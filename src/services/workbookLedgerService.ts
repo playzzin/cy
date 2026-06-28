@@ -56,6 +56,7 @@ type GetEntriesOptions = {
     force?: boolean;
     startDate?: string;
     endDate?: string;
+    transactionType?: WorkbookTransactionType;
     limitCount?: number;
     orderDirection?: 'asc' | 'desc';
 };
@@ -126,15 +127,26 @@ const normalizeLimit = (value: unknown): number | null => {
 const buildCacheKey = (options: GetEntriesOptions) => {
     const startDate = normalizeText(options.startDate);
     const endDate = normalizeText(options.endDate);
+    const transactionType = normalizeText(options.transactionType);
     const limitCount = normalizeLimit(options.limitCount);
     const orderDirection = options.orderDirection === 'desc' ? 'desc' : 'asc';
 
     return [
         startDate ? `start:${startDate}` : 'start:',
         endDate ? `end:${endDate}` : 'end:',
+        transactionType ? `type:${transactionType}` : 'type:',
         limitCount ? `limit:${limitCount}` : 'limit:',
         `order:${orderDirection}`
     ].join('|');
+};
+
+const isMissingFirestoreIndexError = (error: unknown): boolean => {
+    const code = typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: unknown }).code ?? '')
+        : '';
+    const message = error instanceof Error ? error.message : String(error ?? '');
+
+    return code === 'failed-precondition' && message.toLowerCase().includes('index');
 };
 
 const sanitizeEntry = (entry: WorkbookLedgerEntryInput, timestamp: string) => ({
@@ -240,12 +252,17 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
         cachedEntriesByQuery.clear();
     };
 
-    const getEntriesCollectionQuery = (options: GetEntriesOptions = {}) => {
+    const getEntriesCollectionQuery = (options: GetEntriesOptions = {}, omitTransactionType = false) => {
         const constraints: QueryConstraint[] = [];
         const startDate = normalizeText(options.startDate);
         const endDate = normalizeText(options.endDate);
+        const transactionType = normalizeText(options.transactionType);
         const limitCount = normalizeLimit(options.limitCount);
         const orderDirection = options.orderDirection === 'desc' ? 'desc' : 'asc';
+
+        if (transactionType && !omitTransactionType) {
+            constraints.push(where('transactionType', '==', transactionType));
+        }
 
         if (startDate) {
             constraints.push(where('date', '>=', startDate));
@@ -285,7 +302,22 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                 clearCachedEntries();
             }
 
-            const snapshot = await getDocs(getEntriesCollectionQuery(options));
+            const transactionType = normalizeText(options.transactionType);
+            let snapshot;
+
+            try {
+                snapshot = await getDocs(getEntriesCollectionQuery(options));
+            } catch (error) {
+                if (!transactionType || !isMissingFirestoreIndexError(error)) {
+                    throw error;
+                }
+
+                console.warn(
+                    `[workbookLedgerService] Missing Firestore index for ${collectionName} transactionType/date query. Falling back to client-side transactionType filtering.`
+                );
+                snapshot = await getDocs(getEntriesCollectionQuery(options, true));
+            }
+
             const entries = snapshot.docs.map((entryDoc) => {
                 const data = entryDoc.data() as Record<string, unknown>;
                 const deletedAt = normalizeText(data.deletedAt);
@@ -293,7 +325,9 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                 if (deletedAt) return null;
 
                 return normalizeStoredEntry(entryDoc.id, data);
-            }).filter((entry): entry is WorkbookLedgerEntry => entry !== null);
+            })
+                .filter((entry): entry is WorkbookLedgerEntry => entry !== null)
+                .filter((entry) => !transactionType || entry.transactionType === transactionType);
 
             setCachedEntries(cacheKey, entries);
             return cloneEntries(entries);

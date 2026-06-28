@@ -30,7 +30,6 @@ import { CSS } from '@dnd-kit/utilities';
 import { positionService, Position } from '../../services/positionService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { UserRole } from '../../types/roles';
-import { menuServiceV11 } from '../../services/menuServiceV11';
 import IconPicker from '../../pages/admin/menu/components/IconPicker';
 import Swal from 'sweetalert2';
 
@@ -293,27 +292,6 @@ const PositionManager: React.FC = () => {
             alive = false;
         };
     }, []);
-
-    // --- 1.5 Auto-Sync Menu with Positions ---
-    useEffect(() => {
-        if (positions.length > 0) {
-            // Filter valid positions with IDs for sync
-            const validPositions = positions
-                .filter(p => p.id)
-                .map(p => ({
-                    id: p.id!,
-                    name: p.name,
-                    rank: p.rank,
-                    color: p.color,
-                    icon: p.icon,
-                    iconKey: p.iconKey
-                }));
-
-            menuServiceV11.syncWithPositions(validPositions).catch(err =>
-                console.error("Failed to sync menu with positions:", err)
-            );
-        }
-    }, [positions]);
 
     // --- 2. Actions ---
 

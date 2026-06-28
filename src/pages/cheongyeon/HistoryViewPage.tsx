@@ -176,7 +176,7 @@ const CheongyeonHistoryPage: React.FC = () => {
 
     const { scrollYProgress: timelineScrollProgress } = useScroll({
         target: timelineRef,
-        offset: ['start 80%', 'end 18%']
+        offset: ['start 80%', 'end end']
     });
     const timelineProgress = useSpring(timelineScrollProgress, {
         stiffness: 90,
@@ -196,6 +196,53 @@ const CheongyeonHistoryPage: React.FC = () => {
         { label: '핵심 이정표', value: `${HISTORY_ITEMS.length} milestones` },
         { label: '성장 축', value: '시공 · 안전 · 운영' }
     ];
+
+    const [activeTimelineYear, setActiveTimelineYear] = React.useState(firstYear);
+
+    React.useEffect(() => {
+        const root = timelineRef.current;
+        if (!root || typeof window === 'undefined') return;
+
+        const items = Array.from(root.querySelectorAll<HTMLElement>('[data-history-year]'));
+        if (!items.length) return;
+
+        let frameId = 0;
+        const updateActiveYear = () => {
+            frameId = 0;
+            const viewportCenter = window.innerHeight * 0.5;
+            const visibleItems = items.filter((item) => {
+                const rect = item.getBoundingClientRect();
+                return rect.bottom >= window.innerHeight * 0.18 && rect.top <= window.innerHeight * 0.82;
+            });
+            const candidates = visibleItems.length ? visibleItems : items;
+            const activeItem = candidates.reduce<HTMLElement | null>((closest, item) => {
+                if (!closest) return item;
+                const rect = item.getBoundingClientRect();
+                const closestRect = closest.getBoundingClientRect();
+                const distance = Math.abs(rect.top + rect.height / 2 - viewportCenter);
+                const closestDistance = Math.abs(closestRect.top + closestRect.height / 2 - viewportCenter);
+                return distance < closestDistance ? item : closest;
+            }, null);
+            const nextYear = Number(activeItem?.dataset.historyYear);
+            if (Number.isFinite(nextYear)) {
+                setActiveTimelineYear(nextYear);
+            }
+        };
+        const requestUpdate = () => {
+            if (frameId) return;
+            frameId = window.requestAnimationFrame(updateActiveYear);
+        };
+
+        requestUpdate();
+        window.addEventListener('scroll', requestUpdate, { passive: true });
+        window.addEventListener('resize', requestUpdate);
+
+        return () => {
+            if (frameId) window.cancelAnimationFrame(frameId);
+            window.removeEventListener('scroll', requestUpdate);
+            window.removeEventListener('resize', requestUpdate);
+        };
+    }, [firstYear]);
 
     return (
         <div
@@ -239,7 +286,7 @@ const CheongyeonHistoryPage: React.FC = () => {
                     transition={{ duration: 22, repeat: Infinity, ease: 'easeInOut' }}
                 />
                 <motion.div
-                    className="absolute inset-0 opacity-[0.14]"
+                    className={`absolute inset-0 ${isDarkMode ? 'opacity-[0.14]' : 'opacity-[0.08]'}`}
                     style={{ y: meshY }}
                 >
                     <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.32),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(244,114,182,0.24),transparent_28%)]" />
@@ -296,7 +343,7 @@ const CheongyeonHistoryPage: React.FC = () => {
 
                             <motion.h1
                                 variants={heroChildVariants}
-                                className={`mt-5 text-4xl font-black tracking-tight md:text-6xl ${
+                                className={`mt-5 text-4xl font-black md:text-6xl ${
                                     isDarkMode ? 'text-white' : 'text-slate-900'
                                 }`}
                             >
@@ -406,7 +453,7 @@ const CheongyeonHistoryPage: React.FC = () => {
                                                     cx={point.x}
                                                     cy={point.y}
                                                     r="11"
-                                                    fill="rgba(255,255,255,0.08)"
+                                                    fill={isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(14,165,233,0.14)'}
                                                     animate={{ scale: [1, 1.35, 1], opacity: [0.25, 0.65, 0.25] }}
                                                     transition={{
                                                         duration: 2.8,
@@ -416,7 +463,14 @@ const CheongyeonHistoryPage: React.FC = () => {
                                                     }}
                                                     style={{ transformOrigin: `${point.x}px ${point.y}px` }}
                                                 />
-                                                <circle cx={point.x} cy={point.y} r="5.5" fill="#fff" />
+                                                <circle
+                                                    cx={point.x}
+                                                    cy={point.y}
+                                                    r="5.5"
+                                                    fill={isDarkMode ? '#fff' : '#0f172a'}
+                                                    stroke={isDarkMode ? 'transparent' : '#fff'}
+                                                    strokeWidth={isDarkMode ? 0 : 3}
+                                                />
                                             </g>
                                         ))}
                                     </svg>
@@ -454,11 +508,13 @@ const CheongyeonHistoryPage: React.FC = () => {
                     <div className="space-y-8 md:space-y-12">
                         {HISTORY_ITEMS.map((item, index) => {
                             const isLeft = index % 2 === 0;
-                            const yearGhostClass = isDarkMode ? 'text-white/[0.05]' : 'text-slate-200';
+                            const yearGhostClass = isDarkMode ? 'text-white/[0.05]' : 'text-[#d8e2ee]';
+                            const isActive = activeTimelineYear === item.year;
 
                             return (
                                 <motion.article
                                     key={item.year}
+                                    data-history-year={item.year}
                                     initial={{
                                         opacity: 0,
                                         x: isLeft ? -84 : 84,
@@ -484,29 +540,57 @@ const CheongyeonHistoryPage: React.FC = () => {
                                     className="relative"
                                 >
                                     <motion.div
-                                        className={`absolute left-4 top-10 z-20 h-6 w-6 -translate-y-1/2 rounded-full border-4 shadow-[0_0_0_10px_rgba(34,211,238,0.08)] md:left-1/2 md:-translate-x-1/2 ${
-                                            isDarkMode ? 'border-cyan-300 bg-slate-950' : 'border-cyan-500 bg-white'
+                                        className={`absolute left-4 top-10 z-20 h-6 w-6 -translate-y-1/2 overflow-visible rounded-full border-4 md:left-1/2 md:-translate-x-1/2 ${
+                                            isDarkMode ? 'border-white/20 bg-slate-950' : 'border-slate-300 bg-white'
                                         }`}
-                                        animate={{
-                                            scale: [1, 1.16, 1],
-                                            boxShadow: [
-                                                '0 0 0 0 rgba(34,211,238,0.08)',
-                                                '0 0 0 14px rgba(34,211,238,0.02)',
-                                                '0 0 0 0 rgba(34,211,238,0.08)'
-                                            ]
-                                        }}
-                                        transition={{
-                                            duration: 2.8,
-                                            repeat: Infinity,
-                                            ease: 'easeInOut',
-                                            delay: index * 0.15
-                                        }}
+                                        initial={false}
+                                        animate={
+                                            isActive
+                                                ? {
+                                                    scale: [1, 1.16, 1],
+                                                    borderColor: '#ffffff',
+                                                    boxShadow: [
+                                                        '0 0 0 0 rgba(34,211,238,0.16)',
+                                                        '0 0 0 16px rgba(34,211,238,0.07)',
+                                                        '0 0 30px rgba(34,211,238,0.52)'
+                                                    ]
+                                                }
+                                                : {
+                                                    scale: 1,
+                                                    borderColor: isDarkMode ? 'rgba(255,255,255,0.20)' : 'rgb(203,213,225)',
+                                                    boxShadow: '0 0 0 0 rgba(34,211,238,0)'
+                                                }
+                                        }
+                                        transition={
+                                            isActive
+                                                ? { duration: 1.8, repeat: Infinity, ease: 'easeInOut', delay: index * 0.04 }
+                                                : { duration: 0.24, ease: 'easeOut' }
+                                        }
                                     >
                                         <motion.span
-                                            className="absolute inset-0 rounded-full bg-cyan-300/30"
-                                            animate={{ scale: [0.7, 1.45, 0.7], opacity: [0.8, 0, 0.8] }}
-                                            transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut', delay: index * 0.15 }}
+                                            className={`absolute inset-[-4px] rounded-full bg-gradient-to-br ${item.accent}`}
+                                            initial={false}
+                                            animate={isActive ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.72 }}
+                                            transition={{ duration: 0.42, ease: 'easeOut' }}
                                         />
+                                        <motion.span
+                                            className={`absolute inset-[-6px] rounded-full bg-gradient-to-br ${item.accent}`}
+                                            initial={false}
+                                            animate={
+                                                isActive
+                                                    ? {
+                                                        opacity: [0.42, 0, 0.42],
+                                                        scale: [0.9, 1.9, 0.9]
+                                                    }
+                                                    : { opacity: 0, scale: 0.9 }
+                                            }
+                                            transition={
+                                                isActive
+                                                    ? { duration: 2, repeat: Infinity, ease: 'easeInOut', delay: index * 0.05 }
+                                                    : { duration: 0.2, ease: 'easeOut' }
+                                            }
+                                        />
+                                        <span className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.75)]" />
                                     </motion.div>
 
                                     <div className={`grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-10 ${isLeft ? '' : 'md:[&>div:first-child]:order-2'}`}>
@@ -544,7 +628,11 @@ const CheongyeonHistoryPage: React.FC = () => {
                                                 <div className="relative">
                                                     <div className="flex items-center justify-between gap-4">
                                                         <div>
-                                                            <div className={`text-xs font-bold tracking-[0.22em] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                            <div className={`text-xs font-bold tracking-[0.22em] ${
+                                                                isActive
+                                                                    ? isDarkMode ? 'text-cyan-200' : 'text-cyan-700'
+                                                                    : isDarkMode ? 'text-slate-400' : 'text-slate-500'
+                                                            }`}>
                                                                 YEAR
                                                             </div>
                                                             <motion.div
@@ -555,9 +643,17 @@ const CheongyeonHistoryPage: React.FC = () => {
                                                                     ease: 'easeInOut',
                                                                     delay: index * 0.12
                                                                 }}
-                                                                className={`text-3xl font-black md:text-4xl ${isDarkMode ? 'text-white' : 'text-slate-900'}`}
+                                                                className={`relative inline-block text-3xl font-black md:text-4xl ${isDarkMode ? 'text-white' : 'text-slate-900'}`}
                                                             >
-                                                                {item.year}
+                                                                <span>{item.year}</span>
+                                                                <motion.span
+                                                                    className={`pointer-events-none absolute inset-0 bg-gradient-to-r ${item.accent} bg-clip-text text-transparent drop-shadow-[0_0_18px_rgba(34,211,238,0.34)]`}
+                                                                    initial={false}
+                                                                    animate={{ opacity: isActive ? 1 : 0 }}
+                                                                    transition={{ duration: 0.45, ease: 'easeOut' }}
+                                                                >
+                                                                    {item.year}
+                                                                </motion.span>
                                                             </motion.div>
                                                         </div>
 
@@ -572,7 +668,7 @@ const CheongyeonHistoryPage: React.FC = () => {
                                                                 ease: 'easeInOut',
                                                                 delay: index * 0.16
                                                             }}
-                                                            className={`flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br ${item.accent} text-white shadow-lg`}
+                                                            className={`flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br ${item.accent} text-[#ffffff] shadow-lg`}
                                                         >
                                                             <FontAwesomeIcon icon={item.icon} />
                                                         </motion.div>
@@ -625,11 +721,19 @@ const CheongyeonHistoryPage: React.FC = () => {
                                                 whileInView={{ opacity: 1, x: 0 }}
                                                 viewport={{ once: true, amount: 0.4 }}
                                                 transition={{ duration: 0.8, ease: 'easeOut', delay: 0.12 }}
-                                                className={`absolute top-1/2 -translate-y-1/2 text-[7rem] font-black tracking-[-0.08em] ${yearGhostClass} ${
+                                                className={`absolute top-1/2 -translate-y-1/2 text-[7rem] font-black tracking-normal ${yearGhostClass} ${
                                                     isLeft ? 'left-10' : 'right-10'
                                                 }`}
                                             >
-                                                {item.year}
+                                                <span>{item.year}</span>
+                                                <motion.span
+                                                    className={`pointer-events-none absolute inset-0 bg-gradient-to-r ${item.accent} bg-clip-text text-transparent opacity-0 drop-shadow-[0_0_30px_rgba(34,211,238,0.22)]`}
+                                                    initial={false}
+                                                    animate={{ opacity: isActive ? isDarkMode ? 0.34 : 0.46 : 0 }}
+                                                    transition={{ duration: 0.5, ease: 'easeOut' }}
+                                                >
+                                                    {item.year}
+                                                </motion.span>
                                             </motion.div>
                                             <motion.div
                                                 initial={{ opacity: 0, scaleX: 0 }}

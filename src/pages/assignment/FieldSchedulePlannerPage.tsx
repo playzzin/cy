@@ -11,6 +11,7 @@ import {
     useDroppable,
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import html2canvas from 'html2canvas';
 import {
     AlertTriangle,
     CalendarDays,
@@ -54,6 +55,7 @@ import {
     buildDailyReportSiteSnapshot,
     DailyReportSiteSnapshot,
 } from '../../utils/dailyReportSiteSnapshot';
+import { getOpenSites } from '../../utils/siteStatus';
 
 type ScheduleStatus = 'draft' | 'confirmed' | 'working' | 'done';
 type DragKind = 'team' | 'worker' | 'vehicle' | 'site' | 'schedule';
@@ -88,6 +90,7 @@ interface ScheduleItem {
     supportTeams: ScheduleSupportTeam[];
     vehicleIds: string[];
     vehicleLabels: string[];
+    vehicleTeamColors?: Record<string, string>;
     vehicleId: string;
     vehicleLabel: string;
     status: ScheduleStatus;
@@ -166,10 +169,44 @@ const DAILY_REPORT_BOARD_DRAFT_STORAGE_PREFIX = 'dailyReportBoardInputDraft';
 const SCHEDULE_CONFIRMATION_BOARD_DRAFT_STORAGE_PREFIX = 'scheduleConfirmationBoardDraft';
 const DAILY_PAY_TYPE_OPTIONS = ['일급제', '월급제', '용역팀', '지원팀'];
 const DAILY_PAY_TYPE_SET = new Set(DAILY_PAY_TYPE_OPTIONS);
+const BOARD_SITE_NAME_VISIBLE_CHARS = 13;
+const BOARD_WORKER_NAME_VISIBLE_CHARS = 5;
+const BOARD_SITE_NAME_MIN_CARD_WIDTH = 284;
+const BOARD_WORKER_NAME_CELL_MIN_WIDTH = 76;
 const BOARD_WORKERS_PER_COLUMN = 6;
 const BOARD_VEHICLE_TWO_COLUMN_WORKER_THRESHOLD = 18;
-
+const BOARD_CAPTURE_MAX_PIXELS = 18000000;
 const isPersonnelBoardMode = (mode: PlannerMode) => mode === 'daily-report' || mode === 'schedule-confirmation';
+
+const waitForDocumentFonts = async () => {
+    const fonts = typeof document !== 'undefined' ? document.fonts : undefined;
+    if (fonts?.ready) {
+        await fonts.ready;
+    }
+};
+
+const waitForNextPaint = () =>
+    new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+
+const getBoardCaptureScale = (width: number, height: number) => {
+    const pixelCount = Math.max(1, width * height);
+    const maxScaleByPixelBudget = Math.sqrt(BOARD_CAPTURE_MAX_PIXELS / pixelCount);
+    const deviceScale = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    return Math.max(1, Math.min(2, deviceScale, maxScaleByPixelBudget));
+};
+
+const downloadPngBlob = (blob: Blob, fileName: string) => {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+};
 
 const getTempDraftStorageKey = (date: string, mode: PlannerMode = 'dispatch') =>
     `${mode === 'daily-report'
@@ -339,6 +376,10 @@ const mergeScheduleEntries = (base: ScheduleItem, incoming: ScheduleItem): Sched
         supportTeams: mergeSupportTeams([...(base.supportTeams || []), ...(incoming.supportTeams || [])]),
         vehicleIds,
         vehicleLabels,
+        vehicleTeamColors: {
+            ...(base.vehicleTeamColors || {}),
+            ...(incoming.vehicleTeamColors || {}),
+        },
         vehicleId: vehicleIds[0] || '',
         vehicleLabel: vehicleLabels[0] || '',
         memo: [base.memo, incoming.memo].filter(Boolean).join(' / '),
@@ -393,6 +434,28 @@ const getTeamColor = (team: Partial<Team> | undefined) => {
     return normalizeColor(team?.color) || DEFAULT_RESOURCE_COLOR;
 };
 
+const getTeamColorWithFallback = (team: Partial<Team> | undefined, fallbackColor?: string | null) => {
+    return normalizeColor(team?.color) || normalizeColor(fallbackColor) || DEFAULT_RESOURCE_COLOR;
+};
+
+const getScheduleVehicleColor = (
+    schedule: Partial<Pick<ScheduleItem, 'teamColor' | 'siteColor' | 'vehicleTeamColors'>>,
+    vehicleId: string,
+    vehicleAssignedTeamColorById: Map<string, string>
+) => {
+    const scheduleVehicleColor = normalizeColor(schedule.vehicleTeamColors?.[vehicleId]);
+    if (scheduleVehicleColor) return scheduleVehicleColor;
+
+    const assignedTeamColor = normalizeColor(vehicleAssignedTeamColorById.get(vehicleId));
+    if (assignedTeamColor) return assignedTeamColor;
+
+    const scheduleTeamColor = normalizeColor(schedule.teamColor);
+    const siteColor = normalizeColor(schedule.siteColor);
+    if (scheduleTeamColor && scheduleTeamColor !== siteColor) return scheduleTeamColor;
+
+    return DEFAULT_RESOURCE_COLOR;
+};
+
 const normalizeComparableText = (value?: unknown) =>
     String(value ?? '')
         .replace(/\s+/g, '')
@@ -433,6 +496,15 @@ const getReadableTextColor = (hex?: string) => {
     return luminance > 0.58 ? '#0f172a' : '#ffffff';
 };
 
+const getSolidTeamColorStyle = (color?: string, fallbackColor = DEFAULT_RESOURCE_COLOR): React.CSSProperties => {
+    const backgroundColor = normalizeColor(color) || normalizeColor(fallbackColor) || DEFAULT_RESOURCE_COLOR;
+    return {
+        backgroundColor,
+        borderColor: backgroundColor,
+        color: getReadableTextColor(backgroundColor),
+    };
+};
+
 const isInactiveWorker = (worker?: Worker) => {
     const status = String(worker?.status ?? '');
     return status.includes('퇴사') || status.includes('휴무') || worker?.isActive === false;
@@ -442,6 +514,16 @@ const isUnavailableVehicle = (vehicle?: Vehicle) =>
     vehicle?.status === 'MAINTENANCE' || vehicle?.status === 'DISPOSED';
 
 const toTrimmedText = (value: unknown) => String(value ?? '').trim();
+
+const formatBoardDisplayText = (value: unknown, maxLength: number) => {
+    const text = toTrimmedText(value);
+    if (!text || maxLength <= 0) return '';
+
+    const characters = Array.from(text);
+    if (characters.length <= maxLength) return text;
+
+    return `${characters.slice(0, maxLength).join('')}…`;
+};
 
 const normalizeSalaryType = (value?: string | null): string => {
     const normalized = toTrimmedText(value);
@@ -555,7 +637,14 @@ const findTeamInRows = (teams: Team[], teamId?: unknown, teamName?: unknown) => 
     }
 
     if (!normalizedTeamName) return undefined;
-    return teams.find((team) => sameText(team.name, normalizedTeamName));
+    const exactMatch = teams.find((team) => sameText(team.name, normalizedTeamName));
+    if (exactMatch) return exactMatch;
+
+    const normalizedNameKey = normalizeComparableText(normalizedTeamName);
+    return teams.find((team) => {
+        const teamNameKey = normalizeComparableText(team.name);
+        return Boolean(teamNameKey && (teamNameKey === `${normalizedNameKey}팀` || `${teamNameKey}팀` === normalizedNameKey));
+    });
 };
 
 const getSiteColorFromRows = (
@@ -731,6 +820,7 @@ const scheduleToDispatchAssignment = (schedule: ScheduleItem): DispatchAssignmen
     vehicleId: getScheduleVehicleIds(schedule)[0] || '',
     vehicleLabel: schedule.vehicleLabels[0] || schedule.vehicleLabel,
     vehicleLabels: schedule.vehicleLabels,
+    vehicleTeamColors: schedule.vehicleTeamColors,
     requestId: schedule.requestId,
     requestedHeadcount: schedule.requestedHeadcount,
     requestedRoles: schedule.requestedRoles,
@@ -911,20 +1001,62 @@ const scheduleBelongsToViewerTeamScope = (
     return getScheduleViewerScopePriority(schedule, scope, sitesById, teamsById, teams) < 2;
 };
 
-const getVehicleAssignedTeam = (vehicle: Vehicle | undefined, teamsById: Map<string, Team>, teams: Team[]) => {
-    if (!vehicle || String(vehicle.currentAssigneeType || '').toUpperCase() !== 'TEAM') return undefined;
+const getVehicleAssignedTeam = (
+    vehicle: Vehicle | undefined,
+    teamsById: Map<string, Team>,
+    teams: Team[],
+    workersById?: Map<string, Worker>,
+    workers: Worker[] = []
+) => {
+    if (!vehicle) return undefined;
 
+    const assigneeType = String(vehicle.currentAssigneeType || '').toUpperCase();
     const assigneeId = String(vehicle.currentAssigneeId || '');
-    if (assigneeId) {
-        const byId = teamsById.get(assigneeId);
-        if (byId) return byId;
+    const assigneeName = vehicle.currentAssigneeName;
+    const directTeam = findTeamInRows(teams, assigneeId, assigneeName);
+    const assignedWorker =
+        (assigneeId ? workersById?.get(assigneeId) : undefined) ||
+        (assigneeId ? workers.find((row) => String(row.legacyId || '') === assigneeId) : undefined) ||
+        workers.find((row) => sameText(row.name, assigneeName));
 
-        const byLegacyId = teams.find((team) => String(team.legacyId || '') === assigneeId);
-        if (byLegacyId) return byLegacyId;
+    if (assigneeType === 'TEAM') {
+        return directTeam;
     }
 
-    return teams.find((team) => sameText(team.name, vehicle.currentAssigneeName));
+    if (assigneeType === 'WORKER') {
+        return getWorkerAssignedTeam(assignedWorker, teamsById, teams) || directTeam;
+    }
+
+    return directTeam || getWorkerAssignedTeam(assignedWorker, teamsById, teams);
 };
+
+const getVehicleTeamColorFromRows = (
+    vehicleId: string,
+    vehiclesById: Map<string, Vehicle>,
+    teamsById: Map<string, Team>,
+    teams: Team[],
+    workersById: Map<string, Worker>,
+    workers: Worker[],
+    fallbackColor?: string
+) => {
+    const assignedTeam = getVehicleAssignedTeam(vehiclesById.get(vehicleId), teamsById, teams, workersById, workers);
+    return normalizeColor(assignedTeam?.color) || normalizeColor(fallbackColor);
+};
+
+const buildVehicleTeamColorsFromRows = (
+    vehicleIds: string[],
+    vehiclesById: Map<string, Vehicle>,
+    teamsById: Map<string, Team>,
+    teams: Team[],
+    workersById: Map<string, Worker>,
+    workers: Worker[],
+    fallbackColor?: string
+) =>
+    Object.fromEntries(
+        vehicleIds
+            .map((vehicleId) => [vehicleId, getVehicleTeamColorFromRows(vehicleId, vehiclesById, teamsById, teams, workersById, workers, fallbackColor)] as const)
+            .filter((entry) => Boolean(entry[1]))
+    );
 
 const includesKeyword = (keywords: string[], ...values: unknown[]) =>
     values.some((value) => {
@@ -1051,6 +1183,7 @@ const DraggableWorkerPill: React.FC<{
 }> = ({ worker, sourceScheduleId, sourceRosterId, sourceRosterName, teamColor, onRemove, selectable, selected, onToggleSelect }) => {
     const workerId = worker.id || '';
     const workerTeamColor = normalizeColor(teamColor) || normalizeColor(worker.color) || DEFAULT_RESOURCE_COLOR;
+    const workerTeamTextColor = getReadableTextColor(workerTeamColor);
     const inactive = isInactiveWorker(worker);
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: sourceScheduleId ? `schedule-worker:${sourceScheduleId}:${workerId}` : `worker:${workerId}`,
@@ -1109,7 +1242,7 @@ const DraggableWorkerPill: React.FC<{
                     className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border bg-white"
                     style={
                         selected && !inactive
-                            ? { borderColor: workerTeamColor, backgroundColor: workerTeamColor, color: '#fff' }
+                            ? { borderColor: workerTeamColor, backgroundColor: workerTeamColor, color: workerTeamTextColor }
                             : { borderColor: hexToRgba(workerTeamColor, 0.45) }
                     }
                 >
@@ -1142,6 +1275,9 @@ const DraggableVehicleCard: React.FC<{
     onToggleSelect?: () => void;
     onAdd?: () => void;
 }> = ({ vehicle, selected, assignedTeamColor, onToggleSelect, onAdd }) => {
+    const normalizedAssignedTeamColor = normalizeColor(assignedTeamColor);
+    const assignedTeamTextColor = getReadableTextColor(normalizedAssignedTeamColor);
+    const vehicleUnavailable = isUnavailableVehicle(vehicle);
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: `vehicle:${vehicle.id}`,
         data: {
@@ -1156,12 +1292,12 @@ const DraggableVehicleCard: React.FC<{
         opacity: isDragging ? 0.35 : 1,
         borderColor: selected
             ? '#2563eb'
-            : isUnavailableVehicle(vehicle)
+            : vehicleUnavailable
                 ? '#fecaca'
-                : assignedTeamColor
-                    ? hexToRgba(assignedTeamColor, 0.55)
+                : normalizedAssignedTeamColor
+                    ? hexToRgba(normalizedAssignedTeamColor, 0.55)
                     : '#cbd5e1',
-        backgroundColor: !selected && assignedTeamColor && !isUnavailableVehicle(vehicle) ? hexToRgba(assignedTeamColor, 0.07) : undefined,
+        backgroundColor: !selected && normalizedAssignedTeamColor && !vehicleUnavailable ? hexToRgba(normalizedAssignedTeamColor, 0.07) : undefined,
         boxShadow: selected ? '0 0 0 3px rgba(37, 99, 235, 0.16)' : undefined,
     };
 
@@ -1171,14 +1307,14 @@ const DraggableVehicleCard: React.FC<{
             style={style}
             onClick={onToggleSelect}
             className={`flex h-12 cursor-pointer items-center gap-2 rounded-lg border-2 bg-white px-2.5 shadow-sm transition hover:shadow-md ${
-                isUnavailableVehicle(vehicle) ? 'bg-red-50' : ''
+                vehicleUnavailable ? 'bg-red-50' : ''
             }`}
         >
             <span
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-600"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-slate-100 text-slate-600"
                 style={
-                    assignedTeamColor && !isUnavailableVehicle(vehicle)
-                        ? { backgroundColor: hexToRgba(assignedTeamColor, 0.12), color: assignedTeamColor }
+                    normalizedAssignedTeamColor && !vehicleUnavailable
+                        ? { backgroundColor: normalizedAssignedTeamColor, borderColor: normalizedAssignedTeamColor, color: assignedTeamTextColor }
                         : undefined
                 }
             >
@@ -1379,11 +1515,7 @@ const TeamRosterCard: React.FC<{
                         {roster.sourceLabel ? (
                             <span
                                 className="shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black"
-                                style={{
-                                    borderColor: hexToRgba(roster.color, 0.35),
-                                    backgroundColor: hexToRgba(roster.color, 0.08),
-                                    color: roster.color,
-                                }}
+                                style={getSolidTeamColorStyle(roster.color)}
                             >
                                 {roster.sourceLabel}
                             </span>
@@ -1866,12 +1998,14 @@ const ScheduleCard: React.FC<{
                         <span className="text-[11px] font-semibold text-slate-400">팀명 배치</span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                        {schedule.supportTeams.map((team) => (
+                        {schedule.supportTeams.map((team) => {
+                            const teamColor = normalizeColor(team.color) || '#22c55e';
+                            return (
                             <span
                                 key={team.id || team.name}
-                                className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-bold text-slate-700"
+                                className="inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-bold shadow-sm"
+                                style={getSolidTeamColorStyle(teamColor, '#22c55e')}
                             >
-                                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: team.color }} />
                                 <span className="truncate">{team.name}</span>
                                 <button
                                     type="button"
@@ -1879,13 +2013,15 @@ const ScheduleCard: React.FC<{
                                         event.stopPropagation();
                                         onRemoveSupportTeam(team.id || team.name);
                                     }}
-                                    className="text-slate-400 hover:text-red-500"
+                                    className="opacity-70 hover:opacity-100"
+                                    style={{ color: 'inherit' }}
                                     title="지원팀 제거"
                                 >
                                     <X size={12} />
                                 </button>
                             </span>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             ) : !isDailyReportCard ? (
@@ -1902,7 +2038,8 @@ const ScheduleCard: React.FC<{
                     <div className="flex flex-wrap gap-1.5">
                         {scheduleVehicleIds.map((vehicleId, index) => {
                             const assignedVehicle = vehiclesById.get(vehicleId);
-                            const vehicleTeamColor = vehicleAssignedTeamColorById.get(vehicleId);
+                            const vehicleTeamColor = getScheduleVehicleColor(schedule, vehicleId, vehicleAssignedTeamColorById);
+                            const vehicleTextColor = getReadableTextColor(vehicleTeamColor);
                             const vehicleUnavailable = isUnavailableVehicle(assignedVehicle);
                             return (
                                 <span
@@ -1917,8 +2054,9 @@ const ScheduleCard: React.FC<{
                                             ? undefined
                                             : vehicleTeamColor
                                                 ? {
-                                                    borderColor: hexToRgba(vehicleTeamColor, 0.5),
-                                                    backgroundColor: hexToRgba(vehicleTeamColor, 0.08),
+                                                    borderColor: vehicleTeamColor,
+                                                    backgroundColor: vehicleTeamColor,
+                                                    color: vehicleTextColor,
                                                 }
                                             : {
                                                 borderColor: '#cbd5e1',
@@ -1926,7 +2064,7 @@ const ScheduleCard: React.FC<{
                                             }
                                     }
                                 >
-                                    <Truck size={13} style={vehicleUnavailable || !vehicleTeamColor ? undefined : { color: vehicleTeamColor }} />
+                                    <Truck size={13} style={vehicleUnavailable ? undefined : { color: 'inherit' }} />
                                     <span className="truncate">
                                         {assignedVehicle?.licensePlate || schedule.vehicleLabels[index] || schedule.vehicleLabel}
                                     </span>
@@ -1936,7 +2074,8 @@ const ScheduleCard: React.FC<{
                                             event.stopPropagation();
                                             onRemoveVehicle(vehicleId);
                                         }}
-                                        className="text-slate-400 hover:text-red-500"
+                                        className={vehicleUnavailable ? 'text-slate-400 hover:text-red-500' : 'opacity-70 hover:opacity-100'}
+                                        style={vehicleUnavailable ? undefined : { color: 'inherit' }}
                                         title="차량 제거"
                                     >
                                         <X size={12} />
@@ -2008,6 +2147,7 @@ const BoardViewScheduleCard: React.FC<{
     const siteColor = normalizeColor(schedule.siteColor) || normalizeColor(schedule.teamColor) || DEFAULT_RESOURCE_COLOR;
     const scheduleVehicleIds = getScheduleVehicleIds(schedule);
     const isDailyReportCard = isPersonnelBoardMode(mode);
+    const siteNameLabel = formatBoardDisplayText(schedule.siteName || '현장 미지정', BOARD_SITE_NAME_VISIBLE_CHARS);
     const setRefs = (node: HTMLElement | null) => {
         setDropNodeRef(node);
         setDragNodeRef(node);
@@ -2033,9 +2173,12 @@ const BoardViewScheduleCard: React.FC<{
     const workerNameRows = workerRows.map((row) => {
         const rawManDay = Number(schedule.workerManDays?.[row.workerId] ?? 1);
         const manDay = Number.isFinite(rawManDay) && rawManDay > 0 ? rawManDay : 1;
+        const workerNameLabel = formatBoardDisplayText(row.worker.name, BOARD_WORKER_NAME_VISIBLE_CHARS);
+        const fullLabel = isDailyReportCard ? `${row.worker.name} ${manDay.toFixed(1)}` : row.worker.name;
         return {
             id: `worker:${row.workerId}`,
-            label: isDailyReportCard ? `${row.worker.name} ${manDay.toFixed(1)}` : row.worker.name,
+            label: isDailyReportCard ? `${workerNameLabel} ${manDay.toFixed(1)}` : workerNameLabel,
+            fullLabel,
             payType: row.payType,
             teamColor: row.teamColor,
             teamName: row.teamName,
@@ -2053,7 +2196,7 @@ const BoardViewScheduleCard: React.FC<{
     }));
 
     const hasAssignedRows = workerNameRows.length > 0 || supportNameRows.length > 0;
-    const workerPanelColor = normalizeColor(schedule.teamColor) || siteColor;
+    const workerPanelColor = siteColor;
     const getWorkerGridColumnCount = (count: number) =>
         count > 0 ? Math.max(2, Math.ceil(count / BOARD_WORKERS_PER_COLUMN)) : 2;
     const workerTeamGroups = workerNameRows.reduce<Array<{
@@ -2084,10 +2227,10 @@ const BoardViewScheduleCard: React.FC<{
     const maxWorkerLabelLength = workerNameRows.reduce((max, row) => Math.max(max, Array.from(row.label).length), 0);
     const workerNameFontSize = maxWorkerLabelLength >= 5 || workerGridColumnCount >= 3 ? 11 : 12;
     const workerNamePaddingX = maxWorkerLabelLength >= 5 || workerGridColumnCount >= 3 ? 2 : 4;
-    const workerNameCellMinWidth = maxWorkerLabelLength >= 5 ? 58 : 54;
+    const workerNameCellMinWidth = BOARD_WORKER_NAME_CELL_MIN_WIDTH;
     const boardCardWidth = Math.max(
-        216,
-        Math.min(640, workerGridColumnCount * 64 + Math.max(0, workerGridColumnCount - 1) * 6 + 16)
+        BOARD_SITE_NAME_MIN_CARD_WIDTH,
+        Math.min(640, workerGridColumnCount * workerNameCellMinWidth + Math.max(0, workerGridColumnCount - 1) * 6 + 16)
     );
     const vehicleGridColumnCount =
         workerNameRows.length > BOARD_VEHICLE_TWO_COLUMN_WORKER_THRESHOLD && scheduleVehicleIds.length > 1 ? 2 : 1;
@@ -2095,10 +2238,8 @@ const BoardViewScheduleCard: React.FC<{
     return (
         <article
             ref={setRefs}
-            {...attributes}
-            {...listeners}
             onClick={onSelectDestination}
-            className={`relative self-start cursor-move border-2 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+            className={`relative self-start cursor-pointer border-2 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
                 recentlyUpdated ? 'ring-4 ring-emerald-200' : ''
             }`}
             style={{
@@ -2114,6 +2255,7 @@ const BoardViewScheduleCard: React.FC<{
         >
             {selectedDestination ? (
                 <span
+                    data-board-capture-ignore="true"
                     className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-slate-950 text-white shadow-lg"
                     title="선택 중인 현장"
                 >
@@ -2121,14 +2263,29 @@ const BoardViewScheduleCard: React.FC<{
                 </span>
             ) : null}
 
+            <button
+                type="button"
+                data-board-capture-ignore="true"
+                {...attributes}
+                {...listeners}
+                onClick={(event) => event.stopPropagation()}
+                className="absolute left-1 top-1 z-10 flex h-7 w-7 cursor-grab items-center justify-center rounded-md bg-white/80 text-slate-700 shadow-sm transition hover:bg-white active:cursor-grabbing"
+                title="카드 순서 이동"
+                aria-label="카드 순서 이동"
+            >
+                <GripVertical size={15} />
+            </button>
+
             <div
-                className="px-2 py-1.5 text-center"
+                className="px-9 py-1.5 text-center"
                 style={{
                     background: `linear-gradient(180deg, ${hexToRgba(siteColor, 0.68)}, ${siteColor})`,
                     color: getReadableTextColor(siteColor),
                 }}
             >
-                <h3 className="truncate text-lg font-black leading-tight">{schedule.siteName || '현장 미지정'}</h3>
+                <h3 className="truncate text-lg font-black leading-tight" title={schedule.siteName || '현장 미지정'}>
+                    {siteNameLabel}
+                </h3>
             </div>
 
             <div className="border-b border-slate-300 px-2 py-1.5 text-center">
@@ -2153,22 +2310,22 @@ const BoardViewScheduleCard: React.FC<{
                         >
                             {orderedWorkerNameRows.map((row) => {
                                 const style = getBoardPayTypeStyle(row.payType);
-                                const teamColor = normalizeColor(row.teamColor) || workerPanelColor;
+                                const teamBorderColor = normalizeColor(row.teamColor) || workerPanelColor;
                                 return (
                                     <div
                                         key={row.id}
-                                        className="min-w-0 border p-1 shadow-sm"
+                                        className="min-w-0 border-2 p-1 shadow-sm"
                                         style={{
-                                            background: `linear-gradient(180deg, ${hexToRgba(teamColor, 0.9)}, ${teamColor})`,
-                                            borderColor: teamColor,
+                                            background: `linear-gradient(180deg, ${hexToRgba(teamBorderColor, 0.9)}, ${teamBorderColor})`,
+                                            borderColor: teamBorderColor,
                                         }}
-                                        title={`${row.label} · ${row.teamName || '팀 미지정'} · ${style.label}`}
+                                        title={`${row.fullLabel} · ${row.teamName || '팀 미지정'} · ${style.label}`}
                                     >
                                         <div
                                             className="min-w-0 border py-0.5 text-center font-black leading-tight shadow-sm"
                                             style={{
                                                 background: style.background,
-                                                borderColor: style.borderColor,
+                                                borderColor: teamBorderColor,
                                                 color: style.color,
                                                 fontSize: workerNameFontSize,
                                                 boxShadow: style.shadow,
@@ -2243,17 +2400,18 @@ const BoardViewScheduleCard: React.FC<{
                 >
                     {scheduleVehicleIds.map((vehicleId, index) => {
                         const vehicle = vehiclesById.get(vehicleId);
-                        const vehicleColor = normalizeColor(vehicleAssignedTeamColorById.get(vehicleId)) || siteColor;
+                        const vehicleColor = getScheduleVehicleColor(schedule, vehicleId, vehicleAssignedTeamColorById);
+                        const vehicleTextColor = getReadableTextColor(vehicleColor);
                         return (
                             <div
                                 key={vehicleId}
                                 className="flex items-center justify-center gap-1 px-2 py-1.5 text-center text-sm font-black"
                                 style={{
-                                    background: `linear-gradient(180deg, ${hexToRgba(vehicleColor, 0.28)}, ${hexToRgba(vehicleColor, 0.62)})`,
-                                    color: '#0f172a',
+                                    backgroundColor: vehicleColor,
+                                    color: vehicleTextColor,
                                 }}
                             >
-                                <Truck size={14} style={{ color: vehicleColor }} />
+                                <Truck size={14} style={{ color: vehicleTextColor }} />
                                 <span className="truncate">{vehicle?.licensePlate || schedule.vehicleLabels[index] || schedule.vehicleLabel}</span>
                             </div>
                         );
@@ -2301,10 +2459,14 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     const [deletedSchedule, setDeletedSchedule] = useState<ScheduleItem | null>(null);
     const [hasTemporaryDraft, setHasTemporaryDraft] = useState(false);
     const [boardViewMode, setBoardViewMode] = useState(false);
+    const [isMobileBoardLayout, setIsMobileBoardLayout] = useState(() =>
+        typeof window !== 'undefined' ? window.innerWidth < 1024 : false
+    );
     const [showAllScheduleConfirmationSites, setShowAllScheduleConfirmationSites] = useState(false);
     const [viewerTeamScope, setViewerTeamScope] = useState<ViewerTeamScope>(EMPTY_VIEWER_TEAM_SCOPE);
     const [scheduleClipboard, setScheduleClipboard] = useState<ScheduleClipboard | null>(null);
     const [copyingSchedule, setCopyingSchedule] = useState(false);
+    const [capturingBoard, setCapturingBoard] = useState(false);
     const [analyzingSchedule, setAnalyzingSchedule] = useState(false);
     const [isKakaoModalOpen, setIsKakaoModalOpen] = useState(false);
     const [isKakaoAnalyzing, setIsKakaoAnalyzing] = useState(false);
@@ -2319,9 +2481,22 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         }
     }, [isPersonnelInputMode, leftPanelTab]);
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        const updateMobileBoardLayout = () => {
+            setIsMobileBoardLayout(window.innerWidth < 1024);
+        };
+
+        updateMobileBoardLayout();
+        window.addEventListener('resize', updateMobileBoardLayout);
+
+        return () => window.removeEventListener('resize', updateMobileBoardLayout);
+    }, []);
+
     const sensors = useMemo(
         () => [
-            { sensor: PointerSensor, options: { activationConstraint: { distance: 6 } } },
+            { sensor: PointerSensor, options: { activationConstraint: { distance: 12 } } },
             { sensor: KeyboardSensor, options: {} },
         ],
         []
@@ -2678,12 +2853,12 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     const vehicleAssignedTeamColorById = useMemo(() => {
         const map = new Map<string, string>();
         vehicles.forEach((vehicle) => {
-            const assignedTeam = getVehicleAssignedTeam(vehicle, teamsById, teams);
+            const assignedTeam = getVehicleAssignedTeam(vehicle, teamsById, teams, workersById, workers);
             const color = normalizeColor(assignedTeam?.color);
             if (vehicle.id && color) map.set(vehicle.id, color);
         });
         return map;
-    }, [teams, teamsById, vehicles]);
+    }, [teams, teamsById, vehicles, workers, workersById]);
 
     const workerTeamColorById = useMemo(() => {
         const map = new Map<string, string>();
@@ -2856,17 +3031,24 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 return Boolean(worker && !isInactiveWorker(worker));
             });
             const firstWorkerTeamId = rawWorkerIds.map((workerId) => workersById.get(workerId)?.teamId || '').find(Boolean);
-            const teamId = raw.teamId || firstWorkerTeamId || UNASSIGNED_TEAM_ID;
-            const team = teamsById.get(teamId);
+            const rawTeamId = raw.teamId || firstWorkerTeamId;
+            const team = findTeamInRows(teams, rawTeamId, raw.teamName || assignment.teamName);
+            const teamId = rawTeamId || toTrimmedText(team?.id) || UNASSIGNED_TEAM_ID;
             const vehicleIds = cleanIds([...(raw.vehicleIds || []), ...(assignment.vehicleIds || []), raw.vehicleId]);
             const site = assignment.siteId ? sitesById.get(assignment.siteId) : undefined;
-            const teamColor = raw.teamColor || getTeamColor(team);
+            const teamColor = getTeamColorWithFallback(team, raw.teamColor);
             const isSupportAssignment = Boolean(team && isSupportTeam(team, []));
             const workerIds = isSupportAssignment && !isPersonnelInputMode ? [] : rawWorkerIds;
             const supportTeams = mergeSupportTeams([
-                ...(raw.supportTeams || []),
+                ...(raw.supportTeams || []).map((supportTeam) => {
+                    const currentSupportTeam = findTeamInRows(teams, supportTeam.id, supportTeam.name);
+                    return {
+                        ...supportTeam,
+                        color: getTeamColorWithFallback(currentSupportTeam, supportTeam.color),
+                    };
+                }),
                 ...(raw.supportTeamIds || []).map((supportTeamId) => {
-                    const supportTeam = teamsById.get(supportTeamId);
+                    const supportTeam = findTeamInRows(teams, supportTeamId);
                     return {
                         id: supportTeamId,
                         name: supportTeam?.name || supportTeamId,
@@ -2876,17 +3058,20 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 ...(isSupportAssignment && team && (!isPersonnelInputMode || workerIds.length === 0) ? [{ id: teamId, name: team.name, color: teamColor }] : []),
             ]);
             const vehicleLabels = vehicleIds.map((id) => vehiclesById.get(id)?.licensePlate || raw.vehicleLabel || '');
+            const vehicleTeamColors =
+                raw.vehicleTeamColors ||
+                buildVehicleTeamColorsFromRows(vehicleIds, vehiclesById, teamsById, teams, workersById, workers);
 
             return {
                 id: raw.id || `${date}_${teamId}_${assignment.siteId || 'site'}_${index}`,
                 date,
                 teamId,
-                teamName: raw.teamName || team?.name || '미배정',
+                teamName: team?.name || raw.teamName || '미배정',
                 teamColor,
                 siteId: assignment.siteId || '',
                 siteName: assignment.siteName || site?.name || '',
                 siteAddress: raw.siteAddress || site?.address || '',
-                siteColor: raw.siteColor || getSiteColor(site, teamColor),
+                siteColor: getSiteColor(site, teamColor),
                 clientCompanyName: toTrimmedText(site?.clientCompanyName) || raw.clientCompanyName,
                 constructorCompanyName: toTrimmedText(site?.companyName) || toTrimmedText(site?.constructorCompanyName) || raw.constructorCompanyName,
                 partnerName: toTrimmedText(site?.partnerName) || raw.partnerName,
@@ -2906,6 +3091,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 supportTeams,
                 vehicleIds,
                 vehicleLabels,
+                vehicleTeamColors,
                 vehicleId: vehicleIds[0] || '',
                 vehicleLabel: vehicleLabels[0] || '',
                 status: (raw.status as ScheduleStatus) || 'confirmed',
@@ -2926,7 +3112,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 })),
             };
         },
-        [date, getSiteColor, isPersonnelInputMode, sitesById, teams, teamsById, vehiclesById, workersById]
+        [date, getSiteColor, isPersonnelInputMode, sitesById, teams, teamsById, vehiclesById, workers, workersById]
     );
 
     const buildDailyReportsFromSchedules = useCallback((sourceSchedules: ScheduleItem[]) => {
@@ -3151,7 +3337,9 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
             setTeams(teamRows);
             setWorkers(workerRows);
-            setSites(siteRows);
+            const visibleSiteRows = isDailyReportInput ? getOpenSites(siteRows) : siteRows;
+
+            setSites(visibleSiteRows);
             setCompanies(companyRows);
             setVehicles(vehicleRows);
 
@@ -3210,7 +3398,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 const dailySchedules = mapDailyReportsToSchedules(reports, date, workerMap, teamMap, siteRows, teamRows, companyRows);
                 setSchedules(dailySchedules);
                 setSelectedTeamId((prev) => prev || teamRows[0]?.id || UNASSIGNED_TEAM_ID);
-                setSelectedSiteId((prev) => (prev && siteRows.some((site) => site.id === prev) ? prev : ''));
+                setSelectedSiteId((prev) => (prev && visibleSiteRows.some((site) => site.id === prev) ? prev : ''));
                 setDirty(false);
                 return;
             }
@@ -3224,20 +3412,26 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                     const worker = workerMap.get(workerId);
                     return Boolean(worker && !isInactiveWorker(worker));
                 });
-                const teamId =
+                const rawTeamId =
                     raw.teamId ||
-                    rawWorkerIds.map((workerId) => workerMap.get(workerId)?.teamId || '').find(Boolean) ||
-                    UNASSIGNED_TEAM_ID;
-                const team = teamMap.get(teamId);
+                    rawWorkerIds.map((workerId) => workerMap.get(workerId)?.teamId || '').find(Boolean);
+                const team = findTeamInRows(teamRows, rawTeamId, raw.teamName || assignment.teamName);
+                const teamId = rawTeamId || toTrimmedText(team?.id) || UNASSIGNED_TEAM_ID;
                 const site = assignment.siteId ? siteMap.get(assignment.siteId) : undefined;
                 const vehicleIds = cleanIds([...(raw.vehicleIds || []), ...(assignment.vehicleIds || []), raw.vehicleId]);
-                const teamColor = raw.teamColor || getTeamColor(team);
+                const teamColor = getTeamColorWithFallback(team, raw.teamColor);
                 const isSupportAssignment = Boolean(team && isSupportTeam(team, []));
                 const workerIds = isSupportAssignment && !isPersonnelInputMode ? [] : rawWorkerIds;
                 const supportTeams = mergeSupportTeams([
-                    ...(raw.supportTeams || []),
+                    ...(raw.supportTeams || []).map((supportTeam) => {
+                        const currentSupportTeam = findTeamInRows(teamRows, supportTeam.id, supportTeam.name);
+                        return {
+                            ...supportTeam,
+                            color: getTeamColorWithFallback(currentSupportTeam, supportTeam.color),
+                        };
+                    }),
                     ...(raw.supportTeamIds || []).map((supportTeamId) => {
-                        const supportTeam = teamMap.get(supportTeamId);
+                        const supportTeam = findTeamInRows(teamRows, supportTeamId);
                         return {
                             id: supportTeamId,
                             name: supportTeam?.name || supportTeamId,
@@ -3247,17 +3441,20 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                     ...(isSupportAssignment && team && (!isPersonnelInputMode || workerIds.length === 0) ? [{ id: teamId, name: team.name, color: teamColor }] : []),
                 ]);
                 const vehicleLabels = vehicleIds.map((id) => vehicleMap.get(id)?.licensePlate || raw.vehicleLabel || '');
+                const vehicleTeamColors =
+                    raw.vehicleTeamColors ||
+                    buildVehicleTeamColorsFromRows(vehicleIds, vehicleMap, teamMap, teamRows, workerMap, workerRows);
 
                 return {
                     id: raw.id || `${date}_${teamId}_${assignment.siteId || 'site'}_${index}`,
                     date,
                     teamId,
-                    teamName: raw.teamName || team?.name || '미배정',
+                    teamName: team?.name || raw.teamName || '미배정',
                     teamColor,
                     siteId: assignment.siteId || '',
                     siteName: assignment.siteName || site?.name || '',
                     siteAddress: raw.siteAddress || site?.address || '',
-                    siteColor: raw.siteColor || getLoadedSiteColor(site, teamColor),
+                    siteColor: getLoadedSiteColor(site, teamColor),
                     clientCompanyName: toTrimmedText(site?.clientCompanyName) || raw.clientCompanyName,
                     constructorCompanyName: toTrimmedText(site?.companyName) || toTrimmedText(site?.constructorCompanyName) || raw.constructorCompanyName,
                     partnerName: toTrimmedText(site?.partnerName) || raw.partnerName,
@@ -3277,6 +3474,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                     supportTeams,
                     vehicleIds,
                     vehicleLabels,
+                    vehicleTeamColors,
                     vehicleId: vehicleIds[0] || '',
                     vehicleLabel: vehicleLabels[0] || '',
                     status: (raw.status as ScheduleStatus) || 'confirmed',
@@ -3310,7 +3508,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                         (request.responsibleTeamId ? teamMap.get(request.responsibleTeamId) : undefined) ||
                         (site?.responsibleTeamId ? teamMap.get(site.responsibleTeamId) : undefined) ||
                         teamRows.find((team) => team.name === request.responsibleTeamName || team.name === site?.responsibleTeamName);
-                    const siteColor = request.siteColor || getLoadedSiteColor(site, getTeamColor(responsibleTeam));
+                    const siteColor = getLoadedSiteColor(site, getTeamColorWithFallback(responsibleTeam, request.siteColor));
                     return {
                         id: `request-${request.id || `${date}-${index}`}`,
                         date,
@@ -3364,7 +3562,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             setSchedules(mergeSchedulesBySite([...nextSchedules, ...requestSchedules]));
             const defaultTeamId = nextViewerTeamScope.teamIds.find((teamId) => teamMap.has(teamId)) || teamRows[0]?.id || UNASSIGNED_TEAM_ID;
             setSelectedTeamId((prev) => prev || defaultTeamId);
-            setSelectedSiteId((prev) => (prev && siteRows.some((site) => site.id === prev) ? prev : ''));
+            setSelectedSiteId((prev) => (prev && visibleSiteRows.some((site) => site.id === prev) ? prev : ''));
             setDirty(false);
         } catch (error) {
             console.error('[FieldSchedulePlanner] Failed to load data', error);
@@ -3543,7 +3741,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     };
 
     const revealInputCardsOnMobile = () => {
-        if ((isScheduleConfirmationInput || !isPersonnelInputMode) && typeof window !== 'undefined' && window.innerWidth < 1024) {
+        if (isMobileBoardLayout) {
             setBoardViewMode(true);
         }
     };
@@ -3577,6 +3775,9 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         const vehicleLabels =
             overrides.vehicleLabels ??
             vehicleIds.map((vehicleId) => vehiclesById.get(vehicleId)?.licensePlate || overrides.vehicleLabel || '');
+        const vehicleTeamColors =
+            overrides.vehicleTeamColors ??
+            buildVehicleTeamColorsFromRows(vehicleIds, vehiclesById, teamsById, teams, workersById, workers, teamColor);
         const workerTeamIds = Object.fromEntries(workerIds.map((workerId) => {
             const worker = workersById.get(workerId);
             const assignedTeam = getWorkerAssignedTeam(worker, teamsById, teams);
@@ -3611,6 +3812,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             supportTeams,
             vehicleIds,
             vehicleLabels,
+            vehicleTeamColors,
             vehicleId: vehicleIds[0] || '',
             vehicleLabel: vehicleLabels[0] || '',
             status: overrides.status ?? 'draft',
@@ -3646,6 +3848,8 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 if (makeSiteKey(schedule) === key) return schedule;
                 const vehicleIds = getScheduleVehicleIds(schedule).filter((vehicleId) => !incomingVehicleIds.has(vehicleId));
                 const vehicleLabels = vehicleIds.map((vehicleId) => vehiclesById.get(vehicleId)?.licensePlate || '');
+                const vehicleTeamColors = { ...(schedule.vehicleTeamColors || {}) };
+                incomingVehicleIds.forEach((vehicleId) => delete vehicleTeamColors[vehicleId]);
                 const workerManDays = { ...(schedule.workerManDays || {}) };
                 const workerUnitPrices = { ...(schedule.workerUnitPrices || {}) };
                 const workerPayTypes = { ...(schedule.workerPayTypes || {}) };
@@ -3669,6 +3873,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                     workerTeamNames,
                     vehicleIds,
                     vehicleLabels,
+                    vehicleTeamColors,
                     vehicleId: vehicleIds[0] || '',
                     vehicleLabel: vehicleLabels[0] || '',
                 };
@@ -3755,6 +3960,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         }
 
         const siteColor = getSiteColor(selectedSite, selectedRoster?.color || DEFAULT_RESOURCE_COLOR);
+        const vehicleTeamColor = getVehicleTeamColorFromRows(vehicle.id, vehiclesById, teamsById, teams, workersById, workers, selectedRoster?.color);
         const next: ScheduleItem = {
             id: makeScheduleId(),
             date,
@@ -3769,6 +3975,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             supportTeams: [],
             vehicleIds: [vehicle.id],
             vehicleLabels: [vehicle.licensePlate],
+            vehicleTeamColors: vehicleTeamColor ? { [vehicle.id]: vehicleTeamColor } : {},
             vehicleId: vehicle.id,
             vehicleLabel: vehicle.licensePlate,
             status: 'draft',
@@ -4090,10 +4297,15 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 if (schedule.id === scheduleId) {
                     const vehicleIds = cleanIds([...getScheduleVehicleIds(schedule), vehicleId]);
                     const vehicleLabels = vehicleIds.map((id) => vehiclesById.get(id)?.licensePlate || schedule.vehicleLabel || '');
+                    const vehicleTeamColors = {
+                        ...(schedule.vehicleTeamColors || {}),
+                        ...buildVehicleTeamColorsFromRows(vehicleIds, vehiclesById, teamsById, teams, workersById, workers, schedule.teamColor),
+                    };
                     return {
                         ...schedule,
                         vehicleIds,
                         vehicleLabels,
+                        vehicleTeamColors,
                         vehicleId: vehicleIds[0] || '',
                         vehicleLabel: vehicleLabels[0] || '',
                     };
@@ -4102,10 +4314,13 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 if (getScheduleVehicleIds(schedule).includes(vehicleId)) {
                     const vehicleIds = getScheduleVehicleIds(schedule).filter((id) => id !== vehicleId);
                     const vehicleLabels = vehicleIds.map((id) => vehiclesById.get(id)?.licensePlate || '');
+                    const vehicleTeamColors = { ...(schedule.vehicleTeamColors || {}) };
+                    delete vehicleTeamColors[vehicleId];
                     return {
                         ...schedule,
                         vehicleIds,
                         vehicleLabels,
+                        vehicleTeamColors,
                         vehicleId: vehicleIds[0] || '',
                         vehicleLabel: vehicleLabels[0] || '',
                     };
@@ -4209,12 +4424,15 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     };
 
     const removeVehicleFromSchedule = (scheduleId: string, vehicleId: string) => {
-        const vehicleIds =
-            getScheduleVehicleIds(schedules.find((schedule) => schedule.id === scheduleId) || {}).filter((id) => id !== vehicleId);
+        const target = schedules.find((schedule) => schedule.id === scheduleId);
+        const vehicleIds = getScheduleVehicleIds(target || {}).filter((id) => id !== vehicleId);
         const vehicleLabels = vehicleIds.map((id) => vehiclesById.get(id)?.licensePlate || '');
+        const vehicleTeamColors = { ...(target?.vehicleTeamColors || {}) };
+        delete vehicleTeamColors[vehicleId];
         patchSchedule(scheduleId, {
             vehicleIds,
             vehicleLabels,
+            vehicleTeamColors,
             vehicleId: vehicleIds[0] || '',
             vehicleLabel: vehicleLabels[0] || '',
         });
@@ -4321,6 +4539,29 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             }
         }
     };
+
+    const handleDragCancel = () => {
+        setActivePayload(null);
+    };
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        const clearActiveDrag = () => setActivePayload(null);
+        const handleVisibilityChange = () => {
+            if (document.visibilityState !== 'visible') {
+                clearActiveDrag();
+            }
+        };
+
+        window.addEventListener('blur', clearActiveDrag);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            window.removeEventListener('blur', clearActiveDrag);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, []);
 
     const handleSave = async () => {
         setSaving(true);
@@ -4678,6 +4919,92 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         setMessage(`${scheduleClipboard.sourceDate} ${clipboardLabel}을 ${date}에 붙여넣었습니다. 확인 후 저장하세요.`);
     };
 
+    const handleCaptureBoardImage = useCallback(async () => {
+        const node = boardRef.current;
+        if (!node) {
+            setMessage('캡처할 일정 보드를 찾지 못했습니다.');
+            return;
+        }
+
+        const shouldRestoreEditMode = !boardViewMode;
+        const previousScrollTop = node.scrollTop;
+
+        try {
+            setCapturingBoard(true);
+            if (shouldRestoreEditMode) {
+                setBoardViewMode(true);
+            }
+            await waitForNextPaint();
+            await waitForDocumentFonts();
+
+            const target = boardRef.current;
+            if (!target) {
+                throw new Error('Board capture target was not available');
+            }
+
+            const rect = target.getBoundingClientRect();
+            const width = Math.ceil(target.scrollWidth || rect.width);
+            const height = Math.ceil(target.scrollHeight || rect.height);
+
+            if (width <= 0 || height <= 0) {
+                throw new Error('Board capture target has no size');
+            }
+
+            const canvas = await html2canvas(target, {
+                backgroundColor: '#f8fafc',
+                scale: getBoardCaptureScale(width, height),
+                useCORS: true,
+                allowTaint: false,
+                logging: false,
+                width,
+                height,
+                windowWidth: Math.max(document.documentElement.clientWidth, width),
+                windowHeight: Math.max(document.documentElement.clientHeight, height),
+                scrollX: 0,
+                scrollY: -window.scrollY,
+                onclone: (clonedDocument: Document) => {
+                    const clonedBoard = clonedDocument.getElementById('field-schedule-board') as HTMLElement | null;
+                    if (!clonedBoard) return;
+
+                    clonedBoard.style.width = `${width}px`;
+                    clonedBoard.style.height = `${height}px`;
+                    clonedBoard.style.overflow = 'visible';
+                    clonedBoard.style.maxHeight = 'none';
+
+                    let parent = clonedBoard.parentElement;
+                    while (parent) {
+                        parent.style.overflow = 'visible';
+                        parent.style.maxHeight = 'none';
+                        parent = parent.parentElement;
+                    }
+
+                    clonedDocument.querySelectorAll('[data-board-capture-ignore="true"]').forEach((element) => {
+                        (element as HTMLElement).style.display = 'none';
+                    });
+                },
+            } as any);
+
+            const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+            if (!blob) {
+                throw new Error('PNG blob generation failed');
+            }
+
+            downloadPngBlob(blob, `field-schedule-board-${date}.png`);
+            setMessage('커서가 없는 일정 보드 이미지를 저장했습니다.');
+        } catch (error) {
+            console.error('[FieldSchedulePlanner] Failed to capture board image', error);
+            window.alert('일정 보드 이미지 저장 중 문제가 발생했습니다. 다시 시도해주세요.');
+        } finally {
+            if (shouldRestoreEditMode) {
+                setBoardViewMode(false);
+            }
+            setCapturingBoard(false);
+            if (boardRef.current) {
+                boardRef.current.scrollTop = previousScrollTop;
+            }
+        }
+    }, [boardViewMode, date]);
+
     const pageEyebrow = isDailyReportInput
         ? '일보 보드 입력'
         : isScheduleConfirmationInput
@@ -4779,10 +5106,12 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     const mobileSelectionButtonLabel = isPersonnelInputMode ? '선택 인원 추가하기' : '선택 항목 추가하기';
     const offDutyDraftCount = offDutyDraftWorkerIds.length;
     const showOffDutyControls = leftPanelTab === 'teams' || leftPanelTab === 'support';
-    const showMobileSelectionSummary = !offDutySelectionMode && (isScheduleConfirmationInput || !isPersonnelInputMode);
-    const showDisplayBoardCards = boardViewMode && !isScheduleConfirmationInput;
+    const showMobileSelectionSummary = !offDutySelectionMode;
+    const showDailyReportMobileInputMode = isDailyReportInput && isMobileBoardLayout;
+    const showDisplayBoardCards = boardViewMode && !isScheduleConfirmationInput && !showDailyReportMobileInputMode;
     const showCopyControls = !isDailyReportInput && !isScheduleConfirmationInput;
-    const viewToggleLabel = isScheduleConfirmationInput
+    const useSelectionInputToggleLabel = isScheduleConfirmationInput || showDailyReportMobileInputMode;
+    const viewToggleLabel = useSelectionInputToggleLabel
         ? boardViewMode ? '선택보기' : '입력보기'
         : boardViewMode ? '편집보기' : '보드보기';
 
@@ -4793,6 +5122,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 collisionDetection={closestCenter}
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
+                onDragCancel={handleDragCancel}
             >
                 <div className={isPersonnelInputMode
                     ? 'flex h-full min-h-0 flex-col overflow-hidden'
@@ -4968,7 +5298,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
                     <div className={`grid h-0 min-h-0 flex-1 overflow-hidden ${boardViewMode ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)]'}`}>
                         {!boardViewMode ? (
-                        <aside className="flex h-full min-h-0 flex-col overflow-hidden border-b border-slate-200 bg-white lg:border-b-0 lg:border-r">
+                        <aside className="relative flex h-full min-h-0 flex-col overflow-hidden border-b border-slate-200 bg-white lg:border-b-0 lg:border-r">
                             <div className="shrink-0 border-b border-slate-200 p-4">
                                 <div className="relative">
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -5057,7 +5387,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                 ) : null}
 
                                 {showOffDutyControls ? (
-                                    <div className="mt-3 rounded-lg border border-rose-100 bg-rose-50/70 p-2">
+                                    <div className="fixed bottom-3 z-20 max-h-[min(42vh,360px)] w-[calc(100vw-1.5rem)] max-w-[336px] overflow-y-auto rounded-lg border border-rose-100 bg-rose-50/95 p-2 shadow-lg backdrop-blur lg:w-[336px]">
                                         {!offDutySelectionMode ? (
                                             <button
                                                 type="button"
@@ -5234,7 +5564,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                 ) : null}
                             </div>
 
-                            <div className="h-0 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 pb-24" style={{ scrollbarGutter: 'stable' }}>
+                            <div className={`h-0 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 ${showOffDutyControls ? 'pb-96' : 'pb-24'}`} style={{ scrollbarGutter: 'stable' }}>
                                 {loading ? (
                                     <div className="rounded-lg border border-dashed border-slate-200 p-5 text-center text-sm font-semibold text-slate-500">
                                         데이터를 불러오는 중입니다.
@@ -5369,7 +5699,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                     </div>
                                 </div>
 
-                                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
+                                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-700">
                                     <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1">
                                         <UsersRound size={13} />
                                         <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: selectedRoster?.color || '#cbd5e1' }} />
@@ -5413,6 +5743,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                     boardRef.current = node;
                                 }}
                                 id="field-schedule-board"
+                                data-capture-clean={capturingBoard ? 'true' : undefined}
                                 className={`min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-24 transition ${boardViewMode ? 'sm:px-6 sm:pt-6' : 'sm:px-5 sm:pt-5'} ${
                                     isBoardOver ? 'bg-blue-50 ring-2 ring-inset ring-blue-100' : ''
                                 }`}

@@ -4,6 +4,12 @@ import { EstimateDraft, formatCurrency, numberToKorean, LOGO_FALLBACK } from './
 
 type ExcelImageExtension = 'png' | 'jpeg';
 
+type DownloadEstimateExcelOptions = {
+    freezePanes?: boolean;
+};
+
+const EMU_PER_PIXEL = 9525;
+
 /**
  * 브라우저 환경에서 ExcelJS가 안정적으로 처리할 수 있도록 이미지를 data URL로 변환합니다.
  */
@@ -58,6 +64,42 @@ const groupEstimateItems = (items: any[]): Array<{ category: string; items: any[
     return groups;
 };
 
+const getExportScopeNotes = (scopeNotes: string, includeVat: boolean): string => {
+    if (!scopeNotes || !includeVat) return scopeNotes;
+
+    return scopeNotes
+        .replace(/V\.?\s*A\.?\s*T\s*별도(?:\s*\([^)\n]*\))?/gi, 'VAT 포함')
+        .replace(/부가세\s*별도/g, 'VAT 포함');
+};
+
+const sanitizeExcelText = (value: unknown): string => {
+    const text = String(value ?? '');
+    let cleaned = '';
+
+    for (const char of text) {
+        const code = char.charCodeAt(0);
+        if (code === 9 || code === 10 || code === 13 || code >= 32) {
+            cleaned += char;
+        }
+    }
+
+    return cleaned;
+};
+
+const setTextCellValue = (cell: ExcelJS.Cell, value: unknown) => {
+    cell.value = sanitizeExcelText(value);
+    cell.numFmt = '@';
+};
+
+const setCellValue = (cell: ExcelJS.Cell, value: unknown) => {
+    if (typeof value === 'string') {
+        setTextCellValue(cell, value);
+        return;
+    }
+
+    cell.value = value as ExcelJS.CellValue;
+};
+
 /**
  * 견적서/거래명세표를 블랙/그레이 톤의 고품격 서식으로 다운로드합니다.
  */
@@ -67,17 +109,18 @@ export const downloadEstimateExcel = async (
     subtotal: number,
     tax: number,
     total: number,
-    type: 'estimate' | 'transaction' = 'estimate'
+    type: 'estimate' | 'transaction' = 'estimate',
+    options: DownloadEstimateExcelOptions = {}
 ) => {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = '청연ENG ERP';
     workbook.created = new Date();
     workbook.modified = new Date();
 
-    const worksheet = workbook.addWorksheet(type === 'estimate' ? '견적서' : '거래명세표');
-    worksheet.properties.defaultRowHeight = 22;
-
     const isEstimate = type === 'estimate';
+    const isRentalTransaction = !isEstimate && draft.estimateMode === 'rental';
+    const worksheet = workbook.addWorksheet(isEstimate ? '견적서' : (isRentalTransaction ? '임대 거래명세표' : '거래명세표'));
+    worksheet.properties.defaultRowHeight = isEstimate ? 22 : 21.95;
     
     const colorMain = 'FF111827';
     const colorSub = 'FF374151';
@@ -151,25 +194,33 @@ export const downloadEstimateExcel = async (
     const installRatio = draft.installRatio || 50;
     const removeRatio = 100 - installRatio;
     const vatRate = draft.vatRate || 10;
+    const vatInclusionLabel = draft.includeVat === false ? 'VAT 별도' : 'VAT 포함';
 
     // 1. 컬럼 너비 및 마지막 열 설정
-    const lastCol = isEstimate ? 'J' : 'I';
+    const lastCol = isEstimate ? 'J' : (isRentalTransaction ? 'L' : 'I');
     if (isEstimate) {
         worksheet.columns = [
             { width: 3 }, { width: 16 }, { width: 28 }, { width: 8 }, { width: 12 },
             { width: 14 }, { width: 16 }, { width: 14 }, { width: 16 }, { width: 22 },
         ];
+    } else if (isRentalTransaction) {
+        worksheet.columns = [
+            { width: 3.625 }, { width: 11.5 }, { width: 28 }, { width: 8 }, { width: 10 },
+            { width: 11 }, { width: 10 }, { width: 10 }, { width: 14 }, { width: 12 },
+            { width: 14 }, { width: 18 }, { width: 3.625 },
+        ];
     } else {
         worksheet.columns = [
-            { width: 3 }, { width: 14 }, { width: 30 }, { width: 10 }, { width: 12 },
-            { width: 15 }, { width: 18 }, { width: 18 }, { width: 26 },
+            { width: 3.625 }, { width: 10.625 }, { width: 30.625 }, { width: 10.625 }, { width: 10.625 },
+            { width: 10.625 }, { width: 15.625 }, { width: 10.625 }, { width: 20.625 }, { width: 3.625 },
         ];
     }
 
     // 2. 로고 및 제목
-    worksheet.getRow(1).height = 8;
-    worksheet.getRow(2).height = 38;
-    worksheet.getRow(3).height = 28;
+    worksheet.getRow(1).height = isEstimate ? 8 : 8.1;
+    worksheet.getRow(2).height = isEstimate ? 38 : 38.1;
+    worksheet.getRow(3).height = isEstimate ? 28 : 27.95;
+    if (isEstimate) worksheet.getRow(4).height = 38;
     if (isEstimate) {
         worksheet.mergeCells('B2:D3');
         worksheet.mergeCells('E2:G3');
@@ -183,33 +234,30 @@ export const downloadEstimateExcel = async (
     try {
         const logo = await getImageDataUrl(LOGO_FALLBACK);
         const logoId = workbook.addImage({ base64: logo.base64, extension: logo.extension });
-        worksheet.addImage(logoId, {
-            tl: { col: 1.18, row: 1.55 },
-            ext: { width: 220, height: 39 }
-        });
+        const logoPosition: ExcelJS.ImagePosition | any = isEstimate
+            ? {
+                tl: { nativeCol: 8, nativeRow: 3, nativeColOff: 63 * EMU_PER_PIXEL, nativeRowOff: 3 * EMU_PER_PIXEL },
+                ext: { width: 220, height: 39 }
+            }
+            : {
+                tl: { nativeCol: 7, nativeRow: 2, nativeColOff: 291899, nativeRowOff: 151850 },
+                ext: { width: 220, height: 39 }
+            };
+        worksheet.addImage(logoId, logoPosition);
     } catch (e) {
         console.warn('Logo load failed');
     }
 
     const titleCell = worksheet.getCell(isEstimate ? 'E2' : 'D2');
-    titleCell.value = isEstimate ? '견  적  서' : '거 래 명 세 표';
+    titleCell.value = isEstimate ? '견  적  서' : (isRentalTransaction ? '임 대 거 래 명 세 표' : '거 래 명 세 표');
     titleCell.font = { name: fontName, size: 30, bold: true, color: { argb: colorMain } };
     titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
-
-    if (isEstimate) {
-        setRangeBorder('B', 2, 'D', 3, 'thin');
-        setRangeBorder('E', 2, 'G', 3, 'thin');
-        setRangeBorder('H', 2, 'J', 3, 'thin');
-    } else {
-        setRangeBorder('B', 2, 'C', 3, 'thin');
-        setRangeBorder('D', 2, 'F', 3, 'thin');
-        setRangeBorder('G', 2, 'I', 3, 'thin');
-    }
 
     // 3. 상단 정보 테이블
     const infoStartRow = 5;
     const clientSpan = isEstimate ? 'D' : 'C';
     const supplierStart = isEstimate ? 'F' : 'E';
+    const infoSpacerCol = String.fromCharCode(clientSpan.charCodeAt(0) + 1);
 
     const setHeadStyle = (cell: ExcelJS.Cell) => {
         cell.font = { name: fontName, size: 10, bold: true, color: { argb: colorText } };
@@ -219,7 +267,7 @@ export const downloadEstimateExcel = async (
     };
 
     worksheet.mergeCells(`B${infoStartRow}:${clientSpan}${infoStartRow}`);
-    worksheet.getRow(infoStartRow).height = 36;
+    worksheet.getRow(infoStartRow).height = isEstimate ? 36 : 30;
     setHeadStyle(worksheet.getCell(`B${infoStartRow}`));
     worksheet.getCell(`B${infoStartRow}`).value = '공 급 받 는 자';
 
@@ -237,7 +285,7 @@ export const downloadEstimateExcel = async (
 
     infoRows.forEach((rowData, idx) => {
         const rIdx = infoStartRow + 1 + idx;
-        worksheet.getRow(rIdx).height = 32;
+        worksheet.getRow(rIdx).height = isEstimate ? 32 : 24.95;
 
         const setStyle = (cell: ExcelJS.Cell, isLabel = false) => {
             cell.font = { name: fontName, size: 9, bold: isLabel, color: { argb: isLabel ? colorSub : colorMain } };
@@ -249,7 +297,7 @@ export const downloadEstimateExcel = async (
         const lblL = worksheet.getCell(`B${rIdx}`);
         const valL = worksheet.getCell(`C${rIdx}`);
         lblL.value = rowData.left[0];
-        valL.value = rowData.left[1];
+        setCellValue(valL, rowData.left[1]);
         worksheet.mergeCells(`C${rIdx}:${clientSpan}${rIdx}`);
         setStyle(lblL, true);
         setStyle(valL);
@@ -260,22 +308,23 @@ export const downloadEstimateExcel = async (
 
         if (rowData.right.length === 2) {
             const valR = worksheet.getCell(`${String.fromCharCode(supplierStart.charCodeAt(0) + 1)}${rIdx}`);
-            valR.value = rowData.right[1];
+            setCellValue(valR, rowData.right[1]);
             worksheet.mergeCells(`${String.fromCharCode(supplierStart.charCodeAt(0) + 1)}${rIdx}:${lastCol}${rIdx}`);
             setStyle(valR);
         } else {
             const vR1 = worksheet.getCell(`${String.fromCharCode(supplierStart.charCodeAt(0) + 1)}${rIdx}`);
             const lR2 = worksheet.getCell(`${String.fromCharCode(lastCol.charCodeAt(0) - 1)}${rIdx}`);
             const vR2 = worksheet.getCell(`${lastCol}${rIdx}`);
-            vR1.value = rowData.right[1];
+            setCellValue(vR1, rowData.right[1]);
             lR2.value = rowData.right[2];
-            vR2.value = rowData.right[3];
+            setCellValue(vR2, rowData.right[3]);
             worksheet.mergeCells(`${String.fromCharCode(supplierStart.charCodeAt(0) + 1)}${rIdx}:${String.fromCharCode(lastCol.charCodeAt(0) - 2)}${rIdx}`);
             setStyle(vR1);
             setStyle(lR2, true);
             setStyle(vR2);
         }
         for (let c = 'B'.charCodeAt(0); c <= lastCol.charCodeAt(0); c++) {
+            if (String.fromCharCode(c) === infoSpacerCol) continue;
             const cell = worksheet.getCell(`${String.fromCharCode(c)}${rIdx}`);
             if (!cell.border) setStyle(cell);
         }
@@ -285,17 +334,20 @@ export const downloadEstimateExcel = async (
     setRangeBorder(supplierStart, infoStartRow, lastCol, infoEndRow);
     setBoxBorder(worksheet.getCell(`B${infoStartRow}`), 'medium', colorDarkBorder);
     setBoxBorder(worksheet.getCell(`${supplierStart}${infoStartRow}`), 'medium', colorDarkBorder);
+    for (let row = infoStartRow; row <= infoEndRow; row++) {
+        worksheet.getCell(`${infoSpacerCol}${row}`).border = {};
+    }
 
     // 4. 합계 섹션
     const amountRowIdx = infoStartRow + infoRows.length + 2;
-    worksheet.getRow(amountRowIdx).height = 42;
+    worksheet.getRow(amountRowIdx).height = isEstimate ? 42 : 30;
     worksheet.mergeCells(`B${amountRowIdx}:${clientSpan}${amountRowIdx}`);
     const amtLabel = worksheet.getCell(`B${amountRowIdx}`);
-    amtLabel.value = isEstimate ? '견적 합계 금액' : '명세 합계 금액';
+    amtLabel.value = `${isEstimate ? '견적' : '명세'} 합계 금액 (${vatInclusionLabel})`;
     
     worksheet.mergeCells(`${String.fromCharCode(clientSpan.charCodeAt(0) + 1)}${amountRowIdx}:${lastCol}${amountRowIdx}`);
     const amtValue = worksheet.getCell(`${String.fromCharCode(clientSpan.charCodeAt(0) + 1)}${amountRowIdx}`);
-    amtValue.value = `일금 ${numberToKorean(total)}원 정  ( ￦ ${formatCurrency(total)} )`;
+    setTextCellValue(amtValue, `일금 ${numberToKorean(total)}원 정  ( ￦ ${formatCurrency(total)} )`);
 
     [amtLabel, amtValue].forEach(cell => {
         cell.font = { name: fontName, size: 12, bold: true, color: { argb: cell === amtLabel ? colorText : colorMain } };
@@ -397,7 +449,7 @@ export const downloadEstimateExcel = async (
                 worksheet.getRow(curr).height = 23;
                 ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].forEach((col, i) => {
                     const cell = worksheet.getCell(`${col}${curr}`);
-                    cell.value = vals[i];
+                    setCellValue(cell, vals[i]);
                     cell.border = thinBorder as ExcelJS.Borders;
                     cell.font = { name: fontName, size: 9, color: { argb: colorMain } };
                     if ((groupIdx + itemIdx) % 2 === 1) {
@@ -414,7 +466,7 @@ export const downloadEstimateExcel = async (
                 worksheet.mergeCells(`B${groupStartRow}:B${curr - 1}`);
             }
             const groupCell = worksheet.getCell(`B${groupStartRow}`);
-            groupCell.value = group.category;
+            setTextCellValue(groupCell, group.category);
             groupCell.font = { name: fontName, size: 9, bold: true, color: { argb: colorMain } };
             groupCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorBg } };
             groupCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
@@ -440,7 +492,7 @@ export const downloadEstimateExcel = async (
 
             ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].forEach((col, i) => {
                 const cell = worksheet.getCell(`${col}${curr}`);
-                if (col !== 'C' && col !== 'D') cell.value = subtotalValues[i + 1];
+                if (col !== 'C' && col !== 'D') setCellValue(cell, subtotalValues[i + 1]);
                 cell.font = { name: fontName, size: 9, bold: true, color: { argb: colorMain } };
                 cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorAccentSoft } };
                 setBoxBorder(cell, 'thin', colorSub);
@@ -459,7 +511,7 @@ export const downloadEstimateExcel = async (
 
         ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].forEach((col, i) => {
             const cell = worksheet.getCell(`${col}${curr}`);
-            if (col !== 'C' && col !== 'D') cell.value = grandValues[i + 1];
+            if (col !== 'C' && col !== 'D') setCellValue(cell, grandValues[i + 1]);
             cell.font = { name: fontName, size: 10, bold: true, color: { argb: colorText } };
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorMain } };
             setBoxBorder(cell, 'medium', colorDarkBorder);
@@ -469,9 +521,13 @@ export const downloadEstimateExcel = async (
         });
         tableEndRow = curr;
     } else {
-        worksheet.getRow(tHead1).height = 36;
-        const transH = ['날짜', '품목', '단위', '수량', '단가', '공급가액', '세액', '비고'];
-        const transCols = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'];
+        worksheet.getRow(tHead1).height = 30;
+        const transH = isRentalTransaction
+            ? ['날짜', '품목', '단위', '수량', '기본료', '사용일수', '단가', '공급가', '부가세', '합계', '비고']
+            : ['날짜', '품목', '단위', '수량', '단가', '공급가액', '세액', '비고'];
+        const transCols = isRentalTransaction
+            ? ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
+            : ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'];
         transH.forEach((h, i) => {
             const cell = worksheet.getCell(transCols[i] + tHead1);
             cell.value = h;
@@ -480,28 +536,78 @@ export const downloadEstimateExcel = async (
 
         let curr = tHead1 + 1;
         items.forEach((item, idx) => {
-            const supplyAmt = item.amount || 0;
-            const vatAmt = supplyAmt ? Math.round(supplyAmt * vatRate / 100) : 0;
-            const vals = [item.itemDate || '', item.category, item.unit, item.quantity, item.finalUnitPrice, supplyAmt, vatAmt, item.note];
-            worksheet.getRow(curr).height = 23;
+            const quantity = normalizeNumber(item.quantity);
+            const baseFee = normalizeNumber(item.finalUnitPrice || item.unitPrice);
+            const usageDays = Math.max(1, normalizeNumber(item.period || 1));
+            const dailyFee = normalizeNumber(item.rentalUnitPrice);
+            const supplyAmt = isRentalTransaction
+                ? Math.round(quantity * (baseFee + (usageDays * dailyFee)))
+                : (item.amount || 0);
+            const vatAmt = draft.includeVat === false ? 0 : (supplyAmt ? Math.round(supplyAmt * vatRate / 100) : 0);
+            const lineTotal = supplyAmt + vatAmt;
+            const vals = isRentalTransaction
+                ? [
+                    item.itemDate || '',
+                    item.section || item.label || item.category,
+                    item.unit,
+                    quantity || null,
+                    baseFee || null,
+                    usageDays || null,
+                    dailyFee || null,
+                    supplyAmt || null,
+                    vatAmt || null,
+                    lineTotal || null,
+                    item.note || item.category || ''
+                ]
+                : [item.itemDate || '', item.category, item.unit, quantity, item.finalUnitPrice, supplyAmt, vatAmt, item.note];
+            worksheet.getRow(curr).height = 23.1;
             transCols.forEach((col, i) => {
                 const cell = worksheet.getCell(`${col}${curr}`);
-                cell.value = vals[i];
+                setCellValue(cell, vals[i]);
                 cell.border = thinBorder as ExcelJS.Borders;
                 cell.font = { name: fontName, size: 9, color: { argb: colorMain } };
                 if (idx % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
-                if (i === 3) setQuantityFormat(cell);
-                else if (i >= 4 && i <= 6) setMoneyFormat(cell);
-                else cell.alignment = { horizontal: 'center', vertical: 'middle' };
+                if (i === 3 || (isRentalTransaction && i === 5)) setQuantityFormat(cell);
+                else if (isRentalTransaction ? (i === 4 || i === 6 || i === 7 || i === 8 || i === 9) : (i >= 4 && i <= 6)) setMoneyFormat(cell);
+                else cell.alignment = { horizontal: i === 1 || i === transCols.length - 1 ? 'left' : 'center', vertical: 'middle', wrapText: i === transCols.length - 1 };
             });
             curr++;
         });
-        tableEndRow = curr - 1;
+
+        if (isRentalTransaction) {
+            worksheet.getRow(curr).height = 27;
+            worksheet.mergeCells(`B${curr}:D${curr}`);
+            const totalSupply = items.reduce((sum, item) => {
+                const quantity = normalizeNumber(item.quantity);
+                const baseFee = normalizeNumber(item.finalUnitPrice || item.unitPrice);
+                const usageDays = Math.max(1, normalizeNumber(item.period || 1));
+                const dailyFee = normalizeNumber(item.rentalUnitPrice);
+                return sum + Math.round(quantity * (baseFee + (usageDays * dailyFee)));
+            }, 0);
+            const totalTax = draft.includeVat === false ? 0 : Math.round(totalSupply * vatRate / 100);
+            const totalLine = totalSupply + totalTax;
+            const totalVals = ['합계', null, null, null, null, null, null, totalSupply, totalTax, totalLine, ''];
+
+            transCols.forEach((col, i) => {
+                const cell = worksheet.getCell(`${col}${curr}`);
+                if (col !== 'C' && col !== 'D') setCellValue(cell, totalVals[i]);
+                cell.font = { name: fontName, size: 10, bold: true, color: { argb: colorText } };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorMain } };
+                setBoxBorder(cell, 'medium', colorDarkBorder);
+                if (i >= 7 && i <= 9) setMoneyFormat(cell);
+                else cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            });
+            tableEndRow = curr;
+        } else {
+            tableEndRow = curr - 1;
+        }
     }
 
     // 6. 특약사항
     let lastRow = tableEndRow + 2;
-    if (draft.scopeNotes) {
+    if (isEstimate && draft.scopeNotes) {
+        const exportScopeNotes = getExportScopeNotes(draft.scopeNotes, draft.includeVat !== false);
+
         worksheet.mergeCells(`B${lastRow}:${lastCol}${lastRow}`);
         const st = worksheet.getCell(`B${lastRow}`);
         st.value = '◈ 특 약 사 항 (Special Terms)';
@@ -513,23 +619,24 @@ export const downloadEstimateExcel = async (
         lastRow += 1;
         worksheet.mergeCells(`B${lastRow}:${lastCol}${lastRow}`);
         const sc = worksheet.getCell(`B${lastRow}`);
-        sc.value = draft.scopeNotes;
+        setTextCellValue(sc, exportScopeNotes);
         sc.alignment = { vertical: 'top', horizontal: 'left', wrapText: true, indent: 1 };
         sc.font = { name: fontName, size: 9, color: { argb: colorMain } };
         setBoxBorder(sc, 'thin', colorBorder);
-        const lines = (draft.scopeNotes.match(/\n/g) || []).length + 1;
-        const chars = Math.ceil(draft.scopeNotes.length / 85);
+        const lines = (exportScopeNotes.match(/\n/g) || []).length + 1;
+        const chars = Math.ceil(exportScopeNotes.length / 85);
         worksheet.getRow(lastRow).height = Math.max(lines, chars) * 16 + 30;
     }
 
     // 7. 인쇄 설정 최적화
-    worksheet.pageSetup.printArea = `B1:${lastCol}${lastRow + 2}`;
+    // ExcelJS emits printArea as an internal defined-name formula, which can
+    // trigger Excel repair warnings when the variable note section changes.
     worksheet.pageSetup.fitToPage = true;
     worksheet.pageSetup.fitToWidth = 1;
     worksheet.pageSetup.fitToHeight = 0;
     worksheet.pageSetup.horizontalCentered = true;
     worksheet.pageSetup.paperSize = 9;
-    worksheet.pageSetup.orientation = isEstimate ? 'landscape' : 'portrait';
+    worksheet.pageSetup.orientation = (isEstimate || isRentalTransaction) ? 'landscape' : 'portrait';
     worksheet.pageSetup.margins = {
         left: 0.25,
         right: 0.25,
@@ -538,9 +645,11 @@ export const downloadEstimateExcel = async (
         header: 0.15,
         footer: 0.15
     };
-    worksheet.views = [{ state: 'frozen', ySplit: isEstimate ? tHead1 + 1 : tHead1 }];
+    worksheet.views = options.freezePanes !== false
+        ? [{ state: 'frozen', ySplit: isEstimate ? tHead1 + 1 : tHead1, showGridLines: false }]
+        : [{ showGridLines: false }];
 
     // 8. 저장
     const buf = await workbook.xlsx.writeBuffer();
-    saveAs(new Blob([buf]), `${draft.clientCompany || '업체'}_${isEstimate ? '견적서' : '거래명세표'}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    saveAs(new Blob([buf]), `${draft.clientCompany || '업체'}_${isEstimate ? '견적서' : (isRentalTransaction ? '임대거래명세표' : '거래명세표')}_${new Date().toISOString().slice(0, 10)}.xlsx`);
 };

@@ -1,4 +1,4 @@
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import { barobillKakaoService } from '../services/barobillKakaoService';
 import { protectedRegion, requireCallableAuth } from '../auth';
 

@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCheckCircle, faDownload, faMobileScreenButton } from '@fortawesome/free-solid-svg-icons';
+import { faCheckCircle, faMobileScreenButton, faSpinner } from '@fortawesome/free-solid-svg-icons';
 import {
   getInstallPrompt,
   isAppInstalled,
   promptPwaInstall,
+  refreshPwaInstallAssets,
   subscribeToInstallPrompt
 } from '../../pwaInstallPrompt';
 
@@ -34,17 +35,25 @@ const InstallButton = styled.button<{ $ready: boolean }>`
 
 const getInstallHelpMessage = () => {
   const isAppleMobile = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+  const isLocalDevelopmentServer = process.env.NODE_ENV !== 'production'
+    && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
 
-  if (isAppleMobile) {
-    return 'iPhone/iPad에서는 Safari 하단 공유 버튼을 누른 뒤 "홈 화면에 추가"를 선택하면 앱처럼 사용할 수 있습니다.';
+  if (isLocalDevelopmentServer) {
+    return '이 버튼은 APK 파일 다운로드가 아니라 브라우저 PWA 설치 기능입니다. localhost 개발 서버에서는 설치 프롬프트가 제한될 수 있으니 배포 주소(HTTPS) 또는 production build에서 브라우저의 "앱 설치" / "홈 화면에 추가"를 사용해 주세요.';
   }
 
-  return '브라우저 주소창 또는 메뉴에서 "앱 설치" 또는 "홈 화면에 추가"를 선택하면 앱처럼 사용할 수 있습니다.';
+  if (isAppleMobile) {
+    return '이 버튼은 APK 파일 다운로드가 아니라 브라우저 PWA 설치 기능입니다. iPhone/iPad에서는 Safari 하단 공유 버튼을 누른 뒤 "홈 화면에 추가"를 선택하면 앱처럼 사용할 수 있습니다.';
+  }
+
+  return '이 버튼은 APK 파일 다운로드가 아니라 브라우저 PWA 설치 기능입니다. 브라우저 주소창 또는 메뉴에서 "앱 설치" 또는 "홈 화면에 추가"를 선택하면 앱처럼 사용할 수 있습니다.';
 };
 
 export const AppInstallButton: React.FC = () => {
   const [canInstall, setCanInstall] = useState(Boolean(getInstallPrompt()));
   const [installed, setInstalled] = useState(() => isAppInstalled());
+  const [isPreparing, setIsPreparing] = useState(false);
+  const refreshedInstallAssetsRef = useRef(false);
 
   useEffect(() => {
     const update = () => {
@@ -58,17 +67,35 @@ export const AppInstallButton: React.FC = () => {
     return unsubscribe;
   }, []);
 
-  const handleInstall = async () => {
-    if (installed) return;
+  useEffect(() => {
+    if (installed || refreshedInstallAssetsRef.current) return;
 
-    if (!canInstall) {
+    refreshedInstallAssetsRef.current = true;
+    void refreshPwaInstallAssets();
+  }, [installed]);
+
+  const handleInstall = async () => {
+    if (installed || isPreparing) return;
+
+    void refreshPwaInstallAssets();
+
+    const promptAvailable = Boolean(getInstallPrompt());
+    setCanInstall(promptAvailable);
+
+    if (!promptAvailable) {
       window.alert(getInstallHelpMessage());
       return;
     }
 
-    const result = await promptPwaInstall();
-    setCanInstall(Boolean(getInstallPrompt()));
-    setInstalled(result === 'accepted' || isAppInstalled());
+    setIsPreparing(true);
+
+    try {
+      const result = await promptPwaInstall();
+      setCanInstall(Boolean(getInstallPrompt()));
+      setInstalled(result === 'accepted' || isAppInstalled());
+    } finally {
+      setIsPreparing(false);
+    }
   };
 
   if (installed) {
@@ -81,9 +108,9 @@ export const AppInstallButton: React.FC = () => {
   }
 
   return (
-    <InstallButton type="button" $ready={canInstall} onClick={handleInstall}>
-      <FontAwesomeIcon icon={canInstall ? faDownload : faMobileScreenButton} />
-      앱 다운로드
+    <InstallButton type="button" $ready={canInstall && !isPreparing} onClick={handleInstall} disabled={isPreparing}>
+      <FontAwesomeIcon icon={isPreparing ? faSpinner : faMobileScreenButton} spin={isPreparing} />
+      {isPreparing ? '준비 중...' : '앱 설치'}
     </InstallButton>
   );
 };

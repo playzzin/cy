@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, onSnapshot, Unsubscribe, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, getDocFromServer, setDoc, onSnapshot, Unsubscribe, updateDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { MenuItem, SiteDataType } from '../types/menu';
 import { DEFAULT_MENU_CONFIG } from '../constants/defaultMenu';
@@ -34,6 +34,8 @@ interface AllowedMenuMap {
 let currentConfig: SiteDataType | null = null;
 let currentRawConfig: SiteDataType | null = null;
 let unsubscribeSnapshot: Unsubscribe | null = null;
+let pendingSaveFingerprint: string | null = null;
+let pendingSavePromise: Promise<boolean> | null = null;
 const listeners: Set<MenuListener> = new Set();
 
 const deepClone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
@@ -120,6 +122,239 @@ const createDeterministicId = (parts: string[]): string => {
         hash = Math.imul(hash, 16777619);
     }
     return `m_${(hash >>> 0).toString(36)}`;
+};
+
+const RETIRED_HARDCODED_MENU_SEED_IDS = new Set([
+    createDeterministicId(['admin/\uc0ac\uc9c4 \uac70\ub798\ucc98 \ub4f1\ub85d']),
+    createDeterministicId(['admin/\uba85\ud568/\ub2f4\ub2f9\uc790 \uad00\ub9ac']),
+    'office_partner_photo_registration',
+    'office_business_card_contacts'
+]);
+
+const normalizePositionIdForCleanup = (value: unknown): string =>
+    String(value || '').trim().toLowerCase().replace(/[\s_-]/g, '');
+
+const DUPLICATE_POSITION_MENU_IDS = new Set(['teamlead', 'foreman', 'general']);
+const DUPLICATE_POSITION_SITE_KEYS = new Set(['pos_teamLead', 'pos_foreman', 'pos_general']);
+
+const OFFICE_POSITION_CONFIG = {
+    id: 'office',
+    name: '\uc0ac\ubb34\uc2e4',
+    icon: 'fa-building-user',
+    color: 'from-sky-600 to-cyan-400',
+    order: 4.5
+};
+
+const OFFICE_MENU_ITEMS: MenuItem[] = [
+    {
+        id: 'office_dashboard',
+        text: '\uc0ac\ubb34\uc2e4 \uc6b4\uc601 \ub300\uc2dc\ubcf4\ub4dc',
+        icon: 'fa-chart-line',
+        path: '/office/dashboard'
+    },
+    {
+        id: 'office_request_center',
+        text: '\uc2e0\uccad \uc2b9\uc778\uc13c\ud130',
+        icon: 'fa-inbox',
+        path: '/office/request-center'
+    },
+    {
+        id: 'office_daily_review',
+        text: '\uc77c\ubcf4 \uac80\uc218',
+        icon: 'fa-clipboard-check',
+        path: '/office/daily-review'
+    },
+    {
+        id: 'office_worker_documents',
+        text: '\uacc4\uc88c / \uc11c\ub958 \uad00\ub9ac',
+        icon: 'fa-id-card',
+        path: '/office/worker-documents'
+    },
+    {
+        id: 'office_communications',
+        text: '\uacf5\uc9c0 / \uba54\uc2dc\uc9c0 \ubc1c\uc1a1',
+        icon: 'fa-bullhorn',
+        path: '/office/communications'
+    },
+    {
+        id: 'office_payroll_check',
+        text: '\uae09\uc5ec \uc9c0\uae09 \uc804 \ud655\uc778',
+        icon: 'fa-money-check-dollar',
+        path: '/office/payroll-check'
+    },
+    {
+        id: 'office_audit_log',
+        text: '\ucc98\ub9ac \uc774\ub825 / \ub85c\uadf8',
+        icon: 'fa-clock-rotate-left',
+        path: '/office/audit-log'
+    }
+];
+
+const OFFICE_MENU_PATHS = new Set(OFFICE_MENU_ITEMS.map((item) => item.path).filter(Boolean) as string[]);
+const LEGACY_OFFICE_MENU_TEXTS = new Set([
+    '\uc77c\uc815 / \ubc30\uc815 \uad00\ub9ac',
+    '\ucd9c\uc5ed / \uc77c\ubcf4 \uac80\uc218',
+    '\uc791\uc5c5\uc790 / \uc11c\ub958 \uad00\ub9ac',
+    '\uae09\uc5ec / \uac00\ubd88 \ucc98\ub9ac',
+    '\uacbd\ube44 / \ubb3c\ud488 \uc694\uccad \uad00\ub9ac',
+    '\uacf5\uc9c0 / \uba54\uc2dc\uc9c0',
+    '\uc18c\uac1c\uc18c'
+]);
+
+const RECRUITING_MENU_PATH_PREFIX = '/recruiting';
+const RECRUITING_FOLDER_TEXTS = new Set(['\uc18c\uac1c\uc18c', '\uc18c\uac1c\uc18c \uba54\ub274']);
+const DEV_POSITION_NAMES = new Set(['dev', 'developer', '\uac1c\ubc1c', '\uac1c\ubc1c\uc790']);
+
+const officeMenuContainsLegacyArtifacts = (items: (MenuItem | string)[] = []): boolean =>
+    items.some((item) => {
+        if (typeof item === 'string') {
+            return LEGACY_OFFICE_MENU_TEXTS.has(item);
+        }
+
+        if (LEGACY_OFFICE_MENU_TEXTS.has(item.text)) {
+            return true;
+        }
+
+        return Array.isArray(item.sub) ? officeMenuContainsLegacyArtifacts(item.sub) : false;
+    });
+
+const officeMenuHasDuplicateSeedRoutes = (items: (MenuItem | string)[] = [], seen = new Set<string>()): boolean => {
+    for (const item of items) {
+        if (typeof item === 'string') continue;
+
+        if (item.path && OFFICE_MENU_PATHS.has(item.path)) {
+            if (seen.has(item.path)) return true;
+            seen.add(item.path);
+        }
+
+        if (Array.isArray(item.sub) && officeMenuHasDuplicateSeedRoutes(item.sub, seen)) {
+            return true;
+        }
+    }
+
+    return false;
+};
+
+const removeDuplicatePositionMenuArtifacts = (config: SiteDataType): boolean => {
+    let changed = false;
+
+    DUPLICATE_POSITION_SITE_KEYS.forEach((siteKey) => {
+        if (Object.prototype.hasOwnProperty.call(config, siteKey)) {
+            delete config[siteKey];
+            changed = true;
+        }
+    });
+
+    const adminSite: any = config.admin;
+    if (Array.isArray(adminSite?.positionConfig)) {
+        const nextPositionConfig = adminSite.positionConfig.filter((position: any) => {
+            const id = normalizePositionIdForCleanup(position?.id);
+            const siteKey = normalizePositionIdForCleanup(position?.siteKey || position?.menuKey || position?.siteId);
+            return !DUPLICATE_POSITION_MENU_IDS.has(id) && !DUPLICATE_POSITION_MENU_IDS.has(siteKey);
+        });
+
+        if (nextPositionConfig.length !== adminSite.positionConfig.length) {
+            adminSite.positionConfig = nextPositionConfig;
+            changed = true;
+        }
+    }
+
+    return changed;
+};
+
+const removeRetiredHardcodedMenuSeeds = (config: SiteDataType): boolean => {
+    let changed = false;
+
+    const filterItems = (items: (MenuItem | string)[]): (MenuItem | string)[] => {
+        return items.reduce<(MenuItem | string)[]>((acc, item) => {
+            if (typeof item === 'string') {
+                acc.push(item);
+                return acc;
+            }
+
+            if (item.id && RETIRED_HARDCODED_MENU_SEED_IDS.has(item.id)) {
+                changed = true;
+                return acc;
+            }
+
+            if (Array.isArray(item.sub)) {
+                const nextSub = filterItems(item.sub);
+                if (nextSub.length !== item.sub.length) {
+                    item.sub = nextSub;
+                }
+            }
+
+            acc.push(item);
+            return acc;
+        }, []);
+    };
+
+    Object.values(config).forEach((site) => {
+        if (!site || !Array.isArray(site.menu)) return;
+        const nextMenu = filterItems(site.menu);
+        if (nextMenu.length !== site.menu.length) {
+            site.menu = nextMenu as MenuItem[];
+        }
+    });
+
+    return changed;
+};
+
+const ensureOfficeMenuPages = (config: SiteDataType): boolean => {
+    let changed = false;
+    const adminSite: any = config.admin;
+
+    if (adminSite && Array.isArray(adminSite.positionConfig)) {
+        const existingIndex = adminSite.positionConfig.findIndex(
+            (position: any) => normalizePositionIdForCleanup(position?.id) === 'office'
+        );
+
+        if (existingIndex >= 0) {
+            const nextOfficePosition = {
+                ...OFFICE_POSITION_CONFIG,
+                ...adminSite.positionConfig[existingIndex],
+                id: OFFICE_POSITION_CONFIG.id,
+                name: adminSite.positionConfig[existingIndex].name || OFFICE_POSITION_CONFIG.name,
+                icon: adminSite.positionConfig[existingIndex].icon || OFFICE_POSITION_CONFIG.icon,
+                color: adminSite.positionConfig[existingIndex].color || OFFICE_POSITION_CONFIG.color,
+                order: typeof adminSite.positionConfig[existingIndex].order === 'number'
+                    ? adminSite.positionConfig[existingIndex].order
+                    : OFFICE_POSITION_CONFIG.order
+            };
+            if (!configsEqual(adminSite.positionConfig[existingIndex], nextOfficePosition)) {
+                adminSite.positionConfig[existingIndex] = nextOfficePosition;
+                changed = true;
+            }
+        } else {
+            adminSite.positionConfig = [...adminSite.positionConfig, OFFICE_POSITION_CONFIG]
+                .sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+            changed = true;
+        }
+    }
+
+    const existingOfficeSite = config.pos_office;
+    const existingOfficeMenu = Array.isArray(existingOfficeSite?.menu) ? existingOfficeSite.menu : [];
+    const shouldSeedOfficeMenu =
+        !existingOfficeSite ||
+        existingOfficeMenu.length === 0 ||
+        officeMenuContainsLegacyArtifacts(existingOfficeMenu) ||
+        officeMenuHasDuplicateSeedRoutes(existingOfficeMenu);
+
+    const nextOfficeSite = {
+        ...(existingOfficeSite || {}),
+        name: existingOfficeSite?.name || '\uc0ac\ubb34\uc2e4 \uba54\ub274',
+        icon: existingOfficeSite?.icon || 'fa-building-user',
+        menu: shouldSeedOfficeMenu ? deepClone(OFFICE_MENU_ITEMS) : existingOfficeMenu,
+        headerActions: Array.isArray(existingOfficeSite?.headerActions) ? existingOfficeSite.headerActions : [],
+        deletedItems: Array.isArray(existingOfficeSite?.deletedItems) ? existingOfficeSite.deletedItems : []
+    };
+
+    if (!configsEqual(config.pos_office, nextOfficeSite)) {
+        config.pos_office = nextOfficeSite;
+        changed = true;
+    }
+
+    return changed;
 };
 
 const normalizeMenuItem = (item: any, parentIdPath: string): MenuItem => {
@@ -290,6 +525,182 @@ const ensureNoticeBoardMenu = (config: SiteDataType): boolean => {
     });
 
     return changed;
+};
+
+const isPositionMenuSiteKey = (siteKey: string): boolean => siteKey.startsWith('pos_');
+
+const getMenuItemText = (item: MenuItem | string): string =>
+    typeof item === 'string' ? item : item.text;
+
+const getMenuItemPath = (item: MenuItem | string): string | undefined => {
+    const text = getMenuItemText(item);
+    return typeof item === 'string' ? MENU_PATHS[text] : item.path || MENU_PATHS[text];
+};
+
+const isRecruitingMenuItem = (item: MenuItem | string): boolean => {
+    const path = getMenuItemPath(item);
+    if (typeof path === 'string' && path.startsWith(RECRUITING_MENU_PATH_PREFIX)) return true;
+    if (typeof item !== 'string' && Array.isArray(item.sub)) {
+        return item.sub.some(isRecruitingMenuItem);
+    }
+    return false;
+};
+
+const removeRecruitingMenuItems = (items: (MenuItem | string)[]): { items: (MenuItem | string)[]; removed: boolean } => {
+    let removed = false;
+    const nextItems: (MenuItem | string)[] = [];
+
+    items.forEach((item) => {
+        if (typeof item === 'string') {
+            if (isRecruitingMenuItem(item)) {
+                removed = true;
+                return;
+            }
+            nextItems.push(item);
+            return;
+        }
+
+        if (RECRUITING_FOLDER_TEXTS.has(item.text) && isRecruitingMenuItem(item)) {
+            removed = true;
+            return;
+        }
+
+        if ((!Array.isArray(item.sub) || item.sub.length === 0) && isRecruitingMenuItem(item)) {
+            removed = true;
+            return;
+        }
+
+        if (Array.isArray(item.sub) && item.sub.length > 0) {
+            const childResult = removeRecruitingMenuItems(item.sub);
+            if (childResult.removed) {
+                removed = true;
+                if (childResult.items.length === 0 && isRecruitingMenuItem(item)) {
+                    return;
+                }
+                nextItems.push({ ...item, sub: childResult.items });
+                return;
+            }
+        }
+
+        nextItems.push(item);
+    });
+
+    return { items: nextItems, removed };
+};
+
+const removeLegacyRecruitingMenusOutsidePositionMenus = (config: SiteDataType): boolean => {
+    let changed = false;
+
+    Object.entries(config).forEach(([siteKey, site]) => {
+        if (isPositionMenuSiteKey(siteKey) || isDevPositionSite(siteKey, site)) return;
+        if (!site || !Array.isArray(site.menu)) return;
+
+        const result = removeRecruitingMenuItems(site.menu);
+        if (!result.removed) return;
+        site.menu = result.items as MenuItem[];
+        changed = true;
+    });
+
+    return changed;
+};
+
+const isDevPositionSite = (siteKey: string, site: any): boolean => {
+    const normalizedKey = normalizePositionIdForCleanup(siteKey);
+    if (normalizedKey === 'posdev' || normalizedKey === 'dev') return true;
+
+    const normalizedName = normalizePositionIdForCleanup(site?.name);
+    if (DEV_POSITION_NAMES.has(normalizedName)) {
+        return true;
+    }
+
+    return false;
+};
+
+const getPositionSiteKey = (positionId: unknown): string | undefined => {
+    if (typeof positionId !== 'string' || positionId.trim().length === 0) return undefined;
+    const id = positionId.trim();
+    return id.startsWith('pos_') ? id : `pos_${id}`;
+};
+
+const getDevPositionSiteKeys = (config: SiteDataType): Set<string> => {
+    const keys = new Set<string>();
+
+    Object.entries(config).forEach(([siteKey, site]) => {
+        if (isDevPositionSite(siteKey, site)) {
+            keys.add(siteKey);
+        }
+    });
+
+    const positions = Array.isArray((config.admin as any)?.positionConfig)
+        ? (config.admin as any).positionConfig
+        : [];
+
+    positions.forEach((position: any) => {
+        const normalizedId = normalizePositionIdForCleanup(position?.id);
+        const normalizedName = normalizePositionIdForCleanup(position?.name);
+        if (normalizedId === 'dev' || DEV_POSITION_NAMES.has(normalizedName)) {
+            const siteKey = getPositionSiteKey(position?.id);
+            if (siteKey) keys.add(siteKey);
+        }
+    });
+
+    return keys;
+};
+
+const findTopLevelRecruitingFolder = (items: (MenuItem | string)[] = []): MenuItem | undefined =>
+    items.find((item): item is MenuItem =>
+        typeof item !== 'string' && RECRUITING_FOLDER_TEXTS.has(item.text)
+    );
+
+const preserveExistingDevRecruitingFolderChildren = (
+    nextConfig: SiteDataType,
+    existingConfig: SiteDataType
+): boolean => {
+    let changed = false;
+    const devSiteKeys = new Set([
+        ...Array.from(getDevPositionSiteKeys(nextConfig)),
+        ...Array.from(getDevPositionSiteKeys(existingConfig))
+    ]);
+
+    devSiteKeys.forEach((siteKey) => {
+        const nextMenu = nextConfig[siteKey]?.menu;
+        const existingMenu = existingConfig[siteKey]?.menu;
+        if (!Array.isArray(nextMenu) || !Array.isArray(existingMenu)) return;
+
+        const nextFolder = findTopLevelRecruitingFolder(nextMenu);
+        const existingFolder = findTopLevelRecruitingFolder(existingMenu);
+        const existingSub = Array.isArray(existingFolder?.sub) ? existingFolder.sub : [];
+        if (!nextFolder || existingSub.length === 0 || !existingSub.some(isRecruitingMenuItem)) return;
+
+        const nextSub = Array.isArray(nextFolder.sub) ? nextFolder.sub : [];
+        if (nextSub.length > 0) return;
+
+        nextFolder.sub = deepClone(existingSub);
+        changed = true;
+    });
+
+    return changed;
+};
+
+const preserveExistingMenuDataBeforeSave = async (
+    candidateDocId: string,
+    sanitizedData: SiteDataType
+): Promise<SiteDataType> => {
+    try {
+        const snapshot = await getDocFromServer(getMenuDocRef(candidateDocId));
+        if (!snapshot.exists()) return sanitizedData;
+
+        const existingConfig = processIncomingConfig(normalizeSiteDataType(snapshot.data() as SiteDataType));
+        const nextConfig = deepClone(sanitizedData);
+        const preserved = preserveExistingDevRecruitingFolderChildren(nextConfig, existingConfig);
+        if (!preserved) return sanitizedData;
+
+        const result = SiteDataTypeSchema.safeParse(nextConfig);
+        return result.success ? JSON.parse(JSON.stringify(result.data)) : sanitizedData;
+    } catch (error: any) {
+        if (isPermissionDenied(error)) return sanitizedData;
+        throw error;
+    }
 };
 
 const createNationSiteConfig = (sourceSite?: any) => {
@@ -471,6 +882,10 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
         }
     }
 
+    removeDuplicatePositionMenuArtifacts(final);
+    ensureOfficeMenuPages(final);
+    removeRetiredHardcodedMenuSeeds(final);
+
     return final;
 };
 
@@ -517,12 +932,6 @@ const setupSnapshotListener = () => {
             const processedConfig = processIncomingConfig(normalizedIncoming);
             currentRawConfig = deepClone(normalizedIncoming);
             currentConfig = processedConfig;
-
-            if (!configsEqual(processedConfig, normalizedIncoming)) {
-                menuServiceV11.saveMenuConfig(processedConfig).catch(err => {
-                    console.error('[MenuService] Failed to persist normalized snapshot config:', err);
-                });
-            }
 
             notifyListeners();
         },
@@ -579,11 +988,6 @@ export const menuServiceV11 = {
                         const rawData = docSnapshot.data();
                         const normalizedIncoming = normalizeSiteDataType(rawData as SiteDataType);
                         const processedConfig = processIncomingConfig(normalizedIncoming);
-                        if (!configsEqual(processedConfig, normalizedIncoming)) {
-                            menuServiceV11.saveMenuConfig(processedConfig).catch(err => {
-                                console.error('[MenuService] Failed to persist normalized menu config:', err);
-                            });
-                        }
                         return processedConfig;
                     }
 
@@ -614,6 +1018,8 @@ export const menuServiceV11 = {
     },
 
     saveMenuConfig: async (newConfig: SiteDataType) => {
+        let localSaveFingerprint: string | null = null;
+        let localSavePromise: Promise<boolean> | null = null;
         const normalizedConfig = processIncomingConfig(normalizeSiteDataType(newConfig));
         const prunedConfig = pruneLargeConfig(normalizedConfig);
         const result = SiteDataTypeSchema.safeParse(prunedConfig);
@@ -627,29 +1033,55 @@ export const menuServiceV11 = {
 
         try {
             const sanitizedData = JSON.parse(JSON.stringify(result.data));
-            let lastError: any = null;
+            const saveFingerprint = JSON.stringify(sanitizedData);
 
-            const candidatesToTry = [activeDocId, ...DOC_ID_CANDIDATES.filter((d) => d !== activeDocId)];
-            for (const candidate of candidatesToTry) {
-                const menuRef = getMenuDocRef(candidate);
-                try {
-                    // Removing { merge: true } ensures that deleted keys are actually removed from Firestore
-                    await setDoc(menuRef, sanitizedData);
-                    activeDocId = candidate;
-                    return true;
-                } catch (err: any) {
-                    lastError = err;
-                    if (isPermissionDenied(err)) {
-                        continue;
-                    }
-                    throw err;
-                }
+            if (pendingSavePromise && pendingSaveFingerprint === saveFingerprint) {
+                return await pendingSavePromise;
             }
 
-            throw lastError || new Error('All save attempts failed');
+            pendingSaveFingerprint = saveFingerprint;
+            const nextSavePromise = (async () => {
+                let lastError: any = null;
+
+                const candidatesToTry = [activeDocId, ...DOC_ID_CANDIDATES.filter((d) => d !== activeDocId)];
+                for (const candidate of candidatesToTry) {
+                    const menuRef = getMenuDocRef(candidate);
+                    try {
+                        const dataToSave = await preserveExistingMenuDataBeforeSave(candidate, sanitizedData);
+                        // Removing { merge: true } ensures that deleted keys are actually removed from Firestore
+                        await setDoc(menuRef, dataToSave);
+                        activeDocId = candidate;
+                        currentRawConfig = deepClone(dataToSave as SiteDataType);
+                        currentConfig = processIncomingConfig(normalizeSiteDataType(dataToSave as SiteDataType));
+                        return true;
+                    } catch (err: any) {
+                        lastError = err;
+                        if (isPermissionDenied(err)) {
+                            continue;
+                        }
+                        throw err;
+                    }
+                }
+
+                throw lastError || new Error('All save attempts failed');
+            })();
+            pendingSavePromise = nextSavePromise;
+            localSaveFingerprint = saveFingerprint;
+            localSavePromise = nextSavePromise;
+
+            return await nextSavePromise;
         } catch (error) {
             console.error('Failed to save menu configuration:', error);
             throw error;
+        } finally {
+            if (
+                localSavePromise &&
+                pendingSavePromise === localSavePromise &&
+                pendingSaveFingerprint === localSaveFingerprint
+            ) {
+                pendingSaveFingerprint = null;
+                pendingSavePromise = null;
+            }
         }
     },
 
@@ -724,56 +1156,42 @@ export const menuServiceV11 = {
 
             let modified = false;
 
-            // 1. Update positionConfig in admin site
-            const newPositionConfig = [
-                { id: 'full', name: '\uC804\uCCB4 \uBA54\uB274', icon: 'fa-shield-halved', color: 'from-red-600 to-red-400', order: 0 },
-                ...positions.map((p, index) => ({
-                    id: p.id,
-                    name: p.name,
-                    icon: p.iconKey || p.icon || 'fa-user',
-                    color: p.color || 'gray',
-                    order: (p.rank || 0) + 1
-                }))
-            ];
+            const positionsById = new Map(positions.map((p) => [p.id, p]));
+            const currentPositionConfig = Array.isArray(config.admin.positionConfig)
+                ? config.admin.positionConfig
+                : [];
 
-            if (JSON.stringify(config.admin.positionConfig) !== JSON.stringify(newPositionConfig)) {
-                config.admin.positionConfig = newPositionConfig;
+            const nextPositionConfig = currentPositionConfig.map((position: any) => {
+                const source = typeof position?.id === 'string' ? positionsById.get(position.id) : undefined;
+                if (!source || position.id === 'full') return position;
+
+                return {
+                    ...position,
+                    name: source.name || position.name,
+                    icon: source.iconKey || source.icon || position.icon || 'fa-user',
+                    color: source.color || position.color,
+                    order: typeof position.order === 'number' ? position.order : (source.rank || 0) + 1
+                };
+            });
+
+            if (JSON.stringify(currentPositionConfig) !== JSON.stringify(nextPositionConfig)) {
+                config.admin.positionConfig = nextPositionConfig;
                 modified = true;
             }
 
-            // 2. Ensure each position has a site entry
-            positions.forEach(pos => {
-                const siteKey = pos.id.startsWith('pos_') ? pos.id : `pos_${pos.id}`;
+            nextPositionConfig.forEach((position: any) => {
+                if (!position?.id || position.id === 'full') return;
+                const source = positionsById.get(position.id);
+                if (!source) return;
 
-                // If this site key doesn't exist, create it
-                if (!config[siteKey]) {
-                    // Fallback to default menu if pos_general exists, otherwise empty
-                    const fallbackMenu = config['pos_general']?.menu
-                        ? JSON.parse(JSON.stringify(config['pos_general'].menu))
-                        : [];
+                const siteKey = position.id.startsWith('pos_') ? position.id : `pos_${position.id}`;
+                const site = config[siteKey];
+                if (!site) return;
 
-                    config[siteKey] = {
-                        name: pos.name,
-                        icon: pos.iconKey || pos.icon || 'fa-user',
-                        menu: fallbackMenu
-                    };
-                    modified = true;
-                } else {
-                    // Update metadata if changed
-                    if (config[siteKey].name !== pos.name || config[siteKey].icon !== (pos.iconKey || pos.icon)) {
-                        config[siteKey].name = pos.name;
-                        config[siteKey].icon = pos.iconKey || pos.icon || 'fa-user';
-                        modified = true;
-                    }
-                }
-            });
-
-            // 3. Remove orphaned site keys (pos_*) that no longer exist in positions list
-            const validPosKeys = new Set(positions.map(p => p.id.startsWith('pos_') ? p.id : `pos_${p.id}`));
-
-            Object.keys(config).forEach(key => {
-                if (key.startsWith('pos_') && !validPosKeys.has(key)) {
-                    delete config[key];
+                const nextIcon = source.iconKey || source.icon || site.icon || 'fa-user';
+                if (site.name !== source.name || site.icon !== nextIcon) {
+                    site.name = source.name;
+                    site.icon = nextIcon;
                     modified = true;
                 }
             });
@@ -892,9 +1310,10 @@ export const menuServiceV11 = {
 
             const addedNationwidePage = ensureMenuChild(config, '현황관리', '전국페이지');
             const addedNoticeBoard = ensureNoticeBoardMenu(config);
+            const removedLegacyRecruitingMenus = removeLegacyRecruitingMenusOutsidePositionMenus(config);
             const ensuredNationSite = ensureCanonicalNationSiteConfig(config);
             const normalizedSupportAssetMenu = normalizeSupportAssetMenu(config);
-            const changed = addedNationwidePage || addedNoticeBoard || ensuredNationSite || normalizedSupportAssetMenu;
+            const changed = addedNationwidePage || addedNoticeBoard || removedLegacyRecruitingMenus || ensuredNationSite || normalizedSupportAssetMenu;
             if (changed) {
                 await menuServiceV11.saveMenuConfig(config);
             }

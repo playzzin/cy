@@ -8,14 +8,12 @@ import { dailyReportService } from '../../services/dailyReportService';
 import { companyService } from '../../services/companyService';
 import { taskService } from '../../services/taskService';
 import { Task, STATUS_CONFIG } from '../../types/task';
-import { DASHBOARD_MODES, DashboardModeConfig } from './roleDashboardConfig';
-import { QuickMenuSettingsModal } from './QuickMenuSettingsModal';
-import { useQuickMenuActionSettings } from './useQuickMenuActions';
+import { DashboardModeConfig } from './roleDashboardConfig';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faUsers, faBuilding, faClipboardList, faHardHat,
-    faArrowRight, faChartLine, faSpinner, faRightLeft,
-    faListCheck, faCog
+    faArrowRight, faSpinner, faRightLeft,
+    faListCheck
 } from '@fortawesome/free-solid-svg-icons';
 
 interface DashboardExecutiveViewProps {
@@ -28,9 +26,8 @@ const formatManDay = (value: number) =>
         maximumFractionDigits: 1
     });
 
-export const DashboardExecutiveView: React.FC<DashboardExecutiveViewProps> = ({ modeConfig = DASHBOARD_MODES[0] }) => {
+export const DashboardExecutiveView: React.FC<DashboardExecutiveViewProps> = () => {
     const { currentUser } = useAuth();
-    const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState({
         workers: { total: 0, active: 0 },
@@ -166,24 +163,13 @@ export const DashboardExecutiveView: React.FC<DashboardExecutiveViewProps> = ({ 
     }
 
     return (
-        <DashboardExecutiveViewContent stats={stats} modeConfig={modeConfig} />
+        <DashboardExecutiveViewContent stats={stats} />
     );
 };
 
 // Internal component to handle the displaying using the fetched stats
-const DashboardExecutiveViewContent: React.FC<{ stats: any; modeConfig: DashboardModeConfig }> = ({ stats, modeConfig }) => {
+const DashboardExecutiveViewContent: React.FC<{ stats: any }> = ({ stats }) => {
     const navigate = useNavigate();
-    const quickMenu = useQuickMenuActionSettings(modeConfig);
-    const quickActions = quickMenu.actions;
-    const [isQuickMenuSettingsOpen, setIsQuickMenuSettingsOpen] = useState(false);
-
-    const handleQuickActionClick = (path: string, openInNewTab?: boolean) => {
-        if (openInNewTab) {
-            window.open(path, '_blank', 'noopener,noreferrer');
-            return;
-        }
-        navigate(path);
-    };
 
     return (
         <div>
@@ -299,73 +285,7 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any; modeConfig: Dashboar
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Quick Actions */}
                 <div className="lg:col-span-2 space-y-8">
-                    <section>
-                        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                                <FontAwesomeIcon icon={faChartLine} className="text-brand-600" />
-                                {modeConfig.shortLabel} 빠른 실행
-                            </h2>
-                            <button
-                                type="button"
-                                onClick={() => setIsQuickMenuSettingsOpen(true)}
-                                disabled={quickMenu.loading}
-                                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                <FontAwesomeIcon icon={faCog} />
-                                설정
-                            </button>
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            {(() => {
-                                const colorMap: Record<string, { bg: string, text: string, hover: string, iconBg: string }> = {
-                                    brand: { bg: 'bg-brand-50', text: 'text-brand-600', hover: 'hover:border-brand-500', iconBg: 'group-hover:bg-brand-100' },
-                                    blue: { bg: 'bg-blue-50', text: 'text-blue-600', hover: 'hover:border-blue-500', iconBg: 'group-hover:bg-blue-100' },
-                                    green: { bg: 'bg-green-50', text: 'text-green-600', hover: 'hover:border-green-500', iconBg: 'group-hover:bg-green-100' },
-                                    slate: { bg: 'bg-slate-50', text: 'text-slate-600', hover: 'hover:border-slate-500', iconBg: 'group-hover:bg-slate-100' },
-                                    indigo: { bg: 'bg-indigo-50', text: 'text-indigo-600', hover: 'hover:border-indigo-500', iconBg: 'group-hover:bg-indigo-100' },
-                                    emerald: { bg: 'bg-emerald-50', text: 'text-emerald-600', hover: 'hover:border-emerald-500', iconBg: 'group-hover:bg-emerald-100' },
-                                    sky: { bg: 'bg-sky-50', text: 'text-sky-600', hover: 'hover:border-sky-500', iconBg: 'group-hover:bg-sky-100' },
-                                    rose: { bg: 'bg-rose-50', text: 'text-rose-600', hover: 'hover:border-rose-500', iconBg: 'group-hover:bg-rose-100' },
-                                    purple: { bg: 'bg-purple-50', text: 'text-purple-600', hover: 'hover:border-purple-500', iconBg: 'group-hover:bg-purple-100' },
-                                    violet: { bg: 'bg-violet-50', text: 'text-violet-600', hover: 'hover:border-violet-500', iconBg: 'group-hover:bg-violet-100' },
-                                    orange: { bg: 'bg-orange-50', text: 'text-orange-600', hover: 'hover:border-orange-500', iconBg: 'group-hover:bg-orange-100' },
-                                    amber: { bg: 'bg-amber-50', text: 'text-amber-600', hover: 'hover:border-amber-500', iconBg: 'group-hover:bg-amber-100' },
-                                    cyan: { bg: 'bg-cyan-50', text: 'text-cyan-600', hover: 'hover:border-cyan-500', iconBg: 'group-hover:bg-cyan-100' },
-                                    teal: { bg: 'bg-teal-50', text: 'text-teal-600', hover: 'hover:border-teal-500', iconBg: 'group-hover:bg-teal-100' },
-                                    gray: { bg: 'bg-gray-100', text: 'text-gray-600', hover: 'hover:border-gray-500', iconBg: 'group-hover:bg-gray-200' }
-                                };
-
-                                if (quickActions.length === 0) {
-                                    return (
-                                        <div className="col-span-full rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
-                                            등록된 빠른 실행 메뉴가 없습니다. 설정에서 메뉴를 선택하세요.
-                                        </div>
-                                    );
-                                }
-
-                                return quickActions
-                                    .map((action) => {
-                                        const theme = colorMap[action.color] || colorMap.slate;
-                                        return (
-                                            <button
-                                                key={action.key}
-                                                onClick={() => handleQuickActionClick(action.path, action.openInNewTab)}
-                                                className={`p-6 bg-white rounded-xl border border-slate-200 ${theme.hover} hover:shadow-md transition-all text-left group`}
-                                            >
-                                                <div className={`w-10 h-10 ${theme.bg} rounded-lg flex items-center justify-center mb-3 ${theme.iconBg} transition-colors`}>
-                                                    <FontAwesomeIcon icon={action.icon} className={`${theme.text} text-lg`} />
-                                                </div>
-                                                <h3 className="font-semibold text-slate-800 mb-1">{action.label}</h3>
-                                                <p className="text-xs text-slate-500">{action.desc}</p>
-                                            </button>
-                                        );
-                                    });
-                            })()}
-                        </div>
-                    </section>
-
                     {/* Recent Tasks (Work Requests) */}
                     <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                         <div className="p-6 border-b border-slate-100 flex justify-between items-center">
@@ -451,19 +371,6 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any; modeConfig: Dashboar
                 </div>
             </div>
 
-            <QuickMenuSettingsModal
-                isOpen={isQuickMenuSettingsOpen}
-                modeLabel={modeConfig.shortLabel}
-                actions={quickMenu.availableActions}
-                selectedKeys={quickMenu.selectedKeys}
-                defaultSelectedKeys={quickMenu.defaultSelectedKeys}
-                hasPersonalSelection={quickMenu.hasPersonalSelection}
-                saving={quickMenu.saving}
-                maxActions={quickMenu.maxActions}
-                onClose={() => setIsQuickMenuSettingsOpen(false)}
-                onSave={quickMenu.saveSelection}
-                onReset={quickMenu.resetSelection}
-            />
         </div>
     );
 }

@@ -49,6 +49,14 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
         [assigneeType, selectedAssigneeId, teams]
     );
     const selectedTeamColor = selectedTeam ? normalizeHexColor(selectedTeam.color) : '#64748b';
+    const isAssigned = Boolean(vehicle.currentAssigneeId) || vehicle.status === 'ASSIGNED';
+
+    const buildEndDateAsDayBefore = (dateText: string): string => {
+        const date = new Date(dateText);
+        if (Number.isNaN(date.getTime())) return format(new Date(), 'yyyy-MM-dd');
+        date.setDate(date.getDate() - 1);
+        return format(date, 'yyyy-MM-dd');
+    };
 
     const handleStartDateChange = (value: string) => {
         setStartDate(formatTypedDateInput(value, { yearDigits: 2 }));
@@ -106,6 +114,9 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
         setSaving(true);
         try {
             const assigneeName = getAssigneeName(selectedAssigneeId);
+            if (isAssigned) {
+                await vehicleService.unassignVehicle(vehicle.id, buildEndDateAsDayBefore(normalizedStartDate));
+            }
             await vehicleService.assignVehicle(
                 vehicle.id,
                 selectedAssigneeId,
@@ -113,7 +124,7 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
                 assigneeName,
                 normalizedStartDate
             );
-            toast.success("차량이 성공적으로 배정되었습니다.");
+            toast.success(isAssigned ? "차량 배정이 변경되었습니다." : "차량이 성공적으로 배정되었습니다.");
             onUpdate(); // Refresh parent
             onClose();
         } catch (error: any) {
@@ -191,14 +202,14 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
                                         }`}>
                                         {vehicle.status === 'AVAILABLE' ? '대기중' : vehicle.status === 'ASSIGNED' ? '운행중' : vehicle.status}
                                     </span>
-                                    {vehicle.status === 'ASSIGNED' && (
+                                    {isAssigned && (
                                         <span className="font-medium text-gray-900">
                                             {vehicle.currentAssigneeName} ({vehicle.currentAssigneeType === 'TEAM' ? '팀' : '작업자'})
                                         </span>
                                     )}
                                 </div>
                             </div>
-                            {vehicle.status === 'ASSIGNED' && (
+                            {isAssigned && (
                                 <button
                                     onClick={handleUnassign}
                                     disabled={saving}
@@ -210,11 +221,11 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
                         </div>
                     </div>
 
-                    {/* New Assignment Form (Only if Available) */}
-                    {vehicle.status === 'AVAILABLE' && (
+                    {/* New Assignment Form */}
+                    {(
                         <div className="border rounded-lg p-5">
                             <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                                <i className="fas fa-key text-yellow-500"></i> 새 배정
+                                <i className="fas fa-key text-yellow-500"></i> {isAssigned ? '배정 변경' : '새 배정'}
                             </h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="space-y-1">
@@ -278,7 +289,7 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
                                     disabled={saving}
                                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium shadow-sm transition-colors"
                                 >
-                                    {saving ? '저장중...' : '배정 확정'}
+                                    {saving ? '저장중...' : isAssigned ? '배정 변경' : '배정 확정'}
                                 </button>
                             </div>
                         </div>

@@ -6,7 +6,6 @@ import ProfileSetup from '../components/auth/ProfileSetup';
 import { MasterDataProvider } from '../contexts/MasterDataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkerTeamIdMigration } from '../hooks/useWorkerTeamIdMigration';
-import { menuServiceV11 } from '../services/menuServiceV11';
 import { userService, type UserData } from '../services/userService';
 
 const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -17,10 +16,6 @@ const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) 
       console.log(`[App] Migration completed: ${result.updated} reports updated`);
     }
 
-    // Auto-migrate menu structure for Admin and Prune Duplicates
-    // Menu configuration is loaded from Firestore
-    menuServiceV11.pruneDuplicates()
-      .catch(err => console.error(err));
   }, [status, result]);
 
   return <>{children}</>;
@@ -34,9 +29,34 @@ const DashboardLayoutWrapper = () => (
   </DashboardLayout>
 );
 
+const ADMIN_ROLE_KEYS = [
+  'admin',
+  'administrator',
+  'super_admin',
+  'owner',
+  'manager',
+  'dev',
+  'developer',
+  'system_admin',
+  'jhl2vtnk9v3c4eiz4qqi',
+  'pos_jhl2vtnk9v3c4eiz4qqi',
+  '관리자',
+  '사장',
+  '실장',
+  '매니저',
+  '메니저',
+  '개발',
+  '개발자',
+  '시스템관리자',
+];
+
 const isAdminLike = (profile: UserData | null): boolean => {
-  const role = String(profile?.role || '').trim().toLowerCase();
-  return ['admin', 'administrator', '관리자', '사장', '실장', 'manager', '매니저', '메니저'].includes(role);
+  const roles = [
+    profile?.role,
+    profile?.position,
+    ...(Array.isArray(profile?.additionalPositions) ? profile.additionalPositions : []),
+  ];
+  return roles.some((role) => ADMIN_ROLE_KEYS.includes(String(role || '').trim().toLowerCase()));
 };
 
 const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {

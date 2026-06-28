@@ -16,12 +16,17 @@ import { TeamSettlementDocument } from '../types/teamSettlement';
 export type OfficeTransactionCategory =
     // Income
     | 'TEAM_FEE'        // 팀 관리비 (Received from Teams)
+    | 'DAILY_WAGE_MARGIN' // 일급제 청구금액과 실지급금 차액
+    | 'MANUAL_DEPOSIT'  // 수기 입금
+    | 'TEAM_DEBT_COLLECTION' // 팀 미수금 회수
     | 'SALES_GOODS'     // 물품 판매 (Gloves, etc.)
     | 'SITE_PAYBACK'    // 현장 바이백 (Kickback/Commission)
     | 'OTHER_INCOME'    // 기타 수입
 
     // Expense
     | 'SALARY_STAFF'    // 직원 급여
+    | 'OFFICE_EXPENSE_LEDGER' // 사무실 경비내역
+    | 'TEAM_SETTLEMENT_PAYOUT' // 팀정산 지급
     | 'OFFICE_RENT'     // 사무실 월세
     | 'UTILITIES'       // 공과금
     | 'RENTAL_FEE'      // 렌트비 (Vehicle/Equipment)
@@ -40,6 +45,8 @@ export interface OfficeTransaction {
     relatedTeamId?: string;
     relatedSiteId?: string;
     relatedStaffId?: string;
+    relatedYearMonth?: string;
+    source?: 'manual' | 'team_settlement' | 'daily_advance_workbook' | 'expense_ledger' | 'office_staff_payroll' | 'support_client_site_allocation' | 'progress_claim_allocation';
 
     // Meta
     createdAt: string;

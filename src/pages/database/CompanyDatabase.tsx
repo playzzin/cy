@@ -13,12 +13,15 @@ import { statisticsService } from '../../services/statisticsService';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import CompanyForm from '../../components/company/CompanyForm';
-import SingleSelectPopover, { InputPopover } from '../../components/common/SingleSelectPopover';
+import { InputPopover } from '../../components/common/SingleSelectPopover';
+import { partnerRecognitionService } from '../../services/partnerRecognitionService';
+import type { BusinessCardImage, BusinessContact, CompanyRelationship } from '../../types/partnerRecognition';
 
 const COMPANY_COLUMNS = [
     { key: 'name', label: '회사명' },
     { key: 'ceoName', label: '대표자' },
     { key: 'phone', label: '연락처' },
+    { key: 'address', label: '주소' },
     { key: 'businessNumber', label: '사업자등록번호' },
     { key: 'bankName', label: '은행' },
     { key: 'accountNumber', label: '계좌번호' },
@@ -42,7 +45,7 @@ interface CompanyDatabaseProps {
     defaultType?: string; // New: default type for "Add" action
 }
 
-type TabType = 'all' | 'company' | 'partner' | 'client';
+type TabType = 'all' | 'company' | 'partner' | 'client' | 'rental';
 
 const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
     hideHeader = false,
@@ -173,6 +176,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
         if (activeTab === 'company' && !['시공사', '미지정'].includes(company.type || '')) return false;
         if (activeTab === 'partner' && company.type !== '협력사') return false;
         if (activeTab === 'client' && company.type !== '건설사') return false;
+        if (activeTab === 'rental' && company.type !== '임대사') return false;
 
         if (searchTerm) {
             const searchLower = searchTerm.toLowerCase();
@@ -189,6 +193,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
             case '시공사': return 1;
             case '건설사': return 2;
             case '협력사': return 3;
+            case '임대사': return 4;
             default: return 9;
         }
     };
@@ -224,6 +229,14 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
             console.error('Failed to update company inline:', error);
             await loadData();
         }
+    };
+
+    const isCompanyStatusActive = (status: Company['status'] | null | undefined) => !status || status === 'active';
+
+    const handleCompanyStatusToggle = async (company: Company) => {
+        if (!company.id) return;
+        const nextStatus: Company['status'] = isCompanyStatusActive(company.status) ? 'inactive' : 'active';
+        await handleCompanyInlineUpdate(company.id, { status: nextStatus });
     };
 
     const getCompanyManDay = (company: Company, statsMap: { [id: string]: number }, fieldKey: keyof Company): number => {
@@ -298,6 +311,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                             <TabButton id="company" label="시공사" icon={faBuilding} />
                             <TabButton id="partner" label="협력사" icon={faHandshake} />
                             <TabButton id="client" label="건설사(원청)" icon={faIndustry} />
+                            <TabButton id="rental" label="임대사" icon={faIndustry} />
                         </div>
                     </div>
                 </div>
@@ -313,6 +327,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                             {activeTab === 'company' && '시공사 관리'}
                             {activeTab === 'partner' && '협력사 관리'}
                             {activeTab === 'client' && '건설사(원청) 관리'}
+                            {activeTab === 'rental' && '임대사 관리'}
                         </span>
                         <span className="text-sm font-normal text-slate-500 ml-2">({filteredCompanies.length})</span>
                     </h2>
@@ -464,17 +479,26 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                                                                     {company.name}
                                                                 </div>
                                                             ) : col.key === 'status' ? (
-                                                                <SingleSelectPopover
-                                                                    options={[
-                                                                        { id: 'active', name: '정상' },
-                                                                        { id: 'inactive', name: '폐업' },
-                                                                        { id: 'archived', name: '보관' }
-                                                                    ]}
-                                                                    selectedId={company.status || 'active'}
-                                                                    onSelect={(id) => company.id && handleCompanyInlineUpdate(company.id, { status: id as Company['status'] })}
-                                                                    placeholder="상태 선택"
-                                                                    minimal={true}
-                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleCompanyStatusToggle(company);
+                                                                    }}
+                                                                    className={`inline-flex h-8 w-[100px] items-center justify-between gap-2 rounded-full border px-2 text-xs font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${isCompanyStatusActive(company.status)
+                                                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700 focus:ring-emerald-500'
+                                                                        : 'border-slate-200 bg-slate-100 text-slate-600 focus:ring-slate-400'
+                                                                        }`}
+                                                                    aria-pressed={isCompanyStatusActive(company.status)}
+                                                                    title={isCompanyStatusActive(company.status) ? '진행중' : '종료중'}
+                                                                >
+                                                                    <span className={`relative h-4 w-8 shrink-0 rounded-full transition-colors ${isCompanyStatusActive(company.status) ? 'bg-emerald-500' : 'bg-slate-400'}`}>
+                                                                        <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-all ${isCompanyStatusActive(company.status) ? 'left-[18px]' : 'left-0.5'}`} />
+                                                                    </span>
+                                                                    <span className="w-11 text-left">
+                                                                        {isCompanyStatusActive(company.status) ? '진행중' : '종료중'}
+                                                                    </span>
+                                                                </button>
                                                             ) : col.key === 'bankName' ? (
                                                                 <InputPopover
                                                                     value={company.bankName || ''}
@@ -539,6 +563,12 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                                                                         )}
                                                                     </div>
                                                                 </div>
+                                                                {company.id && (
+                                                                    <CompanyRecognitionSummary
+                                                                        companyId={company.id}
+                                                                        companyName={company.name}
+                                                                    />
+                                                                )}
                                                             </div>
                                                         </td>
                                                     </tr>
@@ -584,7 +614,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                             onCancel={() => setShowCompanyModal(false)}
                             defaultType={(() => {
                                 if (defaultType) return defaultType as Company['type'];
-                                const map: Record<string, string> = { 'company': '시공사', 'partner': '협력사', 'client': '건설사' };
+                                const map: Record<string, string> = { 'company': '시공사', 'partner': '협력사', 'client': '건설사', 'rental': '임대사' };
                                 return (map[activeTab] || '미지정') as Company['type'];
                             })()}
                         />
@@ -592,6 +622,137 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                 </div>
             )}
         </div>
+    );
+};
+
+const CompanyRecognitionSummary: React.FC<{ companyId: string; companyName: string }> = ({ companyId, companyName }) => {
+    const [contacts, setContacts] = useState<BusinessContact[]>([]);
+    const [cards, setCards] = useState<BusinessCardImage[]>([]);
+    const [relationships, setRelationships] = useState<CompanyRelationship[]>([]);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        const load = async () => {
+            setLoading(true);
+            try {
+                const [nextContacts, nextCards, nextRelationships] = await Promise.all([
+                    partnerRecognitionService.getCompanyContacts(companyId),
+                    partnerRecognitionService.getCompanyCardImages(companyId),
+                    partnerRecognitionService.getCompanyRelationships(companyId),
+                ]);
+                if (!cancelled) {
+                    setContacts(nextContacts);
+                    setCards(nextCards);
+                    setRelationships(nextRelationships);
+                }
+            } catch (error) {
+                console.error('Failed to load recognition summary:', error);
+                if (!cancelled) {
+                    setContacts([]);
+                    setCards([]);
+                    setRelationships([]);
+                }
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        };
+
+        load();
+        return () => {
+            cancelled = true;
+        };
+    }, [companyId]);
+
+    const visibleRelationships = relationships.slice(0, 6);
+
+    return (
+        <>
+            <div className="bg-white p-4 rounded-lg border border-slate-200">
+                <h4 className="font-bold text-slate-700 mb-2 border-b pb-2">
+                    사진등록 담당자 ({contacts.length})
+                </h4>
+                {loading ? (
+                    <div className="text-xs text-slate-400">불러오는 중...</div>
+                ) : contacts.length === 0 ? (
+                    <div className="text-xs text-slate-400 italic">사진등록 담당자가 없습니다.</div>
+                ) : (
+                    <div className="space-y-2 max-h-36 overflow-y-auto">
+                        {contacts.slice(0, 8).map((contact) => (
+                            <div key={contact.id} className="rounded border border-slate-100 p-2 text-xs">
+                                <div className="font-bold text-slate-800">
+                                    {contact.name || '이름 미상'}
+                                    {contact.position ? <span className="ml-1 font-medium text-slate-500">{contact.position}</span> : null}
+                                </div>
+                                <div className="mt-1 text-slate-500">
+                                    {[contact.department, contact.mobile, contact.email].filter(Boolean).join(' / ') || '-'}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            <div className="bg-white p-4 rounded-lg border border-slate-200">
+                <h4 className="font-bold text-slate-700 mb-2 border-b pb-2">
+                    명함/자료 이미지 ({cards.length})
+                </h4>
+                {loading ? (
+                    <div className="text-xs text-slate-400">불러오는 중...</div>
+                ) : cards.length === 0 ? (
+                    <div className="text-xs text-slate-400 italic">등록된 명함 이미지가 없습니다.</div>
+                ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                        {cards.slice(0, 4).map((card) => (
+                            <a key={card.id} href={card.downloadUrl || '#'} target="_blank" rel="noreferrer" className="block">
+                                {card.downloadUrl ? (
+                                    <img
+                                        src={card.downloadUrl}
+                                        alt={`${companyName} 명함`}
+                                        className="h-20 w-full rounded border border-slate-200 object-cover"
+                                    />
+                                ) : (
+                                    <div className="flex h-20 items-center justify-center rounded border border-slate-200 bg-slate-50 text-xs text-slate-400">
+                                        이미지 없음
+                                    </div>
+                                )}
+                            </a>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            <div className="bg-white p-4 rounded-lg border border-slate-200 md:col-span-2">
+                <h4 className="font-bold text-slate-700 mb-2 border-b pb-2">
+                    연결 거래처 ({relationships.length})
+                </h4>
+                {loading ? (
+                    <div className="text-xs text-slate-400">불러오는 중...</div>
+                ) : visibleRelationships.length === 0 ? (
+                    <div className="text-xs text-slate-400 italic">연결된 거래처 관계가 없습니다.</div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {visibleRelationships.map((relationship) => {
+                            const isSource = relationship.sourceCompanyId === companyId;
+                            const otherName = isSource ? relationship.targetCompanyName : relationship.sourceCompanyName;
+                            return (
+                                <div key={relationship.id} className="rounded border border-slate-100 p-2 text-xs">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="font-bold text-slate-800">{otherName}</span>
+                                        <span className="rounded bg-indigo-50 px-2 py-0.5 font-bold text-indigo-700">
+                                            {relationship.relationshipType}
+                                        </span>
+                                    </div>
+                                    <div className="mt-1 text-slate-500">
+                                        {[relationship.siteName, relationship.tradeCategory].filter(Boolean).join(' / ') || '-'}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+        </>
     );
 };
 

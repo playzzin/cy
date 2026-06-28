@@ -79,6 +79,18 @@ export const ACCOUNT_RELATION_ROLE_LABELS: Record<AccountRelationRole, string> =
     viewer: '조회자',
 };
 
+export const getAccountRelationRoleLabel = (
+    role: AccountRelationRole,
+    entityType?: AccountEntityType
+): string => {
+    if (entityType === 'worker') {
+        if (role === 'owner') return '본인 작업자';
+        if (role === 'staff') return '작업자';
+    }
+
+    return ACCOUNT_RELATION_ROLE_LABELS[role] || role;
+};
+
 export const resolveAccountTypeFromCompanyType = (companyType: unknown): AccountType => {
     const type = String(companyType || '').trim();
     if (type === '협력사') return 'partner_company';

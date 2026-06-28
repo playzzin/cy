@@ -49,6 +49,32 @@ describe('materialOrdering', () => {
         ]);
     });
 
+    it('sorts numeric specs from largest to smallest within the same item name', () => {
+        expect(sortMaterialDisplayRows([
+            { category: '동바리', itemName: '수직재', spec: 'P2' },
+            { category: '동바리', itemName: '수직재', spec: 'P17' },
+            { category: '동바리', itemName: '수직재', spec: 'P08' },
+        ]).map((row) => row.spec)).toEqual(['P17', 'P08', 'P2']);
+
+        expect(sortMaterialDisplayRows([
+            { category: '동바리', itemName: '수평재', spec: 'H02' },
+            { category: '동바리', itemName: '수평재', spec: 'H18' },
+            { category: '동바리', itemName: '수평재', spec: 'H06' },
+        ]).map((row) => row.spec)).toEqual(['H18', 'H06', 'H02']);
+
+        expect(sortMaterialDisplayRows([
+            { category: '비계', itemName: '발판', spec: '2512' },
+            { category: '비계', itemName: '발판', spec: '5018' },
+            { category: '비계', itemName: '발판', spec: '4012' },
+        ]).map((row) => row.spec)).toEqual(['5018', '4012', '2512']);
+
+        expect(sortMaterialDisplayRows([
+            { category: '동바리', itemName: '멍에재', spec: '0.5M' },
+            { category: '동바리', itemName: '멍에재', spec: '6M' },
+            { category: '동바리', itemName: '멍에재', spec: '2.7M' },
+        ]).map((row) => row.spec)).toEqual(['6M', '2.7M', '0.5M']);
+    });
+
     it('classifies 시스템 text as dongbari only after 비계 is excluded', () => {
         expect(getMaterialGroupKey({ category: '시스템 비계', itemName: '수직재' })).toBe('scaffolding');
         expect(getMaterialGroupKey({ category: '시스템 동바리', itemName: '수직재' })).toBe('dongbari');

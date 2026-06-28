@@ -48,6 +48,42 @@ export interface KakaoAnalyzeContext {
     today?: string;
 }
 
+export interface AnalyzedMaterialTransactionItem {
+    category?: string;
+    itemName?: string;
+    spec?: string;
+    unit?: string;
+    quantity?: number;
+    rawText?: string;
+    confidence?: number;
+}
+
+export interface AnalyzedMaterialTransaction {
+    transactionType?: 'inbound' | 'outbound' | '';
+    transactionDate?: string;
+    siteName?: string;
+    vehicleNumber?: string;
+    supplier?: string;
+    recipient?: string;
+    rentalCompanyName?: string;
+    notes?: string;
+    items: AnalyzedMaterialTransactionItem[];
+    warnings?: string[];
+}
+
+export interface MaterialAnalyzeContext {
+    transactionType: 'inbound' | 'outbound';
+    sites?: string[];
+    materials?: Array<{
+        category?: string;
+        itemName?: string;
+        spec?: string;
+        unit?: string;
+    }>;
+    rentalCompanies?: string[];
+    today?: string;
+}
+
 type GeminiPart =
     | { text: string }
     | { inlineData: { mimeType: string; data: string } };
@@ -156,6 +192,90 @@ const DAILY_REPORT_ARRAY_JSON_SCHEMA = {
     }
 };
 
+const MATERIAL_TRANSACTION_JSON_SCHEMA = {
+    type: 'object',
+    properties: {
+        transactionType: {
+            type: 'string',
+            description: 'inbound, outbound, or empty string when unclear.'
+        },
+        transactionDate: {
+            type: 'string',
+            description: 'YYYY-MM-DD date. Empty string when unreadable.'
+        },
+        siteName: {
+            type: 'string',
+            description: '현장명. Empty string when unreadable.'
+        },
+        vehicleNumber: {
+            type: 'string',
+            description: '차량번호. Empty string when unreadable.'
+        },
+        supplier: {
+            type: 'string',
+            description: '입고처, 공급업체, 거래처, 또는 출고 전표의 발행/기재 업체. Empty string when unreadable.'
+        },
+        recipient: {
+            type: 'string',
+            description: '출고자, 반출자, 인수자, 담당자. Empty string when unreadable.'
+        },
+        rentalCompanyName: {
+            type: 'string',
+            description: '임대사 또는 자재 소유 업체명. Empty string when unreadable.'
+        },
+        notes: {
+            type: 'string',
+            description: '비고, 특이사항, 메모. Empty string when none.'
+        },
+        items: {
+            type: 'array',
+            description: '자재 품목별 수량 목록. 수량이 보이지 않는 행은 제외.',
+            items: {
+                type: 'object',
+                properties: {
+                    category: {
+                        type: 'string',
+                        description: '동바리, 비계, 기타 등. 모르면 빈 문자열.'
+                    },
+                    itemName: {
+                        type: 'string',
+                        description: '품명. 예: 수직재, 수평재, 발판, 안전발판, 클램프, 잭베이스.'
+                    },
+                    spec: {
+                        type: 'string',
+                        description: '규격. 예: V-04, SH-15, 4012, 5018, P04, H15.'
+                    },
+                    unit: {
+                        type: 'string',
+                        description: '단위. 예: EA, 개, 본. 모르면 빈 문자열.'
+                    },
+                    quantity: {
+                        type: 'number',
+                        description: '수량. 쉼표는 제거하고 숫자로 반환.'
+                    },
+                    rawText: {
+                        type: 'string',
+                        description: 'OCR로 읽은 원본 품목 행.'
+                    },
+                    confidence: {
+                        type: 'number',
+                        description: '0 to 1 confidence score.'
+                    }
+                },
+                required: ['category', 'itemName', 'spec', 'unit', 'quantity', 'rawText', 'confidence'],
+                propertyOrdering: ['category', 'itemName', 'spec', 'unit', 'quantity', 'rawText', 'confidence']
+            }
+        },
+        warnings: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Unreadable fields or ambiguity warnings.'
+        }
+    },
+    required: ['transactionType', 'transactionDate', 'siteName', 'vehicleNumber', 'supplier', 'recipient', 'rentalCompanyName', 'notes', 'items', 'warnings'],
+    propertyOrdering: ['transactionType', 'transactionDate', 'siteName', 'vehicleNumber', 'supplier', 'recipient', 'rentalCompanyName', 'notes', 'items', 'warnings']
+};
+
 const compactList = (values?: string[], limit = 250): string => {
     if (!values || values.length === 0) return '없음';
     const unique = Array.from(new Set(values.map(v => String(v || '').trim()).filter(Boolean)));
@@ -170,6 +290,55 @@ const getLocalToday = (): string => {
     const mm = String(now.getMonth() + 1).padStart(2, '0');
     const dd = String(now.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
+};
+
+const compactMaterialList = (materials?: MaterialAnalyzeContext['materials'], limit = 500): string => {
+    if (!materials || materials.length === 0) return '없음';
+    const rows = materials
+        .map((material) => [
+            material.category,
+            material.itemName,
+            material.spec,
+            material.unit,
+        ].map((value) => String(value || '').trim()).filter(Boolean).join(' / '))
+        .filter(Boolean);
+    return compactList(rows, limit);
+};
+
+const buildMaterialTransactionPrompt = (context: MaterialAnalyzeContext, imageCount: number): string => {
+    const today = context.today || getLocalToday();
+    const modeLabel = context.transactionType === 'inbound' ? '입고등록' : '출고등록';
+
+    return `
+You extract Korean construction material transaction data from ${imageCount} photo(s).
+The user is filling the ${modeLabel} form. Today's date is ${today}.
+
+Known master data for exact spelling:
+- Sites: ${compactList(context.sites)}
+- Rental companies: ${compactList(context.rentalCompanies)}
+- Materials: ${compactMaterialList(context.materials)}
+
+Documents may be photographed sideways or upside down. They may be printed forms titled 송장, 출고전표, 입고전표, 자재전표, 반출증, or handwritten notes.
+
+Extract only material transaction data:
+1. transactionDate: use YYYY-MM-DD. If the document only has MM-DD, use the current year ${today.slice(0, 4)}. If no date is visible, use an empty string.
+2. siteName: use the closest known site name if the OCR text clearly matches one.
+3. vehicleNumber: Korean vehicle plate or equipment/truck number when visible.
+4. supplier: for inbound, 공급업체/거래처/입고처. For outbound, leave empty unless explicitly present.
+5. recipient: for outbound, 출고자/반출자/인수자/담당자. For inbound, leave empty unless explicitly present.
+6. rentalCompanyName: 임대사 or 자재 소유 업체 when visible.
+7. items: every material line with a readable quantity.
+
+Material extraction rules:
+- Use the known Materials spelling for category, itemName, spec, and unit when the photo text is a clear match.
+- Preserve visible spec tokens such as V-04, SH-15, SH-12, 4012, 5018, P04, H15, 6M.
+- Do not invent missing quantities. Exclude subtotal, total amount, phone numbers, addresses, and signatures.
+- If the same material appears multiple times, return one item with summed quantity.
+- 안전발판 should be treated as 발판 unless the known material list has 안전발판.
+- 수직, 수직재, V are vertical material item names. 수평, 수평재, SH/H are horizontal material item names.
+- Return rawText with the original OCR row so the app can match uncertain items.
+
+Return only JSON matching the provided schema.`;
 };
 
 const buildKakaoDailyReportPrompt = (
@@ -464,6 +633,42 @@ Return empty strings for fields that are not visible.`;
             [{ text: buildKakaoDailyReportPrompt('text', context, text) }],
             DAILY_REPORT_ARRAY_JSON_SCHEMA,
             'Kakao text analysis'
+        );
+    },
+
+    analyzeMaterialTransactionImages: async (
+        files: File[],
+        context: MaterialAnalyzeContext
+    ): Promise<AnalyzedMaterialTransaction> => {
+        const apiKey = getApiKeyOrThrow();
+        const imageFiles = files.filter((file) =>
+            file.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/i.test(file.name)
+        );
+        if (imageFiles.length === 0) {
+            throw new Error('분석할 이미지 파일이 없습니다.');
+        }
+
+        const imageParts = await Promise.all(
+            imageFiles.map(async (file) => {
+                const base64Data = await geminiService.fileToBase64(file);
+                const base64Content = base64Data.split(',')[1];
+                return {
+                    inlineData: {
+                        mimeType: file.type || 'image/jpeg',
+                        data: base64Content
+                    }
+                } as GeminiPart;
+            })
+        );
+
+        return fetchGeminiStructuredJson<AnalyzedMaterialTransaction>(
+            apiKey,
+            [
+                { text: buildMaterialTransactionPrompt(context, imageFiles.length) },
+                ...imageParts
+            ],
+            MATERIAL_TRANSACTION_JSON_SCHEMA,
+            'Material transaction image analysis'
         );
     },
 

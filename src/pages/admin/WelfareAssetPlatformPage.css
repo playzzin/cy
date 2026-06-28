@@ -439,6 +439,475 @@
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 
+.welfare-ladder-panel {
+  background:
+    radial-gradient(circle at 18% 14%, rgba(16, 185, 129, 0.13), transparent 28%),
+    linear-gradient(135deg, #ffffff, #f8fafc 52%, #eefdf6);
+}
+
+.dark .welfare-ladder-panel {
+  background:
+    radial-gradient(circle at 18% 14%, rgba(16, 185, 129, 0.16), transparent 30%),
+    linear-gradient(135deg, #0f172a, #111827 54%, #052e24);
+}
+
+.welfare-ladder-board {
+  position: relative;
+  display: grid;
+  width: min(100%, 360px);
+  grid-template-rows: auto 1fr auto;
+  gap: 10px;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% 18%, rgba(167, 243, 208, 0.34), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(236, 253, 245, 0.92));
+  box-shadow: 0 24px 58px rgba(15, 23, 42, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.86);
+  padding: 16px;
+}
+
+.dark .welfare-ladder-board {
+  background:
+    radial-gradient(circle at 50% 18%, rgba(16, 185, 129, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(2, 44, 34, 0.92));
+  box-shadow: 0 26px 66px rgba(2, 6, 23, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.welfare-ladder-board.is-running {
+  animation: welfareLadderBoardPulse 920ms ease-in-out infinite alternate;
+}
+
+.welfare-ladder-board.is-win {
+  border-color: rgba(16, 185, 129, 0.62);
+  box-shadow: 0 28px 64px rgba(5, 150, 105, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+.welfare-ladder-board.is-lose {
+  border-color: rgba(244, 63, 94, 0.48);
+  box-shadow: 0 24px 58px rgba(190, 18, 60, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.dark .welfare-ladder-board.is-win {
+  box-shadow: 0 28px 70px rgba(5, 150, 105, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.dark .welfare-ladder-board.is-lose {
+  box-shadow: 0 26px 66px rgba(190, 18, 60, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.welfare-ladder-header,
+.welfare-ladder-footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.welfare-ladder-header span,
+.welfare-ladder-footer span {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.dark .welfare-ladder-header span,
+.dark .welfare-ladder-footer span {
+  background: rgba(15, 23, 42, 0.76);
+  color: #f8fafc;
+}
+
+.welfare-ladder-header span.is-selected,
+.welfare-ladder-footer span.is-result {
+  color: #ffffff;
+}
+
+.welfare-ladder-header span.is-odd.is-selected,
+.welfare-ladder-footer span.is-odd.is-result {
+  border-color: rgba(220, 38, 38, 0.72);
+  background: #dc2626;
+  box-shadow: 0 12px 22px rgba(220, 38, 38, 0.22);
+}
+
+.welfare-ladder-header span.is-even.is-selected,
+.welfare-ladder-footer span.is-even.is-result {
+  border-color: rgba(37, 99, 235, 0.72);
+  background: #2563eb;
+  box-shadow: 0 12px 22px rgba(37, 99, 235, 0.22);
+}
+
+.welfare-ladder-footer span.is-win-destination {
+  border-color: rgba(16, 185, 129, 0.42);
+  background:
+    radial-gradient(circle at 50% 20%, rgba(255, 255, 255, 0.72), transparent 28%),
+    linear-gradient(180deg, #ecfdf5, #d1fae5);
+  color: #047857;
+}
+
+.welfare-ladder-footer span.is-lose-destination {
+  border-color: rgba(244, 63, 94, 0.38);
+  background:
+    radial-gradient(circle at 50% 20%, rgba(255, 255, 255, 0.62), transparent 28%),
+    linear-gradient(180deg, #fff1f2, #ffe4e6);
+  color: #be123c;
+}
+
+.dark .welfare-ladder-footer span.is-win-destination {
+  border-color: rgba(52, 211, 153, 0.5);
+  background:
+    radial-gradient(circle at 50% 20%, rgba(255, 255, 255, 0.16), transparent 28%),
+    linear-gradient(180deg, rgba(6, 95, 70, 0.76), rgba(6, 78, 59, 0.84));
+  color: #d1fae5;
+}
+
+.dark .welfare-ladder-footer span.is-lose-destination {
+  border-color: rgba(251, 113, 133, 0.48);
+  background:
+    radial-gradient(circle at 50% 20%, rgba(255, 255, 255, 0.14), transparent 28%),
+    linear-gradient(180deg, rgba(159, 18, 57, 0.68), rgba(136, 19, 55, 0.82));
+  color: #ffe4e6;
+}
+
+.welfare-ladder-footer span.is-result.is-win-destination {
+  border-color: rgba(5, 150, 105, 0.84);
+  background: #059669;
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(5, 150, 105, 0.3);
+  transform: translateY(-2px) scale(1.03);
+}
+
+.welfare-ladder-footer span.is-result.is-lose-destination {
+  border-color: rgba(225, 29, 72, 0.8);
+  background: #e11d48;
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(225, 29, 72, 0.26);
+  transform: translateY(-2px) scale(1.03);
+}
+
+.welfare-ladder-field {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.welfare-ladder-svg {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  overflow: visible;
+}
+
+.welfare-ladder-cover {
+  position: absolute;
+  inset: 8px 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(148, 163, 184, 0.56);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(248, 250, 252, 0.96), rgba(226, 232, 240, 0.96)),
+    repeating-linear-gradient(45deg, rgba(15, 23, 42, 0.08) 0 8px, transparent 8px 16px);
+  color: #334155;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.62);
+}
+
+.dark .welfare-ladder-cover {
+  border-color: rgba(71, 85, 105, 0.78);
+  background:
+    linear-gradient(135deg, rgba(15, 23, 42, 0.97), rgba(30, 41, 59, 0.97)),
+    repeating-linear-gradient(45deg, rgba(226, 232, 240, 0.08) 0 8px, transparent 8px 16px);
+  color: #cbd5e1;
+}
+
+.welfare-ladder-cover span {
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 8px 12px;
+}
+
+.dark .welfare-ladder-cover span {
+  background: rgba(15, 23, 42, 0.82);
+}
+
+.welfare-ladder-rail {
+  stroke: rgba(15, 23, 42, 0.62);
+  stroke-width: 2.8;
+  stroke-linecap: round;
+}
+
+.dark .welfare-ladder-rail {
+  stroke: rgba(226, 232, 240, 0.62);
+}
+
+.welfare-ladder-rung {
+  stroke: rgba(100, 116, 139, 0.62);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+}
+
+.welfare-ladder-rung.is-running {
+  animation: welfareLadderPulse 760ms ease-in-out infinite alternate;
+}
+
+.welfare-ladder-path {
+  fill: none;
+  stroke: #dc2626;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 0;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3.6;
+  filter: drop-shadow(0 4px 8px rgba(15, 23, 42, 0.24));
+  transition: stroke 180ms ease, filter 180ms ease;
+}
+
+.welfare-ladder-path.is-odd {
+  stroke: #dc2626;
+  filter: drop-shadow(0 4px 10px rgba(220, 38, 38, 0.34));
+}
+
+.welfare-ladder-path.is-even {
+  stroke: #2563eb;
+  filter: drop-shadow(0 4px 10px rgba(37, 99, 235, 0.34));
+}
+
+.welfare-ladder-path.is-win {
+  stroke: #059669;
+  filter: drop-shadow(0 4px 12px rgba(5, 150, 105, 0.4));
+}
+
+.welfare-ladder-path.is-lose {
+  stroke: #e11d48;
+  filter: drop-shadow(0 4px 12px rgba(225, 29, 72, 0.36));
+}
+
+.welfare-ladder-path.is-drawing {
+  stroke-dashoffset: 100;
+  animation: welfareLadderDraw 2.25s cubic-bezier(0.16, 0.92, 0.22, 1) forwards;
+}
+
+.welfare-ladder-path.is-hit {
+  stroke-width: 4.2;
+}
+
+.welfare-ladder-result-mark {
+  display: grid;
+  width: clamp(58px, 9vw, 86px);
+  aspect-ratio: 1;
+  place-items: center;
+  border: 1px solid rgba(220, 38, 38, 0.72);
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: clamp(18px, 3.2vw, 26px);
+  font-weight: 900;
+}
+
+.welfare-ladder-result-mark.is-odd {
+  border-color: rgba(220, 38, 38, 0.72);
+  background:
+    radial-gradient(circle at 50% 28%, rgba(255, 255, 255, 0.58), transparent 20%),
+    radial-gradient(circle, #f87171 0%, #dc2626 56%, #7f1d1d 100%);
+  box-shadow: inset 0 0 0 8px rgba(254, 202, 202, 0.24), 0 16px 26px rgba(127, 29, 29, 0.22);
+}
+
+.welfare-ladder-result-mark.is-even {
+  border-color: rgba(37, 99, 235, 0.72);
+  background:
+    radial-gradient(circle at 50% 28%, rgba(255, 255, 255, 0.58), transparent 20%),
+    radial-gradient(circle, #60a5fa 0%, #2563eb 56%, #1e3a8a 100%);
+  box-shadow: inset 0 0 0 8px rgba(191, 219, 254, 0.24), 0 16px 26px rgba(30, 58, 138, 0.22);
+}
+
+.welfare-ladder-result-mark.is-win {
+  border-color: rgba(5, 150, 105, 0.78);
+  background:
+    radial-gradient(circle at 50% 28%, rgba(255, 255, 255, 0.58), transparent 20%),
+    radial-gradient(circle, #34d399 0%, #059669 58%, #064e3b 100%);
+  box-shadow: inset 0 0 0 8px rgba(167, 243, 208, 0.24), 0 16px 28px rgba(5, 150, 105, 0.24);
+}
+
+.welfare-ladder-result-mark.is-lose {
+  border-color: rgba(225, 29, 72, 0.78);
+  background:
+    radial-gradient(circle at 50% 28%, rgba(255, 255, 255, 0.5), transparent 20%),
+    radial-gradient(circle, #fb7185 0%, #e11d48 58%, #881337 100%);
+  box-shadow: inset 0 0 0 8px rgba(254, 205, 211, 0.22), 0 16px 28px rgba(225, 29, 72, 0.22);
+  font-size: clamp(16px, 2.7vw, 22px);
+}
+
+.welfare-ladder-verdict {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f8fafc, #ffffff);
+  color: #0f172a;
+  padding: 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.76);
+}
+
+.dark .welfare-ladder-verdict {
+  border-color: rgba(71, 85, 105, 0.7);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.95));
+  color: #f8fafc;
+}
+
+.welfare-ladder-verdict.is-running {
+  border-color: rgba(59, 130, 246, 0.36);
+  background: linear-gradient(135deg, #eff6ff, #f8fafc);
+  color: #1e3a8a;
+}
+
+.dark .welfare-ladder-verdict.is-running {
+  border-color: rgba(96, 165, 250, 0.46);
+  background: linear-gradient(135deg, rgba(30, 58, 138, 0.42), rgba(15, 23, 42, 0.95));
+  color: #dbeafe;
+}
+
+.welfare-ladder-verdict.is-win {
+  border-color: rgba(16, 185, 129, 0.46);
+  background:
+    linear-gradient(135deg, rgba(236, 253, 245, 0.98), rgba(255, 251, 235, 0.98)),
+    repeating-linear-gradient(90deg, rgba(16, 185, 129, 0.12) 0 6px, transparent 6px 14px);
+  color: #064e3b;
+  box-shadow: 0 18px 42px rgba(5, 150, 105, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.dark .welfare-ladder-verdict.is-win {
+  border-color: rgba(52, 211, 153, 0.52);
+  background:
+    linear-gradient(135deg, rgba(6, 78, 59, 0.72), rgba(113, 63, 18, 0.38)),
+    repeating-linear-gradient(90deg, rgba(52, 211, 153, 0.1) 0 6px, transparent 6px 14px);
+  color: #d1fae5;
+}
+
+.welfare-ladder-verdict.is-lose {
+  border-color: rgba(244, 63, 94, 0.42);
+  background: linear-gradient(135deg, #fff1f2, #f8fafc);
+  color: #881337;
+}
+
+.dark .welfare-ladder-verdict.is-lose {
+  border-color: rgba(251, 113, 133, 0.44);
+  background: linear-gradient(135deg, rgba(136, 19, 55, 0.48), rgba(15, 23, 42, 0.95));
+  color: #ffe4e6;
+}
+
+.welfare-ladder-verdict__shine {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 0 38%, rgba(255, 255, 255, 0.64) 46%, transparent 54% 100%);
+  opacity: 0;
+  transform: translateX(-80%);
+}
+
+.welfare-ladder-verdict.is-running .welfare-ladder-verdict__shine,
+.welfare-ladder-verdict.is-win .welfare-ladder-verdict__shine {
+  animation: welfareLadderShine 1.65s ease-in-out infinite;
+  opacity: 0.72;
+}
+
+.welfare-ladder-verdict__stamp {
+  display: grid;
+  min-width: 82px;
+  min-height: 82px;
+  place-items: center;
+  border: 3px solid currentColor;
+  border-radius: 8px;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 0;
+  transform: rotate(-4deg);
+}
+
+.welfare-ladder-verdict.is-win .welfare-ladder-verdict__stamp,
+.welfare-ladder-verdict.is-lose .welfare-ladder-verdict__stamp {
+  animation: welfareLadderStamp 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.welfare-ladder-verdict__ticker {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.welfare-ladder-verdict__ticker span {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.62);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.dark .welfare-ladder-verdict__ticker span {
+  border-color: rgba(248, 250, 252, 0.12);
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.welfare-ladder-verdict__confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.welfare-ladder-verdict__confetti span {
+  position: absolute;
+  top: -14px;
+  width: 8px;
+  height: 18px;
+  border-radius: 2px;
+  animation: welfareLadderConfetti 1.25s ease-out forwards;
+}
+
+.welfare-ladder-verdict__confetti span:nth-child(1) {
+  left: 8%;
+  background: #dc2626;
+  animation-delay: 20ms;
+}
+
+.welfare-ladder-verdict__confetti span:nth-child(2) {
+  left: 24%;
+  background: #2563eb;
+  animation-delay: 110ms;
+}
+
+.welfare-ladder-verdict__confetti span:nth-child(3) {
+  left: 42%;
+  background: #f59e0b;
+  animation-delay: 40ms;
+}
+
+.welfare-ladder-verdict__confetti span:nth-child(4) {
+  left: 61%;
+  background: #10b981;
+  animation-delay: 150ms;
+}
+
+.welfare-ladder-verdict__confetti span:nth-child(5) {
+  left: 78%;
+  background: #dc2626;
+  animation-delay: 70ms;
+}
+
+.welfare-ladder-verdict__confetti span:nth-child(6) {
+  left: 91%;
+  background: #2563eb;
+  animation-delay: 180ms;
+}
+
 @keyframes welfareCoinFall {
   0% {
     opacity: 0;
@@ -528,6 +997,71 @@
   }
 }
 
+@keyframes welfareLadderPulse {
+  from {
+    opacity: 0.56;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes welfareLadderDraw {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes welfareLadderBoardPulse {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes welfareLadderShine {
+  0% {
+    transform: translateX(-90%);
+  }
+  58%, 100% {
+    transform: translateX(90%);
+  }
+}
+
+@keyframes welfareLadderStamp {
+  0% {
+    opacity: 0;
+    transform: rotate(-9deg) scale(0.72);
+  }
+  72% {
+    opacity: 1;
+    transform: rotate(-2deg) scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(-4deg) scale(1);
+  }
+}
+
+@keyframes welfareLadderConfetti {
+  0% {
+    opacity: 0;
+    transform: translateY(0) rotate(0deg);
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(176px) rotate(220deg);
+  }
+}
+
 @media (max-width: 640px) {
   .welfare-game-stage {
     min-height: auto;
@@ -580,7 +1114,13 @@
   .welfare-result-prize-sprite,
   .welfare-ocean-win-sprite,
   .welfare-result-coin,
-  .welfare-prize-glow {
+  .welfare-prize-glow,
+  .welfare-ladder-rung,
+  .welfare-ladder-path,
+  .welfare-ladder-board,
+  .welfare-ladder-verdict__shine,
+  .welfare-ladder-verdict__stamp,
+  .welfare-ladder-verdict__confetti span {
     animation-duration: 1ms;
     animation-iteration-count: 1;
   }

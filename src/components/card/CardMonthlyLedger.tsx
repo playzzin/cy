@@ -28,6 +28,8 @@ import { iconMap } from '../../constants/iconMap';
 import { Timestamp } from '../../types/timestamp';
 import LedgerBillingEditorModal from '../support/LedgerBillingEditorModal';
 import { OFFICE_ASSIGNMENT_TEAM_ID, OFFICE_ASSIGNMENT_TEAM_NAME, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
+import { DEFAULT_SUPPORT_BILLING_START_DATE, isSupportBillingMonthEnabled, maxIsoDate, minIsoDate } from '../../utils/supportBillingPeriod';
+import { getContrastingTextColor } from '../../utils/color';
 
 interface EditableCellProps {
     value: number;
@@ -432,6 +434,14 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         if (!monthRange) return [];
 
         const cardId = normalizeKey(card.id);
+        const firstBillingTargetStart = minIsoDate(
+            ...billingTargetList
+                .filter((target) => normalizeKey(target.cardId) === cardId)
+                .map((target) => target.startDate)
+        );
+        const billingStartDate = maxIsoDate(DEFAULT_SUPPORT_BILLING_START_DATE, firstBillingTargetStart);
+        if (!isSupportBillingMonthEnabled(yearMonth, billingStartDate)) return [];
+
         const activeAssignments = assignmentList
             .filter((assignment) => normalizeKey(assignment.cardId) === cardId)
             .map((assignment) => ({
@@ -452,11 +462,28 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             });
 
         const findAssignmentForRange = (segmentStart: Date, segmentEnd: Date) => {
-            return activeAssignments.find((entry) => {
+            const overlapping = activeAssignments.filter((entry) => {
                 if (!entry.startDate) return false;
                 const assignmentEnd = entry.endDate ?? monthRange.monthEnd;
                 return entry.startDate.getTime() <= segmentEnd.getTime() && assignmentEnd.getTime() >= segmentStart.getTime();
             });
+            if (overlapping.length > 0) return overlapping[overlapping.length - 1];
+            if (card.currentAssigneeId && card.currentAssigneeType && card.currentAssigneeName) {
+                return {
+                    assignment: {
+                        id: `snapshot-${card.id}`,
+                        cardId: card.id,
+                        cardLabel: `${card.name} (${card.last4})`,
+                        assigneeId: card.currentAssigneeId,
+                        assigneeType: card.currentAssigneeType,
+                        assigneeName: card.currentAssigneeName,
+                        startDate: formatYmdDate(monthRange.monthStart)
+                    },
+                    startDate: monthRange.monthStart,
+                    endDate: null
+                };
+            }
+            return undefined;
         };
 
         const buildSegmentFromAssignment = (
@@ -639,7 +666,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             endDate: formatYmdDate(monthRange.monthEnd),
             overlapDays: monthRange.daysInMonth
         }];
-    }, [monthRange, resolveAssigneeTeam, teamByAnyId, teamByName, workerByAnyId, workerByName]);
+    }, [monthRange, resolveAssigneeTeam, teamByAnyId, teamByName, workerByAnyId, workerByName, yearMonth]);
 
     const loadData = useCallback(async () => {
         if (!yearMonth) return;
@@ -750,8 +777,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 name,
                 color: team?.color || teamInfo?.color || '#94a3b8',
                 icon: team?.icon || team?.iconKey || teamInfo?.icon || null,
-                targetType: 'TEAM',
-                targetLabel: '팀'
+                targetType: 'TEAM'
             };
         };
 
@@ -1058,6 +1084,24 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         return billingDocuments.filter((doc) => matchesCardBillingDocument(doc, row));
     }, [billingDocuments, matchesCardBillingDocument]);
 
+    const getMarkedBillingDocumentsForRow = useCallback((row: CardLedgerRow) => {
+        return billingDocuments.filter((doc) => (
+            normalizeKey(doc.cardId) === normalizeKey(row.card.id) &&
+            normalizeKey(doc.yearMonth) === normalizeKey(yearMonth) &&
+            hasCardLedgerRowMarker(doc, row)
+        ));
+    }, [billingDocuments, hasCardLedgerRowMarker, yearMonth]);
+
+    const getAllBillingDocumentsForRow = useCallback((row: CardLedgerRow) => {
+        const documents = [
+            ...getBillingDocumentsForRow(row),
+            ...getMarkedBillingDocumentsForRow(row)
+        ];
+        return documents.filter((doc, index, list) => (
+            Boolean(doc.id) && list.findIndex((item) => item.id === doc.id) === index
+        ));
+    }, [getBillingDocumentsForRow, getMarkedBillingDocumentsForRow]);
+
     const getRowBillingState = useCallback((row: CardLedgerRow): {
         status: BillingRowStatus;
         documents: CardBillingDocument[];
@@ -1074,10 +1118,10 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         }
         if (row.total <= 0) return { status: 'blocked', documents: [], reason: '금액 없음' };
 
-        const documents = getBillingDocumentsForRow(row);
+        const documents = getAllBillingDocumentsForRow(row);
         if (documents.length === 0) return { status: 'unbilled', documents };
         return { status: 'billed', documents };
-    }, [getBillingDocumentsForRow, resolveCardBillingIdentity]);
+    }, [getAllBillingDocumentsForRow, resolveCardBillingIdentity]);
 
     const billingRows = useMemo(() => {
         return rows
@@ -1105,7 +1149,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
     );
 
     const bulkUnbillableCount = useMemo(
-        () => billingRows.filter(({ billingState }) => billingState.status === 'billed').length,
+        () => billingRows.filter(({ billingState }) => billingState.documents.length > 0).length,
         [billingRows]
     );
 
@@ -1158,9 +1202,12 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
 
             const createTasks: Promise<string>[] = [];
             for (const row of rows) {
+                const memoText = row.memo.trim();
+                let hasAmount = false;
                 for (const category of CATEGORIES) {
                     const amount = row.amounts[category] ?? 0;
                     if (amount > 0) {
+                        hasAmount = true;
                         createTasks.push(
                             cardService.addTransaction({
                                 cardId: row.card.id,
@@ -1169,13 +1216,47 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                 merchant: '월별대장',
                                 category,
                                 amount,
-                                memo: row.memo || undefined
+                                memo: memoText || undefined
                             })
                         );
                     }
                 }
+                if (!hasAmount && memoText) {
+                    createTasks.push(
+                        cardService.addTransaction({
+                            cardId: row.card.id,
+                            cardLabel: `${row.card.name}(${row.card.last4})`,
+                            date: row.segment.startDate || `${yearMonth}-01`,
+                            merchant: '월별대장',
+                            category: 'OTHER',
+                            amount: 0,
+                            memo: memoText
+                        })
+                    );
+                }
             }
             await Promise.all(createTasks);
+
+            const billingSyncTasks: Promise<void>[] = [];
+            rows.forEach((row) => {
+                const documents = [
+                    ...getBillingDocumentsForRow(row),
+                    ...getMarkedBillingDocumentsForRow(row)
+                ].filter((doc, index, list) => (
+                    Boolean(doc.id) && list.findIndex((item) => item.id === doc.id) === index
+                ));
+                if (documents.length === 0) return;
+
+                const next = buildBillingDocumentForRow(row, documents[0]);
+                if (!next) {
+                    const documentIds = Array.from(new Set(documents.map((doc) => doc.id).filter(Boolean)));
+                    billingSyncTasks.push(...documentIds.map((id) => cardBillingService.deleteBilling(id)));
+                    return;
+                }
+
+                billingSyncTasks.push(saveCardLedgerBillingDocument(row, next, documents[0]));
+            });
+            await Promise.all(billingSyncTasks);
 
             setIsDirty(false);
             await loadData();
@@ -1232,9 +1313,10 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             workerId: target.issuedToType === 'worker' ? target.issuedToWorkerId : undefined,
             yearMonth
         });
+        const nextId = `${baseId}${getCardLedgerRowDocumentSuffix(row)}`;
 
         return {
-            id: existing?.id ?? `${baseId}${getCardLedgerRowDocumentSuffix(row)}`,
+            id: nextId,
             yearMonth,
             cardId: row.card.id,
             cardLabel: `${row.card.name} (${row.card.last4})`,
@@ -1247,14 +1329,29 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             issuedToWorkerName: target.issuedToType === 'worker' ? target.issuedToWorkerName : target.teamName,
             variableCost,
             totalAmount: variableCost,
-            status: 'DRAFT',
+            status: existing?.status ?? 'DRAFT',
             lineItems,
             statementAttachmentPaths: existing?.statementAttachmentPaths ?? [],
-            memo: existing?.memo ?? row.memo,
+            memo: row.memo || undefined,
             createdAt: existing?.createdAt ?? Timestamp.now(),
             updatedAt: Timestamp.now(),
             confirmedAt: existing?.confirmedAt
         };
+    };
+
+    const saveCardLedgerBillingDocument = async (
+        row: CardLedgerRow,
+        next: CardBillingDocument,
+        existing?: CardBillingDocument
+    ) => {
+        const staleDocumentIds = new Set<string>();
+        if (existing?.id && existing.id !== next.id) staleDocumentIds.add(existing.id);
+        getMarkedBillingDocumentsForRow(row).forEach((doc) => {
+            if (doc.id && doc.id !== next.id) staleDocumentIds.add(doc.id);
+        });
+
+        await cardBillingService.saveBilling(next);
+        await Promise.all(Array.from(staleDocumentIds).map((id) => cardBillingService.deleteBilling(id)));
     };
 
     const handleCreateOrRecalculateBilling = async (row: CardLedgerRow, mode: 'create' | 'recalculate') => {
@@ -1277,7 +1374,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 return;
             }
 
-            await cardBillingService.saveBilling(next);
+            await saveCardLedgerBillingDocument(row, next, existing);
             await loadData();
             alert(mode === 'recalculate' ? '청구가 다시 처리되었습니다.' : '청구 처리되었습니다.');
         } catch (error) {
@@ -1322,7 +1419,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                         continue;
                     }
 
-                    await cardBillingService.saveBilling(next);
+                    await saveCardLedgerBillingDocument(target.row, next, target.billingState.documents[0]);
                     processed += 1;
                 } catch (error) {
                     console.error(error);
@@ -1391,6 +1488,29 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         }
     };
 
+    const handleCancelBillingConfirmation = async () => {
+        if (!billingEditor || billingEditor.document.status !== 'CONFIRMED') return;
+        if (!window.confirm('카드 청구서 확정을 취소하고 다시 수정 가능하게 변경할까요?')) return;
+
+        setBillingProcessingId(billingEditor.row.id);
+        try {
+            await cardBillingService.saveBilling({
+                ...billingEditor.document,
+                status: 'DRAFT',
+                confirmedAt: null as unknown as Timestamp,
+                updatedAt: Timestamp.now()
+            });
+            await loadData();
+            setBillingEditor(null);
+            alert('청구서 확정이 취소되었습니다.');
+        } catch (error) {
+            console.error(error);
+            alert('청구서 확정 취소에 실패했습니다.');
+        } finally {
+            setBillingProcessingId('');
+        }
+    };
+
     const handleCancelBilling = async (row: CardLedgerRow, document?: CardBillingDocument) => {
         const documents = document ? [document] : getRowBillingState(row).documents;
         const documentIds = Array.from(new Set(documents.map((item) => item.id).filter(Boolean)));
@@ -1419,7 +1539,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         const targets = billingRows.filter(({ billingState }) => (
             action === 'bill'
                 ? billingState.status === 'unbilled'
-                : billingState.status === 'billed'
+                : billingState.documents.length > 0
         ));
 
         if (targets.length === 0) {
@@ -1444,7 +1564,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                             skipped += 1;
                             continue;
                         }
-                        await cardBillingService.saveBilling(next);
+                        await saveCardLedgerBillingDocument(row, next, billingState.documents[0]);
                     } else {
                         const documentIds = Array.from(new Set(
                             billingState.documents.map((item) => item.id).filter(Boolean)
@@ -1632,10 +1752,10 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                     <div className="flex flex-col gap-1.5">
                                                         {assignmentSummary.assignedTeams.map((team) => (
                                                             <div key={`assigned-${team.key}`} className="flex items-center gap-2 min-w-0">
-                                                                <span
-                                                                    className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0"
-                                                                    style={{ backgroundColor: team.color }}
-                                                                >
+                                                                 <span
+                                                                     className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0"
+                                                                     style={{ backgroundColor: team.color, color: getContrastingTextColor(team.color) }}
+                                                                 >
                                                                     <FontAwesomeIcon icon={iconMap[team.icon || ''] || faUsers} />
                                                                 </span>
                                                                 <span className="font-bold text-slate-700 truncate max-w-[160px]" title={team.name}>
@@ -1652,10 +1772,10 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                         type="button"
                                                         onClick={() => onOpenSetup(row.card)}
                                                         className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-100 transition-colors"
-                                                        title="카드 배정/청구대상 수정"
+                                                        title="배정/청구를 수정해 관리대장에 반영"
                                                     >
                                                         <FontAwesomeIcon icon={faUsers} className="text-[10px]" />
-                                                        배정/청구 설정
+                                                        대장 반영
                                                     </button>
                                                 )}
                                             </td>
@@ -1684,10 +1804,10 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                     <div className="flex flex-col gap-1.5">
                                                         {assignmentSummary.billingTargets.map((target) => (
                                                             <div key={`billing-${target.key}`} className="flex items-center gap-2 min-w-0">
-                                                                <span
-                                                                    className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0"
-                                                                    style={{ backgroundColor: target.color }}
-                                                                >
+                                                                 <span
+                                                                     className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0"
+                                                                     style={{ backgroundColor: target.color, color: getContrastingTextColor(target.color) }}
+                                                                 >
                                                                     <FontAwesomeIcon icon={
                                                                         target.targetType === 'WORKER' || target.targetType === 'OFFICE_STAFF'
                                                                             ? faUser
@@ -1698,11 +1818,19 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                                 </span>
                                                                 <span className="font-bold text-slate-700 truncate max-w-[160px]" title={target.name}>
                                                                     {target.name}
-                                                                    <span className="block text-[10px] font-semibold text-slate-400">
-                                                                        {target.targetLabel ? `${target.targetLabel} · ` : ''}
-                                                                        {target.subLabel ? `${target.subLabel} · ` : ''}
-                                                                        {shouldShowPeriod ? `${assignmentSummary.periodLabel} · ${assignmentSummary.overlapDays}일` : ''}
-                                                                    </span>
+                                                                    {(target.targetLabel || target.subLabel) && (
+                                                                        <span className="block text-[10px] font-semibold text-slate-400">
+                                                                            {target.targetLabel ? `${target.targetLabel} · ` : ''}
+                                                                            {target.subLabel || ''}
+                                                                        </span>
+                                                                    )}
+                                                                    {shouldShowPeriod && (
+                                                                        <span className="mt-1 inline-flex max-w-full items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-700">
+                                                                            <span className="shrink-0">분할기간</span>
+                                                                            <span className="truncate">{assignmentSummary.periodLabel}</span>
+                                                                            <span className="shrink-0 rounded bg-white/80 px-1">{assignmentSummary.overlapDays}일</span>
+                                                                        </span>
+                                                                    )}
                                                                 </span>
                                                             </div>
                                                         ))}
@@ -1797,8 +1925,8 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                     type="text"
                                                     value={row.memo}
                                                     onChange={(e) => handleMemoChange(idx, e.target.value)}
-                                                    className="w-full p-2 focus:outline-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-200 rounded-lg text-xs text-slate-600 bg-transparent"
-                                                    placeholder="메모를 입력하세요..."
+                                                    className={`w-full p-2 focus:outline-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-200 rounded-lg text-xs bg-transparent ${row.memo ? 'text-red-600 font-extrabold' : 'text-slate-600'}`}
+                                                    placeholder=""
                                                 />
                                             </td>
                                         </tr>
@@ -1856,6 +1984,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                     onClose={() => setBillingEditor(null)}
                     onSave={(lineItems, memo) => handleSaveBillingEditor(lineItems, memo)}
                     onConfirm={(lineItems, memo) => handleSaveBillingEditor(lineItems, memo, 'CONFIRMED')}
+                    onCancelConfirm={handleCancelBillingConfirmation}
                 />
             )}
         </div>

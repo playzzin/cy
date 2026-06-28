@@ -120,6 +120,8 @@ export const officeStaffService = {
     },
 
     async updateOfficeStaff(id: string, updates: Partial<OfficeStaff>): Promise<void> {
+        const shouldSyncUserPosition = Object.prototype.hasOwnProperty.call(updates as Record<string, unknown>, 'role');
+        const before = shouldSyncUserPosition ? await this.getOfficeStaffMember(id) : null;
         const salaryModel = updates.salaryModel || updates.payType;
         const data = stripUndefinedFields({
             ...updates,
@@ -132,6 +134,12 @@ export const officeStaffService = {
             updatedAt: serverTimestamp(),
         });
         cachedOfficeStaff = null;
+        if (shouldSyncUserPosition && before?.uid) {
+            const { userService } = await import('./userService');
+            await userService.updateUserProfile(String(before.uid), {
+                position: String(updates.role ?? '').trim(),
+            });
+        }
         toast.updated('사무실 직원');
     },
 

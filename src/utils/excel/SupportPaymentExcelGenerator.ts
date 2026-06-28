@@ -15,6 +15,10 @@ export interface SupportLaborStatementExcelRow {
     totalManDay: number;
     unitPrice: number;
     totalAmount: number;
+    billingUnitPrice: number;
+    billingAmount: number;
+    vatAmount: number;
+    issuedAmount: number;
 }
 
 export interface SupportLaborStatementExcelBlock {
@@ -36,7 +40,8 @@ const COLUMN = {
     address: 4,
     dayStart: 5,
     attendance: 21,
-    amount: 22
+    amount: 22,
+    billing: 23
 };
 
 export const generateLaborStatementExcel = async (
@@ -69,6 +74,7 @@ const buildStatementWorksheet = (
         { width: 28 },
         ...Array.from({ length: DAY_LABELS_SECOND.length }, () => ({ width: 4.5 })),
         { width: 9 },
+        { width: 13 },
         { width: 13 }
     ];
     worksheet.views = [{ state: 'frozen', ySplit: 4 }];
@@ -89,8 +95,11 @@ const buildStatementWorksheet = (
         }
     };
 
-    const lastColumnLetter = getExcelColumnLetter(COLUMN.amount);
+    const showTaxColumns = false;
+    const lastColumn = showTaxColumns ? COLUMN.billing : COLUMN.amount;
+    const lastColumnLetter = getExcelColumnLetter(lastColumn);
     const monthNumber = parseInt(yearMonth.split('-')[1] ?? '0', 10);
+    worksheet.getColumn(COLUMN.billing).hidden = !showTaxColumns;
 
     worksheet.mergeCells(`A1:${lastColumnLetter}1`);
     const titleCell = worksheet.getCell('A1');
@@ -102,29 +111,28 @@ const buildStatementWorksheet = (
 
     worksheet.mergeCells('A2:D2');
     worksheet.getCell('A2').value = `현장명: ${statement.siteName || '-'}`;
-    worksheet.mergeCells('E2:Q2');
-    worksheet.getCell('E2').value = `정산 주체: ${statement.settlementName || '-'}`;
-    worksheet.mergeCells('R2:V2');
-    worksheet.getCell('R2').value = `※ ${statement.direction} 기준 집계`;
-    ['A2', 'E2', 'R2'].forEach((address) => {
+    worksheet.mergeCells(`E2:${lastColumnLetter}2`);
+    worksheet.getCell('E2').value = '';
+    ['A2', 'E2'].forEach((address) => {
         const cell = worksheet.getCell(address);
-        cell.font = { bold: true, color: address === 'R2' ? { argb: 'FFD97706' } : { argb: 'FF334155' } };
-        cell.alignment = { horizontal: address === 'R2' ? 'right' : 'left', vertical: 'middle' };
+        cell.font = { bold: true, color: { argb: 'FF334155' } };
+        cell.alignment = { horizontal: 'left', vertical: 'middle' };
     });
     worksheet.getRow(2).height = 22;
 
-    writeHeader(worksheet);
+    writeHeader(worksheet, showTaxColumns);
 
     let currentRow = 5;
     statement.rows.forEach((row, index) => {
-        writeWorkerRows(worksheet, currentRow, row, index + 1);
+        writeWorkerRows(worksheet, currentRow, row, index + 1, showTaxColumns);
         currentRow += 2;
     });
 
-    writeTotalRows(worksheet, currentRow, statement.rows, statement.settlementName);
+    writeTotalRows(worksheet, currentRow, statement.rows, statement.settlementName, showTaxColumns);
 };
 
-const writeHeader = (worksheet: ExcelJS.Worksheet) => {
+const writeHeader = (worksheet: ExcelJS.Worksheet, showTaxColumns: boolean) => {
+    const lastColumn = showTaxColumns ? COLUMN.billing : COLUMN.amount;
     const top = worksheet.getRow(3);
     const bottom = worksheet.getRow(4);
     top.height = 20;
@@ -161,11 +169,15 @@ const writeHeader = (worksheet: ExcelJS.Worksheet) => {
     });
 
     top.getCell(COLUMN.attendance).value = '출역';
-    top.getCell(COLUMN.amount).value = '단가';
-    bottom.getCell(COLUMN.amount).value = '총액';
+    top.getCell(COLUMN.amount).value = '청구단가';
+    bottom.getCell(COLUMN.amount).value = '공급가액';
+    if (showTaxColumns) {
+        top.getCell(COLUMN.billing).value = '부가세';
+        bottom.getCell(COLUMN.billing).value = '발행금액';
+    }
 
     for (let row = 3; row <= 4; row++) {
-        for (let col = 1; col <= COLUMN.amount; col++) {
+        for (let col = 1; col <= lastColumn; col++) {
             const cell = worksheet.getCell(row, col);
             cell.alignment = { horizontal: 'center', vertical: 'middle' };
             cell.font = { ...cell.font, bold: true };
@@ -178,8 +190,10 @@ const writeWorkerRows = (
     worksheet: ExcelJS.Worksheet,
     rowNumber: number,
     row: SupportLaborStatementExcelRow,
-    sequence: number
+    sequence: number,
+    showTaxColumns: boolean
 ) => {
+    const lastColumn = showTaxColumns ? COLUMN.billing : COLUMN.amount;
     worksheet.getRow(rowNumber).height = 19;
     worksheet.getRow(rowNumber + 1).height = 19;
 
@@ -213,17 +227,29 @@ const writeWorkerRows = (
     attendanceCell.fill = solidFill('FFF8FAFC');
 
     const unitPriceCell = worksheet.getCell(rowNumber, COLUMN.amount);
-    unitPriceCell.value = row.unitPrice || 0;
+    unitPriceCell.value = row.billingUnitPrice || 0;
     unitPriceCell.numFmt = '#,##0';
 
     const amountCell = worksheet.getCell(rowNumber + 1, COLUMN.amount);
-    amountCell.value = row.totalAmount || 0;
+    amountCell.value = row.billingAmount || 0;
     amountCell.numFmt = '#,##0';
-    amountCell.font = { bold: true, color: { argb: 'FF4338CA' } };
-    amountCell.fill = solidFill('FFECFDF5');
+    amountCell.font = { bold: true, color: { argb: 'FF92400E' } };
+    amountCell.fill = solidFill('FFFEF3C7');
+
+    if (showTaxColumns) {
+        const billingUnitPriceCell = worksheet.getCell(rowNumber, COLUMN.billing);
+        billingUnitPriceCell.value = row.vatAmount || 0;
+        billingUnitPriceCell.numFmt = '#,##0';
+
+        const issuedAmountCell = worksheet.getCell(rowNumber + 1, COLUMN.billing);
+        issuedAmountCell.value = row.issuedAmount || 0;
+        issuedAmountCell.numFmt = '#,##0';
+        issuedAmountCell.font = { bold: true, color: { argb: 'FF92400E' } };
+        issuedAmountCell.fill = solidFill('FFFEF3C7');
+    }
 
     for (let rowIdx = rowNumber; rowIdx <= rowNumber + 1; rowIdx++) {
-        for (let col = 1; col <= COLUMN.amount; col++) {
+        for (let col = 1; col <= lastColumn; col++) {
             const cell = worksheet.getCell(rowIdx, col);
             cell.border = mediumBorder();
             cell.alignment = getBodyAlignment(col);
@@ -235,8 +261,10 @@ const writeTotalRows = (
     worksheet: ExcelJS.Worksheet,
     rowNumber: number,
     rows: SupportLaborStatementExcelRow[],
-    settlementName: string
+    settlementName: string,
+    showTaxColumns: boolean
 ) => {
+    const lastColumn = showTaxColumns ? COLUMN.billing : COLUMN.amount;
     const dayTotals = Array.from({ length: MAX_DAY_COLUMNS }, () => 0);
     rows.forEach((row) => {
         row.days.forEach((value, index) => {
@@ -245,8 +273,10 @@ const writeTotalRows = (
     });
 
     const totalManDay = rows.reduce((acc, row) => acc + row.totalManDay, 0);
-    const totalAmount = rows.reduce((acc, row) => acc + row.totalAmount, 0);
-    const avgPrice = totalManDay > 0 ? Math.round(totalAmount / totalManDay) : 0;
+    const totalBillingAmount = rows.reduce((acc, row) => acc + (row.billingAmount || Math.round(row.totalManDay * row.billingUnitPrice)), 0);
+    const totalVatAmount = rows.reduce((acc, row) => acc + (row.vatAmount || 0), 0);
+    const totalIssuedAmount = rows.reduce((acc, row) => acc + row.issuedAmount, 0);
+    const avgBillingPrice = totalManDay > 0 ? Math.round(totalBillingAmount / totalManDay) : 0;
 
     worksheet.getRow(rowNumber).height = 20;
     worksheet.getRow(rowNumber + 1).height = 20;
@@ -255,8 +285,8 @@ const writeTotalRows = (
     worksheet.mergeCells(`U${rowNumber}:U${rowNumber + 1}`);
 
     worksheet.getCell(rowNumber, 1).value = '합 계';
-    worksheet.getCell(rowNumber + 1, 1).value = '총 액';
-    if (!rows.length) worksheet.getCell(rowNumber + 1, 1).value = `${settlementName || '정산 주체'} 데이터 없음`;
+    worksheet.getCell(rowNumber + 1, 1).value = showTaxColumns ? '공급/발행금액' : '공급가액';
+    if (!rows.length) worksheet.getCell(rowNumber + 1, 1).value = '데이터 없음';
 
     DAY_LABELS_FIRST.forEach((day, idx) => {
         const cell = worksheet.getCell(rowNumber, COLUMN.dayStart + idx);
@@ -273,17 +303,29 @@ const writeTotalRows = (
     totalManDayCell.numFmt = '0.0';
 
     const avgPriceCell = worksheet.getCell(rowNumber, COLUMN.amount);
-    avgPriceCell.value = avgPrice;
+    avgPriceCell.value = avgBillingPrice;
     avgPriceCell.numFmt = '#,##0';
 
     const totalAmountCell = worksheet.getCell(rowNumber + 1, COLUMN.amount);
-    totalAmountCell.value = totalAmount;
+    totalAmountCell.value = totalBillingAmount;
     totalAmountCell.numFmt = '#,##0';
-    totalAmountCell.font = { bold: true, color: { argb: 'FF3730A3' } };
-    totalAmountCell.fill = solidFill('FFD1FAE5');
+    totalAmountCell.font = { bold: true, color: { argb: 'FF92400E' } };
+    totalAmountCell.fill = solidFill('FFFDE68A');
+
+    if (showTaxColumns) {
+        const avgBillingPriceCell = worksheet.getCell(rowNumber, COLUMN.billing);
+        avgBillingPriceCell.value = totalVatAmount;
+        avgBillingPriceCell.numFmt = '#,##0';
+
+        const totalIssuedAmountCell = worksheet.getCell(rowNumber + 1, COLUMN.billing);
+        totalIssuedAmountCell.value = totalIssuedAmount;
+        totalIssuedAmountCell.numFmt = '#,##0';
+        totalIssuedAmountCell.font = { bold: true, color: { argb: 'FF92400E' } };
+        totalIssuedAmountCell.fill = solidFill('FFFDE68A');
+    }
 
     for (let rowIdx = rowNumber; rowIdx <= rowNumber + 1; rowIdx++) {
-        for (let col = 1; col <= COLUMN.amount; col++) {
+        for (let col = 1; col <= lastColumn; col++) {
             const cell = worksheet.getCell(rowIdx, col);
             cell.font = { ...cell.font, bold: true };
             cell.fill = cell.fill || solidFill('FFE2E8F0');
@@ -347,7 +389,7 @@ const mediumBorder = (): Partial<ExcelJS.Borders> => ({
 
 const getBodyAlignment = (column: number): Partial<ExcelJS.Alignment> => {
     if (column === COLUMN.address) return { horizontal: 'left', vertical: 'middle', wrapText: true };
-    if (column === COLUMN.amount) return { horizontal: 'right', vertical: 'middle' };
+    if (column === COLUMN.amount || column === COLUMN.billing) return { horizontal: 'right', vertical: 'middle' };
     return { horizontal: 'center', vertical: 'middle', wrapText: true };
 };
 

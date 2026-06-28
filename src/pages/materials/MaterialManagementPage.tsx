@@ -7,6 +7,7 @@ import {
     faBoxes,
     faBoxesStacked,
     faBuilding,
+    faCalendar,
     faClipboardList,
     faHistory,
 } from '@fortawesome/free-solid-svg-icons';
@@ -35,6 +36,12 @@ const materialTabs = [
         label: '입출고 내역',
         icon: faClipboardList,
         description: '조회/수정',
+    },
+    {
+        to: '/materials/transactions-by-site-date',
+        label: '현장·일자',
+        icon: faCalendar,
+        description: '입출고 묶음',
     },
     {
         to: '/materials/inventory',
@@ -79,7 +86,7 @@ const MaterialManagementPage: React.FC = () => {
                             </h1>
                         </div>
 
-                        <nav className="grid grid-cols-3 gap-1 sm:-mx-1 sm:flex sm:gap-2 sm:overflow-x-auto sm:px-1 sm:pb-1 xl:mx-0 xl:pb-0" aria-label="자재관리 메뉴">
+                        <nav className="grid grid-cols-4 gap-1 sm:-mx-1 sm:flex sm:gap-2 sm:overflow-x-auto sm:px-1 sm:pb-1 xl:mx-0 xl:pb-0" aria-label="자재관리 메뉴">
                             {materialTabs.map((tab, index) => (
                                 <NavLink
                                     key={tab.to}
@@ -87,7 +94,7 @@ const MaterialManagementPage: React.FC = () => {
                                     end
                                     className={({ isActive }) =>
                                         [
-                                            index > 2 ? 'hidden sm:flex' : 'flex',
+                                            index > 3 ? 'hidden sm:flex' : 'flex',
                                             'group min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-center transition sm:min-w-[132px] sm:justify-start sm:gap-3 sm:px-3 sm:py-2 sm:text-left',
                                             isActive
                                                 ? 'active border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm'

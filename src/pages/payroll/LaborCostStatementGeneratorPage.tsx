@@ -5,7 +5,7 @@ import {
   RotateCcw, Save, Search, Settings, FileText,
   ChevronLeft, ChevronRight, Calculator, Printer, Copy,
   Users, Briefcase, MinusCircle, PlusCircle, Check,
-  MoreHorizontal, Filter, Table
+  MoreHorizontal, Filter, Table, AlertTriangle
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
@@ -16,6 +16,11 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
 import { siteService, Site } from '../../services/siteService';
 import { companyService, Company } from '../../services/companyService';
+import {
+  getWorkerMasterLaborStatementPayType,
+  loadLaborStatementDefaults,
+  saveLaborStatementDefaults
+} from '../../utils/payrollLaborStatementDefaults';
 
 // --- Types ---
 type PayType = 'direct' | 'delegate';
@@ -34,6 +39,9 @@ type RowState = {
   bankName: string;
   bankOwner: string;
   bankAccount: string;
+  directBankName: string;
+  directBankOwner: string;
+  directBankAccount: string;
   teamName: string;
 };
 
@@ -94,6 +102,9 @@ const createEmptyRow = (id: number): RowState => ({
   bankName: '',
   bankOwner: '',
   bankAccount: '',
+  directBankName: '',
+  directBankOwner: '',
+  directBankAccount: '',
   teamName: ''
 });
 
@@ -118,6 +129,15 @@ const sumDaysForMonth = (days: string[], lastDay: number): number => {
     const v = parseFloat(String(raw).trim());
     return acc + (Number.isFinite(v) ? v : 0);
   }, 0);
+};
+
+const formatManDay = (value: number): string => {
+  if (!Number.isFinite(value)) return '';
+  const normalized = Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
+  if (normalized === 0) return '';
+  return Number.isInteger(normalized)
+    ? normalized.toLocaleString('ko-KR')
+    : normalized.toLocaleString('ko-KR', { maximumFractionDigits: 6 });
 };
 
 const extractDayOfMonth = (dateValue: unknown): number | null => {
@@ -151,12 +171,16 @@ const formatRetiredWorkerName = (name: string, isRetired: boolean): string => {
   return isRetired ? `${trimmed} (퇴사)` : trimmed;
 };
 
-const formatWorkerNameCell = (row: RowState, includeTeam: boolean): string => {
-  const parts = [formatRetiredWorkerName(row.workerName, row.isRetired)];
+const formatWorkerNameCell = (row: RowState, includeTeam: boolean, includeRetired = true): string => {
+  const parts = [includeRetired ? formatRetiredWorkerName(row.workerName, row.isRetired) : row.workerName.trim()];
   if (includeTeam && row.teamName.trim()) {
     parts.push(row.teamName.trim());
   }
   return parts.filter(Boolean).join('\n');
+};
+
+const formatWorkerIdentityCell = (row: RowState): string => {
+  return [row.workerSsn.trim(), row.workerPhone.trim()].filter(Boolean).join('\n');
 };
 
 const formatInlineBankInfo = (row: RowState): string => {
@@ -235,6 +259,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   const [isSplitView, setIsSplitView] = useState(true);
   const [showBankUnderAddress, setShowBankUnderAddress] = useState(false);
   const [showTeamUnderName, setShowTeamUnderName] = useState(false);
+  const [useWorkerMasterPayType, setUseWorkerMasterPayType] = useState(() => loadLaborStatementDefaults().useWorkerMasterPayType);
 
   // --- Main Configuration ---
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -243,7 +268,6 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   const [selectedSiteId, setSelectedSiteId] = useState<'ALL' | string>('ALL');
 
   // --- Statement Details ---
-  const [companyName, setCompanyName] = useState('청연');
   const [siteNameInput, setSiteNameInput] = useState('');
   const [statementTitle, setStatementTitle] = useState('노무내역서');
   const [globalRate, setGlobalRate] = useState(230000);
@@ -267,6 +291,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
   const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
   const [rows, setRows] = useState<RowState[]>(() => Array.from({ length: 15 }, (_, i) => createEmptyRow(i + 1)));
+  const [payTypeAutoWarnings, setPayTypeAutoWarnings] = useState<string[]>([]);
 
   // --- Constructor Company Info ---
   const [constructorCompany, setConstructorCompany] = useState<Company | null>(null);
@@ -423,12 +448,6 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     fetchCompany();
   }, [selectedSite]);
 
-  useEffect(() => {
-    if (constructorCompany?.name) {
-      setCompanyName(constructorCompany.name);
-    }
-  }, [constructorCompany]);
-
   const matchesSelectedSiteId = (siteId: string): boolean => {
     if (selectedSiteId === 'ALL') return true;
     const raw = String(siteId ?? '').trim();
@@ -495,6 +514,73 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     return map;
   }, [workers]);
 
+  const getWorkerBankInfo = (row: RowState) => {
+    const worker = (row.workerId ? workerById.get(row.workerId) : undefined)
+      ?? (row.workerName ? workerByName.get(row.workerName) : undefined);
+
+    return {
+      bankName: worker?.bankName ?? '',
+      bankOwner: worker?.accountHolder ?? '',
+      bankAccount: worker?.accountNumber ?? ''
+    };
+  };
+
+  const getDirectBankInfo = (row: RowState) => {
+    const saved = {
+      bankName: row.directBankName,
+      bankOwner: row.directBankOwner,
+      bankAccount: row.directBankAccount
+    };
+
+    if ([saved.bankName, saved.bankOwner, saved.bankAccount].some(value => value.trim().length > 0)) {
+      return saved;
+    }
+
+    return getWorkerBankInfo(row);
+  };
+
+  const addPayTypeAutoWarning = useCallback((workerLabel: string) => {
+    const label = workerLabel.trim() || '이름 없음';
+    setPayTypeAutoWarnings((prev) => (prev.includes(label) ? prev : [...prev, label]));
+  }, []);
+
+  const getWorkerPayTypeOrWarn = useCallback((worker: Worker | null | undefined, fallbackLabel: string): PayType => {
+    if (!useWorkerMasterPayType) return 'direct';
+
+    const payType = getWorkerMasterLaborStatementPayType(worker);
+    if (payType) return payType;
+
+    addPayTypeAutoWarning(worker?.name || fallbackLabel);
+    return 'direct';
+  }, [addPayTypeAutoWarning, useWorkerMasterPayType]);
+
+  const buildBankFieldsForPayType = useCallback((
+    payType: PayType,
+    directBank: Pick<RowState, 'bankName' | 'bankOwner' | 'bankAccount'>
+  ): Pick<RowState, 'payType' | 'bankName' | 'bankOwner' | 'bankAccount' | 'directBankName' | 'directBankOwner' | 'directBankAccount'> => {
+    if (payType === 'delegate') {
+      return {
+        payType: 'delegate',
+        bankName: masterBank,
+        bankOwner: masterOwner,
+        bankAccount: masterAccount,
+        directBankName: directBank.bankName,
+        directBankOwner: directBank.bankOwner,
+        directBankAccount: directBank.bankAccount
+      };
+    }
+
+    return {
+      payType: 'direct',
+      bankName: directBank.bankName,
+      bankOwner: directBank.bankOwner,
+      bankAccount: directBank.bankAccount,
+      directBankName: directBank.bankName,
+      directBankOwner: directBank.bankOwner,
+      directBankAccount: directBank.bankAccount
+    };
+  }, [masterAccount, masterBank, masterOwner]);
+
   const buildAttendanceKey = (): string => `${selectedSiteId}|${startDate}|${endDate}`;
 
   const loadAttendance = async (): Promise<AttendanceMap> => {
@@ -558,29 +644,133 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     }));
   };
 
-  const fillRowWithWorker = (rowId: number, worker: Worker | null, workerKey?: string) => {
+  const fillRowWithWorker = (rowId: number, worker: Worker | null, workerKey?: string, fallbackName?: string) => {
     const w = worker ?? null;
     const unitPriceFromWorker = Number(w?.unitPrice || 0);
     const unitPrice = unitPriceFromWorker > 0 ? String(unitPriceFromWorker) : '';
+    const fallbackWorkerName = fallbackName || (workerKey ? String(workerKey) : '');
+    const workerName = w?.name ?? fallbackWorkerName;
+    const directBank = {
+      bankName: w?.bankName ?? '',
+      bankOwner: w?.accountHolder ?? '',
+      bankAccount: w?.accountNumber ?? ''
+    };
+    const payType = getWorkerPayTypeOrWarn(w, workerName);
 
     setRows(prev => prev.map(r => r.id === rowId ? {
       ...r,
       workerId: w?.id ?? (workerKey ? String(workerKey) : null),
-      workerName: w?.name ?? (workerKey ? String(workerKey) : ''),
+      workerName,
       isRetired: isRetiredWorker(w),
       workerSsn: w?.idNumber ?? '',
       workerPhone: w?.contact ?? '',
       workerAddress: w?.address ?? '',
       unitPrice,
-      bankName: w?.bankName ?? '',
-      bankOwner: w?.accountHolder ?? '',
-      bankAccount: w?.accountNumber ?? '',
+      ...buildBankFieldsForPayType(payType, directBank),
       teamName: w?.teamName ?? ''
     } : r));
   };
 
   const updateRow = (rowId: number, patch: Partial<RowState>) => {
     setRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, ...patch } : r)));
+  };
+
+  const updateRowBankInfo = (
+    rowId: number,
+    patch: Partial<Pick<RowState, 'bankName' | 'bankOwner' | 'bankAccount'>>
+  ) => {
+    setRows((prev) => prev.map((r) => {
+      if (r.id !== rowId) return r;
+
+      const next: RowState = { ...r, ...patch };
+      if (r.payType === 'direct') {
+        if (patch.bankName !== undefined) next.directBankName = patch.bankName;
+        if (patch.bankOwner !== undefined) next.directBankOwner = patch.bankOwner;
+        if (patch.bankAccount !== undefined) next.directBankAccount = patch.bankAccount;
+      }
+      return next;
+    }));
+  };
+
+  const setRowPayType = (rowId: number, payType: PayType) => {
+    setRows((prev) => prev.map((r) => {
+      if (r.id !== rowId) return r;
+
+      if (payType === 'delegate') {
+        const directBank = r.payType === 'direct'
+          ? {
+              bankName: r.bankName,
+              bankOwner: r.bankOwner,
+              bankAccount: r.bankAccount
+            }
+          : getDirectBankInfo(r);
+
+        return {
+          ...r,
+          payType: 'delegate',
+          bankName: masterBank,
+          bankOwner: masterOwner,
+          bankAccount: masterAccount,
+          directBankName: directBank.bankName,
+          directBankOwner: directBank.bankOwner,
+          directBankAccount: directBank.bankAccount
+        };
+      }
+
+      const directBank = getDirectBankInfo(r);
+      return {
+        ...r,
+        payType: 'direct',
+        bankName: directBank.bankName,
+        bankOwner: directBank.bankOwner,
+        bankAccount: directBank.bankAccount,
+        directBankName: directBank.bankName,
+        directBankOwner: directBank.bankOwner,
+        directBankAccount: directBank.bankAccount
+      };
+    }));
+  };
+
+  const buildRowsForWorkerMasterPayTypeSetting = (
+    currentRows: RowState[],
+    enabled: boolean
+  ): { nextRows: RowState[]; warnings: string[] } => {
+    const warningSet = new Set<string>();
+    const nextRows = currentRows.map((row) => {
+      const hasWorker = String(row.workerId ?? '').trim().length > 0 || row.workerName.trim().length > 0;
+      if (!hasWorker) return row;
+
+      const masterWorker = (row.workerId ? workerById.get(row.workerId) : undefined)
+        ?? (row.workerName ? workerByName.get(row.workerName) : undefined);
+      const directBank = getDirectBankInfo(row);
+
+      if (!enabled) {
+        return {
+          ...row,
+          ...buildBankFieldsForPayType('direct', directBank)
+        };
+      }
+
+      const payType = getWorkerMasterLaborStatementPayType(masterWorker);
+      if (!payType) {
+        warningSet.add(row.workerName || row.workerId || '이름 없음');
+      }
+
+      return {
+        ...row,
+        ...buildBankFieldsForPayType(payType ?? 'direct', directBank)
+      };
+    });
+
+    return { nextRows, warnings: Array.from(warningSet) };
+  };
+
+  const handleUseWorkerMasterPayTypeChange = (checked: boolean) => {
+    setUseWorkerMasterPayType(checked);
+    const { nextRows, warnings } = buildRowsForWorkerMasterPayTypeSetting(rows, checked);
+    setRows(nextRows);
+    setPayTypeAutoWarnings(checked ? warnings : []);
+    saveLaborStatementDefaults({ useWorkerMasterPayType: checked });
   };
 
   const loadWorkerToNextEmptyRow = async () => {
@@ -599,7 +789,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       ? (workerById.get(selected.workerId) ?? null)
       : (workerByName.get(selected.name) ?? null);
 
-    fillRowWithWorker(target.id, masterWorker, selected.key);
+    fillRowWithWorker(target.id, masterWorker, selected.key, selected.name);
 
     const map = await loadAttendance();
     if (selected.key && map[selected.key]) {
@@ -612,6 +802,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     const map = await loadAttendance();
 
     const newRows: RowState[] = [];
+    const missingPayTypeWarnings = new Set<string>();
     for (let i = 0; i < count; i++) {
       const r = createEmptyRow(i + 1);
       const w = reportWorkers[i];
@@ -619,17 +810,26 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       if (w) {
         const masterWorker = w.workerId ? workerById.get(w.workerId) : workerByName.get(w.name);
         const entry = map[w.key];
+        const directBank = {
+          bankName: masterWorker?.bankName ?? '',
+          bankOwner: masterWorker?.accountHolder ?? '',
+          bankAccount: masterWorker?.accountNumber ?? ''
+        };
+        const payType = useWorkerMasterPayType
+          ? getWorkerMasterLaborStatementPayType(masterWorker)
+          : undefined;
+        if (useWorkerMasterPayType && !payType) {
+          missingPayTypeWarnings.add(w.name || w.key);
+        }
 
         r.workerId = w.workerId ?? null;
         r.workerName = w.name;
         r.isRetired = isRetiredWorker(masterWorker);
+        Object.assign(r, buildBankFieldsForPayType(payType ?? 'direct', directBank));
         if (masterWorker) {
           r.workerSsn = masterWorker.idNumber ?? '';
           r.workerPhone = masterWorker.contact ?? '';
           r.workerAddress = masterWorker.address ?? '';
-          r.bankName = masterWorker.bankName ?? '';
-          r.bankOwner = masterWorker.accountHolder ?? '';
-          r.bankAccount = masterWorker.accountNumber ?? '';
           if (masterWorker.unitPrice) r.unitPrice = String(masterWorker.unitPrice);
           if (masterWorker.teamName) r.teamName = masterWorker.teamName;
         }
@@ -645,15 +845,28 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       newRows.push(r);
     }
     setRows(newRows);
+    setPayTypeAutoWarnings(useWorkerMasterPayType ? Array.from(missingPayTypeWarnings) : []);
   };
 
   const handleApplyGlobalRate = () => {
-    setRows(prev => prev.map(r => ({ ...r, unitPrice: String(globalRate) })));
+    setRows(prev => prev.map(r => {
+      const workerId = String(r.workerId ?? '').trim();
+      const workerName = r.workerName.trim();
+      const hasWorker = workerId.length > 0 || workerName.length > 0;
+      const hasRegisteredWorker = (
+        (workerId.length > 0 && workerById.has(workerId)) ||
+        (workerName.length > 0 && workerByName.has(workerName))
+      );
+
+      if (!hasWorker) return { ...r, unitPrice: '' };
+      return hasRegisteredWorker ? { ...r, unitPrice: String(globalRate) } : r;
+    }));
   };
 
   const handleClearAll = () => {
     if (window.confirm('작성된 모든 내용을 초기화하시겠습니까?')) {
       setRows(Array.from({ length: 15 }, (_, i) => createEmptyRow(i + 1)));
+      setPayTypeAutoWarnings([]);
     }
   };
 
@@ -671,12 +884,13 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     workbook.lastModifiedBy = 'Codex';
     workbook.created = new Date();
     workbook.modified = new Date();
+    const fixedInfoColumnCount = 4;
 
     const ws = workbook.addWorksheet('노무내역서', {
       views: [{ 
         state: 'frozen', 
         ySplit: isSplitView ? 5 : 4, 
-        xSplit: 5, 
+        xSplit: fixedInfoColumnCount,
         showGridLines: false 
       }]
     });
@@ -685,14 +899,18 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     const [y, m] = (month || '').split('-');
     const lastDay = getMonthLastDay(month);
     const showBankDetailsColumn = showBankColumn;
+    const dayStartColumn = fixedInfoColumnCount + 1;
+    const manDayCellFormat = '@';
+    const moneyNumberFormat = '#,##0';
     const trailingHeaders = showBankDetailsColumn
       ? ['은행', '예금주', '계좌번호', '지급구분']
       : ['지급구분'];
 
     const daySplitPoint = isSplitView ? Math.ceil(lastDay / 2) : lastDay;
     const dayColCount = daySplitPoint;
-    const totalColumns = 5 + dayColCount + 3 + trailingHeaders.length;
-    const summaryStartCol = 5 + dayColCount + 1;
+    const totalColumns = fixedInfoColumnCount + dayColCount + 3 + trailingHeaders.length;
+    const summaryStartCol = fixedInfoColumnCount + dayColCount + 1;
+    const paymentTypeColumn = summaryStartCol + (showBankDetailsColumn ? 6 : 3);
 
     ws.pageSetup = {
       orientation: 'landscape',
@@ -719,13 +937,11 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     // --- Info Row (Row 2) ---
     const periodStr = y && m ? `${y}-${m}-01 ~ ${y}-${m}-${String(lastDay).padStart(2, '0')}` : '-';
     ws.mergeCells(2, 1, 2, 4);
-    ws.mergeCells(2, 5, 2, 7);
-    ws.mergeCells(2, 8, 2, Math.min(12, totalColumns));
+    ws.mergeCells(2, 5, 2, Math.min(12, totalColumns));
     ws.mergeCells(2, Math.min(13, totalColumns), 2, totalColumns);
 
     ws.getCell(2, 1).value = `기간: ${periodStr}`;
-    ws.getCell(2, 5).value = `회사명: ${companyName || '-'}`;
-    ws.getCell(2, 8).value = `현장명: ${siteNameInput || '전체 통합'}`;
+    ws.getCell(2, 5).value = `현장명: ${siteNameInput || '전체 통합'}`;
     ws.getCell(2, Math.min(13, totalColumns)).value = `위임계좌번호: ${masterBank} ${masterAccount}`;
 
     for (let col = 1; col <= totalColumns; col++) {
@@ -764,33 +980,36 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
     // --- Header Rows (Row 4 & 5) ---
     if (isSplitView) {
-      const h1: any[] = ['No', '성명', '주민등록번호', '전화번호', '주소'];
+      const h1: any[] = ['No', '성명', '주민등록번호', '주소'];
       for (let d = 1; d <= daySplitPoint; d++) {
         const dow = getDayOfWeek(month, d);
         h1.push(`${String(d).padStart(2, '0')}\n(${dow})`);
       }
       h1.push('공수', '단가', '총액', ...trailingHeaders);
 
-      const h2: any[] = ['', '', '', '', ''];
+      const h2: any[] = ['', '', '전화번호', ''];
       for (let d = daySplitPoint + 1; d <= lastDay; d++) {
         const dow = getDayOfWeek(month, d);
         h2.push(`${String(d).padStart(2, '0')}\n(${dow})`);
       }
-      while (h2.length < 5 + dayColCount) h2.push('');
+      while (h2.length < fixedInfoColumnCount + dayColCount) h2.push('');
       h2.push('', '', '', ...trailingHeaders.map(() => ''));
 
       const hr1 = ws.addRow(h1);
       const hr2 = ws.addRow(h2);
 
-      [1, 2, 3, 4, 5].forEach(col => ws.mergeCells(hr1.number, col, hr2.number, col));
+      for (let col = 1; col <= fixedInfoColumnCount; col++) {
+        if (col === 3) continue;
+        ws.mergeCells(hr1.number, col, hr2.number, col);
+      }
       for (let col = summaryStartCol; col <= totalColumns; col++) {
         ws.mergeCells(hr1.number, col, hr2.number, col);
       }
 
       hr1.eachCell((cell, colNum) => {
         let bg = 'FF000000'; // Default black
-        if (colNum > 5 && colNum <= 5 + dayColCount) {
-          const day = colNum - 5;
+        if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
+          const day = colNum - fixedInfoColumnCount;
           const weekend = isWeekend(day);
           if (weekend === 'sat') bg = 'FF2563EB'; // Blue
           else if (weekend === 'sun') bg = 'FFDC2626'; // Red
@@ -799,8 +1018,8 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       });
       hr2.eachCell((cell, colNum) => {
         let bg = 'FF000000';
-        if (colNum > 5 && colNum <= 5 + dayColCount) {
-          const day = daySplitPoint + (colNum - 5);
+        if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
+          const day = daySplitPoint + (colNum - fixedInfoColumnCount);
           if (day <= lastDay) {
             const weekend = isWeekend(day);
             if (weekend === 'sat') bg = 'FF2563EB';
@@ -813,7 +1032,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       hr2.height = 32;
       ws.pageSetup.printTitlesRow = `1:${hr2.number}`;
     } else {
-      const h: any[] = ['No', '성명', '주민등록번호', '전화번호', '주소'];
+      const h: any[] = ['No', '성명', '주민등록번호\n전화번호', '주소'];
       for (let d = 1; d <= lastDay; d++) {
         const dow = getDayOfWeek(month, d);
         h.push(`${String(d).padStart(2, '0')}\n(${dow})`);
@@ -822,8 +1041,8 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       const hr = ws.addRow(h);
       hr.eachCell((cell, colNum) => {
         let bg = 'FF000000';
-        if (colNum > 5 && colNum <= 5 + lastDay) {
-          const day = colNum - 5;
+        if (colNum >= dayStartColumn && colNum < dayStartColumn + lastDay) {
+          const day = colNum - fixedInfoColumnCount;
           const weekend = isWeekend(day);
           if (weekend === 'sat') bg = 'FF2563EB';
           else if (weekend === 'sun') bg = 'FFDC2626';
@@ -835,20 +1054,21 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     }
 
     // Column widths
-    ws.getColumn(1).width = 5;
-    ws.getColumn(2).width = 12;
-    ws.getColumn(3).width = 16;
-    ws.getColumn(4).width = 14;
-    ws.getColumn(5).width = 32;
-    for (let i = 0; i < dayColCount; i++) ws.getColumn(6 + i).width = 5.5;
-    ws.getColumn(summaryStartCol).width = 8;
+    ws.getColumn(1).width = 4.5;
+    ws.getColumn(2).width = 10;
+    ws.getColumn(3).width = 15;
+    ws.getColumn(4).width = 40;
+    for (let i = 0; i < dayColCount; i++) ws.getColumn(dayStartColumn + i).width = 4.5;
+    ws.getColumn(summaryStartCol).width = 10;
     ws.getColumn(summaryStartCol + 1).width = 10;
-    ws.getColumn(summaryStartCol + 2).width = 14;
+    ws.getColumn(summaryStartCol + 2).width = 12;
     if (showBankDetailsColumn) {
       ws.getColumn(summaryStartCol + 3).width = 12;
       ws.getColumn(summaryStartCol + 4).width = 10;
       ws.getColumn(summaryStartCol + 5).width = 22;
       ws.getColumn(summaryStartCol + 6).width = 10;
+    } else {
+      ws.getColumn(summaryStartCol + 3).width = 10;
     }
 
     const filledRows = rows.filter(r => r.workerName.trim().length > 0);
@@ -867,27 +1087,30 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       const rowBgColor = idx % 2 === 0 ? 'FFFFFFFF' : 'FFF1F5F9'; // Distinct zebra striping
 
       if (isSplitView) {
-        const d1: any[] = [idx + 1, formatWorkerNameCell(r, showTeamUnderName), r.workerSsn, r.workerPhone, formatAddressCell(r, showBankUnderAddress)];
+        const d1: any[] = [idx + 1, formatWorkerNameCell(r, showTeamUnderName, false), r.workerSsn, formatAddressCell(r, showBankUnderAddress)];
         for (let d = 0; d < daySplitPoint; d++) {
           const val = parseFloat(r.days[d] || '');
           if (Number.isFinite(val)) dailyTotals[d] += val;
-          d1.push(Number.isFinite(val) && val !== 0 ? val : '');
+          d1.push(Number.isFinite(val) ? formatManDay(val) : '');
         }
-        d1.push(totalDaysVal, unitPriceVal, totalAmountVal, ...bankCells);
+        d1.push(formatManDay(totalDaysVal), unitPriceVal, totalAmountVal, ...bankCells);
 
-        const d2: any[] = ['', '', '', '', ''];
+        const d2: any[] = ['', '', r.workerPhone, ''];
         for (let d = daySplitPoint; d < lastDay; d++) {
           const val = parseFloat(r.days[d] || '');
           if (Number.isFinite(val)) dailyTotals[d] += val;
-          d2.push(Number.isFinite(val) && val !== 0 ? val : '');
+          d2.push(Number.isFinite(val) ? formatManDay(val) : '');
         }
-        while (d2.length < 5 + dayColCount) d2.push('');
+        while (d2.length < fixedInfoColumnCount + dayColCount) d2.push('');
         d2.push('', '', '', ...bankCells.map(() => ''));
 
         const row1 = ws.addRow(d1);
         const row2 = ws.addRow(d2);
 
-        [1, 2, 3, 4, 5].forEach(col => ws.mergeCells(row1.number, col, row2.number, col));
+        for (let col = 1; col <= fixedInfoColumnCount; col++) {
+          if (col === 3) continue;
+          ws.mergeCells(row1.number, col, row2.number, col);
+        }
         for (let col = summaryStartCol; col <= totalColumns; col++) {
           ws.mergeCells(row1.number, col, row2.number, col);
         }
@@ -905,9 +1128,9 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBgColor } };
 
             // Weekend background highlight in data rows
-            if (colNum > 5 && colNum <= 5 + dayColCount) {
+            if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
               const dayOffset = row === row1 ? 0 : daySplitPoint;
-              const day = (colNum - 5) + dayOffset;
+              const day = (colNum - fixedInfoColumnCount) + dayOffset;
               if (day <= lastDay) {
                 const weekend = isWeekend(day);
                 if (weekend === 'sat') cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: idx % 2 === 0 ? 'FFEBF5FF' : 'FFDBEAFE' } };
@@ -915,21 +1138,29 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
               }
             }
 
+            if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
+              cell.numFmt = manDayCellFormat;
+            }
+
             if (colNum >= summaryStartCol && colNum <= summaryStartCol + 2) {
-              cell.numFmt = '#,##0';
+              cell.numFmt = colNum === summaryStartCol ? manDayCellFormat : moneyNumberFormat;
               cell.alignment = { horizontal: 'right', vertical: 'middle' };
               cell.font = { size: 9, bold: colNum === summaryStartCol + 2, color: { argb: 'FF000000' } };
+            }
+
+            if (r.payType === 'delegate' && colNum === paymentTypeColumn) {
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEB3B' } };
             }
           });
         });
       } else {
-        const d: any[] = [idx + 1, formatWorkerNameCell(r, showTeamUnderName), r.workerSsn, r.workerPhone, formatAddressCell(r, showBankUnderAddress)];
+        const d: any[] = [idx + 1, formatWorkerNameCell(r, showTeamUnderName, false), formatWorkerIdentityCell(r), formatAddressCell(r, showBankUnderAddress)];
         for (let i = 0; i < lastDay; i++) {
           const val = parseFloat(r.days[i] || '');
           if (Number.isFinite(val)) dailyTotals[i] += val;
-          d.push(Number.isFinite(val) && val !== 0 ? val : '');
+          d.push(Number.isFinite(val) ? formatManDay(val) : '');
         }
-        d.push(totalDaysVal, unitPriceVal, totalAmountVal, ...bankCells);
+        d.push(formatManDay(totalDaysVal), unitPriceVal, totalAmountVal, ...bankCells);
         const dr = ws.addRow(d);
         dr.eachCell((cell, colNum) => {
           cell.border = { 
@@ -942,35 +1173,43 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
           cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBgColor } };
 
-          if (colNum > 5 && colNum <= 5 + lastDay) {
-            const weekend = isWeekend(colNum - 5);
+          if (colNum >= dayStartColumn && colNum < dayStartColumn + lastDay) {
+            const weekend = isWeekend(colNum - fixedInfoColumnCount);
             if (weekend === 'sat') cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: idx % 2 === 0 ? 'FFEBF5FF' : 'FFDBEAFE' } };
             else if (weekend === 'sun') cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: idx % 2 === 0 ? 'FFFFEBEB' : 'FFFEE2E2' } };
           }
 
-          if (colNum >= 5 + lastDay + 1 && colNum <= 5 + lastDay + 3) {
-            cell.numFmt = '#,##0';
+          if (colNum >= dayStartColumn && colNum < dayStartColumn + lastDay) {
+            cell.numFmt = manDayCellFormat;
+          }
+
+          if (colNum >= fixedInfoColumnCount + lastDay + 1 && colNum <= fixedInfoColumnCount + lastDay + 3) {
+            cell.numFmt = colNum === fixedInfoColumnCount + lastDay + 1 ? manDayCellFormat : moneyNumberFormat;
             cell.alignment = { horizontal: 'right', vertical: 'middle' };
-            cell.font = { size: 9, bold: colNum === 5 + lastDay + 3, color: { argb: 'FF000000' } };
+            cell.font = { size: 9, bold: colNum === fixedInfoColumnCount + lastDay + 3, color: { argb: 'FF000000' } };
+          }
+
+          if (r.payType === 'delegate' && colNum === paymentTypeColumn) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEB3B' } };
           }
         });
       }
     });
 
     // --- Footer Row ---
-    const f1: any[] = ['날짜별 공수합계', '', '', '', ''];
-    for (let d = 0; d < daySplitPoint; d++) f1.push(dailyTotals[d] || '');
-    f1.push(grandTotalDays, '', grandTotalAmount, ...trailingHeaders.map(() => ''));
+    const f1: any[] = ['날짜별 공수합계', ...Array.from({ length: fixedInfoColumnCount - 1 }, () => '')];
+    for (let d = 0; d < daySplitPoint; d++) f1.push(formatManDay(dailyTotals[d]));
+    f1.push(formatManDay(grandTotalDays), '', grandTotalAmount, ...trailingHeaders.map(() => ''));
 
     if (isSplitView) {
-      const f2: any[] = ['', '', '', '', ''];
-      for (let d = daySplitPoint; d < lastDay; d++) f2.push(dailyTotals[d] || '');
-      while (f2.length < 5 + dayColCount) f2.push('');
+      const f2: any[] = Array.from({ length: fixedInfoColumnCount }, () => '');
+      for (let d = daySplitPoint; d < lastDay; d++) f2.push(formatManDay(dailyTotals[d]));
+      while (f2.length < fixedInfoColumnCount + dayColCount) f2.push('');
       f2.push('', '', '', ...trailingHeaders.map(() => ''));
 
       const fr1 = ws.addRow(f1);
       const fr2 = ws.addRow(f2);
-      ws.mergeCells(fr1.number, 1, fr2.number, 5);
+      ws.mergeCells(fr1.number, 1, fr2.number, fixedInfoColumnCount);
       for (let col = summaryStartCol; col <= totalColumns; col++) {
         ws.mergeCells(fr1.number, col, fr2.number, col);
       }
@@ -985,8 +1224,11 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
             right: { style: 'thin', color: { argb: 'FF000000' } } 
           };
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
+            cell.numFmt = manDayCellFormat;
+          }
           if (colNum >= summaryStartCol && colNum <= summaryStartCol + 2) {
-            cell.numFmt = '#,##0';
+            cell.numFmt = colNum === summaryStartCol ? manDayCellFormat : moneyNumberFormat;
             cell.alignment = { horizontal: 'right', vertical: 'middle' };
           }
         });
@@ -995,7 +1237,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       fr2.height = 28;
     } else {
       const fr = ws.addRow(f1);
-      ws.mergeCells(fr.number, 1, fr.number, 5);
+      ws.mergeCells(fr.number, 1, fr.number, fixedInfoColumnCount);
       fr.eachCell((cell, colNum) => {
         cell.font = { bold: true, size: 10, color: { argb: 'FF000000' } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDE68A' } };
@@ -1006,17 +1248,24 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
           right: { style: 'thin', color: { argb: 'FF000000' } } 
         };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        if (colNum >= 5 + lastDay + 1 && colNum <= 5 + lastDay + 3) {
-          cell.numFmt = '#,##0';
+        if (colNum >= dayStartColumn && colNum < dayStartColumn + lastDay) {
+          cell.numFmt = manDayCellFormat;
+        }
+        if (colNum >= fixedInfoColumnCount + lastDay + 1 && colNum <= fixedInfoColumnCount + lastDay + 3) {
+          cell.numFmt = colNum === fixedInfoColumnCount + lastDay + 1 ? manDayCellFormat : moneyNumberFormat;
           cell.alignment = { horizontal: 'right', vertical: 'middle' };
         }
       });
       fr.height = 32;
     }
 
+    for (let rowNum = 6; rowNum <= ws.rowCount; rowNum++) {
+      ws.getRow(rowNum).height = 18;
+    }
+
     const buffer = await workbook.xlsx.writeBuffer();
     saveAs(new Blob([buffer]), `노무내역서_${siteNameInput || '전체'}_${month}.xlsx`);
-  }, [rows, month, statementTitle, companyName, siteNameInput, showBankColumn, showBankUnderAddress, showTeamUnderName, isSplitView]);
+  }, [rows, month, statementTitle, siteNameInput, showBankColumn, showBankUnderAddress, showTeamUnderName, isSplitView, masterBank, masterAccount]);
   const statementSummary = useMemo(() => {
     const visibleLastDay = getMonthLastDay(month);
     let totalDays = 0;
@@ -1297,6 +1546,18 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                 <input type="checkbox" checked={showTeamUnderName} onChange={(e) => setShowTeamUnderName(e.target.checked)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-gray-300" />
                 <span className="text-sm font-medium text-slate-600">이름 하단 팀명</span>
               </label>
+              <div className="w-px h-3 bg-slate-200"></div>
+              <label className={`flex items-center gap-2 cursor-pointer rounded-md px-2 py-1 transition-colors select-none ${
+                useWorkerMasterPayType ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50'
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={useWorkerMasterPayType}
+                  onChange={(e) => handleUseWorkerMasterPayTypeChange(e.target.checked)}
+                  className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-gray-300"
+                />
+                <span className="text-sm font-bold">DB 직불여부 적용</span>
+              </label>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -1350,6 +1611,22 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
             <span className="text-xl font-black text-slate-800 tabular-nums leading-none mt-0.5">{statementSummary.totalAmount.toLocaleString()}<span className="text-xs font-medium text-slate-400 ml-1">원</span></span>
           </div>
         </div>
+        {payTypeAutoWarnings.length > 0 && (
+          <div className="border-t border-amber-200 bg-amber-50 px-6 py-2 text-xs font-bold text-amber-800">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="leading-5">
+                <div>직불/위임 자동선택 경고</div>
+                <div className="text-amber-700">
+                  작업자 DB의 직불여부가 없거나 작업자 매칭이 되지 않아 직불 기본값으로 적용했습니다:
+                  {' '}
+                  {payTypeAutoWarnings.slice(0, 8).join(', ')}
+                  {payTypeAutoWarnings.length > 8 ? ` 외 ${payTypeAutoWarnings.length - 8}명` : ''}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="labor-statement-shell flex-1 min-h-0 px-2 pb-2 pt-2 overflow-hidden">
@@ -1374,13 +1651,11 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                     <tr>
                       <th className="border border-black bg-yellow-100 p-1 w-12" rowSpan={2}>기<br />간</th>
                       <td className="border border-black p-1 text-center w-28">{statementPeriod.start}</td>
-                      <th className="border border-black bg-yellow-100 p-1 w-16">회사명</th>
-                      <td className="border border-black p-1 text-center">{companyName || '-'}</td>
+                      <th className="border border-black bg-yellow-100 p-1 w-16" rowSpan={2}>현장명</th>
+                      <td className="border border-black p-1 text-center" rowSpan={2}>{siteNameInput || '전체 통합'}</td>
                     </tr>
                     <tr>
                       <td className="border border-black p-1 text-center">{statementPeriod.end}</td>
-                      <th className="border border-black bg-yellow-100 p-1">현장명</th>
-                      <td className="border border-black p-1 text-center">{siteNameInput || '전체 통합'}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1465,9 +1740,9 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                           />
                           {showBankUnderAddress && (
                             <div data-capture-bank-flat="true" className={`flex items-center divide-x divide-slate-700 bg-slate-50/50 ${splitRowSectionClass}`}>
-                              <input type="text" value={row.bankName} onChange={e => updateRow(row.id, { bankName: e.target.value })} className="w-[60px] h-full px-2 text-center text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="은행" />
-                              <input type="text" value={row.bankOwner} onChange={e => updateRow(row.id, { bankOwner: e.target.value })} className="w-[70px] h-full px-2 text-center text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="예금주" />
-                              <input type="text" value={row.bankAccount} onChange={e => updateRow(row.id, { bankAccount: e.target.value })} className="flex-1 h-full px-2 text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="계좌번호" />
+                              <input type="text" value={row.bankName} onChange={e => updateRowBankInfo(row.id, { bankName: e.target.value })} className="w-[60px] h-full px-2 text-center text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="은행" />
+                              <input type="text" value={row.bankOwner} onChange={e => updateRowBankInfo(row.id, { bankOwner: e.target.value })} className="w-[70px] h-full px-2 text-center text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="예금주" />
+                              <input type="text" value={row.bankAccount} onChange={e => updateRowBankInfo(row.id, { bankAccount: e.target.value })} className="flex-1 h-full px-2 text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="계좌번호" />
                             </div>
                           )}
                         </div>
@@ -1489,7 +1764,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                         );
                       })}
                       {hasSplitSpacerColumn && <td className="border-r border-black bg-slate-50"></td>}
-                      <td className="border-r border-black text-center text-xs font-black text-black bg-[#fffacd]" rowSpan={isSplitView ? 2 : 1}>{sumDaysForMonth(row.days, statementLastDay).toFixed(1)}</td>
+                      <td className="border-r border-black text-center text-xs font-black text-black bg-[#fffacd]" rowSpan={isSplitView ? 2 : 1}>{formatManDay(sumDaysForMonth(row.days, statementLastDay))}</td>
                       <td className="border-r border-black p-0" rowSpan={isSplitView ? 2 : 1}>
                         <input type="text" value={formatComma(row.unitPrice)} onChange={e => updateRow(row.id, { unitPrice: parseComma(e.target.value) })}
                           className="w-full h-full min-h-[30px] px-2 text-right text-[10px] font-bold text-slate-800 bg-transparent outline-none focus:bg-indigo-50 leading-tight"
@@ -1500,13 +1775,13 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                         <td className={`border-black p-1 border-l ${row.payType === 'delegate' ? 'bg-yellow-200' : ''}`} rowSpan={isSplitView ? 2 : 1}>
                           <div className="flex flex-col gap-1 h-full justify-center">
                             <div className="flex items-center justify-center gap-4 text-[11px] border-b border-black pb-1 mb-1">
-                              <label className="flex items-center gap-1 cursor-pointer"><input type="radio" checked={row.payType === 'direct'} onChange={() => updateRow(row.id, { payType: 'direct' })} className="accent-blue-600" /><span className="font-medium text-slate-700">직불</span></label>
-                              <label className="flex items-center gap-1 cursor-pointer"><input type="radio" checked={row.payType === 'delegate'} onChange={() => updateRow(row.id, { payType: 'delegate', bankName: masterBank, bankOwner: masterOwner, bankAccount: masterAccount })} className="accent-red-600" /><span className="font-bold text-red-600">위임</span></label>
+                              <label className="flex items-center gap-1 cursor-pointer"><input type="radio" checked={row.payType === 'direct'} onChange={() => setRowPayType(row.id, 'direct')} className="accent-blue-600" /><span className="font-medium text-slate-700">직불</span></label>
+                              <label className="flex items-center gap-1 cursor-pointer"><input type="radio" checked={row.payType === 'delegate'} onChange={() => setRowPayType(row.id, 'delegate')} className="accent-red-600" /><span className="font-bold text-red-600">위임</span></label>
                             </div>
                             <div data-capture-bank-flat="true" className="flex h-[30px] items-center divide-x divide-black border border-black rounded bg-white/50">
-                              <input type="text" value={row.bankName} onChange={e => updateRow(row.id, { bankName: e.target.value })} className="w-[50px] h-full px-2 text-center text-[10px] leading-tight outline-none bg-transparent" placeholder="은행" />
-                              <input type="text" value={row.bankOwner} onChange={e => updateRow(row.id, { bankOwner: e.target.value })} className="w-[60px] h-full px-2 text-center text-[10px] leading-tight outline-none bg-transparent" placeholder="예금주" />
-                              <input type="text" value={row.bankAccount} onChange={e => updateRow(row.id, { bankAccount: e.target.value })} className="flex-1 h-full px-2 text-[10px] leading-tight outline-none bg-transparent" placeholder="계좌번호" />
+                              <input type="text" value={row.bankName} onChange={e => updateRowBankInfo(row.id, { bankName: e.target.value })} className="w-[50px] h-full px-2 text-center text-[10px] leading-tight outline-none bg-transparent" placeholder="은행" />
+                              <input type="text" value={row.bankOwner} onChange={e => updateRowBankInfo(row.id, { bankOwner: e.target.value })} className="w-[60px] h-full px-2 text-center text-[10px] leading-tight outline-none bg-transparent" placeholder="예금주" />
+                              <input type="text" value={row.bankAccount} onChange={e => updateRowBankInfo(row.id, { bankAccount: e.target.value })} className="flex-1 h-full px-2 text-[10px] leading-tight outline-none bg-transparent" placeholder="계좌번호" />
                             </div>
                           </div>
                         </td>
@@ -1543,13 +1818,13 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                   {primaryDayNumbers.map((dayNumber) => (
                     <td key={dayNumber} className="border border-black p-0 text-center text-[10px] text-[#7f1d1d] bg-[#fca5a5]">
                       <div className={`flex items-center justify-center px-1 ${footerSingleRowHeightClass}`}>
-                        {statementSummary.dailyTotals[dayNumber - 1] > 0 ? statementSummary.dailyTotals[dayNumber - 1].toFixed(1) : ''}
+                        {formatManDay(statementSummary.dailyTotals[dayNumber - 1])}
                       </div>
                     </td>
                   ))}
                   {hasSplitSpacerColumn && <td className="border border-black p-0 bg-[#fca5a5]"></td>}
                   <td className="border border-black p-0 text-center text-sm font-black bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>
-                    <div className={`flex items-center justify-center px-2 ${footerSpanningRowHeightClass}`}>{statementSummary.totalDays.toFixed(1)}</div>
+                    <div className={`flex items-center justify-center px-2 ${footerSpanningRowHeightClass}`}>{formatManDay(statementSummary.totalDays)}</div>
                   </td>
                   <td className="border border-black p-0 text-center bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>
                     <div className={`${footerSpanningRowHeightClass}`}></div>
@@ -1568,7 +1843,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                     {secondaryDayNumbers.map((dayNumber) => (
                       <td key={dayNumber} className="border border-black p-0 text-center text-[10px] text-[#7f1d1d] bg-[#fca5a5]">
                         <div className={`flex items-center justify-center px-1 ${footerSingleRowHeightClass}`}>
-                          {statementSummary.dailyTotals[dayNumber - 1] > 0 ? statementSummary.dailyTotals[dayNumber - 1].toFixed(1) : ''}
+                          {formatManDay(statementSummary.dailyTotals[dayNumber - 1])}
                         </div>
                       </td>
                     ))}

@@ -7,6 +7,8 @@ import {
     faChevronRight,
     faCreditCard,
     faDownload,
+    faEye,
+    faEyeSlash,
     faFloppyDisk,
     faHardHat,
     faLayerGroup,
@@ -116,6 +118,77 @@ const CUSTOM_CATEGORY_META: Record<CustomCategory, { title: string; description:
 };
 
 const normalizeText = (value: unknown) => String(value ?? '').trim();
+const HIDDEN_ACCOUNT_STORAGE_KEY = 'cy_account_management_hidden_accounts_v1';
+const SHOW_HIDDEN_ACCOUNT_STORAGE_KEY = 'cy_account_management_show_hidden_accounts_v1';
+
+const readHiddenAccountKeys = (): string[] => {
+    if (typeof window === 'undefined') return [];
+
+    try {
+        const raw = window.localStorage.getItem(HIDDEN_ACCOUNT_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+    } catch (error) {
+        console.warn('Failed to read hidden account keys:', error);
+        return [];
+    }
+};
+
+const readShowHiddenAccounts = (): boolean => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(SHOW_HIDDEN_ACCOUNT_STORAGE_KEY) === 'true';
+};
+
+const writeHiddenAccountKeys = (keys: string[]) => {
+    if (typeof window === 'undefined') return;
+
+    try {
+        window.localStorage.setItem(HIDDEN_ACCOUNT_STORAGE_KEY, JSON.stringify(keys));
+    } catch (error) {
+        console.warn('Failed to store hidden account keys:', error);
+    }
+};
+
+const writeShowHiddenAccounts = (value: boolean) => {
+    if (typeof window === 'undefined') return;
+
+    try {
+        window.localStorage.setItem(SHOW_HIDDEN_ACCOUNT_STORAGE_KEY, value ? 'true' : 'false');
+    } catch (error) {
+        console.warn('Failed to store hidden account view option:', error);
+    }
+};
+
+const getEntityToken = (id: unknown, name: unknown) => {
+    const normalizedId = normalizeText(id);
+    if (normalizedId) return normalizedId;
+
+    const normalizedName = normalizeText(name);
+    return normalizedName ? `name:${normalizedName}` : '__unknown__';
+};
+
+const getWorkerAccountKey = (worker: Pick<Worker, 'id' | 'name'>) => `worker:${getEntityToken(worker.id, worker.name)}`;
+const getTeamAccountKey = (team: Pick<Team, 'id' | 'name'>) => `team:${getEntityToken(team.id, team.name)}`;
+const getCompanyAccountKey = (company: Pick<Company, 'id' | 'name'>) => `company:${getEntityToken(company.id, company.name)}`;
+const getCustomAccountKey = (entry: Pick<AccountDirectory, 'id' | 'name' | 'category'>) => {
+    const normalizedId = normalizeText(entry.id);
+    return `custom:${normalizedId || `${entry.category}:${normalizeText(entry.name) || '__unknown__'}`}`;
+};
+
+const isEndedAccountStatus = (value: unknown) => {
+    const normalized = normalizeText(value).toLowerCase();
+    if (!normalized) return false;
+
+    return (
+        normalized === 'inactive' ||
+        normalized === 'archived' ||
+        normalized === 'closed' ||
+        normalized === 'ended' ||
+        normalized.includes('\uC885\uB8CC') ||
+        normalized.includes('\uBCF4\uAD00')
+    );
+};
+
 const parseAccountTab = (value: string | null): AccountTab => {
     const normalized = normalizeText(value).toLowerCase();
     if (normalized === 'workers') return 'workers';
@@ -265,6 +338,8 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const [selectedWorkerTeamKey, setSelectedWorkerTeamKey] = useState('all');
     const [workerEmploymentFilter, setWorkerEmploymentFilter] = useState<WorkerEmploymentFilter>('active');
     const [workerSalaryFilter, setWorkerSalaryFilter] = useState<WorkerSalaryFilter>('all');
+    const [showHiddenAccounts, setShowHiddenAccounts] = useState(readShowHiddenAccounts);
+    const [hiddenAccountKeys, setHiddenAccountKeys] = useState<string[]>(readHiddenAccountKeys);
 
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
@@ -289,6 +364,14 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const [uploadPreviewFileName, setUploadPreviewFileName] = useState('');
     const [uploadPreviewSections, setUploadPreviewSections] = useState<UploadPreviewSection[]>([]);
     const [applyingUpload, setApplyingUpload] = useState(false);
+
+    useEffect(() => {
+        writeHiddenAccountKeys(hiddenAccountKeys);
+    }, [hiddenAccountKeys]);
+
+    useEffect(() => {
+        writeShowHiddenAccounts(showHiddenAccounts);
+    }, [showHiddenAccounts]);
     useEffect(() => {
         setActiveTab(requestedTab);
     }, [requestedTab]);
@@ -314,6 +397,21 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
             return next;
         });
     }, []);
+
+    const hiddenAccountKeySet = useMemo(() => new Set(hiddenAccountKeys), [hiddenAccountKeys]);
+
+    const hideAccountKey = useCallback((key: string) => {
+        setHiddenAccountKeys((prev) => {
+            if (prev.includes(key)) return prev;
+            return [...prev, key].sort();
+        });
+    }, []);
+
+    const showAccountKey = useCallback((key: string) => {
+        setHiddenAccountKeys((prev) => prev.filter((item) => item !== key));
+    }, []);
+
+    const isAccountKeyHidden = useCallback((key: string) => hiddenAccountKeySet.has(key), [hiddenAccountKeySet]);
 
     const sortCustomAccounts = useCallback((items: AccountDirectory[]) => {
         return [...items].sort((a, b) => {
@@ -357,21 +455,60 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
 
     const getWorkerTeamMeta = useCallback((worker: Worker) => {
         const team = teamById.get(worker.teamId || '');
+        const company = companyById.get(team?.companyId || '');
         const resolvedTeamName = normalizeText(team?.name) || normalizeText(worker.teamName);
         const teamKey = normalizeText(worker.teamId) || (resolvedTeamName ? `name:${resolvedTeamName}` : '__unassigned__');
         const teamType = normalizeText(team?.type) || normalizeText(worker.teamType) || '미지정';
         const companyName =
             normalizeText(team?.companyName) ||
-            normalizeText(companyById.get(team?.companyId || '')?.name) ||
+            normalizeText(company?.name) ||
             normalizeText(worker.companyName);
+        const companyKey = normalizeText(company?.id) || normalizeText(team?.companyId) || (companyName ? `name:${companyName}` : '__unassigned__');
 
         return {
             teamKey,
             teamName: resolvedTeamName || '미배정 작업자',
             teamType,
             companyName,
+            companyKey,
+            teamStatus: normalizeText(team?.status),
+            companyStatus: normalizeText(company?.status),
         };
     }, [companyById, teamById]);
+
+    const isTeamAccountHidden = useCallback(
+        (team: Pick<Team, 'id' | 'name' | 'status'>) => isEndedAccountStatus(team.status) || isAccountKeyHidden(getTeamAccountKey(team)),
+        [isAccountKeyHidden]
+    );
+
+    const isCompanyAccountHidden = useCallback(
+        (company: Pick<Company, 'id' | 'name' | 'status'>) => isEndedAccountStatus(company.status) || isAccountKeyHidden(getCompanyAccountKey(company)),
+        [isAccountKeyHidden]
+    );
+
+    const isCustomAccountHidden = useCallback(
+        (entry: Pick<AccountDirectory, 'id' | 'name' | 'category' | 'status'>) => isEndedAccountStatus(entry.status) || isAccountKeyHidden(getCustomAccountKey(entry)),
+        [isAccountKeyHidden]
+    );
+
+    const isWorkerAccountHidden = useCallback(
+        (worker: Pick<Worker, 'id' | 'name' | 'status' | 'isActive'>) => getWorkerEmploymentStatus(worker) === 'retired' || isAccountKeyHidden(getWorkerAccountKey(worker)),
+        [isAccountKeyHidden]
+    );
+
+    const isWorkerHiddenByAccountScope = useCallback(
+        (worker: Worker) => {
+            const { teamKey, companyKey, teamStatus, companyStatus } = getWorkerTeamMeta(worker);
+            return (
+                isWorkerAccountHidden(worker) ||
+                isEndedAccountStatus(teamStatus) ||
+                isEndedAccountStatus(companyStatus) ||
+                isAccountKeyHidden(`team:${teamKey}`) ||
+                isAccountKeyHidden(`company:${companyKey}`)
+            );
+        },
+        [getWorkerTeamMeta, isAccountKeyHidden, isWorkerAccountHidden]
+    );
 
     const cheongyeonWorkers = useMemo(() => {
         return workers.filter((worker) => {
@@ -385,6 +522,8 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         const grouped = new Map<string, WorkerTeamOption>();
 
         cheongyeonWorkers.forEach((worker) => {
+            if (!showHiddenAccounts && isWorkerHiddenByAccountScope(worker)) return;
+
             const { teamKey, teamName, teamType, companyName } = getWorkerTeamMeta(worker);
             if (!grouped.has(teamKey)) {
                 grouped.set(teamKey, {
@@ -404,7 +543,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
             if (typeCompare !== 0) return typeCompare;
             return a.label.localeCompare(b.label, 'ko');
         });
-    }, [cheongyeonWorkers, getWorkerTeamMeta]);
+    }, [cheongyeonWorkers, getWorkerTeamMeta, isWorkerHiddenByAccountScope, showHiddenAccounts]);
 
     const normalizedSearchTerm = searchTerm.trim().toLowerCase();
 
@@ -437,6 +576,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const workerScopedItems = useMemo(() => {
         return cheongyeonWorkers.filter((worker) => {
             const { teamKey, teamName, teamType, companyName } = getWorkerTeamMeta(worker);
+            if (!showHiddenAccounts && isWorkerHiddenByAccountScope(worker)) return false;
             if (selectedWorkerTeamKey !== 'all' && teamKey !== selectedWorkerTeamKey) return false;
             if (onlyMissing && hasAccountNumber(worker.accountNumber)) return false;
             if (!normalizedSearchTerm) return true;
@@ -454,7 +594,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 getWorkerSalaryLabel(worker),
             ].some((value) => normalizeText(value).toLowerCase().includes(normalizedSearchTerm));
         });
-    }, [cheongyeonWorkers, getWorkerTeamMeta, normalizedSearchTerm, onlyMissing, selectedWorkerTeamKey]);
+    }, [cheongyeonWorkers, getWorkerTeamMeta, isWorkerHiddenByAccountScope, normalizedSearchTerm, onlyMissing, selectedWorkerTeamKey, showHiddenAccounts]);
 
     const workerStatusCounts = useMemo(
         () =>
@@ -544,6 +684,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
 
     const filteredTeams = useMemo(() => {
         return teams.filter((team) => {
+            if (!showHiddenAccounts && isTeamAccountHidden(team)) return false;
             if (onlyMissing && hasAccountNumber(team.accountNumber)) return false;
             if (!normalizedSearchTerm) return true;
 
@@ -557,7 +698,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 team.accountHolder,
             ].some((value) => normalizeText(value).toLowerCase().includes(normalizedSearchTerm));
         });
-    }, [teams, normalizedSearchTerm, onlyMissing]);
+    }, [isTeamAccountHidden, normalizedSearchTerm, onlyMissing, showHiddenAccounts, teams]);
 
     const teamGroups = useMemo<EntityGroup<Team>[]>(() => {
         const grouped = new Map<string, EntityGroup<Team>>();
@@ -577,6 +718,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
 
     const filteredCompanies = useMemo(() => {
         return companies.filter((company) => {
+            if (!showHiddenAccounts && isCompanyAccountHidden(company)) return false;
             if (onlyMissing && hasAccountNumber(company.accountNumber)) return false;
             if (!normalizedSearchTerm) return true;
 
@@ -589,7 +731,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 company.accountHolder,
             ].some((value) => normalizeText(value).toLowerCase().includes(normalizedSearchTerm));
         });
-    }, [companies, normalizedSearchTerm, onlyMissing]);
+    }, [companies, isCompanyAccountHidden, normalizedSearchTerm, onlyMissing, showHiddenAccounts]);
 
     const companyGroups = useMemo<EntityGroup<Company>[]>(() => {
         const grouped = new Map<string, EntityGroup<Company>>();
@@ -609,6 +751,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
 
     const filteredCustomAccounts = useMemo(() => {
         return customAccounts.filter((entry) => {
+            if (!showHiddenAccounts && isCustomAccountHidden(entry)) return false;
             if (onlyMissing && hasAccountNumber(entry.accountNumber)) return false;
             if (!normalizedSearchTerm) return true;
 
@@ -620,7 +763,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 entry.accountHolder,
             ].some((value) => normalizeText(value).toLowerCase().includes(normalizedSearchTerm));
         });
-    }, [customAccounts, normalizedSearchTerm, onlyMissing]);
+    }, [customAccounts, isCustomAccountHidden, normalizedSearchTerm, onlyMissing, showHiddenAccounts]);
 
     const customGroups = useMemo<EntityGroup<AccountDirectory>[]>(() => {
         return (Object.keys(CUSTOM_CATEGORY_META) as CustomCategory[]).map((category) => {
@@ -660,14 +803,35 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         });
     }, [companyGroups]);
 
-    const workerMissingCount = useMemo(
-        () => cheongyeonWorkers.filter((item) => !hasAccountNumber(item.accountNumber)).length,
-        [cheongyeonWorkers]
+    const visibleCheongyeonWorkersForStats = useMemo(
+        () => cheongyeonWorkers.filter((item) => showHiddenAccounts || !isWorkerHiddenByAccountScope(item)),
+        [cheongyeonWorkers, isWorkerHiddenByAccountScope, showHiddenAccounts]
     );
-    const teamMissingCount = useMemo(() => teams.filter((item) => !hasAccountNumber(item.accountNumber)).length, [teams]);
-    const companyMissingCount = useMemo(() => companies.filter((item) => !hasAccountNumber(item.accountNumber)).length, [companies]);
-    const purchaseCount = useMemo(() => customAccounts.filter((item) => item.category === 'purchase').length, [customAccounts]);
-    const otherCount = useMemo(() => customAccounts.filter((item) => item.category === 'other').length, [customAccounts]);
+    const visibleTeamsForStats = useMemo(
+        () => teams.filter((item) => showHiddenAccounts || !isTeamAccountHidden(item)),
+        [isTeamAccountHidden, showHiddenAccounts, teams]
+    );
+    const visibleCompaniesForStats = useMemo(
+        () => companies.filter((item) => showHiddenAccounts || !isCompanyAccountHidden(item)),
+        [companies, isCompanyAccountHidden, showHiddenAccounts]
+    );
+    const visibleCustomAccountsForStats = useMemo(
+        () => customAccounts.filter((item) => showHiddenAccounts || !isCustomAccountHidden(item)),
+        [customAccounts, isCustomAccountHidden, showHiddenAccounts]
+    );
+    const workerMissingCount = useMemo(
+        () => visibleCheongyeonWorkersForStats.filter((item) => !hasAccountNumber(item.accountNumber)).length,
+        [visibleCheongyeonWorkersForStats]
+    );
+    const teamMissingCount = useMemo(() => visibleTeamsForStats.filter((item) => !hasAccountNumber(item.accountNumber)).length, [visibleTeamsForStats]);
+    const companyMissingCount = useMemo(() => visibleCompaniesForStats.filter((item) => !hasAccountNumber(item.accountNumber)).length, [visibleCompaniesForStats]);
+    const purchaseCount = useMemo(() => visibleCustomAccountsForStats.filter((item) => item.category === 'purchase').length, [visibleCustomAccountsForStats]);
+    const otherCount = useMemo(() => visibleCustomAccountsForStats.filter((item) => item.category === 'other').length, [visibleCustomAccountsForStats]);
+    const hiddenWorkerCount = useMemo(() => cheongyeonWorkers.filter((item) => isWorkerHiddenByAccountScope(item)).length, [cheongyeonWorkers, isWorkerHiddenByAccountScope]);
+    const hiddenTeamCount = useMemo(() => teams.filter((item) => isTeamAccountHidden(item)).length, [isTeamAccountHidden, teams]);
+    const hiddenCompanyCount = useMemo(() => companies.filter((item) => isCompanyAccountHidden(item)).length, [companies, isCompanyAccountHidden]);
+    const hiddenCustomCount = useMemo(() => customAccounts.filter((item) => isCustomAccountHidden(item)).length, [customAccounts, isCustomAccountHidden]);
+    const hiddenAccountCount = hiddenWorkerCount + hiddenTeamCount + hiddenCompanyCount + hiddenCustomCount;
 
     const topWorkerGaps = useMemo(() => workerGroups.filter((group) => group.missingCount > 0).sort((a, b) => b.missingCount - a.missingCount).slice(0, 5), [workerGroups]);
     const topTeamGaps = useMemo(() => teamGroups.filter((group) => group.missingCount > 0), [teamGroups]);
@@ -1570,6 +1734,17 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                             계좌 미등록만 보기
                         </label>
 
+                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                            <input
+                                type="checkbox"
+                                checked={showHiddenAccounts}
+                                onChange={(event) => setShowHiddenAccounts(event.target.checked)}
+                                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            {'\uC228\uAE40/\uC885\uB8CC \uD3EC\uD568'}
+                            <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-bold text-slate-600">{hiddenAccountCount}</span>
+                        </label>
+
                         <button
                             type="button"
                             onClick={loadData}
@@ -1831,7 +2006,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
                                 <SummaryCard
                                     title="작업자 계좌 등록"
-                                    value={`${cheongyeonWorkers.length - workerMissingCount}/${cheongyeonWorkers.length}`}
+                                    value={`${visibleCheongyeonWorkersForStats.length - workerMissingCount}/${visibleCheongyeonWorkersForStats.length}`}
                                     description={`청연 소속 팀 기준으로 묶어 관리하며 미등록 ${workerMissingCount}명`}
                                     icon={faHardHat}
                                     toneClass="border-blue-200 bg-blue-50 text-blue-600"
@@ -1842,7 +2017,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                 />
                                 <SummaryCard
                                     title="팀 계좌 등록"
-                                    value={`${teams.length - teamMissingCount}/${teams.length}`}
+                                    value={`${visibleTeamsForStats.length - teamMissingCount}/${visibleTeamsForStats.length}`}
                                     description={`시공팀/지원팀/용역팀 중 미등록 ${teamMissingCount}팀`}
                                     icon={faUsers}
                                     toneClass="border-amber-200 bg-amber-50 text-amber-600"
@@ -1850,7 +2025,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                 />
                                 <SummaryCard
                                     title="회사 계좌 등록"
-                                    value={`${companies.length - companyMissingCount}/${companies.length}`}
+                                    value={`${visibleCompaniesForStats.length - companyMissingCount}/${visibleCompaniesForStats.length}`}
                                     description={`시공사/협력사/건설사 중 미등록 ${companyMissingCount}개`}
                                     icon={faBuilding}
                                     toneClass="border-emerald-200 bg-emerald-50 text-emerald-600"
@@ -1970,7 +2145,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                         <div>
                                             <div className="text-sm font-semibold text-slate-900">청연 소속 팀 작업자 계좌만 표시합니다.</div>
                                             <div className="mt-1 text-sm text-slate-500">
-                                                청연 소속 전체 {cheongyeonWorkers.length}명 중 현재 {visibleWorkerCount}명을 보고 있습니다.
+                                                청연 소속 전체 {visibleCheongyeonWorkersForStats.length}명 중 현재 {visibleWorkerCount}명을 보고 있습니다.
                                                 기본값은 현재 작업자만 표시하며, 퇴사자는 필요할 때만 열어볼 수 있습니다.
                                             </div>
                                         </div>
@@ -2090,11 +2265,16 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                             const savingKey = rowKey;
                                                             const isEditing = true;
                                                             const accountMissing = !hasAccountNumber(worker.accountNumber);
+                                                            const accountKey = getWorkerAccountKey(worker);
+                                                            const isManuallyHidden = isAccountKeyHidden(accountKey);
+                                                            const isRetiredWorker = getWorkerEmploymentStatus(worker) === 'retired';
+                                                            const isHiddenRow = isWorkerHiddenByAccountScope(worker);
+                                                            const rowClassName = isHiddenRow ? 'bg-slate-50 text-slate-500' : accountMissing ? 'bg-amber-50/50' : 'bg-white';
 
                                                             return (
                                                                 <tr
                                                                     key={worker.id || `${section.key}-${group.key}-${worker.name}`}
-                                                                    className={accountMissing ? 'bg-amber-50/50' : 'bg-white'}
+                                                                    className={rowClassName}
                                                                 >
                                                                     <td className="px-4 py-3 align-top">
                                                                         <div className="font-semibold text-slate-900">{group.teamName}</div>
@@ -2107,7 +2287,19 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                     </td>
                                                                     <td className="px-4 py-3 align-top">
                                                                         <div className="font-semibold text-slate-900">{worker.name}</div>
-                                                                        <div className="mt-1 text-xs text-slate-500">{worker.contact || '연락처 없음'}</div>
+                                                                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                                                            <span>{worker.contact || '연락처 없음'}</span>
+                                                                            {isManuallyHidden && (
+                                                                                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">
+                                                                                    {'\uC228\uAE40'}
+                                                                                </span>
+                                                                            )}
+                                                                            {isRetiredWorker && (
+                                                                                <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 font-semibold text-rose-700">
+                                                                                    {'\uD1F4\uC0AC'}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
                                                                     </td>
                                                                     <td className="px-4 py-3 align-top">
                                                                         <div className="text-sm font-medium text-slate-700">{worker.role || '직책 미입력'}</div>
@@ -2185,6 +2377,15 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                                 <FontAwesomeIcon icon={faTrash} />
                                                                                 삭제
                                                                             </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                disabled={!worker.id}
+                                                                                onClick={() => (isManuallyHidden ? showAccountKey(accountKey) : hideAccountKey(accountKey))}
+                                                                                className={rowActionSecondaryClass}
+                                                                            >
+                                                                                <FontAwesomeIcon icon={isManuallyHidden ? faEye : faEyeSlash} />
+                                                                                {isManuallyHidden ? '\uD45C\uC2DC' : '\uC228\uAE30\uAE30'}
+                                                                            </button>
                                                                         </div>
                                                                     </td>
                                                                 </tr>
@@ -2239,11 +2440,27 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         const rowKey = `team:${team.id}`;
                                                         const savingKey = rowKey;
                                                         const isEditing = true;
+                                                        const accountKey = getTeamAccountKey(team);
+                                                        const isManuallyHidden = isAccountKeyHidden(accountKey);
+                                                        const isEndedStatus = isEndedAccountStatus(team.status);
+                                                        const isHiddenRow = isManuallyHidden || isEndedStatus;
                                                         return (
-                                                            <tr key={team.id} className="align-top">
+                                                            <tr key={team.id} className={`align-top ${isHiddenRow ? 'bg-slate-50 text-slate-500' : ''}`}>
                                                                 <td className="px-4 py-3">
                                                                     <div className="font-semibold text-slate-900">{team.name}</div>
-                                                                    <div className="mt-1 text-xs text-slate-500">{team.memberCount || 0}명</div>
+                                                                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                                                        <span>{team.memberCount || 0}명</span>
+                                                                        {isManuallyHidden && (
+                                                                            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">
+                                                                                {'\uC228\uAE40'}
+                                                                            </span>
+                                                                        )}
+                                                                        {isEndedStatus && (
+                                                                            <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 font-semibold text-rose-700">
+                                                                                {'\uC885\uB8CC'}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
                                                                 </td>
                                                                 <td className="px-4 py-3">{team.companyName || '미지정'}</td>
                                                                 <td className="px-4 py-3">{team.leaderName || '미지정'}</td>
@@ -2303,6 +2520,15 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                             <FontAwesomeIcon icon={faTrash} />
                                                                             삭제
                                                                         </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={!team.id}
+                                                                            onClick={() => (isManuallyHidden ? showAccountKey(accountKey) : hideAccountKey(accountKey))}
+                                                                            className={rowActionSecondaryClass}
+                                                                        >
+                                                                            <FontAwesomeIcon icon={isManuallyHidden ? faEye : faEyeSlash} />
+                                                                            {isManuallyHidden ? '\uD45C\uC2DC' : '\uC228\uAE30\uAE30'}
+                                                                        </button>
                                                                     </div>
                                                                 </td>
                                                             </tr>
@@ -2356,11 +2582,27 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         const rowKey = `company:${company.id}`;
                                                         const savingKey = rowKey;
                                                         const isEditing = true;
+                                                        const accountKey = getCompanyAccountKey(company);
+                                                        const isManuallyHidden = isAccountKeyHidden(accountKey);
+                                                        const isEndedStatus = isEndedAccountStatus(company.status);
+                                                        const isHiddenRow = isManuallyHidden || isEndedStatus;
                                                         return (
-                                                            <tr key={company.id} className="align-top">
+                                                            <tr key={company.id} className={`align-top ${isHiddenRow ? 'bg-slate-50 text-slate-500' : ''}`}>
                                                                 <td className="px-4 py-3">
                                                                     <div className="font-semibold text-slate-900">{company.name}</div>
-                                                                    <div className="mt-1 text-xs text-slate-500">{company.phone || '연락처 없음'}</div>
+                                                                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                                                        <span>{company.phone || '연락처 없음'}</span>
+                                                                        {isManuallyHidden && (
+                                                                            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">
+                                                                                {'\uC228\uAE40'}
+                                                                            </span>
+                                                                        )}
+                                                                        {isEndedStatus && (
+                                                                            <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 font-semibold text-rose-700">
+                                                                                {'\uC885\uB8CC'}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
                                                                 </td>
                                                                 <td className="px-4 py-3">{company.ceoName || '미지정'}</td>
                                                                 <td className="px-4 py-3">{company.businessNumber || '미지정'}</td>
@@ -2419,6 +2661,15 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                         >
                                                                             <FontAwesomeIcon icon={faTrash} />
                                                                             삭제
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={!company.id}
+                                                                            onClick={() => (isManuallyHidden ? showAccountKey(accountKey) : hideAccountKey(accountKey))}
+                                                                            className={rowActionSecondaryClass}
+                                                                        >
+                                                                            <FontAwesomeIcon icon={isManuallyHidden ? faEye : faEyeSlash} />
+                                                                            {isManuallyHidden ? '\uD45C\uC2DC' : '\uC228\uAE30\uAE30'}
                                                                         </button>
                                                                     </div>
                                                                 </td>
@@ -2503,13 +2754,24 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                     const rowKey = `custom:${entry.id}`;
                                                                     const rowSavingKey = rowKey;
                                                                     const isEditing = !!editingKeys[rowKey];
+                                                                    const accountKey = getCustomAccountKey(entry);
+                                                                    const isManuallyHidden = isAccountKeyHidden(accountKey);
+                                                                    const isEndedStatus = isEndedAccountStatus(entry.status);
+                                                                    const isHiddenRow = isManuallyHidden || isEndedStatus;
                                                                     return (
-                                                                        <tr key={entry.id} className="align-top">
+                                                                        <tr key={entry.id} className={`align-top ${isHiddenRow ? 'bg-slate-50 text-slate-500' : ''}`}>
                                                                             <td className="px-4 py-3">
                                                                                 {isEditing ? (
                                                                                     <input value={entry.name || ''} onChange={(event) => updateCustomField(entry.id || '', 'name', event.target.value)} className="w-48 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
                                                                                 ) : (
-                                                                                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">{entry.name || '-'}</div>
+                                                                                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                                                                                        <div>{entry.name || '-'}</div>
+                                                                                        {isManuallyHidden && (
+                                                                                            <div className="mt-1 inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                                                                                                {'\uC228\uAE40'}
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
                                                                                 )}
                                                                             </td>
                                                                             <td className="px-4 py-3">
@@ -2574,6 +2836,15 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                                     <button type="button" disabled={!entry.id || !!savingKeys[rowSavingKey]} onClick={() => entry.id && deleteCustomEntry(entry.id)} className={rowActionDangerClass}>
                                                                                         <FontAwesomeIcon icon={faTrash} />
                                                                                         삭제
+                                                                                    </button>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        disabled={!entry.id}
+                                                                                        onClick={() => (isManuallyHidden ? showAccountKey(accountKey) : hideAccountKey(accountKey))}
+                                                                                        className={rowActionSecondaryClass}
+                                                                                    >
+                                                                                        <FontAwesomeIcon icon={isManuallyHidden ? faEye : faEyeSlash} />
+                                                                                        {isManuallyHidden ? '\uD45C\uC2DC' : '\uC228\uAE30\uAE30'}
                                                                                     </button>
                                                                                 </div>
                                                                             </td>

@@ -91,6 +91,11 @@ export const vehicleFirestoreService = {
         }), { merge: true });
     },
 
+    deleteVehicleAssignment: async (id: string) => {
+        const ref = doc(db, ASSIGNMENT_COLLECTION, id);
+        await deleteDoc(ref);
+    },
+
     /**
      * 차량 청구대상 이력 조회
      */

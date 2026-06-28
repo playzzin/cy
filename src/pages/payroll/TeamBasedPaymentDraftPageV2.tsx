@@ -20,6 +20,16 @@ type WorkerWithId = Worker & { id: string };
 type CompanyTypeFilter = 'all' | 'construction' | 'partner';
 
 const CONSTRUCTION_TEAM_TYPES = new Set<string>(['본팀', '관리팀', '새끼팀', '직영팀', '시공팀']);
+const PAY_TYPE_FILTER_OPTIONS = [
+    { value: '', label: '전체', icon: faSearch, activeClassName: 'bg-slate-800 text-white border-slate-800' },
+    { value: '월급제', label: '월급제', icon: faCalendarDays, activeClassName: 'bg-indigo-600 text-white border-indigo-600' },
+    { value: '일급제', label: '일급제', icon: faCalendarDay, activeClassName: 'bg-blue-600 text-white border-blue-600' },
+    { value: '용역팀', label: '용역팀', icon: faHandshake, activeClassName: 'bg-violet-600 text-white border-violet-600' },
+    { value: '지원팀', label: '지원팀', icon: faHandshake, activeClassName: 'bg-amber-600 text-white border-amber-600' }
+] as const;
+const DEFAULT_PAYSLIP_CONTRACTOR_NAME = '(주)청연이엔지';
+const PAYSLIP_CONTRACTOR_OPTIONS = [DEFAULT_PAYSLIP_CONTRACTOR_NAME, '(주)다원'];
+const CUSTOM_PAYSLIP_CONTRACTOR_VALUE = '__custom_contractor__';
 
 const KB_MAX_DEPOSIT_DISPLAY_LENGTH = 10;
 const KB_MAX_WITHDRAW_DISPLAY_LENGTH = 14;
@@ -104,6 +114,8 @@ const TeamBasedPaymentDraftPageV2: React.FC = () => {
     const [selectedPayslipRowKey, setSelectedPayslipRowKey] = useState<string>('');
     const [selectedPayslipYearMonth, setSelectedPayslipYearMonth] = useState<string>('');
     const [payslipSearchQuery, setPayslipSearchQuery] = useState<string>('');
+    const [payslipContractorOption, setPayslipContractorOption] = useState<string>(DEFAULT_PAYSLIP_CONTRACTOR_NAME);
+    const [customPayslipContractorName, setCustomPayslipContractorName] = useState<string>('');
 
     const normalizeValue = useCallback((value: string | undefined): string => {
         return (value ?? '').replace(/\s+/g, '').trim();
@@ -731,6 +743,13 @@ const TeamBasedPaymentDraftPageV2: React.FC = () => {
         selectedPayslipYearMonth
     ]);
 
+    const resolvedPayslipContractorName = useMemo(() => {
+        const selected = payslipContractorOption === CUSTOM_PAYSLIP_CONTRACTOR_VALUE
+            ? customPayslipContractorName
+            : payslipContractorOption;
+        return selected.trim() || DEFAULT_PAYSLIP_CONTRACTOR_NAME;
+    }, [customPayslipContractorName, payslipContractorOption]);
+
     const kbPreviewRows = useMemo((): KbPreviewRow[] => {
         const depositDisplay = truncateToMaxLength(kbReceiverDisplay ?? '', KB_MAX_DEPOSIT_DISPLAY_LENGTH);
         return filteredPaymentData.map((row) => {
@@ -817,6 +836,7 @@ const TeamBasedPaymentDraftPageV2: React.FC = () => {
 
         const summaryRows: (string | number)[][] = [
             ['항목', '값'],
+            ['시공사', resolvedPayslipContractorName],
             ['이름', selectedPayslipRow.workerName],
             ['팀', selectedPayslipRow.teamName],
             ['월', selectedPayslipYearMonth],
@@ -866,7 +886,7 @@ const TeamBasedPaymentDraftPageV2: React.FC = () => {
         const safeName = (selectedPayslipRow.workerName || 'worker').replace(/[\\/:*?"<>|]/g, '_');
         const fileName = `노임명세서_${safeName}_${selectedPayslipYearMonth}.xlsx`;
         XLSX.writeFile(wb, fileName);
-    }, [selectedPayslipComputed, selectedPayslipRow, selectedPayslipYearMonth]);
+    }, [resolvedPayslipContractorName, selectedPayslipComputed, selectedPayslipRow, selectedPayslipYearMonth]);
 
     const handleDownloadKBExcel = useCallback(() => {
         if (kbPreviewRows.length === 0) {
@@ -1186,37 +1206,18 @@ const TeamBasedPaymentDraftPageV2: React.FC = () => {
                     <div>
                         <label className="block text-xs font-semibold text-slate-600 mb-2">급여방식</label>
                         <div className="flex flex-wrap gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setSelectedType('')}
-                                className={`px-3 py-1 rounded text-xs font-bold border ${selectedType === '' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
-                            >
-                                전체
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setSelectedType('일급제')}
-                                className={`px-3 py-1 rounded text-xs font-bold border ${selectedType === '일급제' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
-                            >
-                                <FontAwesomeIcon icon={faCalendarDay} className="mr-1" />
-                                일급
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setSelectedType('월급제')}
-                                className={`px-3 py-1 rounded text-xs font-bold border ${selectedType === '월급제' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
-                            >
-                                <FontAwesomeIcon icon={faCalendarDays} className="mr-1" />
-                                월급
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setSelectedType('지원팀')}
-                                className={`px-3 py-1 rounded text-xs font-bold border ${selectedType === '지원팀' ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
-                            >
-                                <FontAwesomeIcon icon={faHandshake} className="mr-1" />
-                                지원
-                            </button>
+                            {PAY_TYPE_FILTER_OPTIONS.map((option) => (
+                                <button
+                                    key={option.value || 'all'}
+                                    type="button"
+                                    onClick={() => setSelectedType(option.value)}
+                                    aria-pressed={selectedType === option.value}
+                                    className={`px-3 py-1 rounded text-xs font-bold border ${selectedType === option.value ? option.activeClassName : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                                >
+                                    <FontAwesomeIcon icon={option.icon} className="mr-1" />
+                                    {option.label}
+                                </button>
+                            ))}
                         </div>
                     </div>
 
@@ -1266,6 +1267,22 @@ const TeamBasedPaymentDraftPageV2: React.FC = () => {
                                 onChange={(e) => setEndDate(e.target.value)}
                                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                             />
+                        </div>
+                        <div className="min-w-[300px]">
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">급여 구분</label>
+                            <div className="flex h-[38px] flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1.5">
+                                {PAY_TYPE_FILTER_OPTIONS.filter((option) => option.value !== '지원팀').map((option) => (
+                                    <button
+                                        key={`compact-${option.value || 'all'}`}
+                                        type="button"
+                                        onClick={() => setSelectedType(option.value)}
+                                        aria-pressed={selectedType === option.value}
+                                        className={`rounded-md px-2.5 py-1 text-[11px] font-black transition ${selectedType === option.value ? option.activeClassName : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}`}
+                                    >
+                                        {option.label}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                         <div className="flex-1 min-w-[160px]">
                             <label className="block text-xs font-semibold text-slate-600 mb-1">팀</label>
@@ -1512,6 +1529,30 @@ const TeamBasedPaymentDraftPageV2: React.FC = () => {
                                     ))}
                                 </select>
                             </div>
+                            <div className="w-full sm:w-60">
+                                <label className="block text-xs font-semibold text-slate-600 mb-1">시공사</label>
+                                <select
+                                    value={payslipContractorOption}
+                                    onChange={(e) => setPayslipContractorOption(e.target.value)}
+                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                                >
+                                    {PAYSLIP_CONTRACTOR_OPTIONS.map((name) => (
+                                        <option key={name} value={name}>{name}</option>
+                                    ))}
+                                    <option value={CUSTOM_PAYSLIP_CONTRACTOR_VALUE}>새 상호 직접 입력</option>
+                                </select>
+                            </div>
+                            {payslipContractorOption === CUSTOM_PAYSLIP_CONTRACTOR_VALUE && (
+                                <div className="w-full sm:w-64">
+                                    <label className="block text-xs font-semibold text-slate-600 mb-1">새 상호</label>
+                                    <input
+                                        value={customPayslipContractorName}
+                                        onChange={(e) => setCustomPayslipContractorName(e.target.value)}
+                                        placeholder="시공사 상호 입력"
+                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                                    />
+                                </div>
+                            )}
                         </div>
 
                         <div className="flex-1 overflow-auto p-3 sm:p-4">
@@ -1532,6 +1573,9 @@ const TeamBasedPaymentDraftPageV2: React.FC = () => {
                                     <div className="rounded-lg border border-slate-200 p-4">
                                         <div className="text-sm font-bold text-slate-800">기본 정보</div>
                                         <div className="mt-2 text-sm text-slate-700 space-y-1">
+                                            <div>
+                                                시공사: <span className="font-semibold">{resolvedPayslipContractorName}</span>
+                                            </div>
                                             <div>
                                                 이름: <span className="font-semibold">{selectedPayslipRow.workerName}</span>
                                             </div>

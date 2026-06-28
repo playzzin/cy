@@ -1,4 +1,299 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "daily_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "date", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "daily_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "date", "order": "DESCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "daily_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "teamId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "daily_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "siteId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "daily_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "teamId", "order": "ASCENDING" },
+        { "fieldPath": "siteId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "recruiting_referrers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_worker_referrals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "workerId", "order": "ASCENDING" },
+        { "fieldPath": "startDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_worker_referrals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "referrerId", "order": "ASCENDING" },
+        { "fieldPath": "startDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_referral_daily_lines",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearMonth", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_referral_daily_lines",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearMonth", "order": "ASCENDING" },
+        { "fieldPath": "referrerId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_referral_monthly_settlements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearMonth", "order": "ASCENDING" },
+        { "fieldPath": "referrerName", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_referral_monthly_settlements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearMonth", "order": "DESCENDING" },
+        { "fieldPath": "referrerName", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_referral_daily_lines",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "workerId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_worker_history",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "workerId", "order": "ASCENDING" },
+        { "fieldPath": "eventDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_worker_history",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "eventType", "order": "ASCENDING" },
+        { "fieldPath": "eventDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_referral_payments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearMonth", "order": "ASCENDING" },
+        { "fieldPath": "referrerName", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_referral_payments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearMonth", "order": "ASCENDING" },
+        { "fieldPath": "paymentStatus", "order": "ASCENDING" },
+        { "fieldPath": "referrerName", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_referral_payments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearMonth", "order": "DESCENDING" },
+        { "fieldPath": "referrerName", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_referral_deposits",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearMonth", "order": "ASCENDING" },
+        { "fieldPath": "depositDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_referral_deposits",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearMonth", "order": "ASCENDING" },
+        { "fieldPath": "verified", "order": "ASCENDING" },
+        { "fieldPath": "depositDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_referral_deposits",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearMonth", "order": "DESCENDING" },
+        { "fieldPath": "depositDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_referral_receivables",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "month", "order": "ASCENDING" },
+        { "fieldPath": "referrerName", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_referral_receivables",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "month", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "referrerName", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_referral_receivables",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "month", "order": "DESCENDING" },
+        { "fieldPath": "referrerName", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "partnerRecognitionImages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "jobId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "partnerRecognitionResults",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "jobId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "partnerRecognitionResults",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "jobId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "businessContacts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "businessCardImages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "businessCardImages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "contactId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "businessContactHistories",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "contactId", "order": "ASCENDING" },
+        { "fieldPath": "happenedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "businessContactFollowUps",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "contactId", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "companyRelationships",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sourceCompanyId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "companyRelationships",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "targetCompanyId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "sales_purchase_workbook_entries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "transactionType", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "sales_purchase_workbook_entries_dawon",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "transactionType", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    }
+  ],
   "fieldOverrides": []
 }

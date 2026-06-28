@@ -4,6 +4,7 @@ import {
     faArrowRightFromBracket,
     faBuilding,
     faCheck,
+    faClipboardCheck,
     faFileInvoiceDollar,
     faPen,
     faSearch,
@@ -16,6 +17,7 @@ import { Accommodation } from '../../types/accommodation';
 import { AccommodationAssignment } from '../../types/accommodationAssignment';
 import { formatTypedDateInput, normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
 import { BillingModeSelector, BillingStatusSummary } from '../support/BillingModeSelector';
+import BillingPeriodTimeline, { BillingPeriodTimelineItem } from '../support/BillingPeriodTimeline';
 import { useAccommodationQuickAssignment } from './useAccommodationQuickAssignment';
 
 interface Props {
@@ -55,11 +57,7 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
         selectedBillingTargetKey,
         setSelectedBillingTargetKey,
         selectedBillingTarget,
-        showBillingDateFields,
-        billingTargetStartDate,
-        setBillingTargetStartDate,
-        billingTargetEndDate,
-        setBillingTargetEndDate,
+        billingTargetRecords,
         currentBillingTarget,
         currentBillingTargetDisplay,
         handleEdit,
@@ -81,20 +79,8 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
     const handleStartDateChange = (value: string) => {
         setStartDate(formatTypedDateInput(value, { yearDigits: 2 }));
     };
-    const handleBillingStartDateChange = (value: string) => {
-        setBillingTargetStartDate(formatTypedDateInput(value, { yearDigits: 2 }));
-    };
-    const handleBillingEndDateChange = (value: string) => {
-        setBillingTargetEndDate(formatTypedDateInput(value, { yearDigits: 2 }));
-    };
     const normalizeStartDate = () => {
         setStartDate((prev) => toShortYearDateInputValue(normalizeTypedDateInput(prev) ?? prev) || prev);
-    };
-    const normalizeBillingStartDate = () => {
-        setBillingTargetStartDate((prev) => toShortYearDateInputValue(normalizeTypedDateInput(prev) ?? prev) || prev);
-    };
-    const normalizeBillingEndDate = () => {
-        setBillingTargetEndDate((prev) => prev ? (toShortYearDateInputValue(normalizeTypedDateInput(prev) ?? prev) || prev) : '');
     };
     const filteredAssignmentWorkerOptions = React.useMemo(() => {
         if (!normalizedAssignmentWorkerSearch) return assignmentWorkerOptions;
@@ -129,6 +115,36 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
             : firstLabel;
     }, [displayActiveAssignments]);
     const canUseSameBillingMode = Boolean(currentBillingTarget || displayActiveAssignments.length > 0);
+    const getBillingTargetTypeText = (type?: string | null) => {
+        if (type === 'team') return '팀';
+        if (type === 'worker') return '작업자';
+        if (type === 'office') return '사무실';
+        if (type === 'office_staff') return '사무실직원';
+        return '청구대상';
+    };
+    const billingTimelineItems = React.useMemo<BillingPeriodTimelineItem[]>(() => (
+        billingTargetRecords
+            .slice()
+            .sort((a, b) => {
+                const startDiff = String(a.startDate ?? '').localeCompare(String(b.startDate ?? ''));
+                if (startDiff !== 0) return startDiff;
+                return String(a.id ?? '').localeCompare(String(b.id ?? ''));
+            })
+            .map((target) => {
+                const targetName = target.targetType === 'team'
+                    ? target.teamName
+                    : target.targetType === 'office'
+                        ? target.teamName || '사무실'
+                        : target.workerName;
+                return {
+                    id: String(target.id ?? `${target.accommodationId}:${target.startDate}`),
+                    label: String(targetName || '청구대상'),
+                    typeLabel: getBillingTargetTypeText(target.targetType),
+                    startDate: target.startDate,
+                    endDate: target.endDate
+                };
+            })
+    ), [billingTargetRecords]);
     const [activeSection, setActiveSection] = React.useState<'assignment' | 'billing'>(
         initialBillingSplitMode ? 'billing' : 'assignment'
     );
@@ -178,6 +194,11 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                             }`}
                         >
                             <div className="flex items-center gap-2 text-sm font-extrabold">
+                                <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] ${
+                                    activeSection === 'assignment' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-500'
+                                }`}>
+                                    1
+                                </span>
                                 <FontAwesomeIcon icon={faUsers} className="text-xs" />
                                 <span>배정</span>
                             </div>
@@ -195,6 +216,11 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                             }`}
                         >
                             <div className="flex items-center gap-2 text-sm font-extrabold">
+                                <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] ${
+                                    activeSection === 'billing' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-500'
+                                }`}>
+                                    2
+                                </span>
                                 <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-xs" />
                                 <span>청구</span>
                             </div>
@@ -202,6 +228,39 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                 청구대상 설정
                             </div>
                         </button>
+                    </div>
+
+                    <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(220px,0.7fr)]">
+                        <BillingStatusSummary
+                            items={[
+                                {
+                                    label: '현재 입실',
+                                    value: activeAssignmentSummary,
+                                    tone: displayActiveAssignments.length > 0 ? 'indigo' : 'amber'
+                                },
+                                {
+                                    label: '현재 청구',
+                                    value: currentBillingTargetDisplay,
+                                    tone: currentBillingTarget ? 'indigo' : 'emerald'
+                                },
+                                {
+                                    label: '대장 반영',
+                                    value: '저장 즉시 업데이트',
+                                    tone: 'emerald'
+                                }
+                            ]}
+                        />
+                        <div className="flex items-start gap-2 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-emerald-800">
+                            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-emerald-600 text-[11px] text-white">
+                                <FontAwesomeIcon icon={faClipboardCheck} />
+                            </span>
+                            <div className="min-w-0">
+                                <div className="text-[11px] font-extrabold opacity-70">관리대장 반영</div>
+                                <div className="mt-0.5 text-xs font-bold leading-snug">
+                                    저장하면 숙소 현황과 숙소 공과금/청구대장에 바로 반영됩니다.
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -462,6 +521,13 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                 </div>
                             </div>
 
+                            {billingTimelineItems.length > 0 && (
+                                <BillingPeriodTimeline
+                                    items={billingTimelineItems}
+                                    title="숙소 청구기간 타임라인"
+                                />
+                            )}
+
                             <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
                                 {activeAssignments.length === 0 && (
                                     <div className="text-xs text-slate-500 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
@@ -482,8 +548,8 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                             tone: currentBillingTarget ? 'indigo' : 'emerald'
                                         },
                                         {
-                                            label: '청구 시작일',
-                                            value: displayDate(currentBillingTarget?.startDate) || '26-01-01',
+                                            label: '청구 기준',
+                                            value: '매월 1일~말일',
                                             tone: 'amber'
                                         }
                                     ]}
@@ -534,67 +600,6 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                     </div>
                                     )}
 
-                                    {billingMode !== 'same' && (
-                                        <button
-                                            type="button"
-                                            onClick={() => setBillingMode(billingMode === 'split' ? 'custom' : 'split')}
-                                            className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors ${
-                                                billingMode === 'split'
-                                                    ? 'border-amber-200 bg-amber-50 text-amber-800'
-                                                    : 'border-slate-200 bg-white text-slate-600 hover:border-amber-200 hover:bg-amber-50/60'
-                                            }`}
-                                        >
-                                            <span className="min-w-0">
-                                                <span className="block text-sm font-extrabold">기간 지정</span>
-                                                <span className="mt-0.5 block text-xs font-semibold text-slate-500">
-                                                    월 중간에 청구대상이 바뀔 때만 켭니다.
-                                                </span>
-                                            </span>
-                                            <span className={`ml-3 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-extrabold ${
-                                                billingMode === 'split' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-500'
-                                            }`}>
-                                                {billingMode === 'split' ? '분할청구' : '일반청구'}
-                                            </span>
-                                        </button>
-                                    )}
-
-                                    {showBillingDateFields && (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                            <div>
-                                                <label className="block text-xs font-bold text-slate-500 mb-1.5">
-                                                    {billingMode === 'split' ? '기간 시작일' : '청구 시작일'}
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    inputMode="numeric"
-                                                    maxLength={10}
-                                                    placeholder="YY-MM-DD"
-                                                    value={billingTargetStartDate}
-                                                    onChange={(event) => handleBillingStartDateChange(event.target.value)}
-                                                    onBlur={normalizeBillingStartDate}
-                                                    className="w-full p-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-100 outline-none text-sm font-medium bg-white"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs font-bold text-slate-500 mb-1.5">
-                                                    {billingMode === 'split' ? '기간 종료일' : '청구 종료일'}
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    inputMode="numeric"
-                                                    maxLength={10}
-                                                    placeholder="선택"
-                                                    value={billingTargetEndDate}
-                                                    onChange={(event) => handleBillingEndDateChange(event.target.value)}
-                                                    onBlur={normalizeBillingEndDate}
-                                                    className="w-full p-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-100 outline-none text-sm font-medium bg-white"
-                                                />
-                                            </div>
-                                            <div className="md:col-span-2 text-[11px] font-semibold text-slate-400">
-                                                기본 청구 시작일은 26-01-01입니다. 기간 지정은 월 중간 변경분을 나눌 때만 사용합니다.
-                                            </div>
-                                        </div>
-                                    )}
                                     {billingMode === 'same' && (
                                         <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
                                             별도 청구대상 없이 현재 입실자 기준으로 청구합니다.
@@ -623,8 +628,6 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                             ? '처리 중...'
                                             : billingMode === 'same'
                                                 ? '입실자 동일 저장'
-                                                : billingMode === 'split' && currentBillingTarget
-                                                ? '기간 나눠 저장'
                                                 : currentBillingTarget
                                                     ? '청구대상 수정'
                                                     : '청구대상 저장'}

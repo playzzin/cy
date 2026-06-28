@@ -5,12 +5,15 @@ import { faSearch, faChevronDown, faCheck, faPen, faTimes } from '@fortawesome/f
 
 const POPOVER_Z_INDEX = 11000;
 
+type SingleSelectOption = { id: string; name: string; icon?: React.ReactNode };
+
 interface SingleSelectPopoverProps {
-    options: { id: string; name: string; icon?: React.ReactNode }[];
+    options: SingleSelectOption[];
     selectedId: string | null;
     onSelect: (id: string) => void;
     placeholder?: string;
-    renderSelected?: (selectedOption: { id: string; name: string; icon?: React.ReactNode }) => React.ReactNode;
+    renderSelected?: (selectedOption: SingleSelectOption) => React.ReactNode;
+    selectedOptionOverride?: SingleSelectOption | null;
     minimal?: boolean;
     disabled?: boolean;
 }
@@ -207,6 +210,7 @@ const SingleSelectPopover: React.FC<SingleSelectPopoverProps> = ({
     onSelect,
     placeholder = '선택하세요',
     renderSelected,
+    selectedOptionOverride,
     minimal = false,
     disabled = false
 }) => {
@@ -216,7 +220,8 @@ const SingleSelectPopover: React.FC<SingleSelectPopoverProps> = ({
     const popoverRef = useRef<HTMLDivElement>(null);
     const [popoverRect, setPopoverRect] = useState<{ top: number; left: number; width: number } | null>(null);
 
-    const selectedOption = options.find(opt => opt.id === selectedId);
+    const selectedOption = options.find(opt => opt.id === selectedId)
+        || (selectedOptionOverride?.id === selectedId ? selectedOptionOverride : undefined);
 
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {

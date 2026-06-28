@@ -21,13 +21,15 @@ import SiteDatabase from './SiteDatabase';
 import CompanyDatabase from './CompanyDatabase';
 import OfficeStaffDatabase from './OfficeStaffDatabase';
 import AccountManagementPage from './AccountManagementPage';
+import SettlementTargetDatabase from './SettlementTargetDatabase';
 
-type IntegratedDatabaseTab = 'overview' | 'workers' | 'offices' | 'teams' | 'sites' | 'companies' | 'accounts' | 'reports';
+type IntegratedDatabaseTab = 'overview' | 'workers' | 'offices' | 'settlementTargets' | 'teams' | 'sites' | 'companies' | 'accounts' | 'reports';
 
 const parseIntegratedDatabaseTab = (value: string | null): IntegratedDatabaseTab | null => {
     const normalized = String(value || '').trim().toLowerCase();
     if (normalized === 'workers') return 'workers';
     if (normalized === 'offices' || normalized === 'office' || normalized === 'office-staff' || normalized === 'office_staff') return 'offices';
+    if (normalized === 'settlement-targets' || normalized === 'settlementtargets' || normalized === 'payback' || normalized === 'buyback') return 'settlementTargets';
     if (normalized === 'teams') return 'teams';
     if (normalized === 'sites') return 'sites';
     if (normalized === 'companies') return 'companies';
@@ -70,6 +72,7 @@ interface DatabaseStats {
         contractor: number; // 시공팀
         partner: number;
         builder: number; // 건설사
+        rental: number; // 임대사
     };
     accounts: {
         workerMissing: number;
@@ -109,6 +112,7 @@ interface DailyReportIntegrityIssue {
     date?: string;
     siteId?: string;
     siteName?: string;
+    siteAddress?: string;
     teamId?: string;
     teamName?: string;
     workerId?: string;
@@ -214,7 +218,7 @@ function IntegratedDatabase() {
         offices: { total: 0, active: 0, pending: 0, linked: 0 },
         teams: { total: 0, active: 0, inactive: 0 },
         sites: { total: 0, active: 0, completed: 0 },
-        companies: { total: 0, contractor: 0, partner: 0, builder: 0 },
+        companies: { total: 0, contractor: 0, partner: 0, builder: 0, rental: 0 },
         accounts: { workerMissing: 0, teamMissing: 0, companyMissing: 0 },
         reports: { total: 0, thisMonth: 0, today: 0 }
     });
@@ -349,7 +353,8 @@ function IntegratedDatabase() {
                 total: companies.length,
                 contractor: companies.filter(c => c.type === '시공사').length,
                 partner: companies.filter(c => c.type === '협력사').length,
-                builder: companies.filter(c => c.type === '건설사').length
+                builder: companies.filter(c => c.type === '건설사').length,
+                rental: companies.filter(c => c.type === '임대사').length
             },
             accounts: {
                 workerMissing: workers.filter(w => !w.accountNumber).length,
@@ -395,6 +400,13 @@ function IntegratedDatabase() {
         const teamNames = collectEntityNames(teams);
         const siteIds = collectEntityIds(sites);
         const siteNames = collectEntityNames(sites);
+        const sitesById = new Map<string, Site>();
+        const sitesByName = new Map<string, Site>();
+        sites.forEach((site) => {
+            [toText(site.id), toText(site.legacyId)].filter(Boolean).forEach((id) => sitesById.set(id, site));
+            const nameKey = normalizeNameKey(site.name);
+            if (nameKey) sitesByName.set(nameKey, site);
+        });
         const recentWorkerIds = new Set<string>();
         recentReports.forEach(r => {
             r.workers.forEach(w => {
@@ -467,6 +479,8 @@ function IntegratedDatabase() {
             const reportKey = report.id || report.legacyId || `${report.date}-${report.siteId}-${report.teamId}-${reportIndex}`;
             const reportSiteId = toText(report.siteId);
             const reportSiteName = toText(report.siteName);
+            const matchedReportSite = (reportSiteId ? sitesById.get(reportSiteId) : undefined) || sitesByName.get(normalizeNameKey(reportSiteName));
+            const reportSiteAddress = toText(matchedReportSite?.address) || toText((report as any).siteAddress);
             const reportTeamIds = [toText(report.responsibleTeamId), toText(report.teamId)].filter(Boolean);
             const reportTeamNames = [toText(report.responsibleTeamName), toText(report.teamName)].filter(Boolean);
             const reportTeamId = reportTeamIds[0] || '';
@@ -476,11 +490,12 @@ function IntegratedDatabase() {
                 date: report.date,
                 siteId: reportSiteId,
                 siteName: reportSiteName,
+                ...(reportSiteAddress ? { siteAddress: reportSiteAddress } : {}),
                 teamId: reportTeamId,
                 teamName: reportTeamName
             };
 
-            const hasLinkedSite = (!!reportSiteId && siteIds.has(reportSiteId)) || (!!reportSiteName && siteNames.has(reportSiteName));
+            const hasLinkedSite = Boolean(matchedReportSite) || (!!reportSiteId && siteIds.has(reportSiteId)) || (!!reportSiteName && siteNames.has(reportSiteName));
             if (!hasLinkedSite) {
                 newIssues.reportMissingSites.push({
                     id: `${reportKey}-site`,
@@ -760,7 +775,7 @@ function IntegratedDatabase() {
                                 <span className="text-xs text-slate-500 mb-1">개사</span>
                             </div>
                             <div className="mt-2 text-xs text-slate-400">
-                                <span>시공사 {stats.companies.contractor} · 협력사 {stats.companies.partner} · 건설사 {stats.companies.builder}</span>
+                                <span>시공사 {stats.companies.contractor} · 협력사 {stats.companies.partner} · 건설사 {stats.companies.builder} · 임대사 {stats.companies.rental}</span>
                             </div>
                         </div>
 
@@ -816,6 +831,12 @@ function IntegratedDatabase() {
                             className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'offices' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
                         >
                             사무실 목록
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('settlementTargets')}
+                            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'settlementTargets' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+                        >
+                            정산 대상자
                         </button>
                         <button
                             onClick={() => setActiveTab('teams')}
@@ -1006,7 +1027,7 @@ function IntegratedDatabase() {
                                                                     {issue.date || '날짜 없음'} · {issue.siteName || issue.siteId || '현장 없음'}
                                                                 </div>
                                                                 <div className="text-xs text-slate-500 truncate">
-                                                                    {[issue.teamName || issue.teamId, issue.workerName || issue.workerId, issue.detail].filter(Boolean).join(' · ')}
+                                                                    {[issue.siteAddress, issue.teamName || issue.teamId, issue.workerName || issue.workerId, issue.detail].filter(Boolean).join(' · ')}
                                                                 </div>
                                                             </div>
                                                             <button
@@ -1031,6 +1052,9 @@ function IntegratedDatabase() {
                     )}
                     {activeTab === 'offices' && (
                         <OfficeStaffDatabase hideHeader={true} highlightedId={highlightedId} />
+                    )}
+                    {activeTab === 'settlementTargets' && (
+                        <SettlementTargetDatabase hideHeader={true} highlightedId={highlightedId} />
                     )}
                     {activeTab === 'teams' && (
                         <TeamDatabase hideHeader={false} highlightedId={highlightedId} />

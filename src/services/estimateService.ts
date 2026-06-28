@@ -11,6 +11,7 @@ import {
     serverTimestamp,
     Timestamp
 } from 'firebase/firestore';
+import type { StatementOutputSource } from '../types/statementOutput';
 
 export type EstimateStatus = 'draft' | 'sent' | 'approved' | 'rejected';
 export type EstimateRequestType = 'construction' | 'uxui' | 'development' | 'build' | 'modify';
@@ -103,6 +104,12 @@ export interface Estimate {
     supplierManager?: string;
     supplierManagerContact?: string;
 
+    supportStatementKey?: string;
+    supportStatementSource?: StatementOutputSource;
+    supportStatementYearMonth?: string;
+    supportStatementTargetTitle?: string;
+    supportStatementTargetSubtitle?: string;
+
     createdAt?: Timestamp;
     updatedAt?: Timestamp;
 }
@@ -123,6 +130,11 @@ const stripUndefined = <T extends Record<string, unknown>>(value: T): T => {
         Object.entries(value).filter(([, entry]) => entry !== undefined)
     ) as T;
 };
+
+const normalizeSupportStatementSource = (value: unknown): StatementOutputSource | undefined =>
+    value === 'support-client-site' || value === 'progress-claims' || value === 'support-team-payment'
+        ? value
+        : undefined;
 
 export const normalizeEstimateItem = (raw: Partial<EstimateItem> | any): EstimateItem => {
     const quantity = toNumber(raw?.quantity, 1);
@@ -234,6 +246,12 @@ const normalizeEstimate = (id: string, raw: any): Estimate => {
         supplierAccount: raw?.supplierAccount || '',
         supplierManager: raw?.supplierManager || '',
         supplierManagerContact: raw?.supplierManagerContact || '',
+
+        supportStatementKey: raw?.supportStatementKey ? String(raw.supportStatementKey) : '',
+        supportStatementSource: normalizeSupportStatementSource(raw?.supportStatementSource),
+        supportStatementYearMonth: raw?.supportStatementYearMonth ? String(raw.supportStatementYearMonth) : '',
+        supportStatementTargetTitle: raw?.supportStatementTargetTitle ? String(raw.supportStatementTargetTitle) : '',
+        supportStatementTargetSubtitle: raw?.supportStatementTargetSubtitle ? String(raw.supportStatementTargetSubtitle) : '',
 
         createdAt: raw?.createdAt,
         updatedAt: raw?.updatedAt

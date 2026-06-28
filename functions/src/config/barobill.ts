@@ -5,6 +5,9 @@
  * 테스트 환경과 운영 환경의 WSDL URL이 다릅니다.
  */
 
+const barobillMode = String(process.env.BAROBILL_MODE || '').trim().toUpperCase();
+const barobillIsTest = String(process.env.BAROBILL_IS_TEST || '').trim().toLowerCase();
+
 // 바로빌 API 환경 설정
 export const BAROBILL_CONFIG = {
     // 테스트 환경 WSDL URL
@@ -18,7 +21,7 @@ export const BAROBILL_CONFIG = {
     PROD_KAKAO_WSDL_URL: 'https://ws.barobill.co.kr/KAKAOTALK.asmx?WSDL',
 
     // 현재 사용할 환경 (true: 테스트, false: 운영)
-    IS_TEST: true,
+    IS_TEST: barobillMode ? barobillMode !== 'PROD' : barobillIsTest ? barobillIsTest === 'true' : true,
 };
 
 // 환경에 따른 WSDL URL 반환

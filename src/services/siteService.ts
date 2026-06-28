@@ -7,6 +7,13 @@ import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 
 export type { Site };
 
+const SITE_LIST_CACHE_TTL_MS = 60 * 1000;
+let siteListCache: { rows: Site[]; expiresAt: number } | null = null;
+
+const clearSiteListCache = () => {
+    siteListCache = null;
+};
+
 const snapshotRecord = (id: string, data: Record<string, unknown>): Record<string, unknown> => ({
     id,
     ...stripUndefinedFields(data),
@@ -31,6 +38,7 @@ const logDatabaseChange = async (
 export const siteService = {
     addSite: async (site: Partial<Site> & Pick<Site, 'name' | 'code' | 'address' | 'status'>): Promise<string> => {
         const id = await siteFirestoreService.addSite(site as any);
+        clearSiteListCache();
         await logDatabaseChange('created', 'site', null, snapshotRecord(id, site as Record<string, unknown>), 'siteService.addSite');
 
         // Sync: Add Site ID to Client Company (발주사) if selected
@@ -74,6 +82,7 @@ export const siteService = {
         const cleanedUpdates = stripUndefinedFields(site as Record<string, unknown>);
 
         await siteFirestoreService.updateSite(id, cleanedUpdates as Partial<Site>);
+        clearSiteListCache();
         await logDatabaseChange(
             'updated',
             'site',
@@ -95,6 +104,7 @@ export const siteService = {
     deleteSite: async (id: string): Promise<void> => {
         const existing = await siteFirestoreService.getSite(id);
         await siteFirestoreService.deleteSite(id);
+        clearSiteListCache();
         await logDatabaseChange(
             'deleted',
             'site',
@@ -121,6 +131,7 @@ export const siteService = {
             });
         });
         await batch.commit();
+        clearSiteListCache();
         await Promise.all(beforeRows.map((before) =>
             before
                 ? logDatabaseChange(
@@ -139,7 +150,16 @@ export const siteService = {
     },
 
     getSites: async (): Promise<Site[]> => {
-        return siteFirestoreService.getSites();
+        if (siteListCache && siteListCache.expiresAt > Date.now()) {
+            return siteListCache.rows;
+        }
+
+        const rows = await siteFirestoreService.getSites();
+        siteListCache = {
+            rows,
+            expiresAt: Date.now() + SITE_LIST_CACHE_TTL_MS,
+        };
+        return rows;
     },
 
     getSiteByName: async (name: string): Promise<Site | null> => {
@@ -198,6 +218,7 @@ export const siteService = {
             });
         });
         await batch.commit();
+        clearSiteListCache();
         await Promise.all(beforeRows.map((before) =>
             before
                 ? logDatabaseChange(

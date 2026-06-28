@@ -30,6 +30,12 @@ const EXTERNAL_TEAM_COMPANY_VALUE = '__EXTERNAL_TEAM__';
 const DAILY_PAY_TYPE = '일급제';
 const SUPPORT_PAY_TYPE = '지원팀';
 
+const compareTeamsByName = (a: Team, b: Team): number =>
+    String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko', {
+        numeric: true,
+        sensitivity: 'base',
+    });
+
 const applyCompanySelectionDefaults = (
     prev: Partial<Worker>,
     company?: Company | null
@@ -139,7 +145,7 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                     teamType === SUPPORT_PAY_TYPE ||
                     teamType === '용역팀'
                 );
-            });
+            }).sort(compareTeamsByName);
         }
 
         if (!formData.companyId) return [];
@@ -147,7 +153,7 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
         return teams.filter(t =>
             t.companyId === formData.companyId ||
             (selectedCompany?.name && t.companyName === selectedCompany.name)
-        );
+        ).sort(compareTeamsByName);
     }, [companies, formData.companyId, isExternalCompanySelected, selectedCompany?.name, teams]);
     const canSelectTeam = Boolean(formData.companyId) || isExternalCompanySelected;
 

@@ -45,7 +45,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { userMenuPositionService } from '../../services/userMenuPositionService';
 import { rolePermissionService } from '../../services/rolePermissionService';
-import { UserRole } from '../../types/roles';
 import { SiteDataType, MenuItem } from '../../types/menu';
 import { isRunningAsStandaloneApp } from '../../pwaInstallPrompt';
 
@@ -92,6 +91,17 @@ const MENU_PERMISSION_MAP: { [key: string]: string } = {
 const PATH_PERMISSION_MAP: { [key: string]: string } = {
     '/memos': 'smart-memo',
     '/admin/welfare-assets': 'welfare-assets',
+    '/recruiting/dashboard': 'recruiting-dashboard',
+    '/recruiting/service-workers': 'recruiting-service-workers',
+    '/recruiting/worker-history': 'recruiting-worker-history',
+    '/recruiting/monthly-settlement': 'recruiting-monthly-settlement',
+    '/recruiting/payments': 'recruiting-payments',
+    '/recruiting/deposits': 'recruiting-deposits',
+    '/recruiting/receivables': 'recruiting-receivables',
+    '/recruiting/monthly-statistics': 'recruiting-statistics',
+    '/recruiting/referrers': 'recruiting-referrers',
+    '/recruiting/settings': 'recruiting-settings',
+    '/recruiting/logs': 'recruiting-logs',
 };
 
 const normalizeRole = (role: unknown): string => String(role || '').trim();
@@ -124,10 +134,26 @@ const roleListIncludes = (actualRoles: string[], allowedRoles: string[]): boolea
     return allowedRoles.some((role) => actualKeys.has(normalizeRoleKey(role)));
 };
 
+const ADMIN_ROLE_KEYS = [
+    'admin',
+    'super_admin',
+    'administrator',
+    'owner',
+    'dev',
+    'developer',
+    'system_admin',
+    'jhl2vtnk9v3c4eiz4qqi',
+    'pos_jhl2vtnk9v3c4eiz4qqi',
+    '관리자',
+    '사장',
+    '실장',
+    '개발',
+    '개발자',
+    '시스템관리자',
+];
+
 const isAdminRole = (role: unknown): boolean => {
-    const normalized = normalizeRole(role).toLowerCase();
-    return ['admin', 'super_admin', 'administrator', 'owner'].includes(normalized)
-        || [UserRole.ADMIN, '사장', '실장'].includes(normalizeRole(role));
+    return ADMIN_ROLE_KEYS.includes(normalizeRoleKey(role));
 };
 
 const getPermissionId = (itemText: string, itemPath?: string): string | undefined => {
@@ -157,6 +183,7 @@ const inferMenuIconName = (text: string, path?: string, explicitIcon?: string): 
     if (normalizedPath.startsWith('/support/vehicles')) return 'fa-truck-front';
     if (normalizedPath.startsWith('/support/cards')) return 'fa-credit-card';
     if (normalizedPath.startsWith('/support')) return 'fa-hand-holding-dollar';
+    if (normalizedPath.startsWith('/recruiting')) return 'fa-hand-holding-dollar';
     if (normalizedPath.startsWith('/assignment')) return 'fa-list-check';
     if (normalizedPath.startsWith('/manpower')) return 'fa-users';
     if (normalizedPath.startsWith('/hr')) return 'fa-user-tag';
@@ -211,16 +238,20 @@ const Sidebar: React.FC<SidebarProps> = ({
     const { currentUser } = useAuth();
     const [userProfile, setUserProfile] = useState<any>(null);
     const [additionalMenuPositions, setAdditionalMenuPositions] = useState<string[]>([]);
+    const [linkedEntityRoles, setLinkedEntityRoles] = useState<string[]>([]);
     const [permissions, setPermissions] = useState<any>(null);
     const userAccessRoles = useMemo(() => {
+        const basePositionRoles = linkedEntityRoles.length > 0 ? linkedEntityRoles : userProfile?.position;
         return uniqueRoles([
-            userProfile?.position,
+            basePositionRoles,
             userProfile?.role,
+            userProfile?.systemRole,
+            userProfile?.accountType,
             userProfile?.additionalPositions,
             additionalMenuPositions,
             'user'
         ]);
-    }, [userProfile, additionalMenuPositions]);
+    }, [userProfile, linkedEntityRoles, additionalMenuPositions]);
     const safeCurrentSiteData = currentSiteData || {
         name: '청연ENG ERP',
         icon: 'fa-shield-halved',
@@ -228,10 +259,12 @@ const Sidebar: React.FC<SidebarProps> = ({
     };
 
     useEffect(() => {
+        let cancelled = false;
         let userUnsubscribe: () => void;
         let positionUnsubscribe: () => void;
 
         if (currentUser) {
+            setLinkedEntityRoles([]);
             // Listen to user role changes in real-time
             userUnsubscribe = onSnapshot(doc(db, 'users', currentUser.uid), (docSnap: any) => {
                 if (docSnap.exists()) {
@@ -249,9 +282,28 @@ const Sidebar: React.FC<SidebarProps> = ({
             positionUnsubscribe = userMenuPositionService.subscribe((map) => {
                 setAdditionalMenuPositions(map[currentUser.uid] || []);
             });
+
+            void (async () => {
+                try {
+                    const [{ manpowerService }, { officeStaffService }] = await Promise.all([
+                        import('../../services/manpowerService'),
+                        import('../../services/officeStaffService')
+                    ]);
+                    const [linkedWorker, linkedOfficeStaff] = await Promise.all([
+                        manpowerService.getWorkerByUid(currentUser.uid).catch(() => null),
+                        officeStaffService.getOfficeStaffByUid(currentUser.uid).catch(() => null)
+                    ]);
+                    if (cancelled) return;
+                    setLinkedEntityRoles(uniqueRoles([linkedWorker?.role, linkedOfficeStaff?.role]));
+                } catch (error) {
+                    console.error('[Sidebar] Failed to load linked entity roles:', error);
+                    if (!cancelled) setLinkedEntityRoles([]);
+                }
+            })();
         } else {
             setUserProfile(null);
             setAdditionalMenuPositions([]);
+            setLinkedEntityRoles([]);
         }
 
         const unsubscribe = rolePermissionService.subscribe((perms) => {
@@ -262,6 +314,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         rolePermissionService.getPermissions().then(setPermissions);
 
         return () => {
+            cancelled = true;
             unsubscribe();
             if (userUnsubscribe) userUnsubscribe();
             if (positionUnsubscribe) positionUnsubscribe();
@@ -329,56 +382,43 @@ const Sidebar: React.FC<SidebarProps> = ({
         if (isMobile) closeAll();
     };
 
-    const isParentActive = (item: MenuItem): boolean => {
-        if (!item.sub) return false;
-        return item.sub.some(subItem => {
-            if (typeof subItem === 'string') {
-                return isActiveCheck(menuPaths[subItem]);
-            } else {
-                return subItem.sub?.some(nestedItem =>
-                    typeof nestedItem === 'string' && isActiveCheck(menuPaths[nestedItem])
-                );
-            }
-        });
-    };
-
-    // Filter menu items based on permissions
-    const filteredMenu = safeCurrentSiteData.menu.map((item: MenuItem) => {
-        // Check if parent has sub-items
-        if (item.sub) {
-            // Filter sub-items
-            const filteredSub = item.sub.filter((subItem: string | MenuItem) => {
-                if (typeof subItem === 'string') {
-                    return hasPermission(subItem, undefined, menuPaths[subItem]);
-                } else {
-                    // Object Item
-                    const menuItem = subItem as MenuItem;
-
-                    // If it has children, treat as Nested Group
-                    if (menuItem.sub && menuItem.sub.length > 0) {
-                        const filteredNested = menuItem.sub.filter((nested: string | MenuItem) => {
-                            if (typeof nested === 'string') {
-                                return hasPermission(nested, undefined, menuPaths[nested]);
-                            } else {
-                                // Nested Object Item
-                                return hasPermission(nested.text, nested.roles, nested.path || menuPaths[nested.text]);
-                            }
-                        });
-                        // If children exist, check if any remain
-                        return filteredNested.length > 0;
-                    }
-
-                    // If no children (or empty array), treat as Leaf Link (Object format)
-                    return hasPermission(menuItem.text, menuItem.roles, menuItem.path || menuPaths[menuItem.text]);
-                }
-            });
-
-            return { ...item, sub: filteredSub };
+    const isMenuEntryActive = (entry: string | MenuItem): boolean => {
+        if (typeof entry === 'string') {
+            return isActiveCheck(menuPaths[entry]);
         }
 
-        // Single item
-        return hasPermission(item.text, item.roles, item.path || menuPaths[item.text]) ? item : null;
-    }).filter(Boolean);
+        const directPath = entry.path || menuPaths[entry.text];
+        return isActiveCheck(directPath) || Boolean(entry.sub?.some(isMenuEntryActive));
+    };
+
+    const isParentActive = (item: MenuItem): boolean => Boolean(item.sub?.some(isMenuEntryActive));
+
+    // Filter menu items based on permissions
+    const filterMenuEntry = (entry: string | MenuItem): string | MenuItem | null => {
+        if (typeof entry === 'string') {
+            return hasPermission(entry, undefined, menuPaths[entry]) ? entry : null;
+        }
+
+        const directPath = entry.path || menuPaths[entry.text];
+        const hasOriginalChildren = Array.isArray(entry.sub) && entry.sub.length > 0;
+        const filteredSub = hasOriginalChildren
+            ? (entry.sub || [])
+                .map(filterMenuEntry)
+                .filter((child): child is string | MenuItem => Boolean(child))
+            : undefined;
+
+        if (filteredSub && filteredSub.length > 0) {
+            return { ...entry, sub: filteredSub };
+        }
+
+        if (hasOriginalChildren && !directPath) return null;
+
+        return hasPermission(entry.text, entry.roles, directPath) ? { ...entry, sub: filteredSub } : null;
+    };
+
+    const filteredMenu = safeCurrentSiteData.menu
+        .map((item: MenuItem) => filterMenuEntry(item))
+        .filter((item: string | MenuItem | null): item is MenuItem => Boolean(item) && typeof item !== 'string');
 
     const finalMenu = [...filteredMenu];
 

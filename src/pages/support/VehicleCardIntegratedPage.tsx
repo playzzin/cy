@@ -11,7 +11,6 @@ import {
     faRotateRight,
     faTableCellsLarge,
     faTableList,
-    faTimes,
     faUsers
 } from '@fortawesome/free-solid-svg-icons';
 import { Vehicle } from '../../types/vehicle';
@@ -28,9 +27,11 @@ import { VehicleMonthlyLedger } from '../../components/vehicle/VehicleMonthlyLed
 import { VehicleRegistrySheet } from '../../components/vehicle/VehicleRegistrySheet';
 import { CardForm } from '../../components/card/CardForm';
 import { CardAssignmentManager } from '../../components/card/CardAssignmentManager';
+import { CardBillingTargetManager } from '../../components/card/CardBillingTargetManager';
 import { CardBillingManager } from '../../components/card/CardBillingManager';
 import { CardMonthlyLedger } from '../../components/card/CardMonthlyLedger';
 import { CardRegistrySheet } from '../../components/card/CardRegistrySheet';
+import { AssignmentBillingSetupModal, type AssignmentBillingSection } from '../../components/support/AssignmentBillingSetupModal';
 import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
 
 type AssetTab = 'vehicle' | 'card';
@@ -95,6 +96,8 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
     const [editingCard, setEditingCard] = useState<Card | null>(null);
     const [assignmentInitialCardId, setAssignmentInitialCardId] = useState<string | null>(null);
     const [isCardAssignmentModalOpen, setIsCardAssignmentModalOpen] = useState<boolean>(false);
+    const [cardSetupInitialSection, setCardSetupInitialSection] = useState<AssignmentBillingSection>('assignment');
+    const [cardBillingTargetInitialSplitMode, setCardBillingTargetInitialSplitMode] = useState<boolean>(false);
 
     const loadMasterData = useCallback(async () => {
         setLoadingMaster(true);
@@ -220,20 +223,6 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
         );
     }, [teamFilteredVehicles, vehicleSearchText]);
 
-    const searchFilteredVehicles = useMemo(() => {
-        const keyword = normalizeSearchText(vehicleSearchText);
-        return vehicles.filter((vehicle) =>
-            matchesKeyword(keyword, [
-                vehicle.licensePlate,
-                vehicle.model,
-                vehicle.currentAssigneeName,
-                vehicle.contract?.financeCompany?.name,
-                vehicle.insurance?.company,
-                vehicle.memo
-            ])
-        );
-    }, [vehicles, vehicleSearchText]);
-
     const visibleCards = useMemo(() => {
         const keyword = normalizeSearchText(cardSearchText);
         return teamFilteredCards.filter((card) =>
@@ -269,6 +258,17 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
 
     const refreshAll = () => setRefreshToken((prev) => prev + 1);
 
+    const openCardSetup = (
+        card: Card,
+        section: AssignmentBillingSection = 'assignment',
+        options?: { split?: boolean }
+    ) => {
+        setAssignmentInitialCardId(String(card.id));
+        setCardSetupInitialSection(section);
+        setCardBillingTargetInitialSplitMode(Boolean(options?.split));
+        setIsCardAssignmentModalOpen(true);
+    };
+
     const openVehicleCreate = () => {
         setEditingVehicle(null);
         setIsVehicleFormOpen(true);
@@ -288,6 +288,11 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
         setEditingCard(card);
         setIsCardFormOpen(true);
     };
+
+    const setupCard = useMemo(
+        () => cards.find((card) => String(card.id) === String(assignmentInitialCardId)) ?? null,
+        [assignmentInitialCardId, cards]
+    );
 
     const activeSearchText = activeAssetTab === 'vehicle' ? vehicleSearchText : cardSearchText;
     const setActiveSearchText = activeAssetTab === 'vehicle' ? setVehicleSearchText : setCardSearchText;
@@ -513,9 +518,10 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
 
                 {activeAssetTab === 'vehicle' && vehicleViewTab === 'ledger' && (
                     <VehicleMonthlyLedger
-                        vehicles={searchFilteredVehicles}
+                        vehicles={vehicles}
                         teams={teams}
                         teamFilterId={selectedTeamId}
+                        searchText={vehicleSearchText}
                         loadingVehicles={loadingMaster}
                     />
                 )}
@@ -548,6 +554,8 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
                         cards={visibleCards}
                         teams={teams}
                         loadingCards={loadingMaster}
+                        onOpenSetup={(card) => openCardSetup(card, 'assignment')}
+                        onOpenBillingTarget={(card) => openCardSetup(card, 'billing', { split: true })}
                     />
                 )}
 
@@ -556,10 +564,7 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
                         cards={visibleCards}
                         loading={loadingMaster}
                         onEdit={openCardEdit}
-                        onAssign={(card) => {
-                            setAssignmentInitialCardId(String(card.id));
-                            setIsCardAssignmentModalOpen(true);
-                        }}
+                        onAssign={(card) => openCardSetup(card, 'assignment')}
                     />
                 )}
 
@@ -606,34 +611,38 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
                 />
             )}
 
-            {isCardAssignmentModalOpen && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-                    <div className="relative max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
-                        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-6 py-4">
-                            <h2 className="text-xl font-bold text-slate-800">카드 배정 관리</h2>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setIsCardAssignmentModalOpen(false);
-                                    setAssignmentInitialCardId(null);
-                                }}
-                                className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200"
-                            >
-                                <FontAwesomeIcon icon={faTimes} />
-                            </button>
-                        </div>
-                        <div className="p-6">
-                            <CardAssignmentManager
-                                cards={cards}
-                                loading={loadingMaster}
-                                initialCardId={assignmentInitialCardId}
-                                selectableTeams={selectableTeams}
-                                onRefresh={refreshAll}
-                            />
-                        </div>
-                    </div>
-                </div>
-            )}
+            <AssignmentBillingSetupModal
+                isOpen={isCardAssignmentModalOpen}
+                title={setupCard?.name ? `${setupCard.name} 카드` : '카드'}
+                subtitle={setupCard ? `${setupCard.issuer || '발급사 미지정'} · ${setupCard.maskedNumber || setupCard.last4 || '카드번호 미입력'}` : '카드 배정과 청구대상을 한 화면에서 설정합니다.'}
+                resourceLabel="카드"
+                initialSection={cardSetupInitialSection}
+                onClose={() => {
+                    setIsCardAssignmentModalOpen(false);
+                    setAssignmentInitialCardId(null);
+                    setCardSetupInitialSection('assignment');
+                    setCardBillingTargetInitialSplitMode(false);
+                }}
+                assignmentContent={(
+                    <CardAssignmentManager
+                        cards={cards}
+                        loading={loadingMaster}
+                        initialCardId={assignmentInitialCardId}
+                        selectableTeams={selectableTeams}
+                        onRefresh={refreshAll}
+                    />
+                )}
+                billingContent={(
+                    <CardBillingTargetManager
+                        cards={cards}
+                        loading={loadingMaster}
+                        initialCardId={assignmentInitialCardId}
+                        initialSplitMode={cardBillingTargetInitialSplitMode}
+                        selectableTeams={selectableTeams}
+                        onRefresh={refreshAll}
+                    />
+                )}
+            />
 
             {isCardFormOpen && (
                 <CardForm

@@ -1327,8 +1327,8 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                 <div className="flex-1 min-w-0 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
                     <div className="overflow-auto flex-1">
                         <table className="w-full text-xs">
-                            <thead>
-                                <tr className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
+                            <thead className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                                <tr className="border-b border-slate-200">
                                     <th className="px-3 py-3 text-center w-10">
                                         <input 
                                             type="checkbox" 
@@ -1413,7 +1413,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                             options={Object.values(STATUS_CONFIG).map(c => c.label)}
                                         />
                                     </th>
-                                    <th className="px-3 py-3 text-center font-black text-slate-500 w-14">스캔</th>
+                                    <th className="px-3 py-3 text-center font-black text-slate-500 w-16">노임서류</th>
                                     <th className="px-3 py-3 text-left font-black text-slate-500 w-56">특이사항</th>
                                     <th className="px-3 py-3 text-center font-black text-slate-500 w-10">삭제</th>
                                 </tr>
@@ -1421,14 +1421,14 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                             <tbody className="divide-y divide-slate-100">
                                 {loading ? (
                                     <tr>
-                                        <td colSpan={15} className="py-16 text-center text-slate-400">
+                                        <td colSpan={16} className="py-16 text-center text-slate-400">
                                             <FontAwesomeIcon icon={faRotateRight} className="animate-spin mr-2" />
                                             불러오는 중...
                                         </td>
                                     </tr>
                                 ) : filteredIssues.length === 0 ? (
                                     <tr>
-                                        <td colSpan={15} className="py-16 text-center text-slate-400">
+                                        <td colSpan={16} className="py-16 text-center text-slate-400">
                                             <p className="font-bold">데이터가 없습니다</p>
                                             <p className="text-xs mt-1">행 추가 또는 현장 데이터 가져오기로 시작하세요.</p>
                                         </td>
@@ -1641,10 +1641,11 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                     />
                                                 </td>
 
-                                                {/* 스캔 */}
+                                                {/* 노임서류 */}
                                                 <td className="px-3 py-2 text-center">
                                                     <button
                                                         onClick={() => handleScanToggle(issue.id, issue.scanCompleted)}
+                                                        title="노임서류"
                                                         className={`w-5 h-5 rounded border-2 transition-colors flex items-center justify-center mx-auto ${
                                                             issue.scanCompleted
                                                                 ? 'bg-green-500 border-green-500 text-white'

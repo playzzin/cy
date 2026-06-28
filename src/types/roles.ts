@@ -1,7 +1,10 @@
 export enum UserRole {
     ADMIN = '관리자',
     MANAGER = '매니저',
-    GENERAL = '일반'
+    GENERAL = '일반',
+    PAYROLL_MANAGER = 'PAYROLL_MANAGER',
+    OFFICE_STAFF = 'OFFICE_STAFF',
+    SITE_MANAGER = 'SITE_MANAGER'
 }
 
 export interface PermissionConfig {
@@ -26,7 +29,18 @@ export const DEFAULT_PERMISSIONS: PermissionConfig = {
         'welfare-assets': true,
         'system-config': true,
         'jeonkuk-dashboard': true,
-        'jeonkuk-status': true
+        'jeonkuk-status': true,
+        'recruiting-dashboard': true,
+        'recruiting-service-workers': true,
+        'recruiting-worker-history': true,
+        'recruiting-monthly-settlement': true,
+        'recruiting-payments': true,
+        'recruiting-deposits': true,
+        'recruiting-receivables': true,
+        'recruiting-statistics': true,
+        'recruiting-referrers': true,
+        'recruiting-settings': true,
+        'recruiting-logs': true
     },
     [UserRole.MANAGER]: {
         'dashboard': true,
@@ -43,7 +57,18 @@ export const DEFAULT_PERMISSIONS: PermissionConfig = {
         'welfare-assets': false,
         'system-config': false,
         'jeonkuk-dashboard': false,
-        'jeonkuk-status': false
+        'jeonkuk-status': false,
+        'recruiting-dashboard': true,
+        'recruiting-service-workers': true,
+        'recruiting-worker-history': true,
+        'recruiting-monthly-settlement': false,
+        'recruiting-payments': true,
+        'recruiting-deposits': true,
+        'recruiting-receivables': true,
+        'recruiting-statistics': true,
+        'recruiting-referrers': false,
+        'recruiting-settings': false,
+        'recruiting-logs': true
     },
     [UserRole.GENERAL]: {
         'dashboard': true,
@@ -60,6 +85,56 @@ export const DEFAULT_PERMISSIONS: PermissionConfig = {
         'welfare-assets': false,
         'system-config': false,
         'jeonkuk-dashboard': false,
-        'jeonkuk-status': false
+        'jeonkuk-status': false,
+        'recruiting-dashboard': false,
+        'recruiting-service-workers': false,
+        'recruiting-worker-history': false,
+        'recruiting-monthly-settlement': false,
+        'recruiting-payments': false,
+        'recruiting-deposits': false,
+        'recruiting-receivables': false,
+        'recruiting-statistics': false,
+        'recruiting-referrers': false,
+        'recruiting-settings': false,
+        'recruiting-logs': false
+    },
+    [UserRole.PAYROLL_MANAGER]: {
+        'recruiting-dashboard': true,
+        'recruiting-service-workers': true,
+        'recruiting-worker-history': true,
+        'recruiting-monthly-settlement': true,
+        'recruiting-payments': true,
+        'recruiting-deposits': true,
+        'recruiting-receivables': true,
+        'recruiting-statistics': true,
+        'recruiting-referrers': true,
+        'recruiting-settings': false,
+        'recruiting-logs': true
+    },
+    [UserRole.OFFICE_STAFF]: {
+        'recruiting-dashboard': true,
+        'recruiting-service-workers': true,
+        'recruiting-worker-history': true,
+        'recruiting-monthly-settlement': false,
+        'recruiting-payments': true,
+        'recruiting-deposits': true,
+        'recruiting-receivables': true,
+        'recruiting-statistics': true,
+        'recruiting-referrers': true,
+        'recruiting-settings': false,
+        'recruiting-logs': true
+    },
+    [UserRole.SITE_MANAGER]: {
+        'recruiting-dashboard': true,
+        'recruiting-service-workers': false,
+        'recruiting-worker-history': true,
+        'recruiting-monthly-settlement': false,
+        'recruiting-payments': true,
+        'recruiting-deposits': true,
+        'recruiting-receivables': true,
+        'recruiting-statistics': true,
+        'recruiting-referrers': false,
+        'recruiting-settings': false,
+        'recruiting-logs': true
     }
 };

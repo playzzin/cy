@@ -6,6 +6,7 @@ import { DashboardExecutiveView } from '../components/dashboard/DashboardExecuti
 import { DashboardFieldView } from '../components/dashboard/DashboardFieldView';
 import { DashboardMessageWidget } from '../components/messages/DashboardMessageWidget';
 import { TomorrowScheduleWidget } from '../components/dashboard/widgets/TomorrowScheduleWidget';
+import { QuickActionsWidget } from '../components/dashboard/widgets/QuickActionsWidget';
 import { DashboardPersonalWidgets } from '../components/dashboard/DashboardPersonalWidgets';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
@@ -76,10 +77,13 @@ const DashboardPage: React.FC = () => {
                 onPositionChange={changePosition}
             />
 
-            <main className="max-w-7xl mx-auto px-6 -mt-16 pb-12 relative z-10 w-full overflow-hidden">
+            <main className="w-full px-6 -mt-16 pb-12 relative z-10 overflow-hidden">
                 <DashboardMessageWidget />
                 <div className="mb-6">
                     <TomorrowScheduleWidget />
+                </div>
+                <div className="mb-8">
+                    <QuickActionsWidget modeConfig={modeConfig} />
                 </div>
                 <DashboardPersonalWidgets modeConfig={modeConfig} />
 

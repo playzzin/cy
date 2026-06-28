@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import {
     CalendarDays,
     Check,
+    ChevronLeft,
+    ChevronRight,
     ClipboardList,
     Copy,
     MapPin,
@@ -12,6 +14,7 @@ import {
     Trash2,
     UserX,
     UsersRound,
+    XCircle,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import {
@@ -21,16 +24,20 @@ import {
     isOffDutyOnlyFieldScheduleRequest,
 } from '../../services/fieldScheduleRequestService';
 import { manpowerService, Worker } from '../../services/manpowerService';
+import { officeStaffService } from '../../services/officeStaffService';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
 import { userService, UserData } from '../../services/userService';
 
-const REQUEST_DAY_COUNT = 7;
+const REQUEST_RANGE_DAYS = 30;
+const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
 
 type SiteGroup = 'my-team' | 'support';
+type RequestPageTab = 'register' | 'month-list';
 
 interface SiteTeamScope {
     enabled: boolean;
+    allSiteAccess: boolean;
     teamIds: string[];
     teamNameKeys: string[];
     label: string;
@@ -38,9 +45,18 @@ interface SiteTeamScope {
 
 const EMPTY_SITE_TEAM_SCOPE: SiteTeamScope = {
     enabled: false,
+    allSiteAccess: false,
     teamIds: [],
     teamNameKeys: [],
     label: '',
+};
+
+const OFFICE_SITE_TEAM_SCOPE: SiteTeamScope = {
+    enabled: true,
+    allSiteAccess: true,
+    teamIds: [],
+    teamNameKeys: [],
+    label: '사무실 전체',
 };
 
 const getTodayInputValue = () => {
@@ -56,9 +72,6 @@ const shiftDate = (date: string, amount: number) => {
     return local.toISOString().slice(0, 10);
 };
 
-const getAllowedRequestDates = (baseDate: string) =>
-    Array.from({ length: REQUEST_DAY_COUNT }, (_, index) => shiftDate(baseDate, index + 1));
-
 const getWeekday = (date: string) => new Date(`${date}T00:00:00`).getDay();
 
 const formatDate = (date: string) =>
@@ -66,6 +79,52 @@ const formatDate = (date: string) =>
         month: '2-digit',
         day: '2-digit',
         weekday: 'short',
+    });
+
+const formatFullDate = (date: string) =>
+    new Date(`${date}T00:00:00`).toLocaleDateString('ko-KR', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        weekday: 'short',
+    });
+
+const getMonthStart = (date: string) => `${date.slice(0, 7)}-01`;
+
+const toInputDateValue = (date: Date) => {
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
+};
+
+const shiftMonth = (monthStart: string, amount: number) => {
+    const next = new Date(`${monthStart}T00:00:00`);
+    next.setDate(1);
+    next.setMonth(next.getMonth() + amount);
+    return toInputDateValue(next);
+};
+
+const getMonthEnd = (monthStart: string) => {
+    const date = new Date(`${monthStart}T00:00:00`);
+    return toInputDateValue(new Date(date.getFullYear(), date.getMonth() + 1, 0));
+};
+
+const getCalendarDates = (monthStart: string) => {
+    const start = new Date(`${monthStart}T00:00:00`);
+    const firstWeekday = start.getDay();
+    const gridStart = new Date(start);
+    gridStart.setDate(1 - firstWeekday);
+
+    return Array.from({ length: 42 }, (_, index) => {
+        const date = new Date(gridStart);
+        date.setDate(gridStart.getDate() + index);
+        return toInputDateValue(date);
+    });
+};
+
+const formatMonthTitle = (monthStart: string) =>
+    new Date(`${monthStart}T00:00:00`).toLocaleDateString('ko-KR', {
+        year: 'numeric',
+        month: 'long',
     });
 
 const normalizeText = (value: unknown) => String(value ?? '').trim();
@@ -152,6 +211,11 @@ const findViewerWorker = (uid: string | undefined, workers: Worker[], userData?:
     });
 };
 
+const isOfficeStaffViewer = (userData?: UserData | null, linkedOfficeStaff?: unknown) =>
+    userData?.accountType === 'office' ||
+    parseLinkedIds(userData?.linkedOfficeStaffIds).length > 0 ||
+    Boolean(linkedOfficeStaff);
+
 const buildSiteTeamScope = (worker: Worker | undefined, teamsById: Map<string, Team>, teams: Team[]): SiteTeamScope => {
     const team = findWorkerTeam(worker, teamsById, teams);
     const teamIds = cleanList([worker?.teamId, team?.id, team?.legacyId]);
@@ -160,6 +224,7 @@ const buildSiteTeamScope = (worker: Worker | undefined, teamsById: Map<string, T
 
     return {
         enabled: true,
+        allSiteAccess: false,
         teamIds,
         teamNameKeys: cleanList(teamNames.map(normalizeKey)),
         label: teamNames[0] || teamIds[0],
@@ -173,11 +238,40 @@ const siteMatchesTeamScope = (site: Site, scope: SiteTeamScope) => {
     return Boolean(normalizeKey(site.responsibleTeamName) && scope.teamNameKeys.includes(normalizeKey(site.responsibleTeamName)));
 };
 
+const getSiteIdentity = (site: Site) => site.id || site.name;
+
+const buildSelectableSiteGroups = (siteRows: Site[], scope: SiteTeamScope, supportSiteIds: Set<string>) => {
+    const activeSites = siteRows
+        .filter((site) => site.status !== 'completed')
+        .sort((left, right) => normalizeText(left.name).localeCompare(normalizeText(right.name), 'ko'));
+
+    if (scope.allSiteAccess) {
+        return {
+            myTeam: activeSites,
+            support: activeSites.filter((site) => supportSiteIds.has(getSiteIdentity(site))),
+        };
+    }
+
+    if (!scope.enabled) {
+        return {
+            myTeam: [] as Site[],
+            support: activeSites.filter((site) => supportSiteIds.has(getSiteIdentity(site))),
+        };
+    }
+
+    return {
+        myTeam: activeSites.filter((site) => siteMatchesTeamScope(site, scope)),
+        support: activeSites.filter((site) =>
+            supportSiteIds.has(getSiteIdentity(site)) && !siteMatchesTeamScope(site, scope)
+        ),
+    };
+};
+
 export default function FieldScheduleRequestPage() {
     const { currentUser } = useAuth();
     const today = getTodayInputValue();
     const [selectedDate, setSelectedDate] = useState(() => shiftDate(getTodayInputValue(), 1));
-    const [customDate, setCustomDate] = useState(() => shiftDate(getTodayInputValue(), REQUEST_DAY_COUNT + 1));
+    const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(shiftDate(getTodayInputValue(), 1)));
     const [sites, setSites] = useState<Site[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
@@ -193,12 +287,11 @@ export default function FieldScheduleRequestPage() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState('');
+    const [activeTab, setActiveTab] = useState<RequestPageTab>('register');
 
-    const allowedDates = useMemo(() => getAllowedRequestDates(today), [today]);
-    const requestStartDate = allowedDates[0];
-    const requestEndDate = allowedDates[allowedDates.length - 1];
-    const selectedDateAllowed = Boolean(selectedDate) && selectedDate >= requestStartDate;
-    const selectedDateIsCustom = selectedDateAllowed && !allowedDates.includes(selectedDate);
+    const requestStartDate = useMemo(() => shiftDate(today, 1), [today]);
+    const requestEndDate = useMemo(() => shiftDate(today, REQUEST_RANGE_DAYS), [today]);
+    const selectedDateAllowed = Boolean(selectedDate) && selectedDate >= requestStartDate && selectedDate <= requestEndDate;
     const requestListDateLabel = formatDate(selectedDate);
 
     const teamsById = useMemo(() => new Map(teams.map((team) => [team.id || '', team])), [teams]);
@@ -234,29 +327,21 @@ export default function FieldScheduleRequestPage() {
         () => selectedDateRequests.filter(isOffDutyOnlyFieldScheduleRequest),
         [selectedDateRequests]
     );
+    const monthlySiteRequests = useMemo(
+        () => activeRequests.filter((request) => !isOffDutyOnlyFieldScheduleRequest(request)),
+        [activeRequests]
+    );
+    const monthlyOffDutyRequests = useMemo(
+        () => activeRequests.filter(isOffDutyOnlyFieldScheduleRequest),
+        [activeRequests]
+    );
     const selectedDateOffDutyRequest = useMemo(
         () => offDutyRequests.find((request) => request.date === selectedDate),
         [offDutyRequests, selectedDate]
     );
 
     const siteGroups = useMemo(() => {
-        const activeSites = sites
-            .filter((site) => site.status !== 'completed')
-            .sort((left, right) => normalizeText(left.name).localeCompare(normalizeText(right.name), 'ko'));
-
-        if (!siteTeamScope.enabled) {
-            return {
-                myTeam: [] as Site[],
-                support: activeSites.filter((site) => supportSiteIds.has(site.id || site.name)),
-            };
-        }
-
-        return {
-            myTeam: activeSites.filter((site) => siteMatchesTeamScope(site, siteTeamScope)),
-            support: activeSites.filter((site) =>
-                supportSiteIds.has(site.id || site.name) && !siteMatchesTeamScope(site, siteTeamScope)
-            ),
-        };
+        return buildSelectableSiteGroups(sites, siteTeamScope, supportSiteIds);
     }, [siteTeamScope, sites, supportSiteIds]);
 
     const filteredSites = useMemo(() => {
@@ -292,6 +377,33 @@ export default function FieldScheduleRequestPage() {
             offDutyPeople: offDutyRequests.reduce((sum, request) => sum + request.offDutyWorkerIds.length, 0),
         };
     }, [offDutyRequests, siteRequests]);
+    const monthlyRequestSummary = useMemo(() => {
+        return {
+            siteCount: new Set(monthlySiteRequests.map((request) => `${request.date}:${request.siteId}`)).size,
+            requestedPeople: monthlySiteRequests.reduce((sum, request) => sum + request.requestedHeadcount, 0),
+            offDutyPeople: monthlyOffDutyRequests.reduce((sum, request) => sum + request.offDutyWorkerIds.length, 0),
+        };
+    }, [monthlyOffDutyRequests, monthlySiteRequests]);
+    const monthlySiteRequestsByDate = useMemo(() => {
+        const next = new Map<string, FieldScheduleRequest[]>();
+        monthlySiteRequests.forEach((request) => {
+            const rows = next.get(request.date) || [];
+            rows.push(request);
+            next.set(request.date, rows);
+        });
+        return next;
+    }, [monthlySiteRequests]);
+    const monthlyOffDutyRequestByDate = useMemo(
+        () => new Map(monthlyOffDutyRequests.map((request) => [request.date, request])),
+        [monthlyOffDutyRequests]
+    );
+    const requestedDateSet = useMemo(
+        () => new Set(activeRequests.map((request) => request.date)),
+        [activeRequests]
+    );
+    const calendarDates = useMemo(() => getCalendarDates(calendarMonth), [calendarMonth]);
+    const canMovePrevMonth = useMemo(() => getMonthEnd(shiftMonth(calendarMonth, -1)) >= requestStartDate, [calendarMonth, requestStartDate]);
+    const canMoveNextMonth = useMemo(() => shiftMonth(calendarMonth, 1) <= requestEndDate, [calendarMonth, requestEndDate]);
 
     const loadRequests = useCallback(async (from = requestStartDate, to = requestEndDate) => {
         const rangeRows = await fieldScheduleRequestService.listByDateRange(from, to);
@@ -312,23 +424,24 @@ export default function FieldScheduleRequestPage() {
         setLoading(true);
         setMessage('');
         try {
-            const [siteRows, workerRows, teamRows, viewerUser] = await Promise.all([
+            const [siteRows, workerRows, teamRows, viewerUser, linkedOfficeStaff] = await Promise.all([
                 siteService.getSites(),
                 manpowerService.getWorkers(),
                 teamService.getTeams(),
                 currentUser?.uid ? userService.getUser(currentUser.uid) : Promise.resolve(null),
+                currentUser?.uid ? officeStaffService.getOfficeStaffByUid(currentUser.uid).catch(() => null) : Promise.resolve(null),
             ]);
             const teamMap = new Map(teamRows.map((team) => [team.id || '', team]));
-            const nextScope = buildSiteTeamScope(findViewerWorker(currentUser?.uid, workerRows, viewerUser), teamMap, teamRows);
+            const nextScope = isOfficeStaffViewer(viewerUser, linkedOfficeStaff)
+                ? OFFICE_SITE_TEAM_SCOPE
+                : buildSiteTeamScope(findViewerWorker(currentUser?.uid, workerRows, viewerUser), teamMap, teamRows);
             setSites(siteRows);
             setWorkers(workerRows);
             setTeams(teamRows);
             setSiteTeamScope(nextScope);
-            const activeSites = siteRows.filter((site) => site.status !== 'completed');
-            const myTeamCount = nextScope.enabled
-                ? activeSites.filter((site) => siteMatchesTeamScope(site, nextScope)).length
-                : 0;
-            setSiteGroup(myTeamCount > 0 ? 'my-team' : 'support');
+            const nextSupportSiteIds = new Set(siteRows.filter((site) => isExternalSupportSite(site, teamMap, teamRows)).map(getSiteIdentity));
+            const nextSiteGroups = buildSelectableSiteGroups(siteRows, nextScope, nextSupportSiteIds);
+            setSiteGroup(nextSiteGroups.myTeam.length > 0 ? 'my-team' : 'support');
             await loadRequests();
         } catch (error) {
             console.error('[FieldScheduleRequestPage] Failed to load data', error);
@@ -365,13 +478,22 @@ export default function FieldScheduleRequestPage() {
         setSiteSearch('');
     };
 
-    const applyRequestToForm = (request: FieldScheduleRequest) => {
-        setSelectedDate(request.date);
-        if (!allowedDates.includes(request.date)) {
-            setCustomDate(request.date);
+    const selectCalendarDate = (date: string) => {
+        if (date < requestStartDate || date > requestEndDate) {
+            setMessage(`${formatDate(requestStartDate)}부터 ${formatDate(requestEndDate)}까지 등록할 수 있습니다.`);
+            return;
         }
+        setSelectedDate(date);
+    };
+
+    const applyRequestToForm = (request: FieldScheduleRequest) => {
+        setActiveTab('register');
+        setSelectedDate(request.date);
+        setCalendarMonth(getMonthStart(request.date));
         const requestSite = sites.find((site) => site.id === request.siteId || site.name === request.siteName);
-        if (requestSite && siteTeamScope.enabled) {
+        if (requestSite && siteTeamScope.allSiteAccess) {
+            setSiteGroup(supportSiteIds.has(getSiteIdentity(requestSite)) ? 'support' : 'my-team');
+        } else if (requestSite && siteTeamScope.enabled) {
             setSiteGroup(siteMatchesTeamScope(requestSite, siteTeamScope) ? 'my-team' : 'support');
         }
         setSelectedSiteId(request.siteId);
@@ -390,7 +512,7 @@ export default function FieldScheduleRequestPage() {
             return;
         }
         if (!selectedDateAllowed) {
-            setMessage('내일 이후 날짜만 등록할 수 있습니다.');
+            setMessage(`${formatDate(requestStartDate)}부터 ${formatDate(requestEndDate)}까지 등록할 수 있습니다.`);
             return;
         }
 
@@ -431,7 +553,7 @@ export default function FieldScheduleRequestPage() {
 
     const handleSaveOffDuty = async () => {
         if (!selectedDateAllowed) {
-            setMessage('내일 이후 날짜만 등록할 수 있습니다.');
+            setMessage(`${formatDate(requestStartDate)}부터 ${formatDate(requestEndDate)}까지 등록할 수 있습니다.`);
             return;
         }
 
@@ -463,7 +585,7 @@ export default function FieldScheduleRequestPage() {
                 requestedRoles: [],
                 offDutyWorkerIds,
                 offDutyWorkerNames: selectedOffDutyWorkers.map((worker) => worker.name),
-                memo: '',
+                memo: selectedDateOffDutyRequest?.memo || '',
                 priority: 'normal',
                 requestedById: currentUser?.uid || '',
                 requestedByName,
@@ -491,6 +613,32 @@ export default function FieldScheduleRequestPage() {
         } catch (error) {
             console.error('[FieldScheduleRequestPage] Failed to delete request', error);
             setMessage('요청 삭제에 실패했습니다.');
+        }
+    };
+
+    const handleRemoveOffDutyWorker = async (request: FieldScheduleRequest, workerId: string | undefined, workerName: string) => {
+        if (!workerId) return;
+        const ok = window.confirm(`${formatFullDate(request.date)} ${workerName} 휴무를 취소할까요?`);
+        if (!ok) return;
+
+        setSaving(true);
+        setMessage('');
+        try {
+            await fieldScheduleRequestService.removeOffDutyWorker({
+                date: request.date,
+                workerId,
+                workerName,
+            });
+            await loadRequests();
+            if (request.date === selectedDate) {
+                setOffDutyWorkerIds((prev) => prev.filter((id) => id !== workerId));
+            }
+            setMessage(`${formatDate(request.date)} ${workerName} 휴무를 취소했습니다.`);
+        } catch (error) {
+            console.error('[FieldScheduleRequestPage] Failed to remove off-duty worker', error);
+            setMessage('휴무자 취소에 실패했습니다.');
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -545,6 +693,13 @@ export default function FieldScheduleRequestPage() {
                             {formatDate(selectedDate)}
                         </div>
                         <Link
+                            to="/assignment/off-duty-request"
+                            className="flex h-10 items-center justify-center gap-2 rounded-lg border border-rose-100 bg-rose-50 px-3 text-sm font-bold text-rose-700 hover:bg-rose-100"
+                        >
+                            <UserX size={16} />
+                            휴무신청
+                        </Link>
+                        <Link
                             to="/assignment/field-schedule"
                             className="flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-bold text-white hover:bg-slate-800"
                         >
@@ -555,66 +710,126 @@ export default function FieldScheduleRequestPage() {
                 </div>
             </header>
 
-            <main className="grid min-h-[calc(100vh-146px)] grid-cols-1 gap-4 p-4 lg:grid-cols-[390px_minmax(0,1fr)]">
+            <div className="border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
+                <div className="flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('register')}
+                        className={`flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-black transition ${
+                            activeTab === 'register'
+                                ? 'bg-slate-950 text-white shadow-sm'
+                                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                    >
+                        <Save size={16} />
+                        등록
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('month-list')}
+                        className={`flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-black transition ${
+                            activeTab === 'month-list'
+                                ? 'bg-slate-950 text-white shadow-sm'
+                                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                    >
+                        <ClipboardList size={16} />
+                        한달 요청목록
+                    </button>
+                </div>
+            </div>
+
+            {activeTab === 'register' ? (
+            <main className="grid min-h-[calc(100vh-202px)] grid-cols-1 gap-4 p-4 lg:grid-cols-[390px_minmax(0,1fr)]">
                 <aside className="flex min-h-0 flex-col rounded-lg border border-slate-200 bg-white shadow-sm">
                     <div className="border-b border-slate-200 p-4">
                         <div className="mb-2 flex items-center justify-between">
                             <div className="text-xs font-black text-slate-500">등록 날짜</div>
-                            <div className="text-[11px] font-bold text-slate-400">내일부터 7일</div>
+                            <div className="text-[11px] font-bold text-slate-400">30일 선택 가능</div>
                         </div>
-                        <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 sm:grid-cols-4 lg:grid-cols-2">
-                            {allowedDates.map((date, index) => {
-                                const selected = date === selectedDate;
-                                const weekday = getWeekday(date);
-                                const dateToneClass = selected
-                                    ? weekday === 0
-                                        ? 'bg-rose-600 text-white shadow-sm'
-                                        : weekday === 6
-                                            ? 'bg-blue-600 text-white shadow-sm'
-                                            : 'bg-slate-900 text-white shadow-sm'
-                                    : weekday === 0
-                                        ? 'bg-rose-50 text-rose-700 hover:bg-rose-100'
-                                        : weekday === 6
-                                            ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
-                                            : 'text-slate-600 hover:bg-white hover:text-slate-900';
-                                return (
-                                <button
-                                    key={date}
-                                    type="button"
-                                    onClick={() => setSelectedDate(date)}
-                                    className={`flex min-h-12 flex-col items-center justify-center rounded-md px-2 text-xs font-black ${dateToneClass}`}
-                                >
-                                    <span>{index === 0 ? '내일' : formatDate(date)}</span>
-                                    <span className={`mt-0.5 text-[10px] font-bold ${selected ? 'text-white/80' : weekday === 0 ? 'text-rose-400' : weekday === 6 ? 'text-blue-400' : 'text-slate-400'}`}>
-                                        {date.slice(5).replace('-', '.')}
-                                    </span>
-                                </button>
-                                );
-                            })}
-                            <div
-                                className={`min-h-12 rounded-md border px-2 py-1.5 ${
-                                    selectedDateIsCustom
-                                        ? 'border-emerald-500 bg-emerald-50 text-emerald-800'
-                                        : 'border-transparent bg-white text-slate-600'
-                                }`}
-                            >
+                        <div className="rounded-lg border border-slate-200 bg-white p-3">
+                            <div className="mb-3 flex items-center justify-between gap-2">
                                 <button
                                     type="button"
-                                    onClick={() => setSelectedDate(customDate)}
-                                    className="mb-1 w-full text-center text-xs font-black"
+                                    onClick={() => setCalendarMonth((prev) => shiftMonth(prev, -1))}
+                                    disabled={!canMovePrevMonth}
+                                    aria-label="이전 달"
+                                    className="flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
                                 >
-                                    특정일
+                                    <ChevronLeft size={16} />
                                 </button>
-                                <input
-                                    type="date"
-                                    min={requestStartDate}
-                                    value={customDate}
-                                    onChange={(event) => {
-                                        setCustomDate(event.target.value);
-                                        setSelectedDate(event.target.value);
-                                    }}
-                                    className="h-6 w-full rounded border border-slate-200 bg-white px-1 text-[11px] font-bold text-slate-700 outline-none focus:border-emerald-400"
-                                />
+                                <div className="text-sm font-black text-slate-900">{formatMonthTitle(calendarMonth)}</div>
+                                <button
+                                    type="button"
+                                    onClick={() => setCalendarMonth((prev) => shiftMonth(prev, 1))}
+                                    disabled={!canMoveNextMonth}
+                                    aria-label="다음 달"
+                                    className="flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+                                >
+                                    <ChevronRight size={16} />
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-7 gap-1 text-center">
+                                {WEEKDAY_LABELS.map((weekday, index) => (
+                                    <div
+                                        key={weekday}
+                                        className={`py-1 text-[11px] font-black ${
+                                            index === 0 ? 'text-rose-500' : index === 6 ? 'text-blue-500' : 'text-slate-400'
+                                        }`}
+                                    >
+                                        {weekday}
+                                    </div>
+                                ))}
+                                {calendarDates.map((date) => {
+                                    const selected = date === selectedDate;
+                                    const alreadyRequested = requestedDateSet.has(date);
+                                    const weekday = getWeekday(date);
+                                    const inCurrentMonth = date.startsWith(calendarMonth.slice(0, 7));
+                                    const disabledDate = date < requestStartDate || date > requestEndDate;
+                                    const dateToneClass = selected
+                                        ? 'bg-slate-900 text-white shadow-sm'
+                                        : disabledDate
+                                            ? 'bg-slate-50 text-slate-300'
+                                            : alreadyRequested
+                                                ? 'bg-rose-50 text-rose-700 ring-1 ring-rose-100'
+                                                : weekday === 0
+                                                    ? 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                                                    : weekday === 6
+                                                        ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                                        : 'bg-white text-slate-700 hover:bg-slate-100';
+
+                                    return (
+                                        <button
+                                            key={date}
+                                            type="button"
+                                            onClick={() => selectCalendarDate(date)}
+                                            disabled={disabledDate}
+                                            aria-pressed={selected}
+                                            aria-label={`${formatFullDate(date)}${alreadyRequested ? ' 등록됨' : ''}`}
+                                            className={`relative flex aspect-square min-h-10 flex-col items-center justify-center rounded-md border text-xs font-black transition ${dateToneClass} ${
+                                                selected ? 'border-slate-900' : 'border-slate-100'
+                                            } ${inCurrentMonth ? '' : 'opacity-60'}`}
+                                        >
+                                            <span>{Number(date.slice(8, 10))}</span>
+                                            {alreadyRequested ? (
+                                                <span className={`mt-0.5 h-1.5 w-1.5 rounded-full ${selected ? 'bg-white' : 'bg-rose-500'}`} />
+                                            ) : null}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-bold text-slate-500">
+                                <span className="inline-flex items-center gap-1">
+                                    <span className="h-2 w-2 rounded-full bg-slate-900" />
+                                    선택
+                                </span>
+                                <span className="inline-flex items-center gap-1">
+                                    <span className="h-2 w-2 rounded-full bg-rose-500" />
+                                    등록됨
+                                </span>
+                                <span>{formatDate(requestStartDate)}부터 {formatDate(requestEndDate)}까지 신청 가능</span>
                             </div>
                         </div>
 
@@ -655,8 +870,8 @@ export default function FieldScheduleRequestPage() {
                                 </div>
                                 <div className="mb-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
                                     <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] font-bold text-slate-500">
-                                        <span>해당팀 {siteTeamScope.label || '팀 연결 필요'}</span>
-                                        <span>{siteGroup === 'support' ? '외부지원팀 현장 선택' : '우리팀 현장 선택'}</span>
+                                        <span>{siteTeamScope.allSiteAccess ? siteTeamScope.label : `해당팀 ${siteTeamScope.label || '팀 연결 필요'}`}</span>
+                                        <span>{siteGroup === 'support' ? '외부지원팀 현장 선택' : siteTeamScope.allSiteAccess ? '전체 우리팀 현장 선택' : '우리팀 현장 선택'}</span>
                                     </div>
                                     <div className="grid grid-cols-2 gap-1 rounded-md bg-slate-100 p-1">
                                         <button
@@ -898,12 +1113,29 @@ export default function FieldScheduleRequestPage() {
                                                 <div key={request.id || `${request.date}:off-duty`} className="rounded-md bg-white px-3 py-2 ring-1 ring-rose-100">
                                                     <div className="mb-1 text-xs font-black text-rose-700">{formatDate(request.date)}</div>
                                                     <div className="flex flex-wrap gap-1.5">
-                                                        {request.offDutyWorkerNames.map((name) => (
-                                                            <span key={`${request.id}:${name}`} className="rounded-md bg-rose-50 px-2 py-1 text-xs font-bold text-rose-700">
-                                                                {name}
-                                                            </span>
-                                                        ))}
+                                                        {request.offDutyWorkerNames.map((name, index) => {
+                                                            const workerId = request.offDutyWorkerIds[index];
+                                                            return (
+                                                                <button
+                                                                    key={`${request.id}:${workerId || name}`}
+                                                                    type="button"
+                                                                    onClick={() => handleRemoveOffDutyWorker(request, workerId, name)}
+                                                                    disabled={saving || !workerId}
+                                                                    className="inline-flex items-center gap-1 rounded-md bg-rose-50 px-2 py-1 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:text-rose-300"
+                                                                    title="휴무 취소"
+                                                                >
+                                                                    {name}
+                                                                    <XCircle size={12} />
+                                                                    <span className="text-[10px] text-rose-500">취소</span>
+                                                                </button>
+                                                            );
+                                                        })}
                                                     </div>
+                                                    {request.memo ? (
+                                                        <div className="mt-2 whitespace-pre-line rounded-md bg-rose-50 px-2 py-1.5 text-xs font-semibold leading-5 text-rose-700">
+                                                            {request.memo}
+                                                        </div>
+                                                    ) : null}
                                                 </div>
                                             ))}
                                         </div>
@@ -980,6 +1212,192 @@ export default function FieldScheduleRequestPage() {
                     </div>
                 </section>
             </main>
+            ) : (
+                <main className="min-h-[calc(100vh-202px)] p-4">
+                    <section className="flex min-h-[calc(100vh-234px)] flex-col rounded-lg border border-slate-200 bg-white shadow-sm">
+                        <div className="flex flex-col gap-3 border-b border-slate-200 p-4 xl:flex-row xl:items-center xl:justify-between">
+                            <div>
+                                <div className="flex items-center gap-2 text-xs font-black text-slate-500">
+                                    <CalendarDays size={14} />
+                                    {formatDate(requestStartDate)}부터 {formatDate(requestEndDate)}까지
+                                </div>
+                                <h2 className="mt-1 text-lg font-black text-slate-950">한달 요청목록</h2>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <div className="flex h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-black text-slate-700">
+                                    현장 {monthlyRequestSummary.siteCount}건
+                                </div>
+                                <div className="flex h-10 items-center rounded-lg border border-blue-100 bg-blue-50 px-3 text-sm font-black text-blue-700">
+                                    요청 {monthlyRequestSummary.requestedPeople}명
+                                </div>
+                                <div className="flex h-10 items-center rounded-lg border border-rose-100 bg-rose-50 px-3 text-sm font-black text-rose-700">
+                                    휴무 {monthlyRequestSummary.offDutyPeople}명
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={loadData}
+                                    disabled={loading}
+                                    className="flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 hover:bg-slate-50 disabled:text-slate-300"
+                                >
+                                    <RefreshCw size={16} />
+                                    새로고침
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                            {loading ? (
+                                <div className="grid h-full min-h-[300px] place-items-center text-sm font-bold text-slate-400">
+                                    불러오는 중
+                                </div>
+                            ) : (
+                                <div className="overflow-x-auto">
+                                    <div className="min-w-[980px]">
+                                        <div className="mb-3 flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 p-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => setCalendarMonth((prev) => shiftMonth(prev, -1))}
+                                                disabled={!canMovePrevMonth}
+                                                aria-label="이전 달"
+                                                className="flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+                                            >
+                                                <ChevronLeft size={16} />
+                                            </button>
+                                            <div className="text-sm font-black text-slate-950">{formatMonthTitle(calendarMonth)}</div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setCalendarMonth((prev) => shiftMonth(prev, 1))}
+                                                disabled={!canMoveNextMonth}
+                                                aria-label="다음 달"
+                                                className="flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+                                            >
+                                                <ChevronRight size={16} />
+                                            </button>
+                                        </div>
+
+                                        <div className="grid grid-cols-7 gap-1 text-center">
+                                            {WEEKDAY_LABELS.map((weekday, index) => (
+                                                <div
+                                                    key={weekday}
+                                                    className={`rounded-md bg-slate-100 py-2 text-[11px] font-black ${
+                                                        index === 0 ? 'text-rose-500' : index === 6 ? 'text-blue-500' : 'text-slate-500'
+                                                    }`}
+                                                >
+                                                    {weekday}
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        <div className="mt-1 grid grid-cols-7 gap-1">
+                                            {calendarDates.map((date) => {
+                                                const siteRows = monthlySiteRequestsByDate.get(date) || [];
+                                                const offDutyRow = monthlyOffDutyRequestByDate.get(date);
+                                                const inCurrentMonth = date.startsWith(calendarMonth.slice(0, 7));
+                                                const disabledDate = date < requestStartDate || date > requestEndDate;
+                                                const weekday = getWeekday(date);
+                                                const hasRows = siteRows.length > 0 || Boolean(offDutyRow);
+                                                return (
+                                                    <div
+                                                        key={date}
+                                                        className={`min-h-[148px] rounded-lg border p-2 ${
+                                                            disabledDate
+                                                                ? 'border-slate-100 bg-slate-50 text-slate-300'
+                                                                : hasRows
+                                                                    ? 'border-slate-200 bg-white'
+                                                                    : 'border-slate-100 bg-white'
+                                                        } ${inCurrentMonth ? '' : 'opacity-60'}`}
+                                                    >
+                                                        <div className="mb-2 flex items-center justify-between">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => !disabledDate && selectCalendarDate(date)}
+                                                                disabled={disabledDate}
+                                                                className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-black ${
+                                                                    date === selectedDate
+                                                                        ? 'bg-slate-900 text-white'
+                                                                        : weekday === 0
+                                                                            ? 'text-rose-600 hover:bg-rose-50'
+                                                                            : weekday === 6
+                                                                                ? 'text-blue-600 hover:bg-blue-50'
+                                                                                : 'text-slate-700 hover:bg-slate-100'
+                                                                } disabled:text-slate-300`}
+                                                            >
+                                                                {Number(date.slice(8, 10))}
+                                                            </button>
+                                                            {hasRows ? (
+                                                                <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-500">
+                                                                    {siteRows.length + (offDutyRow ? 1 : 0)}건
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
+
+                                                        {disabledDate ? null : hasRows ? (
+                                                            <div className="space-y-1.5">
+                                                                {siteRows.map((request) => (
+                                                                    <div key={request.id || `${request.date}:${request.siteId}`} className="rounded-md border border-blue-100 bg-blue-50 px-2 py-1.5">
+                                                                        <div className="flex items-start gap-1.5">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => applyRequestToForm(request)}
+                                                                                className="min-w-0 flex-1 text-left"
+                                                                            >
+                                                                                <span className="block truncate text-[11px] font-black text-blue-900">{request.siteName}</span>
+                                                                                <span className="block truncate text-[10px] font-bold text-blue-600">요청 {request.requestedHeadcount}명</span>
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleDelete(request)}
+                                                                                className="shrink-0 rounded p-1 text-rose-600 hover:bg-white"
+                                                                                title="삭제"
+                                                                            >
+                                                                                <Trash2 size={12} />
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+
+                                                                {offDutyRow ? (
+                                                                    <div className="rounded-md border border-rose-100 bg-rose-50 px-2 py-1.5">
+                                                                        <div className="mb-1 flex items-center gap-1 text-[11px] font-black text-rose-700">
+                                                                            <UserX size={12} />
+                                                                            휴무 {offDutyRow.offDutyWorkerIds.length}명
+                                                                        </div>
+                                                                        <div className="flex flex-wrap gap-1">
+                                                                            {offDutyRow.offDutyWorkerNames.map((name, index) => {
+                                                                                const workerId = offDutyRow.offDutyWorkerIds[index];
+                                                                                return (
+                                                                                    <button
+                                                                                        key={`${offDutyRow.id}:${workerId || name}`}
+                                                                                        type="button"
+                                                                                        onClick={() => handleRemoveOffDutyWorker(offDutyRow, workerId, name)}
+                                                                                        disabled={saving || !workerId}
+                                                                                        className="inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-100 hover:bg-rose-100 disabled:cursor-not-allowed disabled:text-rose-300"
+                                                                                        title="휴무 취소"
+                                                                                    >
+                                                                                        {name}
+                                                                                        <XCircle size={10} />
+                                                                                        취소
+                                                                                    </button>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    </div>
+                                                                ) : null}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="mt-8 text-center text-[11px] font-bold text-slate-300">요청 없음</div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </section>
+                </main>
+            )}
         </div>
     );
 }

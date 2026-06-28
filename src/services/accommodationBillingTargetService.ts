@@ -28,9 +28,27 @@ const makeId = (prefix: string): string => {
     return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 };
 
+const toMillis = (value?: unknown): number => {
+    if (!value) return 0;
+    if (value instanceof Timestamp) return value.toMillis();
+    if (typeof (value as { toMillis?: unknown }).toMillis === 'function') {
+        return (value as { toMillis: () => number }).toMillis();
+    }
+    if (typeof (value as { toDate?: unknown }).toDate === 'function') {
+        const date = (value as { toDate: () => Date }).toDate();
+        return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+    }
+    const parsed = new Date(String(value));
+    return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
+
 const compareTargetLatestFirst = (a: AccommodationBillingTarget, b: AccommodationBillingTarget): number => {
     const startDiff = String(b.startDate ?? '').localeCompare(String(a.startDate ?? ''));
     if (startDiff !== 0) return startDiff;
+    const updatedDiff = toMillis(b.updatedAt) - toMillis(a.updatedAt);
+    if (updatedDiff !== 0) return updatedDiff;
+    const createdDiff = toMillis(b.createdAt) - toMillis(a.createdAt);
+    if (createdDiff !== 0) return createdDiff;
     return String(b.id ?? '').localeCompare(String(a.id ?? ''));
 };
 

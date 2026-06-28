@@ -417,13 +417,40 @@ const Header: React.FC<HeaderProps> = ({
         return section.children.some((child) => location.pathname.startsWith(child.path));
     };
 
-    const configuredHeaderActions: MenuItem[] = Array.isArray(safeCurrentSiteData.headerActions)
+    const baseConfiguredHeaderActions: MenuItem[] = Array.isArray(safeCurrentSiteData.headerActions)
         ? safeCurrentSiteData.headerActions
         : DEFAULT_HEADER_ACTIONS;
+    const isPrivilegedHeaderUser = userAccessRoles.some(isPrivilegedRole);
+
+    const configuredHeaderActions: MenuItem[] = React.useMemo(() => {
+        const actions = [...baseConfiguredHeaderActions];
+        if (!isPrivilegedHeaderUser) return actions;
+
+        const ensureDefaultAction = (actionName: string) => {
+            const hasAction = actions.some((item) => String(item.action || '').trim() === actionName);
+            if (hasAction) return;
+
+            const defaultAction = DEFAULT_HEADER_ACTIONS.find((item) => item.action === actionName);
+            if (!defaultAction) return;
+
+            const messageIndex = actions.findIndex((item) => String(item.action || '').trim() === 'messages');
+            if (messageIndex >= 0) {
+                actions.splice(messageIndex, 0, defaultAction);
+                return;
+            }
+
+            actions.push(defaultAction);
+        };
+
+        ensureDefaultAction('position');
+        ensureDefaultAction('admin');
+
+        return actions;
+    }, [baseConfiguredHeaderActions, isPrivilegedHeaderUser]);
 
     const hasHeaderActionAccess = (item: MenuItem): boolean => {
         if (item.hide) return false;
-        if (userAccessRoles.some(isPrivilegedRole)) return true;
+        if (isPrivilegedHeaderUser) return true;
 
         const allowedRoles = Array.isArray(item.roles)
             ? item.roles.map(normalizeAccessRole).filter(Boolean)

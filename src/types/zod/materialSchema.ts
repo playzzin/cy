@@ -20,6 +20,32 @@ export const MaterialSchema = z.object({
 
 export type MaterialZod = z.infer<typeof MaterialSchema>;
 
+export const MaterialPhotoFileSchema = z.object({
+    path: z.string(),
+    name: z.string(),
+    contentType: z.string().optional(),
+    size: z.number().optional(),
+    originalSize: z.number().optional(),
+    compressedSize: z.number().optional(),
+    compressed: z.boolean().optional(),
+    source: z.enum(['camera', 'gallery']).optional(),
+});
+
+export const MaterialPhotoBatchSchema = z.object({
+    id: z.string(),
+    transactionType: z.enum(['inbound', 'outbound']),
+    transactionDate: z.string(),
+    siteId: z.string(),
+    photoCount: z.number(),
+    photos: z.array(MaterialPhotoFileSchema),
+    createdBy: z.string().optional(),
+    createdByName: z.string().optional(),
+    createdAt: z.any().optional(),
+    updatedAt: z.any().optional(),
+});
+
+export type MaterialPhotoBatchZod = z.infer<typeof MaterialPhotoBatchSchema>;
+
 // Material Inbound Transaction Schema
 export const MaterialInboundSchema = z.object({
     id: z.string(),
@@ -40,6 +66,8 @@ export const MaterialInboundSchema = z.object({
     invoiceNumber: z.string().optional(),
     notes: z.string().optional(),
     photoUrls: z.array(z.string()).optional(),
+    photoBatchId: z.string().optional(),
+    photoCount: z.number().optional(),
     registeredBy: z.string().optional(),
     registeredByName: z.string().optional(),
     remarks: z.string().optional(),
@@ -65,9 +93,13 @@ export const MaterialOutboundSchema = z.object({
     vehicleNumber: z.string().optional(),
     recipient: z.string().optional(),
     recipientPhone: z.string().optional(),
+    rentalCompanyId: z.string().optional(),
+    rentalCompanyName: z.string().optional(),
     deliveryStatus: z.enum(['pending', 'in-transit', 'delivered']).optional(),
     notes: z.string().optional(),
     photoUrls: z.array(z.string()).optional(),
+    photoBatchId: z.string().optional(),
+    photoCount: z.number().optional(),
     registeredBy: z.string().optional(),
     registeredByName: z.string().optional(),
     remarks: z.string().optional(),

@@ -13,6 +13,7 @@ import { Company } from '../../services/companyService';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import OutputManagementTabs from '../../components/common/OutputManagementTabs';
 import { loadSessionState, saveSessionState } from '../../utils/sessionStorage';
+import { getContrastingTextColor, getReadableAccentColor } from '../../utils/color';
 
 interface BoardItem {
     id: string;
@@ -88,6 +89,16 @@ const hexToRgba = (hex: string, alpha: number): string => {
     const b = parseInt(normalized.slice(4, 6), 16);
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
+
+const getSolidColorBadgeStyle = (color: string): React.CSSProperties => ({
+    backgroundColor: color,
+    borderColor: color,
+    color: getContrastingTextColor(color)
+});
+
+const getReadableColorOnWhite = (color: string): string => (
+    getReadableAccentColor(color, '#ffffff', 4.5)
+);
 
 const WhiteboardStatusBoard: React.FC = () => {
     // Context에서 마스터 데이터 가져오기 (Firebase 호출 없이 바로 사용!)
@@ -430,7 +441,8 @@ const WhiteboardStatusBoard: React.FC = () => {
     const accentColor = normalizeHexColor(selectedCompany?.color) || '#4f46e5';
     const accentBg = hexToRgba(accentColor, 0.08);
     const accentBorder = hexToRgba(accentColor, 0.18);
-    const accentTextMuted = hexToRgba(accentColor, 0.65);
+    const accentText = getReadableColorOnWhite(accentColor);
+    const accentTextMuted = getReadableColorOnWhite(accentColor);
 
     // 마스터 데이터 로드 시 기본 회사 설정
     useEffect(() => {
@@ -1144,8 +1156,8 @@ const WhiteboardStatusBoard: React.FC = () => {
                             className="flex items-center gap-2 px-4 py-2 rounded-xl border"
                             style={{ backgroundColor: accentBg, borderColor: accentBorder }}
                         >
-                            <div className="text-xs font-bold uppercase tracking-wider" style={{ color: accentColor }}>Total</div>
-                            <div className="text-xl font-black" style={{ color: accentColor }}>
+                            <div className="text-xs font-bold uppercase tracking-wider" style={{ color: accentText }}>Total</div>
+                            <div className="text-xl font-black" style={{ color: accentText }}>
                                 {grandTotalManDaysFiltered.toFixed(1)} <span className="text-sm font-bold" style={{ color: accentTextMuted }}>공수</span>
                             </div>
                         </div>
@@ -1199,7 +1211,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                         <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: accentTextMuted }}>
                             총 공수
                         </div>
-                        <div className="text-2xl font-black" style={{ color: accentColor }}>
+                        <div className="text-2xl font-black" style={{ color: accentText }}>
                             {grandTotalManDaysFiltered.toFixed(1)}
                             <span className="ml-1 text-sm font-bold" style={{ color: accentTextMuted }}>공수</span>
                         </div>
@@ -1223,7 +1235,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                 {/* Logic Explanation Text */}
                 <div className="bg-slate-50 rounded-lg p-3 text-center border border-slate-100">
                     <p className="text-slate-600 text-sm font-medium">
-                        <span className="font-bold mr-2 inline-flex items-center gap-1" style={{ color: accentColor }}>
+                        <span className="font-bold mr-2 inline-flex items-center gap-1" style={{ color: accentText }}>
                                     <FontAwesomeIcon icon={faBuilding} className="text-slate-400" />
                                     {companies.find(c => c.id === selectedCompanyId)?.name || '청연 · 다원'}
                         </span>
@@ -1324,6 +1336,12 @@ const WhiteboardStatusBoard: React.FC = () => {
                                 : undefined;
                             const fallbackColor = isOrangeTheme ? '#f97316' : '#4f46e5';
                             const brandColor = externalSiteTeamColor || itemCompanyColor || fallbackColor;
+                            const brandTextColor = getReadableColorOnWhite(brandColor);
+                            const companyBadgeColor = siteCompanyDisplayColor || '#3b82f6';
+                            const companyBadgeStyle = getSolidColorBadgeStyle(companyBadgeColor);
+                            const normalizedItemColor = normalizeHexColor(item.color);
+                            const siteIconColor = normalizedItemColor || '#F3F4F6';
+                            const siteIconTextColor = normalizedItemColor ? getContrastingTextColor(siteIconColor) : '#94a3b8';
                             const ringStyle: CSSWithVars | undefined = isItemExpanded
                                 ? { '--tw-ring-color': hexToRgba(brandColor, 0.7) }
                                 : undefined;
@@ -1351,9 +1369,9 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                 {item.type === 'site' && (
                                                     <span
                                                         className="inline-flex items-center justify-center w-6 h-6 rounded-full border border-slate-200 flex-shrink-0"
-                                                        style={{ backgroundColor: item.color || '#F3F4F6' }}
+                                                        style={{ backgroundColor: siteIconColor }}
                                                     >
-                                                        <FontAwesomeIcon icon={faHardHat} className={`text-[10px] ${item.color ? 'text-white' : 'text-slate-400'}`} />
+                                                        <FontAwesomeIcon icon={faHardHat} className="text-[10px]" style={{ color: siteIconTextColor }} />
                                                     </span>
                                                 )}
                                                 {item.name}
@@ -1363,31 +1381,22 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                 <div className="flex items-center gap-2 mt-0.5 mb-1.5 flex-wrap">
                                                     {siteCompany && (
                                                         <span
-                                                            className="text-xs font-medium flex items-center gap-1.5"
-                                                            style={{ color: siteCompanyDisplayColor }}
+                                                            className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-bold shadow-sm"
+                                                            style={companyBadgeStyle}
                                                         >
-                                                            <span
-                                                                className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
-                                                                style={{ backgroundColor: siteCompanyDisplayColor || '#3b82f6' }}
-                                                            >
-                                                                <FontAwesomeIcon icon={faBuilding} className="text-[8px] text-white" />
-                                                            </span>
+                                                            <FontAwesomeIcon icon={faBuilding} className="text-[8px]" />
                                                             {siteCompany.name}
                                                         </span>
                                                     )}
                                                     {item.responsibleTeamName && (() => {
                                                         const teamColor = displayedResponsibleTeamColor || '#8b5cf6';
+                                                        const teamBadgeStyle = getSolidColorBadgeStyle(teamColor);
                                                         return (
                                                             <span
-                                                                className="text-xs font-medium flex items-center gap-1.5"
-                                                                style={{ color: teamColor }}
+                                                                className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-bold shadow-sm"
+                                                                style={teamBadgeStyle}
                                                             >
-                                                                <span
-                                                                    className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
-                                                                    style={{ backgroundColor: teamColor }}
-                                                                >
-                                                                    <FontAwesomeIcon icon={faUserGroup} className="text-[8px] text-white" />
-                                                                </span>
+                                                                <FontAwesomeIcon icon={faUserGroup} className="text-[8px]" />
                                                                 {item.responsibleTeamName}
                                                             </span>
                                                         );
@@ -1413,7 +1422,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                     </div>
                                                     <div
                                                         className={`mt-1 text-3xl md:text-4xl font-extrabold whitespace-nowrap drop-shadow-lg ${item.manDay && item.manDay > 0 ? '' : 'text-slate-300'}`}
-                                                        style={item.manDay && item.manDay > 0 ? { color: brandColor, textShadow: `0 2px 8px ${hexToRgba(brandColor, 0.18)}` } : undefined}
+                                                        style={item.manDay && item.manDay > 0 ? { color: brandTextColor, textShadow: `0 2px 8px ${hexToRgba(brandColor, 0.18)}` } : undefined}
                                                     >
                                                         {(item.manDay || 0).toFixed(1)}
                                                         <span className="ml-1 text-lg font-bold text-indigo-400 align-top">공수</span>
@@ -1480,7 +1489,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                     </div>
                                                     <div className="text-right mt-4 md:mt-0 flex-shrink-0">
                                                         <span className="text-sm text-slate-500 block mb-1">총 투입 공수</span>
-                                                        <span className="text-3xl md:text-4xl font-black tracking-tight whitespace-nowrap" style={{ color: brandColor }}>
+                                                        <span className="text-3xl md:text-4xl font-black tracking-tight whitespace-nowrap" style={{ color: brandTextColor }}>
                                                             {totalManDayDisplay.toFixed(1)}
                                                             <span className="text-lg text-slate-400 font-medium ml-1">MD</span>
                                                         </span>
@@ -1523,12 +1532,9 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                     ? resolveDashboardTeam(detail.targetId, detail.targetName)
                                                                     : undefined;
                                                                 const detailTeamColor = normalizeHexColor(detailTeam?.color) || '#8b5cf6';
-                                                                const detailManDayColor = isExternalSupport ? detailTeamColor : '#4f46e5';
-                                                                const externalSupportBadgeStyle: React.CSSProperties = {
-                                                                    borderColor: hexToRgba(detailTeamColor, 0.28),
-                                                                    backgroundColor: hexToRgba(detailTeamColor, 0.1),
-                                                                    color: detailTeamColor
-                                                                };
+                                                                const detailTeamTextColor = getContrastingTextColor(detailTeamColor);
+                                                                const detailManDayColor = isExternalSupport ? getReadableColorOnWhite(detailTeamColor) : '#4f46e5';
+                                                                const externalSupportBadgeStyle = getSolidColorBadgeStyle(detailTeamColor);
                                                                 const detailStatusBadges = viewMode === 'site'
                                                                     ? [
                                                                         isResponsibleTeam ? { label: '담당팀', className: 'border-slate-200 bg-slate-100 text-slate-600' } : undefined,
@@ -1571,20 +1577,21 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                                 className={`rounded-full flex items-center justify-center flex-shrink-0 ${isDetailSelected ? 'w-6 h-6' : 'w-4 h-4'}`}
                                                                                                 style={{ backgroundColor: detailTeamColor }}
                                                                                             >
-                                                                                                <FontAwesomeIcon icon={faUserGroup} className={`text-white ${isDetailSelected ? 'text-[10px]' : 'text-[7px]'}`} />
+                                                                                                <FontAwesomeIcon icon={faUserGroup} className={isDetailSelected ? 'text-[10px]' : 'text-[7px]'} style={{ color: detailTeamTextColor }} />
                                                                                             </span>
                                                                                         );
                                                                                     } else {
                                                                                         // 팀별 보기 -> 상세는 현장
                                                                                         const detailSite = sites.find(s => s.id === detail.targetId);
                                                                                         const siteComp = detailSite ? companies.find(c => c.id === detailSite.companyId) : null;
-                                                                                        const siteColor = siteComp?.color || '#3b82f6';
+                                                                                        const siteColor = normalizeHexColor(siteComp?.color) || '#3b82f6';
+                                                                                        const siteIconTextColor = getContrastingTextColor(siteColor);
                                                                                         return (
                                                                                             <span
                                                                                                 className={`rounded-full flex items-center justify-center flex-shrink-0 ${isDetailSelected ? 'w-6 h-6' : 'w-4 h-4'}`}
                                                                                                 style={{ backgroundColor: siteColor }}
                                                                                             >
-                                                                                                <FontAwesomeIcon icon={faHardHat} className={`text-white ${isDetailSelected ? 'text-[10px]' : 'text-[7px]'}`} />
+                                                                                                <FontAwesomeIcon icon={faHardHat} className={isDetailSelected ? 'text-[10px]' : 'text-[7px]'} style={{ color: siteIconTextColor }} />
                                                                                             </span>
                                                                                         );
                                                                                     }

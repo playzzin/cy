@@ -1068,18 +1068,36 @@
     padding: 12px;
 }
 
+.tw-doc-preview__actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+    gap: 8px;
+}
+
 .tw-doc-preview button {
     height: 34px;
+    width: 100%;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
     border-radius: 8px;
     background: #fff;
     border: 1px solid #cbd5e1;
     color: #334155;
     font-size: 12px;
     font-weight: 900;
+    white-space: nowrap;
 }
 
 .tw-doc-preview button:hover {
     background: #f1f5f9;
+}
+
+.tw-doc-preview button:disabled {
+    cursor: not-allowed;
+    opacity: 0.58;
 }
 
 .tw-output-section {

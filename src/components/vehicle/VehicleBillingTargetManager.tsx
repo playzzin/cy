@@ -10,7 +10,10 @@ import { OfficeStaff, officeStaffService } from '../../services/officeStaffServi
 import { toast, showConfirmAlert } from '../../utils/swal';
 import { hexToRgba, normalizeHexColor } from '../../utils/color';
 import { formatTypedDateInput, normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
-import { BillingMode, BillingModeSelector, BillingStatusSummary } from '../support/BillingModeSelector';
+import { BillingStatusSummary } from '../support/BillingModeSelector';
+import BillingPeriodTimeline, { BillingPeriodTimelineItem } from '../support/BillingPeriodTimeline';
+
+type VehicleBillingMode = 'custom' | 'split';
 
 interface BillingTargetSelection {
     type: VehicleBillingTargetType;
@@ -91,7 +94,7 @@ const targetLabel = (vehicle: Vehicle, records: VehicleBillingTargetRecord[] = [
         return `${getBillingTargetTypeLabel(vehicle.billingTargetType)} · ${vehicle.billingTargetName}`;
     }
     if (vehicle.currentAssigneeName) {
-        return `운전자와 동일 · ${vehicle.currentAssigneeName}`;
+        return `${getBillingTargetTypeLabel(vehicle.currentAssigneeType as VehicleBillingTargetType)} · ${vehicle.currentAssigneeName}`;
     }
     return '청구대상 미지정';
 };
@@ -148,7 +151,7 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
     const [targetRecordsLoading, setTargetRecordsLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [editingTargetRecordId, setEditingTargetRecordId] = useState<string | null>(null);
-    const [billingMode, setBillingMode] = useState<BillingMode>(initialSplitMode ? 'split' : 'same');
+    const [billingMode, setBillingMode] = useState<VehicleBillingMode>(initialSplitMode ? 'split' : 'custom');
 
     const handleTargetStartDateChange = (value: string) => {
         setTargetStartDate(formatTypedDateInput(value, { yearDigits: 2 }));
@@ -332,25 +335,37 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
         () => targetOptionsByKey.get(selectedTargetKey) ?? null,
         [selectedTargetKey, targetOptionsByKey]
     );
+    const selectedTargetTimelineItems = useMemo<BillingPeriodTimelineItem[]>(() => (
+        selectedTargetRecords
+            .slice()
+            .sort((a, b) => {
+                const startDiff = String(a.startDate ?? '').localeCompare(String(b.startDate ?? ''));
+                if (startDiff !== 0) return startDiff;
+                return String(a.id ?? '').localeCompare(String(b.id ?? ''));
+            })
+            .map((record) => {
+                const option = targetOptionsByKey.get(getTargetOptionKey(record.targetType, record.targetId));
+                return {
+                    id: normalizeKey(record.id) || `${normalizeKey(record.vehicleId)}:${normalizeKey(record.startDate)}`,
+                    label: normalizeKey(record.targetName) || '청구대상',
+                    typeLabel: getBillingTargetTypeLabel(record.targetType),
+                    startDate: record.startDate,
+                    endDate: record.endDate,
+                    color: option?.color
+                };
+            })
+    ), [selectedTargetRecords, targetOptionsByKey]);
     const selectedTargetColor = selectedTarget?.color ? normalizeHexColor(selectedTarget.color) : '#64748b';
-    const showTargetSelector = billingMode !== 'same';
+    const showTargetSelector = Boolean(selectedVehicle);
     const showTargetDateFields = Boolean(selectedVehicle && (billingMode === 'split' || editingTargetRecordId));
-    const canUseSameMode = Boolean(selectedVehicle && (
-        selectedVehicle.currentAssigneeName ||
-        selectedVehicleHasExplicitBillingTarget
-    ));
-    const canSaveBilling = Boolean(selectedVehicle) && (
-        billingMode === 'same' ? canUseSameMode : Boolean(selectedTarget)
-    );
+    const canSaveBilling = Boolean(selectedVehicle && selectedTarget);
     const saveButtonLabel = saving
         ? '처리 중...'
-        : billingMode === 'same'
-            ? (selectedVehicle?.currentAssigneeName ? '운전자 동일 저장' : '별도청구 해제')
-                : editingTargetRecordId
-                    ? '청구기간 수정'
-                : billingMode === 'split' && selectedTargetRecords.length > 0
-                    ? '기간 나눠 저장'
-                    : '청구대상 저장';
+        : editingTargetRecordId
+            ? '청구기간 수정'
+            : billingMode === 'split' && selectedTargetRecords.length > 0
+                ? '기간 나눠 저장'
+                : '청구대상 저장';
 
     const clearVehicleBillingTargetSnapshot = async (vehicleId: string) => {
         await vehicleService.updateVehicle(vehicleId, {
@@ -359,6 +374,16 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
             billingTargetName: deleteField(),
             billingTargetStartDate: deleteField(),
             billingTargetEndDate: deleteField()
+        } as unknown as Partial<Vehicle>);
+    };
+
+    const setVehicleBillingTargetSnapshot = async (vehicleId: string, record: Pick<VehicleBillingTargetRecord, 'targetId' | 'targetType' | 'targetName' | 'startDate' | 'endDate'>) => {
+        await vehicleService.updateVehicle(vehicleId, {
+            billingTargetId: record.targetId,
+            billingTargetType: record.targetType,
+            billingTargetName: record.targetName,
+            billingTargetStartDate: record.startDate,
+            billingTargetEndDate: record.endDate || null
         } as unknown as Partial<Vehicle>);
     };
 
@@ -396,11 +421,11 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
             targetName: vehicle.currentAssigneeName,
             startDate,
             endDate,
-            note: '분할 전 기본 운전자'
+            note: '분할 전 운전자'
         };
     };
 
-    const applySameBillingTarget = async (vehicle: Vehicle, effectiveDate: string = DEFAULT_BILLING_START_DATE) => {
+    const clearExplicitBillingTarget = async (vehicle: Vehicle, effectiveDate: string = DEFAULT_BILLING_START_DATE) => {
         const records = await vehicleService.listAllVehicleBillingTargets(vehicle.id);
         const previousEndDate = buildEndDateAsDayBefore(effectiveDate);
         const deleteIds = records
@@ -451,9 +476,9 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
         setSaving(true);
         try {
             if (!target) {
-                await applySameBillingTarget(vehicle);
+                await clearExplicitBillingTarget(vehicle);
                 setEditingTargetRecordId(null);
-                toast.success(vehicle.currentAssigneeName ? '기준일 이후 차량 청구를 운전자와 동일하게 변경했습니다.' : '기준일 이후 별도청구를 해제했습니다.');
+                toast.success('기준일 이후 별도 청구대상 설정을 해제했습니다.');
             } else {
                 const latestRecord = latestSelectedTargetRecord;
                 const shouldCreateSplitRecord = Boolean(billingMode === 'split' && !editingTargetRecordId && latestRecord);
@@ -470,18 +495,20 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
                     const previousEndDate = buildEndDateAsDayBefore(startDate);
                     const defaultRecord = buildCurrentAssigneeTargetRecord(vehicle, DEFAULT_BILLING_START_DATE, previousEndDate);
                     if (!defaultRecord) {
-                        throw new Error('분할 전 기본 운전자가 없어 분할청구를 만들 수 없습니다.');
+                        throw new Error('분할 전 운전자가 없어 분할청구를 만들 수 없습니다.');
                     }
                     upserts.push(defaultRecord);
                 }
 
-                upserts.push(buildTargetRecord(vehicle, target, startDate, endDate, targetRecordId));
+                const nextTargetRecord = buildTargetRecord(vehicle, target, startDate, endDate, targetRecordId);
+                upserts.push(nextTargetRecord);
                 await vehicleService.applyVehicleBillingTargetChanges({
                     vehicleId: vehicle.id,
                     closeRecords,
                     upserts,
                     clearSnapshot: true
                 });
+                await setVehicleBillingTargetSnapshot(vehicle.id, nextTargetRecord);
                 toast.success(editingTargetRecordId ? '차량 청구대상 기간이 수정되었습니다.' : '차량 청구대상 기간이 추가되었습니다.');
                 setEditingTargetRecordId(null);
             }
@@ -495,27 +522,6 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
     const handleAssign = async () => {
         if (!selectedVehicle) {
             toast.error('차량을 선택해주세요.');
-            return;
-        }
-        if (billingMode === 'same') {
-            if (!canUseSameMode) {
-                toast.error('운전자 배정 또는 별도 청구대상이 있어야 기본 청구로 변경할 수 있습니다.');
-                return;
-            }
-            const result = await showConfirmAlert(
-                '차량 청구',
-                selectedVehicle.currentAssigneeName
-                    ? `${selectedVehicle.licensePlate} 차량의 26-01-01 이후 별도 청구를 종료하고 운전자(${selectedVehicle.currentAssigneeName})와 동일하게 청구할까요?`
-                    : `${selectedVehicle.licensePlate} 차량의 26-01-01 이후 별도 청구대상 설정을 해제할까요?`
-            );
-            if (!result.isConfirmed) return;
-
-            try {
-                await saveBillingTarget(selectedVehicle, null);
-            } catch (error) {
-                console.error(error);
-                toast.error('차량 청구 처리에 실패했습니다.');
-            }
             return;
         }
         if (!selectedTarget) {
@@ -553,7 +559,7 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
             return;
         }
         if (billingMode === 'split' && !latestRecord && !editingTargetRecordId && normalizedStartDate <= DEFAULT_BILLING_START_DATE) {
-            toast.error('기간 시작일은 기본 청구 시작일(26-01-01)보다 뒤여야 합니다.');
+            toast.error('기간 시작일은 청구 시작일(26-01-01)보다 뒤여야 합니다.');
             return;
         }
 
@@ -561,7 +567,7 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
             '차량 청구',
             showTargetDateFields
                 ? `${selectedVehicle.licensePlate} 차량을 ${displayDate(normalizedStartDate)}~${displayDate(normalizedEndDate) || '계속'} 기간 동안 ${getBillingTargetTypeLabel(selectedTarget.type)} · ${selectedTarget.name}에 청구할까요?`
-                : `${selectedVehicle.licensePlate} 차량의 기본 청구대상을 ${getBillingTargetTypeLabel(selectedTarget.type)} · ${selectedTarget.name}(으)로 저장할까요?`
+                : `${selectedVehicle.licensePlate} 차량의 청구대상을 ${getBillingTargetTypeLabel(selectedTarget.type)} · ${selectedTarget.name}(으)로 저장할까요?`
         );
         if (!result.isConfirmed) return;
 
@@ -575,10 +581,8 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
 
     const handleReset = async (vehicle: Vehicle) => {
         const result = await showConfirmAlert(
-            '차량 기본 청구',
-            vehicle.currentAssigneeName
-                ? `${vehicle.licensePlate} 차량 청구를 운전자(${vehicle.currentAssigneeName})와 동일하게 변경할까요?`
-                : `${vehicle.licensePlate} 차량의 별도 청구대상 설정을 삭제할까요?`
+            '별도청구 해제',
+            `${vehicle.licensePlate} 차량의 별도 청구대상 설정을 삭제할까요?`
         );
         if (!result.isConfirmed) return;
 
@@ -586,7 +590,7 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
             await saveBillingTarget(vehicle, null);
         } catch (error) {
             console.error(error);
-            toast.error('차량 기본 청구 처리에 실패했습니다.');
+            toast.error('별도청구 해제에 실패했습니다.');
         }
     };
 
@@ -620,8 +624,7 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
     const pickVehicle = (vehicle: Vehicle) => {
         setSelectedVehicleId(vehicle.id);
         const latestRecord = getLatestTargetRecord(targetRecordsByVehicleId.get(normalizeKey(vehicle.id)) ?? []);
-        const hasExplicitTarget = Boolean(latestRecord || (vehicle.billingTargetType && vehicle.billingTargetId));
-        const nextBillingMode: BillingMode = initialSplitMode ? 'split' : (hasExplicitTarget ? 'custom' : 'same');
+        const nextBillingMode: VehicleBillingMode = initialSplitMode ? 'split' : 'custom';
         setBillingMode(nextBillingMode);
         setTargetStartDate(nextBillingMode === 'custom' && latestRecord ? (displayDate(latestRecord.startDate) || getDefaultBillingStartDate()) : getDefaultBillingStartDate());
         setTargetEndDate('');
@@ -654,7 +657,7 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
         }
     };
 
-    const handleBillingModeChange = (mode: BillingMode) => {
+    const handleBillingModeChange = (mode: VehicleBillingMode) => {
         setBillingMode(mode);
         setEditingTargetRecordId(null);
         setTargetEndDate('');
@@ -745,7 +748,7 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
                             className="px-5 py-2.5 rounded-xl font-bold text-sm bg-rose-50 text-rose-700 border border-rose-100 hover:bg-rose-100 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-100 disabled:cursor-not-allowed transition-all flex items-center gap-2"
                         >
                             <FontAwesomeIcon icon={faBan} />
-                            {selectedVehicle?.currentAssigneeName ? '운전자 동일' : '별도청구 해제'}
+                            별도청구 해제
                         </button>
                     </div>
                 </div>
@@ -793,16 +796,6 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
                                     ]}
                                 />
                             )}
-
-                            <BillingModeSelector
-                                value={billingMode}
-                                onChange={handleBillingModeChange}
-                                sameLabel={selectedVehicle?.currentAssigneeName ? '운전자와 동일' : '별도청구 해제'}
-                                sameDescription={selectedVehicle?.currentAssigneeName ? '차량 운전자가 비용도 부담' : '26-01-01 이후 별도청구 해제'}
-                                customDescription="운전자와 다른 팀/사람에게 청구"
-                                disabled={!selectedVehicle}
-                                sameDisabled={!canUseSameMode}
-                            />
 
                             {showTargetSelector && (
                                 <div className="relative">
@@ -915,7 +908,7 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
                                         />
                                     </div>
                                     <div className="sm:col-span-2 text-[11px] font-semibold text-slate-400">
-                                        기본 청구 시작일은 26-01-01입니다. 기간 지정은 월 중간 변경분을 나눌 때만 사용합니다.
+                                        청구 시작일은 26-01-01입니다. 기간 지정은 월 중간 변경분을 나눌 때만 사용합니다.
                                     </div>
                                 </div>
                             )}
@@ -932,14 +925,27 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
                         )}
 
                         {selectedVehicle && (
-                            <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                                <h3 className="font-extrabold text-slate-800 mb-3">청구대상 이력</h3>
+                            <details open={Boolean(editingTargetRecordId)} className="group bg-white rounded-2xl border border-slate-200">
+                                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+                                    <span className="min-w-0">
+                                        <span className="block font-extrabold text-slate-800">청구기간 타임라인</span>
+                                        <span className="mt-0.5 block truncate text-xs font-semibold text-slate-400">
+                                            변경일 기준으로 이전 대상이 닫히고 다음 대상이 이어집니다.
+                                        </span>
+                                    </span>
+                                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-extrabold text-slate-500">
+                                        {selectedTargetRecords.length}건
+                                    </span>
+                                </summary>
+                                <div className="border-t border-slate-100 p-4">
                                 {targetRecordsLoading ? (
                                     <div className="text-sm text-slate-400">불러오는 중...</div>
                                 ) : selectedTargetRecords.length === 0 ? (
                                     <div className="text-sm text-slate-400">등록된 청구대상이 없습니다.</div>
                                 ) : (
-                                    <div className="space-y-2 max-h-[220px] overflow-y-auto">
+                                    <div className="space-y-3">
+                                        <BillingPeriodTimeline items={selectedTargetTimelineItems} />
+                                        <div className="space-y-2 max-h-[220px] overflow-y-auto">
                                         {selectedTargetRecords
                                             .slice()
                                             .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)))
@@ -978,9 +984,11 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
                                                     </div>
                                                 </div>
                                             ))}
+                                        </div>
                                     </div>
                                 )}
-                            </div>
+                                </div>
+                            </details>
                         )}
                     </div>
 
@@ -1030,7 +1038,7 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
                                                     className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-50 text-slate-700 hover:bg-slate-100 inline-flex items-center gap-2"
                                                 >
                                                     <FontAwesomeIcon icon={faRotateLeft} />
-                                                    {vehicle.currentAssigneeName ? '운전자 동일' : '별도청구 해제'}
+                                                    별도청구 해제
                                                 </button>
                                             </div>
                                         </div>

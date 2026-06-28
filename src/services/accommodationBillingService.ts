@@ -20,6 +20,17 @@ import {
 } from '../types/accommodationBilling';
 
 const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+const OFFICE_BILLING_TEAM_ID = '__office__';
+const OFFICE_BILLING_TEAM_NAME = '사무실';
+
+const normalizeBillingTargetText = (value: unknown): string => (
+    String(value ?? '').trim().toLowerCase().replace(/\s+/g, '')
+);
+
+const isOfficeBillingTeam = (teamId?: unknown, teamName?: unknown): boolean => (
+    normalizeBillingTargetText(teamId) === normalizeBillingTargetText(OFFICE_BILLING_TEAM_ID) ||
+    normalizeBillingTargetText(teamName) === normalizeBillingTargetText(OFFICE_BILLING_TEAM_NAME)
+);
 
 const toFirestoreTimestamp = (value?: string | null): Timestamp | undefined => {
     if (!value) return undefined;
@@ -215,6 +226,63 @@ const getRelatedId = (row: any, relationKey: string, flatKey: string): string =>
     return '';
 };
 
+const asFiniteNumber = (value: unknown): number => (
+    typeof value === 'number' && Number.isFinite(value) ? value : 0
+);
+
+const resetPostedAdvancePayment = async (billing: AccommodationBillingDocument): Promise<void> => {
+    const advanceId = billing.postedAdvancePaymentId ? String(billing.postedAdvancePaymentId) : '';
+    if (!advanceId) return;
+
+    const advancesRes = await listAllAdvancePayments();
+    const advances = (advancesRes as any)?.data?.advancePayments ?? [];
+    const existing = advances.find((a: any) => String(a?.id ?? '') === advanceId);
+    if (!existing) return;
+
+    const existingLinkedBillingId = existing?.accommodationBillingDocId ? String(existing.accommodationBillingDocId) : '';
+    if (existingLinkedBillingId && existingLinkedBillingId !== String(billing.id)) return;
+
+    const items = safeJsonParseRecord(existing?.items);
+    const prevMonthCarryover = asFiniteNumber(existing?.prevMonthCarryover);
+    const resetFields = Object.fromEntries(POSTING_FIELDS.map((field) => [field, 0]));
+    const totalDeduction = calculateAdvanceTotal({
+        prevMonthCarryover,
+        accommodation: 0,
+        privateRoom: 0,
+        gloves: 0,
+        deposit: 0,
+        fines: 0,
+        electricity: 0,
+        gas: 0,
+        internet: 0,
+        water: 0,
+        items
+    });
+
+    const [teamUuid, workerUuid] = await Promise.all([
+        resolveTeamUuid(billing.teamId),
+        resolveWorkerUuid(billing.issuedToWorkerId ?? '')
+    ]);
+
+    await updateAdvancePayment({
+        id: advanceId,
+        yearMonth: existing?.yearMonth ?? billing.yearMonth,
+        workerId: (workerUuid ?? getRelatedId(existing, 'worker', 'workerId')) || null,
+        workerName: existing?.workerName ?? billing.issuedToWorkerName ?? null,
+        teamId: (teamUuid ?? getRelatedId(existing, 'team', 'teamId')) || null,
+        teamName: existing?.teamName ?? billing.teamName ?? null,
+        items: existing?.items ?? null,
+        prevMonthCarryover,
+        ...resetFields,
+        totalDeduction,
+        itemAssignments: existing?.itemAssignments ?? null,
+        assignmentType: existing?.assignmentType ?? 'labor',
+        memo: existing?.memo ?? null,
+        accommodationBillingDocId: null,
+        updatedAt: new Date().toISOString()
+    } as any);
+};
+
 const getLineItemBillingDocumentId = (row: any): string => {
     if (row?.billingDocument?.id) return String(row.billingDocument.id);
     if (row?.billingDocumentId) return String(row.billingDocumentId);
@@ -302,7 +370,8 @@ export const accommodationBillingService = {
         const items = (itemsRes as any)?.data?.accommodationBillingLineItems ?? [];
 
         const isAllTeams = !params.teamId || params.teamId === 'all';
-        const teamUuid = isAllTeams ? null : await resolveTeamUuid(params.teamId);
+        const isOfficeTeamFilter = isOfficeBillingTeam(params.teamId);
+        const teamUuid = isAllTeams || isOfficeTeamFilter ? null : await resolveTeamUuid(params.teamId);
 
         const filteredDocs = docs.filter((d: any) => {
             if (String(d?.yearMonth ?? '') !== String(params.yearMonth)) return false;
@@ -312,6 +381,7 @@ export const accommodationBillingService = {
 
             const dcTeamId = d?.team?.id ? String(d.team.id) : (d?.teamId ? String(d.teamId) : '');
             const dcTeamLegacyId = d?.team?.legacyId ? String(d.team.legacyId) : '';
+            if (isOfficeTeamFilter) return isOfficeBillingTeam(dcTeamId || dcTeamLegacyId, d?.teamName);
             if (params.teamId && (dcTeamLegacyId === params.teamId || dcTeamId === params.teamId)) return true;
             return teamUuid ? dcTeamId === teamUuid : false;
         });
@@ -321,7 +391,7 @@ export const accommodationBillingService = {
             const issuedToWorkerId = getRelatedId(d, 'issuedToWorker', 'issuedToWorkerId');
 
             const rawIssuedToType = d?.issuedToType ? String(d.issuedToType) : 'worker';
-            const issuedToType = rawIssuedToType;
+            const issuedToType = rawIssuedToType === 'team_leader' ? 'team' : rawIssuedToType;
 
             const lineItems = items
                 .filter((li: any) => getLineItemBillingDocumentId(li) === String(d?.id ?? ''))
@@ -359,24 +429,27 @@ export const accommodationBillingService = {
     },
 
     async upsertBillingDocument(docData: Omit<AccommodationBillingDocument, 'createdAt' | 'updatedAt'>): Promise<string> {
-        const teamUuid = await resolveTeamUuid(docData.teamId);
+        const isOfficeTeam = isOfficeBillingTeam(docData.teamId, docData.teamName);
+        const teamUuid = isOfficeTeam ? null : await resolveTeamUuid(docData.teamId);
         const issuedToTypeRaw = docData.issuedToType ? String(docData.issuedToType) : 'worker';
         const issuedToType = issuedToTypeRaw === 'team_leader' ? 'team' : issuedToTypeRaw;
         const shouldRequireWorker = issuedToType === 'worker';
         const workerUuid = shouldRequireWorker ? await resolveWorkerUuid(docData.issuedToWorkerId ?? '') : null;
-        if (!teamUuid) throw new Error('???李얠쓣 ???놁뒿?덈떎.');
+        if (!teamUuid && !isOfficeTeam) throw new Error('???李얠쓣 ???놁뒿?덈떎.');
         if (shouldRequireWorker && !workerUuid) throw new Error('?묒뾽?먮? 李얠쓣 ???놁뒿?덈떎.');
 
         const beforeBilling = await findAccommodationBillingDocumentById(docData.id).catch(() => null);
+        const storedTeamId = teamUuid ?? null;
+        const storedTeamName = isOfficeTeam ? OFFICE_BILLING_TEAM_NAME : (docData.teamName ?? null);
         const issuedToWorkerName = issuedToType === 'team'
-            ? (docData.teamName ?? '')
+            ? (storedTeamName ?? '')
             : (docData.issuedToWorkerName ?? null);
 
         const updateRes = await updateAccommodationBillingDocument({
             id: docData.id,
             yearMonth: docData.yearMonth ?? null,
-            teamId: teamUuid,
-            teamName: docData.teamName ?? null,
+            teamId: storedTeamId,
+            teamName: storedTeamName,
             issuedToType: issuedToType ?? null,
             issuedToWorkerId: workerUuid,
             issuedToWorkerName,
@@ -391,8 +464,8 @@ export const accommodationBillingService = {
             await createAccommodationBillingDocument({
                 id: docData.id,
                 yearMonth: docData.yearMonth,
-                teamId: teamUuid,
-                teamName: docData.teamName ?? null,
+                teamId: storedTeamId,
+                teamName: storedTeamName,
                 issuedToType: issuedToType ?? null,
                 issuedToWorkerId: workerUuid,
                 issuedToWorkerName,
@@ -433,7 +506,8 @@ export const accommodationBillingService = {
         const savedBilling = {
             ...docData,
             id: docData.id,
-            teamId: teamUuid,
+            teamId: storedTeamId ?? '',
+            teamName: storedTeamName ?? '',
             issuedToType: issuedToType as any,
             issuedToWorkerId: workerUuid ?? '',
             issuedToWorkerName: issuedToWorkerName ?? '',
@@ -458,6 +532,13 @@ export const accommodationBillingService = {
 
     async deleteBillingDocument(id: string): Promise<void> {
         const beforeBilling = await findAccommodationBillingDocumentById(id).catch(() => null);
+        if (beforeBilling) {
+            try {
+                await resetPostedAdvancePayment(beforeBilling);
+            } catch (advanceError) {
+                console.warn('[accommodationBillingService] advance payment reset failed:', advanceError);
+            }
+        }
         const listItemsRes = await listAllAccommodationBillingLineItems();
         const existingItems = (listItemsRes as any)?.data?.accommodationBillingLineItems ?? [];
         const toDelete = existingItems.filter((li: any) => getLineItemBillingDocumentId(li) === String(id));
@@ -486,6 +567,38 @@ export const accommodationBillingService = {
 
     async getBillingDocumentById(id: string): Promise<AccommodationBillingDocument | null> {
         return findAccommodationBillingDocumentById(id);
+    },
+
+    async cancelConfirmation(billingId: string): Promise<void> {
+        const beforeBilling = await findAccommodationBillingDocumentById(billingId).catch(() => null);
+        if (!beforeBilling) throw new Error('청구서를 찾을 수 없습니다.');
+
+        if (beforeBilling.status !== 'confirmed') return;
+
+        await resetPostedAdvancePayment(beforeBilling);
+        await updateAccommodationBillingDocument({
+            id: billingId,
+            status: 'draft',
+            confirmedAt: null,
+            postedAdvancePaymentId: null
+        } as any);
+
+        try {
+            const { accommodationBillingLogService } = await import('./accommodationBillingLogService');
+            await accommodationBillingLogService.createLog({
+                action: 'updated',
+                before: beforeBilling,
+                after: {
+                    ...beforeBilling,
+                    status: 'draft',
+                    confirmedAt: undefined,
+                    postedAdvancePaymentId: undefined
+                } as AccommodationBillingDocument,
+                source: 'accommodationBillingService.cancelConfirmation'
+            });
+        } catch (logError) {
+            console.warn('[accommodationBillingService] accommodation billing cancel confirmation log failed:', logError);
+        }
     },
 
     async confirmAndPostToAdvancePayment(billingId: string): Promise<void> {

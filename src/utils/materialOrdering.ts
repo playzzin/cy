@@ -24,6 +24,42 @@ const asText = (value: unknown): string => String(value ?? '').trim();
 const normalizeItemToken = (value: unknown): string =>
     asText(value).replace(/\s+/g, '').toLowerCase();
 
+type SpecNumericKey = {
+    prefix: string;
+    number: number;
+    suffix: string;
+};
+
+const getSpecNumericKey = (value: unknown): SpecNumericKey | null => {
+    const text = asText(value);
+    const match = text.match(/^(.*?)(\d+(?:\.\d+)?)(.*)$/);
+    if (!match) return null;
+
+    return {
+        prefix: normalizeItemToken(match[1]),
+        number: Number(match[2]),
+        suffix: normalizeItemToken(match[3]),
+    };
+};
+
+const compareSpecDescending = (aSpec: unknown, bSpec: unknown): number => {
+    const aKey = getSpecNumericKey(aSpec);
+    const bKey = getSpecNumericKey(bSpec);
+
+    if (aKey && bKey) {
+        const prefixCompare = COLLATOR.compare(aKey.prefix, bKey.prefix);
+        if (prefixCompare === 0) {
+            const numberCompare = bKey.number - aKey.number;
+            if (numberCompare !== 0) return numberCompare;
+
+            const suffixCompare = COLLATOR.compare(aKey.suffix, bKey.suffix);
+            if (suffixCompare !== 0) return suffixCompare;
+        }
+    }
+
+    return COLLATOR.compare(asText(aSpec), asText(bSpec));
+};
+
 export const getMaterialGroupKey = (material: MaterialDisplayRow): MaterialGroupKey => {
     const category = asText(material.category);
     const itemName = asText(material.itemName);
@@ -74,7 +110,7 @@ export const compareMaterialDisplayRows = <T extends MaterialDisplayRow>(a: T, b
     const categoryCompare = COLLATOR.compare(asText(a.category), asText(b.category));
     if (categoryCompare !== 0) return categoryCompare;
 
-    return COLLATOR.compare(asText(a.spec), asText(b.spec));
+    return compareSpecDescending(a.spec, b.spec);
 };
 
 export const sortMaterialDisplayRows = <T extends MaterialDisplayRow>(rows: T[]): T[] =>

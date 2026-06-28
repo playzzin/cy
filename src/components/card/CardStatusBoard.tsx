@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faBuilding,
     faBan, faCheckCircle, faClock, faCreditCard, faUser, faUsers,
-    faList, faTh, faPlus, faTrash, faPenToSquare
+    faList, faTh, faPlus, faBoxArchive, faPenToSquare
 } from '@fortawesome/free-solid-svg-icons';
 import { Worker, manpowerService } from '../../services/manpowerService';
 import { OfficeStaff, officeStaffService } from '../../services/officeStaffService';
@@ -13,6 +13,8 @@ import { Team } from '../../services/teamService';
 import { iconMap } from '../../constants/iconMap';
 import { cardService } from '../../services/cardService';
 import { OFFICE_ASSIGNMENT_TEAM_NAME, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
+import BillingPeriodTimeline, { BillingPeriodTimelineItem } from '../support/BillingPeriodTimeline';
+import { getContrastingTextColor } from '../../utils/color';
 
 interface TeamInfo {
     color: string;
@@ -26,8 +28,10 @@ interface CardStatusBoardProps {
     onEdit: (card: Card) => void;
     onAssign: (card: Card) => void;
     onBillingTargetAssign?: (card: Card) => void;
-    onDelete: (card: Card) => void;
+    onCancelUse: (card: Card) => void;
 }
+
+type CardStatusFilter = 'all' | 'ASSIGNED' | 'AVAILABLE' | 'inactive';
 
 const getTeamFaIcon = (iconName?: string) => {
     if (!iconName) return faUsers;
@@ -69,8 +73,9 @@ const compareTeamThenCard = (leftTeam: string, rightTeam: string, leftName: stri
     return normalizeKey(leftName).localeCompare(normalizeKey(rightName), 'ko-KR');
 };
 
-export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams = [], loading, onEdit, onAssign, onBillingTargetAssign, onDelete }) => {
+export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams = [], loading, onEdit, onAssign, onBillingTargetAssign, onCancelUse }) => {
     const [viewMode, setViewMode] = useState<'list' | 'card'>(getInitialViewMode);
+    const [statusFilter, setStatusFilter] = useState<CardStatusFilter>('all');
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
     const [billingTargets, setBillingTargets] = useState<CardBillingTargetRecord[]>([]);
@@ -105,6 +110,36 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
     const getLatestBillingTarget = (card: Card) => (
         latestBillingTargetByCardId.get(String(card.id ?? '').trim())
     );
+
+    const getBillingTargetsForCard = (card: Card) => (
+        billingTargets
+            .filter((target) => normalizeKey(target.cardId) === normalizeKey(card.id))
+            .sort((a, b) => {
+                const startDiff = normalizeKey(a.startDate).localeCompare(normalizeKey(b.startDate));
+                if (startDiff !== 0) return startDiff;
+                return normalizeKey(a.id).localeCompare(normalizeKey(b.id));
+            })
+    );
+
+    const formatBillingPeriodLabel = (startDate?: unknown, endDate?: unknown) => {
+        const start = normalizeKey(startDate);
+        const end = normalizeKey(endDate);
+        if (!start && !end) return '';
+        return `${start || '시작일 없음'} ~ ${end || '계속'}`;
+    };
+
+    const getBillingTargetPeriodLabel = (card: Card) => {
+        const target = getLatestBillingTarget(card);
+        return target ? formatBillingPeriodLabel(target.startDate, target.endDate) : '';
+    };
+
+    const getBillingTargetPeriodTitle = (card: Card) => {
+        const rows = getBillingTargetsForCard(card);
+        if (rows.length === 0) return getBillingTargetPeriodLabel(card);
+        return rows
+            .map((target) => `${formatBillingPeriodLabel(target.startDate, target.endDate)} · ${target.targetName || '청구대상'}`)
+            .join('\n');
+    };
 
     // Worker 데이터 로드 (개인 배정 시 팀 색상 확인용)
     React.useEffect(() => {
@@ -221,8 +256,19 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
         return '';
     };
 
+    const statusFilteredCards = useMemo(() => {
+        if (statusFilter === 'all') return cards;
+        if (statusFilter === 'inactive') {
+            return cards.filter((card) => card.status === 'SUSPENDED' || card.status === 'CLOSED');
+        }
+        return cards.filter((card) => getEffectiveCardStatus(card) === statusFilter);
+    }, [cards, statusFilter]);
+
+    const getSummaryCardClassName = (filter: CardStatusFilter, baseClassName: string) =>
+        `${baseClassName} ${statusFilter === filter ? 'ring-2 ring-indigo-500 ring-offset-2' : ''}`;
+
     const sortedCards = useMemo(() => (
-        [...cards].sort((left, right) => {
+        [...statusFilteredCards].sort((left, right) => {
             const teamCompare = compareTeamThenCard(
                 getCardBillingTeamName(left),
                 getCardBillingTeamName(right),
@@ -232,7 +278,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
             if (teamCompare !== 0) return teamCompare;
             return normalizeKey(left.last4).localeCompare(normalizeKey(right.last4), 'ko-KR');
         })
-    ), [cards, latestBillingTargetByCardId, workerTeamNameMap, officeStaffRows]);
+    ), [statusFilteredCards, latestBillingTargetByCardId, workerTeamNameMap, officeStaffRows]);
 
     const stats = useMemo(() => {
         // ... (existing stats logic)
@@ -294,6 +340,14 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
         return null;
     };
 
+    const getBillingTargetTypeText = (type?: CardBillingTargetType | null) => {
+        if (type === 'TEAM') return '팀';
+        if (type === 'WORKER') return '작업자';
+        if (type === 'OFFICE') return '사무실';
+        if (type === 'OFFICE_STAFF') return '사무실직원';
+        return '청구대상';
+    };
+
     const getTargetTeamInfo = (type?: CardBillingTargetType | null, name?: string | null) => {
         if (!type || !name) return undefined;
         if (type === 'OFFICE' || type === 'OFFICE_STAFF') return officeTeamInfo;
@@ -305,9 +359,9 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
         const color = teamInfo?.color;
         if (color) {
             return {
-                backgroundColor: hexToRgba(color, 0.1),
-                color,
-                border: `1px solid ${hexToRgba(color, 0.2)}`
+                backgroundColor: color,
+                color: getContrastingTextColor(color),
+                border: `1px solid ${color}`
             };
         }
 
@@ -337,8 +391,25 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
             return { label: '별도', className: 'bg-blue-50 text-blue-700 border-blue-100' };
         }
 
-        return { label: '동일', className: 'bg-emerald-50 text-emerald-700 border-emerald-100' };
+        return { label: '기본', className: 'bg-emerald-50 text-emerald-700 border-emerald-100' };
     };
+
+    const getBillingTimelineItems = (card: Card): BillingPeriodTimelineItem[] => (
+        getBillingTargetsForCard(card).map((target) => ({
+            id: normalizeKey(target.id) || `${normalizeKey(target.cardId)}:${normalizeKey(target.startDate)}`,
+            label: normalizeKey(target.targetName) || '청구대상',
+            typeLabel: getBillingTargetTypeText(target.targetType),
+            startDate: target.startDate,
+            endDate: target.endDate,
+            color: target.targetType === 'TEAM'
+                ? teamInfoMap.get(normalizeKey(target.targetName))?.color
+                : undefined
+        }))
+    );
+
+    const shouldShowBillingTimeline = (items: BillingPeriodTimelineItem[]) => (
+        items.length > 1 || items.some((item) => Boolean(normalizeKey(item.endDate)))
+    );
 
     if (loading) {
         return (
@@ -363,7 +434,12 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
     return (
         <div className="space-y-6 animate-fade-in-up">
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
-                <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-lg transition-shadow relative overflow-hidden group">
+                <button
+                    type="button"
+                    onClick={() => setStatusFilter('all')}
+                    aria-pressed={statusFilter === 'all'}
+                    className={getSummaryCardClassName('all', 'w-full text-left bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-lg transition-shadow relative overflow-hidden group')}
+                >
                     <div className="absolute right-0 top-0 w-32 h-32 bg-slate-50 rounded-full -mr-10 -mt-10 group-hover:scale-110 transition-transform"></div>
                     <div className="relative z-10">
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">총 보유 카드</p>
@@ -375,9 +451,14 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                             <FontAwesomeIcon icon={faCreditCard} className="text-slate-400" /> 전체 지원카드
                         </div>
                     </div>
-                </div>
+                </button>
 
-                <div className="bg-white p-6 rounded-2xl border border-emerald-100 shadow-[0_4px_20px_-4px_rgba(16,185,129,0.1)] hover:shadow-lg transition-shadow relative overflow-hidden group">
+                <button
+                    type="button"
+                    onClick={() => setStatusFilter('ASSIGNED')}
+                    aria-pressed={statusFilter === 'ASSIGNED'}
+                    className={getSummaryCardClassName('ASSIGNED', 'w-full text-left bg-white p-6 rounded-2xl border border-emerald-100 shadow-[0_4px_20px_-4px_rgba(16,185,129,0.1)] hover:shadow-lg transition-shadow relative overflow-hidden group')}
+                >
                     <div className="absolute right-0 top-0 w-32 h-32 bg-emerald-50 rounded-full -mr-10 -mt-10 group-hover:scale-110 transition-transform"></div>
                     <div className="relative z-10">
                         <p className="text-xs font-bold text-emerald-600/70 uppercase tracking-wider mb-2">사용 중</p>
@@ -389,9 +470,14 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                             <FontAwesomeIcon icon={faCheckCircle} /> 사용률 {stats.total > 0 ? Math.round((stats.assigned / stats.total) * 100) : 0}%
                         </div>
                     </div>
-                </div>
+                </button>
 
-                <div className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-[0_4px_20px_-4px_rgba(99,102,241,0.1)] hover:shadow-lg transition-shadow relative overflow-hidden group">
+                <button
+                    type="button"
+                    onClick={() => setStatusFilter('AVAILABLE')}
+                    aria-pressed={statusFilter === 'AVAILABLE'}
+                    className={getSummaryCardClassName('AVAILABLE', 'w-full text-left bg-white p-6 rounded-2xl border border-indigo-100 shadow-[0_4px_20px_-4px_rgba(99,102,241,0.1)] hover:shadow-lg transition-shadow relative overflow-hidden group')}
+                >
                     <div className="absolute right-0 top-0 w-32 h-32 bg-indigo-50 rounded-full -mr-10 -mt-10 group-hover:scale-110 transition-transform"></div>
                     <div className="relative z-10">
                         <p className="text-xs font-bold text-indigo-600/70 uppercase tracking-wider mb-2">보관 중</p>
@@ -403,9 +489,14 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                             <FontAwesomeIcon icon={faClock} /> 즉시 배정 가능
                         </div>
                     </div>
-                </div>
+                </button>
 
-                <div className="bg-white p-6 rounded-2xl border border-orange-100 shadow-[0_4px_20px_-4px_rgba(249,115,22,0.1)] hover:shadow-lg transition-shadow relative overflow-hidden group">
+                <button
+                    type="button"
+                    onClick={() => setStatusFilter('inactive')}
+                    aria-pressed={statusFilter === 'inactive'}
+                    className={getSummaryCardClassName('inactive', 'w-full text-left bg-white p-6 rounded-2xl border border-orange-100 shadow-[0_4px_20px_-4px_rgba(249,115,22,0.1)] hover:shadow-lg transition-shadow relative overflow-hidden group')}
+                >
                     <div className="absolute right-0 top-0 w-32 h-32 bg-orange-50 rounded-full -mr-10 -mt-10 group-hover:scale-110 transition-transform"></div>
                     <div className="relative z-10">
                         <p className="text-xs font-bold text-orange-600/70 uppercase tracking-wider mb-2">정지/해지</p>
@@ -417,7 +508,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                             <FontAwesomeIcon icon={faBan} /> 정지 {stats.suspended} · 해지 {stats.closed}
                         </div>
                     </div>
-                </div>
+                </button>
             </div>
 
             <div className="flex justify-end">
@@ -495,6 +586,11 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                     const billingTargetTeamInfo = getTargetTeamInfo(billingTargetType, billingTargetName);
                                     const hasExplicitBillingTarget = Boolean(getLatestBillingTarget(card) || (card.billingTargetType && card.billingTargetId));
                                     const billingModeBadge = getBillingModeBadge(card, hasExplicitBillingTarget, billingTargetName);
+                                    const billingTargetPeriodLabel = getBillingTargetPeriodLabel(card);
+                                    const billingTargetPeriodTitle = getBillingTargetPeriodTitle(card);
+                                    const billingTimelineItems = getBillingTimelineItems(card);
+                                    const showBillingTimeline = shouldShowBillingTimeline(billingTimelineItems);
+                                    const tcText = tc ? getContrastingTextColor(tc) : undefined;
 
                                     return (
                                         <tr
@@ -507,19 +603,18 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                             <td className="px-4 py-3">
                                                 <div className="flex min-w-0 items-center gap-2">
                                                     <span
-                                                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-100 bg-slate-50 text-xs text-slate-400"
-                                                        style={tc ? {
-                                                            backgroundColor: hexToRgba(tc, 0.1),
-                                                            color: tc,
-                                                            borderColor: hexToRgba(tc, 0.22),
-                                                        } : undefined}
+                                                         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-100 bg-slate-50 text-xs text-slate-400"
+                                                         style={tc ? {
+                                                             backgroundColor: tc,
+                                                             color: tcText,
+                                                             borderColor: tc,
+                                                         } : undefined}
                                                     >
                                                         <FontAwesomeIcon icon={faCreditCard} />
                                                     </span>
-                                                    <span
-                                                        className="truncate font-bold text-slate-800 transition-colors group-hover:text-indigo-600"
-                                                        style={tc ? { color: tc } : undefined}
-                                                    >
+                                                     <span
+                                                          className="truncate font-bold text-slate-800 transition-colors group-hover:text-indigo-600"
+                                                      >
                                                         {card.name}
                                                     </span>
                                                 </div>
@@ -551,11 +646,11 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                         type="button"
                                                         onClick={(e) => { e.stopPropagation(); onAssign(card); }}
                                                         className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold transition-transform hover:-translate-y-0.5"
-                                                        style={tc ? {
-                                                            backgroundColor: hexToRgba(tc, 0.1),
-                                                            color: tc,
-                                                            border: `1px solid ${hexToRgba(tc, 0.2)}`,
-                                                        } : {
+                                                          style={tc ? {
+                                                              backgroundColor: tc,
+                                                              color: tcText,
+                                                              border: `1px solid ${tc}`,
+                                                          } : {
                                                             backgroundColor: card.currentAssigneeType === 'TEAM' ? '#f1f5f9' : '#e0e7ff',
                                                             color: card.currentAssigneeType === 'TEAM' ? '#475569' : '#4338ca',
                                                             border: card.currentAssigneeType === 'TEAM' ? '1px solid #e2e8f0' : '1px solid #e0e7ff',
@@ -583,46 +678,42 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                 )}
                                             </td>
                                             <td className="px-4 py-3">
-                                                <div className="flex items-center gap-2">
-                                                    {billingTargetName && billingTargetTypeLabel ? (
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                onBillingTargetAssign?.(card);
-                                                            }}
-                                                            disabled={!onBillingTargetAssign}
-                                                            className="inline-flex max-w-[180px] items-center gap-1.5 rounded-md px-2 py-1 text-xs font-bold transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
-                                                            style={getTargetBadgeStyle(billingTargetType, billingTargetTeamInfo)}
-                                                            title={`${hasExplicitBillingTarget ? '별도 청구대상' : '사용자와 동일'} · ${billingTargetName}`}
-                                                        >
-                                                            <FontAwesomeIcon
-                                                                icon={billingTargetType === 'TEAM'
-                                                                    ? getTeamFaIcon(billingTargetTeamInfo?.icon)
-                                                                    : billingTargetType === 'OFFICE'
-                                                                        ? faBuilding
-                                                                        : faUser}
-                                                                className="text-[10px]"
-                                                            />
-                                                            <span className="truncate">
-                                                                {hasExplicitBillingTarget ? '' : '동일 · '}{billingTargetTypeLabel} · {billingTargetName}
-                                                            </span>
-                                                        </button>
-                                                    ) : (
-                                                        <span className="text-xs font-bold text-slate-300">미지정</span>
-                                                    )}
-                                                    {!hasExplicitBillingTarget && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            onBillingTargetAssign?.(card);
-                                                        }}
-                                                        className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                                        disabled={!onBillingTargetAssign}
-                                                    >
-                                                        청구설정
-                                                    </button>
+                                                <div className="flex min-w-0 flex-col gap-1">
+                                                    <div className="flex items-center gap-2">
+                                                        {billingTargetName && billingTargetTypeLabel ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    onBillingTargetAssign?.(card);
+                                                                }}
+                                                                disabled={!onBillingTargetAssign}
+                                                                className="inline-flex max-w-[180px] items-center gap-1.5 rounded-md px-2 py-1 text-xs font-bold transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                style={getTargetBadgeStyle(billingTargetType, billingTargetTeamInfo)}
+                                                                title={hasExplicitBillingTarget ? `별도 청구대상 · ${billingTargetName}` : `${billingTargetTypeLabel} · ${billingTargetName}`}
+                                                            >
+                                                                <FontAwesomeIcon
+                                                                    icon={billingTargetType === 'TEAM'
+                                                                        ? getTeamFaIcon(billingTargetTeamInfo?.icon)
+                                                                        : billingTargetType === 'OFFICE'
+                                                                            ? faBuilding
+                                                                            : faUser}
+                                                                    className="text-[10px]"
+                                                                />
+                                                                <span className="truncate">
+                                                                    {billingTargetTypeLabel} · {billingTargetName}
+                                                                </span>
+                                                            </button>
+                                                        ) : (
+                                                            <span className="text-xs font-bold text-slate-300">미지정</span>
+                                                        )}
+                                                    </div>
+                                                    {showBillingTimeline ? (
+                                                        <BillingPeriodTimeline items={billingTimelineItems} compact />
+                                                    ) : billingTargetPeriodLabel && (
+                                                        <span className="truncate text-[11px] font-medium text-slate-400" title={billingTargetPeriodTitle}>
+                                                            청구기간 {billingTargetPeriodLabel}
+                                                        </span>
                                                     )}
                                                 </div>
                                             </td>
@@ -654,12 +745,12 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                         <span>배정/청구</span>
                                                     </button>
                                                     <button
-                                                        onClick={(e) => { e.stopPropagation(); onDelete(card); }}
-                                                        className="w-7 h-7 rounded-md bg-slate-50 hover:bg-rose-50 flex items-center justify-center text-slate-400 hover:text-rose-600 transition-colors"
-                                                        aria-label={`카드 삭제: ${card.name}`}
-                                                        title="삭제"
+                                                        onClick={(e) => { e.stopPropagation(); onCancelUse(card); }}
+                                                        className="w-7 h-7 rounded-md bg-slate-50 hover:bg-amber-50 flex items-center justify-center text-slate-400 hover:text-amber-600 transition-colors"
+                                                        aria-label={`카드 사용취소 처리: ${card.name}`}
+                                                        title="사용취소 처리"
                                                     >
-                                                        <FontAwesomeIcon icon={faTrash} className="text-xs" />
+                                                        <FontAwesomeIcon icon={faBoxArchive} className="text-xs" />
                                                     </button>
                                                 </div>
                                             </td>
@@ -672,7 +763,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                     {/* ... (Table Footer Summary) */}
                     <div className="bg-slate-50 border-t border-slate-200 px-4 py-3 flex items-center justify-between text-xs">
                         <span className="text-slate-400 font-medium">
-                            총 {cards.length}장
+                            총 {statusFilteredCards.length} / {cards.length}장
                         </span>
                         <div className="flex items-center gap-4">
                             <span className="text-emerald-600 font-bold">사용중 {stats.assigned}</span>
@@ -696,6 +787,11 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                         const billingTargetTeamInfo = getTargetTeamInfo(billingTargetType, billingTargetName);
                         const hasExplicitBillingTarget = Boolean(getLatestBillingTarget(card) || (card.billingTargetType && card.billingTargetId));
                         const billingModeBadge = getBillingModeBadge(card, hasExplicitBillingTarget, billingTargetName);
+                        const billingTargetPeriodLabel = getBillingTargetPeriodLabel(card);
+                        const billingTargetPeriodTitle = getBillingTargetPeriodTitle(card);
+                        const billingTimelineItems = getBillingTimelineItems(card);
+                        const showBillingTimeline = shouldShowBillingTimeline(billingTimelineItems);
+                        const tcText = tc ? getContrastingTextColor(tc) : undefined;
 
                         return (
                             <div
@@ -742,13 +838,13 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation();
-                                                    onDelete(card);
+                                                    onCancelUse(card);
                                                 }}
-                                                 className="w-8 h-8 rounded-full bg-slate-50 hover:bg-rose-100 flex items-center justify-center text-slate-400 hover:text-rose-700 transition-colors"
-                                                 aria-label={`카드 삭제: ${card.name}`}
-                                                 title="삭제"
+                                                 className="w-8 h-8 rounded-full bg-slate-50 hover:bg-amber-100 flex items-center justify-center text-slate-400 hover:text-amber-700 transition-colors"
+                                                 aria-label={`카드 사용취소 처리: ${card.name}`}
+                                                 title="사용취소 처리"
                                              >
-                                                <FontAwesomeIcon icon={faTrash} className="text-xs" />
+                                                <FontAwesomeIcon icon={faBoxArchive} className="text-xs" />
                                             </button>
                                         </div>
                                     </div>
@@ -760,11 +856,11 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                 type="button"
                                                 onClick={(e) => { e.stopPropagation(); onAssign(card); }}
                                                 className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-transform hover:-translate-y-0.5"
-                                                style={tc ? {
-                                                    backgroundColor: hexToRgba(tc, 0.1),
-                                                    color: tc,
-                                                    border: `1px solid ${hexToRgba(tc, 0.2)}`,
-                                                } : {
+                                                  style={tc ? {
+                                                      backgroundColor: tc,
+                                                      color: tcText,
+                                                      border: `1px solid ${tc}`,
+                                                  } : {
                                                     backgroundColor: card.currentAssigneeType === 'TEAM' ? '#f1f5f9' : '#e0e7ff',
                                                     color: card.currentAssigneeType === 'TEAM' ? '#475569' : '#4338ca',
                                                     border: card.currentAssigneeType === 'TEAM' ? '1px solid #e2e8f0' : '1px solid #e0e7ff',
@@ -786,18 +882,17 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                     <h3 className="mb-1 flex min-w-0 items-center gap-2 text-xl font-black text-slate-800 transition-colors group-hover:text-indigo-700">
                                         <span
                                             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-100 bg-slate-50 text-sm text-slate-400"
-                                            style={tc ? {
-                                                backgroundColor: hexToRgba(tc, 0.1),
-                                                color: tc,
-                                                borderColor: hexToRgba(tc, 0.22),
-                                            } : undefined}
+                                              style={tc ? {
+                                                  backgroundColor: tc,
+                                                  color: tcText,
+                                                  borderColor: tc,
+                                              } : undefined}
                                         >
                                             <FontAwesomeIcon icon={faCreditCard} />
                                         </span>
-                                        <span
-                                            className="truncate transition-colors group-hover:text-indigo-700"
-                                            style={tc ? { color: tc } : undefined}
-                                        >
+                                         <span
+                                              className="truncate transition-colors group-hover:text-indigo-700"
+                                          >
                                             {card.name}
                                         </span>
                                     </h3>
@@ -819,7 +914,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                     disabled={!onBillingTargetAssign}
                                                     className="inline-flex min-w-0 items-center gap-1.5 rounded px-2 py-0.5 text-xs font-bold transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
                                                     style={getTargetBadgeStyle(billingTargetType, billingTargetTeamInfo)}
-                                                    title={`${hasExplicitBillingTarget ? '별도 청구대상' : '사용자와 동일'} · ${billingTargetName}`}
+                                                    title={hasExplicitBillingTarget ? `별도 청구대상 · ${billingTargetName}` : `${billingTargetTypeLabel} · ${billingTargetName}`}
                                                 >
                                                     <FontAwesomeIcon
                                                         icon={billingTargetType === 'TEAM'
@@ -829,12 +924,22 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                                 : faUser}
                                                         className="text-[10px]"
                                                     />
-                                                    <span className="truncate">{hasExplicitBillingTarget ? '' : '동일 · '}{billingTargetTypeLabel} · {billingTargetName}</span>
+                                                    <span className="truncate">{billingTargetTypeLabel} · {billingTargetName}</span>
                                                 </button>
                                             ) : (
                                                 <span className="text-xs text-slate-300">미지정</span>
                                             )}
                                         </div>
+                                        {showBillingTimeline ? (
+                                            <BillingPeriodTimeline items={billingTimelineItems} compact />
+                                        ) : billingTargetPeriodLabel && (
+                                            <div className="flex items-center justify-between gap-2 text-sm">
+                                                <span className="text-slate-400 font-medium text-xs">청구 기간</span>
+                                                <span className="max-w-[180px] truncate rounded bg-slate-50 px-2 py-0.5 text-[11px] font-bold text-slate-500" title={billingTargetPeriodTitle}>
+                                                    {billingTargetPeriodLabel}
+                                                </span>
+                                            </div>
+                                        )}
 
                                         <div className="flex items-center justify-between gap-2 text-sm">
                                             <span className="text-slate-400 font-medium text-xs">청구 방식</span>
@@ -842,20 +947,6 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                 {billingModeBadge.label}
                                             </span>
                                         </div>
-
-                                        {!hasExplicitBillingTarget && (
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onBillingTargetAssign?.(card);
-                                            }}
-                                            disabled={!onBillingTargetAssign}
-                                            className="w-full rounded-lg border border-emerald-100 bg-emerald-50 py-2 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            청구대상 설정
-                                        </button>
-                                        )}
 
                                         <div className="flex justify-between items-center text-sm">
                                             <span className="text-slate-400 font-medium text-xs">번호</span>

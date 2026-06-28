@@ -1,49 +1,95 @@
-.org-chart-page.is-light {
-    background: #f8fafc;
+.cheongyeon-org-codeit-page {
+    font-family: Pretendard, SpoqaHanSansNeo, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
 }
 
-.org-chart-page.is-light [class*="bg-gradient"],
-.org-chart-page.is-light [class*="radial-gradient"],
-.org-chart-page.is-light [class*="linear-gradient"] {
-    background-image: none !important;
+body.cheongyeon-org-codeit-theme {
+    background: #ffffff !important;
 }
 
-.org-chart-page.is-light [class*="bg-cyan-"],
-.org-chart-page.is-light [class*="bg-emerald-"],
-.org-chart-page.is-light [class*="bg-amber-"],
-.org-chart-page.is-light [class*="bg-fuchsia-"],
-.org-chart-page.is-light [class*="bg-violet-"],
-.org-chart-page.is-light [class*="bg-blue-"],
-.org-chart-page.is-light [class*="bg-slate-950"],
-.org-chart-page.is-light [class*="bg-slate-900"],
-.org-chart-page.is-light [class*="bg-black/"],
-.org-chart-page.is-light [class*="bg-white/[0."] {
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode {
+    background: #ffffff !important;
+    color: #333236 !important;
+}
+
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode #main-header {
+    background: #ffffff !important;
+    color: #333236 !important;
+    border-bottom: 1px solid #e8eaf1 !important;
+    box-shadow: 0 1px 0 rgba(21, 27, 45, 0.04);
+}
+
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode #main-content {
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #333236 !important;
+}
+
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode #main-content .cheongyeon-org-codeit-page,
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode #main-content .cheongyeon-org-codeit-page .bg-white {
     background-color: #ffffff !important;
+    color: #333236 !important;
 }
 
-.org-chart-page.is-light [class*="border-cyan-"],
-.org-chart-page.is-light [class*="border-emerald-"],
-.org-chart-page.is-light [class*="border-amber-"],
-.org-chart-page.is-light [class*="border-fuchsia-"],
-.org-chart-page.is-light [class*="border-violet-"],
-.org-chart-page.is-light [class*="border-white/"],
-.org-chart-page.is-light [class*="border-slate-"] {
-    border-color: #e2e8f0 !important;
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode #main-content .cheongyeon-org-codeit-page .text-white {
+    color: #ffffff !important;
 }
 
-.org-chart-page.is-light [class*="text-cyan-"],
-.org-chart-page.is-light [class*="text-emerald-"],
-.org-chart-page.is-light [class*="text-amber-"],
-.org-chart-page.is-light [class*="text-fuchsia-"],
-.org-chart-page.is-light [class*="text-violet-"],
-.org-chart-page.is-light [class*="text-white"] {
-    color: #1f2937 !important;
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode .cheongyeon-top-nav-link {
+    color: rgba(51, 50, 54, 0.78) !important;
+    font-weight: 800;
 }
 
-.org-chart-page.is-light [class*="shadow-"] {
-    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08) !important;
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode .cheongyeon-top-nav-link:hover,
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode .cheongyeon-top-nav-link.active {
+    color: #333236 !important;
+    border-bottom-color: #4f7cff !important;
 }
 
-.org-chart-page.is-light [class*="backdrop-blur"] {
-    backdrop-filter: none !important;
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode .cheongyeon-top-nav-link::after {
+    background: linear-gradient(90deg, #4f7cff, #9d2cff) !important;
+}
+
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode .cheongyeon-header-logo {
+    background: #f7f8fb !important;
+    border-color: #e2e5ee !important;
+}
+
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode .header-btn {
+    color: #5f6472 !important;
+}
+
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode .header-btn:hover {
+    background: #f2f4f8 !important;
+    color: #4f7cff !important;
+}
+
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode .header-quick-tool-group {
+    border-right-color: #e2e5ee !important;
+}
+
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode .cheongyeon-top-nav-dropdown {
+    background: #ffffff !important;
+    border: 1px solid #e2e5ee !important;
+    box-shadow: 0 18px 45px rgba(21, 27, 45, 0.12) !important;
+}
+
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode .cheongyeon-top-nav-sub-item {
+    background: #ffffff !important;
+    border-color: #eef0f6 !important;
+}
+
+body.cheongyeon-org-codeit-theme .app.cheongyeon-mode .cheongyeon-top-nav-sub-title {
+    color: #333236 !important;
+}
+
+.cheongyeon-org-codeit-page select,
+.cheongyeon-org-codeit-page input,
+.cheongyeon-org-codeit-page button {
+    font-family: inherit;
+}
+
+@media (max-width: 640px) {
+    .cheongyeon-org-codeit-page h1 {
+        font-size: 2.25rem;
+    }
 }

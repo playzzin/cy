@@ -7,6 +7,7 @@ import {
     faFloppyDisk,
     faMagnifyingGlass,
     faPlus,
+    faRotateLeft,
     faSearch,
     faTrash,
     faUser,
@@ -603,20 +604,45 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
         }
     };
 
+    const handleCancelConfirmSelected = async () => {
+        if (!selectedDocument || selectedDocument.status !== 'CONFIRMED') return;
+
+        const result = await showConfirmAlert('확정 취소', '선택한 카드 청구서의 확정을 취소하고 다시 수정 가능하게 변경할까요?', '확정 취소');
+        if (!result.isConfirmed) return;
+
+        setSaving(true);
+        try {
+            await cardBillingService.saveBilling({
+                ...selectedDocument,
+                status: 'DRAFT',
+                confirmedAt: null as unknown as Timestamp,
+                updatedAt: Timestamp.now()
+            });
+            toast.success('확정이 취소되었습니다.');
+            await loadBillings();
+        } catch (e: unknown) {
+            console.error(e);
+            const msg = e instanceof Error ? e.message : '확정 취소에 실패했습니다.';
+            toast.error(msg);
+        } finally {
+            setSaving(false);
+        }
+    };
+
     const handleDeleteSelected = async () => {
         if (!selectedDocument) return;
 
-        const result = await showConfirmAlert('청구 문서 삭제', '선택한 청구 문서를 삭제할까요?', '삭제');
+        const result = await showConfirmAlert('카드 청구 취소', '선택한 카드 청구서를 취소할까요? 취소하면 해당 청구 문서가 삭제됩니다.', '청구 취소');
         if (!result.isConfirmed) return;
 
         setSaving(true);
         try {
             await cardBillingService.deleteBilling(selectedDocument.id);
-            toast.success('삭제되었습니다.');
+            toast.success('카드 청구가 취소되었습니다.');
             await loadBillings();
         } catch (e: unknown) {
             console.error(e);
-            const msg = e instanceof Error ? e.message : '삭제에 실패했습니다.';
+            const msg = e instanceof Error ? e.message : '청구 취소에 실패했습니다.';
             toast.error(msg);
         } finally {
             setSaving(false);
@@ -827,6 +853,18 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
                                         <FontAwesomeIcon icon={faCheckDouble} />
                                         확정
                                     </button>
+                                    {selectedDocument.status === 'CONFIRMED' && (
+                                        <button
+                                            onClick={handleCancelConfirmSelected}
+                                            disabled={saving}
+                                            className={`px-4 py-2.5 rounded-xl font-bold text-sm bg-amber-50 text-amber-700 hover:bg-amber-100 flex items-center gap-2 ${
+                                                saving ? 'opacity-60 cursor-wait' : ''
+                                            }`}
+                                        >
+                                            <FontAwesomeIcon icon={faRotateLeft} />
+                                            확정 취소
+                                        </button>
+                                    )}
                                     <button
                                         onClick={handleDeleteSelected}
                                         disabled={saving}
@@ -835,7 +873,7 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
                                         }`}
                                     >
                                         <FontAwesomeIcon icon={faTrash} />
-                                        삭제
+                                        청구 삭제
                                     </button>
                                 </div>
                             </div>

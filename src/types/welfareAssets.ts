@@ -97,7 +97,7 @@ export interface WelfareCategory {
 export interface WelfareGameConfig {
   id: string;
   name: string;
-  type: 'roulette' | 'ocean_reel';
+  type: 'roulette' | 'ocean_reel' | 'ladder_odd_even';
   assetKind: 'point';
   stake: number;
   dailyLimit: number;

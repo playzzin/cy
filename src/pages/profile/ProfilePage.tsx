@@ -2,8 +2,9 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { userService, UserData } from '../../services/userService';
 import { manpowerService, Worker } from '../../services/manpowerService';
+import { officeStaffService, OfficeStaff } from '../../services/officeStaffService';
 import { accountLinkService } from '../../services/accountLinkService';
-import { AccountLink, ACCOUNT_RELATION_ROLE_LABELS, ACCOUNT_TYPE_LABELS } from '../../types/accountLink';
+import { AccountLink, ACCOUNT_TYPE_LABELS, getAccountRelationRoleLabel } from '../../types/accountLink';
 import AccountLinkingModal from '../../components/manpower/AccountLinkingModal';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUser, faEnvelope, faPhone, faBuilding, faLink, faEdit, faSave, faTimes, faHardHat, faCalendar, faShieldAlt, faChartLine } from '@fortawesome/free-solid-svg-icons';
@@ -14,6 +15,13 @@ const getWorkerTeamName = (worker: Worker): string => {
 
     const teamId = String(worker.teamId || '').trim();
     return teamId || '팀 미배정';
+};
+
+const getWorkerPositionName = (worker: Worker): string => {
+    const rank = String(worker.rank || '').trim();
+    if (rank) return rank;
+
+    return String(worker.role || '').trim();
 };
 
 const toManDayNumber = (value: unknown): number => {
@@ -27,10 +35,102 @@ const formatManDay = (value: number): string =>
         maximumFractionDigits: 1,
     });
 
+const toText = (value: unknown): string => String(value ?? '').trim();
+
+const normalizeEmail = (value: unknown): string => toText(value).toLowerCase();
+
+const getWorkerKeys = (worker: Worker): string[] =>
+    Array.from(new Set([worker.id, worker.legacyId].map(toText).filter(Boolean)));
+
+const getOfficeStaffKeys = (staff: OfficeStaff): string[] =>
+    Array.from(new Set([staff.id, staff.legacyId].map(toText).filter(Boolean)));
+
+const formatCurrency = (value: unknown): string => {
+    if (value === null || value === undefined || value === '') return '';
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return String(value);
+    return `${numericValue.toLocaleString('ko-KR')}원`;
+};
+
+const formatDateLike = (value: any): string => {
+    const date = value?.toDate?.() instanceof Date ? value.toDate() : value instanceof Date ? value : null;
+    return date ? date.toLocaleString('ko-KR') : '';
+};
+
+const formatEmploymentStatus = (record: { status?: unknown; isActive?: unknown }): string => {
+    if (record.isActive === false) return '퇴사';
+
+    const status = toText(record.status).toLowerCase();
+    if (!status) return record.isActive === true ? '재직중' : '';
+
+    if (['inactive', 'resigned', 'retired', '퇴사', '퇴사자', '출입금지'].includes(status)) {
+        return '퇴사';
+    }
+
+    if (['active', 'employed', 'working', '재직', '재직중', '근무', '미배정'].includes(status)) {
+        return '재직중';
+    }
+
+    return toText(record.status);
+};
+
+const buildWorkerDetails = (worker: Worker): Array<{ label: string; value: string }> => {
+    const details = [
+        { label: '작업자명', value: toText(worker.name) },
+        { label: '주민번호', value: toText(worker.idNumber) },
+        { label: '작업자 연락처', value: toText(worker.contact) },
+        { label: '작업자 이메일', value: toText(worker.email) },
+        { label: '주소', value: toText(worker.address) },
+        { label: '팀 유형', value: toText(worker.teamType) },
+        { label: '회사', value: toText(worker.companyName || worker.companyId) },
+        { label: '현장', value: toText(worker.siteName || worker.siteId) },
+        { label: '직무', value: toText(worker.role) },
+        { label: '고용형태', value: toText(worker.employmentType) },
+        { label: '급여유형', value: toText(worker.salaryModel || worker.payType) },
+        { label: '단가', value: formatCurrency(worker.unitPrice) },
+        { label: '누적공수', value: `${formatManDay(toManDayNumber(worker.totalManDay))}공수` },
+        { label: '은행', value: toText(worker.bankName) },
+        { label: '계좌번호', value: toText(worker.accountNumber) },
+        { label: '예금주', value: toText(worker.accountHolder) },
+        { label: '상태', value: formatEmploymentStatus(worker) },
+        { label: '혈액형', value: toText(worker.bloodType) },
+        { label: '등록일', value: formatDateLike(worker.createdAt) },
+        { label: '수정일', value: formatDateLike(worker.updatedAt) },
+    ];
+
+    return details.filter((item) => item.value);
+};
+
+const buildOfficeStaffDetails = (staff: OfficeStaff): Array<{ label: string; value: string }> => {
+    const details = [
+        { label: '사무실 직원명', value: toText(staff.name) },
+        { label: '주민번호', value: toText(staff.idNumber) },
+        { label: '사무실 연락처', value: toText(staff.contact) },
+        { label: '사무실 이메일', value: toText(staff.email) },
+        { label: '주소', value: toText(staff.address) },
+        { label: '부서', value: toText(staff.department) },
+        { label: '직책', value: toText(staff.role) },
+        { label: '고용형태', value: toText(staff.employmentType) },
+        { label: '급여유형', value: toText(staff.salaryModel || staff.payType) },
+        { label: '단가', value: formatCurrency(staff.unitPrice) },
+        { label: '은행', value: toText(staff.bankName) },
+        { label: '계좌번호', value: toText(staff.accountNumber) },
+        { label: '예금주', value: toText(staff.accountHolder) },
+        { label: '입사일', value: toText(staff.joinDate) },
+        { label: '상태', value: formatEmploymentStatus(staff) },
+        { label: '메모', value: toText(staff.memo) },
+        { label: '등록일', value: formatDateLike(staff.createdAt) },
+        { label: '수정일', value: formatDateLike(staff.updatedAt) },
+    ];
+
+    return details.filter((item) => item.value);
+};
+
 const ProfilePage: React.FC = () => {
     const { currentUser } = useAuth();
     const [userData, setUserData] = useState<UserData | null>(null);
     const [linkedWorkers, setLinkedWorkers] = useState<Worker[]>([]);
+    const [linkedOfficeStaff, setLinkedOfficeStaff] = useState<OfficeStaff[]>([]);
     const [accountLinks, setAccountLinks] = useState<AccountLink[]>([]);
     const handleUnlink = async (workerId: string) => {
         if (!currentUser || !window.confirm('정말로 이 작업자와의 연결을 해제하시겠습니까?')) return;
@@ -42,6 +142,19 @@ const ProfilePage: React.FC = () => {
             setTimeout(() => setSuccess(null), 3000);
         } catch (err) {
             console.error('연결 해제 실패:', err);
+            setError('연결 해제에 실패했습니다.');
+        }
+    };
+    const handleOfficeStaffUnlink = async (staffId: string) => {
+        if (!currentUser || !window.confirm('정말로 이 사무실 직원과의 연결을 해제하시겠습니까?')) return;
+
+        try {
+            await userService.unlinkUserFromOfficeStaff(currentUser.uid, staffId);
+            setLinkedOfficeStaff(prev => prev.filter(staff => staff.id !== staffId));
+            setSuccess('연결이 해제되었습니다.');
+            setTimeout(() => setSuccess(null), 3000);
+        } catch (err) {
+            console.error('사무실 직원 연결 해제 실패:', err);
             setError('연결 해제에 실패했습니다.');
         }
     };
@@ -61,13 +174,38 @@ const ProfilePage: React.FC = () => {
         position: ''
     });
 
-    const linkedWorkerTeamName = useMemo(() => {
-        const teamNames = Array.from(
-            new Set(linkedWorkers.map(getWorkerTeamName).filter(Boolean))
+    const linkedProfileTeamName = useMemo(() => {
+        const groupNames = Array.from(
+            new Set([
+                ...linkedWorkers.map(getWorkerTeamName),
+                ...linkedOfficeStaff.map((staff) => toText(staff.department) || '사무실'),
+            ].filter(Boolean))
         );
 
-        return teamNames.length > 0 ? teamNames.join(', ') : '연결된 작업자 없음';
-    }, [linkedWorkers]);
+        return groupNames.length > 0 ? groupNames.join(', ') : '연결된 계정 정보 없음';
+    }, [linkedOfficeStaff, linkedWorkers]);
+
+    const linkedProfilePositionName = useMemo(() => {
+        const positionNames = Array.from(
+            new Set([
+                ...linkedWorkers.map(getWorkerPositionName),
+                ...linkedOfficeStaff.map((staff) => toText(staff.role)),
+            ].filter(Boolean))
+        );
+
+        return positionNames.join(', ');
+    }, [linkedOfficeStaff, linkedWorkers]);
+
+    const linkedProfileContact = useMemo(() => {
+        const contacts = Array.from(
+            new Set([
+                ...linkedWorkers.map((worker) => toText(worker.contact)),
+                ...linkedOfficeStaff.map((staff) => toText(staff.contact)),
+            ].filter(Boolean))
+        );
+
+        return contacts.join(', ');
+    }, [linkedOfficeStaff, linkedWorkers]);
 
     const linkedWorkerTotalManDay = useMemo(
         () => linkedWorkers.reduce((total, worker) => total + toManDayNumber(worker.totalManDay), 0),
@@ -84,30 +222,108 @@ const ProfilePage: React.FC = () => {
     }, [currentUser]);
 
     const loadUserData = async () => {
-        if (!currentUser) return;
+        if (!currentUser) {
+            setUserData(null);
+            setLinkedWorkers([]);
+            setLinkedOfficeStaff([]);
+            setAccountLinks([]);
+            setLoading(false);
+            return;
+        }
 
         setLoading(true);
         try {
-            const user = await userService.getUser(currentUser.uid);
+            const [user, links, allWorkers, allOfficeStaff] = await Promise.all([
+                userService.getUser(currentUser.uid),
+                accountLinkService.getLinksByUid(currentUser.uid),
+                manpowerService.getWorkers(true),
+                officeStaffService.getOfficeStaff(true),
+            ]);
             setUserData(user);
-            setAccountLinks(await accountLinkService.getLinksByUid(currentUser.uid));
+            setAccountLinks(links);
 
-            // Load linked workers
-            if (user?.linkedWorkerIds && user.linkedWorkerIds.length > 0) {
-                const workers = await Promise.all(
-                    user.linkedWorkerIds.map(async (workerId: string) => {
-                        try {
-                            const worker = await manpowerService.getWorker(workerId);
-                            return worker;
-                        } catch {
-                            return null;
-                        }
-                    })
-                );
-                setLinkedWorkers(workers.filter((w: Worker | null): w is Worker => w !== null));
-            } else {
-                setLinkedWorkers([]);
-            }
+            const workerByKey = new Map<string, Worker>();
+            const selectedWorkers = new Map<string, Worker>();
+            const officeStaffByKey = new Map<string, OfficeStaff>();
+            const selectedOfficeStaff = new Map<string, OfficeStaff>();
+            const currentEmail = normalizeEmail(currentUser.email);
+
+            const addSelectedWorker = (worker?: Worker | null) => {
+                if (!worker?.id) return;
+                selectedWorkers.set(String(worker.id), worker);
+            };
+            const addSelectedOfficeStaff = (staff?: OfficeStaff | null) => {
+                if (!staff?.id) return;
+                selectedOfficeStaff.set(String(staff.id), staff);
+            };
+
+            allWorkers.forEach((worker) => {
+                getWorkerKeys(worker).forEach((key) => workerByKey.set(key, worker));
+
+                if (worker.uid === currentUser.uid) {
+                    addSelectedWorker(worker);
+                    return;
+                }
+
+                if (currentEmail && normalizeEmail(worker.email) === currentEmail) {
+                    addSelectedWorker(worker);
+                }
+            });
+
+            allOfficeStaff.forEach((staff) => {
+                getOfficeStaffKeys(staff).forEach((key) => officeStaffByKey.set(key, staff));
+
+                if (staff.uid === currentUser.uid) {
+                    addSelectedOfficeStaff(staff);
+                    return;
+                }
+
+                if (currentEmail && normalizeEmail(staff.email) === currentEmail) {
+                    addSelectedOfficeStaff(staff);
+                }
+            });
+
+            (user?.linkedWorkerIds || [])
+                .map(toText)
+                .filter(Boolean)
+                .forEach((workerId) => addSelectedWorker(workerByKey.get(workerId)));
+            (user?.linkedOfficeStaffIds || [])
+                .map(toText)
+                .filter(Boolean)
+                .forEach((staffId) => addSelectedOfficeStaff(officeStaffByKey.get(staffId)));
+
+            links
+                .filter((link) => link.entityType === 'worker' && link.status === 'active')
+                .map((link) => toText(link.entityId))
+                .filter(Boolean)
+                .forEach((workerId) => addSelectedWorker(workerByKey.get(workerId)));
+            links
+                .filter((link) => link.entityType === 'office' && link.status === 'active' && link.entityId !== 'office')
+                .map((link) => toText(link.entityId))
+                .filter(Boolean)
+                .forEach((staffId) => addSelectedOfficeStaff(officeStaffByKey.get(staffId)));
+
+            const nextLinkedWorkers = Array.from(selectedWorkers.values()).sort((a, b) =>
+                toText(a.name).localeCompare(toText(b.name), 'ko-KR')
+            );
+            const nextLinkedOfficeStaff = Array.from(selectedOfficeStaff.values()).sort((a, b) =>
+                toText(a.name).localeCompare(toText(b.name), 'ko-KR')
+            );
+            const workerPositions = Array.from(
+                new Set([
+                    ...nextLinkedWorkers.map(getWorkerPositionName),
+                    ...nextLinkedOfficeStaff.map((staff) => toText(staff.role)),
+                ].filter(Boolean))
+            );
+            const workerContacts = Array.from(
+                new Set([
+                    ...nextLinkedWorkers.map((worker) => toText(worker.contact)),
+                    ...nextLinkedOfficeStaff.map((staff) => toText(staff.contact)),
+                ].filter(Boolean))
+            );
+
+            setLinkedWorkers(nextLinkedWorkers);
+            setLinkedOfficeStaff(nextLinkedOfficeStaff);
 
             // Set form data
             setFormData({
@@ -116,8 +332,8 @@ const ProfilePage: React.FC = () => {
 
             // Set profile data
             setProfileData({
-                phoneNumber: user?.phoneNumber || '',
-                position: user?.position || ''
+                phoneNumber: user?.phoneNumber || workerContacts.join(', '),
+                position: workerPositions.join(', ') || user?.position || ''
             });
         } catch (err) {
             console.error('사용자 정보 로드 실패:', err);
@@ -137,18 +353,21 @@ const ProfilePage: React.FC = () => {
                 position: profileData.position
             });
 
-            // Sync Position to Linked Workers' Rank
-            if (linkedWorkers.length > 0 && profileData.position) {
-                const { manpowerService } = await import('../../services/manpowerService');
-                const updatePromises = linkedWorkers.map(worker =>
-                    worker.id ? manpowerService.updateWorker(worker.id, { rank: profileData.position }) : Promise.resolve()
-                );
-                await Promise.all(updatePromises);
+            const nextPosition = profileData.position.trim();
+            if (nextPosition && !nextPosition.includes(',')) {
+                await Promise.all([
+                    ...linkedWorkers.map(worker =>
+                        worker.id ? manpowerService.updateWorker(worker.id, { role: nextPosition }) : Promise.resolve()
+                    ),
+                    ...linkedOfficeStaff.map(staff =>
+                        staff.id ? officeStaffService.updateOfficeStaff(staff.id, { role: nextPosition }) : Promise.resolve()
+                    )
+                ]);
             }
 
             await loadUserData();
             setEditing(false);
-            setSuccess('프로필이 업데이트되었습니다. (현장 직책 동기화 완료)');
+            setSuccess('프로필이 업데이트되었습니다. (직책 권한 동기화 완료)');
             setTimeout(() => setSuccess(null), 3000);
         } catch (err) {
             console.error('프로필 업데이트 실패:', err);
@@ -162,8 +381,8 @@ const ProfilePage: React.FC = () => {
                 displayName: userData.displayName || ''
             });
             setProfileData({
-                phoneNumber: userData.phoneNumber || '',
-                position: userData.position || ''
+                phoneNumber: userData.phoneNumber || linkedProfileContact,
+                position: linkedProfilePositionName || userData.position || ''
             });
         }
         setEditing(false);
@@ -225,8 +444,8 @@ const ProfilePage: React.FC = () => {
             </header>
 
             {/* 콘텐츠 영역 */}
-            <div className="flex-1 overflow-hidden px-6 pb-6">
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
+            <div className="flex-1 overflow-y-auto px-6 pb-6">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* 기본 정보 */}
                     <div className="lg:col-span-2 space-y-6">
                         {/* 프로필 카드 */}
@@ -324,11 +543,11 @@ const ProfilePage: React.FC = () => {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">
                                             <FontAwesomeIcon icon={faBuilding} className="mr-2" />
-                                            팀
+                                            팀/부서
                                         </label>
                                         <input
                                             type="text"
-                                            value={linkedWorkerTeamName}
+                                            value={linkedProfileTeamName}
                                             disabled
                                             className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-700"
                                         />
@@ -348,6 +567,111 @@ const ProfilePage: React.FC = () => {
                                         />
                                     </div>
                                 </div>
+
+                                {linkedWorkers.length > 0 || linkedOfficeStaff.length > 0 ? (
+                                    <div className="space-y-5 border-t border-slate-200 pt-4">
+                                        {linkedWorkers.map((worker, index) => {
+                                            const workerDetails = buildWorkerDetails(worker);
+
+                                            return (
+                                                <div key={worker.id} className="space-y-4">
+                                                    {linkedWorkers.length > 1 && (
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <p className="text-sm font-semibold text-slate-700">
+                                                                작업자 {index + 1}
+                                                            </p>
+                                                            <button
+                                                                onClick={() => worker.id && handleUnlink(worker.id)}
+                                                                className="text-xs font-semibold text-slate-400 hover:text-red-500"
+                                                                type="button"
+                                                            >
+                                                                연결 해제
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        {workerDetails.map((item) => (
+                                                            <div key={`${worker.id}-${item.label}`}>
+                                                                <label className="block text-sm font-medium text-slate-700 mb-1">
+                                                                    {item.label}
+                                                                </label>
+                                                                <input
+                                                                    type="text"
+                                                                    value={item.value}
+                                                                    disabled
+                                                                    className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-700"
+                                                                />
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    {linkedWorkers.length === 1 && (
+                                                        <button
+                                                            onClick={() => worker.id && handleUnlink(worker.id)}
+                                                            className="text-xs font-semibold text-slate-400 hover:text-red-500"
+                                                            type="button"
+                                                        >
+                                                            연결 해제
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                        {linkedOfficeStaff.map((staff, index) => {
+                                            const staffDetails = buildOfficeStaffDetails(staff);
+                                            const showHeader = linkedOfficeStaff.length > 1 || linkedWorkers.length > 0;
+
+                                            return (
+                                                <div key={staff.id} className="space-y-4">
+                                                    {showHeader && (
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <p className="text-sm font-semibold text-slate-700">
+                                                                사무실 직원 {index + 1}
+                                                            </p>
+                                                            <button
+                                                                onClick={() => staff.id && handleOfficeStaffUnlink(staff.id)}
+                                                                className="text-xs font-semibold text-slate-400 hover:text-red-500"
+                                                                type="button"
+                                                            >
+                                                                연결 해제
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        {staffDetails.map((item) => (
+                                                            <div key={`${staff.id}-${item.label}`}>
+                                                                <label className="block text-sm font-medium text-slate-700 mb-1">
+                                                                    {item.label}
+                                                                </label>
+                                                                <input
+                                                                    type="text"
+                                                                    value={item.value}
+                                                                    disabled
+                                                                    className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-700"
+                                                                />
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    {!showHeader && (
+                                                        <button
+                                                            onClick={() => staff.id && handleOfficeStaffUnlink(staff.id)}
+                                                            className="text-xs font-semibold text-slate-400 hover:text-red-500"
+                                                            type="button"
+                                                        >
+                                                            연결 해제
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                ) : (
+                                    <div className="border-t border-slate-200 pt-4">
+                                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 py-8 text-center">
+                                            <FontAwesomeIcon icon={faHardHat} className="text-4xl text-slate-300 mb-4" />
+                                            <p className="text-slate-500">연결된 작업자/사무실 직원이 없습니다</p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -390,61 +714,15 @@ const ProfilePage: React.FC = () => {
                                     <p className="mt-2 text-xs text-slate-500">
                                         {linkedWorkers.length > 0
                                             ? `연결된 작업자 ${linkedWorkers.length}명 기준`
-                                            : '연결된 작업자 기준으로 집계됩니다'}
+                                            : linkedOfficeStaff.length > 0
+                                                ? `사무실 직원 ${linkedOfficeStaff.length}명 연결됨`
+                                                : '연결된 작업자 기준으로 집계됩니다'}
                                     </p>
                                 </div>
                                 <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
                                     <FontAwesomeIcon icon={faChartLine} />
                                 </div>
                             </div>
-                        </div>
-
-                        <div className="bg-white rounded-lg border border-slate-200 p-6">
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-semibold text-slate-800">연결된 작업자</h3>
-                            </div>
-
-                            {linkedWorkers.length > 0 ? (
-                                <div className="space-y-3">
-                                    {linkedWorkers.map(worker => (
-                                        <div key={worker.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
-                                            <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center">
-                                                <FontAwesomeIcon icon={faHardHat} className="text-slate-500" />
-                                            </div>
-                                            <div className="flex-1">
-                                                <div className="flex justify-between items-start">
-                                                    <div>
-                                                        <p className="font-medium text-slate-800 flex items-center gap-2">
-                                                            {worker.name}
-                                                            {worker.rank && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-200">{worker.rank}</span>}
-                                                        </p>
-                                                        <p className="text-xs text-slate-500 mt-0.5">{worker.teamName || '팀 미배정'}</p>
-                                                        <p className="text-xs font-semibold text-blue-600 mt-1">
-                                                            누적 {formatManDay(toManDayNumber(worker.totalManDay))}공수
-                                                        </p>
-                                                    </div>
-                                                    <span className="text-xs bg-slate-200 text-slate-600 px-2 py-1 rounded-full">
-                                                        {worker.role || '작업자'}
-                                                    </span>
-                                                </div>
-                                                <p className="text-xs text-slate-400 mt-1">{worker.idNumber}</p>
-                                            </div>
-                                            <button
-                                                onClick={() => worker.id && handleUnlink(worker.id)}
-                                                className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
-                                                title="연결 해제"
-                                            >
-                                                <FontAwesomeIcon icon={faTimes} />
-                                            </button>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="text-center py-8">
-                                    <FontAwesomeIcon icon={faHardHat} className="text-4xl text-slate-300 mb-4" />
-                                    <p className="text-slate-500 mb-4">연결된 작업자가 없습니다</p>
-                                </div>
-                            )}
                         </div>
 
                         <div className="bg-white rounded-lg border border-slate-200 p-6">
@@ -460,7 +738,7 @@ const ProfilePage: React.FC = () => {
                                                 <div>
                                                     <p className="font-medium text-slate-800">{link.entityName}</p>
                                                     <p className="text-xs text-slate-500 mt-0.5">
-                                                        {link.entitySubType} · {ACCOUNT_RELATION_ROLE_LABELS[link.relationRole] || link.relationRole}
+                                                        {link.entitySubType} · {getAccountRelationRoleLabel(link.relationRole, link.entityType)}
                                                     </p>
                                                 </div>
                                                 <span className={`text-xs px-2 py-1 rounded-full ${link.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>

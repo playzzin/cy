@@ -12,9 +12,9 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="CY ERP" />
     <meta name="msapplication-TileColor" content="#07111f" />
-    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    <link rel="icon" type="image/png" sizes="192x192" href="%PUBLIC_URL%/icons/icon-192.png" />
-    <link rel="apple-touch-icon" sizes="192x192" href="%PUBLIC_URL%/icons/icon-192.png" />
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json?v=20260524" />
+    <link rel="icon" type="image/png" sizes="192x192" href="%PUBLIC_URL%/icons/icon-192.png?v=20260524" />
+    <link rel="apple-touch-icon" sizes="192x192" href="%PUBLIC_URL%/icons/icon-192.png?v=20260524" />
     <title>청연ENG ERP</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <link rel="stylesheet" as="style" crossorigin
@@ -36,14 +36,15 @@
 
         .app-intro {
             position: relative;
+            isolation: isolate;
             display: grid;
             min-height: 100vh;
             place-items: center;
             overflow: hidden;
             color: #e5f8ff;
             background:
-                linear-gradient(120deg, rgba(34, 211, 238, 0.16), transparent 36%, rgba(251, 191, 36, 0.1) 76%, transparent),
-                linear-gradient(145deg, #05111f 0%, #083344 48%, #0f172a 100%);
+                linear-gradient(180deg, #061225 0%, #020817 58%, #01040b 100%);
+            animation: app-intro-screen-in 0.35s ease-out both;
         }
 
         .app-intro::before {
@@ -51,24 +52,22 @@
             inset: 0;
             content: "";
             background-image:
-                linear-gradient(rgba(125, 211, 252, 0.13) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(125, 211, 252, 0.13) 1px, transparent 1px),
-                linear-gradient(135deg, transparent 46%, rgba(34, 211, 238, 0.14) 47%, rgba(34, 211, 238, 0.14) 48%, transparent 49%);
-            background-size: 64px 64px, 64px 64px, 320px 320px;
-            opacity: 0.38;
-            -webkit-mask-image: radial-gradient(circle at center, #000 0%, transparent 76%);
-            mask-image: radial-gradient(circle at center, #000 0%, transparent 76%);
+                linear-gradient(rgba(125, 211, 252, 0.08) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(125, 211, 252, 0.08) 1px, transparent 1px);
+            background-size: 56px 56px;
+            opacity: 0.42;
+            transform: translate3d(0, 0, 0);
+            animation: app-intro-grid 7s linear infinite;
         }
 
         .app-intro::after {
             position: absolute;
-            right: -6rem;
-            bottom: 6rem;
-            width: 34rem;
-            height: 1px;
+            inset: 0;
             content: "";
-            background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.32), rgba(251, 191, 36, 0.26), transparent);
-            transform: rotate(-18deg);
+            background:
+                linear-gradient(115deg, transparent 0%, transparent 42%, rgba(56, 189, 248, 0.16) 49%, transparent 56%, transparent 100%);
+            transform: translateX(-38%);
+            animation: app-intro-scan 2.8s ease-in-out infinite;
         }
 
         .app-intro__content {
@@ -83,25 +82,55 @@
         }
 
         .app-intro__mark-shell {
+            position: relative;
             display: grid;
-            width: 7rem;
-            height: 7rem;
+            width: 9.5rem;
+            height: 9.5rem;
             place-items: center;
-            border: 1px solid rgba(165, 243, 252, 0.26);
-            border-radius: 2rem;
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03));
-            box-shadow: 0 2rem 4rem rgba(0, 0, 0, 0.35), 0 0 0 0.5rem rgba(14, 116, 144, 0.1);
-            animation: app-intro-float 3.6s ease-in-out infinite;
+            animation:
+                app-intro-logo-rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both,
+                app-intro-float 3.3s ease-in-out 0.7s infinite;
+        }
+
+        .app-intro__mark-shell::before {
+            position: absolute;
+            inset: -0.55rem;
+            z-index: -1;
+            content: "";
+            border-radius: 2.65rem;
+            background: conic-gradient(from 140deg, transparent 0deg, rgba(56, 189, 248, 0.15) 64deg, rgba(14, 165, 233, 0.55) 108deg, rgba(255, 255, 255, 0.42) 140deg, transparent 190deg, transparent 360deg);
+            filter: blur(0.2px);
+            opacity: 0.85;
+            animation: app-intro-ring 2.6s linear infinite;
+        }
+
+        .app-intro__mark-shell::after {
+            position: absolute;
+            inset: 0.38rem;
+            z-index: 2;
+            content: "";
+            border-radius: 2.15rem;
+            background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.38) 45%, transparent 58%);
+            mix-blend-mode: screen;
+            opacity: 0;
+            transform: translateX(-120%);
+            animation: app-intro-logo-sheen 2.4s ease-in-out 0.45s infinite;
         }
 
         .app-intro__mark {
-            width: 6.25rem;
-            height: 6.25rem;
-            border-radius: 1.75rem;
+            position: relative;
+            z-index: 1;
+            width: 8.75rem;
+            height: 8.75rem;
+            border: 1px solid rgba(226, 232, 240, 0.16);
+            border-radius: 2rem;
+            object-fit: cover;
+            box-shadow: 0 2rem 4.5rem rgba(0, 0, 0, 0.42), 0 0 2rem rgba(56, 189, 248, 0.2);
+            animation: app-intro-logo-glow 2.4s ease-in-out infinite;
         }
 
         .app-intro__eyebrow {
-            margin-top: 1.5rem;
+            margin-top: 1.65rem;
             color: #67e8f9;
             font-size: 0.75rem;
             font-weight: 700;
@@ -127,12 +156,13 @@
 
         .app-intro__progress {
             position: relative;
-            width: 11.5rem;
-            height: 0.2rem;
+            width: 12.5rem;
+            height: 0.24rem;
             margin-top: 1.55rem;
             overflow: hidden;
             border-radius: 999px;
-            background: rgba(148, 163, 184, 0.2);
+            background: rgba(148, 163, 184, 0.18);
+            box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.06);
         }
 
         .app-intro__progress::before {
@@ -140,14 +170,65 @@
             inset: 0;
             content: "";
             border-radius: inherit;
-            background: linear-gradient(90deg, transparent, #22d3ee 34%, #fbbf24 70%, transparent);
+            background: linear-gradient(90deg, transparent, #38bdf8 34%, #0ea5e9 70%, transparent);
             transform: translateX(-100%);
             animation: app-intro-progress 1.35s ease-in-out infinite;
+        }
+
+        @keyframes app-intro-screen-in {
+            from {
+                opacity: 0.92;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes app-intro-grid {
+            100% {
+                background-position: 56px 56px, 56px 56px;
+            }
+        }
+
+        @keyframes app-intro-scan {
+            0%,
+            18% {
+                opacity: 0;
+                transform: translateX(-38%);
+            }
+
+            46% {
+                opacity: 1;
+            }
+
+            100% {
+                opacity: 0;
+                transform: translateX(38%);
+            }
+        }
+
+        @keyframes app-intro-ring {
+            100% {
+                transform: rotate(360deg);
+            }
         }
 
         @keyframes app-intro-progress {
             100% {
                 transform: translateX(100%);
+            }
+        }
+
+        @keyframes app-intro-logo-rise {
+            from {
+                opacity: 0.74;
+                transform: translateY(0.35rem) scale(0.96);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
             }
         }
 
@@ -162,10 +243,48 @@
             }
         }
 
+        @keyframes app-intro-logo-glow {
+            0%,
+            100% {
+                filter: saturate(1) brightness(1);
+            }
+
+            50% {
+                filter: saturate(1.08) brightness(1.08);
+            }
+        }
+
+        @keyframes app-intro-logo-sheen {
+            0%,
+            35% {
+                opacity: 0;
+                transform: translateX(-120%);
+            }
+
+            52% {
+                opacity: 0.65;
+            }
+
+            72%,
+            100% {
+                opacity: 0;
+                transform: translateX(120%);
+            }
+        }
+
         @media (prefers-reduced-motion: reduce) {
             .app-intro__mark-shell,
+            .app-intro__mark-shell::before,
+            .app-intro__mark-shell::after,
+            .app-intro__mark,
+            .app-intro::before,
+            .app-intro::after,
             .app-intro__progress::before {
                 animation: none;
+            }
+
+            .app-intro::after {
+                opacity: 0;
             }
         }
 
@@ -196,7 +315,7 @@
         <div class="app-intro" role="status" aria-live="polite" aria-label="청연ENG ERP 로딩 중">
             <div class="app-intro__content">
                 <div class="app-intro__mark-shell" aria-hidden="true">
-                    <img class="app-intro__mark" src="%PUBLIC_URL%/icons/icon-192.png" alt="" />
+                    <img class="app-intro__mark" src="%PUBLIC_URL%/icons/icon-512.png?v=20260524" alt="" width="140" height="140" />
                 </div>
                 <div class="app-intro__eyebrow">CHUNG YEON ENG</div>
                 <h1 class="app-intro__title">청연ENG ERP</h1>

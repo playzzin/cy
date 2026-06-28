@@ -8,13 +8,30 @@ const PERMISSION_DOC_ID = 'permissions';
 
 const normalizeRole = (role: unknown): string => String(role || '').trim();
 
+const ADMIN_ROLE_KEYS = [
+    'admin',
+    'super_admin',
+    'administrator',
+    'owner',
+    'dev',
+    'developer',
+    'system_admin',
+    'jhl2vtnk9v3c4eiz4qqi',
+    'pos_jhl2vtnk9v3c4eiz4qqi',
+    '관리자',
+    '사장',
+    '실장',
+    '개발',
+    '개발자',
+    '시스템관리자',
+];
+
 const isAdminRole = (role: unknown): boolean => {
     const normalized = normalizeRole(role).toLowerCase();
-    return ['admin', 'super_admin', 'administrator', 'owner'].includes(normalized)
-        || [UserRole.ADMIN, '사장', '실장'].includes(normalizeRole(role));
+    return ADMIN_ROLE_KEYS.includes(normalized);
 };
 
-const getSystemRole = (role: unknown): UserRole => {
+const getSystemRole = (role: unknown): UserRole.ADMIN | UserRole.MANAGER | UserRole.GENERAL => {
     const value = normalizeRole(role);
     const normalized = value.toLowerCase();
 
@@ -80,7 +97,7 @@ class RolePermissionService {
                     };
                 };
 
-                const baseBySystemRole: Record<UserRole, Record<string, boolean>> = {
+                const baseBySystemRole: Record<UserRole.ADMIN | UserRole.MANAGER | UserRole.GENERAL, Record<string, boolean>> = {
                     [UserRole.ADMIN]: {
                         ...(DEFAULT_PERMISSIONS[UserRole.ADMIN] || {}),
                         ...loadedByRole(UserRole.ADMIN)
@@ -104,12 +121,21 @@ class RolePermissionService {
                 // Seed per-position permissions
                 positionNames.forEach((positionName) => {
                     const pos = positions.find((p) => normalizeKey(p?.name) === positionName);
-                    const systemRole = (pos?.systemRole as UserRole) || UserRole.GENERAL;
+                    const systemRole = getSystemRole(pos?.systemRole || UserRole.GENERAL);
                     const direct = loaded?.[positionName];
                     merged[positionName] = {
                         ...(baseBySystemRole[systemRole] || baseBySystemRole[UserRole.GENERAL]),
                         ...(direct || {})
                     };
+                });
+
+                Object.keys(DEFAULT_PERMISSIONS).forEach((key) => {
+                    if (!merged[key]) {
+                        merged[key] = {
+                            ...(DEFAULT_PERMISSIONS[key] || {}),
+                            ...(loaded?.[key] || {})
+                        };
+                    }
                 });
 
                 // Always ensure a safe fallback key

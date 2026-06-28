@@ -10,14 +10,17 @@ import { accommodationAssignmentService } from './accommodationAssignmentService
 import { accommodationService } from './accommodationService';
 import { cardBillingService } from './cardBillingService';
 import { cardService } from './cardService';
+import { companyService } from './companyService';
 import { dailyReportService } from './dailyReportService';
-import { laborExchangeService } from './laborExchangeService';
 import { manpowerService } from './manpowerService';
 import { siteService, type Site } from './siteService';
+import { supportClientSiteAllocationService, type SupportClientAllocation } from './supportClientSiteAllocationService';
+import { supportRateService } from './supportRateService';
 import { teamExpenseLedgerService } from './teamExpenseLedgerService';
 import { teamService } from './teamService';
 import { vehicleBillingService } from './vehicleBillingService';
 import { vehicleService } from './vehicleService';
+import { isSupportBillingMonthEnabled } from '../utils/supportBillingPeriod';
 import {
   TeamSettlementDocumentSchema,
   type TeamSettlementAdditionItem,
@@ -29,6 +32,25 @@ import {
 import type { TeamExpenseClaim, TeamExpenseClaimCategory } from '../types/teamExpenseLedger';
 
 const SYSTEM_CONFIG_ID_PREFIX = 'team_settlement_';
+
+export type TeamSettlementSupportDirection = '내부지원간곳' | '내부지원온곳' | '외부지원간곳' | '외부지원온곳';
+
+export type TeamSettlementSupportDetailRow = {
+  id: string;
+  direction: TeamSettlementSupportDirection;
+  date: string;
+  siteId?: string;
+  siteName: string;
+  counterTeamId?: string;
+  counterTeamName?: string;
+  workerId: string;
+  workerName: string;
+  workerTeamId?: string;
+  workerTeamName?: string;
+  manDay: number;
+  unitPrice: number;
+  amount: number;
+};
 
 type SystemConfigRow = {
   id?: unknown;
@@ -43,18 +65,188 @@ const safeJsonParse = <T,>(value: string): T | null => {
   }
 };
 
- const toFiniteNumberOrZero = (value: unknown): number => {
-   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-   if (typeof value === 'string') {
-     const cleaned = value.replace(/,/g, '').trim();
-     if (!cleaned) return 0;
-     const n = Number(cleaned);
-     return Number.isFinite(n) ? n : 0;
-   }
-   return 0;
- };
+const toFiniteNumberOrZero = (value: unknown): number => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/,/g, '').trim();
+    if (!cleaned) return 0;
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+};
+
+const normalizeLookupKey = (value: unknown): string =>
+  String(value ?? '')
+    .trim()
+    .replace(/\s+/g, '')
+    .toLowerCase();
 
 const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+
+const SUPPORT_RATE_OVERRIDE_STORAGE_PREFIX = 'support-team-payment-rate-overrides-v1';
+
+type SupportMonthlyRateOverrides = {
+  bulkSupportRate?: number;
+  bulkRate?: number;
+  supportTeamRates: Record<string, number>;
+  supportAggregateRates: Record<string, number>;
+  supportSiteRates: Record<string, number>;
+  teamRates: Record<string, number>;
+  aggregateRates: Record<string, number>;
+  siteRates: Record<string, number>;
+};
+
+const normalizeSupportIdentity = (value: unknown): string =>
+  String(value ?? '').replace(/\(.*?\)/g, '').replace(/\s+/g, '').trim();
+
+const getSupportRateOverrideStorageKey = (yearMonth: string): string =>
+  `${SUPPORT_RATE_OVERRIDE_STORAGE_PREFIX}:${yearMonth}`;
+
+const toPositiveRate = (value: unknown): number | null => {
+  const parsed = typeof value === 'number'
+    ? value
+    : typeof value === 'string'
+      ? Number(value.replace(/,/g, ''))
+      : NaN;
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.round(parsed);
+};
+
+const calculateSupportLaborAmount = (manDay: number, supportUnitPrice: number): number =>
+  Math.round(Math.max(0, manDay) * Math.max(0, Math.round(supportUnitPrice)));
+
+const DEFAULT_SUPPORT_UNIT_PRICE = 230000;
+const CHEONGYEON_COMPANY_NAME_KEYS = [normalizeSupportIdentity('청연이엔지'), normalizeSupportIdentity('청연')].filter(Boolean);
+
+const isCheongyeonCompanyName = (value?: string | null): boolean => {
+  const normalized = normalizeSupportIdentity(value);
+  if (!normalized) return false;
+  return CHEONGYEON_COMPANY_NAME_KEYS.some((key) =>
+    normalized.includes(key) || (normalized.length >= 2 && key.includes(normalized))
+  );
+};
+
+const normalizeSupportSalaryModel = (value: unknown): string => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  if (raw.includes('지원')) return '지원팀';
+  if (raw.includes('월급')) return '월급제';
+  if (raw.includes('일급')) return '일급제';
+  if (raw.includes('용역')) return '용역팀';
+  return raw;
+};
+
+const isSameTeamIdentity = (
+  leftTeamId?: string | null,
+  leftTeamName?: string | null,
+  rightTeamId?: string | null,
+  rightTeamName?: string | null
+): boolean => {
+  const leftKeys = [normalizeSupportIdentity(leftTeamId), normalizeSupportIdentity(leftTeamName)].filter(Boolean);
+  const rightKeys = [normalizeSupportIdentity(rightTeamId), normalizeSupportIdentity(rightTeamName)].filter(Boolean);
+  return leftKeys.length > 0 && rightKeys.length > 0 && leftKeys.some((key) => rightKeys.includes(key));
+};
+
+const normalizeSupportRateOverrides = (value: Partial<SupportMonthlyRateOverrides> | undefined): SupportMonthlyRateOverrides => {
+  const normalizeRateMap = (raw: unknown): Record<string, number> => {
+    if (!raw || typeof raw !== 'object') return {};
+    return Object.entries(raw as Record<string, unknown>).reduce<Record<string, number>>((acc, [key, rate]) => {
+      const parsed = toPositiveRate(rate);
+      if (parsed) acc[key] = parsed;
+      return acc;
+    }, {});
+  };
+
+  return {
+    bulkSupportRate: toPositiveRate(value?.bulkSupportRate) ?? undefined,
+    bulkRate: toPositiveRate(value?.bulkRate) ?? undefined,
+    supportTeamRates: normalizeRateMap(value?.supportTeamRates),
+    supportAggregateRates: normalizeRateMap(value?.supportAggregateRates),
+    supportSiteRates: normalizeRateMap(value?.supportSiteRates),
+    teamRates: normalizeRateMap(value?.teamRates),
+    aggregateRates: normalizeRateMap(value?.aggregateRates),
+    siteRates: normalizeRateMap(value?.siteRates)
+  };
+};
+
+const loadSupportRateOverrides = (yearMonth: string): SupportMonthlyRateOverrides => {
+  if (typeof window === 'undefined' || !yearMonth) return normalizeSupportRateOverrides(undefined);
+  try {
+    const raw = window.localStorage.getItem(getSupportRateOverrideStorageKey(yearMonth));
+    if (!raw) return normalizeSupportRateOverrides(undefined);
+    return normalizeSupportRateOverrides(JSON.parse(raw) as Partial<SupportMonthlyRateOverrides>);
+  } catch {
+    return normalizeSupportRateOverrides(undefined);
+  }
+};
+
+const getSupportSettlementMergeKey = (direction: string, settlementTeamId?: string, settlementTeamName?: string): string => [
+  direction,
+  normalizeSupportIdentity(settlementTeamId) || normalizeSupportIdentity(settlementTeamName) || 'unknown-settlement'
+].join('::');
+
+const getSupportAggregateId = (direction: string, viewTeamId?: string, viewTeamName?: string, settlementTeamId?: string, settlementTeamName?: string): string => [
+  direction,
+  normalizeSupportIdentity(viewTeamId) || normalizeSupportIdentity(viewTeamName) || 'unknown-view',
+  normalizeSupportIdentity(settlementTeamId) || normalizeSupportIdentity(settlementTeamName) || 'unknown'
+].join('::');
+
+const getSupportMonthlySiteRateKey = (aggregateId: string, siteId: string): string => `${aggregateId}::${siteId}`;
+
+type SupportRateLookupContext = {
+  direction: string;
+  viewTeamId?: string;
+  viewTeamName?: string;
+  settlementTeamId?: string;
+  settlementTeamName?: string;
+};
+
+const resolveSupportUnitRate = (params: {
+  overrides: SupportMonthlyRateOverrides;
+  baseRate: number;
+  contexts: SupportRateLookupContext[];
+  siteId?: string;
+}): number => {
+  const positiveBaseRate = toPositiveRate(params.baseRate) ?? 0;
+  const siteId = normalizeSupportIdentity(params.siteId);
+  const uniqueKeys = (values: string[]): string[] => Array.from(new Set(values.filter(Boolean)));
+  const lookupContexts = params.contexts.filter((context) => context.direction);
+  const teamRateKeys = uniqueKeys(lookupContexts.map((context) =>
+    getSupportSettlementMergeKey(context.direction, context.settlementTeamId, context.settlementTeamName)
+  ));
+  const aggregateIds = uniqueKeys(lookupContexts.map((context) =>
+    getSupportAggregateId(
+      context.direction,
+      context.viewTeamId,
+      context.viewTeamName,
+      context.settlementTeamId,
+      context.settlementTeamName
+    )
+  ));
+  const mergedAggregateIds = teamRateKeys.map((key) => `merged::${key}`);
+
+  if (siteId) {
+    const siteRateKeys = [...teamRateKeys, ...aggregateIds, ...mergedAggregateIds]
+      .map((key) => getSupportMonthlySiteRateKey(key, siteId));
+    for (const key of siteRateKeys) {
+      const rate = toPositiveRate(params.overrides.supportSiteRates[key]);
+      if (rate) return rate;
+    }
+  }
+
+  for (const key of [...aggregateIds, ...mergedAggregateIds]) {
+    const rate = toPositiveRate(params.overrides.supportAggregateRates[key]);
+    if (rate) return rate;
+  }
+
+  for (const key of teamRateKeys) {
+    const rate = toPositiveRate(params.overrides.supportTeamRates[key]);
+    if (rate) return rate;
+  }
+
+  return toPositiveRate(params.overrides.bulkSupportRate) ?? positiveBaseRate;
+};
 
 const buildSystemConfigId = (params: { yearMonth: string; teamId: string }): string => {
   return `${SYSTEM_CONFIG_ID_PREFIX}${params.yearMonth}__${params.teamId}`;
@@ -123,13 +315,27 @@ const normalizeBillingStatus = (value: unknown): string => {
   return raw;
 };
 
-const selectPreferredTeamBillings = <T extends { status?: unknown }>(docs: T[]): T[] => {
+const isPostedBillingStatus = (status: unknown): boolean =>
+  ['confirmed', 'paid', 'overdue'].includes(normalizeBillingStatus(status));
+
+const selectPreferredTeamBillings = <T extends { status?: unknown }>(
+  docs: T[],
+  additionalPosted?: (doc: T) => boolean
+): T[] => {
   if (!Array.isArray(docs) || docs.length === 0) return [];
-  const confirmed = docs.filter((doc) => normalizeBillingStatus(doc.status) === 'confirmed');
-  return confirmed;
+  return docs.filter((doc) => isPostedBillingStatus(doc.status) || Boolean(additionalPosted?.(doc)));
 };
 
 const allowUnconfirmedLedgerFallback = false;
+
+const isVehicleLedgerClaim = (doc: { lineItems?: Array<{ sourceType?: unknown }> }): boolean =>
+  (doc.lineItems ?? []).some((item) => String(item.sourceType ?? '') === 'vehicle_ledger');
+
+const isAccommodationLedgerClaim = (doc: { lineItems?: Array<{ sourceType?: unknown }> }): boolean =>
+  (doc.lineItems ?? []).some((item) => String(item.sourceType ?? '') === 'utility_ledger');
+
+const isCardLedgerClaim = (doc: { lineItems?: Array<{ sourceType?: unknown }> }): boolean =>
+  (doc.lineItems ?? []).some((item) => String(item.sourceType ?? '') === 'card_ledger');
 
 const teamExpenseCategoryLabels: Record<TeamExpenseClaimCategory, string> = {
   meal: '식대',
@@ -186,7 +392,15 @@ const isTeamBillingTarget = (params: {
 const buildTeamIdVariants = async (teamId: string): Promise<{ canonicalTeamId: string; teamName: string; variants: Set<string> }> => {
   const raw = String(teamId);
   const variants = new Set<string>();
-  if (raw) variants.add(raw);
+  const addVariant = (value: unknown) => {
+    const trimmed = String(value ?? '').trim();
+    if (!trimmed) return;
+    variants.add(trimmed);
+    const normalized = normalizeSupportIdentity(trimmed);
+    if (normalized) variants.add(normalized);
+  };
+
+  addVariant(raw);
 
   let canonicalTeamId = raw;
   let teamName = '';
@@ -195,8 +409,9 @@ const buildTeamIdVariants = async (teamId: string): Promise<{ canonicalTeamId: s
     const teams = await teamService.getTeams();
     const matched = teams.find((t) => String(t.id ?? '') === raw || String(t.legacyId ?? '') === raw);
     if (matched?.id) canonicalTeamId = String(matched.id);
-    if (matched?.legacyId) variants.add(String(matched.legacyId));
-    if (matched?.id) variants.add(String(matched.id));
+    addVariant(matched?.legacyId);
+    addVariant(matched?.id);
+    addVariant(matched?.name);
     teamName = matched?.name ?? '';
   } catch {
     // ignore
@@ -216,6 +431,24 @@ const extractSystemConfigRows = (value: unknown): SystemConfigRow[] => {
   return rows as SystemConfigRow[];
 };
 
+const SUPPORT_SALES_ORIGINS = ['support_outgoing', 'support_fee_outgoing', '내부지원간곳', '외부지원간곳'];
+const SUPPORT_PURCHASE_ORIGINS = ['support_incoming', 'support_fee_incoming', '내부지원온곳', '외부지원온곳'];
+const SUPPORT_SALES_SETTLEMENT_ORIGINS = ['support_fee_outgoing', '내부지원간곳', '외부지원간곳'];
+const SUPPORT_PURCHASE_SETTLEMENT_ORIGINS = ['support_fee_incoming', '내부지원온곳', '외부지원온곳'];
+
+type SupportSettlementOrigin = TeamSettlementSupportDirection;
+
+const isSupportSalesOrigin = (origin: unknown): boolean => SUPPORT_SALES_ORIGINS.includes(String(origin));
+const isSupportPurchaseOrigin = (origin: unknown): boolean => SUPPORT_PURCHASE_ORIGINS.includes(String(origin));
+const isSupportSalesSettlementOrigin = (origin: unknown): boolean => SUPPORT_SALES_SETTLEMENT_ORIGINS.includes(String(origin));
+const isSupportPurchaseSettlementOrigin = (origin: unknown): boolean => SUPPORT_PURCHASE_SETTLEMENT_ORIGINS.includes(String(origin));
+
+const toSupportSalesOrigin = (direction: SupportSettlementOrigin): TeamSettlementSalesItem['origin'] =>
+  direction === '내부지원간곳' ? '내부지원간곳' : '외부지원간곳';
+
+const toSupportPurchaseOrigin = (direction: SupportSettlementOrigin): TeamSettlementPurchaseItem['origin'] =>
+  direction === '내부지원온곳' ? '내부지원온곳' : '외부지원온곳';
+
 const stripSupportOriginalLines = (doc: TeamSettlementDocument): TeamSettlementDocument => {
   return {
     ...doc,
@@ -224,10 +457,42 @@ const stripSupportOriginalLines = (doc: TeamSettlementDocument): TeamSettlementD
   };
 };
 
+const mergeLatestSupportAutoLines = (params: {
+  baseDoc: TeamSettlementDocument;
+  autoDoc: TeamSettlementDocument;
+}): TeamSettlementDocument => {
+  const { baseDoc, autoDoc } = params;
+  const latestSupportSales = autoDoc.sales.filter((item) =>
+    item.source === 'auto' && isSupportSalesSettlementOrigin(item.origin)
+  );
+  const latestSupportPurchases = autoDoc.purchases.filter((item) =>
+    item.source === 'auto' && isSupportPurchaseSettlementOrigin(item.origin)
+  );
+
+  return {
+    ...baseDoc,
+    teamName: baseDoc.teamName || autoDoc.teamName,
+    sales: [
+      ...baseDoc.sales.filter((item) =>
+        !(item.source === 'auto' && isSupportSalesOrigin(item.origin))
+      ),
+      ...latestSupportSales
+    ],
+    purchases: [
+      ...baseDoc.purchases.filter((item) =>
+        !(item.source === 'auto' && isSupportPurchaseOrigin(item.origin))
+      ),
+      ...latestSupportPurchases
+    ]
+  };
+};
+
 const mergeAutoAndDraft = (params: { autoDoc: TeamSettlementDocument; savedDoc: TeamSettlementDocument | null }): TeamSettlementDocument => {
   const { autoDoc, savedDoc } = params;
   if (!savedDoc) return autoDoc;
-  if (savedDoc.confirmedAt) return savedDoc;
+  if (savedDoc.confirmedAt) {
+    return mergeLatestSupportAutoLines({ baseDoc: stripSupportOriginalLines(savedDoc), autoDoc });
+  }
 
   const savedSalesById = new Map(savedDoc.sales.map((x) => [x.id, x] as const));
   const patchedAutoSales = autoDoc.sales.map((autoItem) => {
@@ -280,6 +545,295 @@ const notifyTeamSettlementSystemMessage = async (
 };
 
 export const teamSettlementService = {
+  async getSupportSettlementDetailRows(params: { yearMonth: string; teamId: string }): Promise<TeamSettlementSupportDetailRow[]> {
+    const team = await buildTeamIdVariants(params.teamId);
+    const period = getMonthRange(params.yearMonth);
+
+    const [sites, teams, companies, reports, supportRates] = await Promise.all([
+      siteService.getSites(),
+      teamService.getTeams(),
+      companyService.getCompanies(),
+      dailyReportService.getReportsByRange(period.startDate, period.endDate),
+      supportRateService.getAllSiteRates()
+    ]);
+
+    const matchesTeam = (value: unknown): boolean => {
+      if (typeof value !== 'string') return false;
+      const trimmed = value.trim();
+      if (!trimmed) return false;
+      const normalized = normalizeSupportIdentity(trimmed);
+      if (team.variants.has(trimmed) || (normalized && team.variants.has(normalized))) return true;
+      if (isUuidString(trimmed)) return trimmed === team.canonicalTeamId;
+      return false;
+    };
+
+    const teamByAnyId = new Map<string, (typeof teams)[number]>();
+    const teamByName = new Map<string, (typeof teams)[number]>();
+    const setTeamIdLookup = (key: unknown, teamRow: (typeof teams)[number]) => {
+      const trimmed = String(key ?? '').trim();
+      if (!trimmed) return;
+      teamByAnyId.set(trimmed, teamRow);
+      const normalized = normalizeSupportIdentity(trimmed);
+      if (normalized) teamByAnyId.set(normalized, teamRow);
+    };
+    teams.forEach((t) => {
+      setTeamIdLookup(t?.id, t);
+      setTeamIdLookup(t?.legacyId, t);
+      const nameKey = normalizeSupportIdentity(t?.name);
+      if (nameKey && !teamByName.has(nameKey)) teamByName.set(nameKey, t);
+    });
+
+    const companyByAnyId = new Map<string, (typeof companies)[number]>();
+    const setCompanyIdLookup = (key: unknown, companyRow: (typeof companies)[number]) => {
+      const trimmed = String(key ?? '').trim();
+      if (!trimmed) return;
+      companyByAnyId.set(trimmed, companyRow);
+      const normalized = normalizeSupportIdentity(trimmed);
+      if (normalized) companyByAnyId.set(normalized, companyRow);
+    };
+    companies.forEach((company) => {
+      setCompanyIdLookup(company?.id, company);
+      setCompanyIdLookup(company?.legacyId, company);
+    });
+
+    const siteByAnyId = new Map<string, Site>();
+    const siteByName = new Map<string, Site>();
+    const setSiteIdLookup = (key: unknown, siteRow: Site) => {
+      const trimmed = String(key ?? '').trim();
+      if (!trimmed) return;
+      siteByAnyId.set(trimmed, siteRow);
+      const normalized = normalizeSupportIdentity(trimmed);
+      if (normalized) siteByAnyId.set(normalized, siteRow);
+    };
+    sites.forEach((s) => {
+      setSiteIdLookup(s?.id, s);
+      setSiteIdLookup(s?.legacyId, s);
+      if (s?.name) siteByName.set(String(s.name), s);
+    });
+
+    const resolveSite = (siteId?: string, siteName?: string): Site | null => {
+      const idKey = siteId ? String(siteId).trim() : '';
+      const nameKey = siteName ? String(siteName).trim() : '';
+      if (idKey) {
+        const byId = siteByAnyId.get(idKey) ?? siteByAnyId.get(normalizeSupportIdentity(idKey));
+        if (byId) return byId;
+      }
+      if (nameKey && siteByName.has(nameKey)) return siteByName.get(nameKey) ?? null;
+      return null;
+    };
+
+    const supportRateBySiteId = new Map<string, number>();
+    const supportRateBySiteName = new Map<string, number>();
+    supportRates.forEach((rate) => {
+      const configuredRate = toPositiveRate(rate.defaultRate);
+      if (!configuredRate) return;
+      const siteId = normalizeLookupKey(rate.siteId || rate.id);
+      const siteName = normalizeLookupKey(rate.siteName);
+      if (siteId) supportRateBySiteId.set(siteId, configuredRate);
+      if (siteName) supportRateBySiteName.set(siteName, configuredRate);
+    });
+
+    const resolveConfiguredSiteRate = (siteId?: string | null, siteName?: string | null): number | null => {
+      const normalizedSiteId = normalizeLookupKey(siteId);
+      if (normalizedSiteId) {
+        const direct = supportRateBySiteId.get(normalizedSiteId);
+        if (direct) return direct;
+        const site = resolveSite(String(siteId ?? ''), String(siteName ?? ''));
+        const byResolvedName = site ? supportRateBySiteName.get(normalizeLookupKey(site.name)) : undefined;
+        if (byResolvedName) return byResolvedName;
+      }
+      const normalizedSiteName = normalizeLookupKey(siteName);
+      return normalizedSiteName ? (supportRateBySiteName.get(normalizedSiteName) ?? null) : null;
+    };
+
+    const findTeamByIdentity = (teamId?: string | null, teamName?: string | null): (typeof teams)[number] | undefined => {
+      const idKey = String(teamId ?? '').trim();
+      if (idKey) {
+        const byId = teamByAnyId.get(idKey) ?? teamByAnyId.get(normalizeSupportIdentity(idKey));
+        if (byId) return byId;
+      }
+      const nameKey = normalizeSupportIdentity(teamName);
+      return nameKey ? teamByName.get(nameKey) : undefined;
+    };
+
+    const isCheongyeonCompany = (companyId?: string | null, companyName?: string | null): boolean => {
+      const idKey = String(companyId ?? '').trim();
+      if (idKey) {
+        const company = companyByAnyId.get(idKey) ?? companyByAnyId.get(normalizeSupportIdentity(idKey));
+        if (company?.isMyCompany) return true;
+        if (isCheongyeonCompanyName(company?.name)) return true;
+      }
+      return isCheongyeonCompanyName(companyName);
+    };
+
+    const isCheongyeonTeamIdentity = (
+      teamRow?: (typeof teams)[number],
+      teamId?: string | null,
+      teamName?: string | null
+    ): boolean => {
+      const resolved = teamRow ?? findTeamByIdentity(teamId, teamName);
+      if (!resolved) return false;
+      const companyId = String(resolved.companyId ?? '').trim();
+      const companyName = String(resolved.companyName ?? (companyId ? companyByAnyId.get(companyId)?.name : '') ?? '').trim();
+      return isCheongyeonCompany(companyId, companyName);
+    };
+
+    type ClassifiedSupportEntry = {
+      direction: TeamSettlementSupportDirection;
+      viewTeamId?: string;
+      viewTeamName?: string;
+      settlementTeamId?: string;
+      settlementTeamName?: string;
+      counterTeamId?: string;
+      counterTeamName?: string;
+    };
+
+    const rows: TeamSettlementSupportDetailRow[] = [];
+    reports.forEach((report) => {
+      const rawSiteId = String(report.siteId ?? '').trim();
+      const rawSiteName = String(report.siteName ?? '').trim() || '현장 미지정';
+      const site = resolveSite(rawSiteId, rawSiteName);
+      const siteId = site?.id ? String(site.id) : (rawSiteId || undefined);
+      const siteName = site?.name ? String(site.name) : rawSiteName;
+
+      const siteConstructorCompanyId = String(site?.constructorCompanyId ?? site?.companyId ?? report.constructorCompanyId ?? report.companyId ?? '').trim();
+      const siteConstructorCompanyName = String(site?.constructorCompanyName ?? site?.companyName ?? report.constructorCompanyName ?? report.companyName ?? '').trim();
+      const siteIsCheongyeon = isCheongyeonCompany(siteConstructorCompanyId, siteConstructorCompanyName);
+
+      (Array.isArray(report.workers) ? report.workers : []).forEach((reportWorker, workerIndex) => {
+        const reportWorkerTeamId = String(reportWorker.teamId ?? '').trim();
+        const reportWorkerTeamName = String(reportWorker.workerTeamName ?? '').trim();
+        const fallbackSourceTeam = findTeamByIdentity(undefined, reportWorkerTeamName);
+        const fallbackReportTeamId = reportWorkerTeamName ? '' : String(report.teamId ?? '').trim();
+        const workerTeamId = reportWorkerTeamId || (fallbackSourceTeam?.id ? String(fallbackSourceTeam.id) : '') || fallbackReportTeamId;
+        const resolvedSourceTeam = findTeamByIdentity(workerTeamId, reportWorkerTeamName) ?? fallbackSourceTeam;
+        const sourceTeamId = String(
+          resolvedSourceTeam?.id ??
+          (reportWorkerTeamId || normalizeSupportIdentity(reportWorkerTeamName) || fallbackReportTeamId || '')
+        ).trim();
+        const sourceTeamName = String(
+          resolvedSourceTeam?.name ??
+          (reportWorkerTeamName || report.teamName || '팀 미지정')
+        ).trim();
+        const workerCompanyId = String(resolvedSourceTeam?.companyId ?? '').trim();
+        const workerCompanyName = String(
+          resolvedSourceTeam?.companyName ??
+          (workerCompanyId ? companyByAnyId.get(workerCompanyId)?.name : '') ??
+          ''
+        ).trim();
+
+        const targetTeamIdRaw = String(report.responsibleTeamId ?? site?.responsibleTeamId ?? report.teamId ?? '').trim();
+        const targetTeamNameRaw = String(report.responsibleTeamName ?? site?.responsibleTeamName ?? report.teamName ?? '').trim();
+        const resolvedTargetTeam = findTeamByIdentity(targetTeamIdRaw, targetTeamNameRaw);
+        const targetTeamId = String(resolvedTargetTeam?.id ?? targetTeamIdRaw).trim();
+        const targetTeamName = String(resolvedTargetTeam?.name ?? targetTeamNameRaw ?? '팀 미지정').trim();
+        const targetCompanyId = String(resolvedTargetTeam?.companyId ?? siteConstructorCompanyId ?? report.companyId ?? '').trim();
+        const targetCompanyName = String(resolvedTargetTeam?.companyName ?? siteConstructorCompanyName ?? report.companyName ?? '').trim();
+
+        const workerIsCheongyeon = isCheongyeonTeamIdentity(resolvedSourceTeam, sourceTeamId, sourceTeamName);
+        const targetIsCheongyeon = isCheongyeonTeamIdentity(resolvedTargetTeam, targetTeamId, targetTeamName);
+        const isSameFieldAndWorkerTeam = isSameTeamIdentity(sourceTeamId, sourceTeamName, targetTeamId, targetTeamName);
+        const normalizedSalary = normalizeSupportSalaryModel(reportWorker.salaryModel ?? reportWorker.payType);
+        const isSupportModel = normalizedSalary === '지원팀';
+        const isSupportTeam = normalizeSupportIdentity(resolvedSourceTeam?.type).includes('지원');
+
+        const entries: ClassifiedSupportEntry[] = [];
+        if (workerIsCheongyeon && targetIsCheongyeon && isSameFieldAndWorkerTeam) return;
+
+        if (workerIsCheongyeon && targetIsCheongyeon && sourceTeamId && targetTeamId) {
+          entries.push({
+            direction: '내부지원간곳',
+            viewTeamId: sourceTeamId,
+            viewTeamName: sourceTeamName,
+            settlementTeamId: sourceTeamId,
+            settlementTeamName: sourceTeamName,
+            counterTeamId: targetTeamId,
+            counterTeamName: targetTeamName
+          });
+          entries.push({
+            direction: '내부지원온곳',
+            viewTeamId: targetTeamId,
+            viewTeamName: targetTeamName,
+            settlementTeamId: targetTeamId,
+            settlementTeamName: targetTeamName,
+            counterTeamId: sourceTeamId,
+            counterTeamName: sourceTeamName
+          });
+        } else if (!siteIsCheongyeon && workerIsCheongyeon) {
+          entries.push({
+            direction: '외부지원간곳',
+            viewTeamId: sourceTeamId,
+            viewTeamName: sourceTeamName,
+            settlementTeamId: targetTeamId || targetCompanyId,
+            settlementTeamName: targetTeamName || targetCompanyName || siteConstructorCompanyName || '외부 시공사',
+            counterTeamId: targetTeamId || targetCompanyId,
+            counterTeamName: targetTeamName || targetCompanyName || siteConstructorCompanyName || '외부 현장'
+          });
+        } else if (siteIsCheongyeon && targetIsCheongyeon && !workerIsCheongyeon) {
+          entries.push({
+            direction: '외부지원온곳',
+            viewTeamId: targetTeamId,
+            viewTeamName: targetTeamName,
+            settlementTeamId: sourceTeamId || workerCompanyId,
+            settlementTeamName: sourceTeamName || workerCompanyName || '외부 지원팀',
+            counterTeamId: sourceTeamId || workerCompanyId,
+            counterTeamName: sourceTeamName || workerCompanyName || '외부 지원팀'
+          });
+        } else if (siteIsCheongyeon && targetIsCheongyeon && (isSupportModel || isSupportTeam)) {
+          entries.push({
+            direction: '외부지원온곳',
+            viewTeamId: targetTeamId,
+            viewTeamName: targetTeamName,
+            settlementTeamId: sourceTeamId || workerCompanyId,
+            settlementTeamName: sourceTeamName || workerCompanyName || '지원팀',
+            counterTeamId: sourceTeamId || workerCompanyId,
+            counterTeamName: sourceTeamName || workerCompanyName || '외부 지원팀'
+          });
+        }
+
+        if (entries.length === 0) return;
+
+        const rateSiteId = rawSiteId || siteId;
+        const configuredSupportRate = resolveConfiguredSiteRate(rateSiteId, rawSiteName || siteName);
+        const sourceTeamSupportRate = toPositiveRate(resolvedSourceTeam?.supportRate);
+        const baseSupportRate = configuredSupportRate ?? sourceTeamSupportRate ?? toPositiveRate(reportWorker.unitPrice) ?? DEFAULT_SUPPORT_UNIT_PRICE;
+        const manDay = toFiniteNumberOrZero(reportWorker.manDay);
+        if (manDay <= 0) return;
+
+        entries.forEach((entry) => {
+          const isSelectedViewTeam = matchesTeam(String(entry.viewTeamId ?? '')) || isSameTeamIdentity(entry.viewTeamId, entry.viewTeamName, team.canonicalTeamId, team.teamName);
+          if (!isSelectedViewTeam) return;
+
+          const supportUnitPrice = resolveSupportUnitRate({
+            overrides: loadSupportRateOverrides(params.yearMonth),
+            baseRate: baseSupportRate,
+            contexts: [entry],
+            siteId: rateSiteId
+          });
+
+          rows.push({
+            id: `${report.id ?? report.date}:${workerIndex}:${entry.direction}:${siteId ?? siteName}:${reportWorker.workerId ?? reportWorker.name ?? 'worker'}`,
+            direction: entry.direction,
+            date: report.date,
+            siteId,
+            siteName,
+            counterTeamId: entry.counterTeamId,
+            counterTeamName: entry.counterTeamName,
+            workerId: String(reportWorker.workerId ?? ''),
+            workerName: String(reportWorker.name ?? '이름 미상'),
+            workerTeamId: sourceTeamId,
+            workerTeamName: sourceTeamName,
+            manDay,
+            unitPrice: supportUnitPrice,
+            amount: calculateSupportLaborAmount(manDay, supportUnitPrice)
+          });
+        });
+      });
+    });
+
+    return rows;
+  },
+
   async getTeamSettlement(params: { yearMonth: string; teamId: string }): Promise<TeamSettlementDocument> {
     const team = await buildTeamIdVariants(params.teamId);
     const systemId = buildSystemConfigId({ yearMonth: params.yearMonth, teamId: team.canonicalTeamId });
@@ -291,8 +845,6 @@ export const teamSettlementService = {
     const savedUnknown = typeof row?.data === 'string' ? safeJsonParse<unknown>(row.data) : null;
     const savedParsed = savedUnknown ? TeamSettlementDocumentSchema.safeParse(savedUnknown) : null;
     const savedDoc = savedParsed && savedParsed.success ? savedParsed.data : null;
-
-    if (savedDoc?.confirmedAt) return stripSupportOriginalLines(savedDoc);
 
     const autoDoc = await this.calculateAutoSettlement({
       yearMonth: params.yearMonth,
@@ -408,13 +960,26 @@ export const teamSettlementService = {
       return Math.round(value * 10) / 10;
     };
 
-    const exchangeSnapshotInfo = await laborExchangeService.getMonthSnapshotInfo(period.year, period.month);
-
-    const [sites, teams, workerRows, exchangeSummaries, accommodationDocs, vehicleDocs, cardDocs, teamExpenseClaims] = await Promise.all([
+    const [
+      sites,
+      teams,
+      companies,
+      workerRows,
+      supportReports,
+      supportRates,
+      supportClientAllocations,
+      accommodationDocs,
+      vehicleDocs,
+      cardDocs,
+      teamExpenseClaims
+    ] = await Promise.all([
       siteService.getSites(),
       teamService.getTeams(),
+      companyService.getCompanies(),
       dailyReportService.getReportWorkerRowsByRange({ startDate: period.startDate, endDate: period.endDate }),
-      laborExchangeService.getExchangeReport(period.year, period.month, params.teamId, { preferSnapshot: Boolean(exchangeSnapshotInfo?.confirmedAt) }),
+      dailyReportService.getReportsByRange(period.startDate, period.endDate),
+      supportRateService.getAllSiteRates(),
+      supportClientSiteAllocationService.getAllocationsByMonth(params.yearMonth).catch(() => [] as SupportClientAllocation[]),
       accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth: params.yearMonth }),
       vehicleBillingService.getBillingsByMonth(params.yearMonth),
       cardBillingService.getBillingsByMonth(params.yearMonth),
@@ -425,41 +990,56 @@ export const teamSettlementService = {
       if (typeof value !== 'string') return false;
       const trimmed = value.trim();
       if (!trimmed) return false;
-      if (params.teamIdVariants.has(trimmed)) return true;
+      const normalized = normalizeSupportIdentity(trimmed);
+      if (params.teamIdVariants.has(trimmed) || (normalized && params.teamIdVariants.has(normalized))) return true;
       if (isUuidString(trimmed)) return trimmed === params.teamId;
       return false;
     };
 
-    const teamByAnyId = new Map<string, { id: string; name: string }>();
-    const teamByName = new Map<string, { id: string; name: string }>();
+    const teamByAnyId = new Map<string, (typeof teams)[number]>();
+    const teamByName = new Map<string, (typeof teams)[number]>();
+    const setTeamIdLookup = (key: string, teamRow: (typeof teams)[number]) => {
+      const trimmed = String(key ?? '').trim();
+      if (!trimmed) return;
+      teamByAnyId.set(trimmed, teamRow);
+      const normalized = normalizeSupportIdentity(trimmed);
+      if (normalized) teamByAnyId.set(normalized, teamRow);
+    };
     teams.forEach((t) => {
       const id = t?.id ? String(t.id) : '';
       const legacyId = t?.legacyId ? String(t.legacyId) : '';
       const name = t?.name ? String(t.name) : '';
-      if (id) teamByAnyId.set(id, { id, name });
-      if (legacyId) teamByAnyId.set(legacyId, { id, name });
-      if (name) teamByName.set(name, { id, name });
+      setTeamIdLookup(id, t);
+      setTeamIdLookup(legacyId, t);
+      const nameKey = normalizeSupportIdentity(name);
+      if (nameKey && !teamByName.has(nameKey)) teamByName.set(nameKey, t);
     });
 
-    const resolveTeam = (raw: unknown): { id?: string; name?: string } => {
-      if (typeof raw !== 'string') return {};
-      const trimmed = raw.trim();
-      if (!trimmed) return {};
-      const found = teamByAnyId.get(trimmed);
-      if (found) return { id: found.id, name: found.name };
-      return { id: trimmed };
+    const companyByAnyId = new Map<string, (typeof companies)[number]>();
+    const setCompanyIdLookup = (key: string, companyRow: (typeof companies)[number]) => {
+      const trimmed = String(key ?? '').trim();
+      if (!trimmed) return;
+      companyByAnyId.set(trimmed, companyRow);
+      const normalized = normalizeSupportIdentity(trimmed);
+      if (normalized) companyByAnyId.set(normalized, companyRow);
     };
+    companies.forEach((company) => {
+      const id = company?.id ? String(company.id) : '';
+      const legacyId = company?.legacyId ? String(company.legacyId) : '';
+      setCompanyIdLookup(id, company);
+      setCompanyIdLookup(legacyId, company);
+    });
 
     const resolveTeamIdFromAny = (rawId?: string, rawName?: string): string => {
       const idKey = rawId ? String(rawId).trim() : '';
       if (idKey) {
-        const found = teamByAnyId.get(idKey);
+        const found = teamByAnyId.get(idKey) ?? teamByAnyId.get(normalizeSupportIdentity(idKey));
         if (found?.id) return String(found.id);
         return idKey;
       }
       const nameKey = rawName ? String(rawName).trim() : '';
       if (nameKey) {
-        const found = teamByName.get(nameKey);
+        const found = teamByName.get(normalizeSupportIdentity(nameKey));
         if (found?.id) return String(found.id);
       }
       return '';
@@ -467,28 +1047,133 @@ export const teamSettlementService = {
 
     const siteByAnyId = new Map<string, Site>();
     const siteByName = new Map<string, Site>();
+    const setSiteIdLookup = (key: string, siteRow: Site) => {
+      const trimmed = String(key ?? '').trim();
+      if (!trimmed) return;
+      siteByAnyId.set(trimmed, siteRow);
+      const normalized = normalizeSupportIdentity(trimmed);
+      if (normalized) siteByAnyId.set(normalized, siteRow);
+    };
     sites.forEach((s) => {
       const id = s?.id ? String(s.id) : '';
       const legacyId = s?.legacyId ? String(s.legacyId) : '';
       const name = s?.name ? String(s.name) : '';
-      if (id) siteByAnyId.set(id, s);
-      if (legacyId) siteByAnyId.set(legacyId, s);
+      setSiteIdLookup(id, s);
+      setSiteIdLookup(legacyId, s);
       if (name) siteByName.set(name, s);
     });
 
     const resolveSite = (siteId?: string, siteName?: string): Site | null => {
       const idKey = siteId ? String(siteId).trim() : '';
       const nameKey = siteName ? String(siteName).trim() : '';
-      if (idKey && siteByAnyId.has(idKey)) return siteByAnyId.get(idKey) ?? null;
+      if (idKey) {
+        const byId = siteByAnyId.get(idKey) ?? siteByAnyId.get(normalizeSupportIdentity(idKey));
+        if (byId) return byId;
+      }
       if (nameKey && siteByName.has(nameKey)) return siteByName.get(nameKey) ?? null;
       return null;
     };
 
-    const exchange = Array.isArray(exchangeSummaries) && exchangeSummaries.length > 0 ? exchangeSummaries[0] : null;
+    const supportRateBySiteId = new Map<string, number>();
+    const supportRateBySiteName = new Map<string, number>();
+    supportRates.forEach((rate) => {
+      const configuredRate = toPositiveRate(rate.defaultRate);
+      if (!configuredRate) return;
+      const siteId = normalizeLookupKey(rate.siteId || rate.id);
+      const siteName = normalizeLookupKey(rate.siteName);
+      if (siteId) supportRateBySiteId.set(siteId, configuredRate);
+      if (siteName) supportRateBySiteName.set(siteName, configuredRate);
+    });
+
+    const resolveConfiguredSiteRate = (siteId?: string | null, siteName?: string | null): number | null => {
+      const normalizedSiteId = normalizeLookupKey(siteId);
+      if (normalizedSiteId) {
+        const direct = supportRateBySiteId.get(normalizedSiteId);
+        if (direct) return direct;
+        const site = resolveSite(String(siteId ?? ''), String(siteName ?? ''));
+        const byResolvedName = site ? supportRateBySiteName.get(normalizeLookupKey(site.name)) : undefined;
+        if (byResolvedName) return byResolvedName;
+      }
+      const normalizedSiteName = normalizeLookupKey(siteName);
+      return normalizedSiteName ? (supportRateBySiteName.get(normalizedSiteName) ?? null) : null;
+    };
+
+    const findTeamByIdentity = (teamId?: string | null, teamName?: string | null): (typeof teams)[number] | undefined => {
+      const idKey = String(teamId ?? '').trim();
+      if (idKey) {
+        const byId = teamByAnyId.get(idKey) ?? teamByAnyId.get(normalizeSupportIdentity(idKey));
+        if (byId) return byId;
+      }
+      const nameKey = normalizeSupportIdentity(teamName);
+      return nameKey ? teamByName.get(nameKey) : undefined;
+    };
+
+    const isCheongyeonCompany = (companyId?: string | null, companyName?: string | null): boolean => {
+      const idKey = String(companyId ?? '').trim();
+      if (idKey) {
+        const company = companyByAnyId.get(idKey) ?? companyByAnyId.get(normalizeSupportIdentity(idKey));
+        if (company?.isMyCompany) return true;
+        if (isCheongyeonCompanyName(company?.name)) return true;
+      }
+      return isCheongyeonCompanyName(companyName);
+    };
+
+    const isCheongyeonTeamIdentity = (
+      team?: (typeof teams)[number],
+      teamId?: string | null,
+      teamName?: string | null
+    ): boolean => {
+      const resolved = team ?? findTeamByIdentity(teamId, teamName);
+      if (!resolved) return false;
+      const companyId = String(resolved.companyId ?? '').trim();
+      const companyName = String(resolved.companyName ?? (companyId ? companyByAnyId.get(companyId)?.name : '') ?? '').trim();
+      return isCheongyeonCompany(companyId, companyName);
+    };
+
+    const supportSettlementAmountBySiteId = new Map<string, number>();
+    const supportSettlementAmountBySiteName = new Map<string, number>();
+
+    const addSupportSettlementAmount = (map: Map<string, number>, key: string, amount: number) => {
+      if (!key || amount <= 0) return;
+      map.set(key, (map.get(key) ?? 0) + amount);
+    };
+
+    supportClientAllocations.forEach((allocation) => {
+      const amount = Math.round(toFiniteNumberOrZero(allocation.settlementAmount));
+      if (amount <= 0) return;
+
+      const siteId = String(allocation.siteId ?? '').trim();
+      const siteName = String(allocation.siteName ?? '').trim();
+      const resolvedSite = resolveSite(siteId, siteName);
+      const resolvedSiteId = String(resolvedSite?.id ?? siteId).trim();
+      const resolvedSiteName = String(resolvedSite?.name ?? siteName).trim();
+
+      if (resolvedSiteId && resolvedSiteId !== 'unknown-site') {
+        addSupportSettlementAmount(supportSettlementAmountBySiteId, resolvedSiteId, amount);
+      }
+      addSupportSettlementAmount(supportSettlementAmountBySiteName, normalizeLookupKey(resolvedSiteName), amount);
+    });
+
+    const getSupportClientSettlementAmount = (siteId?: string, siteName?: string): number => {
+      const idKey = String(siteId ?? '').trim();
+      if (idKey && idKey !== 'unknown-site' && supportSettlementAmountBySiteId.has(idKey)) {
+        return supportSettlementAmountBySiteId.get(idKey) ?? 0;
+      }
+
+      const nameKey = normalizeLookupKey(siteName);
+      if (nameKey && supportSettlementAmountBySiteName.has(nameKey)) {
+        return supportSettlementAmountBySiteName.get(nameKey) ?? 0;
+      }
+
+      return 0;
+    };
+
+    const supportRateOverrides = loadSupportRateOverrides(params.yearMonth);
 
     const supportSalesGrouped = new Map<
       string,
       {
+        direction: SupportSettlementOrigin;
         siteId?: string;
         siteName: string;
         counterTeamId?: string;
@@ -502,6 +1187,7 @@ export const teamSettlementService = {
     const supportPurchasesGrouped = new Map<
       string,
       {
+        direction: SupportSettlementOrigin;
         siteId?: string;
         siteName: string;
         counterTeamId?: string;
@@ -550,25 +1236,30 @@ export const teamSettlementService = {
       }
     >();
 
-    (exchange?.outgoing?.items ?? []).forEach((item) => {
-      const rawSiteId = String(item.siteId ?? '').trim();
-      const rawSiteName = String(item.siteName ?? '').trim() || '현장 미지정';
-      const site = resolveSite(rawSiteId, rawSiteName);
+    type ClassifiedSupportEntry = Omit<SupportRateLookupContext, 'direction'> & {
+      direction: SupportSettlementOrigin;
+      counterTeamId?: string;
+      counterTeamName?: string;
+    };
 
-      const siteId = site?.id ? String(site.id) : (rawSiteId || undefined);
-      const siteName = site?.name ? String(site.name) : rawSiteName;
+    const addSupportSettlementLine = (
+      map: typeof supportSalesGrouped,
+      row: { manDay: unknown; unitPrice: unknown },
+      entry: ClassifiedSupportEntry,
+      siteId: string | undefined,
+      siteName: string,
+      supportUnitPrice: number
+    ) => {
+      const itemManDay = toFiniteNumberOrZero(row.manDay);
+      if (itemManDay <= 0) return;
 
-      const rawCounterTeamId = item.reportTeamId ? String(item.reportTeamId).trim() : '';
-      const rawCounterTeamName = String(item.reportTeamName ?? '').trim();
-      const counter = rawCounterTeamId ? resolveTeam(rawCounterTeamId) : {};
-      const counterTeamId = rawCounterTeamId || (counter.id ? String(counter.id) : '');
-      const counterTeamName = rawCounterTeamName || (counter.name ? String(counter.name) : '');
-
-      const siteKey = (siteId ? String(siteId) : '').trim() || siteName;
-      const counterKey = counterTeamId || counterTeamName;
-      const key = `${siteKey}__${counterKey}`;
-
-      const current = supportSalesGrouped.get(key) ?? {
+      const counterTeamId = String(entry.counterTeamId ?? '').trim();
+      const counterTeamName = String(entry.counterTeamName ?? '').trim();
+      const siteKey = String(siteId ?? '').trim() || siteName;
+      const counterKey = normalizeSupportIdentity(counterTeamId) || normalizeSupportIdentity(counterTeamName) || entry.direction;
+      const key = `${entry.direction}__${siteKey}__${counterKey}`;
+      const current = map.get(key) ?? {
+        direction: entry.direction,
         siteId,
         siteName,
         counterTeamId: counterTeamId || undefined,
@@ -578,59 +1269,143 @@ export const teamSettlementService = {
         amountFee: 0
       };
 
-      const itemManDay = toFiniteNumberOrZero(item.manDay);
-      const itemUnitPrice = toFiniteNumberOrZero(item.unitPrice);
-      const itemSupportRate = toFiniteNumberOrZero(item.supportRate);
-      const feeAmount = Number.isFinite(item.amount) ? item.amount : itemManDay * itemSupportRate;
-      const originalAmount = itemManDay * itemUnitPrice;
-
-      supportSalesGrouped.set(key, {
+      map.set(key, {
         ...current,
         manDay: current.manDay + itemManDay,
-        amountOriginal: current.amountOriginal + originalAmount,
-        amountFee: current.amountFee + feeAmount
+        amountOriginal: current.amountOriginal + itemManDay * toFiniteNumberOrZero(row.unitPrice),
+        amountFee: current.amountFee + calculateSupportLaborAmount(itemManDay, supportUnitPrice)
       });
-    });
+    };
 
-    (exchange?.incoming?.items ?? []).forEach((item) => {
-      const rawSiteId = String(item.siteId ?? '').trim();
-      const rawSiteName = String(item.siteName ?? '').trim() || '현장 미지정';
+    supportReports.forEach((report) => {
+      const rawSiteId = String(report.siteId ?? '').trim();
+      const rawSiteName = String(report.siteName ?? '').trim() || '현장 미지정';
       const site = resolveSite(rawSiteId, rawSiteName);
-
       const siteId = site?.id ? String(site.id) : (rawSiteId || undefined);
       const siteName = site?.name ? String(site.name) : rawSiteName;
 
-      const rawCounterTeamId = item.workerTeamId ? String(item.workerTeamId).trim() : '';
-      const rawCounterTeamName = String(item.workerTeamName ?? '').trim();
-      const counter = rawCounterTeamId ? resolveTeam(rawCounterTeamId) : {};
-      const counterTeamId = rawCounterTeamId || (counter.id ? String(counter.id) : '');
-      const counterTeamName = rawCounterTeamName || (counter.name ? String(counter.name) : '');
+      const siteConstructorCompanyId = String(site?.constructorCompanyId ?? site?.companyId ?? report.constructorCompanyId ?? report.companyId ?? '').trim();
+      const siteConstructorCompanyName = String(site?.constructorCompanyName ?? site?.companyName ?? report.constructorCompanyName ?? report.companyName ?? '').trim();
+      const siteIsCheongyeon = isCheongyeonCompany(siteConstructorCompanyId, siteConstructorCompanyName);
 
-      const siteKey = (siteId ? String(siteId) : '').trim() || siteName;
-      const counterKey = counterTeamId || counterTeamName;
-      const key = `${siteKey}__${counterKey}`;
+      (Array.isArray(report.workers) ? report.workers : []).forEach((reportWorker) => {
+        const reportWorkerTeamId = String(reportWorker.teamId ?? '').trim();
+        const reportWorkerTeamName = String(reportWorker.workerTeamName ?? '').trim();
+        const fallbackSourceTeam = findTeamByIdentity(undefined, reportWorkerTeamName);
+        const fallbackReportTeamId = reportWorkerTeamName ? '' : String(report.teamId ?? '').trim();
+        const workerTeamId = reportWorkerTeamId || (fallbackSourceTeam?.id ? String(fallbackSourceTeam.id) : '') || fallbackReportTeamId;
+        const resolvedSourceTeam = findTeamByIdentity(workerTeamId, reportWorkerTeamName) ?? fallbackSourceTeam;
+        const sourceTeamId = String(
+          resolvedSourceTeam?.id ??
+          (reportWorkerTeamId || normalizeSupportIdentity(reportWorkerTeamName) || fallbackReportTeamId || '')
+        ).trim();
+        const sourceTeamName = String(
+          resolvedSourceTeam?.name ??
+          (reportWorkerTeamName || report.teamName || '팀 미지정')
+        ).trim();
+        const workerCompanyId = String(resolvedSourceTeam?.companyId ?? '').trim();
+        const workerCompanyName = String(
+          resolvedSourceTeam?.companyName ??
+          (workerCompanyId ? companyByAnyId.get(workerCompanyId)?.name : '') ??
+          ''
+        ).trim();
 
-      const current = supportPurchasesGrouped.get(key) ?? {
-        siteId,
-        siteName,
-        counterTeamId: counterTeamId || undefined,
-        counterTeamName: counterTeamName || undefined,
-        manDay: 0,
-        amountOriginal: 0,
-        amountFee: 0
-      };
+        const targetTeamIdRaw = String(report.responsibleTeamId ?? site?.responsibleTeamId ?? report.teamId ?? '').trim();
+        const targetTeamNameRaw = String(report.responsibleTeamName ?? site?.responsibleTeamName ?? report.teamName ?? '').trim();
+        const resolvedTargetTeam = findTeamByIdentity(targetTeamIdRaw, targetTeamNameRaw);
+        const targetTeamId = String(resolvedTargetTeam?.id ?? targetTeamIdRaw).trim();
+        const targetTeamName = String(resolvedTargetTeam?.name ?? targetTeamNameRaw ?? '팀 미지정').trim();
+        const targetCompanyId = String(resolvedTargetTeam?.companyId ?? siteConstructorCompanyId ?? report.companyId ?? '').trim();
+        const targetCompanyName = String(resolvedTargetTeam?.companyName ?? siteConstructorCompanyName ?? report.companyName ?? '').trim();
 
-      const itemManDay = toFiniteNumberOrZero(item.manDay);
-      const itemUnitPrice = toFiniteNumberOrZero(item.unitPrice);
-      const itemSupportRate = toFiniteNumberOrZero(item.supportRate);
-      const feeAmount = Number.isFinite(item.amount) ? item.amount : itemManDay * itemSupportRate;
-      const originalAmount = itemManDay * itemUnitPrice;
+        const workerIsCheongyeon = isCheongyeonTeamIdentity(resolvedSourceTeam, sourceTeamId, sourceTeamName);
+        const targetIsCheongyeon = isCheongyeonTeamIdentity(resolvedTargetTeam, targetTeamId, targetTeamName);
+        const isSameFieldAndWorkerTeam = isSameTeamIdentity(sourceTeamId, sourceTeamName, targetTeamId, targetTeamName);
+        const normalizedSalary = normalizeSupportSalaryModel(reportWorker.salaryModel ?? reportWorker.payType);
+        const isSupportModel = normalizedSalary === '지원팀';
+        const isSupportTeam = normalizeSupportIdentity(resolvedSourceTeam?.type).includes('지원');
 
-      supportPurchasesGrouped.set(key, {
-        ...current,
-        manDay: current.manDay + itemManDay,
-        amountOriginal: current.amountOriginal + originalAmount,
-        amountFee: current.amountFee + feeAmount
+        const entries: ClassifiedSupportEntry[] = [];
+        if (workerIsCheongyeon && targetIsCheongyeon && isSameFieldAndWorkerTeam) {
+          return;
+        }
+
+        if (workerIsCheongyeon && targetIsCheongyeon && sourceTeamId && targetTeamId) {
+          entries.push({
+            direction: '내부지원간곳',
+            viewTeamId: sourceTeamId,
+            viewTeamName: sourceTeamName,
+            settlementTeamId: sourceTeamId,
+            settlementTeamName: sourceTeamName,
+            counterTeamId: targetTeamId,
+            counterTeamName: targetTeamName
+          });
+          entries.push({
+            direction: '내부지원온곳',
+            viewTeamId: targetTeamId,
+            viewTeamName: targetTeamName,
+            settlementTeamId: targetTeamId,
+            settlementTeamName: targetTeamName,
+            counterTeamId: sourceTeamId,
+            counterTeamName: sourceTeamName
+          });
+        } else if (!siteIsCheongyeon && workerIsCheongyeon) {
+          entries.push({
+            direction: '외부지원간곳',
+            viewTeamId: sourceTeamId,
+            viewTeamName: sourceTeamName,
+            settlementTeamId: targetTeamId || targetCompanyId,
+            settlementTeamName: targetTeamName || targetCompanyName || siteConstructorCompanyName || '외부 시공사',
+            counterTeamId: targetTeamId || targetCompanyId,
+            counterTeamName: targetTeamName || targetCompanyName || siteConstructorCompanyName || '외부 현장'
+          });
+        } else if (siteIsCheongyeon && targetIsCheongyeon && !workerIsCheongyeon) {
+          entries.push({
+            direction: '외부지원온곳',
+            viewTeamId: targetTeamId,
+            viewTeamName: targetTeamName,
+            settlementTeamId: sourceTeamId || workerCompanyId,
+            settlementTeamName: sourceTeamName || workerCompanyName || '외부 지원팀',
+            counterTeamId: sourceTeamId || workerCompanyId,
+            counterTeamName: sourceTeamName || workerCompanyName || '외부 지원팀'
+          });
+        } else if (siteIsCheongyeon && targetIsCheongyeon && (isSupportModel || isSupportTeam)) {
+          entries.push({
+            direction: '외부지원온곳',
+            viewTeamId: targetTeamId,
+            viewTeamName: targetTeamName,
+            settlementTeamId: sourceTeamId || workerCompanyId,
+            settlementTeamName: sourceTeamName || workerCompanyName || '지원팀',
+            counterTeamId: sourceTeamId || workerCompanyId,
+            counterTeamName: sourceTeamName || workerCompanyName || '외부 지원팀'
+          });
+        }
+
+        if (entries.length === 0) return;
+
+        const rateSiteId = rawSiteId || siteId;
+        const configuredSupportRate = resolveConfiguredSiteRate(rateSiteId, rawSiteName || siteName);
+        const sourceTeamSupportRate = toPositiveRate(resolvedSourceTeam?.supportRate);
+        const baseSupportRate = configuredSupportRate ?? sourceTeamSupportRate ?? toPositiveRate(reportWorker.unitPrice) ?? DEFAULT_SUPPORT_UNIT_PRICE;
+        const manDay = toFiniteNumberOrZero(reportWorker.manDay);
+
+        entries.forEach((entry) => {
+          const isSelectedViewTeam = matchesTeam(entry.viewTeamId) || isSameTeamIdentity(entry.viewTeamId, entry.viewTeamName, params.teamId, params.teamName);
+          if (!isSelectedViewTeam) return;
+
+          const supportUnitPrice = resolveSupportUnitRate({
+            overrides: supportRateOverrides,
+            baseRate: baseSupportRate,
+            contexts: [entry],
+            siteId: rateSiteId
+          });
+
+          const targetMap = entry.direction === '외부지원간곳' || entry.direction === '내부지원간곳'
+            ? supportSalesGrouped
+            : supportPurchasesGrouped;
+
+          addSupportSettlementLine(targetMap, { manDay, unitPrice: reportWorker.unitPrice }, entry, siteId, siteName, supportUnitPrice);
+        });
       });
     });
 
@@ -670,17 +1445,20 @@ export const teamSettlementService = {
     });
 
     const dailyReportSales: TeamSettlementSalesItem[] = Array.from(managedSalesGrouped.entries()).map(([key, value]) => {
+      const supportClientSettlementAmount = getSupportClientSettlementAmount(value.siteId, value.siteName);
+      const usesSupportClientSettlement = supportClientSettlementAmount > 0;
       return {
         id: `daily_report_sales:${params.yearMonth}:${key}`,
         source: 'auto',
-        origin: 'daily_report',
+        origin: usesSupportClientSettlement ? 'support_client_site' : 'daily_report',
         kind: value.kind,
         siteId: value.siteId,
         siteName: value.siteName,
         counterTeamId: undefined,
         counterTeamName: undefined,
         manDay: roundManDay(value.manDay),
-        amount: value.amount
+        amount: usesSupportClientSettlement ? supportClientSettlementAmount : value.amount,
+        memo: usesSupportClientSettlement ? '지원정산 정산금액 기준' : undefined
       };
     });
 
@@ -690,14 +1468,15 @@ export const teamSettlementService = {
         return {
           id: `labor_exchange_support_fee_sales:${params.yearMonth}:${key}`,
           source: 'auto',
-          origin: 'support_fee_outgoing',
+          origin: toSupportSalesOrigin(value.direction),
           kind: '지원',
           siteId: value.siteId,
           siteName: value.siteName,
           counterTeamId: value.counterTeamId,
           counterTeamName: value.counterTeamName,
           manDay: roundManDay(value.manDay),
-          amount: Math.round(value.amountFee)
+          amount: Math.round(value.amountFee),
+          memo: '지원단가 기준 노임총액'
         };
       });
 
@@ -707,14 +1486,15 @@ export const teamSettlementService = {
         return {
           id: `labor_exchange_support_fee_purchases:${params.yearMonth}:${key}`,
           source: 'auto',
-          origin: 'support_fee_incoming',
+          origin: toSupportPurchaseOrigin(value.direction),
           kind: '지원',
           siteId: value.siteId,
           siteName: value.siteName,
           counterTeamId: value.counterTeamId,
           counterTeamName: value.counterTeamName,
           manDay: roundManDay(value.manDay),
-          amount: Math.round(value.amountFee)
+          amount: Math.round(value.amountFee),
+          memo: '지원단가 기준 노임총액'
         };
       });
 
@@ -758,10 +1538,13 @@ export const teamSettlementService = {
       return { byAnyId, byName };
     };
 
-    const [assignmentRows, utilityRecords] = await Promise.all([
-      accommodationAssignmentService.getAllAssignments(),
-      accommodationService.getMonthlyLedger(params.yearMonth)
-    ]);
+    const supportBillingEnabled = isSupportBillingMonthEnabled(params.yearMonth);
+    const [assignmentRows, utilityRecords] = supportBillingEnabled
+      ? await Promise.all([
+        accommodationAssignmentService.getAllAssignments(),
+        accommodationService.getMonthlyLedger(params.yearMonth)
+      ])
+      : [[], []] as const;
 
     const accommodationNameById = new Map<string, string>();
     utilityRecords
@@ -865,7 +1648,7 @@ export const teamSettlementService = {
       }))
       : [];
 
-    if (accommodationDeductions.length === 0) {
+    if (supportBillingEnabled && accommodationDeductions.length === 0) {
       const teamAccommodationDocs = accommodationDocs.filter((doc) => {
         if (!isTeamBillingTarget({
           issuedToType: doc.issuedToType,
@@ -880,7 +1663,7 @@ export const teamSettlementService = {
         );
         return resolved ? matchesTeam(resolved) : false;
       });
-      const selectedAccommodationDocs = selectPreferredTeamBillings(teamAccommodationDocs);
+      const selectedAccommodationDocs = selectPreferredTeamBillings(teamAccommodationDocs, isAccommodationLedgerClaim);
 
       accommodationDeductions = selectedAccommodationDocs
         .map((doc): TeamSettlementDeductionItem | null => {
@@ -906,7 +1689,7 @@ export const teamSettlementService = {
         .filter((item): item is TeamSettlementDeductionItem => Boolean(item));
     }
 
-    const teamVehicleDocs = vehicleDocs.filter((doc) => {
+    const teamVehicleDocs = supportBillingEnabled ? vehicleDocs.filter((doc) => {
       if (!isTeamBillingTarget({
         issuedToType: doc.issuedToType,
         teamId: doc.teamId ?? doc.assignedTeamId,
@@ -919,8 +1702,8 @@ export const teamSettlementService = {
         doc.teamName ? String(doc.teamName) : (doc.assignedTeamName ? String(doc.assignedTeamName) : '')
       );
       return resolved ? matchesTeam(resolved) : false;
-    });
-    const selectedVehicleDocs = selectPreferredTeamBillings(teamVehicleDocs);
+    }) : [];
+    const selectedVehicleDocs = selectPreferredTeamBillings(teamVehicleDocs, isVehicleLedgerClaim);
 
     const vehicleDeductionsFromDocs: TeamSettlementDeductionItem[] = selectedVehicleDocs
       .map((doc): TeamSettlementDeductionItem => {
@@ -942,7 +1725,7 @@ export const teamSettlementService = {
 
     let vehicleDeductions: TeamSettlementDeductionItem[] = vehicleDeductionsFromDocs;
 
-    if (allowUnconfirmedLedgerFallback && vehicleDeductions.length === 0) {
+    if (supportBillingEnabled && allowUnconfirmedLedgerFallback && vehicleDeductions.length === 0) {
       const [vehicles, expenses, workerLookups, vehicleAssignments] = await Promise.all([
         vehicleService.getVehicles(),
         vehicleService.getExpensesByMonth(params.yearMonth),
@@ -1123,7 +1906,7 @@ export const teamSettlementService = {
         .filter((item): item is TeamSettlementDeductionItem => Boolean(item));
     }
 
-    const teamCardDocs = cardDocs.filter((doc) => {
+    const teamCardDocs = supportBillingEnabled ? cardDocs.filter((doc) => {
       if (!isTeamBillingTarget({
         issuedToType: doc.issuedToType,
         teamId: doc.teamId ?? doc.assignedTeamId,
@@ -1136,8 +1919,8 @@ export const teamSettlementService = {
         doc.teamName ? String(doc.teamName) : (doc.assignedTeamName ? String(doc.assignedTeamName) : '')
       );
       return resolved ? matchesTeam(resolved) : false;
-    });
-    const selectedCardDocs = selectPreferredTeamBillings(teamCardDocs);
+    }) : [];
+    const selectedCardDocs = selectPreferredTeamBillings(teamCardDocs, isCardLedgerClaim);
 
     const cardDeductionsFromDocs: TeamSettlementDeductionItem[] = selectedCardDocs
       .map((doc): TeamSettlementDeductionItem => {
@@ -1157,7 +1940,7 @@ export const teamSettlementService = {
 
     let cardDeductions: TeamSettlementDeductionItem[] = cardDeductionsFromDocs;
 
-    if (allowUnconfirmedLedgerFallback && cardDeductions.length === 0) {
+    if (supportBillingEnabled && allowUnconfirmedLedgerFallback && cardDeductions.length === 0) {
       const [cards, txs, workerLookups] = await Promise.all([
         cardService.getCards(),
         cardService.getTransactionsByMonth(params.yearMonth),
@@ -1245,7 +2028,6 @@ export const teamSettlementService = {
     const teamExpenseAdditions: TeamSettlementAdditionItem[] = postedTeamExpenseClaims
       .flatMap((claim): TeamSettlementAdditionItem[] => {
         if (claim.claimType !== 'teamCharge' || !String(claim.chargeToTeamId ?? '').trim()) return [];
-
         const amount = Math.round(toFiniteNumberOrZero(claim.amount));
         if (amount <= 0) return [];
 

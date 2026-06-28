@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCheckDouble, faFloppyDisk, faPlus, faTrash, faFileInvoiceDollar, faCalendarAlt, faUser, faUsers, faMoneyBillWave, faSearch } from '@fortawesome/free-solid-svg-icons';
+import { faCheckDouble, faFloppyDisk, faPlus, faTrash, faFileInvoiceDollar, faCalendarAlt, faUser, faUsers, faMoneyBillWave, faRotateLeft, faSearch } from '@fortawesome/free-solid-svg-icons';
 import { teamService, Team } from '../../services/teamService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { companyService } from '../../services/companyService';
@@ -378,6 +378,57 @@ const AccommodationBillingManager: React.FC = () => {
         }
     };
 
+    const handleCancelConfirm = async () => {
+        if (!draft || draft.status !== 'confirmed') return;
+        const ok = window.confirm('숙소 청구서 확정을 취소하고 가불/공제 반영분도 되돌릴까요?');
+        if (!ok) return;
+
+        setSaving(true);
+        try {
+            await accommodationBillingService.cancelConfirmation(draft.id);
+            toast.success('확정이 취소되었습니다.');
+            const docs = await accommodationBillingService.getBillingDocuments({
+                teamId: selectedTeamId || draft.teamId,
+                yearMonth: draft.yearMonth
+            });
+            setDocuments(docs);
+            const found = docs.find((d) => d.id === draft.id);
+            if (found) setDraft(found);
+            setSelectedDocumentId(draft.id);
+        } catch (e) {
+            console.error(e);
+            toast.error('확정 취소에 실패했습니다.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleCancelSelected = async () => {
+        if (!draft) return;
+        const ok = window.confirm(`${draft.issuedToWorkerName || draft.teamName || '선택한'} 숙소 청구서를 취소할까요?\n취소하면 청구 문서가 삭제됩니다.`);
+        if (!ok) return;
+
+        setSaving(true);
+        try {
+            await accommodationBillingService.deleteBillingDocument(draft.id);
+            toast.success('숙소 청구가 취소되었습니다.');
+            setSelectedDocumentId('');
+            setDraft(null);
+            if (selectedTeamId) {
+                const docs = await accommodationBillingService.getBillingDocuments({
+                    teamId: selectedTeamId,
+                    yearMonth
+                });
+                setDocuments(docs);
+            }
+        } catch (e) {
+            console.error(e);
+            toast.error('청구 취소에 실패했습니다.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
     const total = useMemo(() => {
         return draft ? accommodationBillingService.calculateLineItemsTotal(draft.lineItems) : 0;
     }, [draft]);
@@ -709,6 +760,24 @@ const AccommodationBillingManager: React.FC = () => {
                                     >
                                         <FontAwesomeIcon icon={faCheckDouble} />
                                         확정 및 반영
+                                    </button>
+                                    {draft.status === 'confirmed' && (
+                                        <button
+                                            onClick={handleCancelConfirm}
+                                            disabled={saving}
+                                            className={`px-6 py-2.5 rounded-xl font-bold transition flex items-center gap-2 border border-amber-100 bg-amber-50 text-amber-700 hover:bg-amber-100 ${saving ? 'opacity-60 cursor-wait' : ''}`}
+                                        >
+                                            <FontAwesomeIcon icon={faRotateLeft} />
+                                            확정 취소
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={handleCancelSelected}
+                                        disabled={saving}
+                                        className={`px-6 py-2.5 rounded-xl font-bold transition flex items-center gap-2 border border-rose-100 bg-rose-50 text-rose-700 hover:bg-rose-100 ${saving ? 'opacity-60 cursor-wait' : ''}`}
+                                    >
+                                        <FontAwesomeIcon icon={faTrash} />
+                                        청구 삭제
                                     </button>
                                 </div>
                             </div>

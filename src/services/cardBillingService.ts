@@ -3,6 +3,7 @@ import { CardBillingDocument, CardBillingIssuedToType } from '../types/cardBilli
 import { Card, CardAssignmentRecord, CardBillingTargetRecord, CardBillingTargetType, CardTransaction, cardService } from './cardService';
 import { Timestamp } from '../types/timestamp';
 import { manpowerService } from './manpowerService';
+import { DEFAULT_SUPPORT_BILLING_START_DATE, isSupportBillingMonthEnabled, maxIsoDate, minIsoDate } from '../utils/supportBillingPeriod';
 
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
 
@@ -117,7 +118,11 @@ export const cardBillingService = {
             label: `${tx.merchant || 'Unknown'} - ${tx.date}`,
             amount: tx.amount,
             type: 'VARIABLE' as const,
-            category: tx.category
+            category: tx.category,
+            sourceType: 'card_ledger' as const,
+            sourceLedgerRowId: tx.id,
+            sourceStartDate: tx.date,
+            sourceEndDate: tx.date
         }));
 
         const variableCost = lineItems.reduce((acc, it) => acc + (it.amount || 0), 0);
@@ -218,6 +223,10 @@ export const cardBillingService = {
             ));
         };
 
+        const firstBillingTargetStart = minIsoDate(...billingTargets.map((target) => target.startDate));
+        const billingStartDate = maxIsoDate(DEFAULT_SUPPORT_BILLING_START_DATE, firstBillingTargetStart);
+        if (!isSupportBillingMonthEnabled(yearMonth, billingStartDate)) return [];
+
         const grouped = new Map<string, CardBillingDocument>();
 
         const addTransactionToGroup = (tx: CardTransaction, assignment: CardAssignmentRecord) => {
@@ -269,7 +278,12 @@ export const cardBillingService = {
                 label: `${tx.merchant || 'Unknown'} - ${tx.date}`,
                 amount: tx.amount,
                 type: 'VARIABLE' as const,
-                category: tx.category
+                category: tx.category,
+                sourceType: 'card_ledger' as const,
+                sourceLedgerRowId: tx.id,
+                sourceSegmentId: assignment.id,
+                sourceStartDate: tx.date,
+                sourceEndDate: tx.date
             };
 
             if (existing) {
@@ -306,7 +320,19 @@ export const cardBillingService = {
         transactions.forEach((tx) => {
             const txDate = parseYmdDate(tx.date);
             if (!txDate) return;
-            const assignment = findAssignmentForDate(assignments, txDate);
+            const assignment = findAssignmentForDate(assignments, txDate) ?? (
+                card.currentAssigneeId && card.currentAssigneeType && card.currentAssigneeName
+                    ? {
+                        id: `snapshot-${card.id}`,
+                        cardId: card.id,
+                        cardLabel: `${card.name} (${card.last4})`,
+                        assigneeId: card.currentAssigneeId,
+                        assigneeType: card.currentAssigneeType,
+                        assigneeName: card.currentAssigneeName,
+                        startDate: `${yearMonth}-01`
+                    }
+                    : null
+            );
             if (!assignment) return;
             addTransactionToGroup(tx, assignment);
         });

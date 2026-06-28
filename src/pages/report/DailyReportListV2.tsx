@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faCalendarAlt,
@@ -23,6 +23,7 @@ import { confirm, toast } from '../../utils/swal';
 import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typedDateInput';
 import { loadSessionState, saveSessionState } from '../../utils/sessionStorage';
 import { resolveReportPayType, resolveWorkerPayType } from '../../utils/payType';
+import AppIntroScreen from '../../components/common/AppIntroScreen';
 import SingleSelectPopover, { InputPopover } from '../../components/common/SingleSelectPopover';
 import '../taxinvoice/WorkbookLedgerPage.css';
 import './DailyReportListV2.css';
@@ -62,6 +63,11 @@ const compareTeamsWithPriority = (a: string, b: string): number => {
 };
 
 const SALARY_MODEL_OPTIONS = ['일급제', '일급', '월급제', '월급', '지원팀', '용역팀', '도급', '팀기성'];
+
+const INLINE_EDIT_ALL_ROW_LIMIT = 80;
+const VIRTUAL_ROW_LIMIT = 160;
+const VIRTUAL_ROW_HEIGHT = 42;
+const VIRTUAL_OVERSCAN_ROWS = 12;
 
 type RowDraft = {
     siteId: string;
@@ -145,6 +151,7 @@ type DailyReportListViewState = {
 
 const DAILY_REPORT_LIST_VIEW_KEY = 'output-management:daily-report-list-v2:v1';
 const DAILY_REPORT_BOARD_DRAFT_STORAGE_PREFIX = 'dailyReportBoardInputDraft';
+const SITE_NAME_FILTER_PREFIX = '__site_name__:';
 
 const clearDailyReportBoardDrafts = (dates: Iterable<string>) => {
     if (typeof window === 'undefined') return;
@@ -226,11 +233,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
     const siteOptions = useMemo(() => {
         return [...sites].sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
     }, [sites]);
+    const sortedTeamsByName = useMemo(() => {
+        return [...teams].sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
+    }, [teams]);
     const companyOptions = useMemo(() => {
         return [...companies].sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
     }, [companies]);
     const [allWorkers, setAllWorkers] = useState<Worker[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [queryLoadingMessage, setQueryLoadingMessage] = useState('');
 
     const [startDate, setStartDate] = useState(persistedViewState.startDate);
     const [endDate, setEndDate] = useState(persistedViewState.endDate);
@@ -255,6 +266,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
 
     const [rowDrafts, setRowDrafts] = useState<Record<string, RowDraft>>({});
     const [rowSavingKeys, setRowSavingKeys] = useState<Set<string>>(new Set());
+    const [activeEditRowKey, setActiveEditRowKey] = useState<string | null>(null);
+    const tableScrollRef = useRef<HTMLDivElement | null>(null);
+    const [tableViewport, setTableViewport] = useState({ scrollTop: 0, height: 0 });
 
     const [bulkManDay, setBulkManDay] = useState('');
     const [bulkUnitPrice, setBulkUnitPrice] = useState('');
@@ -330,6 +344,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
     ]);
 
     const fetchRows = useCallback(async (): Promise<void> => {
+        setQueryLoadingMessage('출력일보 목록을 불러오는 중');
         setIsLoading(true);
         try {
             const data = await dailyReportService.getReportWorkerRowsByRange({
@@ -341,6 +356,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
             console.error('[DailyReportListV2] Failed to fetch rows', error);
         } finally {
             setIsLoading(false);
+            setQueryLoadingMessage('');
         }
     }, [startDate, endDate]);
 
@@ -407,6 +423,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         setStartDateInput(normalizedStart);
         setEndDateInput(normalizedEnd);
 
+        setQueryLoadingMessage('출력일보 조회 결과를 불러오는 중');
         setIsLoading(true);
         dailyReportService.getReportWorkerRowsByRange({
             startDate: normalizedStart,
@@ -417,6 +434,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
             console.error('[DailyReportListV2] Search fetch failed', error);
         }).finally(() => {
             setIsLoading(false);
+            setQueryLoadingMessage('');
         });
     }, []);
 
@@ -692,7 +710,28 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                 ?? criteria.teamId
             )
             : '';
-        const wantSite = criteria.siteId ? normalizeSiteId(criteria.siteId) : '';
+        const rawWantSite = criteria.siteId ? String(criteria.siteId) : '';
+        const wantSiteNameKey = rawWantSite.startsWith(SITE_NAME_FILTER_PREFIX)
+            ? rawWantSite.slice(SITE_NAME_FILTER_PREFIX.length)
+            : '';
+        const wantSiteIds = new Set<string>();
+        let wantSiteDisplayNameKey = '';
+        if (rawWantSite && !wantSiteNameKey) {
+            const normalizedSiteId = normalizeSiteId(rawWantSite);
+            if (normalizedSiteId) wantSiteIds.add(normalizedSiteId);
+            const matchedSite = sites.find((site) => {
+                const siteId = normalizeSiteId(site.id ?? '');
+                const legacyId = normalizeSiteId(site.legacyId ?? '');
+                return siteId === normalizedSiteId || legacyId === normalizedSiteId;
+            });
+            if (matchedSite) {
+                const siteId = normalizeSiteId(matchedSite.id ?? '');
+                const legacyId = normalizeSiteId(matchedSite.legacyId ?? '');
+                if (siteId) wantSiteIds.add(siteId);
+                if (legacyId) wantSiteIds.add(legacyId);
+                wantSiteDisplayNameKey = normalizeTeamNameKey(matchedSite.name);
+            }
+        }
         const wantWorkerTeam = criteria.workerTeamId ? normalizeTeamId(criteria.workerTeamId) : '';
 
         return rows.filter(r => {
@@ -710,7 +749,14 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                     return false;
                 }
             }
-            if (wantSite && normalizeSiteId(r.siteId) !== wantSite) return false;
+            if (wantSiteIds.size > 0) {
+                const rowSiteId = normalizeSiteId(r.siteId);
+                const rowSiteNameKey = normalizeTeamNameKey(r.siteName);
+                if (!wantSiteIds.has(rowSiteId) && (!wantSiteDisplayNameKey || rowSiteNameKey !== wantSiteDisplayNameKey)) {
+                    return false;
+                }
+            }
+            if (wantSiteNameKey && normalizeTeamNameKey(r.siteName) !== wantSiteNameKey) return false;
             
             if (wantWorkerTeam) {
                 const rowWorkerTeamId = resolveWorkerTeamCanonicalId({
@@ -721,22 +767,65 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
             }
             return true;
         });
-    }, [rows, normalizeTeamId, normalizeSiteId, resolveResponsibleTeamCanonicalId, resolveResponsibleTeamDisplayName, resolveWorkerTeamCanonicalId, teams]);
+    }, [rows, normalizeTeamId, normalizeSiteId, resolveResponsibleTeamCanonicalId, resolveResponsibleTeamDisplayName, resolveWorkerTeamCanonicalId, sites, teams]);
 
     const availableSites = useMemo(() => {
-        if (rows.length === 0) {
-            return sites
-                .slice()
-                .sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
-        }
-
         const filtered = getFiltered({ teamId: selectedTeamId });
-        const siteIds = new Set(filtered.map(r => r.siteId ? String(r.siteId) : null).filter((id): id is string => !!id));
-        return sites
-            .filter(s => siteIds.has(String(s.id)) || (s.legacyId ? siteIds.has(String(s.legacyId)) : false))
-            .slice()
+        const optionMap = new Map<string, Site>();
+
+        filtered.forEach((row) => {
+            const rowSiteId = normalizeSiteId(row.siteId);
+            const rowSiteName = String(row.siteName ?? '').trim();
+            const rowSiteNameKey = normalizeTeamNameKey(rowSiteName);
+            if (!rowSiteId && !rowSiteNameKey) return;
+
+            const matchedSite = sites.find((site) => {
+                const siteId = normalizeSiteId(site.id ?? '');
+                const legacyId = normalizeSiteId(site.legacyId ?? '');
+                const siteNameKey = normalizeTeamNameKey(site.name);
+                return (!!rowSiteId && (siteId === rowSiteId || legacyId === rowSiteId)) ||
+                    (!!rowSiteNameKey && siteNameKey === rowSiteNameKey);
+            });
+
+            if (matchedSite) {
+                const optionId = String(matchedSite.id ?? matchedSite.legacyId ?? rowSiteId ?? rowSiteNameKey);
+                if (optionId && !optionMap.has(optionId)) optionMap.set(optionId, matchedSite);
+                return;
+            }
+
+            if (rowSiteId) {
+                optionMap.set(rowSiteId, {
+                    id: rowSiteId,
+                    legacyId: rowSiteId,
+                    name: rowSiteName || rowSiteId,
+                    code: '',
+                    status: 'active',
+                } as Site);
+                return;
+            }
+
+            const virtualSiteId = `${SITE_NAME_FILTER_PREFIX}${rowSiteNameKey}`;
+            optionMap.set(virtualSiteId, {
+                id: virtualSiteId,
+                name: rowSiteName,
+                code: '',
+                status: 'active',
+            } as Site);
+        });
+
+        return Array.from(optionMap.values())
             .sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
-    }, [getFiltered, sites, selectedTeamId, rows.length]);
+    }, [getFiltered, normalizeSiteId, selectedTeamId, sites]);
+
+    useEffect(() => {
+        if (!selectedSiteId) return;
+        const hasSelectedSite = availableSites.some((site) => (
+            String(site.id ?? '') === selectedSiteId || String(site.legacyId ?? '') === selectedSiteId
+        ));
+        if (!hasSelectedSite) {
+            setSelectedSiteId('');
+        }
+    }, [availableSites, selectedSiteId]);
 
     const availableReportTeams = useMemo(() => {
         if (rows.length === 0) {
@@ -867,7 +956,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
 
     const activeFilterLabels = useMemo(() => {
         const labels: string[] = [];
-        const selectedSite = siteOptions.find((site) => {
+        const selectedSite = availableSites.find((site) => {
             return String(site.id ?? '') === selectedSiteId || String(site.legacyId ?? '') === selectedSiteId;
         });
         const selectedReportTeam = availableReportTeams.find((team) => {
@@ -888,12 +977,12 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         return labels;
     }, [
         activeColumnFilterCount,
+        availableSites,
         availableReportTeams,
         availableWorkerTeams,
         selectedSiteId,
         selectedTeamId,
         selectedWorkerTeamId,
-        siteOptions,
         workerSearch
     ]);
 
@@ -951,6 +1040,61 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         });
         return copied;
     }, [filteredRows, dateSortOrder, sortMode, nameSortOrder, siteSortOrder]);
+
+    const isLightEditMode = isEditMode && sortedRows.length > INLINE_EDIT_ALL_ROW_LIMIT;
+    const shouldVirtualizeRows = sortedRows.length > VIRTUAL_ROW_LIMIT;
+    const tableColumnCount = 12 + (showSiteDetailColumns ? 4 : 0) + (isEditMode ? 2 : 0);
+    const virtualViewportHeight = tableViewport.height || 720;
+    const virtualStartIndex = shouldVirtualizeRows
+        ? Math.max(0, Math.floor(tableViewport.scrollTop / VIRTUAL_ROW_HEIGHT) - VIRTUAL_OVERSCAN_ROWS)
+        : 0;
+    const virtualEndIndex = shouldVirtualizeRows
+        ? Math.min(
+            sortedRows.length,
+            Math.ceil((tableViewport.scrollTop + virtualViewportHeight) / VIRTUAL_ROW_HEIGHT) + VIRTUAL_OVERSCAN_ROWS
+        )
+        : sortedRows.length;
+    const renderedRows = useMemo(() => {
+        return shouldVirtualizeRows ? sortedRows.slice(virtualStartIndex, virtualEndIndex) : sortedRows;
+    }, [shouldVirtualizeRows, sortedRows, virtualStartIndex, virtualEndIndex]);
+    const topVirtualSpacerHeight = shouldVirtualizeRows ? virtualStartIndex * VIRTUAL_ROW_HEIGHT : 0;
+    const bottomVirtualSpacerHeight = shouldVirtualizeRows
+        ? Math.max(0, (sortedRows.length - virtualEndIndex) * VIRTUAL_ROW_HEIGHT)
+        : 0;
+
+    const syncTableViewport = useCallback((element: HTMLDivElement | null) => {
+        if (!element) return;
+        const nextScrollTop = element.scrollTop;
+        const nextHeight = element.clientHeight;
+        setTableViewport(prev => (
+            prev.scrollTop === nextScrollTop && prev.height === nextHeight
+                ? prev
+                : { scrollTop: nextScrollTop, height: nextHeight }
+        ));
+    }, []);
+
+    const handleTableScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+        syncTableViewport(event.currentTarget);
+    }, [syncTableViewport]);
+
+    useEffect(() => {
+        const element = tableScrollRef.current;
+        if (!element) return;
+
+        syncTableViewport(element);
+
+        const handleResize = () => syncTableViewport(element);
+        const resizeObserver = typeof ResizeObserver !== 'undefined'
+            ? new ResizeObserver(handleResize)
+            : null;
+        resizeObserver?.observe(element);
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+            resizeObserver?.disconnect();
+            window.removeEventListener('resize', handleResize);
+        };
+    }, [syncTableViewport, sortedRows.length, isEditMode, showSiteDetailColumns]);
 
     const workerNameOptions = useMemo(() => {
         return allWorkers.map((worker, index) => ({
@@ -1290,6 +1434,13 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         });
     }, [visibleRowKeys]);
 
+    useEffect(() => {
+        if (!activeEditRowKey) return;
+        if (!visibleRowKeys.includes(activeEditRowKey)) {
+            setActiveEditRowKey(null);
+        }
+    }, [activeEditRowKey, visibleRowKeys]);
+
     const isAllSelected = useMemo(() => {
         return visibleRowKeys.length > 0 && visibleRowKeys.every(k => selectedRowKeys.has(k));
     }, [visibleRowKeys, selectedRowKeys]);
@@ -1325,6 +1476,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                 setIsBulkEditOpen(false);
                 setRowDrafts({});
                 setRowSavingKeys(new Set());
+                setActiveEditRowKey(null);
             }
             return next;
         });
@@ -1780,10 +1932,13 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                 ? getSameDateSiteReportIds(r)
                 : [];
 
-            await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates, r.workerIndex);
-            if (Object.keys(otherUpdates).length > 0) {
-                await dailyReportService.updateReport(r.reportId, otherUpdates as any);
-            }
+            await dailyReportService.updateWorkerInReport(
+                r.reportId,
+                r.workerId,
+                updates,
+                r.workerIndex,
+                otherUpdates as any
+            );
             for (const reportId of responsibleReportIds) {
                 await dailyReportService.updateReport(reportId, responsibleUpdates as any);
             }
@@ -1953,6 +2108,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
 
         setIsLoading(true);
         try {
+            const emptyReportUpdatesById = new Map<string, Record<string, unknown>>();
+            const workerUpdateTargets: Parameters<typeof dailyReportService.bulkUpdateWorkersInReports>[0] = [];
+
             for (const r of selected) {
                 if (r.isEmptyReport) {
                     const reportUpdates: Record<string, unknown> = {};
@@ -1961,7 +2119,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                     if (bulkPaymentType) reportUpdates.paymentType = bulkPaymentType;
 
                     if (Object.keys(reportUpdates).length > 0) {
-                        await dailyReportService.updateReport(r.reportId, reportUpdates as any);
+                        emptyReportUpdatesById.set(r.reportId, {
+                            ...(emptyReportUpdatesById.get(r.reportId) ?? {}),
+                            ...reportUpdates
+                        });
                     }
                     continue;
                 }
@@ -1975,7 +2136,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                 if (bulkPaymentType) updates.paymentType = bulkPaymentType;
                 if (bulkWorkerTeamName.trim()) updates.workerTeamName = bulkWorkerTeamName.trim();
                 
-                await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates, r.workerIndex);
+                workerUpdateTargets.push({ reportId: r.reportId, workerId: r.workerId, workerIndex: r.workerIndex, updates });
+            }
+
+            for (const [reportId, reportUpdates] of emptyReportUpdatesById.entries()) {
+                await dailyReportService.updateReport(reportId, reportUpdates as any);
+            }
+
+            if (workerUpdateTargets.length > 0) {
+                await dailyReportService.bulkUpdateWorkersInReports(workerUpdateTargets);
             }
 
             toast.updated('일보');
@@ -2009,24 +2178,34 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
 
         setIsLoading(true);
         try {
+            const selectedDates = new Set(selected.map((row) => row.date).filter(Boolean));
+            const emptyReportIds = Array.from(new Set(
+                selected
+                    .filter((row) => row.isEmptyReport)
+                    .map((row) => row.reportId)
+            ));
+            const workerDeleteTargets = selected
+                .filter((row) => !row.isEmptyReport)
+                .map((row) => ({
+                    reportId: row.reportId,
+                    workerId: row.workerId,
+                    workerIndex: row.workerIndex
+                }));
+
             let successCount = 0;
-            const successDates = new Set<string>();
-            for (const r of selected) {
-                try {
-                    if (r.isEmptyReport) {
-                        await dailyReportService.deleteReport(r.reportId);
-                    } else {
-                        await dailyReportService.removeWorkerFromReport(r.reportId, r.workerId, r.workerIndex);
-                    }
-                    successCount++;
-                    successDates.add(r.date);
-                } catch (e) {
-                    console.error(`Failed to delete worker ${r.workerName} `, e);
-                }
+
+            if (workerDeleteTargets.length > 0) {
+                const result = await dailyReportService.deleteWorkersFromReports(workerDeleteTargets);
+                successCount += result.deletedWorkerCount;
             }
 
-            if (successDates.size > 0) {
-                clearDailyReportBoardDrafts(successDates);
+            if (emptyReportIds.length > 0) {
+                await dailyReportService.deleteReports(emptyReportIds);
+                successCount += selected.filter((row) => row.isEmptyReport).length;
+            }
+
+            if (selectedDates.size > 0) {
+                clearDailyReportBoardDrafts(selectedDates);
             }
 
             if (successCount === selected.length) {
@@ -2143,10 +2322,13 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                         ? getSameDateSiteReportIds(r)
                         : [];
 
-                    await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates, r.workerIndex);
-                    if (Object.keys(otherUpdates).length > 0) {
-                        await dailyReportService.updateReport(r.reportId, otherUpdates as any);
-                    }
+                    await dailyReportService.updateWorkerInReport(
+                        r.reportId,
+                        r.workerId,
+                        updates,
+                        r.workerIndex,
+                        otherUpdates as any
+                    );
                     for (const reportId of responsibleReportIds) {
                         await dailyReportService.updateReport(reportId, responsibleUpdates as any);
                     }
@@ -2245,6 +2427,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
 
     return (
         <div className="daily-report-v2-page flex flex-col flex-1 min-h-0 gap-3 p-0 pb-1">
+            {queryLoadingMessage && (
+                <AppIntroScreen message={queryLoadingMessage} />
+            )}
             <div className="daily-report-v2-toolbar flex-shrink-0 bg-white px-3 py-2.5 rounded-xl shadow-sm border border-slate-200">
                 <div className="daily-report-v2-toolbar-main">
                     <section className="daily-report-v2-toolbar-section daily-report-v2-date-section" aria-label="조회 기간">
@@ -2641,28 +2826,32 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
             )}
 
             <div className="daily-report-v2-panel flex-1 min-h-0 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-                <datalist id="daily-report-v2-salary-model-options">
-                    {SALARY_MODEL_OPTIONS.map((option) => (
-                        <option key={option} value={option} />
-                    ))}
-                </datalist>
-                <datalist id="worker-list-v2">
-                    {workerNameOptions.map((worker) => (
-                        <option key={worker.id} value={worker.name}>
-                            {worker.teamName ? `(${worker.teamName})` : ''}
-                        </option>
-                    ))}
-                </datalist>
-                <datalist id="worker-team-list-v2">
-                    {availableWorkerTeams.map((team) => (
-                        <option key={String(team.id ?? team.name)} value={team.name ?? ''} />
-                    ))}
-                </datalist>
-                <datalist id="company-list-v2">
-                    {companyOptions.map((company) => (
-                        <option key={String(company.id ?? company.legacyId ?? company.name)} value={company.name ?? ''} />
-                    ))}
-                </datalist>
+                {isEditMode && (
+                    <>
+                        <datalist id="daily-report-v2-salary-model-options">
+                            {SALARY_MODEL_OPTIONS.map((option) => (
+                                <option key={option} value={option} />
+                            ))}
+                        </datalist>
+                        <datalist id="worker-list-v2">
+                            {workerNameOptions.map((worker) => (
+                                <option key={worker.id} value={worker.name}>
+                                    {worker.teamName ? `(${worker.teamName})` : ''}
+                                </option>
+                            ))}
+                        </datalist>
+                        <datalist id="worker-team-list-v2">
+                            {availableWorkerTeams.map((team) => (
+                                <option key={String(team.id ?? team.name)} value={team.name ?? ''} />
+                            ))}
+                        </datalist>
+                        <datalist id="company-list-v2">
+                            {companyOptions.map((company) => (
+                                <option key={String(company.id ?? company.legacyId ?? company.name)} value={company.name ?? ''} />
+                            ))}
+                        </datalist>
+                    </>
+                )}
                 {isLoading ? (
                     <div className="flex flex-col items-center justify-center h-64 text-slate-400">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mb-2"></div>
@@ -2709,7 +2898,12 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                         </div>
                     </div>
                 ) : (
-                    <div className="sheet-table-wrapper workbook-frozen-table-wrapper daily-report-v2-wrapper" style={{ flex: 1 }}>
+                    <div
+                        ref={tableScrollRef}
+                        onScroll={handleTableScroll}
+                        className="sheet-table-wrapper workbook-frozen-table-wrapper daily-report-v2-wrapper"
+                        style={{ flex: 1 }}
+                    >
                     <table className={`sheet-table daily-report-workbook-table ${showSiteDetailColumns ? 'min-w-[1730px]' : 'min-w-[1310px]'} text-left text-slate-700`}>
                         <colgroup>
                             {isEditMode && <col className="daily-report-col-select" />}
@@ -2837,12 +3031,18 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                             </tr>
                         </thead>
                         <tbody className="bg-white">
-                            {sortedRows.map((row) => {
+                            {shouldVirtualizeRows && topVirtualSpacerHeight > 0 && (
+                                <tr className="daily-report-v2-virtual-spacer" aria-hidden="true">
+                                    <td colSpan={tableColumnCount} style={{ height: topVirtualSpacerHeight }} />
+                                </tr>
+                            )}
+                            {renderedRows.map((row) => {
                                 const key = getRowKey(row);
                                 const isSelected = selectedRowKeys.has(key);
                                 const draft = rowDrafts[key];
                                 const isDirty = isRowDirty(row, draft);
                                 const isSaving = rowSavingKeys.has(key);
+                                const isInlineEditing = isEditMode && (!isLightEditMode || activeEditRowKey === key || !!draft || isSaving);
                                 const isEmptyReport = !!row.isEmptyReport;
                                 const isTargetReport = !!targetReportId && row.reportId === targetReportId;
 
@@ -2872,6 +3072,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                     <tr
                                         key={key}
                                         className={`sheet-row hover:bg-slate-50 transition-colors border-b border-slate-100 ${isSelected ? 'bg-indigo-50/50' : ''} ${isDirty ? 'bg-amber-50/50' : ''} ${isTargetReport ? 'ring-2 ring-rose-300 bg-rose-50/60' : ''}`}
+                                        style={shouldVirtualizeRows ? { height: VIRTUAL_ROW_HEIGHT } : undefined}
                                     >
                                         {isEditMode && (
                                             <td className={`px-2.5 py-1.5 text-center ${isFixed ? 'sticky left-0 z-30 bg-inherit border-r border-slate-200' : ''}`}>
@@ -2887,7 +3088,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                             {row.date}
                                         </td>
                                         <td className="px-2.5 py-1.5">
-                                            {isEditMode ? (
+                                            {isInlineEditing ? (
                                                 <div className="space-y-1">
                                                     <select
                                                         value={displayRow.siteId}
@@ -2913,7 +3114,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                         {showSiteDetailColumns && (
                                             <>
                                                 <td className="px-2.5 py-1.5">
-                                                    {isEditMode ? (
+                                                    {isInlineEditing ? (
                                                         <input
                                                             type="text"
                                                             list="company-list-v2"
@@ -2929,7 +3130,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                                     )}
                                                 </td>
                                                 <td className="px-2.5 py-1.5">
-                                                    {isEditMode ? (
+                                                    {isInlineEditing ? (
                                                         <input
                                                             type="text"
                                                             list="company-list-v2"
@@ -2945,7 +3146,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                                     )}
                                                 </td>
                                                 <td className="px-2.5 py-1.5">
-                                                    {isEditMode ? (
+                                                    {isInlineEditing ? (
                                                         <input
                                                             type="text"
                                                             list="company-list-v2"
@@ -2963,7 +3164,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                             </>
                                         )}
                                         <td className="px-2.5 py-1.5">
-                                            {isEditMode ? (
+                                            {isInlineEditing ? (
                                                 <select
                                                     value={displayRow.siteType}
                                                     onChange={(e) => setRowDraft(row, { siteType: e.target.value })}
@@ -2979,7 +3180,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                             )}
                                         </td>
                                         <td className="px-2.5 py-1.5">
-                                            {isEditMode ? (
+                                            {isInlineEditing ? (
                                                 <select
                                                     value={displayRow.paymentType}
                                                     onChange={(e) => setRowDraft(row, { paymentType: e.target.value })}
@@ -2994,7 +3195,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                             )}
                                         </td>
                                         <td className="px-2.5 py-1.5">
-                                            {isEditMode ? (
+                                            {isInlineEditing ? (
                                                 <select
                                                     value={resolveResponsibleTeamOptionId({
                                                         responsibleTeamId: displayRow.responsibleTeamId,
@@ -3013,7 +3214,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                                     className={`w-full px-1 py-0.5 border rounded text-sm ${isDirty && draft?.responsibleTeamId !== resolveResponsibleTeamOptionId(row) ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
                                                 >
                                                     <option value="">팀 선택</option>
-                                                    {teams.map(t => <option key={String(t.id ?? t.legacyId ?? t.name)} value={String(t.id ?? t.legacyId ?? t.name)}>{t.name}</option>)}
+                                                    {sortedTeamsByName.map(t => <option key={String(t.id ?? t.legacyId ?? t.name)} value={String(t.id ?? t.legacyId ?? t.name)}>{t.name}</option>)}
                                                 </select>
                                             ) : (
                                                 <span className="truncate block" title={displayResponsibleTeamName}>{displayResponsibleTeamName}</span>
@@ -3021,7 +3222,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                         </td>
                                         {showSiteDetailColumns && (
                                             <td className="px-2.5 py-1.5">
-                                                {isEditMode ? (
+                                                {isInlineEditing ? (
                                                     <select
                                                         value={displayRow.siteManagerId ?? ''}
                                                         onChange={(e) => {
@@ -3049,7 +3250,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                             </td>
                                         )}
                                         <td className="px-2.5 py-1.5">
-                                            {isEditMode && !isEmptyReport ? (
+                                            {isInlineEditing && !isEmptyReport ? (
                                                 <input
                                                     type="text"
                                                     list="worker-list-v2"
@@ -3066,7 +3267,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                             )}
                                         </td>
                                         <td className="px-2.5 py-1.5">
-                                            {isEditMode && !isEmptyReport ? (
+                                            {isInlineEditing && !isEmptyReport ? (
                                                 <input
                                                     type="text"
                                                     list="worker-team-list-v2"
@@ -3087,7 +3288,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                             )}
                                         </td>
                                         <td className="px-2.5 py-1.5">
-                                            {isEditMode && !isEmptyReport ? (
+                                            {isInlineEditing && !isEmptyReport ? (
                                                 <input
                                                     type="text"
                                                     list="daily-report-v2-salary-model-options"
@@ -3102,7 +3303,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                             )}
                                         </td>
                                         <td className="px-2.5 py-1.5 text-right font-mono">
-                                            {isEditMode && !isEmptyReport ? (
+                                            {isInlineEditing && !isEmptyReport ? (
                                                 <input
                                                     type="number"
                                                     step="0.1"
@@ -3117,7 +3318,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                             )}
                                         </td>
                                         <td className="px-2.5 py-1.5 text-right font-mono">
-                                            {isEditMode && !isEmptyReport ? (
+                                            {isInlineEditing && !isEmptyReport ? (
                                                 <input
                                                     type="number"
                                                     value={displayRow.unitPrice}
@@ -3134,7 +3335,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                             {isEmptyReport ? '-' : formatNumber(Math.round((Number(displayRow.manDay) || 0) * (Number(displayRow.unitPrice) || 0)))}
                                         </td>
                                         <td className="px-2.5 py-1.5">
-                                            {isEditMode ? (
+                                            {isInlineEditing ? (
                                                 <input
                                                     type="text"
                                                     value={displayRow.workContent}
@@ -3159,7 +3360,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                                                 <FontAwesomeIcon icon={isSaving ? faSpinner : faSave} spin={isSaving} />
                                                             </button>
                                                             <button
-                                                                onClick={() => clearRowDraft(key)}
+                                                                onClick={() => {
+                                                                    clearRowDraft(key);
+                                                                    if (isLightEditMode) setActiveEditRowKey(null);
+                                                                }}
                                                                 disabled={isSaving}
                                                                 className="w-7 h-7 flex items-center justify-center bg-slate-200 text-slate-600 rounded hover:bg-slate-300"
                                                                 title="취소"
@@ -3167,6 +3371,24 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                                                 <FontAwesomeIcon icon={faXmark} />
                                                             </button>
                                                         </>
+                                                    ) : isLightEditMode && !isInlineEditing ? (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setActiveEditRowKey(key)}
+                                                            className="w-7 h-7 flex items-center justify-center bg-white text-slate-600 border border-slate-200 rounded hover:bg-indigo-50 hover:text-indigo-600"
+                                                            title="Edit row"
+                                                        >
+                                                            <FontAwesomeIcon icon={faPenToSquare} />
+                                                        </button>
+                                                    ) : isLightEditMode ? (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setActiveEditRowKey(null)}
+                                                            className="w-7 h-7 flex items-center justify-center bg-slate-100 text-slate-500 border border-slate-200 rounded hover:bg-slate-200"
+                                                            title="Close edit"
+                                                        >
+                                                            <FontAwesomeIcon icon={faXmark} />
+                                                        </button>
                                                     ) : (
                                                         <span className="text-[10px] text-slate-300 font-bold">저장됨</span>
                                                     )}
@@ -3176,6 +3398,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                     </tr>
                                 );
                             })}
+                            {shouldVirtualizeRows && bottomVirtualSpacerHeight > 0 && (
+                                <tr className="daily-report-v2-virtual-spacer" aria-hidden="true">
+                                    <td colSpan={tableColumnCount} style={{ height: bottomVirtualSpacerHeight }} />
+                                </tr>
+                            )}
                         </tbody>
                     </table>
                     </div>

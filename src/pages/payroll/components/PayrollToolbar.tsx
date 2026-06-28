@@ -57,6 +57,8 @@ export interface PayrollToolbarProps {
 
     pageViewMode: 'standard' | 'ledger';
     setPageViewMode: (mode: 'standard' | 'ledger') => void;
+    ledgerSalaryModelFilter: 'all' | 'monthly' | 'daily' | 'service';
+    setLedgerSalaryModelFilter: (filter: 'all' | 'monthly' | 'daily' | 'service') => void;
 
     ledgerVisibleSections: { utilities: boolean, advances: boolean, taxes: boolean };
     setLedgerVisibleSections: React.Dispatch<React.SetStateAction<{ utilities: boolean, advances: boolean, taxes: boolean }>>;
@@ -159,6 +161,8 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
     setWorkerSearchText,
     pageViewMode,
     setPageViewMode,
+    ledgerSalaryModelFilter,
+    setLedgerSalaryModelFilter,
     ledgerVisibleSections,
     setLedgerVisibleSections,
     showAccountColumns,
@@ -517,32 +521,51 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                                 </SegmentedGroup>
 
                                 {pageViewMode === 'ledger' ? (
-                                    <FieldCard>
-                                        <FieldLabel>가불대장 항목</FieldLabel>
-                                        <ToggleChipGroup>
-                                            <ToggleChipButton
-                                                type="button"
-                                                $active={ledgerVisibleSections.utilities}
-                                                onClick={() => setLedgerVisibleSections((prev) => ({ ...prev, utilities: !prev.utilities }))}
-                                            >
-                                                공과금
-                                            </ToggleChipButton>
-                                            <ToggleChipButton
-                                                type="button"
-                                                $active={ledgerVisibleSections.advances}
-                                                onClick={() => setLedgerVisibleSections((prev) => ({ ...prev, advances: !prev.advances }))}
-                                            >
-                                                가불
-                                            </ToggleChipButton>
-                                            <ToggleChipButton
-                                                type="button"
-                                                $active={ledgerVisibleSections.taxes}
-                                                onClick={() => setLedgerVisibleSections((prev) => ({ ...prev, taxes: !prev.taxes }))}
-                                            >
-                                                세금
-                                            </ToggleChipButton>
-                                        </ToggleChipGroup>
-                                    </FieldCard>
+                                    <>
+                                        <FieldCard>
+                                            <FieldLabel>구분 필터</FieldLabel>
+                                            <SegmentedGroup>
+                                                <SegmentedButton type="button" $active={ledgerSalaryModelFilter === 'all'} onClick={() => setLedgerSalaryModelFilter('all')}>
+                                                    전체
+                                                </SegmentedButton>
+                                                <SegmentedButton type="button" $active={ledgerSalaryModelFilter === 'monthly'} onClick={() => setLedgerSalaryModelFilter('monthly')}>
+                                                    월급제
+                                                </SegmentedButton>
+                                                <SegmentedButton type="button" $active={ledgerSalaryModelFilter === 'daily'} onClick={() => setLedgerSalaryModelFilter('daily')}>
+                                                    일급제
+                                                </SegmentedButton>
+                                                <SegmentedButton type="button" $active={ledgerSalaryModelFilter === 'service'} onClick={() => setLedgerSalaryModelFilter('service')}>
+                                                    용역팀
+                                                </SegmentedButton>
+                                            </SegmentedGroup>
+                                        </FieldCard>
+                                        <FieldCard>
+                                            <FieldLabel>가불대장 항목</FieldLabel>
+                                            <ToggleChipGroup>
+                                                <ToggleChipButton
+                                                    type="button"
+                                                    $active={ledgerVisibleSections.utilities}
+                                                    onClick={() => setLedgerVisibleSections((prev) => ({ ...prev, utilities: !prev.utilities }))}
+                                                >
+                                                    공과금
+                                                </ToggleChipButton>
+                                                <ToggleChipButton
+                                                    type="button"
+                                                    $active={ledgerVisibleSections.advances}
+                                                    onClick={() => setLedgerVisibleSections((prev) => ({ ...prev, advances: !prev.advances }))}
+                                                >
+                                                    가불
+                                                </ToggleChipButton>
+                                                <ToggleChipButton
+                                                    type="button"
+                                                    $active={ledgerVisibleSections.taxes}
+                                                    onClick={() => setLedgerVisibleSections((prev) => ({ ...prev, taxes: !prev.taxes }))}
+                                                >
+                                                    세금
+                                                </ToggleChipButton>
+                                            </ToggleChipGroup>
+                                        </FieldCard>
+                                    </>
                                 ) : (
                                     <FieldCard>
                                         <FieldLabel>표시 옵션</FieldLabel>

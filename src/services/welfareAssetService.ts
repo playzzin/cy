@@ -42,6 +42,7 @@ export interface PlayWelfarePointGameInput {
   userName: string;
   stake: number;
   dailyLimit?: number;
+  selectedSide?: 'odd' | 'even';
   idempotencyKey?: string;
 }
 
@@ -68,9 +69,17 @@ export interface PointRouletteSegmentRuntimeConfig {
   color?: string;
 }
 
+export interface LadderOddEvenSideRuntimeConfig {
+  id: 'odd' | 'even';
+  label: string;
+  multiplier: number;
+  probability: number;
+  color?: string;
+}
+
 export interface WelfareGameRuntimeConfig {
   gameId: string;
-  type: 'roulette' | 'ocean_reel';
+  type: 'roulette' | 'ocean_reel' | 'ladder_odd_even';
   algorithmVersion?: string;
   stake: number;
   dailyLimit: number;
@@ -80,6 +89,7 @@ export interface WelfareGameRuntimeConfig {
   oceanReelStages?: OceanReelStageRuntimeConfig[];
   oceanReelMissPatterns?: OceanReelMissPatternRuntimeConfig[];
   pointRouletteSegments?: PointRouletteSegmentRuntimeConfig[];
+  ladderOddEvenSides?: LadderOddEvenSideRuntimeConfig[];
 }
 
 export type SaveWelfareGameConfigInput =
@@ -97,6 +107,13 @@ export type SaveWelfareGameConfigInput =
       stake: number;
       dailyLimit: number;
       pointRouletteSegments: PointRouletteSegmentRuntimeConfig[];
+    }
+  | {
+      gameId: string;
+      type: 'ladder_odd_even';
+      stake: number;
+      dailyLimit: number;
+      ladderOddEvenSides: LadderOddEvenSideRuntimeConfig[];
     };
 
 export interface UpsertWelfareCategoryInput {

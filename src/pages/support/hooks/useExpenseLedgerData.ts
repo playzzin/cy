@@ -11,10 +11,17 @@ import {
 import { teamExpenseLedgerService } from '../../../services/teamExpenseLedgerService';
 import { teamService, type Team } from '../../../services/teamService';
 import { vehicleBillingService } from '../../../services/vehicleBillingService';
+import { isSupportBillingMonthEnabled } from '../../../utils/supportBillingPeriod';
 import { toast } from '../../../utils/swal';
-import { appendOfficeAssignmentTeam, isOfficeAssignmentReference } from '../../../utils/supportAssignmentTargets';
+import {
+  OFFICE_ASSIGNMENT_TEAM_ID,
+  OFFICE_ASSIGNMENT_TEAM_NAME,
+  appendOfficeAssignmentTeam,
+  isOfficeAssignmentReference
+} from '../../../utils/supportAssignmentTargets';
+import { normalizeVehicleExpenseType } from '../../../utils/vehicleExpenseType';
 import type { AccommodationBillingDocument } from '../../../types/accommodationBilling';
-import type { Card } from '../../../types/card';
+import type { Card, CardBillingTargetRecord, CardBillingTargetType } from '../../../types/card';
 import type { CardBillingDocument } from '../../../types/cardBilling';
 import type { DailyReport } from '../../../services/dailyReportService';
 import type { TeamExpenseCategory, TeamExpenseClaim, TeamExpenseClaimCategory, TeamExpenseClaimType } from '../../../types/teamExpenseLedger';
@@ -32,8 +39,11 @@ export type LedgerSummary = {
   internet: number;
   accommodationOther: number;
   vehicleRent: number;
+  vehicleLease: number;
+  vehicleFuel: number;
   vehicleFine: number;
   vehicleRepair: number;
+  vehicleToll: number;
   vehicleOther: number;
   card: number;
   otherClaim: number;
@@ -73,8 +83,11 @@ export type BillingStatusCounts = {
 
 export type VehicleCostBreakdown = {
   rent: number;
+  lease: number;
+  fuel: number;
   fine: number;
   repair: number;
+  toll: number;
   other: number;
   total: number;
 };
@@ -147,11 +160,93 @@ const getResolvedTeamId = (team: Team | null | undefined, fallbackId?: unknown, 
 const getTeamIdCandidates = (team: Team | null | undefined) =>
   [team?.id, team?.legacyId, team?.name].map((value) => String(value ?? '').trim()).filter(Boolean);
 
+const uniqueTextValues = (values: unknown[]) =>
+  [...new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean))];
+
 const buildCardLabel = (card: Card) => {
   const name = String(card.name ?? '').trim() || '카드';
   const last4 = String(card.last4 ?? '').trim();
   return last4 ? `${name} (${last4})` : name;
 };
+
+const isActiveDuringMonth = (
+  target: { startDate?: string | null; endDate?: string | null },
+  yearMonth: string
+) => {
+  const monthStart = `${yearMonth}-01`;
+  const monthEnd = `${yearMonth}-31`;
+  const startDate = String(target.startDate ?? '').trim();
+  const endDate = String(target.endDate ?? '').trim();
+  return (!startDate || startDate <= monthEnd) && (!endDate || endDate >= monthStart);
+};
+
+const getLatestActiveBillingTarget = (
+  records: CardBillingTargetRecord[],
+  yearMonth: string
+): CardBillingTargetRecord | undefined => (
+  records
+    .filter((record) => isActiveDuringMonth(record, yearMonth))
+    .sort((a, b) => {
+      const startDiff = String(b.startDate ?? '').localeCompare(String(a.startDate ?? ''));
+      if (startDiff !== 0) return startDiff;
+      return String(b.id ?? '').localeCompare(String(a.id ?? ''));
+    })[0]
+);
+
+const getCardSnapshotBillingTarget = (card: Card): {
+  targetId: string;
+  targetType: CardBillingTargetType;
+  targetName: string;
+  startDate?: string | null;
+  endDate?: string | null;
+} | null => {
+  const targetType = card.billingTargetType;
+  const targetId = String(card.billingTargetId ?? '').trim();
+  const targetName = String(card.billingTargetName ?? '').trim();
+  if (!targetType || !targetId || !targetName) return null;
+
+  return {
+    targetId,
+    targetType,
+    targetName,
+    startDate: String((card as any).billingTargetStartDate ?? '').trim() || undefined,
+    endDate: String((card as any).billingTargetEndDate ?? '').trim() || undefined
+  };
+};
+
+const getBillingTargetTeamKeys = (
+  target: Pick<CardBillingTargetRecord, 'targetId' | 'targetType' | 'targetName'> | null | undefined,
+  teams: Team[]
+) => {
+  if (!target) return [];
+
+  if (target.targetType === 'OFFICE' || target.targetType === 'OFFICE_STAFF') {
+    return uniqueTextValues([
+      OFFICE_ASSIGNMENT_TEAM_ID,
+      OFFICE_ASSIGNMENT_TEAM_NAME,
+      target.targetId,
+      target.targetName
+    ]);
+  }
+
+  if (target.targetType === 'TEAM') {
+    const targetId = String(target.targetId ?? '').trim();
+    const targetName = String(target.targetName ?? '').trim();
+    const targetTeam = teams.find((team) => {
+      const ids = getTeamIdCandidates(team);
+      return (targetId && ids.includes(targetId)) || (targetName && String(team.name ?? '').trim() === targetName);
+    });
+
+    return uniqueTextValues([
+      targetId,
+      targetName,
+      ...getTeamIdCandidates(targetTeam)
+    ]);
+  }
+
+  return [];
+};
+
 
 export const normalizeColor = (value: unknown) => {
   const raw = String(value ?? '').trim();
@@ -185,8 +280,11 @@ const makeEmptySummary = (team: Team): LedgerSummary => ({
   internet: 0,
   accommodationOther: 0,
   vehicleRent: 0,
+  vehicleLease: 0,
+  vehicleFuel: 0,
   vehicleFine: 0,
   vehicleRepair: 0,
+  vehicleToll: 0,
   vehicleOther: 0,
   card: 0,
   otherClaim: 0,
@@ -204,8 +302,11 @@ export const getSummaryTotal = (row: LedgerSummary) =>
   row.internet +
   row.accommodationOther +
   row.vehicleRent +
+  row.vehicleLease +
+  row.vehicleFuel +
   row.vehicleFine +
   row.vehicleRepair +
+  row.vehicleToll +
   row.vehicleOther +
   row.card +
   row.otherClaim +
@@ -238,10 +339,23 @@ export const getBillingStatusLabel = (status?: unknown) => {
   return raw || '-';
 };
 
-const isPostedAccommodation = (doc: AccommodationBillingDocument) => doc.status === 'confirmed';
-const isPostedVehicle = (doc: VehicleBillingDocument) => ['CONFIRMED', 'PAID', 'OVERDUE'].includes(String(doc.status ?? ''));
-const isPostedCard = (doc: CardBillingDocument) => ['CONFIRMED', 'PAID', 'OVERDUE'].includes(String(doc.status ?? ''));
+const isAccommodationLedgerClaim = (doc: AccommodationBillingDocument) =>
+  (doc.lineItems ?? []).some((item) => item.sourceType === 'utility_ledger');
+const isPostedAccommodation = (doc: AccommodationBillingDocument) =>
+  doc.status === 'confirmed' || (doc.status === 'draft' && isAccommodationLedgerClaim(doc));
+const isPostedVehicle = (doc: VehicleBillingDocument) => {
+  const status = String(doc.status ?? '').trim().toUpperCase();
+  return ['CONFIRMED', 'PAID', 'OVERDUE'].includes(status);
+};
+const isCardLedgerClaim = (doc: CardBillingDocument) =>
+  (doc.lineItems ?? []).some((item) => item.sourceType === 'card_ledger');
+const isPostedCard = (doc: CardBillingDocument) => {
+  const status = String(doc.status ?? '').trim().toUpperCase();
+  return ['CONFIRMED', 'PAID', 'OVERDUE'].includes(status) || (status === 'DRAFT' && isCardLedgerClaim(doc));
+};
 const isPostedClaim = (claim: TeamExpenseClaim) => claim.status === 'charged' || claim.status === 'settled';
+const isTeamExpenseBillingDocument = (doc: { issuedToType?: unknown }) =>
+  String(doc.issuedToType ?? '').trim().toLowerCase() !== 'worker';
 
 const hasChargeTarget = (claim: TeamExpenseClaim) =>
   Boolean(String(claim.chargeToTeamId ?? '').trim() || String(claim.chargeToTeamName ?? '').trim());
@@ -306,37 +420,51 @@ export const getAttendedSiteOptions = (siteOptions: Site[], dailyReports: DailyR
 
 export const summarizeVehicleBillingCosts = (doc: VehicleBillingDocument): VehicleCostBreakdown => {
   let rent = 0;
+  let lease = 0;
+  let fuel = 0;
   let fine = 0;
   let repair = 0;
+  let toll = 0;
   let other = 0;
-  let hasExplicitRentLine = false;
+  let hasExplicitFixedLine = false;
   let variableLineTotal = 0;
 
   (doc.lineItems ?? []).forEach((item) => {
     const amount = toFiniteNumber(item.amount);
-    const label = normalizeKey(`${item.type ?? ''} ${item.category ?? ''} ${item.label ?? ''}`);
-    const isRent =
+    const category = normalizeKey(item.category);
+    const label = normalizeKey(`${item.type ?? ''} ${item.category ?? ''} ${item.label ?? ''} ${item.id ?? ''}`);
+
+    if (category === 'lease' || label.includes('lease') || label.includes('리스')) {
+      lease += amount;
+      hasExplicitFixedLine = true;
+      return;
+    }
+
+    if (
+      category === 'rent' ||
       item.type === 'FIXED' ||
       label.includes('rent') ||
-      label.includes('lease') ||
+      label.includes('rental') ||
+      label.includes('monthlyfee') ||
+      label.includes('monthly fee') ||
       label.includes('렌트') ||
-      label.includes('월사용료') ||
-      label.includes('사용료') ||
-      label.includes('monthlyfee');
-
-    if (isRent) {
+      label.includes('월사용료')
+    ) {
       rent += amount;
-      hasExplicitRentLine = true;
+      hasExplicitFixedLine = true;
       return;
     }
 
     variableLineTotal += amount;
-    if (label.includes('fine') || label.includes('penalty') || label.includes('과태료')) fine += amount;
-    else if (label.includes('repair') || label.includes('maintenance') || label.includes('수리') || label.includes('정비')) repair += amount;
+    const expenseType = normalizeVehicleExpenseType(category, label, item.id);
+    if (expenseType === 'FUEL') fuel += amount;
+    else if (expenseType === 'REPAIR') repair += amount;
+    else if (expenseType === 'TOLL') toll += amount;
+    else if (expenseType === 'FINE') fine += amount;
     else other += amount;
   });
 
-  if (!hasExplicitRentLine) {
+  if (!hasExplicitFixedLine) {
     rent += toFiniteNumber(doc.fixedCost);
   }
 
@@ -346,11 +474,74 @@ export const summarizeVehicleBillingCosts = (doc: VehicleBillingDocument): Vehic
 
   return {
     rent,
+    lease,
+    fuel,
     fine,
     repair,
+    toll,
     other,
-    total: rent + fine + repair + other
+    total: rent + lease + fuel + fine + repair + toll + other
   };
+};
+
+const makeEmptyVehicleCostBreakdown = (): VehicleCostBreakdown => ({
+  rent: 0,
+  lease: 0,
+  fuel: 0,
+  fine: 0,
+  repair: 0,
+  toll: 0,
+  other: 0,
+  total: 0
+});
+
+const addVehicleCostBreakdown = (target: VehicleCostBreakdown, source: VehicleCostBreakdown) => {
+  target.rent += source.rent;
+  target.lease += source.lease;
+  target.fuel += source.fuel;
+  target.fine += source.fine;
+  target.repair += source.repair;
+  target.toll += source.toll;
+  target.other += source.other;
+  target.total += source.total;
+};
+
+const summarizeVehicleBillingCostsFromDetailRows = (doc: VehicleBillingDocument): VehicleCostBreakdown => {
+  if (!isTeamExpenseBillingDocument(doc)) return makeEmptyVehicleCostBreakdown();
+
+  const items = doc.lineItems ?? [];
+  if (items.length === 0) {
+    const breakdown = summarizeVehicleBillingCosts(doc);
+    return breakdown.total > 0 ? breakdown : makeEmptyVehicleCostBreakdown();
+  }
+
+  return items.reduce((acc, item) => {
+    const amount = toFiniteNumber(item.amount);
+    const breakdown = summarizeVehicleBillingCosts({
+      ...doc,
+      fixedCost: 0,
+      variableCost: 0,
+      totalAmount: amount,
+      lineItems: [item]
+    });
+    if (breakdown.total > 0) addVehicleCostBreakdown(acc, breakdown);
+    return acc;
+  }, makeEmptyVehicleCostBreakdown());
+};
+
+const summarizeCardBillingAmountFromDetailRows = (doc: CardBillingDocument): number => {
+  if (!isTeamExpenseBillingDocument(doc)) return 0;
+
+  const items = doc.lineItems ?? [];
+  if (items.length === 0) {
+    const amount = toFiniteNumber(doc.totalAmount);
+    return amount > 0 ? amount : 0;
+  }
+
+  return items.reduce((sum, item) => {
+    const amount = toFiniteNumber(item.amount);
+    return amount > 0 ? sum + amount : sum;
+  }, 0);
 };
 
 export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, billingScope: BillingScope = 'all', includeDailyReports = false) => {
@@ -360,6 +551,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
   const [vehicleDocs, setVehicleDocs] = useState<VehicleBillingDocument[]>([]);
   const [cardDocs, setCardDocs] = useState<CardBillingDocument[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
+  const [cardBillingTargets, setCardBillingTargets] = useState<CardBillingTargetRecord[]>([]);
   const [claims, setClaims] = useState<TeamExpenseClaim[]>([]);
   const [expenseCategories, setExpenseCategories] = useState<TeamExpenseCategory[]>(DEFAULT_TEAM_EXPENSE_CATEGORIES);
   const [dailyReports, setDailyReports] = useState<DailyReport[]>([]);
@@ -378,7 +570,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
             return [] as DailyReport[];
           })
         : Promise.resolve([] as DailyReport[]);
-      const [teamList, siteList, accommodationList, vehicleList, cardBillingList, claimList, companyList, cardMasterList, categoryList, dailyReportList] = await Promise.all([
+      const [teamList, siteList, accommodationList, vehicleList, cardBillingList, claimList, companyList, cardMasterList, cardBillingTargetList, categoryList, dailyReportList] = await Promise.all([
         teamService.getTeams(),
         siteService.getSites(),
         accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth }),
@@ -387,6 +579,10 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
         teamExpenseLedgerService.getClaimsByMonth(yearMonth),
         companyService.getCompanies(),
         cardService.getCards(),
+        cardService.listAllCardBillingTargets().catch((error) => {
+          console.warn('[useExpenseLedgerData] card billing targets load failed', error);
+          return [] as CardBillingTargetRecord[];
+        }),
         teamExpenseCategoryService.getCategories({ includeInactive: true }).catch((error) => {
           console.warn('[useExpenseLedgerData] expense categories load failed', error);
           return DEFAULT_TEAM_EXPENSE_CATEGORIES;
@@ -413,10 +609,12 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
 
       setTeams(appendOfficeAssignmentTeam(filteredTeams, teamList));
       setSites(siteList);
-      setAccommodationDocs(accommodationList);
-      setVehicleDocs(vehicleList);
-      setCardDocs(cardBillingList);
+      const supportBillingEnabled = isSupportBillingMonthEnabled(yearMonth);
+      setAccommodationDocs(supportBillingEnabled ? accommodationList : []);
+      setVehicleDocs(supportBillingEnabled ? vehicleList : []);
+      setCardDocs(supportBillingEnabled ? cardBillingList : []);
       setCards(cardMasterList);
+      setCardBillingTargets(cardBillingTargetList);
       setClaims(claimList);
       setExpenseCategories(categoryList);
       setDailyReports(dailyReportList);
@@ -479,14 +677,39 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
     [accommodationDocs, billingScope]
   );
 
-  const includedVehicleDocs = useMemo(
+  const teamExpenseAccommodationDocs = useMemo(
+    () => includedAccommodationDocs.filter(isTeamExpenseBillingDocument),
+    [includedAccommodationDocs]
+  );
+
+  const baseIncludedVehicleDocs = useMemo(
     () => (billingScope === 'all' ? vehicleDocs : vehicleDocs.filter(isPostedVehicle)),
     [billingScope, vehicleDocs]
+  );
+
+  const includedVehicleDocs = useMemo(
+    () => baseIncludedVehicleDocs,
+    [baseIncludedVehicleDocs]
+  );
+
+  const baseTeamExpenseVehicleDocs = useMemo(
+    () => baseIncludedVehicleDocs.filter(isTeamExpenseBillingDocument),
+    [baseIncludedVehicleDocs]
+  );
+
+  const teamExpenseVehicleDocs = useMemo(
+    () => baseTeamExpenseVehicleDocs,
+    [baseTeamExpenseVehicleDocs]
   );
 
   const includedCardDocs = useMemo(
     () => (billingScope === 'all' ? cardDocs : cardDocs.filter(isPostedCard)),
     [billingScope, cardDocs]
+  );
+
+  const teamExpenseCardDocs = useMemo(
+    () => includedCardDocs.filter(isTeamExpenseBillingDocument),
+    [includedCardDocs]
   );
 
   const includedClaims = useMemo(
@@ -496,12 +719,12 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
 
   const statusCounts = useMemo<BillingStatusCounts>(
     () => ({
-      accommodationDraft: accommodationDocs.filter((doc) => !isPostedAccommodation(doc)).length,
-      accommodationConfirmed: accommodationDocs.filter(isPostedAccommodation).length,
-      vehicleDraft: vehicleDocs.filter((doc) => !isPostedVehicle(doc)).length,
-      vehiclePosted: vehicleDocs.filter(isPostedVehicle).length,
-      cardDraft: cardDocs.filter((doc) => !isPostedCard(doc)).length,
-      cardPosted: cardDocs.filter(isPostedCard).length,
+      accommodationDraft: accommodationDocs.filter((doc) => isTeamExpenseBillingDocument(doc) && !isPostedAccommodation(doc)).length,
+      accommodationConfirmed: accommodationDocs.filter((doc) => isTeamExpenseBillingDocument(doc) && isPostedAccommodation(doc)).length,
+      vehicleDraft: vehicleDocs.filter((doc) => isTeamExpenseBillingDocument(doc) && !isPostedVehicle(doc)).length,
+      vehiclePosted: vehicleDocs.filter((doc) => isTeamExpenseBillingDocument(doc) && isPostedVehicle(doc)).length,
+      cardDraft: cardDocs.filter((doc) => isTeamExpenseBillingDocument(doc) && !isPostedCard(doc)).length,
+      cardPosted: cardDocs.filter((doc) => isTeamExpenseBillingDocument(doc) && isPostedCard(doc)).length,
       claimDraft: scopedClaims.filter((claim) => claim.status === 'draft').length,
       claimCharged: scopedClaims.filter((claim) => claim.status === 'charged').length,
       claimSettled: scopedClaims.filter((claim) => claim.status === 'settled').length
@@ -527,12 +750,13 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
 
     teams.forEach((team) => ensure(team));
 
-    includedAccommodationDocs.forEach((doc) => {
+    teamExpenseAccommodationDocs.forEach((doc) => {
       const team = resolveTeam(doc.teamId, doc.teamName);
       if (!team) return;
       const row = ensure(team);
       (doc.lineItems ?? []).forEach((item) => {
         const amount = toFiniteNumber(item.amount);
+        if (amount <= 0) return;
         if (item.targetField === 'accommodation') row.accommodation += amount;
         else if (item.targetField === 'privateRoom') row.privateRoom += amount;
         else if (item.targetField === 'electricity') row.electricity += amount;
@@ -543,23 +767,25 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
       });
     });
 
-    includedVehicleDocs.forEach((doc) => {
+    teamExpenseVehicleDocs.forEach((doc) => {
       const team = resolveTeam(doc.teamId ?? doc.assignedTeamId, doc.teamName ?? doc.assignedTeamName);
       if (!team) return;
       const row = ensure(team);
-      const breakdown = summarizeVehicleBillingCosts(doc);
+      const breakdown = summarizeVehicleBillingCostsFromDetailRows(doc);
       row.vehicleRent += breakdown.rent;
+      row.vehicleLease += breakdown.lease;
+      row.vehicleFuel += breakdown.fuel;
       row.vehicleFine += breakdown.fine;
       row.vehicleRepair += breakdown.repair;
+      row.vehicleToll += breakdown.toll;
       row.vehicleOther += breakdown.other;
     });
 
-    includedCardDocs.forEach((doc) => {
+    teamExpenseCardDocs.forEach((doc) => {
       const team = resolveTeam(doc.teamId ?? doc.assignedTeamId, doc.teamName ?? doc.assignedTeamName);
       if (!team) return;
       const row = ensure(team);
-      const lineTotal = (doc.lineItems ?? []).reduce((sum, item) => sum + toFiniteNumber(item.amount), 0);
-      row.card += lineTotal > 0 ? lineTotal : toFiniteNumber(doc.totalAmount);
+      row.card += summarizeCardBillingAmountFromDetailRows(doc);
     });
 
     includedClaims.forEach((claim) => {
@@ -596,7 +822,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
       .filter((row) => selectedTeamId === 'all' || row.teamId === selectedTeamId)
       .filter((row) => selectedTeamId !== 'all' || getSummaryTotal(row) !== 0 || row.receivable !== 0 || row.payable !== 0)
       .sort((a, b) => a.teamName.localeCompare(b.teamName, 'ko-KR'));
-  }, [includedAccommodationDocs, includedCardDocs, includedClaims, includedVehicleDocs, resolveTeam, selectedTeamId, teams]);
+  }, [includedClaims, resolveTeam, selectedTeamId, teamExpenseAccommodationDocs, teamExpenseCardDocs, teamExpenseVehicleDocs, teams]);
 
   const totals = useMemo(
     () =>
@@ -604,7 +830,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
         (acc, row) => ({
           accommodation: acc.accommodation + row.accommodation + row.privateRoom,
           utility: acc.utility + row.electricity + row.gas + row.water + row.internet + row.accommodationOther,
-          vehicle: acc.vehicle + row.vehicleRent + row.vehicleFine + row.vehicleRepair + row.vehicleOther,
+          vehicle: acc.vehicle + row.vehicleRent + row.vehicleLease + row.vehicleFuel + row.vehicleFine + row.vehicleRepair + row.vehicleToll + row.vehicleOther,
           card: acc.card + row.card,
           otherClaim: acc.otherClaim + row.otherClaim,
           officeExpense: acc.officeExpense + row.officeExpense,
@@ -693,6 +919,15 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
   }, [includedClaims, resolveTeam, selectedTeamId]);
 
   const cardLabelOptions = useMemo<ExpensePaymentOption[]>(() => {
+    const billingTargetsByCardId = new Map<string, CardBillingTargetRecord[]>();
+    cardBillingTargets.forEach((target) => {
+      const cardId = String(target.cardId ?? '').trim();
+      if (!cardId) return;
+      const existing = billingTargetsByCardId.get(cardId) ?? [];
+      existing.push(target);
+      billingTargetsByCardId.set(cardId, existing);
+    });
+
     const cardOptions = cards
       .filter((card) => card.status === 'ASSIGNED' && card.currentAssigneeType === 'TEAM')
       .map((card) => {
@@ -703,18 +938,23 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
           const ids = getTeamIdCandidates(team);
           return (assigneeId && ids.includes(assigneeId)) || (assigneeName && String(team.name ?? '').trim() === assigneeName);
         });
-        const teamIds = [
+        const latestBillingTarget = getLatestActiveBillingTarget(billingTargetsByCardId.get(card.id) ?? [], yearMonth);
+        const snapshotBillingTarget = getCardSnapshotBillingTarget(card);
+        const billingTarget = latestBillingTarget
+          ?? (snapshotBillingTarget && isActiveDuringMonth(snapshotBillingTarget, yearMonth) ? snapshotBillingTarget : null);
+        const teamIds = uniqueTextValues([
           assigneeId,
           assigneeName,
-          ...getTeamIdCandidates(assignedTeam)
-        ].filter(Boolean);
+          ...getTeamIdCandidates(assignedTeam),
+          ...getBillingTargetTeamKeys(billingTarget, teams)
+        ]);
 
         return {
           value: label,
           label: assigneeName ? `${label} - ${assigneeName}` : label,
           kind: 'card' as const,
           assigneeName,
-          teamIds: [...new Set(teamIds)]
+          teamIds
         };
       })
       .sort((a, b) => a.label.localeCompare(b.label, 'ko-KR'));
@@ -723,7 +963,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
       { value: '현찰', label: '현찰', kind: 'cash', teamIds: [] },
       ...cardOptions
     ];
-  }, [cards, teams]);
+  }, [cardBillingTargets, cards, teams, yearMonth]);
 
   const activeExpenseCategories = useMemo(
     () => expenseCategories.filter((category) => category.isActive),
@@ -769,7 +1009,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
         return getTeamStableId(team) === selectedTeamId;
       })
     };
-  }, [includedAccommodationDocs, includedVehicleDocs, includedCardDocs, selectedTeamId, resolveTeam]);
+  }, [includedAccommodationDocs, includedCardDocs, includedVehicleDocs, resolveTeam, selectedTeamId]);
 
   return {
     loading,

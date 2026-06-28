@@ -11,6 +11,7 @@ import { accommodationAssignmentService } from '../../services/accommodationAssi
 import { AccommodationAssignment } from '../../types/accommodationAssignment';
 import { toast } from '../../utils/swal';
 import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
+import { getFriendlyErrorMessage, isDeadlineExceededError } from '../../utils/firebaseError';
 
 type AssignMode = 'team' | 'worker';
 
@@ -28,13 +29,7 @@ const isActiveAssignment = (a: AccommodationAssignment): boolean => {
 };
 
 const toErrorMessage = (error: unknown): string => {
-    if (error instanceof Error) {
-        const maybeCode = (error as unknown as { code?: unknown }).code;
-        const codeText = typeof maybeCode === 'string' ? ` (${maybeCode})` : '';
-        return `${error.message}${codeText}`.trim();
-    }
-    if (typeof error === 'string') return error;
-    return '알 수 없는 오류가 발생했습니다.';
+    return getFriendlyErrorMessage(error, '알 수 없는 오류가 발생했습니다.');
 };
 
 const AccommodationAssignmentManager: React.FC = () => {
@@ -306,6 +301,11 @@ const AccommodationAssignmentManager: React.FC = () => {
             await reloadAssignments();
         } catch (e) {
             console.error(e);
+            if (isDeadlineExceededError(e)) {
+                toast.delayed('숙소 배정');
+                await reloadAssignments().catch((reloadError) => console.error(reloadError));
+                return;
+            }
             toast.error(`숙소 배정 저장 실패: ${toErrorMessage(e)}`);
         } finally {
             setSaving(false);
@@ -330,6 +330,11 @@ const AccommodationAssignmentManager: React.FC = () => {
             toast.success('퇴실 처리되었습니다.');
         } catch (e) {
             console.error(e);
+            if (isDeadlineExceededError(e)) {
+                toast.delayed('퇴실 처리');
+                await reloadAssignments().catch((reloadError) => console.error(reloadError));
+                return;
+            }
             toast.error(`퇴실 처리 실패: ${toErrorMessage(e)}`);
         } finally {
             setSaving(false);
@@ -348,6 +353,11 @@ const AccommodationAssignmentManager: React.FC = () => {
             toast.success('삭제되었습니다.');
         } catch (e) {
             console.error(e);
+            if (isDeadlineExceededError(e)) {
+                toast.delayed('배정 삭제');
+                await reloadAssignments().catch((reloadError) => console.error(reloadError));
+                return;
+            }
             toast.error(`삭제 실패: ${toErrorMessage(e)}`);
         } finally {
             setSaving(false);

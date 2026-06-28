@@ -20,6 +20,7 @@ import {
     faXmark
 } from '@fortawesome/free-solid-svg-icons';
 import { useAuth } from '../../contexts/AuthContext';
+import AppIntroScreen from '../../components/common/AppIntroScreen';
 import { companyService } from '../../services/companyService';
 import { siteService } from '../../services/siteService';
 import { teamService } from '../../services/teamService';
@@ -34,8 +35,10 @@ import './WorkbookLedgerPage.css';
 
 registerAllModules();
 
-type WorkbookTab = 'input' | 'database' | 'ledger' | 'summary';
+type WorkbookTab = 'input' | 'database' | 'ledger' | 'summary' | 'vat';
 type SummaryMode = '매출' | '매입' | '미수금' | '미지급금';
+type QuarterVatBasis = 'date' | 'applied';
+type QuarterVatOption = 'all' | 'Q1' | 'Q2' | 'Q3' | 'Q4';
 
 interface InputRow {
     transactionType: WorkbookTransactionType | '';
@@ -80,6 +83,15 @@ interface SummaryFilter {
     siteName: string;
 }
 
+interface QuarterVatFilter {
+    year: number;
+    quarter: QuarterVatOption;
+    basis: QuarterVatBasis;
+    teamName: string;
+    partnerName: string;
+    siteName: string;
+}
+
 interface LedgerRow {
     id: string;
     date: string;
@@ -110,6 +122,62 @@ interface SummaryRow {
     settlementEntryIds: string[];
     note: string;
     teamName: string;
+}
+
+interface QuarterVatSummaryRow {
+    quarter: QuarterVatOption;
+    label: string;
+    periodLabel: string;
+    salesSupply: number;
+    salesVat: number;
+    salesTotal: number;
+    purchaseSupply: number;
+    purchaseVat: number;
+    purchaseTotal: number;
+    payableVat: number;
+    entryCount: number;
+    warningCount: number;
+}
+
+interface QuarterVatMonthlyRow {
+    month: number;
+    label: string;
+    salesSupply: number;
+    salesVat: number;
+    salesTotal: number;
+    purchaseSupply: number;
+    purchaseVat: number;
+    purchaseTotal: number;
+    payableVat: number;
+    entryCount: number;
+    warningCount: number;
+}
+
+interface QuarterVatDetailRow {
+    id: string;
+    transactionType: WorkbookTransactionType;
+    date: string;
+    periodLabel: string;
+    quarter: QuarterVatOption;
+    partnerName: string;
+    siteName: string;
+    description: string;
+    supplyAmount: number;
+    taxAmount: number;
+    expectedTaxAmount: number;
+    totalAmount: number;
+    expectedTotalAmount: number;
+    issues: string[];
+    note: string;
+    teamName: string;
+}
+
+interface QuarterVatReport {
+    quarterRows: QuarterVatSummaryRow[];
+    monthlyRows: QuarterVatMonthlyRow[];
+    detailRows: QuarterVatDetailRow[];
+    warningRows: QuarterVatDetailRow[];
+    totals: QuarterVatSummaryRow;
 }
 
 interface LegacyMatchCandidate {
@@ -195,12 +263,21 @@ const DB_INITIAL_LOAD_LIMIT = 300;
 const INPUT_GRID_DERIVED_SOURCE = 'workbook-input-derived';
 const INPUT_GRID_MOUSE_COMMIT_SOURCE = 'workbook-input-mouse-commit';
 const INPUT_GRID_NUMERIC_COLUMNS = new Set([5, 6, 7, 8, 9, 10, 11]);
+const INPUT_GRID_AMOUNT_COLUMNS = new Set([6, 7, 8, 9]);
+const INPUT_GRID_AMOUNT_PROPS = new Set<keyof InputRow>([
+    'supplyAmount',
+    'taxAmount',
+    'totalAmount',
+    'paymentAmount'
+]);
 const isInputGridNumericColumn = (columnIndex: number) => INPUT_GRID_NUMERIC_COLUMNS.has(columnIndex);
+const isInputGridAmountColumn = (columnIndex: number) => INPUT_GRID_AMOUNT_COLUMNS.has(columnIndex);
 type EntryLoadScope = 'none' | 'recent' | 'range' | 'all';
 interface EntryLoadQuery {
     scope: EntryLoadScope;
     startDate?: string;
     endDate?: string;
+    transactionType?: WorkbookTransactionType;
     limitCount?: number;
     orderDirection?: 'asc' | 'desc';
 }
@@ -216,7 +293,17 @@ const createAllEntryLoadQuery = (): EntryLoadQuery => ({
     orderDirection: 'asc'
 });
 
-const createRangeEntryLoadQuery = (startDate: string, endDate: string): EntryLoadQuery => {
+const createTransactionTypeEntryLoadQuery = (transactionType: WorkbookTransactionType): EntryLoadQuery => ({
+    scope: 'all',
+    transactionType,
+    orderDirection: 'asc'
+});
+
+const createRangeEntryLoadQuery = (
+    startDate: string,
+    endDate: string,
+    transactionType?: WorkbookTransactionType
+): EntryLoadQuery => {
     const normalizedStart = String(startDate ?? '').trim();
     const normalizedEnd = String(endDate ?? '').trim();
 
@@ -225,6 +312,7 @@ const createRangeEntryLoadQuery = (startDate: string, endDate: string): EntryLoa
             scope: 'range',
             startDate: normalizedEnd,
             endDate: normalizedStart,
+            transactionType,
             orderDirection: 'asc'
         };
     }
@@ -233,6 +321,7 @@ const createRangeEntryLoadQuery = (startDate: string, endDate: string): EntryLoa
         scope: 'range',
         startDate: normalizedStart,
         endDate: normalizedEnd,
+        transactionType,
         orderDirection: 'asc'
     };
 };
@@ -241,6 +330,7 @@ const buildEntryLoadQueryKey = (entryQuery: EntryLoadQuery) => [
     entryQuery.scope,
     entryQuery.startDate ?? '',
     entryQuery.endDate ?? '',
+    entryQuery.transactionType ?? '',
     entryQuery.limitCount ?? '',
     entryQuery.orderDirection ?? 'asc'
 ].join('|');
@@ -257,6 +347,7 @@ interface RefreshPageDataOptions {
     forceCatalogs?: boolean;
     loadEntries?: boolean;
     entryQuery?: EntryLoadQuery;
+    silent?: boolean;
 }
 
 const buildDefaultLedgerStart = (date: Date) => (
@@ -267,7 +358,10 @@ const WORKBOOK_TABS: Array<{ id: WorkbookTab; label: string }> = [
     { id: 'database', label: 'DB' },
     { id: 'ledger', label: '조회 (매출, 매입 거래장)' },
     { id: 'summary', label: '전체 조회' },
+    { id: 'vat', label: '분기 부가세' },
 ];
+
+const SUMMARY_MODE_TABS: SummaryMode[] = ['매출', '매입', '미수금', '미지급금'];
 
 const TENANT_TABS: Array<{ key: WorkbookLedgerTenant; label: string; path: string; colorClass: string }> = [
     { key: 'cheongyeon', label: '청연', path: '/payroll/workbook-ledger', colorClass: 'tenant-cheongyeon' },
@@ -366,9 +460,40 @@ const formatDateInput = (date: Date) => (
     `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 );
 
-const formatShortDateInput = (normalizedDate: string) => (
-    `${normalizedDate.slice(2, 4)}-${normalizedDate.slice(5, 7)}-${normalizedDate.slice(8, 10)}`
+const formatDateInputForGrid = (normalizedDate: string) => normalizedDate;
+
+const isSupportedInputYear = (value: number): boolean => (
+    Number.isInteger(value) && value >= 2000 && value <= 2100
 );
+
+const parseInputYear = (value: unknown): number | null => {
+    const firstCell = String(value ?? '')
+        .split(/\t|\r\n|\n|\r/)
+        .map((part) => part.trim())
+        .find(Boolean) ?? '';
+
+    if (!firstCell) return null;
+
+    const fullYearMatch = firstCell.match(/\b(19\d{2}|20\d{2}|2100)\b/);
+    if (fullYearMatch) {
+        const year = Number(fullYearMatch[1]);
+        return isSupportedInputYear(year) ? year : null;
+    }
+
+    const compactDigits = firstCell.replace(/\D/g, '');
+    if (compactDigits.length >= 4) {
+        const year = Number(compactDigits.slice(0, 4));
+        if (isSupportedInputYear(year)) return year;
+    }
+
+    const twoDigitYearMatch = firstCell.match(/^\d{2}(?:[-./]\d{1,2}[-./]\d{1,2})?$/);
+    if (twoDigitYearMatch) {
+        const year = 2000 + Number(firstCell.slice(0, 2));
+        return isSupportedInputYear(year) ? year : null;
+    }
+
+    return null;
+};
 
 const expandDateYear = (yearText: string): number => {
     const year = Number(yearText);
@@ -422,6 +547,26 @@ const toNumberOrNull = (value: unknown): number | null => {
         return Number.isFinite(parsed) ? parsed : null;
     }
     return null;
+};
+
+const normalizeInputGridAmountValue = (value: unknown): unknown => {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : value;
+    if (typeof value !== 'string') return value;
+
+    const trimmed = value.trim();
+    if (!trimmed.includes(',')) return value;
+
+    const compact = trimmed
+        .replace(/\s+/g, '')
+        .replace(/^₩/, '')
+        .replace(/원$/, '');
+
+    if (!/^[+-]?\d{1,3}(,\d{3})+(\.\d+)?$/.test(compact)) {
+        return value;
+    }
+
+    const parsed = Number(compact.replace(/,/g, ''));
+    return Number.isFinite(parsed) ? parsed : value;
 };
 
 const normalizeText = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
@@ -674,7 +819,7 @@ const toInputText = (value: unknown) => {
 
 const normalizeInputDateForGrid = (value: unknown, baseYear: number): string => {
     const normalizedDate = normalizeDate(value, baseYear);
-    if (normalizedDate) return formatShortDateInput(normalizedDate);
+    if (normalizedDate) return formatDateInputForGrid(normalizedDate);
     return toInputText(value);
 };
 
@@ -737,6 +882,38 @@ const areInputGridValuesEqual = (left: unknown, right: unknown) => {
     if (left === right) return true;
     if (isEmptyInputGridValue(left) && isEmptyInputGridValue(right)) return true;
     return false;
+};
+
+const isInputGridAmountProp = (prop: unknown) => {
+    if (typeof prop === 'number') return isInputGridAmountColumn(prop);
+    if (typeof prop === 'string') {
+        if (INPUT_GRID_AMOUNT_PROPS.has(prop as keyof InputRow)) return true;
+
+        const numericProp = Number(prop);
+        return Number.isInteger(numericProp) && isInputGridAmountColumn(numericProp);
+    }
+    return false;
+};
+
+const normalizeInputGridAmountChanges = (changes: Array<unknown>) => {
+    changes.forEach((change) => {
+        if (!Array.isArray(change)) return;
+        if (!change || !isInputGridAmountProp(change[1])) return;
+        change[3] = normalizeInputGridAmountValue(change[3]);
+    });
+};
+
+const normalizeInputGridPastedData = (data: unknown[][], startColumn: number) => {
+    const normalizedStartColumn = Number.isInteger(startColumn) ? startColumn : 0;
+
+    data.forEach((row) => {
+        if (!Array.isArray(row)) return;
+
+        row.forEach((cellValue, columnOffset) => {
+            if (!isInputGridAmountColumn(normalizedStartColumn + columnOffset)) return;
+            row[columnOffset] = normalizeInputGridAmountValue(cellValue);
+        });
+    });
 };
 
 const applyInputGridDerivedValues = (
@@ -1023,6 +1200,236 @@ const isPaymentEntry = (entry: WorkbookLedgerEntry) => (entry.paymentAmount ?? 0
 const isSummarySettlementMode = (mode: SummaryMode) => mode === '미수금' || mode === '미지급금';
 const isStandalonePaymentEntry = (entry: WorkbookLedgerEntry) => isPaymentEntry(entry) && (entry.totalAmount ?? 0) <= 0;
 const isUnmappedPaymentEntry = (entry: WorkbookLedgerEntry) => isStandalonePaymentEntry(entry) && !normalizeText(entry.matchedEntryId);
+
+const QUARTER_VAT_OPTIONS: Array<{ value: QuarterVatOption; label: string; months: number[] }> = [
+    { value: 'Q1', label: '1분기', months: [1, 2, 3] },
+    { value: 'Q2', label: '2분기', months: [4, 5, 6] },
+    { value: 'Q3', label: '3분기', months: [7, 8, 9] },
+    { value: 'Q4', label: '4분기', months: [10, 11, 12] },
+];
+
+const getQuarterFromMonth = (month: number | null | undefined): QuarterVatOption | null => {
+    if (!month || month < 1 || month > 12) return null;
+    if (month <= 3) return 'Q1';
+    if (month <= 6) return 'Q2';
+    if (month <= 9) return 'Q3';
+    return 'Q4';
+};
+
+const getQuarterVatOption = (quarter: QuarterVatOption) =>
+    QUARTER_VAT_OPTIONS.find((option) => option.value === quarter);
+
+const getQuarterVatLabel = (quarter: QuarterVatOption) =>
+    quarter === 'all' ? '전체' : getQuarterVatOption(quarter)?.label ?? quarter;
+
+const getQuarterVatPeriodLabel = (year: number, quarter: QuarterVatOption) => {
+    const option = getQuarterVatOption(quarter);
+    if (!option) return `${year}년 전체`;
+    return `${year}.${String(option.months[0]).padStart(2, '0')}~${String(option.months[2]).padStart(2, '0')}`;
+};
+
+const getQuarterVatEntryPeriod = (entry: WorkbookLedgerEntry, basis: QuarterVatBasis) => {
+    if (basis === 'applied') {
+        const appliedYear = entry.appliedYear ?? getYearFromDate(entry.date);
+        const appliedMonth = entry.appliedMonth ?? getMonthFromDate(entry.date);
+        const quarter = getQuarterFromMonth(appliedMonth);
+
+        return {
+            year: appliedYear,
+            month: appliedMonth,
+            quarter,
+            periodLabel: appliedYear && appliedMonth
+                ? `${appliedYear}-${String(appliedMonth).padStart(2, '0')}`
+                : '-',
+        };
+    }
+
+    const normalizedDate = normalizeDate(entry.date);
+    const year = getYearFromDate(normalizedDate);
+    const month = getMonthFromDate(normalizedDate);
+    const quarter = getQuarterFromMonth(month);
+
+    return {
+        year,
+        month,
+        quarter,
+        periodLabel: normalizedDate || '-',
+    };
+};
+
+const emptyQuarterVatSummaryRow = (
+    quarter: QuarterVatOption,
+    label: string,
+    periodLabel: string
+): QuarterVatSummaryRow => ({
+    quarter,
+    label,
+    periodLabel,
+    salesSupply: 0,
+    salesVat: 0,
+    salesTotal: 0,
+    purchaseSupply: 0,
+    purchaseVat: 0,
+    purchaseTotal: 0,
+    payableVat: 0,
+    entryCount: 0,
+    warningCount: 0,
+});
+
+const addQuarterVatAmount = (
+    target: QuarterVatSummaryRow | QuarterVatMonthlyRow,
+    entry: WorkbookLedgerEntry,
+    warningCount: number
+) => {
+    const supplyAmount = entry.supplyAmount ?? 0;
+    const taxAmount = entry.taxAmount ?? 0;
+    const totalAmount = entry.totalAmount ?? 0;
+
+    if (entry.transactionType === '매입') {
+        target.purchaseSupply += supplyAmount;
+        target.purchaseVat += taxAmount;
+        target.purchaseTotal += totalAmount;
+    } else {
+        target.salesSupply += supplyAmount;
+        target.salesVat += taxAmount;
+        target.salesTotal += totalAmount;
+    }
+
+    target.payableVat = target.salesVat - target.purchaseVat;
+    target.entryCount += 1;
+    target.warningCount += warningCount;
+};
+
+const getQuarterVatEntryIssues = (entry: WorkbookLedgerEntry, basis: QuarterVatBasis): string[] => {
+    const issues: string[] = [];
+    const supplyAmount = entry.supplyAmount ?? 0;
+    const taxAmount = entry.taxAmount ?? 0;
+    const totalAmount = entry.totalAmount ?? 0;
+    const expectedTaxAmount = supplyAmount !== 0 ? Math.round(supplyAmount * 0.1) : 0;
+    const expectedTotalAmount = supplyAmount + taxAmount;
+
+    if (!normalizeDate(entry.date)) issues.push('날짜 오류');
+    if (basis === 'applied' && (!entry.appliedYear || !entry.appliedMonth)) issues.push('적용연월 없음');
+    if (Math.abs(taxAmount - expectedTaxAmount) > 1) issues.push('세액 불일치');
+    if (Math.abs(totalAmount - expectedTotalAmount) > 1) issues.push('합계 불일치');
+
+    return issues;
+};
+
+const buildQuarterVatReport = (entries: WorkbookLedgerEntry[], filter: QuarterVatFilter): QuarterVatReport => {
+    const year = Number(filter.year);
+    const quarterRowsByKey = new Map<QuarterVatOption, QuarterVatSummaryRow>();
+    QUARTER_VAT_OPTIONS.forEach((option) => {
+        quarterRowsByKey.set(
+            option.value,
+            emptyQuarterVatSummaryRow(option.value, option.label, getQuarterVatPeriodLabel(year, option.value))
+        );
+    });
+
+    const selectedMonths = filter.quarter === 'all'
+        ? Array.from({ length: 12 }, (_, index) => index + 1)
+        : getQuarterVatOption(filter.quarter)?.months ?? [];
+    const monthlyRowsByMonth = new Map<number, QuarterVatMonthlyRow>();
+    selectedMonths.forEach((month) => {
+        monthlyRowsByMonth.set(month, {
+            month,
+            label: `${month}월`,
+            salesSupply: 0,
+            salesVat: 0,
+            salesTotal: 0,
+            purchaseSupply: 0,
+            purchaseVat: 0,
+            purchaseTotal: 0,
+            payableVat: 0,
+            entryCount: 0,
+            warningCount: 0,
+        });
+    });
+
+    const detailRows: QuarterVatDetailRow[] = [];
+
+    entries
+        .filter((entry) => (entry.totalAmount ?? 0) !== 0 || (entry.supplyAmount ?? 0) !== 0 || (entry.taxAmount ?? 0) !== 0)
+        .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
+        .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
+        .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
+        .forEach((entry) => {
+            const period = getQuarterVatEntryPeriod(entry, filter.basis);
+            if (period.year !== year || !period.month || !period.quarter) return;
+
+            const issues = getQuarterVatEntryIssues(entry, filter.basis);
+            const warningCount = issues.length > 0 ? 1 : 0;
+            const quarterRow = quarterRowsByKey.get(period.quarter);
+            if (quarterRow) addQuarterVatAmount(quarterRow, entry, warningCount);
+
+            const isSelectedQuarter = filter.quarter === 'all' || filter.quarter === period.quarter;
+            if (!isSelectedQuarter) return;
+
+            const monthRow = monthlyRowsByMonth.get(period.month);
+            if (monthRow) addQuarterVatAmount(monthRow, entry, warningCount);
+
+            const supplyAmount = entry.supplyAmount ?? 0;
+            const taxAmount = entry.taxAmount ?? 0;
+            detailRows.push({
+                id: getWorkbookEntryKey(entry),
+                transactionType: entry.transactionType,
+                date: entry.date,
+                periodLabel: period.periodLabel,
+                quarter: period.quarter,
+                partnerName: entry.partnerName,
+                siteName: entry.siteName ?? '',
+                description: entry.description,
+                supplyAmount,
+                taxAmount,
+                expectedTaxAmount: supplyAmount !== 0 ? Math.round(supplyAmount * 0.1) : 0,
+                totalAmount: entry.totalAmount ?? 0,
+                expectedTotalAmount: supplyAmount + taxAmount,
+                issues,
+                note: entry.note ?? '',
+                teamName: entry.teamName ?? '',
+            });
+        });
+
+    const quarterRows = QUARTER_VAT_OPTIONS.map((option) => quarterRowsByKey.get(option.value))
+        .filter((row): row is QuarterVatSummaryRow => Boolean(row));
+    const monthlyRows = selectedMonths
+        .map((month) => monthlyRowsByMonth.get(month))
+        .filter((row): row is QuarterVatMonthlyRow => Boolean(row));
+    const warningRows = detailRows.filter((row) => row.issues.length > 0);
+    const totals = detailRows.reduce((accumulator, row) => {
+        const syntheticEntry: WorkbookLedgerEntry = {
+            transactionType: row.transactionType,
+            date: row.date,
+            partnerName: row.partnerName,
+            siteName: row.siteName,
+            description: row.description,
+            supplyAmount: row.supplyAmount,
+            taxAmount: row.taxAmount,
+            totalAmount: row.totalAmount,
+            paymentAmount: 0,
+        };
+        addQuarterVatAmount(accumulator, syntheticEntry, row.issues.length > 0 ? 1 : 0);
+        return accumulator;
+    }, emptyQuarterVatSummaryRow(
+        filter.quarter,
+        filter.quarter === 'all' ? `${year}년 전체` : `${year}년 ${getQuarterVatLabel(filter.quarter)}`,
+        getQuarterVatPeriodLabel(year, filter.quarter)
+    ));
+
+    return {
+        quarterRows,
+        monthlyRows,
+        detailRows: detailRows.sort((left, right) => {
+            const dateCompare = left.date.localeCompare(right.date, 'en');
+            if (dateCompare !== 0) return dateCompare;
+            const typeCompare = left.transactionType.localeCompare(right.transactionType, 'ko');
+            if (typeCompare !== 0) return typeCompare;
+            return left.partnerName.localeCompare(right.partnerName, 'ko');
+        }),
+        warningRows,
+        totals,
+    };
+};
 
 const getLinkedPaymentTotal = (entries: WorkbookLedgerEntry[], invoiceId: string, excludePaymentId?: string) => entries
     .filter((entry) => (
@@ -1634,27 +2041,32 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const dbUploadInputRef = useRef<HTMLInputElement | null>(null);
     const ledgerCaptureRef = useRef<HTMLDivElement | null>(null);
     const summaryCaptureRef = useRef<HTMLDivElement | null>(null);
+    const quarterVatCaptureRef = useRef<HTMLDivElement | null>(null);
     const { currentUser } = useAuth();
     const ledgerService = useMemo(() => createWorkbookLedgerService(tenantKey), [tenantKey]);
 
     const today = useMemo(() => new Date(), []);
     const currentYear = today.getFullYear();
+    const currentQuarter = getQuarterFromMonth(today.getMonth() + 1) ?? 'Q1';
     const todayString = formatDateInput(today);
     const defaultLedgerStart = buildDefaultLedgerStart(today);
 
     const [activeTab, setActiveTab] = useState<WorkbookTab>('input');
     const [loading, setLoading] = useState(false);
+    const [loadingMessage, setLoadingMessage] = useState('');
     const [saving, setSaving] = useState(false);
     const [uploadingDb, setUploadingDb] = useState(false);
     const [downloadingDb, setDownloadingDb] = useState(false);
     const [downloadingKb, setDownloadingKb] = useState(false);
+    const [downloadingVat, setDownloadingVat] = useState(false);
     const [showKbPreview, setShowKbPreview] = useState(false);
     const [kbReceiverDisplay, setKbReceiverDisplay] = useState(companyLabel);
     const [kbMemoSuffix, setKbMemoSuffix] = useState('');
     const [dbActionLoading, setDbActionLoading] = useState(false);
-    const [capturingView, setCapturingView] = useState<'ledger' | 'summary' | null>(null);
+    const [capturingView, setCapturingView] = useState<'ledger' | 'summary' | 'vat' | null>(null);
     const [printingLedger, setPrintingLedger] = useState(false);
     const [printingSummary, setPrintingSummary] = useState(false);
+    const [printingVat, setPrintingVat] = useState(false);
     const [receiptActionLoading, setReceiptActionLoading] = useState(false);
     const [entries, setEntries] = useState<WorkbookLedgerEntry[]>([]);
     const [entriesLoaded, setEntriesLoaded] = useState(false);
@@ -1713,6 +2125,22 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         partnerName: '',
         siteName: '',
     });
+    const [quarterVatDraft, setQuarterVatDraft] = useState<QuarterVatFilter>({
+        year: currentYear,
+        quarter: currentQuarter,
+        basis: 'date',
+        teamName: '',
+        partnerName: '',
+        siteName: '',
+    });
+    const [quarterVatFilter, setQuarterVatFilter] = useState<QuarterVatFilter>({
+        year: currentYear,
+        quarter: currentQuarter,
+        basis: 'date',
+        teamName: '',
+        partnerName: '',
+        siteName: '',
+    });
     const [dbFilter, setDbFilter] = useState<DbFilterState>(emptyDbFilter);
     const [dbSort, setDbSort] = useState<DbSortState>({ field: 'date', direction: 'asc' });
     const [dbPaymentMappingMode, setDbPaymentMappingMode] = useState<DbPaymentMappingMode>('all');
@@ -1744,16 +2172,26 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
     const refreshPageData = useCallback(async (options?: RefreshPageDataOptions): Promise<WorkbookLedgerEntry[] | null> => {
         let loadedEntries: WorkbookLedgerEntry[] | null = null;
-        setLoading(true);
+        const requestedEntryQuery = options?.entryQuery ?? entryLoadQueryRef.current;
+        const shouldLoadEntries = options?.loadEntries ?? entriesLoadedRef.current;
+        const shouldShowLoading = !options?.silent;
+        const nextLoadingMessage = shouldLoadEntries
+            ? requestedEntryQuery.scope === 'all'
+                ? `${companyLabel} 전체 DB 장부를 불러오는 중`
+                : `${companyLabel} 장부 데이터를 불러오는 중`
+            : `${companyLabel} 장부 화면을 준비하는 중`;
+        if (shouldShowLoading) {
+            setLoadingMessage(nextLoadingMessage);
+            setLoading(true);
+        }
         try {
             const shouldLoadCatalogs = options?.forceCatalogs || !catalogsLoadedRef.current;
-            const shouldLoadEntries = options?.loadEntries ?? entriesLoadedRef.current;
-            const requestedEntryQuery = options?.entryQuery ?? entryLoadQueryRef.current;
             const [savedEntries, companies, sites, teams] = await Promise.all([
                 shouldLoadEntries ? ledgerService.getEntries({
                     force: options?.forceEntries,
                     startDate: requestedEntryQuery.startDate,
                     endDate: requestedEntryQuery.endDate,
+                    transactionType: requestedEntryQuery.transactionType,
                     limitCount: requestedEntryQuery.limitCount,
                     orderDirection: requestedEntryQuery.orderDirection
                 }) : Promise.resolve(null),
@@ -1786,16 +2224,21 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             }
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', '전용 장부 데이터를 불러오지 못했습니다.', 'error');
+            if (shouldShowLoading) {
+                Swal.fire('오류', '전용 장부 데이터를 불러오지 못했습니다.', 'error');
+            }
         } finally {
-            setLoading(false);
+            if (shouldShowLoading) {
+                setLoading(false);
+                setLoadingMessage('');
+            }
         }
 
         return loadedEntries;
-    }, [ledgerService, rebuildLookupOptions]);
+    }, [companyLabel, ledgerService, rebuildLookupOptions]);
 
     useEffect(() => {
-        refreshPageData({ forceCatalogs: true, loadEntries: false });
+        refreshPageData({ forceCatalogs: true, loadEntries: false, silent: true });
     }, [refreshPageData]);
 
     const getEntryLoadQueryForTab = useCallback((tab: WorkbookTab): EntryLoadQuery => {
@@ -1804,23 +2247,49 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         }
 
         if (tab === 'ledger') {
-            return createRangeEntryLoadQuery(ledgerFilter.startDate, ledgerFilter.endDate);
+            return createRangeEntryLoadQuery(
+                ledgerFilter.startDate,
+                ledgerFilter.endDate,
+                ledgerFilter.transactionType
+            );
         }
 
         if (tab === 'summary') {
+            const summaryTransactionType: WorkbookTransactionType =
+                summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '매입' : '매출';
+
             if (isSummarySettlementMode(summaryFilter.mode)) {
                 return {
                     scope: 'range',
                     endDate: summaryFilter.endDate,
+                    transactionType: summaryTransactionType,
                     orderDirection: 'asc'
                 };
             }
 
-            return createAllEntryLoadQuery();
+            return createTransactionTypeEntryLoadQuery(summaryTransactionType);
+        }
+
+        if (tab === 'vat') {
+            if (quarterVatFilter.basis === 'applied') {
+                return createAllEntryLoadQuery();
+            }
+
+            const year = Number.isInteger(quarterVatFilter.year) ? quarterVatFilter.year : currentYear;
+            return createRangeEntryLoadQuery(`${year}-01-01`, `${year}-12-31`);
         }
 
         return { scope: 'none' };
-    }, [ledgerFilter.endDate, ledgerFilter.startDate, summaryFilter.endDate, summaryFilter.mode, summaryFilter.startDate]);
+    }, [
+        currentYear,
+        ledgerFilter.endDate,
+        ledgerFilter.startDate,
+        quarterVatFilter.basis,
+        quarterVatFilter.year,
+        summaryFilter.endDate,
+        summaryFilter.mode,
+        summaryFilter.startDate
+    ]);
 
     useEffect(() => {
         if (activeTab === 'input') return;
@@ -1833,6 +2302,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [activeTab, getEntryLoadQueryForTab, refreshPageData]);
 
     useEffect(() => {
+        if (activeTab !== 'summary' || purchaseAccountsByName.size > 0) return;
+
         const loadPurchaseAccounts = async () => {
             try {
                 const accounts = await accountDirectoryService.getEntriesByCategory('purchase');
@@ -1852,7 +2323,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         };
 
         loadPurchaseAccounts();
-    }, []);
+    }, [activeTab, purchaseAccountsByName.size]);
 
     useEffect(() => {
         selectedTeamRef.current = selectedTeam;
@@ -1895,9 +2366,9 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const commitBaseYearInput = useCallback(() => {
         const input = baseYearInputRef.current;
         const value = input?.value.trim() ?? '';
-        const nextYear = Number(value);
+        const nextYear = parseInputYear(value);
 
-        if (!Number.isInteger(nextYear) || nextYear < 2000 || nextYear > 2100) {
+        if (nextYear === null) {
             if (input) input.value = String(baseYearRef.current || currentYear);
             return;
         }
@@ -1906,6 +2377,16 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         setBaseYear(nextYear);
         if (input) input.value = String(nextYear);
     }, [currentYear]);
+
+    const handleBaseYearPaste = useCallback((event: React.ClipboardEvent<HTMLInputElement>) => {
+        const nextYear = parseInputYear(event.clipboardData.getData('text'));
+        if (nextYear === null) return;
+
+        event.preventDefault();
+        baseYearRef.current = nextYear;
+        setBaseYear(nextYear);
+        event.currentTarget.value = String(nextYear);
+    }, []);
 
     const syncTopInputRefs = useCallback(() => {
         selectedTeamRef.current = selectedTeamInputRef.current?.value ?? selectedTeamRef.current;
@@ -1960,6 +2441,27 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
         const activeEditor = hotInstance?.getActiveEditor?.();
         return activeEditor?.TEXTAREA ?? focusedElement;
+    }, []);
+
+    const getInputGridPasteStartColumn = useCallback((coords: unknown) => {
+        if (Array.isArray(coords) && coords.length > 0) {
+            const startCol = Number((coords[0] as { startCol?: unknown }).startCol);
+            if (Number.isInteger(startCol)) return startCol;
+        }
+
+        const selectedCell = hotRef.current?.hotInstance?.getSelectedLast?.();
+        const selectedColumn = Array.isArray(selectedCell) ? Number(selectedCell[1]) : 0;
+        return Number.isInteger(selectedColumn) ? selectedColumn : 0;
+    }, []);
+
+    const handleInputGridBeforePaste = useCallback((data: unknown[][], coords: unknown) => {
+        if (!Array.isArray(data)) return;
+        normalizeInputGridPastedData(data, getInputGridPasteStartColumn(coords));
+    }, [getInputGridPasteStartColumn]);
+
+    const handleInputGridBeforeChange = useCallback((changes: unknown) => {
+        if (!Array.isArray(changes)) return;
+        normalizeInputGridAmountChanges(changes);
     }, []);
 
     const handleInputGridChange = useCallback((changes: unknown, source: string) => {
@@ -2333,7 +2835,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [entries, entryLoadScope, loadAllEntries]);
 
     const handleCopyCapture = useCallback(async (
-        target: 'ledger' | 'summary',
+        target: 'ledger' | 'summary' | 'vat',
         element: HTMLElement | null,
         label: string
     ) => {
@@ -3390,6 +3892,22 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         setSummaryFilter(nextFilter);
     }, [defaultLedgerStart, summaryDraft, todayString]);
 
+    const applyQuarterVatFilter = useCallback(() => {
+        const nextYear = Number(quarterVatDraft.year);
+        if (!Number.isInteger(nextYear) || nextYear < 2000 || nextYear > 2100) {
+            Swal.fire('입력 확인', '조회 연도는 2000년부터 2100년 사이로 입력해주세요.', 'warning');
+            return;
+        }
+
+        setQuarterVatFilter({
+            ...quarterVatDraft,
+            year: nextYear,
+            teamName: normalizeText(quarterVatDraft.teamName),
+            partnerName: normalizeText(quarterVatDraft.partnerName),
+            siteName: normalizeText(quarterVatDraft.siteName),
+        });
+    }, [quarterVatDraft]);
+
     const ledgerRows = useMemo(
         () => (activeTab === 'ledger' ? buildLedgerRows(entries, ledgerFilter) : []),
         [activeTab, entries, ledgerFilter]
@@ -3397,6 +3915,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const summaryRows = useMemo(
         () => (activeTab === 'summary' || receiptHistoryTargetId ? buildSummaryRows(entries, summaryFilter) : []),
         [activeTab, entries, receiptHistoryTargetId, summaryFilter]
+    );
+    const quarterVatReport = useMemo(
+        () => (activeTab === 'vat' ? buildQuarterVatReport(entries, quarterVatFilter) : buildQuarterVatReport([], quarterVatFilter)),
+        [activeTab, entries, quarterVatFilter]
     );
 
     const ledgerTotals = useMemo(() => {
@@ -3605,6 +4127,89 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         }
     }, [kbPreviewRows, summaryFilter.mode]);
 
+    const handleDownloadQuarterVat = useCallback(async () => {
+        if (quarterVatReport.detailRows.length === 0) {
+            Swal.fire('안내', '다운로드할 분기 부가세 데이터가 없습니다.', 'info');
+            return;
+        }
+
+        setDownloadingVat(true);
+        try {
+            const XLSX = await import('xlsx');
+            const { saveAs } = await import('file-saver');
+            const workbook = XLSX.utils.book_new();
+
+            const summarySheet = XLSX.utils.aoa_to_sheet([
+                ['분기', '기간', '매출 공급가액', '매출 세액', '매출 합계', '매입 공급가액', '매입 세액', '매입 합계', '예상 납부세액', '건수'],
+                ...quarterVatReport.quarterRows.map((row) => [
+                    row.label,
+                    row.periodLabel,
+                    row.salesSupply,
+                    row.salesVat,
+                    row.salesTotal,
+                    row.purchaseSupply,
+                    row.purchaseVat,
+                    row.purchaseTotal,
+                    row.payableVat,
+                    row.entryCount,
+                ]),
+            ]);
+            XLSX.utils.book_append_sheet(workbook, summarySheet, '분기요약');
+
+            const monthlySheet = XLSX.utils.aoa_to_sheet([
+                ['월', '매출 공급가액', '매출 세액', '매출 합계', '매입 공급가액', '매입 세액', '매입 합계', '예상 납부세액', '건수'],
+                ...quarterVatReport.monthlyRows.map((row) => [
+                    row.label,
+                    row.salesSupply,
+                    row.salesVat,
+                    row.salesTotal,
+                    row.purchaseSupply,
+                    row.purchaseVat,
+                    row.purchaseTotal,
+                    row.payableVat,
+                    row.entryCount,
+                ]),
+            ]);
+            XLSX.utils.book_append_sheet(workbook, monthlySheet, '월별요약');
+
+            const detailSheet = XLSX.utils.aoa_to_sheet([
+                ['구분', '발행일', '귀속', '분기', '거래처명', '현장명', '내용', '공급가액', '세액', '예상세액', '합계', '예상합계', '비고', '팀명'],
+                ...quarterVatReport.detailRows.map((row) => [
+                    row.transactionType,
+                    row.date,
+                    row.periodLabel,
+                    getQuarterVatLabel(row.quarter),
+                    row.partnerName,
+                    row.siteName,
+                    row.description,
+                    row.supplyAmount,
+                    row.taxAmount,
+                    row.expectedTaxAmount,
+                    row.totalAmount,
+                    row.expectedTotalAmount,
+                    row.note,
+                    row.teamName,
+                ]),
+            ]);
+            XLSX.utils.book_append_sheet(workbook, detailSheet, '세부내역');
+
+            const workbookBuffer = XLSX.write(workbook, {
+                bookType: 'xlsx',
+                type: 'array'
+            });
+            const blob = new Blob([workbookBuffer], {
+                type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            });
+            const quarterLabel = getQuarterVatLabel(quarterVatFilter.quarter).replace(/\s+/g, '');
+            saveAs(blob, `${companyLabel}_분기부가세_${quarterVatFilter.year}_${quarterLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+        } catch (error) {
+            console.error(error);
+            Swal.fire('오류', '분기 부가세 다운로드에 실패했습니다.', 'error');
+        } finally {
+            setDownloadingVat(false);
+        }
+    }, [companyLabel, quarterVatFilter.quarter, quarterVatFilter.year, quarterVatReport]);
+
     const canRegisterReceipt = summaryFilter.mode === '미수금' || summaryFilter.mode === '미지급금';
     const canOpenReceiptHistory = canRegisterReceipt;
     const summarySettlementType: WorkbookTransactionType = summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '매입' : '매출';
@@ -3677,6 +4282,120 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         () => getSettlementLabels(receiptHistoryInvoice?.transactionType ?? receiptHistorySummaryRow?.transactionType),
         [receiptHistoryInvoice?.transactionType, receiptHistorySummaryRow?.transactionType]
     );
+
+    const handlePrintQuarterVat = useCallback(() => {
+        if (quarterVatReport.detailRows.length === 0) {
+            Swal.fire('안내', '인쇄할 분기 부가세 데이터가 없습니다.', 'info');
+            return;
+        }
+
+        const printWindow = window.open('', '_blank', 'width=1200,height=900');
+        if (!printWindow) {
+            Swal.fire('안내', '팝업 차단을 해제한 뒤 다시 시도해주세요.', 'info');
+            return;
+        }
+
+        const selectedLabel = quarterVatFilter.quarter === 'all'
+            ? `${quarterVatFilter.year}년 전체`
+            : `${quarterVatFilter.year}년 ${getQuarterVatLabel(quarterVatFilter.quarter)}`;
+        const basisLabel = quarterVatFilter.basis === 'applied' ? '적용연월 기준' : '발행일 기준';
+        const metricRows = [
+            ['매출세액', quarterVatReport.totals.salesVat],
+            ['매입세액', quarterVatReport.totals.purchaseVat],
+            ['예상 납부세액', Math.max(quarterVatReport.totals.payableVat, 0)],
+            ['환급 예상액', Math.max(-quarterVatReport.totals.payableVat, 0)],
+        ];
+        const quarterRowsHtml = quarterVatReport.quarterRows.map((row) => `
+            <tr>
+                <td>${escapeHtml(row.label)}</td>
+                <td>${escapeHtml(row.periodLabel)}</td>
+                <td class="right">${formatNumber(row.salesVat)}</td>
+                <td class="right">${formatNumber(row.purchaseVat)}</td>
+                <td class="right">${formatNumber(row.payableVat)}</td>
+                <td class="right">${formatNumber(row.entryCount)}</td>
+            </tr>
+        `).join('');
+        const monthlyRowsHtml = quarterVatReport.monthlyRows.map((row) => `
+            <tr>
+                <td>${escapeHtml(row.label)}</td>
+                <td class="right">${formatNumber(row.salesSupply)}</td>
+                <td class="right">${formatNumber(row.salesVat)}</td>
+                <td class="right">${formatNumber(row.purchaseSupply)}</td>
+                <td class="right">${formatNumber(row.purchaseVat)}</td>
+                <td class="right">${formatNumber(row.payableVat)}</td>
+                <td class="right">${formatNumber(row.entryCount)}</td>
+            </tr>
+        `).join('');
+        const detailRowsHtml = quarterVatReport.detailRows.map((row, index) => `
+            <tr>
+                <td class="right">${index + 1}</td>
+                <td>${escapeHtml(row.transactionType)}</td>
+                <td>${escapeHtml(row.date)}</td>
+                <td>${escapeHtml(row.periodLabel)}</td>
+                <td>${escapeHtml(row.partnerName)}</td>
+                <td>${escapeHtml(row.siteName || '-')}</td>
+                <td class="right">${formatNumber(row.supplyAmount)}</td>
+                <td class="right">${formatNumber(row.taxAmount)}</td>
+                <td class="right">${formatNumber(row.totalAmount)}</td>
+            </tr>
+        `).join('');
+        const metricRowsHtml = metricRows.map(([label, value]) => `
+            <div class="metric"><span>${escapeHtml(String(label))}</span><strong>${formatNumber(Number(value))}</strong></div>
+        `).join('');
+
+        setPrintingVat(true);
+        printWindow.document.write(`
+            <!doctype html>
+            <html lang="ko">
+            <head>
+                <meta charset="utf-8" />
+                <title>${escapeHtml(companyLabel)} ${escapeHtml(selectedLabel)} 부가세</title>
+                <style>
+                    body { margin: 24px; color: #111827; font-family: "Malgun Gothic", Arial, sans-serif; }
+                    h1 { margin: 0; font-size: 22px; }
+                    h2 { margin: 24px 0 8px; font-size: 15px; }
+                    .meta { margin-top: 8px; color: #475569; font-size: 12px; }
+                    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 16px; }
+                    .metric { border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; background: #f8fafc; }
+                    .metric span { display: block; color: #64748b; font-size: 11px; font-weight: 700; }
+                    .metric strong { display: block; margin-top: 4px; font-size: 16px; }
+                    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+                    th, td { border: 1px solid #cbd5e1; padding: 6px 7px; font-size: 11px; word-break: keep-all; }
+                    th { background: #1e3a8a; color: white; }
+                    .right { text-align: right; }
+                    @media print { body { margin: 12mm; } .no-print { display: none; } }
+                </style>
+            </head>
+            <body>
+                <h1>${escapeHtml(companyLabel)} ${escapeHtml(selectedLabel)} 부가세</h1>
+                <div class="meta">${escapeHtml(basisLabel)} · 팀 ${escapeHtml(quarterVatFilter.teamName || '전체')} · 거래처 ${escapeHtml(quarterVatFilter.partnerName || '전체')} · 현장 ${escapeHtml(quarterVatFilter.siteName || '전체')}</div>
+                <div class="metrics">${metricRowsHtml}</div>
+                <h2>분기 요약</h2>
+                <table>
+                    <thead><tr><th>분기</th><th>기간</th><th>매출세액</th><th>매입세액</th><th>예상 납부</th><th>건수</th></tr></thead>
+                    <tbody>${quarterRowsHtml}</tbody>
+                </table>
+                <h2>월별 요약</h2>
+                <table>
+                    <thead><tr><th>월</th><th>매출 공급가액</th><th>매출세액</th><th>매입 공급가액</th><th>매입세액</th><th>예상 납부</th><th>건수</th></tr></thead>
+                    <tbody>${monthlyRowsHtml}</tbody>
+                </table>
+                <h2>세부 내역</h2>
+                <table>
+                    <thead><tr><th>No</th><th>구분</th><th>발행일</th><th>귀속</th><th>거래처명</th><th>현장명</th><th>공급가액</th><th>세액</th><th>합계</th></tr></thead>
+                    <tbody>${detailRowsHtml}</tbody>
+                </table>
+                <script>
+                    window.addEventListener('load', () => {
+                        window.print();
+                    });
+                </script>
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
+        setTimeout(() => setPrintingVat(false), 800);
+    }, [companyLabel, quarterVatFilter, quarterVatReport]);
 
     const handlePrintLedger = useCallback(() => {
         if (ledgerRows.length === 0) {
@@ -4431,10 +5150,26 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const selectableSummaryRowIds = useMemo(
         () => summaryFilter.mode === '미지급금'
             ? summaryRows
-                .filter((row) => row.outstandingAmount > 0)
+                .filter((row) => row.transactionType === '매입' && row.outstandingAmount > 0)
                 .map((row) => row.id)
             : [],
         [summaryFilter.mode, summaryRows]
+    );
+
+    const selectedSummaryRows = useMemo(
+        () => summaryFilter.mode === '미지급금'
+            ? summaryRows.filter((row) => (
+                selectedSummaryRowIdSet.has(row.id) &&
+                row.transactionType === '매입' &&
+                row.outstandingAmount > 0
+            ))
+            : [],
+        [selectedSummaryRowIdSet, summaryFilter.mode, summaryRows]
+    );
+
+    const selectedSummaryOutstandingTotal = useMemo(
+        () => selectedSummaryRows.reduce((total, row) => total + row.outstandingAmount, 0),
+        [selectedSummaryRows]
     );
 
     const areAllSelectableSummaryRowsSelected = useMemo(
@@ -4565,11 +5300,101 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         });
     }, [selectableSummaryRowIds]);
 
+    const handleBulkPaySelectedSummaryRows = useCallback(async () => {
+        if (summaryFilter.mode !== '미지급금') {
+            Swal.fire('안내', '일괄지급은 미지급금 조회에서만 가능합니다.', 'info');
+            return;
+        }
+
+        const targetRows = selectedSummaryRows;
+        if (targetRows.length === 0) {
+            Swal.fire('안내', '일괄지급할 미지급금 행을 먼저 선택하세요.', 'info');
+            return;
+        }
+
+        const targetTotal = targetRows.reduce((total, row) => total + row.outstandingAmount, 0);
+        const labels = getSettlementLabels('매입');
+
+        const result = await Swal.fire({
+            title: '선택 미지급금 일괄지급',
+            html: `
+                <div style="display:grid;gap:12px;text-align:left;">
+                    <div>
+                        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">선택 건수</div>
+                        <div style="padding:10px 12px;border:1px solid #d7dde7;border-radius:10px;background:#f8fafc;">${targetRows.length.toLocaleString()}건</div>
+                    </div>
+                    <div>
+                        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">지급 합계</div>
+                        <div style="padding:10px 12px;border:1px solid #d7dde7;border-radius:10px;background:#f8fafc;">${formatNumber(targetTotal)}원</div>
+                    </div>
+                    <div>
+                        <label for="bulk-payment-date" style="font-size:13px;font-weight:700;display:block;margin-bottom:6px;">${labels.date}</label>
+                        <input id="bulk-payment-date" type="date" value="${todayString}" class="swal2-input" style="margin:0;width:100%;" />
+                    </div>
+                    <div>
+                        <label for="bulk-payment-note" style="font-size:13px;font-weight:700;display:block;margin-bottom:6px;">비고</label>
+                        <input id="bulk-payment-note" type="text" value="일괄지급" class="swal2-input" style="margin:0;width:100%;" placeholder="${labels.placeholder}" />
+                    </div>
+                </div>
+            `,
+            showCancelButton: true,
+            confirmButtonText: '일괄지급',
+            cancelButtonText: '취소',
+            focusConfirm: false,
+            preConfirm: () => {
+                const date = (document.getElementById('bulk-payment-date') as HTMLInputElement | null)?.value ?? '';
+                const note = (document.getElementById('bulk-payment-note') as HTMLInputElement | null)?.value ?? '';
+
+                if (!date) {
+                    Swal.showValidationMessage(`${labels.date}를 입력하세요.`);
+                    return null;
+                }
+
+                return { date, note };
+            }
+        });
+
+        if (!result.isConfirmed || !result.value) return;
+
+        const { date, note } = result.value;
+        setSaving(true);
+        try {
+            await ledgerService.addEntries(targetRows.map((row) => ({
+                transactionType: row.transactionType,
+                date,
+                partnerName: row.partnerName,
+                siteName: row.siteName,
+                description: labels.action,
+                manDays: null,
+                supplyAmount: 0,
+                taxAmount: 0,
+                totalAmount: 0,
+                paymentAmount: row.outstandingAmount,
+                appliedYear: row.appliedYear ?? getYearFromDate(row.issueDate) ?? getYearFromDate(date),
+                appliedMonth: row.appliedMonth ?? getMonthFromDate(row.issueDate) ?? getMonthFromDate(date),
+                matchedEntryId: row.id,
+                note: normalizeText(note),
+                teamName: row.teamName,
+                createdBy: currentUser?.uid ?? ''
+            })));
+
+            await refreshPageData({ forceEntries: true });
+            const paidRowIds = new Set(targetRows.map((row) => row.id));
+            setSelectedSummaryRowIds((prev) => prev.filter((id) => !paidRowIds.has(id)));
+            Swal.fire('일괄지급 완료', `${targetRows.length.toLocaleString()}건 / ${formatNumber(targetTotal)}원 지급내역을 등록했습니다.`, 'success');
+        } catch (error) {
+            console.error(error);
+            Swal.fire('오류', '선택 미지급금 일괄지급에 실패했습니다.', 'error');
+        } finally {
+            setSaving(false);
+        }
+    }, [currentUser?.uid, ledgerService, refreshPageData, selectedSummaryRows, summaryFilter.mode, todayString]);
+
     const inputDataSchema = useMemo(() => emptyInputRow(), []);
 
     const inputColumns = useMemo<any[]>(() => [
         { data: 'transactionType', type: 'dropdown', source: ['매입', '매출'], width: 88 },
-        { data: 'date', type: 'date', dateFormat: 'YY-MM-DD', correctFormat: true, width: 98 },
+        { data: 'date', type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true, width: 112 },
         { data: 'partnerName', type: 'autocomplete', source: partnerNames, strict: false, width: 190 },
         { data: 'siteName', type: 'autocomplete', source: siteNames, strict: false, width: 210 },
         { data: 'description', type: 'text', width: 240 },
@@ -4660,11 +5485,12 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         <td className="sheet-value" colSpan={2}>
                             <input
                                 ref={baseYearInputRef}
-                                type="number"
-                                min={2000}
-                                max={2100}
+                                type="text"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
                                 defaultValue={baseYear}
                                 onChange={(event) => handleBaseYearChange(event.target.value)}
+                                onPaste={handleBaseYearPaste}
                                 onBlur={commitBaseYearInput}
                             />
                         </td>
@@ -4689,6 +5515,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     minSpareRows={8}
                     licenseKey="non-commercial-and-evaluation"
                     afterInit={handleInputGridAfterInit}
+                    beforePaste={handleInputGridBeforePaste}
+                    beforeChange={handleInputGridBeforeChange}
                     afterChange={handleInputGridChange}
                     afterSelectionEnd={handleInputGridSelectionEnd}
                     beforeKeyDown={handleInputGridBeforeKeyDown}
@@ -5497,6 +6325,27 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             <th className="sheet-title-dark" colSpan={16}>전체 조회</th>
                         </tr>
                         <tr>
+                            <td className="workbook-summary-mode-tabs-cell" colSpan={16}>
+                                <div className="workbook-summary-mode-tabs" role="tablist" aria-label="전체조회 구분">
+                                    {SUMMARY_MODE_TABS.map((mode) => (
+                                        <button
+                                            key={mode}
+                                            type="button"
+                                            role="tab"
+                                            aria-selected={summaryDraft.mode === mode}
+                                            className={`workbook-summary-mode-tab ${summaryDraft.mode === mode ? 'active' : ''}`}
+                                            onClick={() => {
+                                                setSummaryDraft((prev) => ({ ...prev, mode }));
+                                                setSummaryFilter((prev) => ({ ...prev, mode }));
+                                            }}
+                                        >
+                                            {mode}
+                                        </button>
+                                    ))}
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
                             <th className="sheet-label-blue">검색시작일</th>
                             <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
                                 <input
@@ -5546,11 +6395,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     disabled={
                                         downloadingKb ||
                                         summaryFilter.mode !== '미지급금' ||
-                                        selectedSummaryRowIds.length === 0
+                                        selectedSummaryRows.length === 0
                                     }
                                 >
                                     <FontAwesomeIcon icon={downloadingKb ? faSpinner : faDownload} spin={downloadingKb} />
-                                    {`국민은행용 다운로드${selectedSummaryRowIds.length > 0 ? ` (${selectedSummaryRowIds.length})` : ''}`}
+                                    {`국민은행용 다운로드${selectedSummaryRows.length > 0 ? ` (${selectedSummaryRows.length})` : ''}`}
                                 </button>
                             </td>
                             <td className="sheet-button-wrap sheet-button-stack" colSpan={2}>
@@ -5570,23 +6419,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, teamName: event.target.value }))}
                                     placeholder="전체"
                                 />
-                            </td>
-                            <th className="sheet-label-green">구 분</th>
-                            <td className="sheet-value-light">
-                                <select
-                                    className="sheet-filter-input"
-                                    value={summaryDraft.mode}
-                                    onChange={(event) => {
-                                        const nextMode = event.target.value as SummaryMode;
-                                        setSummaryDraft((prev) => ({ ...prev, mode: nextMode }));
-                                        setSummaryFilter((prev) => ({ ...prev, mode: nextMode }));
-                                    }}
-                                >
-                                    <option value="매출">매출</option>
-                                    <option value="매입">매입</option>
-                                    <option value="미수금">미수금</option>
-                                    <option value="미지급금">미지급금</option>
-                                </select>
                             </td>
                             <th className="sheet-label-green">거래처</th>
                             <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
@@ -5608,7 +6440,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     placeholder="현장 전체"
                                 />
                             </td>
-                            <td className="sheet-spacer sheet-filter-count-cell" colSpan={6}>
+                            <td className="sheet-spacer sheet-filter-count-cell" colSpan={8}>
                                 <div className="sheet-button-count">{getEntryLoadScopeText(entryLoadScope, summaryRows.length)}</div>
                             </td>
                         </tr>
@@ -5617,9 +6449,19 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
                 {summaryFilter.mode === '미지급금' && (
                     <div className="mb-2 flex flex-col gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="text-sm text-emerald-900">
-                            미지급금 선택 {selectedSummaryRowIds.length.toLocaleString()}건
+                        <div className="flex flex-col gap-1 text-sm text-emerald-900 sm:flex-row sm:items-center sm:gap-3">
+                            <span>미지급금 선택 {selectedSummaryRows.length.toLocaleString()}건</span>
+                            <span>선택 합계 {formatNumber(selectedSummaryOutstandingTotal)}원</span>
                         </div>
+                        <button
+                            type="button"
+                            className="excel-button excel-button-green"
+                            onClick={handleBulkPaySelectedSummaryRows}
+                            disabled={saving || selectedSummaryRows.length === 0}
+                        >
+                            <FontAwesomeIcon icon={saving ? faSpinner : faPenToSquare} spin={saving} />
+                            선택 일괄지급
+                        </button>
                     </div>
                 )}
 
@@ -5759,8 +6601,290 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             </div>
         </section>
     );
+
+    const renderQuarterVatTab = () => {
+        const totals = quarterVatReport.totals;
+        const payableVat = totals.payableVat;
+        const selectedLabel = quarterVatFilter.quarter === 'all'
+            ? `${quarterVatFilter.year}년 전체`
+            : `${quarterVatFilter.year}년 ${getQuarterVatLabel(quarterVatFilter.quarter)}`;
+        const basisLabel = quarterVatFilter.basis === 'applied' ? '적용연월 기준' : '발행일 기준';
+        const metricItems = [
+            { label: '매출세액', value: totals.salesVat, tone: 'sales' },
+            { label: '매입세액', value: totals.purchaseVat, tone: 'purchase' },
+            { label: '예상 납부세액', value: Math.max(payableVat, 0), tone: payableVat >= 0 ? 'payable' : 'muted' },
+            { label: '환급 예상액', value: Math.max(-payableVat, 0), tone: payableVat < 0 ? 'refund' : 'muted' },
+        ];
+
+        return (
+            <section className="workbook-sheet workbook-vat-sheet">
+                <div ref={quarterVatCaptureRef}>
+                    <table className="sheet-control-table query-sheet-table workbook-vat-filter-table">
+                        <tbody>
+                            <tr>
+                                <th className="sheet-title-dark" colSpan={16}>분기 부가세</th>
+                            </tr>
+                            <tr>
+                                <th className="sheet-label-blue">조회연도</th>
+                                <td className="sheet-value-light" colSpan={2}>
+                                    <input
+                                        type="number"
+                                        className="sheet-filter-input"
+                                        value={quarterVatDraft.year}
+                                        onChange={(event) => setQuarterVatDraft((prev) => ({ ...prev, year: Number(event.target.value) }))}
+                                    />
+                                </td>
+                                <th className="sheet-label-blue">분기</th>
+                                <td className="sheet-value-light" colSpan={2}>
+                                    <select
+                                        className="sheet-filter-input"
+                                        value={quarterVatDraft.quarter}
+                                        onChange={(event) => setQuarterVatDraft((prev) => ({ ...prev, quarter: event.target.value as QuarterVatOption }))}
+                                    >
+                                        <option value="all">전체</option>
+                                        {QUARTER_VAT_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>{option.label}</option>
+                                        ))}
+                                    </select>
+                                </td>
+                                <th className="sheet-label-blue">기준</th>
+                                <td className="sheet-value-light" colSpan={2}>
+                                    <select
+                                        className="sheet-filter-input"
+                                        value={quarterVatDraft.basis}
+                                        onChange={(event) => setQuarterVatDraft((prev) => ({ ...prev, basis: event.target.value as QuarterVatBasis }))}
+                                    >
+                                        <option value="date">발행일 기준</option>
+                                        <option value="applied">적용연월 기준</option>
+                                    </select>
+                                </td>
+                                <td className="sheet-button-wrap" colSpan={2}>
+                                    <button
+                                        type="button"
+                                        className="excel-button excel-button-blue"
+                                        onClick={() => handleCopyCapture('vat', quarterVatCaptureRef.current, '분기 부가세')}
+                                        disabled={capturingView === 'vat'}
+                                    >
+                                        <FontAwesomeIcon icon={capturingView === 'vat' ? faSpinner : faCopy} spin={capturingView === 'vat'} />
+                                        화면 복사
+                                    </button>
+                                </td>
+                                <td className="sheet-button-wrap" colSpan={2}>
+                                    <button
+                                        type="button"
+                                        className="excel-button excel-button-gray"
+                                        onClick={handlePrintQuarterVat}
+                                        disabled={printingVat}
+                                    >
+                                        <FontAwesomeIcon icon={printingVat ? faSpinner : faPrint} spin={printingVat} />
+                                        인쇄
+                                    </button>
+                                </td>
+                                <td className="sheet-button-wrap" colSpan={2}>
+                                    <button
+                                        type="button"
+                                        className="excel-button excel-button-green"
+                                        onClick={handleDownloadQuarterVat}
+                                        disabled={downloadingVat}
+                                    >
+                                        <FontAwesomeIcon icon={downloadingVat ? faSpinner : faDownload} spin={downloadingVat} />
+                                        엑셀
+                                    </button>
+                                </td>
+                                <td className="sheet-button-wrap" colSpan={1}>
+                                    <button type="button" className="excel-button excel-button-green" onClick={applyQuarterVatFilter}>
+                                        <FontAwesomeIcon icon={faMagnifyingGlass} />
+                                        조회
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th className="sheet-label-green">팀 명</th>
+                                <td className="sheet-value-light" colSpan={2}>
+                                    <input
+                                        className="sheet-filter-input"
+                                        list="workbook-team-options"
+                                        value={quarterVatDraft.teamName}
+                                        onChange={(event) => setQuarterVatDraft((prev) => ({ ...prev, teamName: event.target.value }))}
+                                        placeholder="전체"
+                                    />
+                                </td>
+                                <th className="sheet-label-green">거래처</th>
+                                <td className="sheet-value-light sheet-filter-wide-cell" colSpan={3}>
+                                    <input
+                                        className="sheet-filter-input"
+                                        list="workbook-partner-options"
+                                        value={quarterVatDraft.partnerName}
+                                        onChange={(event) => setQuarterVatDraft((prev) => ({ ...prev, partnerName: event.target.value }))}
+                                        placeholder="거래처 전체"
+                                    />
+                                </td>
+                                <th className="sheet-label-green">현장명</th>
+                                <td className="sheet-value-light sheet-filter-wide-cell" colSpan={3}>
+                                    <input
+                                        className="sheet-filter-input"
+                                        list="workbook-site-options"
+                                        value={quarterVatDraft.siteName}
+                                        onChange={(event) => setQuarterVatDraft((prev) => ({ ...prev, siteName: event.target.value }))}
+                                        placeholder="현장 전체"
+                                    />
+                                </td>
+                                <td className="sheet-spacer sheet-filter-count-cell" colSpan={5}>
+                                    <div className="sheet-button-count">
+                                        {selectedLabel} · {basisLabel} · {getEntryLoadScopeText(entryLoadScope, quarterVatReport.detailRows.length)}
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    {quarterVatFilter.basis === 'applied' && entryLoadScope !== 'all' && (
+                        <div className="workbook-vat-notice workbook-vat-notice-warning">
+                            적용연월 기준은 전체 DB를 기준으로 계산합니다. 전체 DB 로딩이 끝나면 결과가 자동으로 갱신됩니다.
+                        </div>
+                    )}
+
+                    <div className="workbook-vat-metric-grid">
+                        {metricItems.map((item) => (
+                            <div key={item.label} className={`workbook-vat-metric-card workbook-vat-metric-${item.tone}`}>
+                                <div>{item.label}</div>
+                                <strong>{formatNumber(item.value)}</strong>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="workbook-vat-grid">
+                        <div className="workbook-vat-panel">
+                            <div className="workbook-vat-panel-title">분기 요약</div>
+                            <div className="sheet-table-wrapper">
+                                <table className="sheet-table workbook-vat-table">
+                                    <thead>
+                                        <tr>
+                                            <th>분기</th>
+                                            <th>기간</th>
+                                            <th>매출 공급가액</th>
+                                            <th>매출세액</th>
+                                            <th>매입 공급가액</th>
+                                            <th>매입세액</th>
+                                            <th>예상 납부</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {quarterVatReport.quarterRows.map((row) => (
+                                            <tr key={row.quarter} className={quarterVatFilter.quarter === row.quarter ? 'workbook-vat-selected-row' : ''}>
+                                                <td>{row.label}</td>
+                                                <td>{row.periodLabel}</td>
+                                                <td className="align-right">{formatNumber(row.salesSupply)}</td>
+                                                <td className="align-right">{formatNumber(row.salesVat)}</td>
+                                                <td className="align-right">{formatNumber(row.purchaseSupply)}</td>
+                                                <td className="align-right">{formatNumber(row.purchaseVat)}</td>
+                                                <td className="align-right">{formatNumber(row.payableVat)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div className="workbook-vat-panel">
+                            <div className="workbook-vat-panel-title">월별 요약</div>
+                            <div className="sheet-table-wrapper">
+                                <table className="sheet-table workbook-vat-table">
+                                    <thead>
+                                        <tr>
+                                            <th>월</th>
+                                            <th>매출세액</th>
+                                            <th>매입세액</th>
+                                            <th>예상 납부</th>
+                                            <th>건수</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {quarterVatReport.monthlyRows.map((row) => (
+                                            <tr key={row.month}>
+                                                <td>{row.label}</td>
+                                                <td className="align-right">{formatNumber(row.salesVat)}</td>
+                                                <td className="align-right">{formatNumber(row.purchaseVat)}</td>
+                                                <td className="align-right">{formatNumber(row.payableVat)}</td>
+                                                <td className="align-right">{formatNumber(row.entryCount)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="workbook-vat-panel">
+                        <div className="workbook-vat-panel-title">세부 내역 {quarterVatReport.detailRows.length.toLocaleString()}건</div>
+                        <div className="sheet-table-wrapper workbook-vat-detail-wrapper">
+                            <table className="sheet-table workbook-vat-table workbook-vat-detail-table">
+                                <colgroup>
+                                    <col className="workbook-vat-col-no" />
+                                    <col className="workbook-vat-col-type" />
+                                    <col className="workbook-vat-col-date" />
+                                    <col className="workbook-vat-col-period" />
+                                    <col className="workbook-vat-col-quarter" />
+                                    <col className="workbook-vat-col-partner" />
+                                    <col className="workbook-vat-col-site" />
+                                    <col className="workbook-vat-col-description" />
+                                    <col className="workbook-vat-col-amount" />
+                                    <col className="workbook-vat-col-vat" />
+                                    <col className="workbook-vat-col-total" />
+                                    <col className="workbook-vat-col-team" />
+                                </colgroup>
+                                <thead>
+                                    <tr>
+                                        <th>No</th>
+                                        <th>구분</th>
+                                        <th>발행일</th>
+                                        <th>귀속</th>
+                                        <th>분기</th>
+                                        <th>거래처명</th>
+                                        <th>현장명</th>
+                                        <th>내용</th>
+                                        <th>공급가액</th>
+                                        <th>세액</th>
+                                        <th>합계</th>
+                                        <th>팀명</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {quarterVatReport.detailRows.length === 0 && (
+                                        <tr>
+                                            <td colSpan={12} className="sheet-empty-state">조회 결과가 없습니다.</td>
+                                        </tr>
+                                    )}
+                                    {quarterVatReport.detailRows.map((row, index) => (
+                                        <tr key={row.id}>
+                                            <td className="align-right">{index + 1}</td>
+                                            <td>{row.transactionType}</td>
+                                            <td>{row.date}</td>
+                                            <td>{row.periodLabel}</td>
+                                            <td>{getQuarterVatLabel(row.quarter)}</td>
+                                            <td>{row.partnerName}</td>
+                                            <td>{row.siteName || '-'}</td>
+                                            <td>{row.description || '-'}</td>
+                                            <td className="align-right">{formatNumber(row.supplyAmount)}</td>
+                                            <td className="align-right">{formatNumber(row.taxAmount)}</td>
+                                            <td className="align-right">{formatNumber(row.totalAmount)}</td>
+                                            <td>{row.teamName || '-'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        );
+    };
+
     return (
         <div className={`workbook-ledger-page ${tenantKey === 'cheongyeon' ? 'tenant-cheongyeon' : 'tenant-dawon'}`}>
+            {loading && loadingMessage && (
+                <AppIntroScreen message={loadingMessage} />
+            )}
             <div className="workbook-shell">
                 <div className="workbook-titlebar">
                     <div>
@@ -5827,6 +6951,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 {activeTab === 'database' && renderDatabaseTab()}
                 {activeTab === 'ledger' && renderLedgerTab()}
                 {activeTab === 'summary' && renderSummaryTab()}
+                {activeTab === 'vat' && renderQuarterVatTab()}
 
                 {showKbPreview && (
                     <div

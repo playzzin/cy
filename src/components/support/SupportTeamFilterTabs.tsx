@@ -1,6 +1,6 @@
 import React from 'react';
 import { Team } from '../../services/teamService';
-import { hexToRgba, normalizeHexColor } from '../../utils/color';
+import { getContrastingTextColor, hexToRgba, normalizeHexColor } from '../../utils/color';
 
 interface SupportTeamFilterTabsProps {
     teams: Team[];
@@ -43,6 +43,7 @@ export const SupportTeamFilterTabs: React.FC<SupportTeamFilterTabsProps> = ({
                     const teamId = getTeamId(team);
                     if (!teamId) return null;
                     const color = normalizeHexColor(team.color);
+                    const selectedTextColor = getContrastingTextColor(color);
                     const isSelected = String(selectedTeamId) === teamId;
 
                     return (
@@ -52,27 +53,28 @@ export const SupportTeamFilterTabs: React.FC<SupportTeamFilterTabsProps> = ({
                             onClick={() => onChange(teamId)}
                             disabled={disabled}
                             aria-label={`팀별 보기: ${team.name}`}
-                            className={`${buttonBase} ${
-                                isSelected
-                                    ? 'text-white shadow-sm'
-                                    : 'bg-white hover:-translate-y-0.5'
-                            } ${disabled ? 'cursor-not-allowed opacity-50 hover:translate-y-0' : ''}`}
-                            style={isSelected
-                                ? {
-                                    backgroundColor: color,
-                                    borderColor: color
-                                }
-                                : {
-                                    color,
-                                    borderColor: hexToRgba(color, 0.18),
-                                    backgroundColor: hexToRgba(color, 0.06)
-                                }}
+                             className={`${buttonBase} ${
+                                 isSelected
+                                     ? 'shadow-sm'
+                                     : 'bg-white hover:-translate-y-0.5'
+                             } ${disabled ? 'cursor-not-allowed opacity-50 hover:translate-y-0' : ''}`}
+                             style={isSelected
+                                 ? {
+                                     backgroundColor: color,
+                                     borderColor: color,
+                                     color: selectedTextColor
+                                 }
+                                 : {
+                                     color: '#0f172a',
+                                     borderColor: hexToRgba(color, 0.45),
+                                     backgroundColor: hexToRgba(color, 0.14)
+                                 }}
                             title={team.name}
                         >
                             <span
-                                className="h-2 w-2 shrink-0 rounded-full"
-                                style={{ backgroundColor: isSelected ? '#fff' : color }}
-                            />
+                                 className="h-2 w-2 shrink-0 rounded-full"
+                                 style={{ backgroundColor: isSelected ? selectedTextColor : color }}
+                             />
                             <span className="whitespace-nowrap">{team.name}</span>
                         </button>
                     );

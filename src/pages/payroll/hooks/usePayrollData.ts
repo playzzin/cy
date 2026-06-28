@@ -11,6 +11,7 @@ import {
 import { advancePaymentService, AdvancePayment } from '../../../services/advancePaymentService';
 import { PaymentData, MonthlyAdvanceLedgerRow, DeductionBreakdown, WorkerWorkEntry, DeductionLine, LedgerManualInput } from '../types/payroll';
 import { BANK_CODES, STANDARD_DEDUCTION_FIELDS } from '../constants/payroll.constants';
+import { resolveReportPayType } from '../../../utils/payType';
 
 // Helper: Convert any value to number safely
 const toNumber = (value: unknown): number => {
@@ -30,6 +31,16 @@ const normalizeTeamName = (value: string | undefined): string => {
     .replace(/\(.*?\)/g, '')
     .replace(/\s+/g, '')
     .trim();
+};
+
+const normalizeSalaryModelLabel = (value: unknown): '월급제' | '일급제' | '용역팀' | '' => {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return '';
+  const lower = normalized.toLowerCase();
+  if (normalized.includes('용역') || lower === 'service' || lower.includes('service')) return '용역팀';
+  if (normalized.includes('월급') || lower === 'monthly' || lower.includes('monthly')) return '월급제';
+  if (normalized.includes('일급') || normalized.includes('일당') || lower === 'daily' || lower.includes('daily')) return '일급제';
+  return '';
 };
 
 // Helper: Build month range [YYYY-MM, ...]
@@ -74,11 +85,12 @@ const deduplicateAdvanceRecords = (records: AdvancePayment[]): AdvancePayment[] 
   const map = new Map<string, AdvancePayment>();
   records.forEach((record) => {
     const teamKey = (record.teamId ?? '').trim() || '__no_team__';
+    const salaryKey = normalizeSalaryModelLabel(record.salaryModel) || '__legacy_salary__';
     const currentScore = toNumber(record.totalDeduction);
-    const prev = map.get(teamKey);
+    const prev = map.get(`${teamKey}__${salaryKey}`);
     const prevScore = toNumber(prev?.totalDeduction);
     if (!prev || currentScore >= prevScore) {
-      map.set(teamKey, record);
+      map.set(`${teamKey}__${salaryKey}`, record);
     }
   });
   return Array.from(map.values());
@@ -169,6 +181,7 @@ const pickPreferredAdvanceRecord = (
   options: {
     preferredTeamId?: string;
     preferredTeamName?: string;
+    preferredSalaryModel?: string;
   } = {}
 ): AdvancePayment | undefined => {
   const monthMatched = records.filter((record) => String(record.yearMonth ?? '') === yearMonth);
@@ -176,6 +189,7 @@ const pickPreferredAdvanceRecord = (
 
   const preferredTeamId = String(options.preferredTeamId ?? '').trim();
   const preferredTeamNameKey = normalizeTeamName(options.preferredTeamName);
+  const preferredSalaryModel = normalizeSalaryModelLabel(options.preferredSalaryModel);
 
   const exactTeamIdMatched = preferredTeamId
     ? monthMatched.filter((record) => String(record.teamId ?? '').trim() === preferredTeamId)
@@ -199,6 +213,17 @@ const pickPreferredAdvanceRecord = (
       ? exactTeamIdMatched
       : (teamNameMatched.length > 0 ? teamNameMatched : monthMatched);
 
+  const salaryMatched = preferredSalaryModel
+    ? candidates.filter((record) => normalizeSalaryModelLabel(record.salaryModel) === preferredSalaryModel)
+    : [];
+  const legacySalaryMatched = preferredSalaryModel
+    ? candidates.filter((record) => !normalizeSalaryModelLabel(record.salaryModel))
+    : [];
+  const salaryScopedCandidates = preferredSalaryModel
+    ? (salaryMatched.length > 0 ? salaryMatched : legacySalaryMatched)
+    : candidates;
+  if (salaryScopedCandidates.length === 0) return undefined;
+
   const getPreferenceRank = (record: AdvancePayment): number => {
     const recordTeamId = String(record.teamId ?? '').trim();
     const recordTeamNameKey = normalizeTeamName(record.teamName);
@@ -207,7 +232,7 @@ const pickPreferredAdvanceRecord = (
     return 1;
   };
 
-  return candidates.reduce<AdvancePayment | undefined>((best, current) => {
+  return salaryScopedCandidates.reduce<AdvancePayment | undefined>((best, current) => {
     if (!best) return current;
 
     const bestPreferenceRank = getPreferenceRank(best);
@@ -625,11 +650,11 @@ export const usePayrollData = (
           if (!w) return;
           if (selectedWorkerId && canonicalWorkerId !== resolveWorkerCanonicalId(selectedWorkerId)) return;
 
-          const salaryModel = (rw.payType || '').trim();
-          const isMonthly = salaryModel === '월급제';
-          const isDaily = salaryModel === '일급제';
-          const isService = salaryModel === '용역팀';
-          if (!isMonthly && !isDaily && !isService) return;
+          const manDay = toNumber(rw.manDay);
+          if (manDay <= 0) return;
+
+          const salaryModel = normalizeSalaryModelLabel(resolveReportPayType(rw, w));
+          if (!salaryModel) return;
 
           // A worker row can belong to a different team than the report header.
           const rowTeamId = resolveTeamCanonicalId(rw.teamId);
@@ -664,7 +689,7 @@ export const usePayrollData = (
             teamId: safeTeamKey,
             teamName: resolvedTeamName,
             month: reportYM,
-            manDay: rw.manDay,
+            manDay,
             unitPrice,
             isLabor,
             reportDate: report.date,
@@ -674,7 +699,7 @@ export const usePayrollData = (
             paymentMethod: reportPaymentMethod || '-'
           };
 
-          const resolvedModel = isDaily ? '일급제' : isService ? '용역팀' : '월급제';
+          const resolvedModel = salaryModel;
           const paymentKey = `${reportYM}__${baseParams.workerId}__${safeTeamKey}__${resolvedModel}`;
           mergeAggregate(workerAggregates, paymentKey, { ...baseParams, salaryModel: resolvedModel });
           const ledgerKey = `${reportYM}__${baseParams.workerId}__${safeTeamKey}__${resolvedModel}`;
@@ -713,6 +738,7 @@ export const usePayrollData = (
           {
             preferredTeamId: canonicalTeamId,
             preferredTeamName: agg.teamName || w?.teamName,
+            preferredSalaryModel: agg.salaryModel,
           }
         );
 
@@ -791,6 +817,7 @@ export const usePayrollData = (
           {
             preferredTeamId: canonicalTeamId,
             preferredTeamName: agg.teamName || w?.teamName,
+            preferredSalaryModel: agg.salaryModel,
           }
         );
         const manual = buildManualInputFromAdvanceRecord(selectedAdvanceRecord);

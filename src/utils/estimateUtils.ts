@@ -77,7 +77,7 @@ export const createItem = (input: Partial<EstimateItem> = {}): EstimateItem => (
     amount: (input.quantity || 0) * (input.finalUnitPrice || 0),
     install50: 0,
     remove50: 0,
-    note: '',
+    note: input.note || '',
     pointBase: 4000,
     pointMultiplier: 1500,
     itemDate: (input as any).itemDate || new Date().toISOString().split('T')[0],

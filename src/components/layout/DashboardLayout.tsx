@@ -13,7 +13,7 @@ import BottomPanel from './LayoutBottomPanel';
 import AdminPanel from './AdminPanel';
 
 // 타입 인터페이스 정의
-import SidebarSkeleton from './SidebarSkeleton';
+import AppIntroScreen from '../common/AppIntroScreen';
 import { menuServiceV11 } from '../../services/menuServiceV11';
 import { SiteData, SiteDataType, MenuItem, PositionItem } from '../../types/menu';
 import { MENU_PATHS } from '../../constants/menuPaths';
@@ -80,10 +80,11 @@ const findFirstPositionById = (positions: PositionItem[], ids: string[]): Positi
 
 const resolveUserMenuPositionId = (
     positions: PositionItem[],
-    userProfile: { position?: unknown; role?: unknown } | null | undefined,
-    linkedWorkerRole?: unknown
+    userProfile: { position?: unknown; role?: unknown; accountType?: unknown; systemRole?: unknown } | null | undefined,
+    linkedEntityRoles?: unknown | unknown[]
 ): string | undefined => {
-    const candidates = [userProfile?.position, linkedWorkerRole, userProfile?.role];
+    const linkedRoles = Array.isArray(linkedEntityRoles) ? linkedEntityRoles : [linkedEntityRoles];
+    const candidates = [...linkedRoles, userProfile?.position, userProfile?.role, userProfile?.systemRole, userProfile?.accountType];
 
     for (const candidate of candidates) {
         const matched = findMatchingPosition(positions, candidate);
@@ -133,7 +134,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     // Dynamic Menu State
     const [siteData, setSiteData] = useState<SiteDataType | null>(null);
 
-    const didRunMenuMigrationsRef = useRef(false);
     const autoAppliedPositionForUserRef = useRef('');
 
     const { currentUser } = useAuth();
@@ -215,13 +215,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                         const adminRoles = ['admin', '관리자', '사장', '실장'];
                         const isAdminRole = adminRoles.includes(role);
                         setIsAdmin(isAdminRole);
-
-                        if (isAdminRole && !didRunMenuMigrationsRef.current) {
-                            didRunMenuMigrationsRef.current = true;
-                            menuServiceV11.runOneTimeMigrations().catch((err) => {
-                                console.error('[MenuService] One-time migration failed:', err);
-                            });
-                        }
 
                         let targetSite = '';
                         if (role === 'admin' || role === '관리자') targetSite = 'admin';
@@ -431,19 +424,24 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
         const applyUserPositionMode = async () => {
             try {
-                const [{ userService }, { manpowerService }] = await Promise.all([
+                const [{ userService }, { manpowerService }, { officeStaffService }] = await Promise.all([
                     import('../../services/userService'),
-                    import('../../services/manpowerService')
+                    import('../../services/manpowerService'),
+                    import('../../services/officeStaffService')
                 ]);
 
-                const [profile, linkedWorker] = await Promise.all([
+                const [profile, linkedWorker, linkedOfficeStaff] = await Promise.all([
                     userService.getUser(currentUser.uid),
-                    manpowerService.getWorkerByUid(currentUser.uid).catch(() => null)
+                    manpowerService.getWorkerByUid(currentUser.uid).catch(() => null),
+                    officeStaffService.getOfficeStaffByUid(currentUser.uid).catch(() => null)
                 ]);
 
                 if (cancelled) return;
 
-                const resolvedPositionId = resolveUserMenuPositionId(positions, profile, linkedWorker?.role);
+                const resolvedPositionId = resolveUserMenuPositionId(positions, profile, [
+                    linkedWorker?.role,
+                    linkedOfficeStaff?.role
+                ]);
                 if (!resolvedPositionId) return;
 
                 const applyKey = `${currentUser.uid}:${resolvedPositionId}`;
@@ -470,7 +468,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     // Position to Site mapping - 직책별로 전용 메뉴 사용
     // 'full' = 현재 사이트(보통 admin) 전체 메뉴 표시
     const getPositionSiteMap = () => {
-        const map: { [key: string]: string } = { 'full': '' };
+        const map: { [key: string]: string } = {
+            full: '',
+        };
         if (positions.length > 0) {
             positions.forEach(pos => {
                 if (pos.id !== 'full') {
@@ -499,7 +499,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         : (availableSiteKeys[0] || currentSite);
     const baseSite = siteData?.[currentSite]?.menu ? currentSite : fallbackSite;
     const positionSite = POSITION_SITE_MAP[currentPosition];
-    const effectiveSite = (currentPosition === 'full' || !positionSite)
+    const effectiveSite = (isSiteLayerMode || currentPosition === 'full' || !positionSite)
         ? baseSite
         : (siteData?.[positionSite]?.menu ? positionSite : baseSite);
     const currentSiteData = siteData
@@ -565,6 +565,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         // 청연사이트(test)로 전환 시 /dashboard2로 이동
         const nextDashboardPath = siteModeDashboards[siteKey];
         if (nextDashboardPath) {
+            setIsPositionPanelOpen(false);
             navigateSync(nextDashboardPath);
         } else if (location.pathname === '/dashboard2' || location.pathname === '/dashboard3') {
             // 다른 사이트로 전환 시 /dashboard2에 있으면 /dashboard로 이동
@@ -623,16 +624,16 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         isDarkMode,
         toggleDarkMode
     };
+    const isMemoFullBleedPage = location.pathname === '/memos';
+    const mainContentClassName = [
+        location.pathname === siteModeDashboardPath ? 'cheongyeon-main' : '',
+        isMemoFullBleedPage ? 'page-full-bleed' : ''
+    ].filter(Boolean).join(' ');
 
     if (!siteData) {
         return (
             <SiteModeProvider {...siteModeValue}>
-                <div className="app">
-                    <SidebarSkeleton />
-                    <main id="main-content">
-                        {children}
-                    </main>
-                </div>
+                <AppIntroScreen message="메뉴 정보를 불러오는 중" />
             </SiteModeProvider>
         );
     }
@@ -710,7 +711,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
 
                     {/* Main Content with Video Background for Dashboard2 */}
-                    <main id="main-content" className={location.pathname === siteModeDashboardPath ? 'cheongyeon-main' : ''} onClick={() => {
+                    <main id="main-content" className={mainContentClassName} onClick={() => {
                         if (isBottomPanelOpen || isAdminPanelOpen || isPositionPanelOpen || isMobileOpen || !isSidebarCollapsed) {
                             closeAll();
                         }
@@ -791,7 +792,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
 
 
-                <main id="main-content" onClick={() => {
+                <main id="main-content" className={mainContentClassName} onClick={() => {
                     if (isBottomPanelOpen || isAdminPanelOpen || isPositionPanelOpen || isMobileOpen || !isSidebarCollapsed) {
                         closeAll();
                     }

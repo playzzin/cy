@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faClipboardList,
@@ -15,6 +16,8 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import materialService from '../../services/materialService';
 import { siteService, Site } from '../../services/siteService';
+import { companyService } from '../../services/companyService';
+import { settlementTargetService } from '../../services/settlementTargetService';
 import { InboundTransaction, Material, OutboundTransaction } from '../../types/materials';
 import * as XLSX from 'xlsx-js-style';
 import {
@@ -24,6 +27,11 @@ import {
     getSiteStatusLabel,
     MaterialSiteStatusFilter
 } from './materialSiteFilters';
+import {
+    buildMaterialRentalCompanyOptions,
+    getMaterialRentalCompanyOptionId,
+    MaterialRentalCompanyOption,
+} from './materialRentalCompanyOptions';
 
 type Transaction = (InboundTransaction | OutboundTransaction) & {
     type: 'inbound' | 'outbound';
@@ -32,6 +40,8 @@ type Transaction = (InboundTransaction | OutboundTransaction) & {
 };
 
 type ExcelCellValue = string | number;
+
+const RENTAL_UNASSIGNED_FILTER = '__rental_unassigned__';
 
 const excelRgb = (color: string): string => color.replace('#', '').toUpperCase();
 
@@ -55,10 +65,12 @@ const sanitizeExcelFileName = (value: string): string => (
 );
 
 const MaterialTransactionsPage: React.FC = () => {
+    const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
     const [materials, setMaterials] = useState<Material[]>([]);
+    const [rentalCompanies, setRentalCompanies] = useState<MaterialRentalCompanyOption[]>([]);
 
     // Filters
     const [siteStatusFilter, setSiteStatusFilter] = useState<MaterialSiteStatusFilter>('active');
@@ -67,10 +79,12 @@ const MaterialTransactionsPage: React.FC = () => {
     const [transactionType, setTransactionType] = useState<'all' | 'inbound' | 'outbound'>('all');
     const [vehicleNumber, setVehicleNumber] = useState('');
     const [materialName, setMaterialName] = useState('');
+    const [rentalCompanyFilter, setRentalCompanyFilter] = useState('');
 
     // Edit State
     const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [selectedTransactionKeys, setSelectedTransactionKeys] = useState<Set<string>>(new Set());
 
     // Edit Form State
     const [editForm, setEditForm] = useState({
@@ -79,6 +93,8 @@ const MaterialTransactionsPage: React.FC = () => {
         vehicleNumber: '',
         quantity: 0,
         counterparty: '',
+        rentalCompanyId: '',
+        rentalCompanyName: '',
         notes: ''
     });
 
@@ -95,6 +111,7 @@ const MaterialTransactionsPage: React.FC = () => {
 
     const trimText = (value: unknown): string => String(value ?? '').trim();
     const normalizeSearchText = (value: unknown): string => trimText(value).replace(/\s+/g, '').toLowerCase();
+    const getTransactionKey = (tx: Transaction): string => `${tx.type}:${tx.id}`;
 
     useEffect(() => {
         loadMasterData();
@@ -114,13 +131,16 @@ const MaterialTransactionsPage: React.FC = () => {
 
     const loadMasterData = async () => {
         try {
-            const [siteRows, materialRows] = await Promise.all([
+            const [siteRows, materialRows, companyRows, settlementTargetRows] = await Promise.all([
                 siteService.getSites(),
                 materialService.getUniqueMaterialsForSelection(),
+                companyService.getCompanies(),
+                settlementTargetService.getTargets().catch(() => []),
             ]);
             const cheongyeonSites = filterCheongyeonMaterialSites(siteRows, 'all');
             setSites(cheongyeonSites);
             setMaterials(materialRows);
+            setRentalCompanies(buildMaterialRentalCompanyOptions(companyRows, settlementTargetRows));
             await handleSearch(cheongyeonSites, materialRows, siteStatusFilter);
         } catch (error) {
             console.error('Failed to load transaction master data:', error);
@@ -195,12 +215,37 @@ const MaterialTransactionsPage: React.FC = () => {
             });
 
             setTransactions(normalized);
+            setSelectedTransactionKeys(new Set());
         } catch (error) {
             console.error('Failed to search transactions:', error);
             alert('데이터를 조회하는 중 오류가 발생했습니다.');
         } finally {
             setLoading(false);
         }
+    };
+
+    const toggleTransactionSelection = (tx: Transaction) => {
+        const key = getTransactionKey(tx);
+        setSelectedTransactionKeys((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+        });
+    };
+
+    const toggleAllVisibleTransactions = () => {
+        const visibleKeys = visibleTransactions.map(getTransactionKey);
+        const allSelected = visibleKeys.length > 0 && visibleKeys.every((key) => selectedTransactionKeys.has(key));
+        setSelectedTransactionKeys((prev) => {
+            const next = new Set(prev);
+            if (allSelected) {
+                visibleKeys.forEach((key) => next.delete(key));
+            } else {
+                visibleKeys.forEach((key) => next.add(key));
+            }
+            return next;
+        });
     };
 
     const handleDelete = async (tx: Transaction) => {
@@ -223,6 +268,35 @@ const MaterialTransactionsPage: React.FC = () => {
         }
     };
 
+    const handleBulkDelete = async () => {
+        const selectedRows = visibleTransactions.filter((tx) => selectedTransactionKeys.has(getTransactionKey(tx)));
+        if (selectedRows.length === 0) {
+            alert('삭제할 내역을 선택해주세요.');
+            return;
+        }
+
+        if (!window.confirm(`선택한 입출고 내역 ${selectedRows.length}건을 삭제하시겠습니까?`)) return;
+
+        setLoading(true);
+        try {
+            for (const tx of selectedRows) {
+                if (tx.type === 'inbound') {
+                    await materialService.deleteInboundTransaction(tx.id);
+                } else {
+                    await materialService.deleteOutboundTransaction(tx.id);
+                }
+            }
+            setSelectedTransactionKeys(new Set());
+            alert('선택한 내역이 삭제되었습니다.');
+            await handleSearch();
+        } catch (error) {
+            console.error('Bulk deletion failed:', error);
+            alert('선택 삭제에 실패했습니다.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const openEditModal = (tx: Transaction) => {
         setEditingTx(tx);
         setEditForm({
@@ -233,9 +307,20 @@ const MaterialTransactionsPage: React.FC = () => {
             counterparty: tx.type === 'inbound'
                 ? trimText((tx as InboundTransaction).supplier)
                 : trimText((tx as OutboundTransaction).recipient),
+            rentalCompanyId: tx.type === 'outbound' ? trimText((tx as OutboundTransaction).rentalCompanyId) : '',
+            rentalCompanyName: tx.type === 'outbound' ? trimText((tx as OutboundTransaction).rentalCompanyName) : '',
             notes: tx.notes || ''
         });
         setIsEditModalOpen(true);
+    };
+
+    const handleEditRentalCompanyChange = (selectedCompanyId: string) => {
+        const company = rentalCompanies.find((row) => getMaterialRentalCompanyOptionId(row) === selectedCompanyId);
+        setEditForm((prev) => ({
+            ...prev,
+            rentalCompanyId: selectedCompanyId,
+            rentalCompanyName: company?.name || '',
+        }));
     };
 
     const handleUpdate = async () => {
@@ -261,6 +346,8 @@ const MaterialTransactionsPage: React.FC = () => {
                 await materialService.updateInboundTransaction(editingTx.id, updates);
             } else {
                 updates.recipient = editForm.counterparty;
+                updates.rentalCompanyId = editForm.rentalCompanyId;
+                updates.rentalCompanyName = editForm.rentalCompanyName;
                 await materialService.updateOutboundTransaction(editingTx.id, updates);
             }
 
@@ -287,6 +374,7 @@ const MaterialTransactionsPage: React.FC = () => {
             '단위',
             '차량번호',
             '입고처/출고자',
+            '임대사',
             '비고',
         ];
         const toExcelQuantity = (value: unknown): number => {
@@ -307,6 +395,7 @@ const MaterialTransactionsPage: React.FC = () => {
                 t.type === 'inbound'
                     ? ((t as InboundTransaction).supplier || '')
                     : ((t as OutboundTransaction).recipient || ''),
+                t.type === 'outbound' ? ((t as OutboundTransaction).rentalCompanyName || '') : '',
                 t.notes || '',
             ]),
         ];
@@ -321,6 +410,7 @@ const MaterialTransactionsPage: React.FC = () => {
             { wch: 10 },
             { wch: 8 },
             { wch: 16 },
+            { wch: 20 },
             { wch: 20 },
             { wch: 34 },
         ];
@@ -344,7 +434,7 @@ const MaterialTransactionsPage: React.FC = () => {
                 const isInboundType = isData && c === 1 && cell.v === '입고';
                 const isOutboundType = isData && c === 1 && cell.v === '출고';
                 const isQuantity = c === 5;
-                const isTextLong = c === 9;
+                const isTextLong = c === 10;
                 const isAltRow = isData && r % 2 === 0;
 
                 cell.s = {
@@ -393,9 +483,39 @@ const MaterialTransactionsPage: React.FC = () => {
     };
 
     const visibleTransactions = transactions.filter((t) => {
-        if (!siteKeyword.trim()) return true;
-        return normalizeSearchText(t.siteName).includes(normalizeSearchText(siteKeyword));
+        if (siteKeyword.trim() && !normalizeSearchText(t.siteName).includes(normalizeSearchText(siteKeyword))) {
+            return false;
+        }
+
+        if (!rentalCompanyFilter) return true;
+        if (t.type !== 'outbound') return false;
+
+        const outbound = t as OutboundTransaction;
+        const rentalCompanyId = trimText(outbound.rentalCompanyId);
+        const rentalCompanyName = trimText(outbound.rentalCompanyName);
+
+        if (rentalCompanyFilter === RENTAL_UNASSIGNED_FILTER) {
+            return !rentalCompanyId && !rentalCompanyName;
+        }
+
+        const selectedCompany = rentalCompanies.find((company) => getMaterialRentalCompanyOptionId(company) === rentalCompanyFilter);
+        const selectedName = trimText(selectedCompany?.name);
+
+        return (
+            rentalCompanyId === rentalCompanyFilter ||
+            (!!selectedName && normalizeSearchText(rentalCompanyName) === normalizeSearchText(selectedName)) ||
+            normalizeSearchText(rentalCompanyName).includes(normalizeSearchText(rentalCompanyFilter))
+        );
     });
+    const showDetachedEditRentalOption = !!(
+        editingTx?.type === 'outbound' &&
+        editForm.rentalCompanyId &&
+        editForm.rentalCompanyName &&
+        !rentalCompanies.some((company) => getMaterialRentalCompanyOptionId(company) === editForm.rentalCompanyId)
+    );
+    const visibleTransactionKeys = visibleTransactions.map(getTransactionKey);
+    const selectedVisibleCount = visibleTransactionKeys.filter((key) => selectedTransactionKeys.has(key)).length;
+    const allVisibleSelected = visibleTransactionKeys.length > 0 && selectedVisibleCount === visibleTransactionKeys.length;
 
     return (
         <div className="flex-1 min-h-0 flex flex-col p-6 max-w-[2200px] w-full mx-auto bg-slate-50 overflow-hidden font-sans">
@@ -407,18 +527,40 @@ const MaterialTransactionsPage: React.FC = () => {
                     </h1>
                     <p className="text-slate-500 mt-1 text-sm">차량별, 현장별 자재 이동 내역을 조회합니다.</p>
                 </div>
-                <button
-                    onClick={handleDownloadExcel}
-                    className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 transition flex items-center gap-2 shadow-sm font-medium"
-                >
-                    <FontAwesomeIcon icon={faDownload} />
-                    Excel 다운로드
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={() => navigate('/materials/transactions-by-site-date')}
+                        className="bg-white text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-50 transition flex items-center gap-2 shadow-sm font-medium border border-slate-200"
+                    >
+                        <FontAwesomeIcon icon={faClipboardList} />
+                        현장·날짜별 보기
+                    </button>
+                    <span className="text-xs font-bold text-slate-500">
+                        선택 {selectedVisibleCount.toLocaleString('ko-KR')}건
+                    </span>
+                    <button
+                        type="button"
+                        onClick={handleBulkDelete}
+                        disabled={selectedVisibleCount === 0 || loading}
+                        className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition flex items-center gap-2 shadow-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        <FontAwesomeIcon icon={faTrash} />
+                        선택 삭제
+                    </button>
+                    <button
+                        onClick={handleDownloadExcel}
+                        className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 transition flex items-center gap-2 shadow-sm font-medium"
+                    >
+                        <FontAwesomeIcon icon={faDownload} />
+                        Excel 다운로드
+                    </button>
+                </div>
             </div>
 
             {/* Filter Section */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6 flex-shrink-0">
-                <div className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
+                <div className="grid grid-cols-1 md:grid-cols-7 gap-4 items-end">
                     <div className="md:col-span-1">
                         <label className="block text-xs font-bold text-slate-500 mb-1">현장구분</label>
                         <select
@@ -482,6 +624,24 @@ const MaterialTransactionsPage: React.FC = () => {
                             <FontAwesomeIcon icon={faTruck} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs" />
                         </div>
                     </div>
+                    <div className="md:col-span-1">
+                        <label className="block text-xs font-bold text-slate-500 mb-1">임대사</label>
+                        <select
+                            value={rentalCompanyFilter}
+                            onChange={(e) => setRentalCompanyFilter(e.target.value)}
+                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
+                        >
+                            <option value="">전체 임대사</option>
+                            {rentalCompanies.map((company) => {
+                                const optionId = getMaterialRentalCompanyOptionId(company);
+                                if (!optionId) return null;
+                                return (
+                                    <option key={optionId} value={optionId}>{company.name}</option>
+                                );
+                            })}
+                            <option value={RENTAL_UNASSIGNED_FILTER}>임대사 미지정</option>
+                        </select>
+                    </div>
                     <div className="md:col-span-1 flex gap-2">
                         <button
                             onClick={() => handleSearch()}
@@ -497,18 +657,27 @@ const MaterialTransactionsPage: React.FC = () => {
             {/* Data Table */}
             <div className="flex-1 min-h-0 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
                 <div className="flex-1 overflow-auto min-h-[780px] max-h-[calc(100vh-220px)]">
-                    <table className="w-full min-w-[1780px] text-sm">
+                    <table className="w-full min-w-[1970px] text-sm">
                         <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
                             <tr>
-                                <th className="px-4 py-3 text-left font-bold text-slate-600 w-32 sticky left-0 z-20 bg-slate-50">일자</th>
-                                <th className="px-4 py-3 text-center font-bold text-slate-600 w-24 sticky left-[128px] z-20 bg-slate-50">구분</th>
-                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[220px] sticky left-[224px] z-20 bg-slate-50">현장</th>
-                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[220px] sticky left-[444px] z-20 bg-slate-50">품명</th>
+                                <th className="px-3 py-3 text-center font-bold text-slate-600 w-12 sticky left-0 z-30 bg-slate-50">
+                                    <input
+                                        type="checkbox"
+                                        checked={allVisibleSelected}
+                                        onChange={toggleAllVisibleTransactions}
+                                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                </th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-600 w-32 sticky left-[48px] z-20 bg-slate-50">일자</th>
+                                <th className="px-4 py-3 text-center font-bold text-slate-600 w-24 sticky left-[176px] z-20 bg-slate-50">구분</th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[220px] sticky left-[272px] z-20 bg-slate-50">현장</th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[220px] sticky left-[492px] z-20 bg-slate-50">품명</th>
                                 <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[160px]">규격</th>
                                 <th className="px-4 py-3 text-right font-bold text-slate-600 w-24">수량</th>
                                 <th className="px-4 py-3 text-left font-bold text-slate-600 w-20">단위</th>
                                 <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[150px]">차량번호</th>
                                 <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[160px]">입고처/출고자</th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[160px]">임대사</th>
                                 <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[220px]">비고</th>
                                 <th className="px-4 py-3 text-center font-bold text-slate-600 w-24">관리</th>
                             </tr>
@@ -516,16 +685,27 @@ const MaterialTransactionsPage: React.FC = () => {
                         <tbody className="divide-y divide-slate-100">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={11} className="p-20 text-center text-slate-400">
+                                    <td colSpan={13} className="p-20 text-center text-slate-400">
                                         <div className="animate-spin inline-block w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full mb-4"></div>
                                         <p>데이터를 불러오는 중입니다...</p>
                                     </td>
                                 </tr>
                             ) : visibleTransactions.length > 0 ? (
-                                visibleTransactions.map((t, index) => (
-                                    <tr key={`${t.id}-${index}`} className="hover:bg-slate-50 transition-colors">
-                                        <td className="px-4 py-2.5 text-slate-600 sticky left-0 z-10 bg-white">{t.transactionDate}</td>
-                                        <td className="px-4 py-2.5 text-center sticky left-[128px] z-10 bg-white">
+                                visibleTransactions.map((t, index) => {
+                                    const isSelected = selectedTransactionKeys.has(getTransactionKey(t));
+                                    const stickyBgClass = isSelected ? 'bg-indigo-50' : 'bg-white';
+                                    return (
+                                    <tr key={`${getTransactionKey(t)}-${index}`} className={`hover:bg-slate-50 transition-colors ${isSelected ? 'bg-indigo-50' : ''}`}>
+                                        <td className={`px-3 py-2.5 text-center sticky left-0 z-20 ${stickyBgClass}`}>
+                                            <input
+                                                type="checkbox"
+                                                checked={isSelected}
+                                                onChange={() => toggleTransactionSelection(t)}
+                                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                            />
+                                        </td>
+                                        <td className={`px-4 py-2.5 text-slate-600 sticky left-[48px] z-10 ${stickyBgClass}`}>{t.transactionDate}</td>
+                                        <td className={`px-4 py-2.5 text-center sticky left-[176px] z-10 ${stickyBgClass}`}>
                                             <span className={`px-2.5 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1.5
                                                 ${t.type === 'inbound'
                                                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
@@ -536,11 +716,11 @@ const MaterialTransactionsPage: React.FC = () => {
                                                 {t.type === 'inbound' ? '입고' : '출고'}
                                             </span>
                                         </td>
-                                        <td className="px-4 py-2.5 font-medium text-slate-800 sticky left-[224px] z-10 bg-white">
+                                        <td className={`px-4 py-2.5 font-medium text-slate-800 sticky left-[272px] z-10 ${stickyBgClass}`}>
                                             <div>{t.siteName}</div>
                                             <div className="text-[11px] font-semibold text-slate-400">{t.siteStatusLabel}</div>
                                         </td>
-                                        <td className="px-4 py-2.5 font-medium text-slate-800 sticky left-[444px] z-10 bg-white">{t.itemName}</td>
+                                        <td className={`px-4 py-2.5 font-medium text-slate-800 sticky left-[492px] z-10 ${stickyBgClass}`}>{t.itemName}</td>
                                         <td className="px-4 py-2.5 text-slate-500">{t.spec}</td>
                                         <td className={`px-4 py-2.5 text-right font-bold ${t.type === 'inbound' ? 'text-emerald-600' : 'text-orange-600'}`}>
                                             {t.quantity.toLocaleString()}
@@ -559,6 +739,9 @@ const MaterialTransactionsPage: React.FC = () => {
                                             {t.type === 'inbound'
                                                 ? ((t as InboundTransaction).supplier || '-')
                                                 : ((t as OutboundTransaction).recipient || '-')}
+                                        </td>
+                                        <td className="px-4 py-2.5 text-slate-600 text-xs">
+                                            {t.type === 'outbound' ? ((t as OutboundTransaction).rentalCompanyName || '-') : '-'}
                                         </td>
                                         <td className="px-4 py-2.5 text-slate-500 whitespace-pre-wrap break-words">{t.notes || '-'}</td>
                                         <td className="px-4 py-2.5 text-center">
@@ -580,10 +763,11 @@ const MaterialTransactionsPage: React.FC = () => {
                                             </div>
                                         </td>
                                     </tr>
-                                ))
+                                    );
+                                })
                             ) : (
                                 <tr>
-                                    <td colSpan={11} className="p-24 text-center text-slate-400">
+                                    <td colSpan={13} className="p-24 text-center text-slate-400">
                                         <div className="bg-slate-50 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
                                             <FontAwesomeIcon icon={faFilter} className="text-3xl text-slate-300" />
                                         </div>
@@ -685,6 +869,29 @@ const MaterialTransactionsPage: React.FC = () => {
                                         className="w-full border border-slate-300 rounded-lg px-3 py-2"
                                     />
                                 </div>
+
+                                {editingTx?.type === 'outbound' && (
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-1">임대사</label>
+                                        <select
+                                            value={editForm.rentalCompanyId}
+                                            onChange={(e) => handleEditRentalCompanyChange(e.target.value)}
+                                            className="w-full border border-slate-300 rounded-lg px-3 py-2"
+                                        >
+                                            <option value="">임대사 선택</option>
+                                            {showDetachedEditRentalOption && (
+                                                <option value={editForm.rentalCompanyId}>{editForm.rentalCompanyName}</option>
+                                            )}
+                                            {rentalCompanies.map((company) => {
+                                                const optionId = getMaterialRentalCompanyOptionId(company);
+                                                if (!optionId) return null;
+                                                return (
+                                                    <option key={optionId} value={optionId}>{company.name}</option>
+                                                );
+                                            })}
+                                        </select>
+                                    </div>
+                                )}
 
                                 <div>
                                     <label className="block text-sm font-bold text-slate-700 mb-1">비고</label>

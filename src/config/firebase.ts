@@ -27,13 +27,15 @@ const app = (() => {
   const existing = getApps();
   if (existing.length > 0) return existing[0];
 
+  const measurementId = process.env.REACT_APP_FIREBASE_MEASUREMENT_ID;
   const firebaseConfig = {
     apiKey: requireEnv('REACT_APP_FIREBASE_API_KEY'),
     authDomain: requireEnv('REACT_APP_FIREBASE_AUTH_DOMAIN'),
     projectId: requireEnv('REACT_APP_FIREBASE_PROJECT_ID'),
     storageBucket: requireEnv('REACT_APP_FIREBASE_STORAGE_BUCKET'),
     messagingSenderId: requireEnv('REACT_APP_FIREBASE_MESSAGING_SENDER_ID'),
-    appId: requireEnv('REACT_APP_FIREBASE_APP_ID')
+    appId: requireEnv('REACT_APP_FIREBASE_APP_ID'),
+    ...(measurementId ? { measurementId } : {})
   };
 
   return initializeApp(firebaseConfig);

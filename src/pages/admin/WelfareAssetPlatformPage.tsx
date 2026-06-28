@@ -6,6 +6,7 @@ import {
   Coins,
   Dice5,
   FileSpreadsheet,
+  GitFork,
   History,
   LockKeyhole,
   Moon,
@@ -41,11 +42,13 @@ import {
   YAxis
 } from 'recharts';
 import { useAuth } from '../../contexts/AuthContext';
+import { dailyReportService } from '../../services/dailyReportService';
 import { manpowerService, type Worker } from '../../services/manpowerService';
 import { userService, type UserData } from '../../services/userService';
 import {
   validateWelfareDoubleEntry,
   welfareAssetService,
+  type LadderOddEvenSideRuntimeConfig,
   type OceanReelMissPatternRuntimeConfig,
   type OceanReelStageRuntimeConfig,
   type PointRouletteSegmentRuntimeConfig,
@@ -70,9 +73,10 @@ import type {
 import './WelfareAssetPlatformPage.css';
 
 type AdminTab = 'dashboard' | 'ledger' | 'games' | 'bulk' | 'controls';
-type GamePage = 'roulette' | 'ocean_reel';
+type GamePage = 'roulette' | 'ocean_reel' | 'ladder_odd_even';
 type GamePanelMode = 'play' | 'settings';
 type AdjustmentDirection = 'credit' | 'debit';
+type LadderSide = 'odd' | 'even';
 type CSSVariableProperties = React.CSSProperties & { [key: `--${string}`]: string | number };
 
 interface AdjustmentDraft {
@@ -84,6 +88,22 @@ interface AdjustmentDraft {
   memo: string;
 }
 
+interface ManDayPointGrantDraft {
+  startDate: string;
+  endDate: string;
+  pointPerManDay: string;
+  categoryId: string;
+  memo: string;
+}
+
+interface LinkedWorkerSummary {
+  id: string;
+  legacyId?: string;
+  name: string;
+  teamName: string;
+  role?: string;
+}
+
 interface EmployeeAssetRow {
   id: string;
   name: string;
@@ -93,6 +113,18 @@ interface EmployeeAssetRow {
   point: number;
   pointExpiresAt: string;
   dailyGamePlays: number;
+  linkedWorkers?: LinkedWorkerSummary[];
+}
+
+interface ManDayPointPreviewRow {
+  employeeId: string;
+  employeeName: string;
+  team: string;
+  workerNames: string[];
+  workerIds: string[];
+  manDay: number;
+  workDateCount: number;
+  included: boolean;
 }
 
 interface AssetFlowRow {
@@ -123,6 +155,8 @@ const buildBusinessDate = (date = new Date()) => {
   const koreanTime = new Date(date.getTime() + 9 * 60 * 60 * 1000);
   return koreanTime.toISOString().slice(0, 10);
 };
+
+const buildCurrentMonthStartDate = () => `${buildBusinessDate().slice(0, 7)}-01`;
 
 const parseBusinessDate = (value: unknown): string => {
   const text = toText(value);
@@ -180,6 +214,15 @@ const parseDecimal = (value: unknown): number => {
   const parsed = typeof value === 'number' ? value : Number(String(value ?? '').replace(/[,%\s]/g, '').trim());
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 };
+
+const roundManDayValue = (value: number): number => Math.round(value * 100) / 100;
+
+const formatManDayValue = (value: number): string => (
+  roundManDayValue(value).toLocaleString('ko-KR', {
+    minimumFractionDigits: Number.isInteger(roundManDayValue(value)) ? 0 : 1,
+    maximumFractionDigits: 2
+  })
+);
 
 const clampNumber = (value: unknown, fallback: number, min: number, max: number): number => {
   if (value === undefined || value === null || String(value).trim() === '') return fallback;
@@ -265,7 +308,16 @@ const buildEmployeeRowsFromUsers = (
         cash: cashSnapshot?.balance ?? 0,
         point: pointSnapshot?.balance ?? 0,
         pointExpiresAt: '정책별',
-        dailyGamePlays: 0
+        dailyGamePlays: 0,
+        linkedWorkers: linkedWorkers
+          .filter((worker) => worker.id)
+          .map((worker) => ({
+            id: String(worker.id),
+            legacyId: worker.legacyId ? String(worker.legacyId) : undefined,
+            name: toText(worker.name) || String(worker.id),
+            teamName: toText(worker.teamName) || '미배정',
+            role: toText(worker.role)
+          }))
       };
     })
     .sort((left, right) => left.name.localeCompare(right.name, 'ko-KR'));
@@ -442,9 +494,11 @@ const getAuditActionLabel = (action: string) => ({
 const gameConfigs: WelfareGameConfig[] = [
   { id: 'point-roulette', name: '포인트 룰렛', type: 'roulette', assetKind: 'point', stake: 100, dailyLimit: 3, active: true, expectedReturnRate: 0.74 },
   { id: 'ocean-reel', name: '해양 릴게임', type: 'ocean_reel', assetKind: 'point', stake: 100, dailyLimit: 0, active: true, expectedReturnRate: 0.7 },
+  { id: 'ladder-odd-even', name: '사다리 홀짝', type: 'ladder_odd_even', assetKind: 'point', stake: 100, dailyLimit: 3, active: true, expectedReturnRate: 0.95 },
 ];
 
 const oceanReelAlgorithmVersion = 'ocean-reel-v3-cumulative-probability';
+const ladderOddEvenAlgorithmVersion = 'ladder-odd-even-v1-configurable-probability';
 
 const oceanReelStages = [
   { stage: 1, symbol: '해파리', payout: '5배', multiplierText: '5배', oddsText: '10분의 1', minMultiplier: 5, maxMultiplier: 5, oddsDenominator: 10, color: '#06b6d4', spritePosition: '0% 0%' },
@@ -485,6 +539,7 @@ const reelColumnStyles: CSSVariableProperties[] = [
 
 type ReelPhase = 'idle' | 'spinning' | 'revealed';
 type RoulettePhase = 'idle' | 'spinning' | 'revealed';
+type LadderPhase = 'idle' | 'spinning' | 'revealed';
 
 const defaultPointRouletteSegments: PointRouletteSegmentRuntimeConfig[] = [
   { id: 'miss-1', label: 'MISS', subLabel: '다음 기회', multiplier: 0, probability: 0.27, color: '#1e293b' },
@@ -494,6 +549,30 @@ const defaultPointRouletteSegments: PointRouletteSegmentRuntimeConfig[] = [
   { id: 'jackpot', label: '5배', subLabel: '5배', multiplier: 5, probability: 0.04, color: '#f59e0b' },
   { id: 'base-2', label: '원금', subLabel: '원금 보전', multiplier: 1, probability: 0.15, color: '#2563eb' }
 ];
+
+const defaultLadderOddEvenSides: LadderOddEvenSideRuntimeConfig[] = [
+  { id: 'odd', label: '홀', multiplier: 1.9, probability: 0.5, color: '#dc2626' },
+  { id: 'even', label: '짝', multiplier: 1.9, probability: 0.5, color: '#2563eb' }
+];
+
+const ladderSideLabels: Record<LadderSide, string> = {
+  odd: '홀',
+  even: '짝'
+};
+
+const ladderRailX: Record<LadderSide, number> = {
+  odd: 24,
+  even: 76
+};
+
+const ladderWinDestinationSide: LadderSide = 'odd';
+const ladderLoseDestinationSide: LadderSide = 'even';
+
+const getLadderVerdictDestinationSide = (hit: boolean): LadderSide => (
+  hit ? ladderWinDestinationSide : ladderLoseDestinationSide
+);
+
+const defaultLadderPreviewRungs = [24, 38, 52, 66];
 
 const getPointRouletteSegmentDisplay = (
   segment: Pick<PointRouletteSegmentRuntimeConfig, 'label' | 'subLabel' | 'multiplier'>,
@@ -568,6 +647,23 @@ interface PointRouletteResult {
   expectedReturnRate: number;
 }
 
+interface LadderOddEvenResult {
+  label: string;
+  reward: number;
+  stake: number;
+  multiplier: number;
+  selectedSide: LadderSide;
+  selectedSideLabel: string;
+  resultSide: LadderSide;
+  resultSideLabel: string;
+  ladderRungs: number[];
+  hit: boolean;
+  algorithmVersion: string;
+  hitRate: number;
+  missRate: number;
+  expectedReturnRate: number;
+}
+
 type OceanReelStage = typeof oceanReelStages[number];
 
 interface OceanReelSettingDraft {
@@ -588,6 +684,14 @@ interface PointRouletteSettingDraft {
   id: string;
   label: string;
   subLabel: string;
+  color?: string;
+  multiplier: string;
+  probabilityPercent: string;
+}
+
+interface LadderOddEvenSettingDraft {
+  id: LadderSide;
+  label: string;
   color?: string;
   multiplier: string;
   probabilityPercent: string;
@@ -642,6 +746,20 @@ const createPointRouletteSettingsDraft = (config?: WelfareGameRuntimeConfig | nu
       subLabel: loadedSegment?.subLabel ?? segment.subLabel,
       color: loadedSegment?.color ?? segment.color,
       multiplier: String(loadedSegment?.multiplier ?? segment.multiplier),
+      probabilityPercent
+    };
+  })
+);
+
+const createLadderOddEvenSettingsDraft = (config?: WelfareGameRuntimeConfig | null): LadderOddEvenSettingDraft[] => (
+  defaultLadderOddEvenSides.map((side) => {
+    const loadedSide = config?.ladderOddEvenSides?.find((item) => item.id === side.id);
+    const probabilityPercent = ((loadedSide?.probability ?? side.probability) * 100).toFixed(2).replace(/\.?0+$/, '') || '0';
+    return {
+      id: side.id,
+      label: loadedSide?.label ?? side.label,
+      color: loadedSide?.color ?? side.color,
+      multiplier: String(loadedSide?.multiplier ?? side.multiplier),
       probabilityPercent
     };
   })
@@ -707,6 +825,19 @@ const normalizePointRouletteSettings = (settings: PointRouletteSettingDraft[]): 
   })
 );
 
+const normalizeLadderOddEvenSettings = (settings: LadderOddEvenSettingDraft[]): LadderOddEvenSideRuntimeConfig[] => (
+  defaultLadderOddEvenSides.map((side) => {
+    const draft = settings.find((item) => item.id === side.id);
+    return {
+      id: side.id,
+      label: draft?.label || side.label,
+      color: draft?.color || side.color,
+      multiplier: clampNumber(draft?.multiplier, side.multiplier, 0, 10000),
+      probability: clampNumber(draft?.probabilityPercent, side.probability * 100, 0, 100) / 100
+    };
+  })
+);
+
 const normalizeGameRuleSettings = (
   settings: Record<string, GameRuleSettingDraft>
 ): Record<string, { stake: number; dailyLimit: number }> => (
@@ -738,6 +869,68 @@ const calculatePointRouletteReturnRate = (settings: PointRouletteSegmentRuntimeC
 const calculatePointRouletteHitRate = (settings: PointRouletteSegmentRuntimeConfig[]): number => (
   settings.reduce((sum, segment) => sum + (segment.multiplier > 0 ? segment.probability : 0), 0)
 );
+
+const calculateLadderOddEvenReturnRate = (settings: LadderOddEvenSideRuntimeConfig[]): number => (
+  settings.length === 0
+    ? 0
+    : settings.reduce((sum, side) => sum + (side.probability * side.multiplier), 0) / settings.length
+);
+
+const calculateLadderOddEvenHitRate = (settings: LadderOddEvenSideRuntimeConfig[]): number => (
+  settings.length === 0
+    ? 0
+    : settings.reduce((sum, side) => sum + side.probability, 0) / settings.length
+);
+
+const readLadderSide = (value: unknown, fallback: LadderSide = 'odd'): LadderSide => (
+  String(value ?? '').trim().toLowerCase() === 'even' ? 'even' : fallback
+);
+
+const getOppositeLadderSide = (side: LadderSide): LadderSide => (side === 'odd' ? 'even' : 'odd');
+
+const readLadderRungs = (metadata: Record<string, unknown>, fallbackSelectedSide: LadderSide, fallbackResultSide: LadderSide): number[] => {
+  const rawRungs = metadata.ladderRungs;
+  const parsed = Array.isArray(rawRungs)
+    ? rawRungs.map((rung) => parseAmount(rung)).filter((rung) => rung > 10 && rung < 90)
+    : [];
+  if (parsed.length > 0) return parsed.slice(0, 6).sort((left, right) => left - right);
+
+  const shouldMatch = fallbackSelectedSide === fallbackResultSide;
+  return shouldMatch ? [24, 46, 68, 80] : [24, 40, 56];
+};
+
+const normalizeLadderRungsForResult = (
+  selectedSide: LadderSide,
+  resultSide: LadderSide,
+  rungLevels: number[]
+): number[] => {
+  const normalized = [...rungLevels]
+    .map((level) => parseAmount(level))
+    .filter((level) => level > 10 && level < 90)
+    .slice(0, 6)
+    .sort((left, right) => left - right);
+  const shouldSwitchSide = selectedSide !== resultSide;
+  const switchesSide = normalized.length % 2 === 1;
+  if (switchesSide === shouldSwitchSide) return normalized;
+
+  const fallbackLevels = [20, 32, 44, 56, 68, 80];
+  const extraLevel = fallbackLevels.find((level) => normalized.every((existing) => Math.abs(existing - level) >= 4));
+  if (extraLevel) return [...normalized, extraLevel].sort((left, right) => left - right);
+
+  return normalized.slice(0, Math.max(0, normalized.length - 1));
+};
+
+const buildLadderPathPoints = (selectedSide: LadderSide, rungLevels: number[]): string => {
+  let currentSide = selectedSide;
+  const points = [`${ladderRailX[currentSide]},10`];
+  rungLevels.forEach((level) => {
+    points.push(`${ladderRailX[currentSide]},${level}`);
+    currentSide = getOppositeLadderSide(currentSide);
+    points.push(`${ladderRailX[currentSide]},${level}`);
+  });
+  points.push(`${ladderRailX[currentSide]},90`);
+  return points.join(' ');
+};
 
 const readOceanReelStops = (metadata: Record<string, unknown>, fallbackStage: number): number[] => {
   const rawStops = metadata.reelStops;
@@ -919,6 +1112,7 @@ const WelfareAssetPlatformPage: React.FC = () => {
   const [gamePanelMode, setGamePanelMode] = useState<GamePanelMode>('play');
   const [gameRuleSettings, setGameRuleSettings] = useState<Record<string, GameRuleSettingDraft>>(() => createDefaultGameRuleSettings());
   const [pointRouletteSettings, setPointRouletteSettings] = useState<PointRouletteSettingDraft[]>(() => createPointRouletteSettingsDraft());
+  const [ladderOddEvenSettings, setLadderOddEvenSettings] = useState<LadderOddEvenSettingDraft[]>(() => createLadderOddEvenSettingsDraft());
   const [oceanReelSettings, setOceanReelSettings] = useState<OceanReelSettingDraft[]>(() => createOceanReelSettingsDraft());
   const [oceanMissPatternSettings, setOceanMissPatternSettings] = useState<OceanReelMissPatternDraft[]>(() => createOceanMissPatternDraft());
   const [gameConfigLoading, setGameConfigLoading] = useState(false);
@@ -946,6 +1140,16 @@ const WelfareAssetPlatformPage: React.FC = () => {
     memo: ''
   });
   const [adjustmentSubmitting, setAdjustmentSubmitting] = useState(false);
+  const [manDayPointGrantDraft, setManDayPointGrantDraft] = useState<ManDayPointGrantDraft>({
+    startDate: buildCurrentMonthStartDate(),
+    endDate: buildBusinessDate(),
+    pointPerManDay: '100',
+    categoryId: '',
+    memo: ''
+  });
+  const [manDayPointPreviewRows, setManDayPointPreviewRows] = useState<ManDayPointPreviewRow[]>([]);
+  const [manDayPointLoading, setManDayPointLoading] = useState(false);
+  const [manDayPointSubmitting, setManDayPointSubmitting] = useState(false);
   const [permissionSaving, setPermissionSaving] = useState(false);
   const [masterSyncing, setMasterSyncing] = useState(false);
   const [roulettePointBalance, setRoulettePointBalance] = useState(0);
@@ -956,12 +1160,19 @@ const WelfareAssetPlatformPage: React.FC = () => {
   const [pointRoulettePhase, setPointRoulettePhase] = useState<RoulettePhase>('idle');
   const [pointRouletteRotation, setPointRouletteRotation] = useState(0);
   const [lastPointRouletteResult, setLastPointRouletteResult] = useState<PointRouletteResult | null>(null);
+  const [ladderSelectedSide, setLadderSelectedSide] = useState<LadderSide>('odd');
+  const [ladderOddEvenPlays, setLadderOddEvenPlays] = useState(0);
+  const [ladderOddEvenPhase, setLadderOddEvenPhase] = useState<LadderPhase>('idle');
+  const [pendingLadderOddEvenResult, setPendingLadderOddEvenResult] = useState<LadderOddEvenResult | null>(null);
+  const [lastLadderOddEvenResult, setLastLadderOddEvenResult] = useState<LadderOddEvenResult | null>(null);
   const [gameSubmitting, setGameSubmitting] = useState(false);
   const [lastGameResult, setLastGameResult] = useState<ReelGameResult | null>(null);
   const adjustmentSubmitKeyRef = useRef<string | null>(null);
+  const manDayPointSubmitKeyRef = useRef<string | null>(null);
   const bulkSubmitKeyRef = useRef<string | null>(null);
   const rouletteRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pointRouletteRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ladderRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadUserAssetData = useCallback(async () => {
     setLoadingData(true);
@@ -1043,9 +1254,10 @@ const WelfareAssetPlatformPage: React.FC = () => {
     setGameConfigLoading(true);
     Promise.allSettled([
       welfareAssetService.getGameRuntimeConfig('point-roulette'),
-      welfareAssetService.getGameRuntimeConfig('ocean-reel')
+      welfareAssetService.getGameRuntimeConfig('ocean-reel'),
+      welfareAssetService.getGameRuntimeConfig('ladder-odd-even')
     ])
-      .then(([pointResult, oceanResult]) => {
+      .then(([pointResult, oceanResult, ladderResult]) => {
         if (!active) return;
         if (pointResult.status === 'fulfilled' && pointResult.value) {
           setPointRouletteSettings(createPointRouletteSettingsDraft(pointResult.value));
@@ -1060,6 +1272,13 @@ const WelfareAssetPlatformPage: React.FC = () => {
           setGameRuleSettings((prev) => ({
             ...prev,
             'ocean-reel': createGameRuleSettingDraft('ocean-reel', oceanResult.value)
+          }));
+        }
+        if (ladderResult.status === 'fulfilled' && ladderResult.value) {
+          setLadderOddEvenSettings(createLadderOddEvenSettingsDraft(ladderResult.value));
+          setGameRuleSettings((prev) => ({
+            ...prev,
+            'ladder-odd-even': createGameRuleSettingDraft('ladder-odd-even', ladderResult.value)
           }));
         }
       })
@@ -1079,7 +1298,23 @@ const WelfareAssetPlatformPage: React.FC = () => {
     () => buildEmployeeRowsFromUsers(users, workers, accountSnapshots),
     [accountSnapshots, users, workers]
   );
+  const linkedEmployeeRows = useMemo(
+    () => employeeRows.filter((employee) => (employee.linkedWorkers || []).length > 0),
+    [employeeRows]
+  );
   const employeeById = useMemo(() => new Map(employeeRows.map((employee) => [employee.id, employee])), [employeeRows]);
+  const linkedEmployeeByWorkerKey = useMemo(() => {
+    const lookup = new Map<string, { employee: EmployeeAssetRow; worker: LinkedWorkerSummary }>();
+    linkedEmployeeRows.forEach((employee) => {
+      (employee.linkedWorkers || []).forEach((worker) => {
+        [worker.id, worker.legacyId].forEach((workerKey) => {
+          const normalized = normalizeComparable(workerKey);
+          if (normalized && !lookup.has(normalized)) lookup.set(normalized, { employee, worker });
+        });
+      });
+    });
+    return lookup;
+  }, [linkedEmployeeRows]);
   const employeeLookup = useMemo(() => {
     const lookup = new Map<string, EmployeeAssetRow>();
     employeeRows.forEach((employee) => {
@@ -1135,6 +1370,25 @@ const WelfareAssetPlatformPage: React.FC = () => {
     () => categories.filter((category) => isCategoryEligible(category, adjustmentDraft.assetKind, adjustmentDraft.direction)),
     [adjustmentDraft.assetKind, adjustmentDraft.direction, categories]
   );
+  const manDayPointCategories = useMemo(
+    () => categories.filter((category) => isCategoryEligible(category, 'point', 'credit')),
+    [categories]
+  );
+  const manDayPointRate = Math.max(0, parseAmount(manDayPointGrantDraft.pointPerManDay));
+  const manDayPointRows = useMemo(() => manDayPointPreviewRows.map((row) => ({
+    ...row,
+    pointAmount: Math.round(row.manDay * manDayPointRate)
+  })), [manDayPointPreviewRows, manDayPointRate]);
+  const manDayPointSelectedRows = useMemo(
+    () => manDayPointRows.filter((row) => row.included && row.pointAmount > 0),
+    [manDayPointRows]
+  );
+  const manDayPointSummary = useMemo(() => ({
+    workerCount: manDayPointRows.reduce((sum, row) => sum + row.workerIds.length, 0),
+    selectedUserCount: manDayPointSelectedRows.length,
+    totalManDay: roundManDayValue(manDayPointSelectedRows.reduce((sum, row) => sum + row.manDay, 0)),
+    totalPoint: manDayPointSelectedRows.reduce((sum, row) => sum + row.pointAmount, 0)
+  }), [manDayPointRows, manDayPointSelectedRows]);
 
   useEffect(() => {
     setAdjustmentDraft((prev) => ({
@@ -1145,6 +1399,17 @@ const WelfareAssetPlatformPage: React.FC = () => {
         : adjustmentCategories[0]?.id || ''
     }));
   }, [adjustmentCategories, employeeRows]);
+
+  useEffect(() => {
+    setManDayPointGrantDraft((prev) => ({
+      ...prev,
+      categoryId: manDayPointCategories.some((category) => category.id === prev.categoryId)
+        ? prev.categoryId
+        : manDayPointCategories.find((category) => category.id === 'point-adjustment')?.id
+          || manDayPointCategories[0]?.id
+          || ''
+    }));
+  }, [manDayPointCategories]);
 
   useEffect(() => {
     if (bulkFileUploaded) return;
@@ -1238,6 +1503,10 @@ const WelfareAssetPlatformPage: React.FC = () => {
     () => normalizePointRouletteSettings(pointRouletteSettings),
     [pointRouletteSettings]
   );
+  const normalizedLadderOddEvenSettings = useMemo(
+    () => normalizeLadderOddEvenSettings(ladderOddEvenSettings),
+    [ladderOddEvenSettings]
+  );
   const pointRouletteExpectedReturnRate = useMemo(
     () => calculatePointRouletteReturnRate(normalizedPointRouletteSettings),
     [normalizedPointRouletteSettings]
@@ -1250,6 +1519,23 @@ const WelfareAssetPlatformPage: React.FC = () => {
   const pointRouletteProbabilityTotal = normalizedPointRouletteSettings.reduce((sum, segment) => sum + segment.probability, 0);
   const pointRouletteConfigError = Math.abs(pointRouletteProbabilityTotal - 1) > 0.0001
     ? `포인트 룰렛 확률 합계가 100%가 되어야 합니다. 현재 ${formatReturnRate(pointRouletteProbabilityTotal)}입니다.`
+    : '';
+  const ladderOddEvenExpectedReturnRate = useMemo(
+    () => calculateLadderOddEvenReturnRate(normalizedLadderOddEvenSettings),
+    [normalizedLadderOddEvenSettings]
+  );
+  const ladderOddEvenHitRate = useMemo(
+    () => calculateLadderOddEvenHitRate(normalizedLadderOddEvenSettings),
+    [normalizedLadderOddEvenSettings]
+  );
+  const ladderOddEvenMissRate = Math.max(0, 1 - ladderOddEvenHitRate);
+  const ladderOddEvenProbabilityTotal = normalizedLadderOddEvenSettings.reduce((sum, side) => sum + side.probability, 0);
+  const ladderSelectedConfig = normalizedLadderOddEvenSettings.find((side) => side.id === ladderSelectedSide) || normalizedLadderOddEvenSettings[0];
+  const ladderSelectedExpectedReturnRate = ladderSelectedConfig
+    ? ladderSelectedConfig.probability * ladderSelectedConfig.multiplier
+    : ladderOddEvenExpectedReturnRate;
+  const ladderOddEvenConfigError = Math.abs(ladderOddEvenProbabilityTotal - 1) > 0.0001
+    ? `사다리 홀짝 확률 합계가 100%가 되어야 합니다. 현재 ${formatReturnRate(ladderOddEvenProbabilityTotal)}입니다.`
     : '';
   const pointRouletteSliceAngle = 360 / Math.max(normalizedPointRouletteSettings.length, 1);
   const pointRouletteWheelBackground = `conic-gradient(${normalizedPointRouletteSettings
@@ -1281,18 +1567,91 @@ const WelfareAssetPlatformPage: React.FC = () => {
   const configuredGameConfigs = useMemo(() => gameConfigs.map((game) => ({
     ...game,
     ...(normalizedGameRuleSettings[game.id] || { stake: game.stake, dailyLimit: game.dailyLimit }),
-    expectedReturnRate: game.type === 'ocean_reel' ? oceanExpectedReturnRate : pointRouletteExpectedReturnRate
-  })), [normalizedGameRuleSettings, oceanExpectedReturnRate, pointRouletteExpectedReturnRate]);
+    expectedReturnRate: game.type === 'ocean_reel'
+      ? oceanExpectedReturnRate
+      : game.type === 'ladder_odd_even'
+        ? ladderOddEvenExpectedReturnRate
+        : pointRouletteExpectedReturnRate
+  })), [normalizedGameRuleSettings, oceanExpectedReturnRate, ladderOddEvenExpectedReturnRate, pointRouletteExpectedReturnRate]);
   const pointRoulette = configuredGameConfigs.find((game) => game.type === 'roulette') || configuredGameConfigs[0];
   const roulette = configuredGameConfigs.find((game) => game.type === 'ocean_reel') || configuredGameConfigs[0];
+  const ladderOddEven = configuredGameConfigs.find((game) => game.type === 'ladder_odd_even') || configuredGameConfigs[0];
   const pointRouletteStake = pointRoulette.stake;
   const rouletteStake = roulette.stake;
+  const ladderOddEvenStake = ladderOddEven.stake;
   const pointRouletteLimitReached = pointRoulette.dailyLimit > 0 && pointRoulettePlays >= pointRoulette.dailyLimit;
   const rouletteLimitReached = roulette.dailyLimit > 0 && roulettePlays >= roulette.dailyLimit;
+  const ladderOddEvenLimitReached = ladderOddEven.dailyLimit > 0 && ladderOddEvenPlays >= ladderOddEven.dailyLimit;
   const pointRouletteLimitLabel = pointRoulette.dailyLimit > 0 ? `일 ${pointRoulette.dailyLimit}회` : '횟수 제한 없음';
   const rouletteLimitLabel = roulette.dailyLimit > 0 ? `일 ${roulette.dailyLimit}회` : '횟수 제한 없음';
+  const ladderOddEvenLimitLabel = ladderOddEven.dailyLimit > 0 ? `일 ${ladderOddEven.dailyLimit}회` : '횟수 제한 없음';
   const pointRouletteNetChange = lastPointRouletteResult ? lastPointRouletteResult.reward - lastPointRouletteResult.stake : null;
   const rouletteNetChange = lastGameResult ? lastGameResult.reward - lastGameResult.stake : null;
+  const ladderOddEvenNetChange = lastLadderOddEvenResult ? lastLadderOddEvenResult.reward - lastLadderOddEvenResult.stake : null;
+  const activeLadderOddEvenResult = pendingLadderOddEvenResult || lastLadderOddEvenResult;
+  const ladderMiddleVisible = Boolean(activeLadderOddEvenResult);
+  const ladderBoardSelectedSide = activeLadderOddEvenResult?.selectedSide || ladderSelectedSide;
+  const ladderBoardDestinationSide = activeLadderOddEvenResult
+    ? getLadderVerdictDestinationSide(activeLadderOddEvenResult.hit)
+    : ladderWinDestinationSide;
+  const currentLadderRungs = activeLadderOddEvenResult
+    ? normalizeLadderRungsForResult(ladderBoardSelectedSide, ladderBoardDestinationSide, activeLadderOddEvenResult.ladderRungs)
+    : defaultLadderPreviewRungs;
+  const currentLadderPathPoints = buildLadderPathPoints(
+    ladderBoardSelectedSide,
+    currentLadderRungs
+  );
+  const ladderPathVerdictClass = activeLadderOddEvenResult?.hit ? 'is-win' : 'is-lose';
+  const ladderMarkSide = lastLadderOddEvenResult?.resultSide || ladderSelectedSide;
+  const ladderMarkClass = lastLadderOddEvenResult
+    ? lastLadderOddEvenResult.hit ? 'is-win' : 'is-lose'
+    : ladderMarkSide === 'odd' ? 'is-odd' : 'is-even';
+  const activeLadderDestinationSide = activeLadderOddEvenResult
+    ? getLadderVerdictDestinationSide(activeLadderOddEvenResult.hit)
+    : null;
+  const ladderOddDestinationIsWin = true;
+  const ladderEvenDestinationIsWin = false;
+  const ladderVerdictState = ladderOddEvenPhase === 'spinning'
+    ? 'running'
+    : lastLadderOddEvenResult
+      ? lastLadderOddEvenResult.hit ? 'win' : 'lose'
+      : 'ready';
+  const ladderVerdictTitle = ladderVerdictState === 'running'
+    ? '판정 중'
+    : ladderVerdictState === 'win'
+      ? '당첨!'
+      : ladderVerdictState === 'lose'
+        ? '미당첨'
+        : '결과 대기';
+  const ladderVerdictDescription = ladderVerdictState === 'running'
+    ? `${ladderSideLabels[ladderSelectedSide]} 출발점에서 사다리를 타고 있습니다.`
+    : lastLadderOddEvenResult
+      ? lastLadderOddEvenResult.hit
+        ? `${lastLadderOddEvenResult.selectedSideLabel} 선택이 당첨 칸에 도착했습니다.`
+        : `${lastLadderOddEvenResult.selectedSideLabel} 선택이 미당첨 칸에 도착했습니다.`
+      : '홀 또는 짝을 선택하고 사다리를 시작하세요.';
+  const activeGamePlayName = gamePage === 'ocean_reel'
+    ? roulette.name
+    : gamePage === 'ladder_odd_even'
+      ? ladderOddEven.name
+      : pointRoulette.name;
+  const activeGameStake = gamePage === 'ocean_reel'
+    ? rouletteStake
+    : gamePage === 'ladder_odd_even'
+      ? ladderOddEvenStake
+      : pointRouletteStake;
+  const activeGamePlayCount = gamePage === 'ocean_reel'
+    ? roulettePlays
+    : gamePage === 'ladder_odd_even'
+      ? ladderOddEvenPlays
+      : pointRoulettePlays;
+  const activeGameLimitLabel = gamePage === 'ocean_reel'
+    ? rouletteLimitLabel
+    : gamePage === 'ladder_odd_even'
+      ? ladderOddEvenLimitLabel
+      : pointRouletteLimitLabel;
+  const activeGameBalanceAfterStake = Math.max(0, roulettePointBalance - Math.max(activeGameStake, 0));
+  const activeGameHasEnoughPoint = activeGameStake > 0 && activeGameStake <= roulettePointBalance;
   const winningOceanStage = lastGameResult?.hit ? getOceanReelStage(lastGameResult.finalStage) : null;
   const canPlayPointRoulette = Boolean(roulettePlayer)
     && pointRoulette.active
@@ -1308,6 +1667,13 @@ const WelfareAssetPlatformPage: React.FC = () => {
     && rouletteStake > 0
     && rouletteStake <= roulettePointBalance
     && !rouletteLimitReached;
+  const canPlayLadderOddEven = Boolean(roulettePlayer)
+    && ladderOddEven.active
+    && !gameSubmitting
+    && ladderOddEvenPhase !== 'spinning'
+    && ladderOddEvenStake > 0
+    && ladderOddEvenStake <= roulettePointBalance
+    && !ladderOddEvenLimitReached;
   const pointRouletteDisabledReason = !currentUser?.uid
     ? '로그인 후 플레이할 수 있습니다.'
     : !roulettePlayer
@@ -1326,8 +1692,21 @@ const WelfareAssetPlatformPage: React.FC = () => {
         : rouletteStake > roulettePointBalance
             ? '사용 가능한 포인트가 부족합니다.'
             : '';
+  const ladderOddEvenDisabledReason = !currentUser?.uid
+    ? '로그인 후 플레이할 수 있습니다.'
+    : !roulettePlayer
+      ? '플레이어 정보를 불러오는 중입니다.'
+      : ladderOddEvenLimitReached
+        ? '오늘 사다리 홀짝 참여 횟수를 모두 사용했습니다.'
+        : ladderOddEvenStake > roulettePointBalance
+          ? '사용 가능한 포인트가 부족합니다.'
+          : '';
   const selectedAdjustmentEmployee = employeeById.get(adjustmentDraft.employeeId);
   const selectedAdjustmentCategory = categories.find((category) => category.id === adjustmentDraft.categoryId);
+  const selectedManDayPointCategory = categories.find((category) => category.id === manDayPointGrantDraft.categoryId);
+  const isManDayPointPeriodValid = /^\d{4}-\d{2}-\d{2}$/.test(manDayPointGrantDraft.startDate)
+    && /^\d{4}-\d{2}-\d{2}$/.test(manDayPointGrantDraft.endDate)
+    && manDayPointGrantDraft.startDate <= manDayPointGrantDraft.endDate;
   const signedAdjustmentAmount = Math.abs(parseAmount(adjustmentDraft.amount))
     * (adjustmentDraft.direction === 'credit' ? 1 : -1);
   const canSubmitAdjustment = Boolean(selectedAdjustmentEmployee)
@@ -1335,6 +1714,14 @@ const WelfareAssetPlatformPage: React.FC = () => {
     && Boolean(selectedAdjustmentCategory && isCategoryEligible(selectedAdjustmentCategory, adjustmentDraft.assetKind, adjustmentDraft.direction))
     && signedAdjustmentAmount !== 0
     && (adjustmentDraft.assetKind === 'cash' ? currentAdminAccess.adjustCash : currentAdminAccess.adjustPoint);
+  const canLoadManDayPointPreview = currentAdminAccess.adjustPoint
+    && isManDayPointPeriodValid
+    && linkedEmployeeRows.length > 0;
+  const canSubmitManDayPointGrant = canLoadManDayPointPreview
+    && Boolean(selectedManDayPointCategory && isCategoryEligible(selectedManDayPointCategory, 'point', 'credit'))
+    && manDayPointRate > 0
+    && manDayPointSelectedRows.length > 0
+    && manDayPointSummary.totalPoint > 0;
   const canSubmitBulk = currentAdminAccess.bulk;
 
   useEffect(() => {
@@ -1352,11 +1739,15 @@ const WelfareAssetPlatformPage: React.FC = () => {
     setRoulettePointBalance(roulettePlayer?.point ?? 0);
     setPointRoulettePlays(readUsageCount(pointRoulette.id, countRecordedPlays(pointRoulette.id)));
     setRoulettePlays(readUsageCount(roulette.id, countRecordedPlays(roulette.id)));
-  }, [dailyGameUsageCounts, gamePlays, pointRoulette.id, roulette.id, roulettePlayer?.id, roulettePlayer?.point, todayBusinessDate]);
+    setLadderOddEvenPlays(readUsageCount(ladderOddEven.id, countRecordedPlays(ladderOddEven.id)));
+  }, [dailyGameUsageCounts, gamePlays, ladderOddEven.id, pointRoulette.id, roulette.id, roulettePlayer?.id, roulettePlayer?.point, todayBusinessDate]);
 
   useEffect(() => {
     setLastPointRouletteResult(null);
     setPointRoulettePhase('idle');
+    setPendingLadderOddEvenResult(null);
+    setLastLadderOddEvenResult(null);
+    setLadderOddEvenPhase('idle');
     setLastGameResult(null);
     setRoulettePhase('idle');
   }, [roulettePlayer?.id]);
@@ -1367,6 +1758,9 @@ const WelfareAssetPlatformPage: React.FC = () => {
     }
     if (pointRouletteRevealTimerRef.current) {
       clearTimeout(pointRouletteRevealTimerRef.current);
+    }
+    if (ladderRevealTimerRef.current) {
+      clearTimeout(ladderRevealTimerRef.current);
     }
   }, []);
 
@@ -1548,6 +1942,167 @@ const WelfareAssetPlatformPage: React.FC = () => {
     }
   };
 
+  const loadManDayPointPreview = async () => {
+    if (!canLoadManDayPointPreview) {
+      setActionMessage({
+        tone: 'error',
+        text: !currentAdminAccess.adjustPoint
+          ? '포인트 지급 권한이 없습니다.'
+          : !isManDayPointPeriodValid
+            ? '공수 조회 기간을 확인해 주세요.'
+            : '연결된 작업자가 없습니다.'
+      });
+      return;
+    }
+
+    setManDayPointLoading(true);
+    setActionMessage(null);
+    try {
+      const reportRows = await dailyReportService.getReportWorkerRowsByRange({
+        startDate: manDayPointGrantDraft.startDate,
+        endDate: manDayPointGrantDraft.endDate
+      });
+      const summaries = new Map<string, {
+        employee: EmployeeAssetRow;
+        workerNames: Set<string>;
+        workerIds: Set<string>;
+        workDates: Set<string>;
+        manDay: number;
+      }>();
+
+      reportRows.forEach((row) => {
+        if (row.isEmptyReport || row.status === 'absent') return;
+        const link = linkedEmployeeByWorkerKey.get(normalizeComparable(row.workerId));
+        if (!link) return;
+        const manDay = parseDecimal(row.manDay);
+        if (!Number.isFinite(manDay) || manDay <= 0) return;
+
+        const current = summaries.get(link.employee.id) || {
+          employee: link.employee,
+          workerNames: new Set<string>(),
+          workerIds: new Set<string>(),
+          workDates: new Set<string>(),
+          manDay: 0
+        };
+        current.workerNames.add(toText(row.workerName) || link.worker.name);
+        current.workerIds.add(link.worker.id);
+        if (link.worker.legacyId) current.workerIds.add(link.worker.legacyId);
+        if (row.date) current.workDates.add(row.date);
+        current.manDay += manDay;
+        summaries.set(link.employee.id, current);
+      });
+
+      const nextRows = Array.from(summaries.values())
+        .map((summary): ManDayPointPreviewRow => ({
+          employeeId: summary.employee.id,
+          employeeName: summary.employee.name,
+          team: summary.employee.team,
+          workerNames: Array.from(summary.workerNames).sort((left, right) => left.localeCompare(right, 'ko-KR')),
+          workerIds: Array.from(summary.workerIds),
+          manDay: roundManDayValue(summary.manDay),
+          workDateCount: summary.workDates.size,
+          included: summary.manDay > 0
+        }))
+        .filter((row) => row.manDay > 0)
+        .sort((left, right) => right.manDay - left.manDay || left.employeeName.localeCompare(right.employeeName, 'ko-KR'));
+
+      setManDayPointPreviewRows(nextRows);
+      setActionMessage({
+        tone: nextRows.length > 0 ? 'info' : 'error',
+        text: nextRows.length > 0
+          ? `${nextRows.length}명의 연결 작업자 공수를 불러왔습니다.`
+          : '선택한 기간에 포인트 지급 가능한 연결 작업자 공수가 없습니다.'
+      });
+    } catch (error) {
+      console.error('[WelfareAssetPlatformPage] failed to load man-day point preview', error);
+      setActionMessage({ tone: 'error', text: error instanceof Error ? error.message : '공수 데이터를 불러오지 못했습니다.' });
+    } finally {
+      setManDayPointLoading(false);
+    }
+  };
+
+  const toggleManDayPointRow = (employeeId: string, included: boolean) => {
+    setManDayPointPreviewRows((prev) => prev.map((row) => (
+      row.employeeId === employeeId ? { ...row, included } : row
+    )));
+  };
+
+  const setAllManDayPointRowsIncluded = (included: boolean) => {
+    setManDayPointPreviewRows((prev) => prev.map((row) => ({ ...row, included })));
+  };
+
+  const submitManDayPointGrant = async () => {
+    if (manDayPointSubmitKeyRef.current) return;
+    if (!selectedManDayPointCategory || !canSubmitManDayPointGrant) {
+      setActionMessage({ tone: 'error', text: '지급 가능한 공수 포인트 내역이 없습니다.' });
+      return;
+    }
+
+    const requestKey = createClientRequestId('man-day-point-grant');
+    manDayPointSubmitKeyRef.current = requestKey;
+    setManDayPointSubmitting(true);
+    setActionMessage(null);
+    try {
+      const postings = manDayPointSelectedRows.flatMap((row) => {
+        const employee = employeeById.get(row.employeeId);
+        if (!employee) return [];
+        return buildPostings(
+          employee,
+          0,
+          row.pointAmount,
+          manDayPointGrantDraft.memo.trim()
+            || `${manDayPointGrantDraft.startDate}~${manDayPointGrantDraft.endDate} 공수 ${formatManDayValue(row.manDay)} × 공수당 ${formatPoint(manDayPointRate)}`
+        );
+      });
+
+      const validation = validateWelfareDoubleEntry(postings);
+      if (!validation.valid) {
+        setActionMessage({ tone: 'error', text: validation.errors.join('\n') });
+        return;
+      }
+
+      await welfareAssetService.createLedgerTransaction({
+        title: `공수 기준 포인트 지급 ${manDayPointSelectedRows.length}명`,
+        categoryId: selectedManDayPointCategory.id,
+        categoryName: selectedManDayPointCategory.name,
+        source: 'manual_adjustment',
+        businessDate: buildBusinessDate(),
+        postings,
+        idempotencyKey: requestKey,
+        metadata: {
+          mode: 'man_day_point_grant',
+          requestKey,
+          startDate: manDayPointGrantDraft.startDate,
+          endDate: manDayPointGrantDraft.endDate,
+          pointPerManDay: manDayPointRate,
+          rowCount: manDayPointSelectedRows.length,
+          totalManDay: manDayPointSummary.totalManDay,
+          totalPoint: manDayPointSummary.totalPoint,
+          rows: manDayPointSelectedRows.map((row) => ({
+            employeeId: row.employeeId,
+            employeeName: row.employeeName,
+            workerIds: row.workerIds,
+            manDay: row.manDay,
+            pointAmount: row.pointAmount
+          }))
+        }
+      });
+
+      const paidEmployeeIds = new Set(manDayPointSelectedRows.map((row) => row.employeeId));
+      setManDayPointPreviewRows((prev) => prev.map((row) => (
+        paidEmployeeIds.has(row.employeeId) ? { ...row, included: false } : row
+      )));
+      setActionMessage({ tone: 'success', text: `${manDayPointSelectedRows.length}명에게 ${formatPoint(manDayPointSummary.totalPoint)}를 지급했습니다.` });
+      await loadUserAssetData();
+    } catch (error) {
+      console.error('[WelfareAssetPlatformPage] failed to submit man-day point grant', error);
+      setActionMessage({ tone: 'error', text: formatWelfareActionError(error) });
+    } finally {
+      manDayPointSubmitKeyRef.current = null;
+      setManDayPointSubmitting(false);
+    }
+  };
+
   const submitBulkRows = async () => {
     if (bulkSubmitKeyRef.current) return;
     if (!canSubmitBulk) {
@@ -1720,6 +2275,16 @@ const WelfareAssetPlatformPage: React.FC = () => {
     )));
   };
 
+  const updateLadderOddEvenSetting = (
+    sideId: LadderSide,
+    field: keyof Pick<LadderOddEvenSettingDraft, 'multiplier' | 'probabilityPercent'>,
+    value: string
+  ) => {
+    setLadderOddEvenSettings((prev) => prev.map((row) => (
+      row.id === sideId ? { ...row, [field]: value.replace(/[^\d.]/g, '') } : row
+    )));
+  };
+
   const updateGameRuleSetting = (
     gameId: string,
     field: keyof GameRuleSettingDraft,
@@ -1761,6 +2326,39 @@ const WelfareAssetPlatformPage: React.FC = () => {
       setActionMessage({ tone: 'success', text: `포인트 룰렛 설정을 저장했습니다. 당첨 ${formatReturnRate(config.hitRate)} · 미당첨 ${formatReturnRate(config.missRate)} · 환급률 ${formatReturnRate(config.expectedReturnRate)}` });
     } catch (error) {
       console.error('[WelfareAssetPlatformPage] failed to save point roulette config', error);
+      setActionMessage({ tone: 'error', text: formatWelfareActionError(error) });
+    } finally {
+      setGameConfigSaving(false);
+    }
+  };
+
+  const saveLadderOddEvenSettings = async () => {
+    if (!currentAdminAccess.game) {
+      setActionMessage({ tone: 'error', text: '게임 설정 저장 권한이 없습니다.' });
+      return;
+    }
+    if (ladderOddEvenConfigError) {
+      setActionMessage({ tone: 'error', text: ladderOddEvenConfigError });
+      return;
+    }
+
+    setGameConfigSaving(true);
+    setActionMessage(null);
+    try {
+      const config = await welfareAssetService.saveGameRuntimeConfig({
+        gameId: 'ladder-odd-even',
+        type: 'ladder_odd_even',
+        ...(normalizedGameRuleSettings['ladder-odd-even'] || { stake: ladderOddEven.stake, dailyLimit: ladderOddEven.dailyLimit }),
+        ladderOddEvenSides: normalizedLadderOddEvenSettings
+      });
+      setLadderOddEvenSettings(createLadderOddEvenSettingsDraft(config));
+      setGameRuleSettings((prev) => ({
+        ...prev,
+        'ladder-odd-even': createGameRuleSettingDraft('ladder-odd-even', config)
+      }));
+      setActionMessage({ tone: 'success', text: `사다리 홀짝 설정을 저장했습니다. 평균 당첨 ${formatReturnRate(config.hitRate)} · 미당첨 ${formatReturnRate(config.missRate)} · 평균 환급률 ${formatReturnRate(config.expectedReturnRate)}` });
+    } catch (error) {
+      console.error('[WelfareAssetPlatformPage] failed to save ladder odd-even config', error);
       setActionMessage({ tone: 'error', text: formatWelfareActionError(error) });
     } finally {
       setGameConfigSaving(false);
@@ -1957,6 +2555,94 @@ const WelfareAssetPlatformPage: React.FC = () => {
     } catch (error) {
       console.error('[WelfareAssetPlatformPage] failed to play point roulette', error);
       setPointRoulettePhase('idle');
+      setActionMessage({ tone: 'error', text: formatWelfareActionError(error) });
+    } finally {
+      setGameSubmitting(false);
+    }
+  };
+
+  const playLadderOddEven = async () => {
+    if (!currentUser?.uid || !roulettePlayer) {
+      setActionMessage({ tone: 'error', text: '사다리 홀짝은 현재 로그인한 사용자 계정으로만 실행할 수 있습니다.' });
+      return;
+    }
+    if (!canPlayLadderOddEven) {
+      setActionMessage({ tone: 'error', text: ladderOddEvenDisabledReason || '사다리 홀짝을 실행할 수 없습니다.' });
+      return;
+    }
+
+    setGameSubmitting(true);
+    setLadderOddEvenPhase('spinning');
+    setPendingLadderOddEvenResult(null);
+    setLastLadderOddEvenResult(null);
+    setActionMessage(null);
+    if (ladderRevealTimerRef.current) {
+      clearTimeout(ladderRevealTimerRef.current);
+      ladderRevealTimerRef.current = null;
+    }
+
+    try {
+      const result = await welfareAssetService.playPointGame({
+        gameId: ladderOddEven.id,
+        gameName: ladderOddEven.name,
+        userId: currentUser.uid,
+        userName: roulettePlayer.name,
+        stake: ladderOddEvenStake,
+        dailyLimit: ladderOddEven.dailyLimit,
+        selectedSide: ladderSelectedSide,
+        idempotencyKey: createClientRequestId('ladder-odd-even')
+      });
+      const metadata = result.metadata || {};
+      const settledStake = parseAmount(metadata.unitStake) || ladderOddEvenStake;
+      const selectedSide = readLadderSide(metadata.selectedSide, ladderSelectedSide);
+      const resultSide = readLadderSide(metadata.resultSide, selectedSide);
+      const multiplier = settledStake > 0 ? result.reward / settledStake : 0;
+      const nextResult: LadderOddEvenResult = {
+        label: result.resultLabel,
+        reward: result.reward,
+        stake: settledStake,
+        multiplier,
+        selectedSide,
+        selectedSideLabel: String(metadata.selectedSideLabel || ladderSideLabels[selectedSide]),
+        resultSide,
+        resultSideLabel: String(metadata.resultSideLabel || ladderSideLabels[resultSide]),
+        ladderRungs: readLadderRungs(metadata, selectedSide, resultSide),
+        hit: metadata.hit === true || (result.reward > 0 && selectedSide === resultSide),
+        algorithmVersion: String(metadata.algorithmVersion || ''),
+        hitRate: typeof metadata.hitRate === 'number' ? metadata.hitRate : (ladderSelectedConfig?.probability ?? ladderOddEvenHitRate),
+        missRate: typeof metadata.missRate === 'number' ? metadata.missRate : Math.max(0, 1 - (ladderSelectedConfig?.probability ?? ladderOddEvenHitRate)),
+        expectedReturnRate: typeof metadata.expectedReturnRate === 'number' ? metadata.expectedReturnRate : ladderSelectedExpectedReturnRate
+      };
+
+      const nextLadderPlayCount = ladderOddEven.dailyLimit > 0 && Number.isFinite(result.remainingPlays) && result.remainingPlays >= 0
+        ? Math.max(ladderOddEven.dailyLimit - result.remainingPlays, ladderOddEvenPlays + 1)
+        : ladderOddEvenPlays + 1;
+      setRoulettePointBalance((prev) => prev - settledStake + result.reward);
+      setLadderOddEvenPlays(nextLadderPlayCount);
+      setDailyGameUsageCounts((prev) => ({
+        ...prev,
+        [ladderOddEven.id]: Math.max(prev[ladderOddEven.id] ?? 0, nextLadderPlayCount)
+      }));
+      setPendingLadderOddEvenResult(nextResult);
+      setActionMessage({ tone: 'info', text: `${nextResult.selectedSideLabel} 출발점에서 사다리 경로를 따라가는 중입니다.` });
+      ladderRevealTimerRef.current = setTimeout(() => {
+        setLastLadderOddEvenResult(nextResult);
+        setPendingLadderOddEvenResult(null);
+        setLadderOddEvenPhase('revealed');
+        const versionWarning = nextResult.algorithmVersion !== ladderOddEvenAlgorithmVersion
+          ? ' · 구버전 Functions 호출 중'
+          : '';
+        setActionMessage({
+          tone: nextResult.hit ? 'success' : 'info',
+          text: `${nextResult.selectedSideLabel} 선택 → ${nextResult.hit ? '당첨' : '미당첨'} 도착 · 차감 ${formatPoint(nextResult.stake)} · 보상 ${formatPoint(nextResult.reward)}${versionWarning}`
+        });
+        ladderRevealTimerRef.current = null;
+      }, 2400);
+      void loadUserAssetData();
+    } catch (error) {
+      console.error('[WelfareAssetPlatformPage] failed to play ladder odd-even', error);
+      setPendingLadderOddEvenResult(null);
+      setLadderOddEvenPhase('idle');
       setActionMessage({ tone: 'error', text: formatWelfareActionError(error) });
     } finally {
       setGameSubmitting(false);
@@ -2335,6 +3021,179 @@ const WelfareAssetPlatformPage: React.FC = () => {
                 )}
               </div>
 
+              <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <h2 className="text-base font-black text-slate-950 dark:text-white">연결 작업자 공수 포인트 지급</h2>
+                    <p className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">
+                      사용자 계정에 연결된 작업자의 출력일보 공수를 합산해 공수당 설정 포인트를 지급합니다.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs font-black text-slate-600 dark:text-slate-300 sm:flex">
+                    <span className="rounded-md border border-slate-200 px-3 py-2 dark:border-slate-700">
+                      연결 계정 {formatNumber(linkedEmployeeRows.length)}명
+                    </span>
+                    <span className="rounded-md border border-slate-200 px-3 py-2 dark:border-slate-700">
+                      선택 {formatNumber(manDayPointSummary.selectedUserCount)}명
+                    </span>
+                    <span className="rounded-md border border-slate-200 px-3 py-2 dark:border-slate-700">
+                      총 {formatManDayValue(manDayPointSummary.totalManDay)}공수
+                    </span>
+                    <span className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      {formatPoint(manDayPointSummary.totalPoint)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 xl:grid-cols-[150px_150px_160px_minmax(180px,0.8fr)_minmax(220px,1fr)_140px_140px]">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-black text-slate-500 dark:text-slate-400">시작일</span>
+                    <input
+                      type="date"
+                      value={manDayPointGrantDraft.startDate}
+                      onChange={(event) => setManDayPointGrantDraft((prev) => ({ ...prev, startDate: event.target.value }))}
+                      className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-black text-slate-500 dark:text-slate-400">종료일</span>
+                    <input
+                      type="date"
+                      value={manDayPointGrantDraft.endDate}
+                      onChange={(event) => setManDayPointGrantDraft((prev) => ({ ...prev, endDate: event.target.value }))}
+                      className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-black text-slate-500 dark:text-slate-400">공수당 포인트</span>
+                    <input
+                      value={manDayPointGrantDraft.pointPerManDay}
+                      onChange={(event) => setManDayPointGrantDraft((prev) => ({ ...prev, pointPerManDay: event.target.value }))}
+                      inputMode="numeric"
+                      className="h-10 rounded-md border border-slate-200 bg-white px-3 text-right text-sm font-black tabular-nums outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950"
+                      placeholder="100"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-black text-slate-500 dark:text-slate-400">지급 항목</span>
+                    <select
+                      value={manDayPointGrantDraft.categoryId}
+                      onChange={(event) => setManDayPointGrantDraft((prev) => ({ ...prev, categoryId: event.target.value }))}
+                      className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950"
+                    >
+                      {manDayPointCategories.map((category) => (
+                        <option key={category.id} value={category.id}>{category.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-black text-slate-500 dark:text-slate-400">메모</span>
+                    <input
+                      value={manDayPointGrantDraft.memo}
+                      onChange={(event) => setManDayPointGrantDraft((prev) => ({ ...prev, memo: event.target.value }))}
+                      className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950"
+                      placeholder="미입력 시 기간/공수 자동 기록"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={loadManDayPointPreview}
+                    disabled={!canLoadManDayPointPreview || manDayPointLoading}
+                    className="mt-auto inline-flex h-10 items-center justify-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
+                  >
+                    <RefreshCw size={16} className={manDayPointLoading ? 'animate-spin' : ''} />
+                    공수 불러오기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitManDayPointGrant}
+                    disabled={!canSubmitManDayPointGrant || manDayPointSubmitting}
+                    className="mt-auto inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-black text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                  >
+                    <Coins size={16} className={manDayPointSubmitting ? 'animate-spin' : ''} />
+                    선택 지급
+                  </button>
+                </div>
+
+                <div className="mt-3 overflow-hidden rounded-md border border-slate-200 dark:border-slate-800">
+                  <div className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="text-xs font-black text-slate-500 dark:text-slate-400">
+                      {manDayPointRows.length > 0
+                        ? `미리보기 ${formatNumber(manDayPointRows.length)}명 · 연결 작업자 ${formatNumber(manDayPointSummary.workerCount)}명`
+                        : '기간을 선택한 뒤 공수를 불러오세요.'}
+                    </div>
+                    {manDayPointRows.length > 0 && (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setAllManDayPointRowsIncluded(true)}
+                          className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >
+                          전체 선택
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAllManDayPointRowsIncluded(false)}
+                          className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >
+                          전체 해제
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {manDayPointRows.length > 0 ? (
+                    <div className="max-h-[360px] overflow-auto">
+                      <table className="w-full min-w-[860px] text-sm">
+                        <thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-500 dark:bg-slate-950 dark:text-slate-400">
+                          <tr>
+                            <th className="w-12 px-3 py-3 text-center">선택</th>
+                            <th className="px-3 py-3 text-left">사용자</th>
+                            <th className="px-3 py-3 text-left">연결 작업자</th>
+                            <th className="px-3 py-3 text-right">근무일</th>
+                            <th className="px-3 py-3 text-right">공수</th>
+                            <th className="px-3 py-3 text-right">지급 포인트</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {manDayPointRows.map((row) => (
+                            <tr key={row.employeeId} className="hover:bg-slate-50 dark:hover:bg-slate-800/60">
+                              <td className="px-3 py-3 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={row.included}
+                                  onChange={(event) => toggleManDayPointRow(row.employeeId, event.target.checked)}
+                                  className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                />
+                              </td>
+                              <td className="px-3 py-3">
+                                <div className="font-black text-slate-900 dark:text-white">{row.employeeName}</div>
+                                <div className="text-xs font-bold text-slate-500">{row.team}</div>
+                              </td>
+                              <td className="px-3 py-3 font-bold text-slate-700 dark:text-slate-200">
+                                {row.workerNames.join(', ')}
+                              </td>
+                              <td className="px-3 py-3 text-right font-mono font-bold tabular-nums text-slate-600 dark:text-slate-300">
+                                {formatNumber(row.workDateCount)}
+                              </td>
+                              <td className="px-3 py-3 text-right font-mono font-black tabular-nums text-slate-900 dark:text-white">
+                                {formatManDayValue(row.manDay)}
+                              </td>
+                              <td className="px-3 py-3 text-right font-mono font-black tabular-nums text-emerald-700 dark:text-emerald-300">
+                                {formatPoint(row.pointAmount)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="px-3 py-8 text-center text-sm font-bold text-slate-500 dark:text-slate-400">
+                      연결된 작업자 기준으로 조회된 공수 미리보기가 없습니다.
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
                 <div className="overflow-auto">
                   <table className="w-full min-w-[1120px] text-sm">
@@ -2404,12 +3263,23 @@ const WelfareAssetPlatformPage: React.FC = () => {
           {activeTab === 'games' && (
             <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_430px]">
               <div className="space-y-4">
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-3">
                   {configuredGameConfigs.map((game) => {
-                    const nextPage = game.type === 'ocean_reel' ? 'ocean_reel' : 'roulette';
+                    const nextPage = game.type === 'ocean_reel'
+                      ? 'ocean_reel'
+                      : game.type === 'ladder_odd_even'
+                        ? 'ladder_odd_even'
+                        : 'roulette';
                     const displayReturnRate = game.type === 'ocean_reel'
                       ? oceanExpectedReturnRate
-                      : pointRouletteExpectedReturnRate;
+                      : game.type === 'ladder_odd_even'
+                        ? ladderOddEvenExpectedReturnRate
+                        : pointRouletteExpectedReturnRate;
+                    const gameAccentClass = game.type === 'ocean_reel'
+                      ? 'bg-cyan-600'
+                      : game.type === 'ladder_odd_even'
+                        ? 'bg-emerald-600'
+                        : 'bg-violet-600';
                     return (
                       <button
                         key={game.id}
@@ -2428,9 +3298,9 @@ const WelfareAssetPlatformPage: React.FC = () => {
                         <div className="flex items-center justify-between gap-2">
                           <span className={cx(
                             'inline-flex h-10 w-10 items-center justify-center rounded-md text-white',
-                            game.type === 'ocean_reel' ? 'bg-cyan-600' : 'bg-violet-600'
+                            gameAccentClass
                           )}>
-                            {game.type === 'ocean_reel' ? <Waves size={18} /> : <Dice5 size={18} />}
+                            {game.type === 'ocean_reel' ? <Waves size={18} /> : game.type === 'ladder_odd_even' ? <GitFork size={18} /> : <Dice5 size={18} />}
                           </span>
                           <span className="rounded-md bg-emerald-50 px-2 py-1 text-xs font-black text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
                             {game.active ? 'ON' : 'OFF'}
@@ -2476,6 +3346,47 @@ const WelfareAssetPlatformPage: React.FC = () => {
                     확률/환급률
                   </button>
                 </div>
+
+                {gamePanelMode === 'play' && (
+                  <div className="grid gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-4 shadow-sm dark:border-emerald-900 dark:bg-emerald-950/50 lg:grid-cols-[minmax(220px,1.1fr)_repeat(3,minmax(0,1fr))]">
+                    <div className="flex items-center gap-3">
+                      <div className="grid h-12 w-12 shrink-0 place-items-center rounded-md bg-emerald-600 text-white shadow-sm">
+                        <Coins size={22} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-black text-emerald-700 dark:text-emerald-300">내 포인트</div>
+                        <div className="mt-1 text-3xl font-black tabular-nums text-slate-950 dark:text-white">
+                          {formatPoint(roulettePointBalance)}
+                        </div>
+                        <div className="mt-1 truncate text-xs font-bold text-emerald-700/80 dark:text-emerald-200/80">
+                          {roulettePlayer?.name || '로그인 사용자'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="rounded-md border border-emerald-200 bg-white/80 p-3 dark:border-emerald-900 dark:bg-slate-950/45">
+                      <div className="text-xs font-black text-slate-500 dark:text-slate-400">선택 게임</div>
+                      <div className="mt-1 truncate text-lg font-black text-slate-950 dark:text-white">{activeGamePlayName}</div>
+                      <div className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">오늘 {activeGamePlayCount}회 참여 · {activeGameLimitLabel}</div>
+                    </div>
+                    <div className="rounded-md border border-emerald-200 bg-white/80 p-3 dark:border-emerald-900 dark:bg-slate-950/45">
+                      <div className="text-xs font-black text-slate-500 dark:text-slate-400">1회 차감</div>
+                      <div className="mt-1 text-lg font-black text-slate-950 dark:text-white">{formatPoint(Math.max(activeGameStake, 0))}</div>
+                      <div className={cx(
+                        'mt-1 text-xs font-bold',
+                        activeGameHasEnoughPoint ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-600 dark:text-rose-300'
+                      )}>
+                        {activeGameHasEnoughPoint ? '플레이 가능' : '포인트 부족'}
+                      </div>
+                    </div>
+                    <div className="rounded-md border border-emerald-200 bg-white/80 p-3 dark:border-emerald-900 dark:bg-slate-950/45">
+                      <div className="text-xs font-black text-slate-500 dark:text-slate-400">차감 후 최소 잔액</div>
+                      <div className="mt-1 text-lg font-black tabular-nums text-slate-950 dark:text-white">
+                        {formatPoint(activeGameBalanceAfterStake)}
+                      </div>
+                      <div className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">보상 발생 시 즉시 반영</div>
+                    </div>
+                  </div>
+                )}
 
                 {gamePanelMode === 'play' && gamePage === 'roulette' && (
                   <div className="welfare-roulette-panel rounded-md border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -2606,6 +3517,256 @@ const WelfareAssetPlatformPage: React.FC = () => {
                         {!canPlayPointRoulette && pointRouletteDisabledReason && (
                           <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
                             {pointRouletteDisabledReason}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {gamePanelMode === 'play' && gamePage === 'ladder_odd_even' && (
+                  <div className="welfare-ladder-panel rounded-md border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="grid gap-5 xl:grid-cols-[minmax(280px,0.86fr)_minmax(0,1fr)]">
+                      <div className="flex flex-col items-center justify-center">
+                        <div
+                          className={cx(
+                            'welfare-ladder-board',
+                            ladderVerdictState === 'running' && 'is-running',
+                            ladderVerdictState === 'win' && 'is-win',
+                            ladderVerdictState === 'lose' && 'is-lose'
+                          )}
+                          aria-label="사다리 홀짝 보드"
+                        >
+                          <div className="welfare-ladder-header">
+                            <span className={cx('is-odd', ladderBoardSelectedSide === 'odd' && 'is-selected')}>홀</span>
+                            <span className={cx('is-even', ladderBoardSelectedSide === 'even' && 'is-selected')}>짝</span>
+                          </div>
+                          <div className="welfare-ladder-field">
+                            <svg className="welfare-ladder-svg" viewBox="0 0 100 100" role="img" aria-label="사다리 경로">
+                              <line x1="24" y1="10" x2="24" y2="90" className="welfare-ladder-rail" />
+                              <line x1="76" y1="10" x2="76" y2="90" className="welfare-ladder-rail" />
+                              {ladderMiddleVisible && currentLadderRungs.map((level) => (
+                                <line
+                                  key={level}
+                                  x1="24"
+                                  y1={level}
+                                  x2="76"
+                                  y2={level}
+                                  className={cx(
+                                    'welfare-ladder-rung',
+                                    ladderOddEvenPhase === 'spinning' && 'is-running'
+                                  )}
+                                />
+                              ))}
+                              {ladderMiddleVisible && (
+                                <polyline
+                                  points={currentLadderPathPoints}
+                                  pathLength={100}
+                                  className={cx(
+                                    'welfare-ladder-path',
+                                    ladderPathVerdictClass,
+                                    ladderOddEvenPhase === 'spinning' && 'is-drawing',
+                                    ladderOddEvenPhase === 'revealed' && lastLadderOddEvenResult?.hit && 'is-hit'
+                                  )}
+                                />
+                              )}
+                            </svg>
+                            {!ladderMiddleVisible && (
+                              <div className="welfare-ladder-cover">
+                                <span>베팅 후 공개</span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="welfare-ladder-footer">
+                            <span
+                              className={cx(
+                                ladderOddDestinationIsWin ? 'is-win-destination' : 'is-lose-destination',
+                                activeLadderDestinationSide === 'odd' && 'is-result'
+                              )}
+                              aria-label={`왼쪽 도착점 ${ladderOddDestinationIsWin ? '당첨' : '미당첨'}`}
+                            >
+                              {ladderOddDestinationIsWin ? '당첨' : '미당첨'}
+                            </span>
+                            <span
+                              className={cx(
+                                ladderEvenDestinationIsWin ? 'is-win-destination' : 'is-lose-destination',
+                                activeLadderDestinationSide === 'even' && 'is-result'
+                              )}
+                              aria-label={`오른쪽 도착점 ${ladderEvenDestinationIsWin ? '당첨' : '미당첨'}`}
+                            >
+                              {ladderEvenDestinationIsWin ? '당첨' : '미당첨'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col rounded-md border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/60">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <div className="text-xs font-black text-emerald-600 dark:text-emerald-300">LADDER ODD/EVEN</div>
+                            <h2 className="mt-1 text-lg font-black text-slate-950 dark:text-white">사다리 홀짝</h2>
+                            <div className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">
+                              {roulettePlayer?.name || '로그인 사용자'} · 사용 가능 {formatPoint(roulettePointBalance)} · 오늘 {ladderOddEvenPlays}회 참여 · {ladderOddEvenLimitLabel}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={playLadderOddEven}
+                            disabled={!canPlayLadderOddEven}
+                            className="inline-flex h-10 min-w-[132px] items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-black text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                          >
+                            <Play size={16} className={ladderOddEvenPhase === 'spinning' ? 'animate-spin' : ''} />
+                            {ladderOddEvenPhase === 'spinning' ? '진행 중' : '사다리 타기'}
+                          </button>
+                        </div>
+
+                        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                          {normalizedLadderOddEvenSettings.map((side) => {
+                            const selected = ladderSelectedSide === side.id;
+                            return (
+                              <button
+                                key={side.id}
+                                type="button"
+                                onClick={() => {
+                                  if (ladderOddEvenPhase !== 'spinning') setLadderSelectedSide(side.id);
+                                }}
+                                disabled={ladderOddEvenPhase === 'spinning'}
+                                className={cx(
+                                  'rounded-md border px-4 py-3 text-left transition-colors',
+                                  selected
+                                    ? side.id === 'odd'
+                                      ? 'border-red-400 bg-red-50 text-red-900 ring-2 ring-red-100 dark:border-red-500 dark:bg-red-950 dark:text-red-100 dark:ring-red-900'
+                                      : 'border-blue-400 bg-blue-50 text-blue-900 ring-2 ring-blue-100 dark:border-blue-500 dark:bg-blue-950 dark:text-blue-100 dark:ring-blue-900'
+                                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-700'
+                                )}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-lg font-black">{side.label}</span>
+                                  <span className="rounded-md px-2 py-1 text-xs font-black text-white" style={{ backgroundColor: side.color }}>
+                                    {formatMultiplier(side.multiplier)}
+                                  </span>
+                                </div>
+                                <div className="mt-1 text-xs font-bold opacity-75">
+                                  결과 확률 {formatReturnRate(side.probability)} · 기대 {formatReturnRate(side.probability * side.multiplier)}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <div className={cx(
+                          'relative mt-5 overflow-hidden rounded-md border px-4 py-4',
+                          ladderOddEvenPhase === 'spinning'
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100'
+                            : lastLadderOddEvenResult
+                              ? lastLadderOddEvenResult.hit
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100'
+                                : 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-100'
+                              : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300'
+                        )}>
+                          {lastLadderOddEvenResult?.hit && <div className="welfare-prize-glow" aria-hidden="true" />}
+                          <div className="relative z-[1] flex items-start gap-3">
+                            <div className={cx('welfare-ladder-result-mark shrink-0', ladderMarkClass)}>
+                              {lastLadderOddEvenResult ? lastLadderOddEvenResult.hit ? '당첨' : '미당첨' : ladderSideLabels[ladderSelectedSide]}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-black opacity-75">
+                                {ladderOddEvenPhase === 'spinning' ? '사다리 진행 중' : lastLadderOddEvenResult ? lastLadderOddEvenResult.hit ? '적중' : '미적중' : 'READY'}
+                              </div>
+                              {ladderOddEvenPhase === 'spinning' ? (
+                                <div className="mt-1 text-lg font-black">{ladderSideLabels[ladderSelectedSide]} 선택으로 사다리 경로를 따라가고 있습니다.</div>
+                              ) : lastLadderOddEvenResult ? (
+                                  <div className="mt-1">
+                                    <div className="text-lg font-black">
+                                    {lastLadderOddEvenResult.selectedSideLabel} 선택 → {lastLadderOddEvenResult.hit ? '당첨' : '미당첨'} 도착
+                                  </div>
+                                  <div className="mt-1 text-sm font-bold opacity-90">
+                                    차감 {formatPoint(lastLadderOddEvenResult.stake)} · 보상 {formatPoint(lastLadderOddEvenResult.reward)} · 손익 {ladderOddEvenNetChange !== null && ladderOddEvenNetChange > 0 ? '+' : ''}{ladderOddEvenNetChange === null ? '-' : formatPoint(ladderOddEvenNetChange)}
+                                  </div>
+                                  <div className="mt-1 text-xs font-black opacity-75">
+                                    {lastLadderOddEvenResult.algorithmVersion === ladderOddEvenAlgorithmVersion
+                                      ? `서버 확률 당첨 ${formatReturnRate(lastLadderOddEvenResult.hitRate)} · 미당첨 ${formatReturnRate(lastLadderOddEvenResult.missRate)} · 환급률 ${formatReturnRate(lastLadderOddEvenResult.expectedReturnRate)}`
+                                      : '구버전 Functions가 호출되어 새 사다리 판정이 적용되지 않았습니다.'}
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="mt-1 text-lg font-black">{formatPoint(ladderOddEvenStake)}를 걸고 홀/짝 중 하나를 선택합니다.</div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-5 grid gap-3 md:grid-cols-4">
+                          <div className="rounded-md border border-slate-200 bg-white/70 p-4 dark:border-slate-800 dark:bg-slate-900/70">
+                            <div className="text-xs font-black text-slate-500 dark:text-slate-400">1회 차감</div>
+                            <div className="mt-2 text-xl font-black text-slate-950 dark:text-white">{formatPoint(Math.max(ladderOddEvenStake, 0))}</div>
+                          </div>
+                          <div className="rounded-md border border-slate-200 bg-white/70 p-4 dark:border-slate-800 dark:bg-slate-900/70">
+                            <div className="text-xs font-black text-slate-500 dark:text-slate-400">선택</div>
+                            <div className="mt-2 text-xl font-black text-slate-950 dark:text-white">{ladderSideLabels[ladderSelectedSide]}</div>
+                          </div>
+                          <div className="rounded-md border border-slate-200 bg-white/70 p-4 dark:border-slate-800 dark:bg-slate-900/70">
+                            <div className="text-xs font-black text-slate-500 dark:text-slate-400">판정</div>
+                            <div className={cx(
+                              'mt-2 text-xl font-black',
+                              lastLadderOddEvenResult
+                                ? lastLadderOddEvenResult.hit ? 'text-emerald-600' : 'text-rose-600'
+                                : 'text-slate-950 dark:text-white'
+                            )}>
+                              {lastLadderOddEvenResult ? lastLadderOddEvenResult.hit ? '당첨' : '미당첨' : '-'}
+                            </div>
+                          </div>
+                          <div className="rounded-md border border-slate-200 bg-white/70 p-4 dark:border-slate-800 dark:bg-slate-900/70">
+                            <div className="text-xs font-black text-slate-500 dark:text-slate-400">손익</div>
+                            <div className={cx(
+                              'mt-2 text-xl font-black tabular-nums',
+                              ladderOddEvenNetChange === null
+                                ? 'text-slate-950 dark:text-white'
+                                : ladderOddEvenNetChange >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                            )}>
+                              {ladderOddEvenNetChange === null ? '-' : formatPoint(ladderOddEvenNetChange)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className={cx('welfare-ladder-verdict mt-4', `is-${ladderVerdictState}`)} aria-live="polite">
+                          <div className="welfare-ladder-verdict__shine" aria-hidden="true" />
+                          {ladderVerdictState === 'win' && (
+                            <div className="welfare-ladder-verdict__confetti" aria-hidden="true">
+                              <span />
+                              <span />
+                              <span />
+                              <span />
+                              <span />
+                              <span />
+                            </div>
+                          )}
+                          <div className="relative z-[1] flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <div className="text-xs font-black uppercase tracking-[0.18em] opacity-70">FINAL RESULT</div>
+                              <div className="mt-1 text-3xl font-black sm:text-4xl">{ladderVerdictTitle}</div>
+                              <div className="mt-1 text-sm font-bold opacity-85">{ladderVerdictDescription}</div>
+                            </div>
+                            <div className="welfare-ladder-verdict__stamp">
+                              {ladderVerdictState === 'win'
+                                ? 'WIN'
+                                : ladderVerdictState === 'lose'
+                                  ? 'MISS'
+                                  : ladderVerdictState === 'running'
+                                    ? 'GO'
+                                    : 'READY'}
+                            </div>
+                          </div>
+                          <div className="welfare-ladder-verdict__ticker">
+                            <span>선택 {lastLadderOddEvenResult ? lastLadderOddEvenResult.selectedSideLabel : ladderSideLabels[ladderSelectedSide]}</span>
+                            <span>도착 {lastLadderOddEvenResult ? lastLadderOddEvenResult.hit ? '당첨' : '미당첨' : '-'}</span>
+                            <span>보상 {lastLadderOddEvenResult ? formatPoint(lastLadderOddEvenResult.reward) : '-'}</span>
+                          </div>
+                        </div>
+
+                        {!canPlayLadderOddEven && ladderOddEvenDisabledReason && (
+                          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                            {ladderOddEvenDisabledReason}
                           </div>
                         )}
                       </div>
@@ -2984,6 +4145,103 @@ const WelfareAssetPlatformPage: React.FC = () => {
                   </div>
                 )}
 
+                {gamePanelMode === 'settings' && gamePage === 'ladder_odd_even' && (
+                  <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <GitFork size={18} className="text-emerald-600" />
+                          <h2 className="text-lg font-black text-slate-950 dark:text-white">사다리 홀짝 확률/환급률</h2>
+                        </div>
+                        <div className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">
+                          확률 합계 {formatReturnRate(ladderOddEvenProbabilityTotal)} · 평균 당첨 {formatReturnRate(ladderOddEvenHitRate)} · 평균 미당첨 {formatReturnRate(ladderOddEvenMissRate)} · 평균 환급률 {formatReturnRate(ladderOddEvenExpectedReturnRate)}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={saveLadderOddEvenSettings}
+                        disabled={!currentAdminAccess.game || gameConfigSaving || Boolean(ladderOddEvenConfigError)}
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-black text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                      >
+                        <ShieldCheck size={16} className={gameConfigSaving ? 'animate-spin' : ''} />
+                        {gameConfigSaving ? '저장 중' : '설정 저장'}
+                      </button>
+                    </div>
+
+                    {ladderOddEvenConfigError && (
+                      <div className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200">
+                        {ladderOddEvenConfigError}
+                      </div>
+                    )}
+
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <label className="block rounded-md border border-slate-200 bg-slate-50 p-3 text-xs font-black text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+                        기본 차감 포인트
+                        <input
+                          value={gameRuleSettings['ladder-odd-even']?.stake ?? String(ladderOddEven.stake)}
+                          onChange={(event) => updateGameRuleSetting('ladder-odd-even', 'stake', event.target.value)}
+                          inputMode="numeric"
+                          className="mt-2 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-black tabular-nums outline-none focus:border-emerald-500 dark:border-slate-700 dark:bg-slate-900"
+                        />
+                      </label>
+                      <label className="block rounded-md border border-slate-200 bg-slate-50 p-3 text-xs font-black text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+                        일일 횟수 제한
+                        <input
+                          value={gameRuleSettings['ladder-odd-even']?.dailyLimit ?? String(ladderOddEven.dailyLimit)}
+                          onChange={(event) => updateGameRuleSetting('ladder-odd-even', 'dailyLimit', event.target.value)}
+                          inputMode="numeric"
+                          className="mt-2 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-black tabular-nums outline-none focus:border-emerald-500 dark:border-slate-700 dark:bg-slate-900"
+                        />
+                        <span className="mt-1 block text-[11px] font-bold text-slate-400">0이면 횟수 제한 없음</span>
+                      </label>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      {normalizedLadderOddEvenSettings.map((side) => {
+                        const draft = ladderOddEvenSettings.find((item) => item.id === side.id);
+                        return (
+                          <div key={side.id} className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm font-black text-white" style={{ backgroundColor: side.color }}>
+                                  {side.label}
+                                </span>
+                                <div>
+                                  <div className="font-black text-slate-950 dark:text-white">{side.label} 결과</div>
+                                  <div className="text-xs font-bold text-slate-500 dark:text-slate-400">선택자가 맞히면 {formatMultiplier(side.multiplier)}</div>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="mt-3 grid grid-cols-2 gap-2">
+                              <label className="block text-xs font-black text-slate-500 dark:text-slate-400">
+                                배당
+                                <input
+                                  value={draft?.multiplier ?? ''}
+                                  onChange={(event) => updateLadderOddEvenSetting(side.id, 'multiplier', event.target.value)}
+                                  inputMode="decimal"
+                                  className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-black tabular-nums outline-none focus:border-emerald-500 dark:border-slate-700 dark:bg-slate-900"
+                                />
+                              </label>
+                              <label className="block text-xs font-black text-slate-500 dark:text-slate-400">
+                                결과 확률 %
+                                <input
+                                  value={draft?.probabilityPercent ?? ''}
+                                  onChange={(event) => updateLadderOddEvenSetting(side.id, 'probabilityPercent', event.target.value)}
+                                  inputMode="decimal"
+                                  className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-black tabular-nums outline-none focus:border-emerald-500 dark:border-slate-700 dark:bg-slate-900"
+                                />
+                              </label>
+                            </div>
+                            <div className="mt-3 rounded-md bg-white px-3 py-2 text-xs font-black text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                              결과 확률 {formatReturnRate(side.probability)} · 선택 적중 시 보상 {formatPoint(Math.trunc(ladderOddEvenStake * side.multiplier))} · 환급 기여 {formatReturnRate(side.probability * side.multiplier)}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {gamePanelMode === 'settings' && gamePage === 'roulette' && (
                   <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -3097,7 +4355,7 @@ const WelfareAssetPlatformPage: React.FC = () => {
 
                 <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <div className="flex items-center gap-2">
-                    {gamePage === 'ocean_reel' ? <Waves size={18} className="text-cyan-600" /> : <Dice5 size={18} className="text-violet-600" />}
+                    {gamePage === 'ocean_reel' ? <Waves size={18} className="text-cyan-600" /> : gamePage === 'ladder_odd_even' ? <GitFork size={18} className="text-emerald-600" /> : <Dice5 size={18} className="text-violet-600" />}
                     <h2 className="text-base font-black text-slate-950 dark:text-white">게임 방법</h2>
                   </div>
                   {gamePage === 'ocean_reel' ? (
@@ -3132,6 +4390,31 @@ const WelfareAssetPlatformPage: React.FC = () => {
                             </div>
                           );
                         })}
+                      </div>
+                    </div>
+                  ) : gamePage === 'ladder_odd_even' ? (
+                    <div className="mt-4 space-y-3">
+                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                        홀 또는 짝을 먼저 선택한 뒤 사다리를 탑니다. 아래 도착점은 왼쪽 당첨, 오른쪽 미당첨으로 고정되며, 서버 판정에 따라 선이 해당 도착점으로 이동합니다.
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {normalizedLadderOddEvenSettings.map((side) => (
+                          <div key={side.id} className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex h-3 w-3 rounded-sm" style={{ backgroundColor: side.color }} />
+                              <span className="font-black text-slate-950 dark:text-white">{side.label}</span>
+                            </div>
+                            <div className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">
+                              결과 확률 {formatReturnRate(side.probability)} · 배당 {formatMultiplier(side.multiplier)}
+                            </div>
+                            <div className="mt-3 text-xs font-black text-slate-500 dark:text-slate-400">
+                              {formatPoint(ladderOddEvenStake)} 기준 보상 {formatPoint(Math.trunc(ladderOddEvenStake * side.multiplier))} · 환급 기여 {formatReturnRate(side.probability * side.multiplier)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                        현재 선택 기준 기대 환급률은 {formatReturnRate(ladderSelectedExpectedReturnRate)}입니다. 확률 합계는 100%가 되어야 저장됩니다.
                       </div>
                     </div>
                   ) : (

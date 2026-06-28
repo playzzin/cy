@@ -9,6 +9,7 @@ import {
     faChevronUp,
     faClipboardList,
     faMapMarkerAlt,
+    faPhone,
     faRoute,
     faSpinner,
     faTruck,
@@ -16,6 +17,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { dispatchService, DailyDispatch, DispatchAssignment } from '../../../services/dispatchService';
 import { manpowerService, Worker } from '../../../services/manpowerService';
+import { siteService, Site } from '../../../services/siteService';
 import { teamService, Team } from '../../../services/teamService';
 import { vehicleService } from '../../../services/vehicleService';
 import { Vehicle } from '../../../types/vehicle';
@@ -23,11 +25,27 @@ import { useAuth } from '../../../contexts/AuthContext';
 
 type ScheduleSource = 'tomorrow' | 'fallback' | 'empty';
 
-type ExtendedDispatchAssignment = DispatchAssignment & Partial<{
+interface AssignmentSupportTeam {
+    id?: string;
+    name: string;
+    color?: string;
+    manDay?: number | string;
+    payType?: string;
+}
+
+type ExtendedDispatchAssignment = Omit<DispatchAssignment, 'supportTeams'> & Partial<{
     responsibleTeamId: string;
     responsibleTeamName: string;
+    siteManagerId: string;
+    siteManagerName: string;
+    siteManagerContact: string;
     workerTeamIds: Record<string, string>;
     workerTeamNames: Record<string, string>;
+    workerManDays: Record<string, number | string>;
+    workerPayTypes: Record<string, string>;
+    requestId: string;
+    requestedHeadcount: number | string;
+    supportTeams: AssignmentSupportTeam[];
 }>;
 
 interface LookupState {
@@ -35,6 +53,8 @@ interface LookupState {
     vehiclesById: Map<string, Vehicle>;
     teamsById: Map<string, Team>;
     teamsByName: Map<string, Team>;
+    sitesById: Map<string, Site>;
+    sitesByName: Map<string, Site>;
 }
 
 interface DisplayChip {
@@ -42,6 +62,7 @@ interface DisplayChip {
     label: string;
     subLabel?: string;
     color?: string;
+    payType?: string;
 }
 
 interface ViewerTeamScope {
@@ -52,6 +73,8 @@ interface ViewerTeamScope {
 }
 
 const DEFAULT_RESOURCE_COLOR = '#64748b';
+const DAILY_PAY_TYPE_OPTIONS = ['일급제', '월급제', '용역팀', '지원팀'];
+const DAILY_PAY_TYPE_SET = new Set(DAILY_PAY_TYPE_OPTIONS);
 const BOARD_WORKERS_PER_COLUMN = 8;
 const BOARD_VEHICLE_TWO_COLUMN_WORKER_THRESHOLD = 10;
 
@@ -387,9 +410,9 @@ const BoardSurface = styled.div`
         linear-gradient(#e2e8f0 1px, transparent 1px),
         linear-gradient(90deg, #e2e8f0 1px, transparent 1px);
     background-size: 33px 33px;
-    max-height: 560px;
+    max-height: 640px;
     overflow: auto;
-    padding: 18px;
+    padding: 22px;
 `;
 
 const BoardCards = styled.div`
@@ -397,7 +420,7 @@ const BoardCards = styled.div`
     flex-wrap: wrap;
     align-items: flex-start;
     justify-content: flex-start;
-    gap: 28px;
+    gap: 32px;
 `;
 
 const BoardCard = styled.div`
@@ -408,7 +431,7 @@ const BoardCard = styled.div`
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
     text-align: left;
     max-width: 100%;
-    cursor: pointer;
+    height: max-content;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
     overflow: visible;
 
@@ -434,18 +457,26 @@ const BoardSiteName = styled.h4`
 `;
 
 const BoardAddress = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
     border-bottom: 1px solid #cbd5e1;
-    padding: 6px 8px;
+    padding: 6px 8px 8px;
     text-align: center;
     color: #0f172a;
     font-size: 0.86rem;
     font-weight: 800;
+`;
 
-    @media (max-width: 768px) {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 6px;
-    }
+const BoardRequestStatus = styled.div`
+    border-bottom: 1px solid #cbd5e1;
+    background: #eff6ff;
+    color: #1e40af;
+    padding: 6px 8px;
+    text-align: center;
+    font-size: 0.76rem;
+    font-weight: 900;
 `;
 
 const BoardAddressText = styled.span`
@@ -456,18 +487,14 @@ const BoardAddressText = styled.span`
 `;
 
 const NavigationButtons = styled.div`
-    display: none;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    min-width: max-content;
-
-    @media (max-width: 768px) {
-        display: inline-flex;
-    }
+    flex-wrap: wrap;
+    gap: 5px;
 `;
 
-const NavigationButton = styled.button<{ $variant: 'kakao' | 'tmap' }>`
+const NavigationButton = styled.button<{ $variant: 'kakao' | 'tmap' | 'phone' }>`
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -475,13 +502,20 @@ const NavigationButton = styled.button<{ $variant: 'kakao' | 'tmap' }>`
     min-height: 26px;
     padding: 3px 7px;
     border-radius: 6px;
-    border: 1px solid ${(props) => (props.$variant === 'kakao' ? '#facc15' : '#10b981')};
-    background: ${(props) => (props.$variant === 'kakao' ? '#fef08a' : '#d1fae5')};
-    color: ${(props) => (props.$variant === 'kakao' ? '#713f12' : '#065f46')};
+    border: 1px solid ${(props) => (
+        props.$variant === 'kakao' ? '#facc15' : props.$variant === 'phone' ? '#93c5fd' : '#10b981'
+    )};
+    background: ${(props) => (
+        props.$variant === 'kakao' ? '#fef08a' : props.$variant === 'phone' ? '#dbeafe' : '#d1fae5'
+    )};
+    color: ${(props) => (
+        props.$variant === 'kakao' ? '#713f12' : props.$variant === 'phone' ? '#1e3a8a' : '#065f46'
+    )};
     font-size: 0.68rem;
     font-weight: 900;
     line-height: 1;
     white-space: nowrap;
+    text-decoration: none;
     cursor: pointer;
     transition: filter 0.15s ease, transform 0.15s ease;
 
@@ -493,6 +527,31 @@ const NavigationButton = styled.button<{ $variant: 'kakao' | 'tmap' }>`
     &:disabled {
         cursor: not-allowed;
         opacity: 0.45;
+    }
+`;
+
+const ContactLink = styled.a`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 26px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    border: 1px solid #93c5fd;
+    background: #dbeafe;
+    color: #1e3a8a;
+    font-size: 0.68rem;
+    font-weight: 900;
+    line-height: 1;
+    white-space: nowrap;
+    text-decoration: none;
+    cursor: pointer;
+    transition: filter 0.15s ease, transform 0.15s ease;
+
+    &:hover {
+        filter: brightness(0.97);
+        transform: translateY(-1px);
     }
 `;
 
@@ -610,6 +669,8 @@ const emptyLookups = (): LookupState => ({
     vehiclesById: new Map(),
     teamsById: new Map(),
     teamsByName: new Map(),
+    sitesById: new Map(),
+    sitesByName: new Map(),
 });
 
 const EMPTY_VIEWER_TEAM_SCOPE: ViewerTeamScope = {
@@ -621,11 +682,113 @@ const EMPTY_VIEWER_TEAM_SCOPE: ViewerTeamScope = {
 
 const toText = (value: unknown) => String(value || '').trim();
 const MOBILE_USER_AGENT_PATTERN = /Android|iPhone|iPad|iPod|Windows Phone/i;
+const NO_ADDRESS_LABEL = '주소 없음';
+
+const toPositiveNumber = (value: unknown, fallback = 1) => {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : fallback;
+};
 
 const sameText = (a: unknown, b: unknown) => {
     const left = toText(a).toLowerCase();
     const right = toText(b).toLowerCase();
     return Boolean(left && right && left === right);
+};
+
+const cleanIds = (ids: Array<string | undefined | null>) =>
+    Array.from(new Set(ids.map(toText).filter(Boolean)));
+
+const getAssignmentVehicleIds = (assignment: Partial<ExtendedDispatchAssignment>) =>
+    cleanIds([...(assignment.vehicleIds || []), assignment.vehicleId]);
+
+const getAssignedHeadcount = (assignment: Pick<ExtendedDispatchAssignment, 'workerIds' | 'supportTeams'>) =>
+    cleanIds(assignment.workerIds || []).length + (assignment.supportTeams || []).length;
+
+const normalizeSalaryType = (value?: string | null): string => {
+    const normalized = toText(value);
+    if (!normalized) return '';
+    if (normalized === '일급') return '일급제';
+    if (normalized === '일당') return '일급제';
+    if (normalized === '월급') return '월급제';
+    if (normalized === '용역') return '용역팀';
+    if (normalized === '지원') return '지원팀';
+    return normalized;
+};
+
+const normalizeDailyPayType = (value: unknown, fallback = ''): string => {
+    const normalized = normalizeSalaryType(toText(value));
+    return DAILY_PAY_TYPE_SET.has(normalized) ? normalized : fallback;
+};
+
+const getBoardPayTypeStyle = (payType: unknown) => {
+    const normalized = normalizeDailyPayType(payType, '일급제');
+
+    if (normalized === '월급제') {
+        return {
+            label: '월급제',
+            background: '#ffffff',
+            borderColor: '#cbd5e1',
+            color: '#0f172a',
+            shadow: 'inset 0 0 0 1px rgba(148, 163, 184, 0.24)',
+        };
+    }
+
+    if (normalized === '용역팀' || normalized === '지원팀') {
+        return {
+            label: normalized,
+            background: '#22c55e',
+            borderColor: '#15803d',
+            color: '#052e16',
+            shadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.32)',
+        };
+    }
+
+    return {
+        label: '일급제',
+        background: '#facc15',
+        borderColor: '#ca8a04',
+        color: '#1f2937',
+        shadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.32)',
+    };
+};
+
+const resolveScheduleWorkerSalaryType = (worker?: Partial<Worker> | null): string => {
+    if (!worker) return '일급제';
+    const row = worker as Partial<Worker> & Record<string, unknown>;
+
+    const teamType = normalizeDailyPayType(row.teamType);
+    if (teamType === '지원팀') return '지원팀';
+    if (teamType === '용역팀') return '용역팀';
+
+    const payType = normalizeDailyPayType(row.payType);
+    if (payType) return payType;
+
+    const salaryModel = normalizeDailyPayType(row.salaryModel);
+    if (salaryModel) return salaryModel;
+
+    const legacyPayType =
+        normalizeDailyPayType(row.salaryType) ||
+        normalizeDailyPayType(row.paymentType) ||
+        normalizeDailyPayType(row.wageType) ||
+        normalizeDailyPayType(row.employmentType);
+    if (legacyPayType) return legacyPayType;
+
+    return teamType || '일급제';
+};
+
+const getSupportTeamPayType = (team?: Partial<Team> | null, fallback?: unknown) => {
+    const saved = normalizeSalaryType(toText(fallback));
+    if (saved) return saved;
+
+    const row = (team || {}) as Partial<Team> & Record<string, unknown>;
+    const teamType = normalizeSalaryType(toText(row.type));
+    if (teamType === '지원팀') return '지원팀';
+    if (teamType === '협력사' || teamType === '용역팀') return '용역팀';
+
+    const defaultSalaryModel = normalizeSalaryType(toText(row.defaultSalaryModel));
+    if (defaultSalaryModel) return defaultSalaryModel;
+
+    return '지원팀';
 };
 
 const buildViewerTeamScope = (worker?: Worker | null): ViewerTeamScope => {
@@ -641,11 +804,13 @@ const buildViewerTeamScope = (worker?: Worker | null): ViewerTeamScope => {
     };
 };
 
-const buildLookupState = (workers: Worker[], vehicles: Vehicle[], teams: Team[]): LookupState => {
+const buildLookupState = (workers: Worker[], vehicles: Vehicle[], teams: Team[], sites: Site[] = []): LookupState => {
     const workersById = new Map<string, Worker>();
     const vehiclesById = new Map<string, Vehicle>();
     const teamsById = new Map<string, Team>();
     const teamsByName = new Map<string, Team>();
+    const sitesById = new Map<string, Site>();
+    const sitesByName = new Map<string, Site>();
 
     workers.forEach((worker) => {
         const id = toText(worker.id);
@@ -661,8 +826,16 @@ const buildLookupState = (workers: Worker[], vehicles: Vehicle[], teams: Team[])
         if (id) teamsById.set(id, team);
         if (name) teamsByName.set(name, team);
     });
+    sites.forEach((site) => {
+        const id = toText(site.id);
+        const legacyId = toText(site.legacyId);
+        const name = toText(site.name);
+        if (id) sitesById.set(id, site);
+        if (legacyId) sitesById.set(legacyId, site);
+        if (name) sitesByName.set(name, site);
+    });
 
-    return { workersById, vehiclesById, teamsById, teamsByName };
+    return { workersById, vehiclesById, teamsById, teamsByName, sitesById, sitesByName };
 };
 
 const dedupeByKey = <T extends { key: string }>(items: T[]) => {
@@ -681,11 +854,8 @@ const hasAssignments = (dispatch: DailyDispatch | null | undefined) =>
 const uniqueCount = (values: Array<string | undefined>) =>
     new Set(values.map((value) => String(value || '').trim()).filter(Boolean)).size;
 
-const getVehicleCount = (assignment: DispatchAssignment) => {
-    const ids = [
-        ...(assignment.vehicleIds || []),
-        assignment.vehicleId,
-    ].map((value) => String(value || '').trim()).filter(Boolean);
+const getVehicleCount = (assignment: ExtendedDispatchAssignment) => {
+    const ids = getAssignmentVehicleIds(assignment);
 
     const labels = [
         ...(assignment.vehicleLabels || []),
@@ -695,7 +865,7 @@ const getVehicleCount = (assignment: DispatchAssignment) => {
     return Math.max(uniqueCount(ids), uniqueCount(labels));
 };
 
-const getSupportTeamCount = (assignment: DispatchAssignment) =>
+const getSupportTeamCount = (assignment: Pick<ExtendedDispatchAssignment, 'supportTeams' | 'supportTeamIds'>) =>
     Math.max(
         uniqueCount((assignment.supportTeams || []).map((team) => team.id || team.name)),
         uniqueCount(assignment.supportTeamIds || [])
@@ -775,12 +945,14 @@ const getWorkerChips = (
         const worker = lookups.workersById.get(id);
         const teamId = toText(assignment.workerTeamIds?.[id] || worker?.teamId || assignment.teamId);
         const teamName = toText(assignment.workerTeamNames?.[id] || worker?.teamName || assignment.teamName);
+        const payType = normalizeDailyPayType(assignment.workerPayTypes?.[id]) || resolveScheduleWorkerSalaryType(worker);
 
         return {
             key: id,
             label: toText(worker?.name) || id,
             subLabel: teamName || undefined,
             color: getTeamColor(teamId, teamName, lookups, worker?.color || assignment.teamColor),
+            payType,
         };
     }));
 };
@@ -806,10 +978,12 @@ const getSupportTeamChips = (
     const fromObjects = (assignment.supportTeams || []).map((team) => {
         const id = toText(team.id);
         const name = toText(team.name) || id;
+        const teamRow = id ? lookups.teamsById.get(id) : lookups.teamsByName.get(name);
         return {
             key: id || name,
             label: name,
             color: team.color || getTeamColor(id, name, lookups),
+            payType: getSupportTeamPayType(teamRow, team.payType),
         };
     });
 
@@ -823,6 +997,7 @@ const getSupportTeamChips = (
                 key: id,
                 label: toText(team?.name) || id,
                 color: team?.color || '#f97316',
+                payType: getSupportTeamPayType(team),
             };
         })
         .filter(Boolean) as DisplayChip[];
@@ -872,10 +1047,7 @@ const getVehicleChips = (
     assignment: ExtendedDispatchAssignment,
     lookups: LookupState
 ): DisplayChip[] => {
-    const vehicleIds = [
-        ...(assignment.vehicleIds || []),
-        assignment.vehicleId,
-    ].map(toText).filter(Boolean);
+    const vehicleIds = getAssignmentVehicleIds(assignment);
     const labels = [
         ...(assignment.vehicleLabels || []),
         assignment.vehicleLabel,
@@ -902,6 +1074,21 @@ const getVehicleChips = (
 
     return dedupeByKey([...fromIds, ...fromLabels]);
 };
+
+const getSiteForAssignment = (
+    assignment: ExtendedDispatchAssignment,
+    lookups: LookupState
+): Site | undefined => {
+    const siteId = toText(assignment.siteId);
+    const siteName = toText(assignment.siteName);
+    return (siteId ? lookups.sitesById.get(siteId) : undefined) ||
+        (siteName ? lookups.sitesByName.get(siteName) : undefined);
+};
+
+const getResolvedSiteAddress = (
+    assignment: ExtendedDispatchAssignment,
+    lookups: LookupState
+): string => toText(assignment.siteAddress) || toText(getSiteForAssignment(assignment, lookups)?.address);
 
 const normalizeColor = (value?: string | null) => {
     const color = toText(value);
@@ -956,36 +1143,81 @@ const getDispatchUpdatedMillis = (dispatch: DailyDispatch): number => {
 };
 
 const getDestinationName = (assignment: ExtendedDispatchAssignment) =>
-    toText(assignment.siteName) || toText(assignment.siteAddress) || '현장';
+    toText(assignment.siteAddress) || NO_ADDRESS_LABEL;
 
 const getDestinationQuery = (assignment: ExtendedDispatchAssignment) => {
-    const siteName = toText(assignment.siteName);
-    const siteAddress = toText(assignment.siteAddress);
-    return [siteName, siteAddress].filter(Boolean).join(' ');
+    return toText(assignment.siteAddress);
+};
+
+const getWorkerContact = (worker?: Partial<Worker> | null): string => {
+    const row = (worker || {}) as Partial<Worker> & Record<string, unknown>;
+    return toText(row.contact) || toText(row.phone);
+};
+
+const normalizePhoneHref = (phone: unknown): string => {
+    const raw = toText(phone);
+    const normalized = raw.replace(/[^\d+]/g, '');
+    return normalized ? `tel:${normalized}` : '';
+};
+
+const getSiteManagerContact = (
+    assignment: ExtendedDispatchAssignment,
+    lookups: LookupState
+): { name: string; phone: string; href: string } | null => {
+    const site = getSiteForAssignment(assignment, lookups);
+    const managerId = toText(assignment.siteManagerId) || toText(site?.siteManagerId);
+    const managerName = toText(assignment.siteManagerName) || toText(site?.siteManagerName);
+    const managerById = managerId ? lookups.workersById.get(managerId) : undefined;
+    const managerByName = managerName
+        ? Array.from(lookups.workersById.values()).find((worker) => sameText(worker.name, managerName))
+        : undefined;
+    const manager = managerById || managerByName;
+    const phone = toText(assignment.siteManagerContact) || getWorkerContact(manager);
+    const href = normalizePhoneHref(phone);
+    if (!phone || !href) return null;
+
+    return {
+        name: toText(manager?.name) || managerName || '현장 담당자',
+        phone,
+        href,
+    };
 };
 
 const buildKakaoNaviDeepLink = (assignment: ExtendedDispatchAssignment) => {
+    const address = getDestinationQuery(assignment);
     const params = new URLSearchParams({
-        name: getDestinationName(assignment),
+        name: address || NO_ADDRESS_LABEL,
         coord_type: 'wgs84',
     });
-    const address = toText(assignment.siteAddress);
     if (address) params.set('addr', address);
     return `kakaonavi://navigate?${params.toString()}`;
 };
 
-const buildKakaoFallbackUrl = (assignment: ExtendedDispatchAssignment) =>
-    `https://map.kakao.com/link/search/${encodeURIComponent(getDestinationQuery(assignment) || getDestinationName(assignment))}`;
+const buildKakaoFallbackUrl = (assignment: ExtendedDispatchAssignment) => {
+    const address = getDestinationQuery(assignment);
+    return address ? `https://map.kakao.com/link/search/${encodeURIComponent(address)}` : '';
+};
 
-const buildTmapDeepLink = (assignment: ExtendedDispatchAssignment) =>
-    `tmap://search?name=${encodeURIComponent(getDestinationQuery(assignment) || getDestinationName(assignment))}`;
+const buildTmapDeepLink = (assignment: ExtendedDispatchAssignment) => {
+    const address = getDestinationQuery(assignment);
+    return address ? `tmap://search?name=${encodeURIComponent(address)}` : '';
+};
 
-const buildTmapFallbackUrl = (assignment: ExtendedDispatchAssignment) =>
-    `https://www.tmap.co.kr/tmap2/mobile/route.jsp?name=${encodeURIComponent(getDestinationQuery(assignment) || getDestinationName(assignment))}`;
+const buildTmapFallbackUrl = (assignment: ExtendedDispatchAssignment) => {
+    const address = getDestinationQuery(assignment);
+    return address ? `https://www.tmap.co.kr/tmap2/mobile/route.jsp?name=${encodeURIComponent(address)}` : '';
+};
 
 const openNavigation = (deepLink: string, fallbackUrl: string) => {
+    if (!deepLink && !fallbackUrl) return;
+
     if (!MOBILE_USER_AGENT_PATTERN.test(navigator.userAgent)) {
-        window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
+        if (fallbackUrl) window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
+        return;
+    }
+
+    if (!deepLink) {
+        if (fallbackUrl) window.location.href = fallbackUrl;
         return;
     }
 
@@ -999,7 +1231,7 @@ const openNavigation = (deepLink: string, fallbackUrl: string) => {
 
     window.setTimeout(() => {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
-        if (!movedToApp && !document.hidden) {
+        if (!movedToApp && !document.hidden && fallbackUrl) {
             window.location.href = fallbackUrl;
         }
     }, 1400);
@@ -1027,17 +1259,18 @@ export const TomorrowScheduleWidget: React.FC = () => {
             setState((prev) => ({ ...prev, loading: true, error: null }));
 
             try {
-                const [tomorrowDispatch, workers, vehicles, teams, linkedWorker] = await Promise.all([
+                const [tomorrowDispatch, workers, vehicles, teams, sites, linkedWorker] = await Promise.all([
                     dispatchService.getDispatchByDate(tomorrowDate),
                     manpowerService.getWorkers().catch(() => []),
                     vehicleService.listAllVehicles().catch(() => []),
                     teamService.getTeams().catch(() => []),
+                    siteService.getSites().catch(() => []),
                     currentUser?.uid
                         ? manpowerService.getWorkerByUid(currentUser.uid).catch(() => null)
                         : Promise.resolve(null),
                 ]);
                 if (!isMounted) return;
-                setLookups(buildLookupState(workers, vehicles, teams));
+                setLookups(buildLookupState(workers, vehicles, teams, sites));
                 setViewerTeamScope(buildViewerTeamScope(linkedWorker || workers.find((worker) => worker.uid === currentUser?.uid) || null));
 
                 if (hasAssignments(tomorrowDispatch)) {
@@ -1257,6 +1490,7 @@ export const TomorrowScheduleWidget: React.FC = () => {
                                     0
                                 );
                                 const workerNameFontSize = maxWorkerLabelLength >= 5 || workerColumnCount >= 3 ? 11 : 12;
+                                const workerNamePaddingX = maxWorkerLabelLength >= 5 || workerColumnCount >= 3 ? 2 : 4;
                                 const workerNameMinWidth = maxWorkerLabelLength >= 5 ? 58 : 54;
                                 const boardCardWidth = Math.max(
                                     216,
@@ -1264,8 +1498,13 @@ export const TomorrowScheduleWidget: React.FC = () => {
                                 );
                                 const vehicleColumnCount =
                                     workerChips.length > BOARD_VEHICLE_TWO_COLUMN_WORKER_THRESHOLD && vehicleChips.length > 1 ? 2 : 1;
-                                const destinationQuery = getDestinationQuery(assignment);
+                                const siteAddress = getResolvedSiteAddress(assignment, lookups);
+                                const navigationAssignment = { ...assignment, siteAddress };
+                                const destinationQuery = getDestinationQuery(navigationAssignment);
                                 const hasNavigationTarget = destinationQuery.length > 0;
+                                const managerContact = getSiteManagerContact(assignment, lookups);
+                                const hasAssignedRows = workerChips.length > 0 || supportTeamChips.length > 0;
+                                const requestedHeadcount = Number(assignment.requestedHeadcount || 0);
 
                                 return (
                                     <BoardCard
@@ -1285,16 +1524,19 @@ export const TomorrowScheduleWidget: React.FC = () => {
                                         </BoardCardHeader>
 
                                         <BoardAddress>
-                                            <BoardAddressText title={assignment.siteAddress || '주소 없음'}>
-                                                {assignment.siteAddress || '주소 없음'}
+                                            <BoardAddressText title={siteAddress || '주소 없음'}>
+                                                {siteAddress || '주소 없음'}
                                             </BoardAddressText>
-                                            <NavigationButtons aria-label={`${getDestinationName(assignment)} 길안내`}>
+                                            <NavigationButtons aria-label={`${getDestinationName(navigationAssignment)} 길안내`}>
                                                 <NavigationButton
                                                     type="button"
                                                     $variant="kakao"
                                                     disabled={!hasNavigationTarget}
                                                     title="카카오내비로 길안내 열기"
-                                                    onClick={() => openNavigation(buildKakaoNaviDeepLink(assignment), buildKakaoFallbackUrl(assignment))}
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        openNavigation(buildKakaoNaviDeepLink(navigationAssignment), buildKakaoFallbackUrl(navigationAssignment));
+                                                    }}
                                                 >
                                                     <FontAwesomeIcon icon={faMapMarkerAlt} />
                                                     카카오
@@ -1304,67 +1546,107 @@ export const TomorrowScheduleWidget: React.FC = () => {
                                                     $variant="tmap"
                                                     disabled={!hasNavigationTarget}
                                                     title="TMAP으로 길안내 열기"
-                                                    onClick={() => openNavigation(buildTmapDeepLink(assignment), buildTmapFallbackUrl(assignment))}
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        openNavigation(buildTmapDeepLink(navigationAssignment), buildTmapFallbackUrl(navigationAssignment));
+                                                    }}
                                                 >
                                                     <FontAwesomeIcon icon={faRoute} />
                                                     TMAP
                                                 </NavigationButton>
+                                                {managerContact ? (
+                                                    <ContactLink
+                                                        href={managerContact.href}
+                                                        title={`${managerContact.name} ${managerContact.phone}`}
+                                                        onClick={(event) => event.stopPropagation()}
+                                                    >
+                                                        <FontAwesomeIcon icon={faPhone} />
+                                                        전화
+                                                    </ContactLink>
+                                                ) : null}
                                             </NavigationButtons>
                                         </BoardAddress>
-                                        {workerChips.length > 0 ? (
-                                            <BoardWorkerPanel
-                                                style={{
-                                                    background: `linear-gradient(180deg, ${hexToRgba(workerPanelColor, 0.28)}, ${hexToRgba(workerPanelColor, 0.62)})`,
-                                                    gridTemplateColumns: `repeat(${getWorkerColumnCount(orderedWorkerChips.length)}, minmax(${workerNameMinWidth}px, 1fr))`,
-                                                }}
-                                            >
-                                                {orderedWorkerChips.map((worker) => {
-                                                    const teamColor = normalizeColor(worker.color) || workerPanelColor;
-                                                    return (
-                                                        <BoardNameOuter
-                                                            key={worker.key}
-                                                            style={{
-                                                                background: `linear-gradient(180deg, ${hexToRgba(teamColor, 0.9)}, ${teamColor})`,
-                                                                borderColor: teamColor,
-                                                            }}
-                                                            title={worker.subLabel ? `${worker.label} · ${worker.subLabel}` : worker.label}
-                                                        >
-                                                            <BoardNameInner style={{ fontSize: workerNameFontSize }}>
-                                                                <span>{worker.label}</span>
-                                                            </BoardNameInner>
-                                                        </BoardNameOuter>
-                                                    );
-                                                })}
-                                            </BoardWorkerPanel>
-                                        ) : (
-                                            <BoardEmpty>작업자 미배치</BoardEmpty>
-                                        )}
+                                        {assignment.requestId || requestedHeadcount > 0 ? (
+                                            <BoardRequestStatus>
+                                                요청 {requestedHeadcount}명 / 배치 {getAssignedHeadcount(assignment)}명
+                                            </BoardRequestStatus>
+                                        ) : null}
 
-                                        {supportTeamChips.length > 0 ? (
-                                            <BoardSupportPanel $withTopBorder={workerChips.length > 0}>
-                                                <BoardSupportTitle>지원팀</BoardSupportTitle>
-                                                <BoardSupportGrid>
-                                                    {supportTeamChips.map((team) => {
-                                                        const teamColor = normalizeColor(team.color) || '#22c55e';
-                                                        return (
-                                                            <BoardNameOuter
-                                                                key={team.key}
-                                                                style={{
-                                                                    background: `linear-gradient(180deg, ${hexToRgba(teamColor, 0.9)}, ${teamColor})`,
-                                                                    borderColor: teamColor,
-                                                                }}
-                                                                title={team.label}
-                                                            >
-                                                                <BoardNameInner>
-                                                                    <span>{team.label}</span>
-                                                                </BoardNameInner>
-                                                            </BoardNameOuter>
-                                                        );
-                                                    })}
-                                                </BoardSupportGrid>
-                                            </BoardSupportPanel>
+                                        {hasAssignedRows ? (
+                                            <div style={{ borderBottom: '1px solid #cbd5e1' }}>
+                                                {workerChips.length > 0 ? (
+                                                    <BoardWorkerPanel
+                                                        style={{
+                                                            background: `linear-gradient(180deg, ${hexToRgba(workerPanelColor, 0.28)}, ${hexToRgba(workerPanelColor, 0.62)})`,
+                                                            gridTemplateColumns: `repeat(${getWorkerColumnCount(orderedWorkerChips.length)}, minmax(${workerNameMinWidth}px, 1fr))`,
+                                                        }}
+                                                    >
+                                                        {orderedWorkerChips.map((worker) => {
+                                                            const style = getBoardPayTypeStyle(worker.payType);
+                                                            const teamColor = normalizeColor(worker.color) || workerPanelColor;
+                                                            return (
+                                                                <BoardNameOuter
+                                                                    key={worker.key}
+                                                                    style={{
+                                                                        background: `linear-gradient(180deg, ${hexToRgba(teamColor, 0.9)}, ${teamColor})`,
+                                                                        borderColor: teamColor,
+                                                                    }}
+                                                                    title={`${worker.label}${worker.subLabel ? ` · ${worker.subLabel}` : ''} · ${style.label}`}
+                                                                >
+                                                                    <BoardNameInner
+                                                                        style={{
+                                                                            background: style.background,
+                                                                            borderColor: teamColor,
+                                                                            color: style.color,
+                                                                            fontSize: workerNameFontSize,
+                                                                            boxShadow: style.shadow,
+                                                                            paddingLeft: workerNamePaddingX,
+                                                                            paddingRight: workerNamePaddingX,
+                                                                        }}
+                                                                    >
+                                                                        <span>{worker.label}</span>
+                                                                    </BoardNameInner>
+                                                                </BoardNameOuter>
+                                                            );
+                                                        })}
+                                                    </BoardWorkerPanel>
+                                                ) : null}
+
+                                                {supportTeamChips.length > 0 ? (
+                                                    <BoardSupportPanel $withTopBorder={workerChips.length > 0}>
+                                                        <BoardSupportTitle>지원팀</BoardSupportTitle>
+                                                        <BoardSupportGrid>
+                                                            {supportTeamChips.map((team) => {
+                                                                const style = getBoardPayTypeStyle(team.payType);
+                                                                const teamColor = normalizeColor(team.color) || '#22c55e';
+                                                                return (
+                                                                    <BoardNameOuter
+                                                                        key={team.key}
+                                                                        style={{
+                                                                            background: `linear-gradient(180deg, ${hexToRgba(teamColor, 0.9)}, ${teamColor})`,
+                                                                            borderColor: teamColor,
+                                                                        }}
+                                                                        title={`${team.label} · ${style.label}`}
+                                                                    >
+                                                                        <BoardNameInner
+                                                                            style={{
+                                                                                background: style.background,
+                                                                                borderColor: style.borderColor,
+                                                                                color: style.color,
+                                                                                boxShadow: style.shadow,
+                                                                            }}
+                                                                        >
+                                                                            <span>{team.label}</span>
+                                                                        </BoardNameInner>
+                                                                    </BoardNameOuter>
+                                                                );
+                                                            })}
+                                                        </BoardSupportGrid>
+                                                    </BoardSupportPanel>
+                                                ) : null}
+                                            </div>
                                         ) : (
-                                            <BoardEmpty>지원팀 미배치</BoardEmpty>
+                                            <BoardEmpty>작업자/지원팀 미배치</BoardEmpty>
                                         )}
 
                                         {vehicleChips.length > 0 ? (
@@ -1375,15 +1657,17 @@ export const TomorrowScheduleWidget: React.FC = () => {
                                             >
                                                 {vehicleChips.map((vehicle) => {
                                                     const vehicleColor = normalizeColor(vehicle.color) || siteColor;
+                                                    const vehicleTextColor = getReadableTextColor(vehicleColor);
                                                     return (
                                                         <BoardVehicleCell
                                                             key={vehicle.key}
                                                             style={{
-                                                                background: `linear-gradient(180deg, ${hexToRgba(vehicleColor, 0.28)}, ${hexToRgba(vehicleColor, 0.62)})`,
+                                                                backgroundColor: vehicleColor,
+                                                                color: vehicleTextColor,
                                                             }}
                                                             title={vehicle.subLabel ? `${vehicle.label} · ${vehicle.subLabel}` : vehicle.label}
                                                         >
-                                                            <FontAwesomeIcon icon={faTruck} style={{ color: vehicleColor }} />
+                                                            <FontAwesomeIcon icon={faTruck} style={{ color: vehicleTextColor }} />
                                                             <span>{vehicle.label}</span>
                                                         </BoardVehicleCell>
                                                     );

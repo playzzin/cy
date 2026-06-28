@@ -113,6 +113,15 @@ const mapRequest = (id: string, data: Record<string, unknown>): FieldScheduleReq
 export const fieldScheduleRequestService = {
     makeRequestId,
 
+    listAll: async (): Promise<FieldScheduleRequest[]> => {
+        const snapshot = await getDocs(collection(db, COLLECTION_NAME));
+        return snapshot.docs
+            .map((entry) => mapRequest(entry.id, entry.data() as Record<string, unknown>))
+            .sort((left, right) =>
+                left.date.localeCompare(right.date) || left.siteName.localeCompare(right.siteName, 'ko')
+            );
+    },
+
     listByDate: async (date: string): Promise<FieldScheduleRequest[]> => {
         const snapshot = await getDocs(query(
             collection(db, COLLECTION_NAME),
@@ -274,5 +283,21 @@ export const fieldScheduleRequestService = {
 
     deleteRequest: async (id: string): Promise<void> => {
         await deleteDoc(doc(db, COLLECTION_NAME, id));
+    },
+
+    updateRequestStatus: async (
+        id: string,
+        status: FieldScheduleRequestStatus,
+        audit: { actorId?: string; actorName?: string; memo?: string } = {}
+    ): Promise<void> => {
+        const now = Timestamp.now();
+        await setDoc(doc(db, COLLECTION_NAME, id), stripUndefinedFields({
+            status,
+            reviewedById: normalizeText(audit.actorId),
+            reviewedByName: normalizeText(audit.actorName),
+            reviewMemo: normalizeText(audit.memo),
+            reviewedAt: now,
+            updatedAt: now,
+        } as Record<string, unknown>), { merge: true });
     },
 };

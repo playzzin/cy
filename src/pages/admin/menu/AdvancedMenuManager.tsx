@@ -26,12 +26,14 @@ import {
     faArrowLeft,
     faCopy,
     faList,
-    faGrip
+    faGrip,
+    faPlus
 } from '@fortawesome/free-solid-svg-icons';
 import { arrayMove } from '@dnd-kit/sortable';
 
 import { menuServiceV11, SiteDataType, MenuItem } from '../../../services/menuServiceV11';
 import { DEFAULT_MENU_CONFIG } from '../../../constants/defaultMenu';
+import { MENU_PATHS } from '../../../constants/menuPaths';
 import ToolboxPanel from './components/ToolboxPanel';
 import SortableTreeCanvas from './components/SortableTreeCanvas';
 import InspectorPanel from './components/InspectorPanel';
@@ -128,6 +130,67 @@ const collectMenuIds = (nodes: (MenuItem | string)[], ids = new Set<string>()) =
     return ids;
 };
 
+type MenuParentOption = {
+    id: string;
+    label: string;
+    depth: number;
+};
+
+const ROOT_PARENT_ID = '__root__';
+
+const getMenuItemId = (item: MenuItem | string): string =>
+    typeof item === 'string' ? item : String(item.id || item.text || '');
+
+const collectParentOptions = (
+    nodes: (MenuItem | string)[],
+    depth = 0,
+    excludedIds = new Set<string>(),
+    options: MenuParentOption[] = []
+): MenuParentOption[] => {
+    nodes.forEach((item) => {
+        if (typeof item === 'string' || item.text === '-') return;
+
+        const id = getMenuItemId(item);
+        if (!id || excludedIds.has(id)) return;
+
+        options.push({
+            id,
+            depth,
+            label: `${'└ '.repeat(depth)}${item.text || id}`
+        });
+
+        if (Array.isArray(item.sub)) {
+            collectParentOptions(item.sub, depth + 1, excludedIds, options);
+        }
+    });
+
+    return options;
+};
+
+const collectDescendantIds = (item: MenuItem | string, ids = new Set<string>()): Set<string> => {
+    if (typeof item === 'string') return ids;
+    const id = getMenuItemId(item);
+    if (id) ids.add(id);
+    if (Array.isArray(item.sub)) {
+        item.sub.forEach((child) => collectDescendantIds(child, ids));
+    }
+    return ids;
+};
+
+const createUniqueMenuId = (items: (MenuItem | string)[], text: string, path?: string): string => {
+    const existingIds = collectMenuIds(items);
+    const base = createIdBase(path || text || 'menu');
+    let candidate = `menu_${base}`;
+    let counter = 1;
+
+    while (existingIds.has(candidate)) {
+        candidate = `menu_${base}_${counter}`;
+        counter += 1;
+    }
+
+    return candidate;
+};
+
 const createIdBase = (value: unknown) => {
     const base = String(value || 'menu')
         .trim()
@@ -222,6 +285,11 @@ const AdvancedMenuManager: React.FC = () => {
     const [selectedSurface, setSelectedSurface] = useState<MenuSurface>('menu');
     const [leftPanelOpen, setLeftPanelOpen] = useState(true);
     const [rightPanelOpen, setRightPanelOpen] = useState(true);
+    const [quickAddType, setQuickAddType] = useState<'folder' | 'link'>('link');
+    const [quickAddText, setQuickAddText] = useState('');
+    const [quickAddPath, setQuickAddPath] = useState('');
+    const [quickAddParentId, setQuickAddParentId] = useState<string>(ROOT_PARENT_ID);
+    const [moveTargetParentId, setMoveTargetParentId] = useState<string>(ROOT_PARENT_ID);
 
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     // Derived state: Get actual item objects from IDs

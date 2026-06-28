@@ -1,4 +1,4 @@
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 
 export const protectedRegion = functions
@@ -14,6 +14,58 @@ export function requireCallableAuth(context: functions.https.CallableContext): f
         throw new functions.https.HttpsError('unauthenticated', 'Authentication is required.');
     }
     return context.auth;
+}
+
+const ADMIN_ROLES = new Set([
+    'ADMIN',
+    'admin',
+    'administrator',
+    'super_admin',
+    'owner',
+    'DEV',
+    'dev',
+    'DEVELOPER',
+    'developer',
+    'SYSTEM_ADMIN',
+    'system_admin',
+    '관리자',
+    '사장',
+    '실장',
+    '개발',
+    '개발자',
+    '시스템관리자',
+]);
+
+const hasAdminRoleValue = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(hasAdminRoleValue);
+    return ADMIN_ROLES.has(String(value || '').trim());
+};
+
+export async function requireCallableAdmin(context: functions.https.CallableContext): Promise<functions.https.CallableContext['auth']> {
+    const auth = requireCallableAuth(context);
+    const token = (auth.token || {}) as Record<string, unknown>;
+
+    if (
+        hasAdminRoleValue(token.role)
+        || hasAdminRoleValue(token.position)
+        || hasAdminRoleValue(token.systemRole)
+        || hasAdminRoleValue(token.additionalPositions)
+    ) {
+        return auth;
+    }
+
+    const userSnap = await admin.firestore().collection('users').doc(auth.uid).get();
+    const user = userSnap.data() || {};
+    if (
+        hasAdminRoleValue(user.role)
+        || hasAdminRoleValue(user.position)
+        || hasAdminRoleValue(user.systemRole)
+        || hasAdminRoleValue(user.additionalPositions)
+    ) {
+        return auth;
+    }
+
+    throw new functions.https.HttpsError('permission-denied', '관리자 권한이 필요합니다.');
 }
 
 export async function requireHttpAuth(req: any, res: any): Promise<admin.auth.DecodedIdToken | null> {

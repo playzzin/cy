@@ -12,6 +12,7 @@ import { toast, showConfirmAlert } from '../../utils/swal';
 import { hexToRgba, normalizeHexColor } from '../../utils/color';
 import { formatTypedDateInput, normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
 import { buildOfficeStaffAssignmentOptions, isOfficeAssignmentTeam } from '../../utils/supportAssignmentTargets';
+import { getFriendlyErrorMessage, isDeadlineExceededError } from '../../utils/firebaseError';
 
 type AssigneeMode = CardAssigneeType;
 
@@ -308,7 +309,13 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
             onRefresh();
         } catch (e: unknown) {
             console.error(e);
-            const message = e instanceof Error ? e.message : '카드 배정에 실패했습니다.';
+            if (isDeadlineExceededError(e)) {
+                toast.delayed(editingAssignment ? '카드 배정 수정' : '카드 배정');
+                await loadAssignmentRecords().catch((reloadError) => console.error(reloadError));
+                onRefresh();
+                return;
+            }
+            const message = getFriendlyErrorMessage(e, '카드 배정에 실패했습니다.');
             toast.error(message);
         } finally {
             setSaving(false);
@@ -328,7 +335,13 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
             onRefresh();
         } catch (e: unknown) {
             console.error(e);
-            const message = e instanceof Error ? e.message : '배정 해제에 실패했습니다.';
+            if (isDeadlineExceededError(e)) {
+                toast.delayed('카드 배정 해제');
+                await loadAssignmentRecords().catch((reloadError) => console.error(reloadError));
+                onRefresh();
+                return;
+            }
+            const message = getFriendlyErrorMessage(e, '배정 해제에 실패했습니다.');
             toast.error(message);
         } finally {
             setSaving(false);
@@ -586,8 +599,14 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                         )}
 
                         {selectedCard && (
-                            <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                                <h3 className="font-extrabold text-slate-800 mb-3">배정 이력</h3>
+                            <details open={Boolean(editingAssignmentId)} className="group bg-white rounded-2xl border border-slate-200">
+                                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+                                    <span className="font-extrabold text-slate-800">배정 이력</span>
+                                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-extrabold text-slate-500">
+                                        {selectedCardAssignments.length}건
+                                    </span>
+                                </summary>
+                                <div className="border-t border-slate-100 p-4">
                                 {assignmentRecordsLoading ? (
                                     <div className="text-sm text-slate-400">불러오는 중...</div>
                                 ) : selectedCardAssignments.length === 0 ? (
@@ -617,7 +636,8 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                                         ))}
                                     </div>
                                 )}
-                            </div>
+                                </div>
+                            </details>
                         )}
                     </div>
 

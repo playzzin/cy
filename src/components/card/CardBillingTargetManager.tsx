@@ -11,6 +11,7 @@ import { toast, showConfirmAlert } from '../../utils/swal';
 import { hexToRgba, normalizeHexColor } from '../../utils/color';
 import { formatTypedDateInput, normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
 import { BillingMode, BillingModeSelector, BillingStatusSummary } from '../support/BillingModeSelector';
+import BillingPeriodTimeline, { BillingPeriodTimelineItem } from '../support/BillingPeriodTimeline';
 
 interface BillingTargetSelection {
     type: CardBillingTargetType;
@@ -125,7 +126,9 @@ const targetLabel = (card: Card, records: CardBillingTargetRecord[] = []): strin
         return `${getBillingTargetTypeLabel(card.billingTargetType)} · ${card.billingTargetName}`;
     }
     if (card.currentAssigneeName) {
-        return `사용자와 동일 · ${card.currentAssigneeName}`;
+        return card.currentAssigneeType
+            ? `${getBillingTargetTypeLabel(card.currentAssigneeType as CardBillingTargetType)} · ${card.currentAssigneeName}`
+            : card.currentAssigneeName;
     }
     return '청구대상 미지정';
 };
@@ -356,6 +359,26 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
         () => targetOptionsByKey.get(selectedTargetKey) ?? null,
         [selectedTargetKey, targetOptionsByKey]
     );
+    const selectedTargetTimelineItems = useMemo<BillingPeriodTimelineItem[]>(() => (
+        selectedTargetRecords
+            .slice()
+            .sort((a, b) => {
+                const startDiff = String(a.startDate ?? '').localeCompare(String(b.startDate ?? ''));
+                if (startDiff !== 0) return startDiff;
+                return String(a.id ?? '').localeCompare(String(b.id ?? ''));
+            })
+            .map((record) => {
+                const option = targetOptionsByKey.get(getTargetOptionKey(record.targetType, record.targetId));
+                return {
+                    id: normalizeKey(record.id) || `${normalizeKey(record.cardId)}:${normalizeKey(record.startDate)}`,
+                    label: normalizeKey(record.targetName) || '청구대상',
+                    typeLabel: getBillingTargetTypeLabel(record.targetType),
+                    startDate: record.startDate,
+                    endDate: record.endDate,
+                    color: option?.color
+                };
+            })
+    ), [selectedTargetRecords, targetOptionsByKey]);
     const selectedTargetColor = selectedTarget?.color ? normalizeHexColor(selectedTarget.color) : '#64748b';
     const showTargetSelector = billingMode !== 'same';
     const showTargetDateFields = Boolean(selectedCard && (billingMode === 'split' || editingTargetRecordId));
@@ -369,7 +392,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
     const saveButtonLabel = saving
         ? '처리 중...'
         : billingMode === 'same'
-            ? (selectedCard?.currentAssigneeName ? '사용자 동일 저장' : '별도청구 해제')
+            ? (selectedCard?.currentAssigneeName ? '기본 청구 저장' : '별도청구 해제')
                 : editingTargetRecordId
                     ? '청구기간 수정'
                 : billingMode === 'split' && selectedTargetRecords.length > 0
@@ -383,6 +406,16 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
             billingTargetName: deleteField(),
             billingTargetStartDate: deleteField(),
             billingTargetEndDate: deleteField()
+        } as unknown as Partial<Card>);
+    };
+
+    const setCardBillingTargetSnapshot = async (cardId: string, record: Pick<CardBillingTargetRecord, 'targetId' | 'targetType' | 'targetName' | 'startDate' | 'endDate'>) => {
+        await cardService.updateCard(cardId, {
+            billingTargetId: record.targetId,
+            billingTargetType: record.targetType,
+            billingTargetName: record.targetName,
+            billingTargetStartDate: record.startDate,
+            billingTargetEndDate: record.endDate || null
         } as unknown as Partial<Card>);
     };
 
@@ -460,7 +493,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
             if (!target) {
                 await applySameBillingTarget(card);
                 setEditingTargetRecordId(null);
-                toast.success(card.currentAssigneeName ? '기준일 이후 카드 청구를 사용자와 동일하게 변경했습니다.' : '기준일 이후 별도청구를 해제했습니다.');
+                toast.success(card.currentAssigneeName ? '기준일 이후 카드 청구를 기본 청구로 변경했습니다.' : '기준일 이후 별도청구를 해제했습니다.');
             } else {
                 const latestRecord = latestSelectedTargetRecord;
                 const shouldCreateSplitRecord = Boolean(billingMode === 'split' && !editingTargetRecordId && latestRecord);
@@ -482,13 +515,15 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                     upserts.push(defaultRecord);
                 }
 
-                upserts.push(buildTargetRecord(card, target, startDate, endDate, targetRecordId));
+                const nextTargetRecord = buildTargetRecord(card, target, startDate, endDate, targetRecordId);
+                upserts.push(nextTargetRecord);
                 await cardService.applyCardBillingTargetChanges({
                     cardId: card.id,
                     closeRecords,
                     upserts,
                     clearSnapshot: true
                 });
+                await setCardBillingTargetSnapshot(card.id, nextTargetRecord);
                 toast.success(editingTargetRecordId ? '카드 청구대상 기간이 수정되었습니다.' : '카드 청구대상 기간이 추가되었습니다.');
                 setEditingTargetRecordId(null);
             }
@@ -512,7 +547,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
             const result = await showConfirmAlert(
                 '카드 청구',
                 selectedCard.currentAssigneeName
-                    ? `${selectedCard.name} 카드의 26-01-01 이후 별도 청구를 종료하고 사용자(${selectedCard.currentAssigneeName})와 동일하게 청구할까요?`
+                    ? `${selectedCard.name} 카드의 26-01-01 이후 별도 청구를 종료하고 기본 청구로 변경할까요?`
                     : `${selectedCard.name} 카드의 26-01-01 이후 별도 청구대상 설정을 해제할까요?`
             );
             if (!result.isConfirmed) return;
@@ -584,7 +619,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
         const result = await showConfirmAlert(
             '카드 기본 청구',
             card.currentAssigneeName
-                ? `${card.name} 카드 청구를 사용자(${card.currentAssigneeName})와 동일하게 변경할까요?`
+                ? `${card.name} 카드 청구를 기본 청구로 변경할까요?`
                 : `${card.name} 카드의 별도 청구대상 설정을 삭제할까요?`
         );
         if (!result.isConfirmed) return;
@@ -609,7 +644,14 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
             await cardService.deleteCardBillingTarget(record.id);
             const card = cardsById.get(String(record.cardId));
             if (card) {
-                await clearCardBillingTargetSnapshot(card.id);
+                const remainingRecords = (targetRecordsByCardId.get(normalizeKey(card.id)) ?? [])
+                    .filter((item) => normalizeKey(item.id) !== normalizeKey(record.id));
+                const nextRecord = getLatestTargetRecord(remainingRecords);
+                if (nextRecord) {
+                    await setCardBillingTargetSnapshot(card.id, nextRecord);
+                } else {
+                    await clearCardBillingTargetSnapshot(card.id);
+                }
             }
             await loadTargetRecords();
             onRefresh();
@@ -753,7 +795,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                             className="px-5 py-2.5 rounded-xl font-bold text-sm bg-rose-50 text-rose-700 border border-rose-100 hover:bg-rose-100 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-100 disabled:cursor-not-allowed transition-all flex items-center gap-2"
                         >
                             <FontAwesomeIcon icon={faBan} />
-                            {selectedCard?.currentAssigneeName ? '사용자 동일' : '별도청구 해제'}
+                            {selectedCard?.currentAssigneeName ? '기본 청구' : '별도청구 해제'}
                         </button>
                     </div>
                 </div>
@@ -805,7 +847,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                             <BillingModeSelector
                                 value={billingMode}
                                 onChange={handleBillingModeChange}
-                                sameLabel={selectedCard?.currentAssigneeName ? '사용자와 동일' : '별도청구 해제'}
+                                sameLabel={selectedCard?.currentAssigneeName ? '기본 청구' : '별도청구 해제'}
                                 sameDescription={selectedCard?.currentAssigneeName ? '카드 사용자가 비용도 부담' : '26-01-01 이후 별도청구 해제'}
                                 customDescription="사용자와 다른 팀/사람에게 청구"
                                 disabled={!selectedCard}
@@ -940,14 +982,27 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                         )}
 
                         {selectedCard && (
-                            <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                                <h3 className="font-extrabold text-slate-800 mb-3">청구대상 기간</h3>
+                            <details open={Boolean(editingTargetRecordId)} className="group bg-white rounded-2xl border border-slate-200">
+                                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+                                    <span className="min-w-0">
+                                        <span className="block font-extrabold text-slate-800">청구기간 타임라인</span>
+                                        <span className="mt-0.5 block truncate text-xs font-semibold text-slate-400">
+                                            변경일 기준으로 이전 대상이 닫히고 다음 대상이 이어집니다.
+                                        </span>
+                                    </span>
+                                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-extrabold text-slate-500">
+                                        {selectedTargetRecords.length}건
+                                    </span>
+                                </summary>
+                                <div className="border-t border-slate-100 p-4">
                                 {targetRecordsLoading ? (
                                     <div className="text-sm text-slate-400">불러오는 중...</div>
                                 ) : selectedTargetRecords.length === 0 ? (
                                     <div className="text-sm text-slate-400">등록된 청구기간이 없습니다.</div>
                                 ) : (
-                                    <div className="space-y-2 max-h-[220px] overflow-y-auto">
+                                    <div className="space-y-3">
+                                        <BillingPeriodTimeline items={selectedTargetTimelineItems} />
+                                        <div className="space-y-2 max-h-[220px] overflow-y-auto">
                                         {selectedTargetRecords
                                             .slice()
                                             .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)))
@@ -983,9 +1038,11 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                                                     </div>
                                                 </div>
                                             ))}
+                                        </div>
                                     </div>
                                 )}
-                            </div>
+                                </div>
+                            </details>
                         )}
                     </div>
 
@@ -1035,7 +1092,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                                                     className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-50 text-slate-700 hover:bg-slate-100 inline-flex items-center gap-2"
                                                 >
                                                     <FontAwesomeIcon icon={faRotateLeft} />
-                                                    {card.currentAssigneeName ? '사용자 동일' : '별도청구 해제'}
+                                                    {card.currentAssigneeName ? '기본 청구' : '별도청구 해제'}
                                                 </button>
                                             </div>
                                         </div>

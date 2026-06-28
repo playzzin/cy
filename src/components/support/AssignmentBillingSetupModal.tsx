@@ -1,8 +1,15 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faFileInvoiceDollar, faTimes, faUsers } from '@fortawesome/free-solid-svg-icons';
+import { faClipboardCheck, faFileInvoiceDollar, faTimes, faUsers } from '@fortawesome/free-solid-svg-icons';
 
 export type AssignmentBillingSection = 'assignment' | 'billing';
+export type AssignmentBillingSummaryTone = 'slate' | 'indigo' | 'emerald' | 'amber';
+
+export interface AssignmentBillingSummaryItem {
+    label: string;
+    value: React.ReactNode;
+    tone?: AssignmentBillingSummaryTone;
+}
 
 interface AssignmentBillingSetupModalProps {
     isOpen: boolean;
@@ -10,10 +17,19 @@ interface AssignmentBillingSetupModalProps {
     subtitle?: string;
     resourceLabel?: string;
     initialSection?: AssignmentBillingSection;
+    summaryItems?: AssignmentBillingSummaryItem[];
+    ledgerHint?: string;
     assignmentContent?: React.ReactNode;
     billingContent?: React.ReactNode;
     onClose: () => void;
 }
+
+const summaryToneClasses: Record<AssignmentBillingSummaryTone, string> = {
+    slate: 'border-slate-200 bg-slate-50 text-slate-700',
+    indigo: 'border-indigo-100 bg-indigo-50 text-indigo-800',
+    emerald: 'border-emerald-100 bg-emerald-50 text-emerald-800',
+    amber: 'border-amber-100 bg-amber-50 text-amber-800'
+};
 
 export const AssignmentBillingSetupModal: React.FC<AssignmentBillingSetupModalProps> = ({
     isOpen,
@@ -21,6 +37,8 @@ export const AssignmentBillingSetupModal: React.FC<AssignmentBillingSetupModalPr
     subtitle,
     resourceLabel = '대상',
     initialSection = 'assignment',
+    summaryItems = [],
+    ledgerHint,
     assignmentContent,
     billingContent,
     onClose
@@ -80,11 +98,11 @@ export const AssignmentBillingSetupModal: React.FC<AssignmentBillingSetupModalPr
                     <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
-                                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-sm text-white shadow-lg shadow-indigo-100">
+                                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-sm text-white shadow-sm shadow-indigo-100">
                                     <FontAwesomeIcon icon={activeSection === 'billing' ? faFileInvoiceDollar : faUsers} />
                                 </span>
                                 <div className="min-w-0">
-                                    <p className="text-xs font-extrabold uppercase tracking-wider text-indigo-500">배정/청구 설정</p>
+                                    <p className="text-xs font-extrabold text-indigo-500">배정과 청구를 한 번에 정리</p>
                                     <h2 className="truncate text-lg font-black text-slate-900 sm:text-xl">{title}</h2>
                                 </div>
                             </div>
@@ -102,21 +120,55 @@ export const AssignmentBillingSetupModal: React.FC<AssignmentBillingSetupModalPr
                         </button>
                     </div>
 
+                    {(summaryItems.length > 0 || ledgerHint) && (
+                        <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(220px,0.7fr)]">
+                            {summaryItems.length > 0 && (
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                    {summaryItems.map((item) => {
+                                        const tone = item.tone ?? 'slate';
+                                        return (
+                                            <div key={item.label} className={`rounded-lg border px-3 py-2 ${summaryToneClasses[tone]}`}>
+                                                <div className="text-[11px] font-extrabold text-current opacity-60">{item.label}</div>
+                                                <div className="mt-1 truncate text-sm font-extrabold">{item.value}</div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                            {ledgerHint && (
+                                <div className="flex items-start gap-2 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-emerald-800">
+                                    <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-emerald-600 text-[11px] text-white">
+                                        <FontAwesomeIcon icon={faClipboardCheck} />
+                                    </span>
+                                    <div className="min-w-0">
+                                        <div className="text-[11px] font-extrabold opacity-70">관리대장 반영</div>
+                                        <div className="mt-0.5 text-xs font-bold leading-snug">{ledgerHint}</div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {hasAssignment && hasBilling && (
-                        <div className="mt-4 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
-                            {tabs.map((tab) => (
+                        <div className="mt-4 grid grid-cols-2 rounded-lg bg-slate-100 p-1">
+                            {tabs.map((tab, index) => (
                                 <button
                                     key={tab.key}
                                     type="button"
                                     onClick={() => tab.enabled && setActiveSection(tab.key)}
                                     disabled={!tab.enabled}
-                                    className={`min-w-0 rounded-lg px-3 py-2 text-left transition-all ${
+                                    className={`min-w-0 rounded-md px-3 py-2 text-left transition-all ${
                                         activeSection === tab.key
                                             ? 'bg-white text-indigo-700 shadow-sm'
                                             : 'text-slate-500 hover:bg-white/60 hover:text-slate-800'
                                     } ${!tab.enabled ? 'cursor-not-allowed opacity-40' : ''}`}
                                 >
                                     <div className="flex items-center gap-2 text-sm font-extrabold">
+                                        <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] ${
+                                            activeSection === tab.key ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-500'
+                                        }`}>
+                                            {index + 1}
+                                        </span>
                                         <FontAwesomeIcon icon={tab.icon} className="text-xs" />
                                         <span>{tab.label}</span>
                                     </div>

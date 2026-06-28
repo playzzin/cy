@@ -23,6 +23,7 @@ export interface DispatchAssignment {
     vehicleId?: string;
     vehicleLabel?: string;
     vehicleLabels?: string[];
+    vehicleTeamColors?: Record<string, string>;
     startTime?: string;
     endTime?: string;
     status?: string;

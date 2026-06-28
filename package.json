@@ -90,6 +90,9 @@
     "start": "node scripts/react-scripts-start.js",
     "build": "node --max-old-space-size=8192 scripts/react-scripts-build.js",
     "verify:hosting-build": "node scripts/verify-hosting-build.js",
+    "todo:codex-bridge": "node scripts/todo-codex-bridge.mjs",
+    "todo:codex-run": "node scripts/todo-codex-worker.mjs",
+    "todo:codex-dry-run": "node scripts/todo-codex-worker.mjs --dry-run",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },

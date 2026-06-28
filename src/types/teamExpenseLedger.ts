@@ -3,6 +3,16 @@ export type TeamExpenseClaimStatus = 'draft' | 'charged' | 'settled';
 export type TeamExpenseClaimType = 'teamCharge' | 'otherExpense' | 'officeExpense';
 export type TeamExpenseCategoryScope = TeamExpenseClaimType | 'both';
 
+export interface TeamExpenseClaimAttachment {
+  id: string;
+  name: string;
+  fullPath: string;
+  url?: string;
+  size?: number;
+  contentType?: string;
+  uploadedAt?: unknown;
+}
+
 export interface TeamExpenseCategory {
   id: string;
   label: string;
@@ -31,6 +41,11 @@ export interface TeamExpenseClaim {
   amount: number;
   status: TeamExpenseClaimStatus;
   memo?: string;
+  attachments?: TeamExpenseClaimAttachment[];
+  sourceType?: 'manual' | 'office_fixed_expense';
+  sourceFixedExpenseId?: string;
+  sourceFixedExpenseName?: string;
+  generatedForYearMonth?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -51,4 +66,9 @@ export interface TeamExpenseClaimInput {
   amount: number;
   status?: TeamExpenseClaimStatus;
   memo?: string;
+  attachments?: TeamExpenseClaimAttachment[];
+  sourceType?: 'manual' | 'office_fixed_expense';
+  sourceFixedExpenseId?: string;
+  sourceFixedExpenseName?: string;
+  generatedForYearMonth?: string;
 }

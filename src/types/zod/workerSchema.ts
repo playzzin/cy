@@ -20,6 +20,7 @@ export const WorkerSchema = z.object({
     unitPrice: z.number().optional().default(0),
     payType: z.string().optional().nullable(),
     salaryModel: z.string().optional().nullable(),
+    laborStatementPayType: z.enum(['direct', 'delegate']).optional().nullable(),
     bankName: z.string().optional().nullable(),
     accountNumber: z.string().optional().nullable(),
     accountHolder: z.string().optional().nullable(),

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCheckDouble, faFloppyDisk, faPlus, faTrash, faXmark } from '@fortawesome/free-solid-svg-icons';
+import { faCheckDouble, faFloppyDisk, faPlus, faRotateLeft, faTrash, faXmark } from '@fortawesome/free-solid-svg-icons';
 
 export interface LedgerBillingEditorLineItem {
     id?: string;
@@ -22,6 +22,7 @@ interface LedgerBillingEditorModalProps<TLineItem extends LedgerBillingEditorLin
     onClose: () => void;
     onSave: (lineItems: TLineItem[], memo: string) => Promise<void>;
     onConfirm?: (lineItems: TLineItem[], memo: string) => Promise<void>;
+    onCancelConfirm?: () => Promise<void>;
 }
 
 const makeLineItemId = () => {
@@ -48,7 +49,8 @@ const LedgerBillingEditorModal = <TLineItem extends LedgerBillingEditorLineItem,
     saving = false,
     onClose,
     onSave,
-    onConfirm
+    onConfirm,
+    onCancelConfirm
 }: LedgerBillingEditorModalProps<TLineItem>) => {
     const [draftItems, setDraftItems] = useState<TLineItem[]>(() => lineItems.map((item) => ({ ...item })));
     const [draftMemo, setDraftMemo] = useState(memo ?? '');
@@ -220,6 +222,17 @@ const LedgerBillingEditorModal = <TLineItem extends LedgerBillingEditorLineItem,
                         >
                             <FontAwesomeIcon icon={faCheckDouble} />
                             확정
+                        </button>
+                    )}
+                    {readOnly && onCancelConfirm && (
+                        <button
+                            type="button"
+                            onClick={onCancelConfirm}
+                            disabled={saving}
+                            className="px-4 py-2.5 rounded-xl bg-amber-600 text-white text-sm font-bold hover:bg-amber-700 disabled:bg-amber-300 inline-flex items-center gap-2"
+                        >
+                            <FontAwesomeIcon icon={faRotateLeft} />
+                            확정 취소
                         </button>
                     )}
                 </div>

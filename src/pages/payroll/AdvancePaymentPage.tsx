@@ -3,10 +3,11 @@ import { teamService } from '../../services/teamService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { advancePaymentService, AdvancePayment } from '../../services/advancePaymentService';
 import { dailyReportService } from '../../services/dailyReportService';
-import { accommodationBillingService } from '../../services/accommodationBillingService';
 import { accommodationService } from '../../services/accommodationService';
+import { accommodationBillingService } from '../../services/accommodationBillingService';
+import { accommodationBillingTargetService } from '../../services/accommodationBillingTargetService';
 import { Accommodation } from '../../types/accommodation';
-import { accommodationAssignmentService } from '../../services/accommodationAssignmentService';
+import { vehicleBillingService } from '../../services/vehicleBillingService';
 import { companyService } from '../../services/companyService';
 import {
     payrollConfigService,
@@ -17,10 +18,13 @@ import {
     DEFAULT_ADVANCE_ITEM_LABELS
 } from '../../services/payrollConfigService';
 import { siteService, Site } from '../../services/siteService';
+import { isSupportBillingMonthEnabled } from '../../utils/supportBillingPeriod';
+import { resolveReportPayType, resolveWorkerPayType } from '../../utils/payType';
 import { useAuth } from '../../contexts/AuthContext';
 import { userService } from '../../services/userService';
 import { UserRole } from '../../types/roles';
 import type { AccommodationAssignment } from '../../types/accommodationAssignment';
+import type { AccommodationBillingTarget } from '../../types/accommodationBillingTarget';
 import type { UtilityRecord } from '../../types/accommodation';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSave, faSearch, faSpinner, faCalculator, faFloppyDisk, faTrash, faRotateRight, faArrowUp, faArrowDown } from '@fortawesome/free-solid-svg-icons';
@@ -75,13 +79,34 @@ const normalizeCompanyNameKey = (value?: string | null): string =>
         .trim()
         .toLowerCase();
 
-type PersonalAccommodationAggregate = Record<string, Record<PersonalAccommodationField, number>>;
 type WorkerPaymentSummary = {
     laborManDay: number;
     laborAmount: number;
     invoiceManDay: number;
     invoiceAmount: number;
 };
+
+type SalaryModelBucket = 'daily' | 'monthly' | 'service';
+type WorkerSalaryModelPresence = Partial<Record<SalaryModelBucket, true>>;
+type WorkerSalaryModelPresenceMap = Record<string, WorkerSalaryModelPresence>;
+type SalaryModelFilter = 'all' | SalaryModelBucket;
+type AdvanceTeamOption = {
+    id: string;
+    legacyId?: string;
+    name: string;
+    companyId?: string;
+    companyName?: string;
+    parentTeamId?: string;
+    parentTeamName?: string;
+};
+type PayrollAdvanceWorkerRow = Worker & {
+    id: string;
+    advanceWorkerId?: string;
+    advanceTeamId?: string;
+    salaryModelBucket?: SalaryModelBucket;
+};
+
+type PersonalAccommodationAggregate = Record<string, Record<PersonalAccommodationField, number>>;
 
 const createPersonalAccommodationFieldRecord = (): Record<PersonalAccommodationField, number> => ({
     accommodation: 0,
@@ -101,6 +126,54 @@ const createWorkerPaymentSummary = (): WorkerPaymentSummary => ({
 });
 
 const EMPTY_WORKER_PAYMENT_SUMMARY: WorkerPaymentSummary = createWorkerPaymentSummary();
+
+const resolveSalaryModelBucket = (value: unknown): SalaryModelBucket | null => {
+    const normalized = String(value ?? '').trim();
+    if (!normalized) return null;
+    const lower = normalized.toLowerCase();
+    if (normalized.includes('\uC6A9\uC5ED') || lower === 'service' || lower.includes('service')) return 'service';
+    if (normalized.includes('\uC6D4\uAE09') || lower === 'monthly' || lower.includes('monthly')) return 'monthly';
+    if (normalized.includes('\uC77C\uAE09') || normalized.includes('\uC77C\uB2F9') || lower === 'daily' || lower.includes('daily')) return 'daily';
+    return null;
+};
+
+const getSalaryModelLabel = (bucket: SalaryModelBucket): '일급제' | '월급제' | '용역팀' => {
+    if (bucket === 'monthly') return '월급제';
+    if (bucket === 'service') return '용역팀';
+    return '일급제';
+};
+
+const normalizeAdvanceSalaryModelLabel = (value: unknown): string => {
+    const bucket = resolveSalaryModelBucket(value);
+    if (bucket) return getSalaryModelLabel(bucket);
+    return String(value ?? '').trim();
+};
+
+const buildPayrollWorkerRowKey = (workerId: string, teamId: string, bucket: SalaryModelBucket): string =>
+    `${workerId}__${teamId || 'no-team'}__${bucket}`;
+
+const getAdvanceWorkerId = (worker: Worker): string =>
+    String((worker as any).advanceWorkerId ?? worker.id ?? '').trim();
+
+const getAdvanceTeamId = (worker: Worker, fallbackTeamId?: string): string =>
+    String((worker as any).advanceTeamId ?? worker.teamId ?? fallbackTeamId ?? '').trim();
+
+const markWorkerSalaryModelPresence = (
+    map: WorkerSalaryModelPresenceMap,
+    workerId: string,
+    rawSalaryModel: unknown
+): void => {
+    const normalizedWorkerId = String(workerId ?? '').trim();
+    if (!normalizedWorkerId) return;
+
+    const bucket = resolveSalaryModelBucket(rawSalaryModel);
+    if (!bucket) return;
+
+    map[normalizedWorkerId] = {
+        ...(map[normalizedWorkerId] ?? {}),
+        [bucket]: true
+    };
+};
 
 const CORPORATE_ADVANCE_ITEM_KEYS = [
     'corporateAdvance1',
@@ -125,6 +198,27 @@ const toFiniteNumberOrZero = (value: unknown): number => {
         return Number.isFinite(parsed) ? parsed : 0;
     }
     return 0;
+};
+
+const isPostedVehicleBillingStatus = (status: unknown): boolean => {
+    const raw = String(status ?? '').trim().toUpperCase();
+    return raw === 'CONFIRMED' || raw === 'PAID' || raw === 'OVERDUE';
+};
+
+const isPostedAccommodationBillingStatus = (status: unknown): boolean => {
+    return String(status ?? '').trim().toLowerCase() === 'confirmed';
+};
+
+const isVehicleLedgerClaim = (doc: { lineItems?: Array<{ sourceType?: unknown }> }): boolean =>
+    (doc.lineItems ?? []).some((item) => String(item.sourceType ?? '') === 'vehicle_ledger');
+
+const getVehicleDriverFineAmount = (doc: { lineItems?: Array<{ amount?: unknown; category?: unknown; label?: unknown }> }): number => {
+    return (doc.lineItems ?? []).reduce((sum, item) => {
+        const category = String(item.category ?? '').trim().toUpperCase();
+        const label = String(item.label ?? '').trim().toLowerCase();
+        if (category !== 'FINE' && !label.includes('fine') && !label.includes('penalty')) return sum;
+        return sum + toFiniteNumberOrZero(item.amount);
+    }, 0);
 };
 
 const getAdvanceFieldValue = (advance: AdvancePayment, field: string): number => {
@@ -322,11 +416,39 @@ const buildPersonalAccommodationAggregate = (params: {
     assignments: AccommodationAssignment[];
     utilityRecords: UtilityRecord[];
     accommodations: Map<string, Accommodation>;
+    billingTargets?: AccommodationBillingTarget[];
     resolveWorkerId: (rawWorkerId: string) => string | null;
+    resolveWorkerIdByName?: (workerName: string, teamId?: string) => string | null;
     resolveWorkerName: (workerId: string) => string | null;
 }): PersonalAccommodationAggregate => {
     const range = parseYearMonthRange(params.yearMonth);
     if (!range) return {};
+
+    const findAccommodationByKeys = (...keys: unknown[]): Accommodation | undefined => {
+        for (const rawKey of keys) {
+            const key = String(rawKey ?? '').trim();
+            if (!key) continue;
+
+            const direct = params.accommodations.get(key);
+            if (direct) return direct;
+
+            const normalized = normalizeDeductionLabel(key);
+            if (normalized && normalized !== key) {
+                const normalizedMatch = params.accommodations.get(normalized);
+                if (normalizedMatch) return normalizedMatch;
+            }
+        }
+        return undefined;
+    };
+
+    const getCanonicalAccommodationId = (rawAccommodationId?: unknown, rawAccommodationName?: unknown): string => {
+        const idKey = String(rawAccommodationId ?? '').trim();
+        const nameKey = String(rawAccommodationName ?? '').trim();
+        const accommodation = findAccommodationByKeys(idKey, nameKey);
+        const fallback = idKey || nameKey;
+        if (!accommodation) return fallback;
+        return String(accommodation.id ?? fallback).trim() || fallback;
+    };
 
     type WorkerBillingCandidate = {
         accommodationId: string;
@@ -337,12 +459,47 @@ const buildPersonalAccommodationAggregate = (params: {
     };
 
     const workerBillingCandidates: WorkerBillingCandidate[] = [];
+    const billingTargetWeightsByAccommodation = new Map<string, Array<{ workerId: string; weight: number }>>();
+    const nonPersonalBillingTargetAccommodationIds = new Set<string>();
+
+    (params.billingTargets ?? []).forEach((target) => {
+        const targetType = String(target.targetType ?? '').trim();
+
+        const accommodationId = getCanonicalAccommodationId(target.accommodationId, target.accommodationName);
+        if (!accommodationId) return;
+
+        const startDate = parseYmdDate(String(target.startDate ?? '').trim()) ?? range.monthStart;
+        const endDate = target.endDate ? parseYmdDate(String(target.endDate).trim()) : null;
+        const overlapDays = calculateOverlapDays({
+            monthStart: range.monthStart,
+            monthEnd: range.monthEnd,
+            startDate,
+            endDate
+        });
+        if (overlapDays <= 0) return;
+
+        if (targetType !== 'worker') {
+            nonPersonalBillingTargetAccommodationIds.add(accommodationId);
+            return;
+        }
+
+        const rawWorkerId = String(target.workerId ?? '').trim();
+        const targetTeamId = String(target.teamId ?? '').trim();
+        const resolvedWorkerId =
+            (rawWorkerId ? params.resolveWorkerId(rawWorkerId) : null) ??
+            params.resolveWorkerIdByName?.(String(target.workerName ?? '').trim(), targetTeamId);
+        if (!resolvedWorkerId) return;
+
+        const current = billingTargetWeightsByAccommodation.get(accommodationId) ?? [];
+        current.push({ workerId: resolvedWorkerId, weight: overlapDays });
+        billingTargetWeightsByAccommodation.set(accommodationId, current);
+    });
 
     params.assignments.forEach((assignment) => {
         const source = assignment.source ? String(assignment.source).trim() : '';
         if (source !== 'worker') return;
 
-        const accommodationId = String(assignment.accommodationId ?? '').trim();
+        const accommodationId = getCanonicalAccommodationId(assignment.accommodationId, assignment.accommodationName);
         const rawWorkerId = String(assignment.workerId ?? '').trim();
         if (!accommodationId || !rawWorkerId) return;
 
@@ -413,41 +570,43 @@ const buildPersonalAccommodationAggregate = (params: {
     params.utilityRecords.forEach((record) => {
         if (String(record.yearMonth ?? '') !== String(params.yearMonth)) return;
 
-        const accommodationId = String(record.accommodationId ?? '').trim();
+        const accommodationId = getCanonicalAccommodationId(record.accommodationId, record.accommodationName);
         if (!accommodationId) return;
+        if (nonPersonalBillingTargetAccommodationIds.has(accommodationId)) return;
 
+        const directTargetWeights = billingTargetWeightsByAccommodation.get(accommodationId) ?? [];
         const occupantDays = occupantDaysByAccommodation.get(accommodationId);
-        if (!occupantDays || occupantDays.size === 0) return;
+        if (directTargetWeights.length === 0 && (!occupantDays || occupantDays.size === 0)) return;
 
-        // --- Logic Update: Individual Ownership Handling ---
-        const accommodation = params.accommodations.get(accommodationId);
+        const accommodation = findAccommodationByKeys(record.accommodationId, record.accommodationName, accommodationId);
         let weights: Array<{ workerId: string; weight: number }> = [];
 
-        // Check if individual ownership & match owner
-        let ownerFound = false;
-        if (accommodation?.ownership === 'Individual') {
-            const ownerName = (accommodation.currentOccupantName || accommodation.name || '').trim();
-            if (ownerName) {
-                // Find worker among occupants who matches the owner name
-                for (const [workerId] of occupantDays) {
-                    const wName = params.resolveWorkerName(workerId);
-                    if (wName && wName.trim() === ownerName) {
-                        weights = [{ workerId, weight: 1 }]; // Winner takes all
-                        ownerFound = true;
-                        break;
+        if (directTargetWeights.length > 0) {
+            weights = directTargetWeights;
+        } else if (occupantDays) {
+            let ownerFound = false;
+            if (accommodation?.ownership === 'Individual') {
+                const ownerName = (accommodation.currentOccupantName || accommodation.name || '').trim();
+                const normalizedOwnerName = normalizeDeductionLabel(ownerName);
+                if (normalizedOwnerName) {
+                    for (const [workerId] of occupantDays) {
+                        const workerName = params.resolveWorkerName(workerId);
+                        if (workerName && normalizeDeductionLabel(workerName) === normalizedOwnerName) {
+                            weights = [{ workerId, weight: 1 }];
+                            ownerFound = true;
+                            break;
+                        }
                     }
                 }
             }
-        }
 
-        // Default N/1 (by days) if not individual or owner not found
-        if (!ownerFound) {
-            weights = Array.from(occupantDays.entries()).map(([workerId, days]) => ({
-                workerId,
-                weight: days
-            }));
+            if (!ownerFound) {
+                weights = Array.from(occupantDays.entries()).map(([workerId, days]) => ({
+                    workerId,
+                    weight: days
+                }));
+            }
         }
-        // ---------------------------------------------------
 
         const amountByField: Record<PersonalAccommodationField, number> = {
             accommodation: toFiniteNumberOrZero(record.costs?.rent),
@@ -542,15 +701,17 @@ const AdvancePaymentPage: React.FC = () => {
     const [selectedTeamId, setSelectedTeamId] = useState('');
     const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
 
-    const [salaryModelFilter, setSalaryModelFilter] = useState<'all' | 'daily' | 'monthly'>('all');
+    const [salaryModelFilter, setSalaryModelFilter] = useState<SalaryModelFilter>('all');
     const [workerNameQuery, setWorkerNameQuery] = useState('');
 
     // Data State
-    const [teams, setTeams] = useState<{ id: string; name: string; companyName?: string }[]>([]);
+    const [teams, setTeams] = useState<AdvanceTeamOption[]>([]);
+    const [allTeamOptions, setAllTeamOptions] = useState<AdvanceTeamOption[]>([]);
     const [companies, setCompanies] = useState<string[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [advances, setAdvances] = useState<{ [workerId: string]: AdvancePayment }>({});
     const [workerPaymentSummaryMap, setWorkerPaymentSummaryMap] = useState<Record<string, WorkerPaymentSummary>>({});
+    const [selectedMonthSalaryModels, setSelectedMonthSalaryModels] = useState<WorkerSalaryModelPresenceMap>({});
 
     const [, setPayrollConfig] = useState<PayrollConfig | null>(null);
     const [deductionItems, setDeductionItems] = useState<PayrollDeductionItem[]>([]);
@@ -815,11 +976,14 @@ const AdvancePaymentPage: React.FC = () => {
     }, [isOtherDeductionId]);
 
     const createEmptyAdvance = useCallback((worker: Worker, teamId: string, month: string): AdvancePayment => {
+        const advanceWorkerId = getAdvanceWorkerId(worker);
+        const advanceTeamId = getAdvanceTeamId(worker, teamId);
         return {
-            workerId: worker.id!,
+            workerId: advanceWorkerId,
             workerName: worker.name,
-            teamId: teamId,
+            teamId: advanceTeamId,
             teamName: worker.teamName || '',
+            salaryModel: String((worker as any).salaryModel ?? (worker as any).payType ?? '').trim(),
             yearMonth: month,
             items: {},
             prevMonthCarryover: 0,
@@ -919,16 +1083,24 @@ const AdvancePaymentPage: React.FC = () => {
                 return false;
             });
 
-            const formattedTeams = allowedTeams.map((team) => ({
+            const formatTeamOption = (team: typeof teamList[number]): AdvanceTeamOption => ({
                 id: team.id || '',
+                legacyId: team.legacyId ?? undefined,
                 name: team.name,
+                companyId: team.companyId ?? undefined,
+                parentTeamId: team.parentTeamId ?? undefined,
+                parentTeamName: team.parentTeamName ?? undefined,
                 companyName:
                     (normalizeCompanyNameKey(team.companyName)
                         ? String(team.companyName).replace(/\s*소속팀\s*$/, '').trim()
                         : '') ||
                     (team.companyId ? constructionCompanyNameById.get(team.companyId) : undefined) ||
                     '기타'
-            }));
+            });
+
+            setAllTeamOptions(teamList.map(formatTeamOption));
+
+            const formattedTeams = allowedTeams.map(formatTeamOption);
             setTeams(formattedTeams);
 
             const uniqueCompanies = Array.from(
@@ -1008,27 +1180,123 @@ const AdvancePaymentPage: React.FC = () => {
 
         setLoading(true);
         setHasChanges(false);
+        setSelectedMonthSalaryModels({});
         try {
             const allWorkers = await manpowerService.getWorkers();
-            const allowedTeamIdSet = new Set(
-                selectedTeamId === ALL_TEAMS_VALUE
-                    ? filteredTeams.map((t) => t.id).filter(Boolean)
-                    : [selectedTeamId]
-            );
-
-            const teamWorkers = allWorkers.filter((w) => {
-                const teamId = String(w.teamId ?? '');
-                return teamId && allowedTeamIdSet.has(teamId);
+            const workerByAnyId = new Map<string, Worker>();
+            const workerCanonicalKeyByAnyId = new Map<string, string>();
+            allWorkers.forEach((worker) => {
+                const workerId = String(worker.id ?? '').trim();
+                const legacyId = String(worker.legacyId ?? '').trim();
+                const canonicalKey = workerId || legacyId;
+                if (!canonicalKey) return;
+                if (workerId) {
+                    workerByAnyId.set(workerId, worker);
+                    workerCanonicalKeyByAnyId.set(workerId, canonicalKey);
+                }
+                if (legacyId) {
+                    workerByAnyId.set(legacyId, worker);
+                    workerCanonicalKeyByAnyId.set(legacyId, canonicalKey);
+                }
+                workerByAnyId.set(canonicalKey, worker);
+                workerCanonicalKeyByAnyId.set(canonicalKey, canonicalKey);
             });
+
+            const teamByAnyId = new Map<string, AdvanceTeamOption>();
+            const teamCanonicalIdByAnyId = new Map<string, string>();
+            allTeamOptions.forEach((team) => {
+                const teamId = String(team.id ?? '').trim();
+                const legacyId = String(team.legacyId ?? '').trim();
+                const canonicalTeamId = teamId || legacyId;
+                if (!canonicalTeamId) return;
+                if (teamId) {
+                    teamByAnyId.set(teamId, team);
+                    teamCanonicalIdByAnyId.set(teamId, canonicalTeamId);
+                }
+                if (legacyId) {
+                    teamByAnyId.set(legacyId, team);
+                    teamCanonicalIdByAnyId.set(legacyId, canonicalTeamId);
+                }
+                teamByAnyId.set(canonicalTeamId, team);
+                teamCanonicalIdByAnyId.set(canonicalTeamId, canonicalTeamId);
+            });
+
+            const resolveWorkerCanonicalKey = (rawId: unknown): string => {
+                const normalized = String(rawId ?? '').trim();
+                if (!normalized) return '';
+                return workerCanonicalKeyByAnyId.get(normalized) ?? normalized;
+            };
+
+            const resolveTeamCanonicalId = (rawId: unknown): string => {
+                const normalized = String(rawId ?? '').trim();
+                if (!normalized) return '';
+                return teamCanonicalIdByAnyId.get(normalized) ?? normalized;
+            };
+
+            const findTeamByName = (rawName: unknown): AdvanceTeamOption | undefined => {
+                const normalizedName = normalizeTeamName(String(rawName ?? ''));
+                if (!normalizedName) return undefined;
+                return allTeamOptions.find((team) => normalizeTeamName(team.name) === normalizedName);
+            };
+
+            const addAllowedTeamId = (rawTeamId: unknown): void => {
+                const canonicalTeamId = resolveTeamCanonicalId(rawTeamId);
+                if (canonicalTeamId) allowedTeamIdSet.add(canonicalTeamId);
+            };
+
+            const allowedTeamIdSet = new Set<string>();
+            const filteredTeamIds = filteredTeams.map((t) => t.id).filter(Boolean);
+
+            const addTeamAndChildren = (teamId: string): void => {
+                const canonicalSelectedTeamId = resolveTeamCanonicalId(teamId);
+                const selectedTeam =
+                    allTeamOptions.find((team) => resolveTeamCanonicalId(team.id) === canonicalSelectedTeamId) ??
+                    teams.find((team) => team.id === teamId);
+                const selectedTeamNameKey = normalizeTeamName(selectedTeam?.name ?? '');
+                addAllowedTeamId(teamId);
+
+                allTeamOptions.forEach((team) => {
+                    if (!team.id) return;
+                    if (resolveTeamCanonicalId(team.parentTeamId) === canonicalSelectedTeamId) {
+                        addAllowedTeamId(team.id);
+                        return;
+                    }
+
+                    if (
+                        selectedTeamNameKey &&
+                        normalizeTeamName(team.parentTeamName ?? '') === selectedTeamNameKey
+                    ) {
+                        addAllowedTeamId(team.id);
+                    }
+                });
+            };
+
+            if (selectedTeamId === ALL_TEAMS_VALUE) {
+                filteredTeamIds.forEach(addTeamAndChildren);
+            } else {
+                addTeamAndChildren(selectedTeamId);
+            }
+            const shouldLoadAllTeamScopedRecords =
+                selectedTeamId === ALL_TEAMS_VALUE || allowedTeamIdSet.size > 1;
 
             const [yearStr, monthStr] = selectedMonth.split('-');
             const parsedMonthRange = parseYearMonthRange(selectedMonth);
             const monthStartDate = `${selectedMonth}-01`;
             const monthEndDate = `${selectedMonth}-${String(parsedMonthRange?.monthEnd.getDate() ?? 31).padStart(2, '0')}`;
+            const supportBillingEnabled = isSupportBillingMonthEnabled(selectedMonth);
 
-            // 데이터 병렬 로드: 가불 내역 + 숙소 청구 내역 + 숙소 개인배정/월별공과금대장
-            const [existingAdvances, billingDocs, assignmentRows, utilityRecords, accommodations, monthlyReports, siteRows] = await Promise.all([
-                selectedTeamId === ALL_TEAMS_VALUE
+            const [
+                existingAdvances,
+                billingDocs,
+                vehicleBillingDocs,
+                monthlyReports,
+                siteRows,
+                accommodationRows,
+                accommodationAssignments,
+                accommodationLedgerRecords,
+                accommodationBillingTargets
+            ] = await Promise.all([
+                shouldLoadAllTeamScopedRecords
                     ? advancePaymentService.getAdvancePaymentsByYearMonth(
                         parseInt(yearStr),
                         parseInt(monthStr)
@@ -1039,22 +1307,29 @@ const AdvancePaymentPage: React.FC = () => {
                         selectedTeamId
                     ),
                 accommodationBillingService.getBillingDocuments({
-                    teamId: selectedTeamId === ALL_TEAMS_VALUE ? 'all' : selectedTeamId,
+                    teamId: shouldLoadAllTeamScopedRecords ? 'all' : selectedTeamId,
                     yearMonth: selectedMonth
                 }),
-                selectedTeamId === ALL_TEAMS_VALUE
-                    ? accommodationAssignmentService.getAllAssignments()
-                    : accommodationAssignmentService.getAssignmentsByTeam(selectedTeamId),
-                accommodationService.getMonthlyLedger(selectedMonth),
-                accommodationService.getAccommodations(),
+                vehicleBillingService.getBillingsByMonth(selectedMonth),
                 dailyReportService.getReportsByRange(monthStartDate, monthEndDate),
-                siteService.getSites()
+                siteService.getSites(),
+                accommodationService.listAllAccommodations().catch((error) => {
+                    console.warn('[AdvancePaymentPage] Failed to load accommodations:', error);
+                    return [] as Accommodation[];
+                }),
+                accommodationService.getAssignments().catch((error) => {
+                    console.warn('[AdvancePaymentPage] Failed to load accommodation assignments:', error);
+                    return [] as AccommodationAssignment[];
+                }),
+                accommodationService.getMonthlyLedger(selectedMonth).catch((error) => {
+                    console.warn('[AdvancePaymentPage] Failed to load accommodation monthly ledger:', error);
+                    return [] as UtilityRecord[];
+                }),
+                accommodationBillingTargetService.listTargets().catch((error) => {
+                    console.warn('[AdvancePaymentPage] Failed to load accommodation billing targets:', error);
+                    return [] as AccommodationBillingTarget[];
+                })
             ]);
-
-            const accommodationsMap = new Map<string, Accommodation>();
-            (accommodations as Accommodation[] ?? []).forEach((acc) => {
-                if (acc && acc.id) accommodationsMap.set(String(acc.id), acc);
-            });
             const siteMap = new Map<string, Site>();
             (siteRows as Site[] ?? []).forEach((site) => {
                 const siteId = String(site.id ?? '').trim();
@@ -1063,48 +1338,164 @@ const AdvancePaymentPage: React.FC = () => {
                 if (legacySiteId && !siteMap.has(legacySiteId)) siteMap.set(legacySiteId, site);
             });
 
+            const accommodationByAnyId = new Map<string, Accommodation>();
+            const registerAccommodationKey = (key: unknown, accommodation: Accommodation): void => {
+                const normalizedKey = String(key ?? '').trim();
+                if (!normalizedKey || accommodationByAnyId.has(normalizedKey)) return;
+                accommodationByAnyId.set(normalizedKey, accommodation);
+            };
+            ((accommodationRows as Accommodation[]) ?? []).forEach((accommodation) => {
+                registerAccommodationKey(accommodation.id, accommodation);
+                registerAccommodationKey((accommodation as any).legacyId, accommodation);
+                registerAccommodationKey(accommodation.name, accommodation);
+                registerAccommodationKey(normalizeDeductionLabel(accommodation.name), accommodation);
+            });
+
+            const resolveReportTeamContext = (report: any, reportWorker: any, worker?: Worker): { teamId: string; teamName: string } => {
+                const reportTeamId =
+                    resolveTeamCanonicalId(report.teamId) ||
+                    resolveTeamCanonicalId(findTeamByName(report.teamName)?.id);
+                const reportTeam = teamByAnyId.get(reportTeamId);
+                const rowTeamName = String(reportWorker.workerTeamName ?? '').trim();
+                const rowTeamId = resolveTeamCanonicalId(reportWorker.teamId);
+                const rowTeamIdByName = rowTeamName
+                    ? resolveTeamCanonicalId(findTeamByName(rowTeamName)?.id)
+                    : '';
+                const workerTeamId = resolveTeamCanonicalId(worker?.teamId);
+                const resolvedTeamId = rowTeamId || rowTeamIdByName || reportTeamId || workerTeamId || '';
+                const resolvedTeam = teamByAnyId.get(resolvedTeamId);
+                const resolvedTeamName =
+                    String(resolvedTeam?.name ?? '').trim() ||
+                    rowTeamName ||
+                    String(reportTeam?.name ?? '').trim() ||
+                    String(report.teamName ?? '').trim() ||
+                    String(worker?.teamName ?? '').trim();
+
+                return { teamId: resolvedTeamId, teamName: resolvedTeamName };
+            };
+
+            const payrollWorkerByKey = new Map<string, PayrollAdvanceWorkerRow>();
+            monthlyReports.forEach((report) => {
+                if ((report.date ?? '').slice(0, 7) !== selectedMonth) return;
+
+                report.workers.forEach((reportWorker) => {
+                    const manDay = toFiniteNumberOrZero(reportWorker.manDay);
+                    if (manDay <= 0) return;
+
+                    const reportWorkerId = String(reportWorker.workerId ?? '').trim();
+                    if (!reportWorkerId) return;
+
+                    const workerKey = resolveWorkerCanonicalKey(reportWorkerId);
+                    if (!workerKey) return;
+
+                    const worker = workerByAnyId.get(workerKey) ?? workerByAnyId.get(reportWorkerId);
+                    if (!worker) return;
+
+                    const reportSalaryModel = resolveReportPayType(reportWorker, worker);
+                    const salaryBucket = resolveSalaryModelBucket(reportSalaryModel);
+                    if (!salaryBucket) return;
+
+                    const teamContext = resolveReportTeamContext(report, reportWorker, worker);
+                    if (!teamContext.teamId || !allowedTeamIdSet.has(teamContext.teamId)) return;
+
+                    const rowKey = buildPayrollWorkerRowKey(workerKey, teamContext.teamId, salaryBucket);
+                    if (!payrollWorkerByKey.has(rowKey)) {
+                        payrollWorkerByKey.set(rowKey, {
+                            ...worker,
+                            id: rowKey,
+                            legacyId: String(worker.legacyId ?? '').trim() || workerKey,
+                            advanceWorkerId: workerKey,
+                            advanceTeamId: teamContext.teamId,
+                            salaryModelBucket: salaryBucket,
+                            teamId: teamContext.teamId,
+                            teamName: teamContext.teamName,
+                            payType: getSalaryModelLabel(salaryBucket),
+                            salaryModel: getSalaryModelLabel(salaryBucket)
+                        });
+                    }
+                });
+            });
+            const teamWorkers = Array.from(payrollWorkerByKey.values());
+
             const advancesMap: { [key: string]: AdvancePayment } = {};
             const importedCellMap: Record<string, true> = {};
             let hasAutoImportUpdates = false;
 
             // worker.id/worker.legacyId 혼용으로 인한 재조회 누락을 막기 위해 canonical worker key를 먼저 만든다.
             const canonicalWorkerKeyByAnyId = new Map<string, string>();
+            const rowKeysByAdvanceWorkerTeam = new Map<string, string[]>();
+            const rowKeyByAdvanceWorkerTeamSalary = new Map<string, string>();
             teamWorkers.forEach((worker) => {
-                const workerId = String(worker.id ?? '').trim();
+                const rowKey = String(worker.id ?? '').trim();
+                const workerId = getAdvanceWorkerId(worker);
                 const legacyId = String(worker.legacyId ?? '').trim();
-                const canonicalKey = workerId || legacyId;
+                const canonicalKey = rowKey || workerId || legacyId;
                 if (!canonicalKey) return;
+                if (rowKey) canonicalWorkerKeyByAnyId.set(rowKey, canonicalKey);
                 if (workerId) canonicalWorkerKeyByAnyId.set(workerId, canonicalKey);
                 if (legacyId) canonicalWorkerKeyByAnyId.set(legacyId, canonicalKey);
+
+                const advanceTeamId = getAdvanceTeamId(worker);
+                if (workerId && advanceTeamId && rowKey) {
+                    const mapKey = `${workerId}__${advanceTeamId}`;
+                    rowKeysByAdvanceWorkerTeam.set(mapKey, [...(rowKeysByAdvanceWorkerTeam.get(mapKey) ?? []), rowKey]);
+                    const salaryBucket = worker.salaryModelBucket ?? resolveSalaryModelBucket((worker as any).salaryModel ?? (worker as any).payType);
+                    if (salaryBucket) {
+                        rowKeyByAdvanceWorkerTeamSalary.set(`${workerId}__${advanceTeamId}__${salaryBucket}`, rowKey);
+                    }
+                }
             });
 
             // 1. 기존 가불 내역 먼저 맵에 담기
-            existingAdvances
-                .filter((record) => {
-                    if (selectedTeamId !== ALL_TEAMS_VALUE) return true;
-                    return allowedTeamIdSet.has(String(record.teamId ?? ''));
-                })
-                .forEach(record => {
-                    const rawWorkerId = String(record.workerId ?? '').trim();
-                    const workerKey = canonicalWorkerKeyByAnyId.get(rawWorkerId) ?? rawWorkerId;
-                    if (!workerKey) return;
+            const scopedExistingAdvances = existingAdvances.filter((record) => {
+                return allowedTeamIdSet.has(resolveTeamCanonicalId(record.teamId));
+            });
+            const applyExistingAdvanceRecord = (record: AdvancePayment, allowLegacyFallback: boolean): void => {
+                const rawWorkerId = String(record.workerId ?? '').trim();
+                const actualWorkerKey = resolveWorkerCanonicalKey(rawWorkerId);
+                const recordTeamId = resolveTeamCanonicalId(record.teamId);
+                const recordSalaryBucket = resolveSalaryModelBucket(record.salaryModel);
+                const exactRowKey = recordSalaryBucket
+                    ? rowKeyByAdvanceWorkerTeamSalary.get(`${actualWorkerKey}__${recordTeamId}__${recordSalaryBucket}`)
+                    : undefined;
+                const fallbackRowKey = allowLegacyFallback
+                    ? (rowKeysByAdvanceWorkerTeam.get(`${actualWorkerKey}__${recordTeamId}`) ?? []).find((key) => !advancesMap[key])
+                    : undefined;
+                const workerKey = exactRowKey ?? fallbackRowKey;
+                if (!workerKey) return;
+                if (allowLegacyFallback && advancesMap[workerKey]) return;
 
-                    const normalizedRecord: AdvancePayment = {
-                        ...record,
-                        workerId: workerKey,
-                        privateRoom: record.privateRoom ?? 0,
-                        items: record.items ?? {}
-                    };
+                const rowWorker = payrollWorkerByKey.get(workerKey);
+                const normalizedSalaryModel =
+                    rowWorker?.salaryModelBucket
+                        ? getSalaryModelLabel(rowWorker.salaryModelBucket)
+                        : normalizeAdvanceSalaryModelLabel(record.salaryModel);
+                const normalizedRecord: AdvancePayment = {
+                    ...record,
+                    workerId: rowWorker ? getAdvanceWorkerId(rowWorker) : actualWorkerKey,
+                    teamId: rowWorker ? getAdvanceTeamId(rowWorker, recordTeamId) : recordTeamId,
+                    teamName: rowWorker?.teamName || record.teamName || '',
+                    salaryModel: normalizedSalaryModel || undefined,
+                    privateRoom: record.privateRoom ?? 0,
+                    items: record.items ?? {}
+                };
 
-                    advancesMap[workerKey] = {
-                        ...normalizedRecord,
-                        totalDeduction: calculateTotalDeduction(normalizedRecord)
-                    };
-                });
+                advancesMap[workerKey] = {
+                    ...normalizedRecord,
+                    totalDeduction: calculateTotalDeduction(normalizedRecord)
+                };
+            };
+
+            scopedExistingAdvances
+                .filter((record) => Boolean(resolveSalaryModelBucket(record.salaryModel)))
+                .forEach((record) => applyExistingAdvanceRecord(record, false));
+            scopedExistingAdvances
+                .filter((record) => !resolveSalaryModelBucket(record.salaryModel))
+                .forEach((record) => applyExistingAdvanceRecord(record, true));
 
             // 2. 누락된 근로자들에 대해 빈 레코드 생성
             teamWorkers.forEach(w => {
-                const candidateWorkerIds = [String(w.id ?? ''), String(w.legacyId ?? '')]
+                const candidateWorkerIds = [String(w.id ?? ''), getAdvanceWorkerId(w), String(w.legacyId ?? '')]
                     .map((id) => id.trim())
                     .filter((id) => id.length > 0);
                 const hasExisting = candidateWorkerIds.some((id) => Boolean(advancesMap[id]));
@@ -1113,21 +1504,19 @@ const AdvancePaymentPage: React.FC = () => {
                 const workerKey = candidateWorkerIds[0];
                 if (!workerKey) return;
 
-                const teamId = String(w.teamId ?? '');
+                const teamId = getAdvanceTeamId(w);
                 advancesMap[workerKey] = createEmptyAdvance({ ...w, id: workerKey }, teamId, selectedMonth);
             });
 
             const advanceWorkerKeyByAnyWorkerId = new Map<string, string>();
-            const workerIdToNameMap = new Map<string, string>();
             Object.keys(advancesMap).forEach((key) => {
                 const normalized = String(key ?? '').trim();
                 if (!normalized) return;
                 advanceWorkerKeyByAnyWorkerId.set(normalized, normalized);
-                workerIdToNameMap.set(normalized, advancesMap[normalized].workerName);
             });
 
             teamWorkers.forEach((w) => {
-                const candidateWorkerIds = [String(w.id ?? ''), String(w.legacyId ?? '')]
+                const candidateWorkerIds = [String(w.id ?? ''), getAdvanceWorkerId(w), String(w.legacyId ?? '')]
                     .map((id) => id.trim())
                     .filter((id) => id.length > 0);
                 if (candidateWorkerIds.length === 0) return;
@@ -1138,13 +1527,39 @@ const AdvancePaymentPage: React.FC = () => {
                 candidateWorkerIds.forEach((id) => {
                     advanceWorkerKeyByAnyWorkerId.set(id, canonicalKey);
                 });
-                workerIdToNameMap.set(canonicalKey, w.name);
+            });
+
+            const workerKeyByNormalizedName = new Map<string, string>();
+            const workerKeyByTeamAndNormalizedName = new Map<string, string>();
+            const workerNameByAdvanceKey = new Map<string, string>();
+            teamWorkers.forEach((worker) => {
+                const candidateWorkerIds = [String(worker.id ?? ''), getAdvanceWorkerId(worker), String(worker.legacyId ?? '')]
+                    .map((id) => id.trim())
+                    .filter((id) => id.length > 0);
+                const canonicalKey = candidateWorkerIds.find((id) => Boolean(advancesMap[id])) ?? candidateWorkerIds[0];
+                if (!canonicalKey) return;
+
+                const workerName = String(worker.name ?? '').trim();
+                const normalizedWorkerName = normalizeDeductionLabel(workerName);
+                if (!normalizedWorkerName) return;
+
+                workerNameByAdvanceKey.set(canonicalKey, workerName);
+                if (!workerKeyByNormalizedName.has(normalizedWorkerName)) {
+                    workerKeyByNormalizedName.set(normalizedWorkerName, canonicalKey);
+                }
+
+                const teamId = String(worker.teamId ?? '').trim();
+                if (!teamId) return;
+                const teamScopedKey = `${teamId}::${normalizedWorkerName}`;
+                if (!workerKeyByTeamAndNormalizedName.has(teamScopedKey)) {
+                    workerKeyByTeamAndNormalizedName.set(teamScopedKey, canonicalKey);
+                }
             });
 
             const workerUnitPriceByAnyWorkerId = new Map<string, number>();
             teamWorkers.forEach((worker) => {
                 const unitPrice = toFiniteNumberOrZero(worker.unitPrice);
-                const candidateWorkerIds = [String(worker.id ?? ''), String(worker.legacyId ?? '')]
+                const candidateWorkerIds = [String(worker.id ?? ''), getAdvanceWorkerId(worker), String(worker.legacyId ?? '')]
                     .map((id) => id.trim())
                     .filter((id) => id.length > 0);
                 candidateWorkerIds.forEach((id) => {
@@ -1153,6 +1568,7 @@ const AdvancePaymentPage: React.FC = () => {
             });
 
             const aggregatedWorkerPaymentSummaryMap: Record<string, WorkerPaymentSummary> = {};
+            const selectedMonthSalaryModelMap: WorkerSalaryModelPresenceMap = {};
             const ensureWorkerPaymentSummary = (workerKey: string): WorkerPaymentSummary => {
                 if (!aggregatedWorkerPaymentSummaryMap[workerKey]) {
                     aggregatedWorkerPaymentSummaryMap[workerKey] = createWorkerPaymentSummary();
@@ -1172,11 +1588,25 @@ const AdvancePaymentPage: React.FC = () => {
                     const reportWorkerId = String(reportWorker.workerId ?? '').trim();
                     if (!reportWorkerId) return;
 
-                    const workerKey = advanceWorkerKeyByAnyWorkerId.get(reportWorkerId);
-                    if (!workerKey) return;
-
                     const manDay = toFiniteNumberOrZero(reportWorker.manDay);
                     if (manDay <= 0) return;
+
+                    const actualWorkerKey = resolveWorkerCanonicalKey(reportWorkerId);
+                    if (!actualWorkerKey) return;
+
+                    const worker = workerByAnyId.get(actualWorkerKey) ?? workerByAnyId.get(reportWorkerId);
+                    const teamContext = resolveReportTeamContext(report, reportWorker, worker);
+                    if (!teamContext.teamId || !allowedTeamIdSet.has(teamContext.teamId)) return;
+
+                    const reportSalaryModel = resolveReportPayType(reportWorker, worker);
+                    const salaryBucket = resolveSalaryModelBucket(reportSalaryModel);
+                    if (!salaryBucket) return;
+
+                    const workerKey = buildPayrollWorkerRowKey(actualWorkerKey, teamContext.teamId, salaryBucket);
+                    if (!advanceWorkerKeyByAnyWorkerId.has(workerKey)) return;
+
+                    markWorkerSalaryModelPresence(selectedMonthSalaryModelMap, workerKey, reportSalaryModel);
+                    markWorkerSalaryModelPresence(selectedMonthSalaryModelMap, reportWorkerId, reportSalaryModel);
 
                     const reportUnitPrice = toFiniteNumberOrZero(reportWorker.unitPrice);
                     const fallbackUnitPrice = workerUnitPriceByAnyWorkerId.get(reportWorkerId) ?? 0;
@@ -1198,19 +1628,43 @@ const AdvancePaymentPage: React.FC = () => {
             // workerId -> { field: totalAmount }
             const billingAggregate: Record<string, Record<string, number>> = {};
             const billingProvidedFields: Record<string, Set<string>> = {};
-            const fieldsToIntegrate = new Set(['accommodation', 'electricity', 'gas', 'water', 'privateRoom', 'internet']);
+            const fieldsToIntegrate = new Set([
+                'accommodation',
+                'electricity',
+                'gas',
+                'water',
+                'privateRoom',
+                'internet',
+                'fines',
+                'maintenance',
+                'other',
+                resolvedOtherDeductionId
+            ]);
+            const buildBillingSourceFieldKey = (sourceId: unknown, field: string): string =>
+                `${String(sourceId ?? '').trim()}::${String(field ?? '').trim()}`;
+            const resolveAccommodationSourceId = (rawAccommodationId: unknown): string => {
+                const rawId = String(rawAccommodationId ?? '').trim();
+                if (!rawId) return '';
+                const accommodation = accommodationByAnyId.get(rawId);
+                return String(accommodation?.id ?? rawId).trim();
+            };
+            const confirmedPersonalBillingUtilityFieldKeys = new Set<string>();
+            const confirmedPersonalBillingAccommodationFieldKeys = new Set<string>();
 
-            billingDocs
-                .filter(d => d.issuedToType === 'worker' && d.issuedToWorkerId)
+            (supportBillingEnabled ? billingDocs : [])
+                .filter(d => isPostedAccommodationBillingStatus(d.status))
                 .forEach(doc => {
-                    const resolvedWorkerKey = advanceWorkerKeyByAnyWorkerId.get(String(doc.issuedToWorkerId ?? '').trim());
-                    if (!resolvedWorkerKey) return;
+                    const resolvedWorkerKey = doc.issuedToType === 'worker' && doc.issuedToWorkerId
+                        ? advanceWorkerKeyByAnyWorkerId.get(String(doc.issuedToWorkerId ?? '').trim())
+                        : undefined;
 
-                    if (!billingAggregate[resolvedWorkerKey]) {
-                        billingAggregate[resolvedWorkerKey] = {};
-                    }
-                    if (!billingProvidedFields[resolvedWorkerKey]) {
-                        billingProvidedFields[resolvedWorkerKey] = new Set();
+                    if (resolvedWorkerKey) {
+                        if (!billingAggregate[resolvedWorkerKey]) {
+                            billingAggregate[resolvedWorkerKey] = {};
+                        }
+                        if (!billingProvidedFields[resolvedWorkerKey]) {
+                            billingProvidedFields[resolvedWorkerKey] = new Set();
+                        }
                     }
 
                     doc.lineItems.forEach(li => {
@@ -1219,12 +1673,145 @@ const AdvancePaymentPage: React.FC = () => {
                         const field = accommodationBillingService.getAdvanceFieldForTargetField(li.targetField);
                         if (!fieldsToIntegrate.has(field)) return;
 
+                        const sourceUtilityRecordId = String(li.sourceUtilityRecordId ?? '').trim();
+                        if (sourceUtilityRecordId) {
+                            confirmedPersonalBillingUtilityFieldKeys.add(buildBillingSourceFieldKey(sourceUtilityRecordId, field));
+                        }
+
+                        const sourceAccommodationId = resolveAccommodationSourceId(li.sourceAccommodationId);
+                        if (sourceAccommodationId) {
+                            confirmedPersonalBillingAccommodationFieldKeys.add(buildBillingSourceFieldKey(sourceAccommodationId, field));
+                        }
+
+                        if (!resolvedWorkerKey) return;
+
                         billingProvidedFields[resolvedWorkerKey].add(field);
                         billingAggregate[resolvedWorkerKey][field] = (billingAggregate[resolvedWorkerKey][field] || 0) + amount;
                     });
                 });
 
-            // 4. 집계된 숙소 데이터를 가불 맵에 반영
+            // 4. 집계된 청구 데이터를 가불 맵에 반영
+            const personalAccommodationLedgerRecords = ((accommodationLedgerRecords as UtilityRecord[]) ?? []).map((record) => {
+                const recordId = String(record.id ?? '').trim();
+                const accommodationId = resolveAccommodationSourceId(record.accommodationId);
+                const shouldSuppressField = (field: PersonalAccommodationField): boolean => {
+                    return (
+                        (Boolean(recordId) && confirmedPersonalBillingUtilityFieldKeys.has(buildBillingSourceFieldKey(recordId, field))) ||
+                        (Boolean(accommodationId) && confirmedPersonalBillingAccommodationFieldKeys.has(buildBillingSourceFieldKey(accommodationId, field)))
+                    );
+                };
+
+                if (!PERSONAL_ACCOMMODATION_FIELDS.some(shouldSuppressField)) return record;
+
+                const nextCosts = {
+                    rent: toFiniteNumberOrZero(record.costs?.rent),
+                    electricity: toFiniteNumberOrZero(record.costs?.electricity),
+                    gas: toFiniteNumberOrZero(record.costs?.gas),
+                    water: toFiniteNumberOrZero(record.costs?.water),
+                    internet: toFiniteNumberOrZero(record.costs?.internet),
+                    maintenance: toFiniteNumberOrZero(record.costs?.maintenance),
+                    other: toFiniteNumberOrZero(record.costs?.other),
+                    total: toFiniteNumberOrZero(record.costs?.total)
+                };
+
+                PERSONAL_ACCOMMODATION_FIELDS.forEach((field) => {
+                    if (!shouldSuppressField(field)) return;
+                    if (field === 'accommodation') {
+                        nextCosts.rent = 0;
+                        return;
+                    }
+                    nextCosts[field] = 0;
+                });
+                nextCosts.total =
+                    nextCosts.rent +
+                    nextCosts.electricity +
+                    nextCosts.gas +
+                    nextCosts.water +
+                    nextCosts.internet +
+                    nextCosts.maintenance +
+                    nextCosts.other;
+
+                return {
+                    ...record,
+                    costs: nextCosts
+                };
+            });
+
+            const personalAccommodationAggregate = supportBillingEnabled
+                ? buildPersonalAccommodationAggregate({
+                    yearMonth: selectedMonth,
+                    assignments: (accommodationAssignments as AccommodationAssignment[]) ?? [],
+                    utilityRecords: personalAccommodationLedgerRecords,
+                    accommodations: accommodationByAnyId,
+                    billingTargets: (accommodationBillingTargets as AccommodationBillingTarget[]) ?? [],
+                    resolveWorkerId: (rawWorkerId) => {
+                        const normalizedWorkerId = String(rawWorkerId ?? '').trim();
+                        if (!normalizedWorkerId) return null;
+                        return advanceWorkerKeyByAnyWorkerId.get(normalizedWorkerId) ?? null;
+                    },
+                    resolveWorkerIdByName: (workerName, teamId) => {
+                        const normalizedWorkerName = normalizeDeductionLabel(workerName);
+                        if (!normalizedWorkerName) return null;
+
+                        const normalizedTeamId = String(teamId ?? '').trim();
+                        if (normalizedTeamId) {
+                            const teamScopedWorkerKey = workerKeyByTeamAndNormalizedName.get(`${normalizedTeamId}::${normalizedWorkerName}`);
+                            if (teamScopedWorkerKey) return teamScopedWorkerKey;
+                        }
+
+                        return workerKeyByNormalizedName.get(normalizedWorkerName) ?? null;
+                    },
+                    resolveWorkerName: (workerId) => {
+                        const normalizedWorkerId = String(workerId ?? '').trim();
+                        if (!normalizedWorkerId) return null;
+                        const workerKey = advanceWorkerKeyByAnyWorkerId.get(normalizedWorkerId) ?? normalizedWorkerId;
+                        return workerNameByAdvanceKey.get(workerKey) ?? null;
+                    }
+                })
+                : {};
+
+            Object.entries(personalAccommodationAggregate).forEach(([workerKey, amounts]) => {
+                if (!billingAggregate[workerKey]) {
+                    billingAggregate[workerKey] = {};
+                }
+                if (!billingProvidedFields[workerKey]) {
+                    billingProvidedFields[workerKey] = new Set();
+                }
+
+                PERSONAL_ACCOMMODATION_FIELDS.forEach((field) => {
+                    const amount = toFiniteNumberOrZero(amounts[field]);
+                    if (amount === 0) return;
+
+                    const targetField = field === 'other' ? resolvedOtherDeductionId : field;
+                    if (!fieldsToIntegrate.has(targetField)) return;
+
+                    billingProvidedFields[workerKey].add(field);
+                    billingProvidedFields[workerKey].add(targetField);
+                    billingAggregate[workerKey][targetField] = (billingAggregate[workerKey][targetField] || 0) + amount;
+                });
+            });
+
+            (supportBillingEnabled ? vehicleBillingDocs : [])
+                .filter((doc) => doc.issuedToType === 'worker' && doc.issuedToWorkerId)
+                .filter((doc) => isPostedVehicleBillingStatus(doc.status) || isVehicleLedgerClaim(doc))
+                .forEach((doc) => {
+                    const resolvedWorkerKey = advanceWorkerKeyByAnyWorkerId.get(String(doc.issuedToWorkerId ?? '').trim());
+                    if (!resolvedWorkerKey) return;
+
+                    const fineAmount = getVehicleDriverFineAmount(doc);
+                    if (fineAmount <= 0) return;
+
+                    if (!billingAggregate[resolvedWorkerKey]) {
+                        billingAggregate[resolvedWorkerKey] = {};
+                    }
+                    if (!billingProvidedFields[resolvedWorkerKey]) {
+                        billingProvidedFields[resolvedWorkerKey] = new Set();
+                    }
+
+                    billingProvidedFields[resolvedWorkerKey].add('fines');
+                    billingAggregate[resolvedWorkerKey].fines = (billingAggregate[resolvedWorkerKey].fines || 0) + fineAmount;
+                });
+
             Object.entries(billingAggregate).forEach(([workerKey, amounts]) => {
                 const target = advancesMap[workerKey];
                 if (!target) return;
@@ -1255,47 +1842,35 @@ const AdvancePaymentPage: React.FC = () => {
                 }
             });
 
-            // 5. 숙소관리 개인배정(개인 배정 source) 기반 자동 연동
-            const personalAccommodationAggregate = buildPersonalAccommodationAggregate({
-                yearMonth: selectedMonth,
-                assignments: assignmentRows,
-                utilityRecords,
-                accommodations: accommodationsMap,
-                resolveWorkerId: (rawWorkerId) => {
-                    const normalized = String(rawWorkerId ?? '').trim();
-                    if (!normalized) return null;
-                    return advanceWorkerKeyByAnyWorkerId.get(normalized) ?? null;
-                },
-                resolveWorkerName: (workerId) => workerIdToNameMap.get(workerId) ?? null
-            });
+            // These deductions are system-linked. If no posted source provides them this month,
+            // clear stale saved values so unbilled accommodation is not deducted.
+            const billingControlledFields = new Set<string>([
+                'accommodation',
+                'electricity',
+                'gas',
+                'water',
+                'privateRoom',
+                'internet',
+                'fines',
+                'maintenance',
+                resolvedOtherDeductionId
+            ]);
 
-            Object.entries(personalAccommodationAggregate).forEach(([workerKey, amounts]) => {
-                const target = advancesMap[workerKey];
-                if (!target) return;
-
+            Object.entries(advancesMap).forEach(([workerKey, target]) => {
+                const providedFields = billingProvidedFields[workerKey] ?? new Set<string>();
                 let hasUpdate = false;
-                PERSONAL_ACCOMMODATION_FIELDS.forEach((field) => {
-                    const deductionFieldId = field === 'other' ? resolvedOtherDeductionId : field;
-                    const isFieldProvidedByBilling = billingProvidedFields[workerKey]?.has(deductionFieldId)
-                        || billingProvidedFields[workerKey]?.has(field)
-                        || false;
-                    if (isFieldProvidedByBilling) return;
 
-                    const nextAmount = toFiniteNumberOrZero(amounts[field]);
-                    const currentAmount = getAdvanceFieldValue(target, deductionFieldId);
+                billingControlledFields.forEach((field) => {
+                    const isProvided =
+                        providedFields.has(field) ||
+                        (field === resolvedOtherDeductionId && providedFields.has('other'));
+                    if (isProvided) return;
 
-                    // 개인배정 자동연동 0값이 수동 공과금을 덮어쓰지 않도록 보호한다.
-                    if (nextAmount <= 0 && currentAmount > 0) {
-                        return;
-                    }
+                    const currentAmount = getAdvanceFieldValue(target, field);
+                    if (currentAmount === 0) return;
 
-                    if (currentAmount !== nextAmount) {
-                        setAdvanceFieldValue(target, deductionFieldId, nextAmount);
-                        hasUpdate = true;
-                    }
-                    if (nextAmount !== 0) {
-                        importedCellMap[buildAutoImportedCellKey(workerKey, deductionFieldId)] = true;
-                    }
+                    setAdvanceFieldValue(target, field, 0);
+                    hasUpdate = true;
                 });
 
                 if (hasUpdate) {
@@ -1307,18 +1882,20 @@ const AdvancePaymentPage: React.FC = () => {
             setWorkers(teamWorkers);
             setAdvances(advancesMap);
             setWorkerPaymentSummaryMap(aggregatedWorkerPaymentSummaryMap);
+            setSelectedMonthSalaryModels(selectedMonthSalaryModelMap);
             setAutoImportedCellMap(importedCellMap);
             setHasChanges(hasAutoImportUpdates);
 
         } catch (error) {
             console.error("Error loading data:", error);
             setWorkerPaymentSummaryMap({});
+            setSelectedMonthSalaryModels({});
             setAutoImportedCellMap({});
             Swal.fire('오류', '데이터를 불러오는 중 오류가 발생했습니다.', 'error');
         } finally {
             setLoading(false);
         }
-    }, [calculateTotalDeduction, canUseAdvanceManagement, createEmptyAdvance, filteredTeams, resolvedOtherDeductionId, selectedMonth, selectedTeamId]);
+    }, [allTeamOptions, calculateTotalDeduction, canUseAdvanceManagement, createEmptyAdvance, filteredTeams, resolvedOtherDeductionId, selectedMonth, selectedTeamId, teams]);
 
     useEffect(() => {
         if (didApplyQueryRef.current) return;
@@ -1377,10 +1954,24 @@ const AdvancePaymentPage: React.FC = () => {
         const matchesSalaryModel = (worker: Worker): boolean => {
             if (salaryModelFilter === 'all') return true;
 
-            const model = String(worker.salaryModel ?? worker.payType ?? '').trim();
+            const selectedMonthPresence = [String(worker.id ?? '').trim(), String(worker.legacyId ?? '').trim()]
+                .filter((workerId) => workerId.length > 0)
+                .reduce<WorkerSalaryModelPresence>((presence, workerId) => {
+                    const monthPresence = selectedMonthSalaryModels[workerId];
+                    if (monthPresence?.daily) presence.daily = true;
+                    if (monthPresence?.monthly) presence.monthly = true;
+                    if (monthPresence?.service) presence.service = true;
+                    return presence;
+                }, {});
+
+            if (selectedMonthPresence.daily || selectedMonthPresence.monthly || selectedMonthPresence.service) {
+                return Boolean(selectedMonthPresence[salaryModelFilter]);
+            }
+
+            const model = resolveWorkerPayType(worker);
+            const modelBucket = resolveSalaryModelBucket(model);
             if (!model) return salaryModelFilter === 'daily';
-            if (salaryModelFilter === 'monthly') return model.includes('월급');
-            return model.includes('일급');
+            return modelBucket === salaryModelFilter;
         };
 
         const matchesName = (worker: Worker): boolean => {
@@ -1391,7 +1982,7 @@ const AdvancePaymentPage: React.FC = () => {
         return [...workers]
             .filter((worker) => matchesSalaryModel(worker) && matchesName(worker))
             .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko-KR'));
-    }, [salaryModelFilter, workerNameQuery, workers]);
+    }, [salaryModelFilter, selectedMonthSalaryModels, workerNameQuery, workers]);
 
     const inputRefMap = useRef(new Map<string, HTMLInputElement>());
 
@@ -1556,6 +2147,7 @@ const AdvancePaymentPage: React.FC = () => {
                         ...record,
                         workerId: String(record.workerId ?? '').trim(),
                         teamId: String(record.teamId ?? '').trim(),
+                        salaryModel: normalizeAdvanceSalaryModelLabel(record.salaryModel),
                         yearMonth: String(record.yearMonth ?? '').trim(),
                         items: cleanedItems
                     };
@@ -1564,14 +2156,22 @@ const AdvancePaymentPage: React.FC = () => {
                     return normalized;
                 })
                 .filter((record) => record.workerId && record.teamId && record.yearMonth);
+            const recordsToSave = Array.from(
+                normalizedRecords.reduce<Map<string, AdvancePayment>>((map, record) => {
+                    const salaryBucket = resolveSalaryModelBucket(record.salaryModel) ?? 'unspecified';
+                    const key = `${record.teamId}__${record.workerId}__${record.yearMonth}__${salaryBucket}`;
+                    map.set(key, record);
+                    return map;
+                }, new Map()).values()
+            );
 
-            if (normalizedRecords.length === 0) {
+            if (recordsToSave.length === 0) {
                 Swal.fire('알림', '저장할 데이터가 없습니다.', 'info');
                 return;
             }
 
             const results = await Promise.allSettled(
-                normalizedRecords.map((record) => advancePaymentService.saveAdvancePayment(record))
+                recordsToSave.map((record) => advancePaymentService.saveAdvancePayment(record))
             );
 
             const successCount = results.filter((result) => result.status === 'fulfilled').length;
@@ -2122,6 +2722,12 @@ const AdvancePaymentPage: React.FC = () => {
                     >
                         월급직
                     </button>
+                    <button
+                        onClick={() => setSalaryModelFilter('service')}
+                        className={`px-3 py-1 text-xs rounded ${salaryModelFilter === 'service' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                    >
+                        용역팀
+                    </button>
                 </div>
                 <div className="text-xs text-slate-500 ml-auto flex items-center gap-4">
                     <span>총 인원: <b>{visibleWorkers.length}</b>명</span>
@@ -2210,6 +2816,9 @@ const AdvancePaymentPage: React.FC = () => {
                                                 <td rowSpan={2} className="p-2 text-center border-r border-slate-200 font-medium sticky left-12 z-20 bg-white shadow-[1px_0_2px_rgba(0,0,0,0.05)]">
                                                     {worker.name}
                                                     <div className="text-[10px] text-slate-400 font-normal">{worker.rank || '-'}</div>
+                                                    <div className="text-[10px] text-slate-500 font-semibold">
+                                                        {worker.teamName || '-'} · {resolveWorkerPayType(worker) || '-'}
+                                                    </div>
                                                 </td>
                                                 <td rowSpan={2} className="p-1.5 text-center border-r border-slate-200 text-[10px] leading-tight min-w-[170px]">
                                                     <div className="font-semibold text-indigo-700 whitespace-nowrap">

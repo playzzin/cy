@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { protectedRegion, requireCallableAuth } from '../auth';
 
@@ -66,6 +66,16 @@ interface PointRouletteSegmentConfig {
     color?: string;
 }
 
+type LadderOddEvenSide = 'odd' | 'even';
+
+interface LadderOddEvenSideConfig {
+    id: LadderOddEvenSide;
+    label: string;
+    multiplier: number;
+    probability: number;
+    color?: string;
+}
+
 interface WelfareGameRuntimeConfig {
     gameId?: string;
     type?: string;
@@ -78,6 +88,7 @@ interface WelfareGameRuntimeConfig {
     oceanReelStages?: OceanReelStageConfig[];
     oceanReelMissPatterns?: OceanReelMissPatternConfig[];
     pointRouletteSegments?: PointRouletteSegmentConfig[];
+    ladderOddEvenSides?: LadderOddEvenSideConfig[];
 }
 
 interface OceanReelRuntimeConfig {
@@ -90,6 +101,13 @@ interface OceanReelRuntimeConfig {
 
 interface PointRouletteRuntimeConfig {
     segments: PointRouletteSegmentConfig[];
+    hitRate: number;
+    missRate: number;
+    expectedReturnRate: number;
+}
+
+interface LadderOddEvenRuntimeConfig {
+    sides: LadderOddEvenSideConfig[];
     hitRate: number;
     missRate: number;
     expectedReturnRate: number;
@@ -126,6 +144,7 @@ const fieldValue = admin.firestore.FieldValue;
 const assetKinds: WelfareAssetKind[] = ['cash', 'point'];
 const OCEAN_REEL_ALGORITHM_VERSION = 'ocean-reel-v3-cumulative-probability';
 const POINT_ROULETTE_ALGORITHM_VERSION = 'point-roulette-v1-configurable-probability';
+const LADDER_ODD_EVEN_ALGORITHM_VERSION = 'ladder-odd-even-v1-configurable-probability';
 
 const DEFAULT_CATEGORIES: WelfareCategoryInput[] = [
     { id: 'birthday', name: '생일 축하', assetKind: 'point', source: 'manual_adjustment', direction: 'credit', active: true, expiresAfterDays: 365 },
@@ -207,6 +226,11 @@ const toIntegerAmount = (value: unknown): number => {
     const parsed = typeof value === 'number' ? value : Number(String(value ?? '').replace(/,/g, ''));
     if (!Number.isFinite(parsed)) return 0;
     return Math.trunc(parsed);
+};
+
+const toNumberAmount = (value: unknown): number => {
+    const parsed = typeof value === 'number' ? value : Number(String(value ?? '').replace(/,/g, ''));
+    return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const cleanText = (value: unknown, fallback = ''): string => String(value ?? fallback).trim();
@@ -587,9 +611,15 @@ const defaultPointRouletteSegments: PointRouletteSegmentConfig[] = [
     { id: 'base-2', label: '원금', subLabel: '원금 보전', multiplier: 1, probability: 0.15, color: '#2563eb' },
 ];
 
+const defaultLadderOddEvenSides: LadderOddEvenSideConfig[] = [
+    { id: 'odd', label: '홀', multiplier: 1.9, probability: 0.5, color: '#dc2626' },
+    { id: 'even', label: '짝', multiplier: 1.9, probability: 0.5, color: '#2563eb' },
+];
+
 const defaultGameRules: Record<string, { stake: number; dailyLimit: number }> = {
     'point-roulette': { stake: 100, dailyLimit: 3 },
     'ocean-reel': { stake: 100, dailyLimit: 0 },
+    'ladder-odd-even': { stake: 100, dailyLimit: 3 },
 };
 
 const clampInteger = (value: unknown, fallback: number, min: number, max: number): number => {
@@ -601,6 +631,13 @@ const clampInteger = (value: unknown, fallback: number, min: number, max: number
 const clampIntegerIncludingZero = (value: unknown, fallback: number, min: number, max: number): number => {
     if (value === undefined || value === null || String(value).trim() === '') return fallback;
     const parsed = toIntegerAmount(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(Math.max(parsed, min), max);
+};
+
+const clampNumber = (value: unknown, fallback: number, min: number, max: number): number => {
+    if (value === undefined || value === null || String(value).trim() === '') return fallback;
+    const parsed = toNumberAmount(value);
     if (!Number.isFinite(parsed)) return fallback;
     return Math.min(Math.max(parsed, min), max);
 };
@@ -668,6 +705,20 @@ const normalizePointRouletteSegments = (rawSegments: unknown): PointRouletteSegm
     });
 };
 
+const normalizeLadderOddEvenSides = (rawSides: unknown): LadderOddEvenSideConfig[] => {
+    const rows = Array.isArray(rawSides) ? rawSides : [];
+    return defaultLadderOddEvenSides.map((fallback): LadderOddEvenSideConfig => {
+        const raw = rows.find((item) => cleanText((item as any)?.id) === fallback.id) as Partial<LadderOddEvenSideConfig> & { probabilityPercent?: unknown } | undefined;
+        return {
+            id: fallback.id,
+            label: cleanText(raw?.label, fallback.label),
+            color: cleanText(raw?.color, fallback.color || ''),
+            multiplier: clampNumber(raw?.multiplier, fallback.multiplier, 0, 10000),
+            probability: normalizeProbability(raw?.probability ?? raw?.probabilityPercent, fallback.probability),
+        };
+    });
+};
+
 const calculateOceanExpectedReturnRate = (stages: OceanReelStageConfig[]): number => (
     stages.reduce((sum, stage) => {
         const averageMultiplier = (stage.minMultiplier + stage.maxMultiplier) / 2;
@@ -687,6 +738,18 @@ const calculatePointRouletteHitRate = (segments: PointRouletteSegmentConfig[]): 
     segments.reduce((sum, segment) => sum + (segment.multiplier > 0 ? segment.probability : 0), 0)
 );
 
+const calculateLadderOddEvenExpectedReturnRate = (sides: LadderOddEvenSideConfig[]): number => (
+    sides.length === 0
+        ? 0
+        : sides.reduce((sum, side) => sum + (side.probability * side.multiplier), 0) / sides.length
+);
+
+const calculateLadderOddEvenHitRate = (sides: LadderOddEvenSideConfig[]): number => (
+    sides.length === 0
+        ? 0
+        : sides.reduce((sum, side) => sum + side.probability, 0) / sides.length
+);
+
 const buildOceanReelRuntimeConfig = (rawConfig?: Record<string, unknown> | WelfareGameRuntimeConfig | null): OceanReelRuntimeConfig => {
     const stages = normalizeOceanReelStages(rawConfig?.oceanReelStages);
     const missPatterns = normalizeOceanReelMissPatterns(rawConfig?.oceanReelMissPatterns);
@@ -697,6 +760,17 @@ const buildOceanReelRuntimeConfig = (rawConfig?: Record<string, unknown> | Welfa
         hitRate,
         missRate: Math.max(0, 1 - hitRate),
         expectedReturnRate: calculateOceanExpectedReturnRate(stages),
+    };
+};
+
+const buildLadderOddEvenRuntimeConfig = (rawConfig?: Record<string, unknown> | WelfareGameRuntimeConfig | null): LadderOddEvenRuntimeConfig => {
+    const sides = normalizeLadderOddEvenSides(rawConfig?.ladderOddEvenSides);
+    const hitRate = calculateLadderOddEvenHitRate(sides);
+    return {
+        sides,
+        hitRate,
+        missRate: Math.max(0, 1 - hitRate),
+        expectedReturnRate: calculateLadderOddEvenExpectedReturnRate(sides),
     };
 };
 
@@ -727,6 +801,19 @@ const assertPointRouletteRuntimeConfig = (runtime: PointRouletteRuntimeConfig) =
     }
     if (Math.abs(probabilityTotal - 1) > 0.0001) {
         throw new functions.https.HttpsError('invalid-argument', 'Point roulette probabilities must add up to 100%.');
+    }
+};
+
+const assertLadderOddEvenRuntimeConfig = (runtime: LadderOddEvenRuntimeConfig) => {
+    const probabilityTotal = runtime.sides.reduce((sum, side) => sum + side.probability, 0);
+    if (runtime.sides.length !== 2 || !runtime.sides.some((side) => side.id === 'odd') || !runtime.sides.some((side) => side.id === 'even')) {
+        throw new functions.https.HttpsError('invalid-argument', 'Odd/even ladder must have odd and even sides.');
+    }
+    if (probabilityTotal <= 0) {
+        throw new functions.https.HttpsError('invalid-argument', 'At least one ladder side probability must be greater than 0.');
+    }
+    if (Math.abs(probabilityTotal - 1) > 0.0001) {
+        throw new functions.https.HttpsError('invalid-argument', 'Odd/even ladder probabilities must add up to 100%.');
     }
 };
 
@@ -767,11 +854,30 @@ const buildPointRouletteConfigResponse = (
     };
 };
 
+const buildLadderOddEvenConfigResponse = (
+    gameId: string,
+    rawConfig?: Record<string, unknown> | null
+): WelfareGameRuntimeConfig => {
+    const runtime = buildLadderOddEvenRuntimeConfig(rawConfig);
+    return {
+        gameId,
+        type: 'ladder_odd_even',
+        algorithmVersion: LADDER_ODD_EVEN_ALGORITHM_VERSION,
+        stake: normalizeGameStake(gameId, rawConfig),
+        dailyLimit: normalizeGameDailyLimit(gameId, rawConfig),
+        ladderOddEvenSides: runtime.sides,
+        expectedReturnRate: runtime.expectedReturnRate,
+        hitRate: runtime.hitRate,
+        missRate: runtime.missRate,
+    };
+};
+
 const readWelfareGameRuntimeConfig = async (gameId: string): Promise<WelfareGameRuntimeConfig | null> => {
     const snap = await db.collection('welfare_game_configs').doc(normalizeDocId(gameId)).get();
     const data = snap.exists ? snap.data() || {} : null;
     if (gameId === 'ocean-reel') return buildOceanReelConfigResponse(gameId, data);
     if (gameId === 'point-roulette') return buildPointRouletteConfigResponse(gameId, data);
+    if (gameId === 'ladder-odd-even') return buildLadderOddEvenConfigResponse(gameId, data);
     return null;
 };
 
@@ -953,12 +1059,98 @@ const pickPointRouletteOutcome = (stake: number, config?: WelfareGameRuntimeConf
     };
 };
 
-const pickGameOutcome = (gameId: string, stake: number, runtimeConfig?: WelfareGameRuntimeConfig | null): WelfareGameOutcome => {
+const normalizeLadderSide = (value: unknown): LadderOddEvenSide => (
+    cleanText(value).toLowerCase() === 'even' ? 'even' : 'odd'
+);
+
+const buildLadderRungLevels = (
+    selectedSide: LadderOddEvenSide,
+    resultSide: LadderOddEvenSide
+): number[] => {
+    const sameSide = selectedSide === resultSide;
+    const candidateCounts = sameSide ? [2, 4] : [3, 5];
+    const count = candidateCounts[randomInt(0, candidateCounts.length - 1)];
+    const levels = [20, 32, 44, 56, 68, 80];
+    return levels
+        .map((level) => ({ level, sort: Math.random() }))
+        .sort((left, right) => left.sort - right.sort)
+        .slice(0, count)
+        .map((item) => item.level)
+        .sort((left, right) => left - right);
+};
+
+const pickLadderOddEvenOutcome = (
+    stake: number,
+    selectedSide: LadderOddEvenSide,
+    config?: WelfareGameRuntimeConfig | null
+): WelfareGameOutcome => {
+    const runtime = buildLadderOddEvenRuntimeConfig(config);
+    assertLadderOddEvenRuntimeConfig(runtime);
+
+    const roll = Math.random();
+    let cumulativeProbability = 0;
+    let resultSideConfig = runtime.sides[runtime.sides.length - 1];
+    for (const side of runtime.sides) {
+        cumulativeProbability += side.probability;
+        if (roll < cumulativeProbability) {
+            resultSideConfig = side;
+            break;
+        }
+    }
+
+    const selectedSideConfig = runtime.sides.find((side) => side.id === selectedSide) || runtime.sides[0];
+    const resultSide = resultSideConfig.id;
+    const hit = selectedSide === resultSide;
+    const multiplier = hit ? selectedSideConfig.multiplier : 0;
+    const reward = Math.trunc(stake * multiplier);
+    const rungLevels = buildLadderRungLevels(selectedSide, resultSide);
+
+    return {
+        reward,
+        resultLabel: hit
+            ? `${selectedSideConfig.label} 적중 ${formatPointRouletteMultiplier(selectedSideConfig.multiplier)}`
+            : `${resultSideConfig.label} 결과`,
+        metadata: {
+            gameType: 'ladder_odd_even',
+            algorithmVersion: LADDER_ODD_EVEN_ALGORITHM_VERSION,
+            unitStake: stake,
+            selectedSide,
+            selectedSideLabel: selectedSideConfig.label,
+            resultSide,
+            resultSideLabel: resultSideConfig.label,
+            finalColumn: resultSide,
+            ladderRungs: rungLevels,
+            hit,
+            roll,
+            multiplier,
+            probability: resultSideConfig.probability,
+            selectedProbability: selectedSideConfig.probability,
+            hitRate: selectedSideConfig.probability,
+            missRate: Math.max(0, 1 - selectedSideConfig.probability),
+            expectedReturnRate: selectedSideConfig.probability * selectedSideConfig.multiplier,
+            configuredHitRate: runtime.hitRate,
+            configuredMissRate: runtime.missRate,
+            configuredExpectedReturnRate: runtime.expectedReturnRate,
+            sides: runtime.sides,
+            settledBy: hit ? 'side_match' : 'side_miss',
+        },
+    };
+};
+
+const pickGameOutcome = (
+    gameId: string,
+    stake: number,
+    runtimeConfig?: WelfareGameRuntimeConfig | null,
+    options: { selectedSide?: unknown } = {}
+): WelfareGameOutcome => {
     if (gameId === 'ocean-reel') {
         return pickOceanReelOutcome(stake, runtimeConfig);
     }
     if (gameId === 'point-roulette') {
         return pickPointRouletteOutcome(stake, runtimeConfig);
+    }
+    if (gameId === 'ladder-odd-even') {
+        return pickLadderOddEvenOutcome(stake, normalizeLadderSide(options.selectedSide), runtimeConfig);
     }
 
     const roll = Math.random();
@@ -1119,6 +1311,11 @@ export const getWelfareGameConfig = protectedRegion.https.onCall(async (data, co
             config: buildPointRouletteConfigResponse(gameId, rawConfig),
         };
     }
+    if (gameId === 'ladder-odd-even') {
+        return {
+            config: buildLadderOddEvenConfigResponse(gameId, rawConfig),
+        };
+    }
 
     return {
         config: buildOceanReelConfigResponse(gameId, rawConfig),
@@ -1137,6 +1334,12 @@ export const saveWelfareGameConfig = protectedRegion.https.onCall(async (data, c
             dailyLimit: (data as any)?.dailyLimit,
             pointRouletteSegments: (data as any)?.pointRouletteSegments,
         })
+        : gameId === 'ladder-odd-even'
+        ? buildLadderOddEvenConfigResponse(gameId, {
+            stake: (data as any)?.stake,
+            dailyLimit: (data as any)?.dailyLimit,
+            ladderOddEvenSides: (data as any)?.ladderOddEvenSides,
+        })
         : buildOceanReelConfigResponse(gameId, {
             stake: (data as any)?.stake,
             dailyLimit: (data as any)?.dailyLimit,
@@ -1146,6 +1349,8 @@ export const saveWelfareGameConfig = protectedRegion.https.onCall(async (data, c
 
     if (gameId === 'point-roulette') {
         assertPointRouletteRuntimeConfig(buildPointRouletteRuntimeConfig(config));
+    } else if (gameId === 'ladder-odd-even') {
+        assertLadderOddEvenRuntimeConfig(buildLadderOddEvenRuntimeConfig(config));
     } else if (gameId === 'ocean-reel') {
         assertOceanReelRuntimeConfig(buildOceanReelRuntimeConfig(config));
     } else {
@@ -1159,13 +1364,14 @@ export const saveWelfareGameConfig = protectedRegion.https.onCall(async (data, c
         updatedByName: getActorName(auth),
     }, { merge: true });
 
-    await writeAuditLog('SAVE_WELFARE_GAME_CONFIG', auth, gameId, gameId === 'point-roulette' ? '포인트 룰렛' : '해양 릴게임', {
+    await writeAuditLog('SAVE_WELFARE_GAME_CONFIG', auth, gameId, gameId === 'point-roulette' ? '포인트 룰렛' : gameId === 'ladder-odd-even' ? '사다리 홀짝' : '해양 릴게임', {
         stake: config.stake,
         dailyLimit: config.dailyLimit,
         expectedReturnRate: config.expectedReturnRate,
         oceanReelStages: config.oceanReelStages,
         oceanReelMissPatterns: config.oceanReelMissPatterns,
         pointRouletteSegments: config.pointRouletteSegments,
+        ladderOddEvenSides: config.ladderOddEvenSides,
     });
 
     return { config };
@@ -1188,7 +1394,7 @@ export const playWelfarePointGame = protectedRegion.https.onCall(async (data, co
         throw new functions.https.HttpsError('invalid-argument', 'gameId is required.');
     }
 
-    const runtimeConfig = ['ocean-reel', 'point-roulette'].includes(gameId)
+    const runtimeConfig = ['ocean-reel', 'point-roulette', 'ladder-odd-even'].includes(gameId)
         ? await readWelfareGameRuntimeConfig(gameId)
         : null;
     const requestedStake = toIntegerAmount((data as any)?.stake);
@@ -1202,7 +1408,9 @@ export const playWelfarePointGame = protectedRegion.https.onCall(async (data, co
         throw new functions.https.HttpsError('invalid-argument', 'stake must be positive.');
     }
 
-    const outcome = pickGameOutcome(gameId, stake, runtimeConfig);
+    const outcome = pickGameOutcome(gameId, stake, runtimeConfig, {
+        selectedSide: (data as any)?.selectedSide,
+    });
 
     return db.runTransaction(async (tx) => {
         if (idempotencyKey) {

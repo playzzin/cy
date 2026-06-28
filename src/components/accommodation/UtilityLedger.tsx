@@ -14,6 +14,8 @@ import { AccommodationBillingDocument, AccommodationBillingLineItem, Accommodati
 import { iconMap } from '../../constants/iconMap';
 import AccommodationQuickAssignmentModal from './QuickAssignmentModal';
 import LedgerBillingEditorModal from '../support/LedgerBillingEditorModal';
+import { DEFAULT_SUPPORT_BILLING_START_DATE } from '../../utils/supportBillingPeriod';
+import { getContrastingTextColor } from '../../utils/color';
 
 // ── 독립 EditableCell 컴포넌트 (Ref 기반 비제어 방식) ──────────
 // typing 중 React 리렌더 0회 → 커서 이탈 완전 방지
@@ -132,6 +134,7 @@ const UTILITY_FIELD_TO_TARGET: Record<Exclude<keyof UtilityRecord['costs'], 'tot
     other: 'accommodation'
 };
 
+const FIXED_SPLIT_FIELDS = new Set<Exclude<keyof UtilityRecord['costs'], 'total'>>(['rent', 'internet', 'maintenance']);
 const OFFICE_TARGET_ID = '__office__';
 const OFFICE_TARGET_NAME = '사무실';
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -171,6 +174,19 @@ const allocateAmountByDays = (amount: number, dayCounts: number[]): number[] => 
     return dayCounts.map((days, index) => {
         if (index === dayCounts.length - 1) return amount - allocated;
         const share = Math.round(amount * (Math.max(0, days) / totalDays));
+        allocated += share;
+        return share;
+    });
+};
+
+const allocateAmountEvenly = (amount: number, count: number): number[] => {
+    if (amount <= 0 || count <= 0) return Array.from({ length: Math.max(0, count) }, () => 0);
+    const baseAmount = Math.floor(amount / count);
+    const remainder = amount - (baseAmount * count);
+    let allocated = 0;
+    return Array.from({ length: count }, (_, index) => {
+        if (index === count - 1) return amount - allocated;
+        const share = baseAmount + (index < remainder ? 1 : 0);
         allocated += share;
         return share;
     });
@@ -345,7 +361,11 @@ const UtilityLedger: React.FC = () => {
             (assignment) =>
                 isMatchingAccommodationAssignment(assignment, canonicalAccommodationId, canonicalAccommodationName) &&
                 isActiveInSelectedMonth(assignment)
-        );
+        ).sort((a, b) => {
+            const left = a.startDate ? new Date(a.startDate).getTime() : 0;
+            const right = b.startDate ? new Date(b.startDate).getTime() : 0;
+            return (Number.isFinite(right) ? right : 0) - (Number.isFinite(left) ? left : 0);
+        });
     }, [assignments, isMatchingAccommodationAssignment, yearMonth]);
 
     const handleOpenQuickAssignFromRecord = useCallback((record: UtilityRecord, splitMode = false) => {
@@ -570,6 +590,41 @@ const UtilityLedger: React.FC = () => {
         return date;
     };
 
+    const parseBillingTargetStartDate = (value?: string | null): Date | null => (
+        parseBillingTargetDate(value || DEFAULT_SUPPORT_BILLING_START_DATE)
+    );
+
+    const toTimestampMillis = (value?: unknown): number => {
+        if (!value) return 0;
+        if (typeof (value as { toMillis?: unknown }).toMillis === 'function') {
+            return (value as { toMillis: () => number }).toMillis();
+        }
+        if (typeof (value as { toDate?: unknown }).toDate === 'function') {
+            const date = (value as { toDate: () => Date }).toDate();
+            return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+        }
+        const parsed = new Date(String(value));
+        return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+    };
+
+    const compareBillingTargetsOldestFirst = (
+        left: AccommodationBillingTarget,
+        right: AccommodationBillingTarget
+    ): number => {
+        const leftStart = normalizeKey(left.startDate) || DEFAULT_SUPPORT_BILLING_START_DATE;
+        const rightStart = normalizeKey(right.startDate) || DEFAULT_SUPPORT_BILLING_START_DATE;
+        const startDiff = leftStart.localeCompare(rightStart);
+        if (startDiff !== 0) return startDiff;
+
+        const updatedDiff = toTimestampMillis(left.updatedAt) - toTimestampMillis(right.updatedAt);
+        if (updatedDiff !== 0) return updatedDiff;
+
+        const createdDiff = toTimestampMillis(left.createdAt) - toTimestampMillis(right.createdAt);
+        if (createdDiff !== 0) return createdDiff;
+
+        return String(left.id ?? '').localeCompare(String(right.id ?? ''));
+    };
+
     const getBillingTargetsForAccommodation = (
         canonicalAccommodationId: string,
         canonicalAccommodationName: string
@@ -585,11 +640,7 @@ const UtilityLedger: React.FC = () => {
             );
         });
 
-        return targets.sort((a, b) => {
-            const startDiff = String(a.startDate ?? '').localeCompare(String(b.startDate ?? ''));
-            if (startDiff !== 0) return startDiff;
-            return String(a.id ?? '').localeCompare(String(b.id ?? ''));
-        });
+        return targets.sort(compareBillingTargetsOldestFirst);
     };
 
     const resolveBillingTarget = (canonicalAccommodationId: string, canonicalAccommodationName: string): AccommodationBillingTarget | undefined => {
@@ -597,7 +648,7 @@ const UtilityLedger: React.FC = () => {
             const targetRanges = getBillingTargetsForAccommodation(canonicalAccommodationId, canonicalAccommodationName)
                 .map((target) => ({
                     target,
-                    startDate: parseBillingTargetDate(target.startDate),
+                    startDate: parseBillingTargetStartDate(target.startDate),
                     endDate: parseBillingTargetDate(target.endDate)
                 }))
                 .filter((entry) => {
@@ -646,6 +697,7 @@ const UtilityLedger: React.FC = () => {
 
         const candidates = assignments.filter((assignment) => {
             if (!isMatchingAccommodationAssignment(assignment, canonicalAccommodationId, canonicalAccommodationName)) return false;
+            if ((assignment.status ?? 'active') === 'ended') return false;
 
             const start = assignment.startDate ? new Date(assignment.startDate) : null;
             const end = assignment.endDate ? new Date(assignment.endDate) : null;
@@ -657,17 +709,7 @@ const UtilityLedger: React.FC = () => {
             return true;
         });
 
-        const isActiveAssignment = (assignment: AccommodationAssignment): boolean => {
-            if ((assignment.status ?? 'active') === 'ended') return false;
-            if (!assignment.endDate) return true;
-            const endDate = new Date(assignment.endDate);
-            if (Number.isNaN(endDate.getTime())) return true;
-            return endDate >= monthRange.monthStart;
-        };
-
-        const activeCandidates = candidates.filter(isActiveAssignment);
-        const displayCandidates = activeCandidates.length > 0 ? activeCandidates : candidates;
-        if (displayCandidates.length === 0) return null;
+        const displayCandidates = candidates;
 
         const assignedTeamMap = new Map<string, TeamBadge>();
         const billingTeamMap = new Map<string, TeamBadge>();
@@ -1117,7 +1159,7 @@ const UtilityLedger: React.FC = () => {
         const targetRanges = getBillingTargetsForAccommodation(accommodationId, accommodationName)
             .map((target) => ({
                 target,
-                startDate: parseBillingTargetDate(target.startDate),
+                startDate: parseBillingTargetStartDate(target.startDate),
                 endDate: parseBillingTargetDate(target.endDate),
                 identityKey: getAccommodationTargetIdentityKey(target)
             }))
@@ -1208,7 +1250,9 @@ const UtilityLedger: React.FC = () => {
             const amount = Number(record.costs[field] ?? 0);
             if (!Number.isFinite(amount) || amount <= 0) return;
 
-            const shares = allocateAmountByDays(amount, ranges.map((range) => range.overlapDays));
+            const shares = FIXED_SPLIT_FIELDS.has(field)
+                ? allocateAmountEvenly(amount, ranges.length)
+                : allocateAmountByDays(amount, ranges.map((range) => range.overlapDays));
             shares.forEach((share, index) => {
                 if (share <= 0) return;
                 const range = ranges[index];
@@ -1434,6 +1478,24 @@ const UtilityLedger: React.FC = () => {
         } catch (error) {
             console.error(error);
             alert('청구서 저장에 실패했습니다.');
+        } finally {
+            setBillingProcessingId('');
+        }
+    };
+
+    const handleCancelBillingConfirmation = async () => {
+        if (!billingEditor || billingEditor.document.status !== 'confirmed') return;
+        if (!window.confirm('숙소 청구서 확정을 취소하고 가불/공제 반영분도 되돌릴까요?')) return;
+
+        setBillingProcessingId(billingEditor.record.id);
+        try {
+            await accommodationBillingService.cancelConfirmation(billingEditor.document.id);
+            await loadLedger();
+            setBillingEditor(null);
+            alert('청구서 확정이 취소되었습니다.');
+        } catch (error) {
+            console.error(error);
+            alert('청구서 확정 취소에 실패했습니다.');
         } finally {
             setBillingProcessingId('');
         }
@@ -1725,7 +1787,6 @@ const UtilityLedger: React.FC = () => {
                                     const visibleAssignedWorkers = assignedWorkers.slice(0, 3);
                                     const billingBadge = getBillingStatusBadge(billingState.status);
                                     const isProcessing = billingProcessingId === rec.id || bulkBillingAction !== '';
-                                    const canSplitBill = getSplitBillingRangesForRecord(rec).length > 1;
 
                                     return (
                                         <tr key={`${rec.accommodationId}-${idx}`} className="group hover:bg-blue-50/40 transition-colors">
@@ -1740,8 +1801,8 @@ const UtilityLedger: React.FC = () => {
                                                     <div className="flex flex-col gap-1.5">
                                                         {assignmentSummary.assignedTeams.map((team) => (
                                                             <div key={team.key} className="flex items-center gap-2 min-w-0">
-                                                                <span className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0"
-                                                                    style={{ backgroundColor: team.color }}>
+                                                                 <span className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0"
+                                                                     style={{ backgroundColor: team.color, color: getContrastingTextColor(team.color) }}>
                                                                     <FontAwesomeIcon icon={
                                                                         team.targetType === 'worker' || team.targetType === 'office_staff'
                                                                             ? faUser
@@ -1810,10 +1871,10 @@ const UtilityLedger: React.FC = () => {
                                                     <div className="flex flex-col gap-1.5">
                                                         {assignmentSummary.billingTeams.map((team) => (
                                                             <div key={`billing-${team.key}`} className="flex items-center gap-2 min-w-0">
-                                                                <span
-                                                                    className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0"
-                                                                    style={{ backgroundColor: team.color }}
-                                                                >
+                                                                 <span
+                                                                     className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0"
+                                                                     style={{ backgroundColor: team.color, color: getContrastingTextColor(team.color) }}
+                                                                 >
                                                                     <FontAwesomeIcon icon={iconMap[team.icon || ''] || faUsers} />
                                                                 </span>
                                                                 <span className="font-bold text-slate-700 truncate max-w-[160px]" title={team.name}>
@@ -1888,11 +1949,11 @@ const UtilityLedger: React.FC = () => {
                                                             <button
                                                                 type="button"
                                                                 disabled={isProcessing}
-                                                                onClick={() => handleOpenQuickAssignFromRecord(rec, true)}
+                                                                onClick={() => handleOpenQuickAssignFromRecord(rec)}
                                                                 className="px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200 hover:bg-amber-100 disabled:text-amber-300 disabled:bg-amber-50 whitespace-nowrap"
-                                                                title="분할청구 대상 기간 만들기"
+                                                                title="청구대상 설정"
                                                             >
-                                                                분할청구
+                                                                청구설정
                                                             </button>
                                                         </>
                                                     ) : billingState.status === 'unbilled' ? (
@@ -1904,15 +1965,6 @@ const UtilityLedger: React.FC = () => {
                                                                 className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 disabled:bg-indigo-300 whitespace-nowrap"
                                                             >
                                                                 {isProcessing ? '처리중' : '청구'}
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                disabled={isProcessing}
-                                                                onClick={() => canSplitBill ? handleCreateSplitBilling(rec) : handleOpenQuickAssignFromRecord(rec, true)}
-                                                                className="px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200 hover:bg-amber-100 disabled:text-amber-300 disabled:bg-amber-50 whitespace-nowrap"
-                                                                title={canSplitBill ? '분할된 청구대상 기간으로 금액을 나누어 청구' : '분할청구 대상 기간 만들기'}
-                                                            >
-                                                                분할청구
                                                             </button>
                                                         </>
                                                     ) : (
@@ -1961,8 +2013,8 @@ const UtilityLedger: React.FC = () => {
                                                         setRecords(newRecords);
                                                         setIsDirty(true);
                                                     }}
-                                                    className="w-full p-2 focus:outline-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-200 rounded-lg text-xs text-slate-600 bg-transparent"
-                                                    placeholder="메모를 입력하세요..."
+                                                    className={`w-full p-2 focus:outline-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-200 rounded-lg text-xs bg-transparent ${rec.memo ? 'text-red-600 font-extrabold' : 'text-slate-600'}`}
+                                                    placeholder=""
                                                 />
                                             </td>
                                         </tr>
@@ -1970,7 +2022,7 @@ const UtilityLedger: React.FC = () => {
                                 })}
                                 {billingRows.length === 0 && (
                                     <tr>
-                                        <td colSpan={17} className="p-20 text-center text-slate-400 bg-slate-50/50">
+                                        <td colSpan={16} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">
                                                 <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-4xl text-slate-300" />
                                                 <p>조건에 맞는 숙소 대장 행이 없습니다.</p>
@@ -1981,7 +2033,7 @@ const UtilityLedger: React.FC = () => {
                             </tbody>
                             <tfoot className="bg-slate-800 text-white font-bold text-sm tracking-wide sticky bottom-0 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                                 <tr>
-                                    <td colSpan={5} className="p-4 border-r border-slate-600 text-center">합계</td>
+                                    <td colSpan={4} className="p-4 border-r border-slate-600 text-center">합계</td>
                                     <td className="p-4 border-r border-slate-600 text-right font-mono text-amber-300">{records.reduce((sum, r) => sum + (r.costs.rent || 0), 0).toLocaleString()}</td>
                                     <td className="p-4 border-r border-slate-600 text-right font-mono">{records.reduce((sum, r) => sum + (r.costs.electricity || 0), 0).toLocaleString()}</td>
                                     <td className="p-4 border-r border-slate-600 text-right font-mono">{records.reduce((sum, r) => sum + (r.costs.gas || 0), 0).toLocaleString()}</td>
@@ -2007,7 +2059,7 @@ const UtilityLedger: React.FC = () => {
                     <p className="text-xs text-amber-700 leading-relaxed">
                         * 10만 원을 초과하는 공과금은 <strong className="text-rose-600">빨간색 굵은 글씨</strong>로 표시됩니다.<br />
                         * <strong>고정(Fixed)</strong> 항목은 자동으로 입력되지만, 필요 시 수정할 수 있습니다.<br />
-                        * 같은 달에 청구대상이 나뉜 숙소는 <strong>[분할청구]</strong>로 금액을 기간별 일할 배분합니다.<br />
+                        * 숙소 청구는 선택한 청구대상에게 매월 1일부터 말일까지 월 전체 기준으로 청구합니다.<br />
                         * 모든 변경사항은 <strong>[전체 저장]</strong> 버튼을 눌러야 반영됩니다.
                     </p>
                 </div>
@@ -2043,6 +2095,7 @@ const UtilityLedger: React.FC = () => {
                     onClose={() => setBillingEditor(null)}
                     onSave={(lineItems, memo) => handleSaveBillingEditor(lineItems, memo)}
                     onConfirm={(lineItems, memo) => handleSaveBillingEditor(lineItems, memo, 'confirmed')}
+                    onCancelConfirm={handleCancelBillingConfirmation}
                 />
             )}
         </div>

@@ -8,6 +8,7 @@ import {
     CalendarDays,
     ChevronDown,
     CheckCircle2,
+    Copy,
     Download,
     Eye,
     EyeOff,
@@ -20,6 +21,7 @@ import {
     Printer,
     RefreshCw,
     Search,
+    Send,
     ShieldCheck,
     UserRound,
     Users,
@@ -120,6 +122,71 @@ const maskAccountNumber = (value?: string | null, visible = false) => {
     if (!raw) return EMPTY_TEXT;
     if (visible || raw.length <= 4) return raw;
     return `${'*'.repeat(Math.max(4, raw.length - 4))}${raw.slice(-4)}`;
+};
+
+const copyTextToClipboard = async (text: string) => {
+    if (!navigator.clipboard?.writeText) {
+        throw new Error('Clipboard text copy is not supported.');
+    }
+
+    await navigator.clipboard.writeText(text);
+};
+
+const convertImageBlobToPng = async (blob: Blob): Promise<Blob> => {
+    if (blob.type === 'image/png') return blob;
+
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+        bitmap.close();
+        throw new Error('Canvas context is not available.');
+    }
+
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+
+    return await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((nextBlob) => {
+            if (nextBlob) {
+                resolve(nextBlob);
+                return;
+            }
+            reject(new Error('Failed to convert image to PNG.'));
+        }, 'image/png');
+    });
+};
+
+const copyImageUrlToClipboard = async (imageUrl: string) => {
+    const ClipboardItemCtor = (window as unknown as {
+        ClipboardItem?: new (items: Record<string, Blob>) => ClipboardItem;
+    }).ClipboardItem;
+    const clipboard = navigator.clipboard as Clipboard & {
+        write?: (data: ClipboardItem[]) => Promise<void>;
+    };
+
+    if (!ClipboardItemCtor || !clipboard?.write) {
+        await copyTextToClipboard(imageUrl);
+        return 'link' as const;
+    }
+
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+        throw new Error('Failed to fetch image.');
+    }
+
+    const blob = await response.blob();
+    const pngBlob = await convertImageBlobToPng(blob);
+    await clipboard.write([
+        new ClipboardItemCtor({
+            'image/png': pngBlob,
+        }),
+    ]);
+
+    return 'image' as const;
 };
 
 const isInactiveWorker = (worker: Worker) => {
@@ -275,6 +342,8 @@ const TeamWorkerDetailPage: React.FC = () => {
     const [idCardUrl, setIdCardUrl] = useState<string>('');
     const [idCardLoading, setIdCardLoading] = useState(false);
     const [idCardError, setIdCardError] = useState('');
+    const [idCardCopying, setIdCardCopying] = useState(false);
+    const [idCardSending, setIdCardSending] = useState(false);
     const [isSignatureOpen, setIsSignatureOpen] = useState(false);
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
@@ -685,6 +754,62 @@ const TeamWorkerDetailPage: React.FC = () => {
             mounted = false;
         };
     }, [selectedWorker?.fileNameSaved]);
+
+    const handleCopyIdCard = async () => {
+        if (!idCardUrl || idCardCopying) return;
+
+        setIdCardCopying(true);
+        try {
+            const result = await copyImageUrlToClipboard(idCardUrl);
+            toast.success(result === 'image'
+                ? '신분증 이미지가 클립보드에 복사되었습니다.'
+                : '신분증 링크가 클립보드에 복사되었습니다.');
+        } catch (error) {
+            console.error('ID card copy failed:', error);
+            try {
+                await copyTextToClipboard(idCardUrl);
+                toast.info('이미지 복사가 제한되어 신분증 링크를 복사했습니다.');
+            } catch {
+                toast.error('신분증 복사에 실패했습니다.');
+            }
+        } finally {
+            setIdCardCopying(false);
+        }
+    };
+
+    const handleSendIdCard = async () => {
+        if (!idCardUrl || idCardSending) return;
+
+        const workerName = String(selectedWorker?.name ?? '작업자').trim() || '작업자';
+        setIdCardSending(true);
+
+        try {
+            if (navigator.share) {
+                await navigator.share({
+                    title: `${workerName} 신분증`,
+                    text: `${workerName} 신분증`,
+                    url: idCardUrl,
+                });
+                toast.success('신분증 보내기를 완료했습니다.');
+                return;
+            }
+
+            await copyTextToClipboard(idCardUrl);
+            toast.info('보내기를 지원하지 않아 신분증 링크를 복사했습니다.');
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') return;
+
+            console.error('ID card send failed:', error);
+            try {
+                await copyTextToClipboard(idCardUrl);
+                toast.info('보내기가 제한되어 신분증 링크를 복사했습니다.');
+            } catch {
+                toast.error('신분증 보내기에 실패했습니다.');
+            }
+        } finally {
+            setIdCardSending(false);
+        }
+    };
 
     const handleRefresh = async () => {
         setLoadingMaster(true);
@@ -1168,9 +1293,31 @@ const TeamWorkerDetailPage: React.FC = () => {
                                                 )}
                                             </div>
                                             {idCardUrl && (
-                                                <button type="button" onClick={() => window.open(idCardUrl, '_blank', 'noopener,noreferrer')}>
-                                                    원본 보기
-                                                </button>
+                                                <div className="tw-doc-preview__actions">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => window.open(idCardUrl, '_blank', 'noopener,noreferrer')}
+                                                    >
+                                                        <Eye size={14} />
+                                                        원본 보기
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void handleCopyIdCard()}
+                                                        disabled={idCardCopying}
+                                                    >
+                                                        <Copy size={14} />
+                                                        {idCardCopying ? '복사 중' : '복사'}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void handleSendIdCard()}
+                                                        disabled={idCardSending}
+                                                    >
+                                                        <Send size={14} />
+                                                        {idCardSending ? '보내는 중' : '보내기'}
+                                                    </button>
+                                                </div>
                                             )}
                                         </div>
 

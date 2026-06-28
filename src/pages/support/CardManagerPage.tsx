@@ -12,6 +12,9 @@ import { CardStatusBoard } from '../../components/card/CardStatusBoard';
 import { CardMonthlyLedger } from '../../components/card/CardMonthlyLedger';
 import { AssignmentBillingSetupModal, type AssignmentBillingSection } from '../../components/support/AssignmentBillingSetupModal';
 import { SupportTeamFilterTabs } from '../../components/support/SupportTeamFilterTabs';
+import { SupportCancellationHistory } from '../../components/support/SupportCancellationHistory';
+import { SupportCancellationModal, type SupportCancellationFormValue } from '../../components/support/SupportCancellationModal';
+import { supportCancellationLogService } from '../../services/supportCancellationLogService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlus, faCreditCard, faChartPie, faTable, faRotateRight, faCircleExclamation, faHistory, faSearch } from '@fortawesome/free-solid-svg-icons';
 import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
@@ -38,7 +41,7 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
     const [searchTerm, setSearchTerm] = useState('');
 
     // Tab State
-    const [activeTab, setActiveTab] = useState<'status' | 'ledger'>('status');
+    const [activeTab, setActiveTab] = useState<'status' | 'ledger' | 'history'>('status');
 
     // Modal State
     const [isCardFormOpen, setIsCardFormOpen] = useState(false);
@@ -47,6 +50,8 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
     const [setupInitialCardId, setSetupInitialCardId] = useState<string | null>(null);
     const [setupInitialSection, setSetupInitialSection] = useState<AssignmentBillingSection>('assignment');
     const [billingTargetInitialSplitMode, setBillingTargetInitialSplitMode] = useState(false);
+    const [cancellationTarget, setCancellationTarget] = useState<Card | null>(null);
+    const [savingCancellation, setSavingCancellation] = useState(false);
 
     // 데이터 로드 함수
     const loadData = async () => {
@@ -141,13 +146,73 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
         setIsSetupModalOpen(true);
     };
 
-    const handleDeleteCard = async (card: Card) => {
-        const label = card.name || card.maskedNumber || '선택한 카드';
-        const ok = window.confirm(`${label} 카드를 삭제하시겠습니까?\n사용/청구 이력 보존을 위해 카드 상태는 폐쇄로 변경됩니다.`);
-        if (!ok) return;
+    const openCancellationModal = (card: Card) => {
+        setCancellationTarget(card);
+    };
+
+    const getCancellationStatusAfter = (reason: SupportCancellationFormValue['reason']): Card['status'] => {
+        if (reason === 'CARD_SUSPENDED' || reason === 'CARD_LOST') return 'SUSPENDED';
+        return 'CLOSED';
+    };
+
+    const handleCancellationSubmit = async (form: SupportCancellationFormValue) => {
+        if (!cancellationTarget) return;
+        const card = cancellationTarget;
+        const statusAfter = getCancellationStatusAfter(form.reason);
+        setSavingCancellation(true);
 
         try {
-            await cardService.deleteCard(card.id);
+            const activeBillingTargets = (await cardService.listAllCardBillingTargets(card.id))
+                .filter((target) => !String(target.endDate ?? '').trim());
+
+            if (card.currentAssigneeId || card.currentAssigneeName) {
+                await cardService.unassignCard(card.id, form.processedDate);
+            }
+
+            if (activeBillingTargets.length > 0) {
+                await cardService.applyCardBillingTargetChanges({
+                    cardId: card.id,
+                    closeRecords: activeBillingTargets.map((target) => ({ id: target.id, endDate: form.processedDate })),
+                    clearSnapshot: true
+                });
+            }
+
+            await cardService.updateCard(card.id, {
+                status: statusAfter,
+                currentAssigneeId: null,
+                currentAssigneeType: null,
+                currentAssigneeName: null,
+                billingTargetId: null,
+                billingTargetType: null,
+                billingTargetName: null
+            } as unknown as Partial<Card>);
+
+            await supportCancellationLogService.createLog({
+                resourceType: 'card',
+                resourceId: card.id,
+                resourceLabel: card.name || card.maskedNumber || '카드',
+                reason: form.reason,
+                reasonLabel: form.reasonLabel,
+                processedDate: form.processedDate,
+                statusBefore: card.status,
+                statusAfter,
+                assigneeName: card.currentAssigneeName,
+                billingTargetName: card.billingTargetName || undefined,
+                settlementAmount: form.settlementAmount,
+                note: form.note,
+                snapshot: {
+                    name: card.name,
+                    issuer: card.issuer,
+                    cardType: card.cardType,
+                    maskedNumber: card.maskedNumber,
+                    last4: card.last4,
+                    expiry: card.expiry,
+                    status: card.status,
+                    assigneeName: card.currentAssigneeName,
+                    billingTargetName: card.billingTargetName
+                }
+            });
+
             if (editingCard?.id === card.id) {
                 setIsCardFormOpen(false);
                 setEditingCard(null);
@@ -157,10 +222,14 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                 setBillingTargetInitialSplitMode(false);
                 setIsSetupModalOpen(false);
             }
+            setCancellationTarget(null);
+            setActiveTab('history');
             handleRefresh();
         } catch (error) {
-            console.error('Failed to delete card', error);
-            window.alert('카드 삭제 중 오류가 발생했습니다.');
+            console.error('Failed to process card cancellation', error);
+            window.alert('카드 사용취소 처리 중 오류가 발생했습니다.');
+        } finally {
+            setSavingCancellation(false);
         }
     };
 
@@ -183,6 +252,27 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
         () => cards.find((card) => String(card.id) === String(setupInitialCardId)) ?? null,
         [cards, setupInitialCardId]
     );
+    const setupCardAssigneeLabel = React.useMemo(() => {
+        if (!setupCard?.currentAssigneeName) return '미배정';
+        return `${setupCard.currentAssigneeType === 'TEAM' ? '팀' : '개인'} · ${setupCard.currentAssigneeName}`;
+    }, [setupCard]);
+    const setupCardBillingLabel = React.useMemo(() => {
+        if (!setupCard) return '미설정';
+        if (setupCard.billingTargetName) {
+            const targetType = setupCard.billingTargetType === 'TEAM'
+                ? '팀'
+                : setupCard.billingTargetType === 'WORKER'
+                    ? '작업자'
+                    : setupCard.billingTargetType === 'OFFICE'
+                        ? '사무실'
+                        : setupCard.billingTargetType === 'OFFICE_STAFF'
+                            ? '사무실직원'
+                            : '청구대상';
+            return `${targetType} · ${setupCard.billingTargetName}`;
+        }
+        if (setupCard.currentAssigneeName) return '청구 탭에서 확인';
+        return '미설정';
+    }, [setupCard]);
 
     return (
         <div className={`${embedded ? 'space-y-5 sm:space-y-6 bg-transparent min-h-full w-full min-w-0 max-w-full overflow-x-hidden' : 'p-3 sm:p-6 space-y-5 sm:space-y-6 bg-slate-50 min-h-full w-full max-w-[calc(100vw-30px)] sm:max-w-full min-w-0 overflow-x-hidden'}`}>
@@ -243,6 +333,13 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                                 <FontAwesomeIcon icon={faTable} className="mr-2" />
                                 카드 통합관리대장
                             </button>
+                            <button
+                                onClick={() => setActiveTab('history')}
+                                className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold transition-all sm:px-6 ${activeTab === 'history' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                                <FontAwesomeIcon icon={faHistory} className="mr-2" />
+                                처리내역
+                            </button>
                         </div>
                     </div>
 
@@ -288,15 +385,20 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                         onEdit={openEditCard}
                         onAssign={openAssignCard}
                         onBillingTargetAssign={openBillingTargetCard}
-                        onDelete={handleDeleteCard}
+                        onCancelUse={openCancellationModal}
                     />
-                ) : (
+                ) : activeTab === 'ledger' ? (
                     <CardMonthlyLedger
                         cards={filteredCards}
                         teams={teams}
                         loadingCards={loading}
                         onOpenSetup={openAssignCard}
                         onOpenBillingTarget={(card) => openBillingTargetCard(card, { split: true })}
+                    />
+                ) : (
+                    <SupportCancellationHistory
+                        resourceType="card"
+                        title="카드 사용취소 처리내역"
                     />
                 )}
             </div>
@@ -308,6 +410,12 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                 subtitle={setupCard ? `${setupCard.issuer || '발급사 미지정'} · ${setupCard.maskedNumber || setupCard.last4 || '카드번호 미입력'}` : '카드 배정과 청구대상을 한 화면에서 설정합니다.'}
                 resourceLabel="카드"
                 initialSection={setupInitialSection}
+                summaryItems={[
+                    { label: '현재 배정', value: setupCardAssigneeLabel, tone: setupCard?.currentAssigneeName ? 'indigo' : 'amber' },
+                    { label: '현재 청구', value: setupCardBillingLabel, tone: setupCard?.billingTargetName ? 'indigo' : setupCard?.currentAssigneeName ? 'emerald' : 'amber' },
+                    { label: '대장 반영', value: '저장 즉시 업데이트', tone: 'emerald' }
+                ]}
+                ledgerHint="저장하면 카드 현황, 카드 통합관리대장, 월별 청구대장에 바로 반영됩니다."
                 onClose={closeSetupModal}
                 assignmentContent={(
                     <CardAssignmentManager
@@ -337,6 +445,16 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                     onSuccess={handleCardFormSuccess}
                 />
             )}
+
+            <SupportCancellationModal
+                isOpen={!!cancellationTarget}
+                resourceType="card"
+                resourceLabel={cancellationTarget?.name || cancellationTarget?.maskedNumber || '카드'}
+                resourceDescription={cancellationTarget ? `${cancellationTarget.issuer || '발급사 미지정'} · ${cancellationTarget.maskedNumber || cancellationTarget.last4 || '번호 미입력'} · ${cancellationTarget.currentAssigneeName || '배정자 없음'}` : undefined}
+                submitting={savingCancellation}
+                onClose={() => setCancellationTarget(null)}
+                onSubmit={handleCancellationSubmit}
+            />
         </div>
     );
 };

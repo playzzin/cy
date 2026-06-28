@@ -131,7 +131,7 @@ export const VehicleList: React.FC<VehicleListProps> = ({
                         </tbody>
                         <tfoot className="bg-slate-800 text-white font-bold text-sm tracking-wide sticky bottom-0 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                             <tr>
-                                <td colSpan={6} className="p-4 border-r border-slate-600 text-center">합계 (Total)</td>
+                                <td colSpan={6} className="p-4 border-r border-slate-600 text-center">합계</td>
                                 <td className="p-4 border-r border-slate-600 text-right font-mono text-amber-300 text-lg">
                                     {totalMonthlyCost.toLocaleString()}
                                 </td>

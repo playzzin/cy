@@ -221,7 +221,7 @@
     min-height: 0;
     max-height: none;
     overflow-x: auto;
-        overflow-y: visible !important;
+    overflow-y: auto !important;
     background: #ffffff;
     padding-bottom: 10px;
     scrollbar-gutter: stable both-edges;
@@ -229,8 +229,8 @@
 
 .sheet-table-wrapper.workbook-frozen-table-wrapper.daily-report-v2-wrapper {
     max-height: none;
-        overflow-y: visible !important;
-    }
+    overflow-y: auto !important;
+}
 
 /* 테이블의 바닥 여백 제거 및 레이아웃 최적화 */
 .daily-report-workbook-table {
@@ -262,6 +262,18 @@
 }
 .daily-report-workbook-table tbody tr:hover {
     background: #e0e7ef !important;
+}
+
+.daily-report-workbook-table tbody tr.daily-report-v2-virtual-spacer,
+.daily-report-workbook-table tbody tr.daily-report-v2-virtual-spacer:hover {
+    background: transparent !important;
+}
+
+.daily-report-workbook-table tbody tr.daily-report-v2-virtual-spacer td {
+    border: 0 !important;
+    padding: 0 !important;
+    font-size: 0;
+    line-height: 0;
 }
 
 /* 헤더와 sticky 컬럼의 폰트 강조 */

@@ -11,6 +11,8 @@ import { Vehicle, VehicleAssignmentRecord, VehicleBillingTargetRecord, VehicleBi
 import { VehicleBillingDocument, VehicleBillingCostItem, VehicleBillingIssuedToType } from '../types/vehicleBilling';
 import { vehicleService } from './vehicleService';
 import { Timestamp } from 'firebase/firestore';
+import { DEFAULT_SUPPORT_BILLING_START_DATE, isSupportBillingMonthEnabled, maxIsoDate, minIsoDate } from '../utils/supportBillingPeriod';
+import { normalizeVehicleExpenseType } from '../utils/vehicleExpenseType';
 
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
 
@@ -214,10 +216,16 @@ const resolveVehicleBillingTargetForDate = (
     }
 
     return {
-        targetType: vehicle.currentAssigneeType,
+        targetType: vehicle.currentAssigneeType || undefined,
         targetId: normalizeKey(vehicle.currentAssigneeId),
         targetName: normalizeKey(vehicle.currentAssigneeName)
     };
+};
+
+const getResolvedVehicleBillingTargetKey = (target: ReturnType<typeof resolveVehicleBillingTargetForDate>): string => {
+    const type = normalizeKey(target.targetType || 'UNASSIGNED');
+    const idOrName = normalizeKey(target.targetId) || normalizeKey(target.targetName);
+    return `${type}:${idOrName}`;
 };
 
 const findWorkerInRows = (workers: any[], id?: string | null, name?: string | null): any | null => {
@@ -335,20 +343,28 @@ export const vehicleBillingService = {
                 label: `Monthly Fee (${vehicle.type})`,
                 amount: fixedCost,
                 type: 'FIXED',
-                category: 'RENT'
+                category: 'RENT',
+                sourceType: 'vehicle_ledger'
             });
         }
 
         // Variable Costs
         let variableCost = 0;
         expenses.forEach(exp => {
-            variableCost += exp.amount;
+            const expenseType = normalizeVehicleExpenseType(exp.type, exp.note, exp.id);
+            const amount = Number(exp.amount ?? 0);
+            if (!Number.isFinite(amount)) return;
+            variableCost += amount;
             lineItems.push({
                 id: exp.id,
-                label: `${exp.type} - ${exp.date}`,
-                amount: exp.amount,
+                label: `${expenseType} - ${exp.date}`,
+                amount,
                 type: 'VARIABLE',
-                category: exp.type
+                category: expenseType,
+                sourceType: 'vehicle_ledger',
+                sourceLedgerRowId: exp.id,
+                sourceStartDate: exp.date,
+                sourceEndDate: exp.date
             });
         });
 
@@ -392,15 +408,15 @@ export const vehicleBillingService = {
             yearMonth,
             vehicleId: vehicle.id,
             vehiclePlate: vehicle.licensePlate,
-            assignedTeamId,
-            assignedTeamName,
-            teamId: billingTeamId,
-            teamName: billingTeamName,
+            assignedTeamId: assignedTeamId || undefined,
+            assignedTeamName: assignedTeamName || undefined,
+            teamId: billingTeamId || undefined,
+            teamName: billingTeamName || undefined,
             issuedToType,
             issuedToWorkerId: issuedToType === 'worker' ? (targetId ?? undefined) : undefined,
             issuedToWorkerName: issuedToType === 'worker'
                 ? (targetName ?? undefined)
-                : billingTeamName,
+                : billingTeamName || undefined,
 
             fixedCost,
             variableCost,
@@ -425,6 +441,13 @@ export const vehicleBillingService = {
             listWorkers().catch(() => ({ data: { workers: [] } }))
         ]);
         const workers = (workerRes as any)?.data?.workers ?? [];
+        const firstBillingTargetStart = minIsoDate(...billingTargets.map((target) => target.startDate));
+        const billingStartDate = maxIsoDate(
+            DEFAULT_SUPPORT_BILLING_START_DATE,
+            vehicle.contract?.startDate,
+            firstBillingTargetStart
+        );
+        if (!isSupportBillingMonthEnabled(yearMonth, billingStartDate)) return [];
 
         const assignmentRanges = assignments
             .map((assignment) => {
@@ -568,20 +591,96 @@ export const vehicleBillingService = {
                     const end = minDate(segment.end, contractEnd);
                     const dayCount = inclusiveDays(start, end);
                     if (dayCount <= 0) return null;
-                    return { segment, startDate: formatYmdDate(start), endDate: formatYmdDate(end), dayCount };
+                    return { segment, start, end, startDate: formatYmdDate(start), endDate: formatYmdDate(end), dayCount };
                 })
                 .filter((entry): entry is {
                     segment: typeof segments[number];
+                    start: Date;
+                    end: Date;
                     startDate: string;
                     endDate: string;
                     dayCount: number;
                 } => Boolean(entry));
-            const totalFixedDays = fixedSegments.reduce((sum, entry) => sum + entry.dayCount, 0);
+
+            const targetChanges = billingTargets
+                .map((target) => ({
+                    target,
+                    start: parseYmdDate(target.startDate),
+                    end: parseYmdDate(target.endDate)
+                }))
+                .filter((entry) => (
+                    Boolean(entry.start) &&
+                    entry.start!.getTime() <= month.end.getTime() &&
+                    (!entry.end || entry.end.getTime() >= month.start.getTime())
+                ))
+                .sort((a, b) => {
+                    const startDiff = (a.start?.getTime() ?? 0) - (b.start?.getTime() ?? 0);
+                    if (startDiff !== 0) return startDiff;
+                    return String(a.target.id ?? '').localeCompare(String(b.target.id ?? ''));
+                });
+
+            const rawFixedTargetSegments = fixedSegments.flatMap((entry) => {
+                const splitStartTimes = new Set<number>([entry.start.getTime()]);
+                targetChanges.forEach((change) => {
+                    if (!change.start) return;
+                    if (change.start.getTime() > entry.start.getTime() && change.start.getTime() <= entry.end.getTime()) {
+                        splitStartTimes.add(change.start.getTime());
+                    }
+                });
+
+                const starts = Array.from(splitStartTimes)
+                    .sort((a, b) => a - b)
+                    .map((time) => new Date(time));
+
+                return starts
+                    .map((start, index) => {
+                        const nextStart = starts[index + 1] ?? null;
+                        const end = nextStart ? minDate(addDays(nextStart, -1), entry.end) : entry.end;
+                        const dayCount = inclusiveDays(start, end);
+                        if (dayCount <= 0) return null;
+                        const resolvedTarget = resolveVehicleBillingTargetForDate(vehicle, start, billingTargets, entry.segment.assignment);
+                        return {
+                            segment: entry.segment,
+                            start,
+                            end,
+                            startDate: formatYmdDate(start),
+                            endDate: formatYmdDate(end),
+                            dayCount,
+                            targetKey: getResolvedVehicleBillingTargetKey(resolvedTarget)
+                        };
+                    })
+                    .filter((item): item is {
+                        segment: typeof segments[number];
+                        start: Date;
+                        end: Date;
+                        startDate: string;
+                        endDate: string;
+                        dayCount: number;
+                        targetKey: string;
+                    } => Boolean(item));
+            });
+            const fixedTargetSegments = rawFixedTargetSegments.reduce<typeof rawFixedTargetSegments>((merged, entry) => {
+                const prev = merged[merged.length - 1];
+                if (
+                    prev &&
+                    prev.targetKey === entry.targetKey &&
+                    addDays(prev.end, 1).getTime() === entry.start.getTime()
+                ) {
+                    prev.end = entry.end;
+                    prev.endDate = entry.endDate;
+                    prev.dayCount += entry.dayCount;
+                    return merged;
+                }
+                merged.push({ ...entry });
+                return merged;
+            }, []);
+
+            const totalFixedDays = fixedTargetSegments.reduce((sum, entry) => sum + entry.dayCount, 0);
             const totalFixedAmount = Math.round((monthlyFee * totalFixedDays) / month.days);
             let allocatedFixedAmount = 0;
 
-            fixedSegments.forEach((entry, index) => {
-                const amount = index === fixedSegments.length - 1
+            fixedTargetSegments.forEach((entry, index) => {
+                const amount = index === fixedTargetSegments.length - 1
                     ? totalFixedAmount - allocatedFixedAmount
                     : Math.round((totalFixedAmount * entry.dayCount) / totalFixedDays);
                 allocatedFixedAmount += amount;
@@ -591,7 +690,11 @@ export const vehicleBillingService = {
                     label: `Monthly Fee (${vehicle.type}) ${entry.startDate}~${entry.endDate}`,
                     amount,
                     type: 'FIXED',
-                    category: 'RENT'
+                    category: 'RENT',
+                    sourceType: 'vehicle_ledger',
+                    sourceSegmentId: entry.segment.assignment.id,
+                    sourceStartDate: entry.startDate,
+                    sourceEndDate: entry.endDate
                 }, parseYmdDate(entry.startDate) ?? entry.segment.start);
             });
         }
@@ -610,12 +713,18 @@ export const vehicleBillingService = {
             if (!segment) return;
             const amount = Number(expense.amount ?? 0);
             if (!Number.isFinite(amount)) return;
+            const expenseType = normalizeVehicleExpenseType(expense.type, expense.note, expense.id);
             addLineItemToGroup(segment, {
                 id: expense.id,
-                label: `${expense.type} - ${expense.date}`,
+                label: `${expenseType} - ${expense.date}`,
                 amount,
                 type: 'VARIABLE',
-                category: expense.type
+                category: expenseType,
+                sourceType: 'vehicle_ledger',
+                sourceLedgerRowId: expense.id,
+                sourceSegmentId: segment.assignment.id,
+                sourceStartDate: expense.date,
+                sourceEndDate: expense.date
             }, expenseDate);
         });
 

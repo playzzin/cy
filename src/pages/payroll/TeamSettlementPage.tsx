@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Swal from 'sweetalert2';
-import { YearMonthPicker } from '../../components/common/YearMonthPicker';
 import { CurrencyInput } from '../../components/common/CurrencyInput';
 import { accommodationAssignmentService } from '../../services/accommodationAssignmentService';
 import { accommodationBillingService } from '../../services/accommodationBillingService';
@@ -13,10 +12,11 @@ import { laborExchangeService, type LaborExchangeItem, type TeamExchangeSummary 
 import { manpowerService, type Worker as ManpowerWorker } from '../../services/manpowerService';
 import { teamExpenseLedgerService } from '../../services/teamExpenseLedgerService';
 import { teamService, type Team } from '../../services/teamService';
-import { teamSettlementService } from '../../services/teamSettlementService';
+import { teamSettlementService, type TeamSettlementSupportDetailRow } from '../../services/teamSettlementService';
 import { vehicleBillingService } from '../../services/vehicleBillingService';
 import { vehicleService } from '../../services/vehicleService';
 import { officeService } from '../../services/officeService';
+import { supportRateService, type SupportRate } from '../../services/supportRateService';
 import { toast } from '../../utils/swal';
 import type { UtilityRecord } from '../../types/accommodation';
 import type { AccommodationAssignment } from '../../types/accommodationAssignment';
@@ -45,6 +45,86 @@ const buildDefaultYearMonth = (): string => {
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   return `${y}-${m}`;
+};
+
+const MONTH_BUTTON_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1);
+
+const parseYearMonthValue = (value: string): { year: number; month: number } => {
+  const now = new Date();
+  const fallback = { year: now.getFullYear(), month: now.getMonth() + 1 };
+  const matched = /^(\d{4})-(\d{2})$/.exec(String(value ?? '').trim());
+  if (!matched) return fallback;
+
+  const year = Number(matched[1]);
+  const month = Number(matched[2]);
+  return {
+    year: Number.isFinite(year) ? year : fallback.year,
+    month: Number.isFinite(month) && month >= 1 && month <= 12 ? month : fallback.month
+  };
+};
+
+const buildYearMonthValue = (year: number, month: number): string => {
+  const now = new Date();
+  const safeYear = Number.isFinite(year) ? year : now.getFullYear();
+  const safeMonth = Number.isFinite(month) && month >= 1 && month <= 12 ? month : now.getMonth() + 1;
+  return `${safeYear}-${String(safeMonth).padStart(2, '0')}`;
+};
+
+const DEFAULT_TEAM_BUTTON_COLOR = '#4f46e5';
+
+const normalizeHexColor = (value?: string | null): string | null => {
+  const trimmed = String(value ?? '').trim();
+  const withoutHash = trimmed.startsWith('#') ? trimmed.slice(1) : trimmed;
+
+  if (/^[0-9a-fA-F]{6}$/.test(withoutHash)) return `#${withoutHash.toLowerCase()}`;
+  if (/^[0-9a-fA-F]{3}$/.test(withoutHash)) {
+    return `#${withoutHash
+      .split('')
+      .map((char) => `${char}${char}`)
+      .join('')
+      .toLowerCase()}`;
+  }
+
+  return null;
+};
+
+const hexToRgb = (hex: string): { r: number; g: number; b: number } | null => {
+  const normalized = normalizeHexColor(hex);
+  if (!normalized) return null;
+
+  const value = normalized.slice(1);
+  return {
+    r: parseInt(value.slice(0, 2), 16),
+    g: parseInt(value.slice(2, 4), 16),
+    b: parseInt(value.slice(4, 6), 16)
+  };
+};
+
+const getReadableTextColor = (hex: string): string => {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return '#ffffff';
+  const luminance = (0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b) / 255;
+  return luminance > 0.55 ? '#0f172a' : '#ffffff';
+};
+
+const getTeamButtonStyle = (color: string | null | undefined, selected: boolean): React.CSSProperties => {
+  const normalized = normalizeHexColor(color) ?? DEFAULT_TEAM_BUTTON_COLOR;
+  const rgb = hexToRgb(normalized);
+  if (!rgb) return {};
+
+  if (selected) {
+    return {
+      backgroundColor: normalized,
+      borderColor: normalized,
+      color: getReadableTextColor(normalized)
+    };
+  }
+
+  return {
+    backgroundColor: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.12)`,
+    borderColor: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.45)`,
+    color: '#1f2937'
+  };
 };
 
 const buildLocalId = (prefix: string): string => {
@@ -89,6 +169,12 @@ const safeNumber = (value: unknown): number => {
   }
   return 0;
 };
+
+const normalizeRateLookupKey = (value: unknown): string =>
+  String(value ?? '')
+    .trim()
+    .replace(/\s+/g, '')
+    .toLowerCase();
 
 const teamExpenseCategoryLabels: Record<TeamExpenseClaimCategory, string> = {
   meal: '식대',
@@ -212,16 +298,30 @@ const getKindBadgeClassName = (kind: TeamSettlementWorkKind): string => {
   return 'bg-amber-50 text-amber-800 border-amber-200';
 };
 
+const SUPPORT_SALES_ORIGINS = ['support_outgoing', 'support_fee_outgoing', '내부지원간곳', '외부지원간곳'];
+const SUPPORT_PURCHASE_ORIGINS = ['support_incoming', 'support_fee_incoming', '내부지원온곳', '외부지원온곳'];
+const SUPPORT_SETTLEMENT_ORIGINS = ['support_fee_outgoing', 'support_fee_incoming', '내부지원간곳', '외부지원간곳', '내부지원온곳', '외부지원온곳'];
+
+const isSupportSalesOrigin = (origin: unknown): boolean => SUPPORT_SALES_ORIGINS.includes(String(origin));
+const isSupportPurchaseOrigin = (origin: unknown): boolean => SUPPORT_PURCHASE_ORIGINS.includes(String(origin));
+const isSupportOrigin = (origin: unknown): boolean => isSupportSalesOrigin(origin) || isSupportPurchaseOrigin(origin);
+const isSupportSettlementOrigin = (origin: unknown): boolean => SUPPORT_SETTLEMENT_ORIGINS.includes(String(origin));
+
 const formatSalesOrigin = (origin: TeamSettlementSalesItem['origin']): string => {
   if (origin === 'daily_report') return '출력';
+  if (origin === 'support_client_site') return '지원정산';
   if (origin === 'tax_invoice') return '계산서';
-  if (origin === 'support_fee_outgoing') return '지원간것';
+  if (origin === '내부지원간곳') return '내부간곳';
+  if (origin === '외부지원간곳') return '외부간곳';
+  if (origin === 'support_fee_outgoing') return '지원매출';
   return '수기';
 };
 
 const formatPurchaseOrigin = (origin: TeamSettlementPurchaseItem['origin']): string => {
   if (origin === 'daily_report') return '출력';
-  if (origin === 'support_fee_incoming') return '지원온것';
+  if (origin === '내부지원온곳') return '내부온곳';
+  if (origin === '외부지원온곳') return '외부온곳';
+  if (origin === 'support_fee_incoming') return '지원매입';
   return '수기';
 };
 
@@ -234,14 +334,163 @@ const formatAdditionOrigin = (origin: TeamSettlementAdditionItem['origin']): str
 const formatDeductionOrigin = (origin: TeamSettlementDeductionItem['origin']): string => {
   if (origin === 'team_expense_claim') return '경비';
   if (origin === 'office_expense') return '사무실비';
-  if (origin === 'daily_wage_payroll') return '일급제 급여';
-  if (origin === 'monthly_wage_payroll') return '월급제 급여';
-  if (origin === 'service_team_payroll') return '용역팀 급여';
+  if (origin === 'daily_wage_payroll' || origin === 'monthly_wage_payroll' || origin === 'service_team_payroll') return '급여';
   if (origin === 'accommodation_billing') return '숙소';
   if (origin === 'vehicle_billing') return '차량';
   if (origin === 'card_billing') return '카드';
   return '수기';
 };
+
+type DeductionGroupDefinition = {
+  key: string;
+  title: string;
+  description: string;
+  origins: TeamSettlementDeductionItem['origin'][];
+  showWhenEmpty?: boolean;
+};
+
+type DeductionGroup = DeductionGroupDefinition & {
+  items: TeamSettlementDeductionItem[];
+  displayItems: DeductionDisplayItem[];
+  sourceSummaries: DeductionSourceSummary[];
+  totalAmount: number;
+};
+
+type DeductionDisplayItem = TeamSettlementDeductionItem & {
+  isAggregate?: boolean;
+  itemCount?: number;
+};
+
+type DeductionSourceSummary = {
+  origin: TeamSettlementDeductionItem['origin'];
+  label: string;
+  amount: number;
+  count: number;
+};
+
+const PAYROLL_DEDUCTION_ORIGIN_ORDER: Partial<Record<TeamSettlementDeductionItem['origin'], number>> = {
+  monthly_wage_payroll: 1,
+  daily_wage_payroll: 2,
+  service_team_payroll: 3
+};
+
+const EXPENSE_DEDUCTION_ORIGIN_ORDER: Partial<Record<TeamSettlementDeductionItem['origin'], number>> = {
+  accommodation_billing: 1,
+  vehicle_billing: 2,
+  card_billing: 3,
+  team_expense_claim: 4
+};
+
+const EXPENSE_DEDUCTION_ORIGINS: TeamSettlementDeductionItem['origin'][] = [
+  'accommodation_billing',
+  'vehicle_billing',
+  'card_billing',
+  'team_expense_claim'
+];
+const EXPENSE_GROUP_AGGREGATE_PREFIX = 'deduction-aggregate:expense:';
+const EXPENSE_GROUP_AGGREGATE_ALL_ID = `${EXPENSE_GROUP_AGGREGATE_PREFIX}all`;
+
+const getDeductionSourceSummaryLabel = (origin: TeamSettlementDeductionItem['origin']): string => {
+  if (origin === 'vehicle_billing') return '차량경비';
+  if (origin === 'accommodation_billing') return '숙소비';
+  if (origin === 'card_billing') return '카드비';
+  if (origin === 'team_expense_claim') return '경비';
+  if (origin === 'office_expense') return '사무실비';
+  if (origin === 'daily_wage_payroll') return '일급제';
+  if (origin === 'monthly_wage_payroll') return '월급제';
+  if (origin === 'service_team_payroll') return '용역팀';
+  return formatDeductionOrigin(origin);
+};
+
+const buildDeductionSourceSummaries = (items: TeamSettlementDeductionItem[]): DeductionSourceSummary[] => {
+  const byOrigin = new Map<TeamSettlementDeductionItem['origin'], DeductionSourceSummary>();
+
+  items.forEach((item) => {
+    const prev = byOrigin.get(item.origin) ?? {
+      origin: item.origin,
+      label: getDeductionSourceSummaryLabel(item.origin),
+      amount: 0,
+      count: 0
+    };
+    byOrigin.set(item.origin, {
+      ...prev,
+      amount: prev.amount + safeNumber(item.amount),
+      count: prev.count + 1
+    });
+  });
+
+  return Array.from(byOrigin.values())
+    .filter((summary) => summary.amount > 0 || summary.count > 0)
+    .sort((a, b) => {
+      const expenseOrder = (EXPENSE_DEDUCTION_ORIGIN_ORDER[a.origin] ?? 99) - (EXPENSE_DEDUCTION_ORIGIN_ORDER[b.origin] ?? 99);
+      if (expenseOrder !== 0) return expenseOrder;
+      const payrollOrder = (PAYROLL_DEDUCTION_ORIGIN_ORDER[a.origin] ?? 99) - (PAYROLL_DEDUCTION_ORIGIN_ORDER[b.origin] ?? 99);
+      if (payrollOrder !== 0) return payrollOrder;
+      return a.label.localeCompare(b.label, 'ko');
+    });
+};
+
+const buildDeductionDisplayItems = (
+  groupKey: string,
+  items: TeamSettlementDeductionItem[]
+): DeductionDisplayItem[] => {
+  if (groupKey !== 'expense') return items;
+  if (items.length === 0) return [];
+
+  return EXPENSE_DEDUCTION_ORIGINS.flatMap((origin): DeductionDisplayItem[] => {
+    const originItems = items.filter((item) => item.origin === origin);
+    if (originItems.length === 0) return [];
+
+    const amount = originItems.reduce((sum, x) => sum + safeNumber(x.amount), 0);
+    const originLabel = formatDeductionOrigin(origin);
+    return [{
+      ...originItems[0],
+      id: `${EXPENSE_GROUP_AGGREGATE_PREFIX}${origin}`,
+      source: 'auto',
+      origin,
+      category: `${originLabel} 전체`,
+      amount,
+      memo: `${originLabel} ${originItems.length}건 합계`,
+      isAggregate: true,
+      itemCount: originItems.length
+    }];
+  });
+};
+
+const getDeductionDisplayOriginLabel = (item: DeductionDisplayItem): string => {
+  if (item.id.startsWith(EXPENSE_GROUP_AGGREGATE_PREFIX)) return formatDeductionOrigin(item.origin);
+  return item.isAggregate ? getDeductionSourceSummaryLabel(item.origin) : formatDeductionOrigin(item.origin);
+};
+
+const DEDUCTION_GROUP_DEFINITIONS: DeductionGroupDefinition[] = [
+  {
+    key: 'office_expense',
+    title: '사무실비',
+    description: '도급·직영 공수 기준 사무실비',
+    origins: ['office_expense'],
+    showWhenEmpty: true
+  },
+  {
+    key: 'payroll',
+    title: '급여',
+    description: '월급제·일급제·용역팀 급여 공제',
+    origins: ['monthly_wage_payroll', 'daily_wage_payroll', 'service_team_payroll'],
+    showWhenEmpty: true
+  },
+  {
+    key: 'expense',
+    title: '경비',
+    description: '차량·숙소·카드·경비 청구 공제',
+    origins: EXPENSE_DEDUCTION_ORIGINS,
+    showWhenEmpty: true
+  },
+  {
+    key: 'manual',
+    title: '수기 공제',
+    description: '직접 입력한 공제',
+    origins: ['manual']
+  }
+];
 
 const KINDS: TeamSettlementWorkKind[] = ['도급', '직영', '지원'];
 
@@ -282,6 +531,47 @@ type LineDetailRow = {
   manDay: number;
   unitPrice: number;
   amount: number;
+};
+
+type ExpenseAggregateDetailChildRow = {
+  date?: string;
+  subject?: string;
+  label: string;
+  category?: string;
+  amount: number;
+  note?: string;
+  allocation?: string;
+};
+
+type ExpenseAggregateDetailRow = {
+  key: string;
+  origin: TeamSettlementDeductionItem['origin'];
+  originLabel: string;
+  subject: string;
+  category: string;
+  amount: number;
+  memo?: string;
+  details: ExpenseAggregateDetailChildRow[];
+};
+
+type SupportRateMissingRow = {
+  key: string;
+  directionLabel: string;
+  siteName: string;
+  counterTeamName: string;
+  manDay: number;
+  currentRate: number;
+  reason: string;
+};
+
+type SettlementAmountMissingRow = {
+  key: string;
+  kind: TeamSettlementWorkKind;
+  originLabel: string;
+  siteName: string;
+  manDay: number;
+  amount: number;
+  reason: string;
 };
 
 type DeductionSourceData = {
@@ -339,11 +629,15 @@ export const TeamSettlementPage: React.FC = () => {
   const [doc, setDoc] = useState<TeamSettlementDocument | null>(null);
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' });
   const [detailRows, setDetailRows] = useState<DailyReportWorkerRow[]>([]);
+  const [supportDetailRows, setSupportDetailRows] = useState<TeamSettlementSupportDetailRow[]>([]);
   const [laborExchangeSummary, setLaborExchangeSummary] = useState<TeamExchangeSummary | null>(null);
   const [expandedLineIds, setExpandedLineIds] = useState<Set<string>>(() => new Set());
   const [expandedSiteKeys, setExpandedSiteKeys] = useState<Set<string>>(() => new Set());
   const [expandedDeductionIds, setExpandedDeductionIds] = useState<Set<string>>(() => new Set());
+  const [expandedExpenseDetailKeys, setExpandedExpenseDetailKeys] = useState<Set<string>>(() => new Set());
   const [deductionSourceData, setDeductionSourceData] = useState<DeductionSourceData>(() => createEmptyDeductionSourceData());
+  const [supportRates, setSupportRates] = useState<SupportRate[]>([]);
+  const [supportRatesLoaded, setSupportRatesLoaded] = useState<boolean>(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -387,6 +681,27 @@ export const TeamSettlementPage: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSupportRates = async () => {
+      try {
+        const rows = await supportRateService.getAllSiteRates();
+        if (!cancelled) setSupportRates(rows);
+      } catch (error) {
+        console.error(error);
+        if (!cancelled) setSupportRates([]);
+      } finally {
+        if (!cancelled) setSupportRatesLoaded(true);
+      }
+    };
+
+    void loadSupportRates();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Set default selected team when teams are loaded
   useEffect(() => {
     if (teams.length > 0) {
@@ -402,20 +717,28 @@ export const TeamSettlementPage: React.FC = () => {
     const loadDetails = async () => {
       if (!doc) {
         setDetailRows([]);
+        setSupportDetailRows([]);
         return;
       }
       try {
         const range = buildMonthRange(yearMonth);
-        const rows = await dailyReportService.getReportWorkerRowsByRange({
-          startDate: range.startDate,
-          endDate: range.endDate
-        });
+        const [rows, supportRows] = await Promise.all([
+          dailyReportService.getReportWorkerRowsByRange({
+            startDate: range.startDate,
+            endDate: range.endDate
+          }),
+          selectedTeamId
+            ? teamSettlementService.getSupportSettlementDetailRows({ yearMonth, teamId: selectedTeamId })
+            : Promise.resolve([] as TeamSettlementSupportDetailRow[])
+        ]);
         if (cancelled) return;
         setDetailRows(rows);
+        setSupportDetailRows(supportRows);
       } catch (error) {
         console.error(error);
         if (cancelled) return;
         setDetailRows([]);
+        setSupportDetailRows([]);
       }
     };
 
@@ -423,7 +746,7 @@ export const TeamSettlementPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [doc, yearMonth]);
+  }, [doc, selectedTeamId, yearMonth]);
 
   useEffect(() => {
     let cancelled = false;
@@ -604,42 +927,12 @@ export const TeamSettlementPage: React.FC = () => {
     return { salesTotal, purchasesTotal, deductionsTotal, additionsTotal, prevCarryover, deposit, net };
   }, [doc]);
 
-  const dashboardMetrics = useMemo(() => {
-    const salesSupportManDay = (doc?.sales ?? [])
-      .filter((x) => x.source === 'auto' && x.origin === 'support_fee_outgoing')
-      .reduce((sum, x) => sum + safeNumber(x.manDay), 0);
-
-    const salesSupportFeeTotal = (doc?.sales ?? [])
-      .filter((x) => x.source === 'auto' && x.origin === 'support_fee_outgoing')
-      .reduce((sum, x) => sum + safeNumber(x.amount), 0);
-
-    const purchasesSupportManDay = (doc?.purchases ?? [])
-      .filter((x) => x.source === 'auto' && x.origin === 'support_fee_incoming')
-      .reduce((sum, x) => sum + safeNumber(x.manDay), 0);
-
-    const purchasesSupportFeeTotal = (doc?.purchases ?? [])
-      .filter((x) => x.source === 'auto' && x.origin === 'support_fee_incoming')
-      .reduce((sum, x) => sum + safeNumber(x.amount), 0);
-
-    const contractSalesTotal = (doc?.sales ?? [])
-      .filter((x) => x.kind === '도급')
-      .reduce((sum, x) => sum + safeNumber(x.amount), 0);
-
-    return {
-      salesSupportManDay,
-      salesSupportFeeTotal,
-      purchasesSupportManDay,
-      purchasesSupportFeeTotal,
-      contractSalesTotal
-    };
-  }, [doc]);
-
   const siteSkkumiRows = useMemo<SiteSkkumiRow[]>(() => {
     if (!doc) return [];
 
     const bySite = new Map<string, SiteSkkumiRow>();
     doc.sales
-      .filter((s) => s.source === 'auto' && s.origin === 'daily_report' && (s.kind === '도급' || s.kind === '직영'))
+      .filter((s) => s.source === 'auto' && (s.origin === 'daily_report' || s.origin === 'support_client_site') && (s.kind === '도급' || s.kind === '직영'))
       .forEach((s) => {
         const siteName = String(s.siteName ?? '').trim() || '현장 미지정';
         const prev = bySite.get(siteName) ?? { siteName, quantity: 0, manDay: 0, amount: 0 };
@@ -711,6 +1004,172 @@ export const TeamSettlementPage: React.FC = () => {
     return { teamAvgPerManDay, siteAvgPerManDay };
   }, [detailRows, doc, matchesTeam, siteSkkumiRows]);
 
+  const supportRateMissingRows = useMemo<SupportRateMissingRow[]>(() => {
+    if (!supportRatesLoaded) return [];
+    if (!laborExchangeSummary) return [];
+
+    const rateBySiteId = new Map<string, number>();
+    const rateBySiteName = new Map<string, number>();
+    supportRates.forEach((rate) => {
+      const parsedRate = safeNumber(rate.defaultRate);
+      const siteId = String(rate.siteId ?? rate.id ?? '').trim();
+      const siteName = String(rate.siteName ?? '').trim();
+      if (siteId) rateBySiteId.set(siteId, parsedRate);
+      if (siteName) rateBySiteName.set(normalizeRateLookupKey(siteName), parsedRate);
+    });
+
+    type MissingAgg = SupportRateMissingRow & { rateAmount: number };
+    const grouped = new Map<string, MissingAgg>();
+
+    const getConfiguredRate = (item: LaborExchangeItem): number => {
+      const siteId = String(item.siteId ?? '').trim();
+      if (siteId && rateBySiteId.has(siteId)) return safeNumber(rateBySiteId.get(siteId));
+      const siteNameKey = normalizeRateLookupKey(item.siteName);
+      if (siteNameKey && rateBySiteName.has(siteNameKey)) return safeNumber(rateBySiteName.get(siteNameKey));
+      return 0;
+    };
+
+    const matchesSite = (lineSiteId: unknown, lineSiteName: unknown, item: LaborExchangeItem): boolean => {
+      const lineId = String(lineSiteId ?? '').trim();
+      const itemId = String(item.siteId ?? '').trim();
+      if (lineId && itemId && lineId === itemId) return true;
+      const lineName = normalizeRateLookupKey(lineSiteName);
+      const itemName = normalizeRateLookupKey(item.siteName);
+      return Boolean(lineName && itemName && lineName === itemName);
+    };
+
+    const matchesCounterTeam = (lineTeamId: unknown, lineTeamName: unknown, itemTeamId: unknown, itemTeamName: unknown): boolean => {
+      const lineId = String(lineTeamId ?? '').trim();
+      const itemId = String(itemTeamId ?? '').trim();
+      if (lineId && itemId && lineId === itemId) return true;
+      const lineName = normalizeRateLookupKey(lineTeamName);
+      const itemName = normalizeRateLookupKey(itemTeamName);
+      return Boolean(lineName && itemName && lineName === itemName);
+    };
+
+    const getAppliedSupportRate = (item: LaborExchangeItem, direction: 'outgoing' | 'incoming'): number => {
+      const supportLines = direction === 'outgoing'
+        ? (doc?.sales ?? []).filter((line) => line.source === 'auto' && isSupportSettlementOrigin(line.origin))
+        : (doc?.purchases ?? []).filter((line) => line.source === 'auto' && isSupportSettlementOrigin(line.origin));
+      const matched = supportLines.find((line) => {
+        if (!matchesSite(line.siteId, line.siteName, item)) return false;
+        return direction === 'outgoing'
+          ? matchesCounterTeam(line.counterTeamId, line.counterTeamName, item.reportTeamId, item.reportTeamName)
+          : matchesCounterTeam(line.counterTeamId, line.counterTeamName, item.workerTeamId, item.workerTeamName);
+      });
+      return matched ? (safeAverage(safeNumber(matched.amount), safeNumber(matched.manDay)) ?? 0) : 0;
+    };
+
+    const addMissing = (params: {
+      item: LaborExchangeItem;
+      directionLabel: string;
+      counterTeamName: string;
+      reason: string;
+    }) => {
+      const siteName = String(params.item.siteName ?? '').trim() || '현장 미지정';
+      const counterTeamName = String(params.counterTeamName ?? '').trim() || '-';
+      const key = `${params.directionLabel}__${siteName}__${counterTeamName}__${params.reason}`;
+      const currentRate = safeNumber(params.item.supportRate);
+      const manDay = safeNumber(params.item.manDay);
+      const prev = grouped.get(key) ?? {
+        key,
+        directionLabel: params.directionLabel,
+        siteName,
+        counterTeamName,
+        manDay: 0,
+        currentRate: 0,
+        reason: params.reason,
+        rateAmount: 0
+      };
+      grouped.set(key, {
+        ...prev,
+        manDay: prev.manDay + manDay,
+        rateAmount: prev.rateAmount + currentRate * manDay,
+        currentRate: safeAverage(prev.rateAmount + currentRate * manDay, prev.manDay + manDay) ?? currentRate
+      });
+    };
+
+    (laborExchangeSummary.outgoing.items ?? []).forEach((item) => {
+      const configuredRate = getConfiguredRate(item);
+      const appliedRate = getAppliedSupportRate(item, 'outgoing');
+      const currentRate = appliedRate > 0 ? appliedRate : safeNumber(item.supportRate);
+      if ((configuredRate > 0 || appliedRate > 0) && currentRate > 0) return;
+
+      addMissing({
+        item,
+        directionLabel: '지원 매출',
+        counterTeamName: item.reportTeamName || item.reportTeamId,
+        reason: configuredRate <= 0 && appliedRate <= 0 ? '현장 지원단가 미등록' : '지원단가 0원'
+      });
+    });
+
+    (laborExchangeSummary.incoming.items ?? []).forEach((item) => {
+      const configuredRate = getConfiguredRate(item);
+      const appliedRate = getAppliedSupportRate(item, 'incoming');
+      const currentRate = appliedRate > 0 ? appliedRate : safeNumber(item.supportRate);
+      if ((configuredRate > 0 || appliedRate > 0) && currentRate > 0) return;
+
+      addMissing({
+        item,
+        directionLabel: '지원 매입',
+        counterTeamName: item.workerTeamName || item.workerTeamId,
+        reason: configuredRate <= 0 && appliedRate <= 0 ? '현장 지원단가 미등록' : '지원단가 0원'
+      });
+    });
+
+    return Array.from(grouped.values())
+      .map(({ rateAmount, ...row }) => row)
+      .sort((a, b) => {
+        const directionSort = a.directionLabel.localeCompare(b.directionLabel, 'ko');
+        if (directionSort !== 0) return directionSort;
+        const siteSort = a.siteName.localeCompare(b.siteName, 'ko');
+        if (siteSort !== 0) return siteSort;
+        return a.counterTeamName.localeCompare(b.counterTeamName, 'ko');
+      });
+  }, [doc, laborExchangeSummary, supportRates, supportRatesLoaded]);
+
+  const deductionGroups = useMemo<DeductionGroup[]>(() => {
+    const deductionItems = doc?.deductions ?? [];
+    const assignedIds = new Set<string>();
+    const groups = DEDUCTION_GROUP_DEFINITIONS.map((definition): DeductionGroup => {
+      const items = deductionItems
+        .filter((item) => definition.origins.includes(item.origin))
+        .sort((a, b) => {
+          if (definition.key === 'payroll') {
+            return (PAYROLL_DEDUCTION_ORIGIN_ORDER[a.origin] ?? 99) - (PAYROLL_DEDUCTION_ORIGIN_ORDER[b.origin] ?? 99);
+          }
+          if (definition.key === 'expense') {
+            return (EXPENSE_DEDUCTION_ORIGIN_ORDER[a.origin] ?? 99) - (EXPENSE_DEDUCTION_ORIGIN_ORDER[b.origin] ?? 99);
+          }
+          return 0;
+        });
+      items.forEach((item) => assignedIds.add(item.id));
+      return {
+        ...definition,
+        items,
+        displayItems: buildDeductionDisplayItems(definition.key, items),
+        sourceSummaries: buildDeductionSourceSummaries(items),
+        totalAmount: items.reduce((sum, item) => sum + safeNumber(item.amount), 0)
+      };
+    });
+
+    const otherItems = deductionItems.filter((item) => !assignedIds.has(item.id));
+    if (otherItems.length > 0) {
+      groups.push({
+        key: 'other',
+        title: '기타 공제',
+        description: '분류되지 않은 공제',
+        origins: [],
+        items: otherItems,
+        displayItems: buildDeductionDisplayItems('other', otherItems),
+        sourceSummaries: buildDeductionSourceSummaries(otherItems),
+        totalAmount: otherItems.reduce((sum, item) => sum + safeNumber(item.amount), 0)
+      });
+    }
+
+    return groups.filter((group) => group.showWhenEmpty || group.items.length > 0);
+  }, [doc]);
+
   const updateDoc = useCallback((updater: (prev: TeamSettlementDocument) => TeamSettlementDocument) => {
     setDoc((prev) => {
       if (!prev) return prev;
@@ -718,13 +1177,13 @@ export const TeamSettlementPage: React.FC = () => {
     });
   }, []);
 
-  const handleAddManualSale = useCallback(() => {
+  const handleAddManualSale = useCallback((kind: TeamSettlementWorkKind = '직영') => {
     updateDoc((prev) => {
       const item: TeamSettlementSalesItem = {
         id: buildLocalId('sale_manual'),
         source: 'manual',
         origin: 'manual',
-        kind: '직영',
+        kind,
         siteName: '수기',
         manDay: 0,
         amount: 0
@@ -912,6 +1371,21 @@ export const TeamSettlementPage: React.FC = () => {
     'inline-flex items-center justify-center px-3 py-2 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-100 transition disabled:opacity-50 disabled:cursor-not-allowed';
   const addButtonClassName =
     'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold border bg-slate-900 text-white hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed';
+  const selectedYearMonth = useMemo(() => parseYearMonthValue(yearMonth), [yearMonth]);
+
+  const handleSettlementYearChange = useCallback((delta: number) => {
+    setYearMonth((prev) => {
+      const current = parseYearMonthValue(prev);
+      return buildYearMonthValue(current.year + delta, current.month);
+    });
+  }, []);
+
+  const handleSettlementMonthSelect = useCallback((month: number) => {
+    setYearMonth((prev) => {
+      const current = parseYearMonthValue(prev);
+      return buildYearMonthValue(current.year, month);
+    });
+  }, []);
 
   const toggleLineExpanded = useCallback((id: string) => {
     setExpandedLineIds((prev) => {
@@ -936,6 +1410,15 @@ export const TeamSettlementPage: React.FC = () => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleExpenseDetailExpanded = useCallback((key: string) => {
+    setExpandedExpenseDetailKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }, []);
@@ -1027,21 +1510,418 @@ export const TeamSettlementPage: React.FC = () => {
         rows: Array<{ date: string; subject: string; label: string; amount: number; note?: string }>;
         totalAmount: number;
       }
+      | {
+        kind: 'expense_aggregate';
+        rows: ExpenseAggregateDetailRow[];
+        totalAmount: number;
+      }
       | null => {
       if (!doc) return null;
 
       const deductionCategory = String(item.category ?? '').trim();
       const itemIdText = String(item.id ?? '');
+      const isAggregateDetailItem = itemIdText.startsWith('deduction-aggregate:');
+      const isExpenseAggregateItem = itemIdText === EXPENSE_GROUP_AGGREGATE_ALL_ID;
+      const isExpenseOriginAggregateItem = itemIdText.startsWith(EXPENSE_GROUP_AGGREGATE_PREFIX) && !isExpenseAggregateItem;
       const extractBracketValue = (value: string, prefix: string): string => {
         const regex = new RegExp(`^${prefix}\\s*\\((.+)\\)$`);
         const matched = regex.exec(String(value ?? '').trim());
         return matched ? matched[1].trim() : '';
       };
+      const extractParenthesizedText = (value: string): string => {
+        const matched = /\((.+)\)/.exec(String(value ?? '').trim());
+        return matched ? matched[1].trim() : '';
+      };
+      const splitMemoParts = (memo?: string): string[] =>
+        String(memo ?? '')
+          .split('/')
+          .map((part) => part.trim())
+          .filter(Boolean);
+
+      if (isExpenseAggregateItem || isExpenseOriginAggregateItem) {
+        type ChildWithSubject = ExpenseAggregateDetailChildRow & { subject: string };
+
+        const buildWorkerTeamMaps = () => {
+          const workerTeamByAnyId = new Map<string, { teamId?: string; teamName?: string }>();
+          const workerTeamByName = new Map<string, { teamId?: string; teamName?: string }>();
+          deductionSourceData.workers.forEach((w) => {
+            const info = { teamId: w.teamId, teamName: w.teamName };
+            const id = String(w.id ?? '').trim();
+            const legacyId = String(w.legacyId ?? '').trim();
+            const name = String(w.name ?? '').trim();
+            if (id) workerTeamByAnyId.set(id, info);
+            if (legacyId) workerTeamByAnyId.set(legacyId, info);
+            if (name) workerTeamByName.set(name, info);
+          });
+          return { workerTeamByAnyId, workerTeamByName };
+        };
+
+        const buildGenericExpenseRow = (
+          deduction: TeamSettlementDeductionItem,
+          originLabel = getDeductionSourceSummaryLabel(deduction.origin),
+          subject = extractParenthesizedText(String(deduction.category ?? '')) || '-',
+          category = String(deduction.category ?? '').trim() || getDeductionSourceSummaryLabel(deduction.origin)
+        ): ExpenseAggregateDetailRow => {
+          const memoParts = splitMemoParts(deduction.memo);
+          const date = memoParts.find((part) => /^\d{4}-\d{2}-\d{2}/.test(part));
+          const memo = memoParts.filter((part) => part !== date).join(' / ');
+          return {
+            key: `expense-detail:${deduction.origin}:${String(deduction.id ?? '')}:${subject}:${category}`,
+            origin: deduction.origin,
+            originLabel,
+            subject,
+            category,
+            amount: safeNumber(deduction.amount),
+            memo: memo || undefined,
+            details: []
+          };
+        };
+
+        const groupChildrenBySubject = (
+          deduction: TeamSettlementDeductionItem,
+          originLabel: string,
+          category: string,
+          fallbackSubject: string,
+          children: ChildWithSubject[]
+        ): ExpenseAggregateDetailRow[] => {
+          const bySubject = new Map<string, ChildWithSubject[]>();
+          children
+            .filter((child) => safeNumber(child.amount) > 0)
+            .forEach((child) => {
+              const subject = String(child.subject ?? '').trim() || fallbackSubject || '-';
+              const list = bySubject.get(subject) ?? [];
+              list.push({ ...child, subject });
+              bySubject.set(subject, list);
+            });
+
+          return Array.from(bySubject.entries()).map(([subject, detailRows]) => ({
+            key: `expense-detail:${deduction.origin}:${String(deduction.id ?? '')}:${subject}:${category}`,
+            origin: deduction.origin,
+            originLabel,
+            subject,
+            category,
+            amount: detailRows.reduce((sum, row) => sum + safeNumber(row.amount), 0),
+            memo: deduction.memo,
+            details: detailRows.map(({ subject: _subject, ...detail }) => detail)
+          }));
+        };
+
+        const buildVehicleExpenseRows = (deduction: TeamSettlementDeductionItem): ExpenseAggregateDetailRow[] => {
+          const category = String(deduction.category ?? '').trim();
+          const deductionIdText = String(deduction.id ?? '');
+          const targetPlate = extractBracketValue(category, '차량비') || extractParenthesizedText(category);
+          const originLabel = '차량';
+          const summaryCategory = '차량별 경비';
+
+          const selectedDocs = selectPreferredTeamBillings(
+            deductionSourceData.vehicleDocs.filter((row) =>
+              isTeamBillingTarget({
+                issuedToType: row.issuedToType,
+                teamId: row.teamId ?? row.assignedTeamId,
+                teamName: row.teamName ?? row.assignedTeamName,
+                issuedToWorkerId: row.issuedToWorkerId,
+                issuedToWorkerName: row.issuedToWorkerName
+              }) &&
+              matchesTeamByIdOrName(row.teamId ?? row.assignedTeamId, row.teamName ?? row.assignedTeamName)
+            )
+          );
+          const isLedgerVehicleItem = deductionIdText.endsWith(':ledger');
+          const matchedDocs = selectedDocs.filter((row) => {
+            if (isLedgerVehicleItem) return false;
+            const plate = String(row.vehiclePlate ?? '').trim();
+            const id = String(row.vehicleId ?? '').trim();
+            if (targetPlate && plate === targetPlate) return true;
+            if (id && deductionIdText.includes(id)) return true;
+            if (plate && deductionIdText.includes(plate)) return true;
+            return false;
+          });
+
+          const docChildren: ChildWithSubject[] = matchedDocs
+            .flatMap((billing) => {
+              const plate = String(billing.vehiclePlate ?? '').trim() || String(billing.vehicleId ?? '').trim() || targetPlate || '-';
+              if ((billing.lineItems ?? []).length === 0) {
+                return [
+                  { subject: plate, label: '고정비', amount: safeNumber(billing.fixedCost), note: 'FIXED' },
+                  { subject: plate, label: '변동비', amount: safeNumber(billing.variableCost), note: 'VARIABLE' }
+                ];
+              }
+              return (billing.lineItems ?? []).map((li) => ({
+                subject: plate,
+                label: String(li.label ?? '').trim() || '차량비',
+                amount: safeNumber(li.amount),
+                note: String(li.category ?? li.type ?? '').trim() || undefined
+              }));
+            })
+            .filter((row) => row.amount > 0);
+
+          if (docChildren.length > 0) {
+            return groupChildrenBySubject(deduction, originLabel, summaryCategory, targetPlate || '-', docChildren);
+          }
+
+          const { workerTeamByAnyId, workerTeamByName } = buildWorkerTeamMaps();
+          const expenseByVehicleId = new Map<string, VehicleExpenseRecord[]>();
+          deductionSourceData.vehicleExpenses.forEach((expense) => {
+            const vehicleId = String(expense.vehicleId ?? '').trim();
+            if (!vehicleId) return;
+            const list = expenseByVehicleId.get(vehicleId) ?? [];
+            list.push(expense);
+            expenseByVehicleId.set(vehicleId, list);
+          });
+
+          const ledgerChildren: ChildWithSubject[] = deductionSourceData.vehicles
+            .flatMap((vehicle) => {
+              const plate = String(vehicle.licensePlate ?? '').trim();
+              const vehicleId = String(vehicle.id ?? '').trim();
+              if (targetPlate && plate !== targetPlate) return [] as ChildWithSubject[];
+              if (!targetPlate && vehicleId && !deductionIdText.includes(vehicleId) && plate && !deductionIdText.includes(plate)) return [] as ChildWithSubject[];
+
+              let isAssignedTeam = false;
+              if (vehicle.currentAssigneeType === 'TEAM') {
+                isAssignedTeam = matchesTeamByIdOrName(vehicle.currentAssigneeId, vehicle.currentAssigneeName);
+              } else if (vehicle.currentAssigneeType === 'WORKER') {
+                const workerId = String(vehicle.currentAssigneeId ?? '').trim();
+                const workerName = String(vehicle.currentAssigneeName ?? '').trim();
+                const info = (workerId ? workerTeamByAnyId.get(workerId) : undefined) ?? (workerName ? workerTeamByName.get(workerName) : undefined);
+                isAssignedTeam = info ? matchesTeamByIdOrName(info.teamId, info.teamName) : false;
+              }
+              if (!isAssignedTeam) return [] as ChildWithSubject[];
+
+              const subject = plate || vehicleId || targetPlate || '-';
+              const rows: ChildWithSubject[] = [];
+              const fixedCost =
+                vehicle.type === 'RENT' || vehicle.type === 'LEASE'
+                  ? safeNumber(vehicle.contract?.monthlyFee)
+                  : 0;
+              if (fixedCost > 0) {
+                rows.push({ subject, label: '월 고정비', amount: fixedCost, note: 'FIXED' });
+              }
+
+              const expenses = [...(expenseByVehicleId.get(vehicleId) ?? [])].sort((a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')));
+              expenses.forEach((expense) => {
+                rows.push({
+                  subject,
+                  label: String(expense.type ?? '').trim() || '변동비',
+                  amount: safeNumber(expense.amount),
+                  date: String(expense.date ?? '').trim() || undefined,
+                  note: 'VARIABLE'
+                });
+              });
+              return rows;
+            })
+            .filter((row) => row.amount > 0);
+
+          if (ledgerChildren.length > 0) {
+            return groupChildrenBySubject(deduction, originLabel, summaryCategory, targetPlate || '-', ledgerChildren);
+          }
+
+          return [buildGenericExpenseRow(deduction, originLabel, targetPlate || '-', summaryCategory)];
+        };
+
+        const buildAccommodationExpenseRows = (deduction: TeamSettlementDeductionItem): ExpenseAggregateDetailRow[] => {
+          const category = String(deduction.category ?? '').trim();
+          const deductionIdText = String(deduction.id ?? '');
+          const itemIdParts = deductionIdText.split(':');
+          const rawKey = itemIdParts.length >= 3 ? itemIdParts.slice(2).join(':') : '';
+          const isLedgerItem = rawKey.startsWith('ledger:');
+          const targetDocId = !isLedgerItem && rawKey ? rawKey : '';
+          const fallbackSubject = extractParenthesizedText(category) || '-';
+          const originLabel = '숙소';
+          const summaryCategory = '숙소별 경비';
+
+          const accommodationNameById = new Map<string, string>();
+          const accommodationNameByUtilityRecordId = new Map<string, string>();
+          deductionSourceData.utilityRecords.forEach((record) => {
+            const accommodationId = String(record.accommodationId ?? '').trim();
+            const accommodationName = String(record.accommodationName ?? '').trim();
+            const recordId = String(record.id ?? '').trim();
+            if (accommodationId && accommodationName) accommodationNameById.set(accommodationId, accommodationName);
+            if (recordId && accommodationName) accommodationNameByUtilityRecordId.set(recordId, accommodationName);
+          });
+
+          const selectedDocs = selectPreferredTeamBillings(
+            deductionSourceData.accommodationDocs.filter((row) =>
+              isTeamBillingTarget({
+                issuedToType: row.issuedToType,
+                teamId: row.teamId,
+                teamName: row.teamName,
+                issuedToWorkerId: row.issuedToWorkerId,
+                issuedToWorkerName: row.issuedToWorkerName
+              }) && matchesTeamByIdOrName(row.teamId, row.teamName)
+            )
+          );
+
+          const docChildren: ChildWithSubject[] = selectedDocs
+            .filter((billing) => {
+              if (isLedgerItem) return false;
+              if (!targetDocId) return true;
+              return String(billing.id ?? '') === targetDocId;
+            })
+            .flatMap((billing) => {
+              const billedTo = billing.teamName ? String(billing.teamName) : selectedTeamName || '팀';
+              return (billing.lineItems ?? []).map((li) => ({
+                subject:
+                  (li.sourceUtilityRecordId ? accommodationNameByUtilityRecordId.get(String(li.sourceUtilityRecordId).trim()) : undefined) ||
+                  (li.sourceAccommodationId ? accommodationNameById.get(String(li.sourceAccommodationId).trim()) : undefined) ||
+                  String(li.sourceAccommodationId ?? '').trim() ||
+                  billedTo,
+                label: String(li.label ?? '').trim() || mapAccommodationTargetFieldLabel(String(li.targetField ?? '')),
+                amount: safeNumber(li.amount)
+              }));
+            })
+            .filter((row) => row.amount > 0);
+
+          if (docChildren.length > 0) {
+            return groupChildrenBySubject(deduction, originLabel, summaryCategory, fallbackSubject, docChildren);
+          }
+
+          const range = buildMonthRange(yearMonth);
+          const monthStart = parseYmdDate(range.startDate);
+          const monthEnd = parseYmdDate(range.endDate);
+          if (!monthStart || !monthEnd) return [buildGenericExpenseRow(deduction, originLabel, fallbackSubject, summaryCategory)];
+
+          const targetAccommodationId = isLedgerItem ? rawKey.replace(/^ledger:/, '').trim() : '';
+          const teamDaysByAccommodation = new Map<string, number>();
+          const totalDaysByAccommodation = new Map<string, number>();
+          const { workerTeamByAnyId, workerTeamByName } = buildWorkerTeamMaps();
+
+          deductionSourceData.accommodationAssignments.forEach((assignment) => {
+            const accommodationId = String(assignment.accommodationId ?? '').trim();
+            if (!accommodationId) return;
+
+            const startDate = parseYmdDate(String(assignment.startDate ?? '').trim());
+            if (!startDate) return;
+            const endDate = assignment.endDate ? parseYmdDate(String(assignment.endDate).trim()) : null;
+            const overlapDays = calculateOverlapDays({ monthStart, monthEnd, startDate, endDate });
+            if (overlapDays <= 0) return;
+
+            totalDaysByAccommodation.set(accommodationId, (totalDaysByAccommodation.get(accommodationId) ?? 0) + overlapDays);
+
+            let teamMatched = matchesTeamByIdOrName(assignment.teamId, assignment.teamName);
+            if (!teamMatched) {
+              const workerId = String(assignment.workerId ?? '').trim();
+              const workerName = String(assignment.workerName ?? '').trim();
+              const workerTeam =
+                (workerId ? workerTeamByAnyId.get(workerId) : undefined) ??
+                (workerName ? workerTeamByName.get(workerName) : undefined);
+              if (workerTeam) {
+                teamMatched = matchesTeamByIdOrName(workerTeam.teamId, workerTeam.teamName);
+              }
+            }
+
+            if (teamMatched) {
+              teamDaysByAccommodation.set(accommodationId, (teamDaysByAccommodation.get(accommodationId) ?? 0) + overlapDays);
+            }
+          });
+
+          const ledgerChildren: ChildWithSubject[] = deductionSourceData.utilityRecords
+            .flatMap((record) => {
+              const accommodationId = String(record.accommodationId ?? '').trim();
+              if (!accommodationId) return [] as ChildWithSubject[];
+              if (targetAccommodationId && accommodationId !== targetAccommodationId) return [] as ChildWithSubject[];
+
+              const teamDays = teamDaysByAccommodation.get(accommodationId) ?? 0;
+              const totalDays = totalDaysByAccommodation.get(accommodationId) ?? 0;
+              if (teamDays <= 0 || totalDays <= 0) return [] as ChildWithSubject[];
+
+              const ratio = teamDays / totalDays;
+              const subject = String(record.accommodationName ?? '').trim() || accommodationId;
+              const allocation = `${safeNumber(teamDays)}/${safeNumber(totalDays)}`;
+
+              return [
+                { label: '월세', amount: Math.round(safeNumber(record.costs?.rent) * ratio) },
+                { label: '전기', amount: Math.round(safeNumber(record.costs?.electricity) * ratio) },
+                { label: '가스', amount: Math.round(safeNumber(record.costs?.gas) * ratio) },
+                { label: '수도', amount: Math.round(safeNumber(record.costs?.water) * ratio) },
+                { label: '인터넷', amount: Math.round(safeNumber(record.costs?.internet) * ratio) },
+                { label: '관리비', amount: Math.round(safeNumber(record.costs?.maintenance) * ratio) },
+                { label: '기타', amount: Math.round(safeNumber(record.costs?.other) * ratio) }
+              ]
+                .filter((row) => row.amount > 0)
+                .map((row) => ({
+                  subject,
+                  label: row.label,
+                  amount: row.amount,
+                  allocation
+                }));
+            })
+            .filter((row) => row.amount > 0);
+
+          if (ledgerChildren.length > 0) {
+            return groupChildrenBySubject(deduction, originLabel, summaryCategory, fallbackSubject, ledgerChildren);
+          }
+
+          return [buildGenericExpenseRow(deduction, originLabel, fallbackSubject, summaryCategory)];
+        };
+
+        const rawRows = (doc.deductions ?? [])
+          .filter((deduction) => EXPENSE_DEDUCTION_ORIGINS.includes(deduction.origin))
+          .flatMap((deduction): ExpenseAggregateDetailRow[] => {
+            if (deduction.origin === 'vehicle_billing') return buildVehicleExpenseRows(deduction);
+            if (deduction.origin === 'accommodation_billing') return buildAccommodationExpenseRows(deduction);
+            return [buildGenericExpenseRow(deduction)];
+          })
+          .filter((row) => row.amount > 0);
+
+        const grouped = new Map<string, ExpenseAggregateDetailRow>();
+        rawRows.forEach((row) => {
+          const key = `${row.origin}:${row.subject}:${row.category}`;
+          const prev = grouped.get(key);
+          if (!prev) {
+            grouped.set(key, { ...row, key, details: [...row.details] });
+            return;
+          }
+          grouped.set(key, {
+            ...prev,
+            amount: prev.amount + row.amount,
+            memo: [prev.memo, row.memo].filter(Boolean).join(' / ') || undefined,
+            details: [...prev.details, ...row.details]
+          });
+        });
+
+        const resourceRows = Array.from(grouped.values()).sort((a, b) => {
+          const order = (EXPENSE_DEDUCTION_ORIGIN_ORDER[a.origin] ?? 99) - (EXPENSE_DEDUCTION_ORIGIN_ORDER[b.origin] ?? 99);
+          if (order !== 0) return order;
+          return a.subject.localeCompare(b.subject, 'ko');
+        });
+        if (isExpenseOriginAggregateItem) {
+          const rows = resourceRows.filter((row) => row.origin === item.origin);
+          const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0);
+          return { kind: 'expense_aggregate', rows, totalAmount };
+        }
+
+        const rows = EXPENSE_DEDUCTION_ORIGINS
+          .map((origin): ExpenseAggregateDetailRow | null => {
+            const originRows = resourceRows.filter((row) => row.origin === origin);
+            if (originRows.length === 0) return null;
+
+            const originLabel = formatDeductionOrigin(origin);
+            return {
+              key: `expense-origin:${origin}`,
+              origin,
+              originLabel,
+              subject: '전체',
+              category: `${originLabel} 전체`,
+              amount: originRows.reduce((sum, row) => sum + safeNumber(row.amount), 0),
+              memo: `${originRows.length}건`,
+              details: originRows.map((row) => ({
+                subject: row.subject,
+                label: row.subject,
+                category: row.category,
+                amount: row.amount,
+                note: row.memo,
+                allocation: row.details.length > 0 ? `${row.details.length}건` : undefined
+              }))
+            };
+          })
+          .filter((row): row is ExpenseAggregateDetailRow => Boolean(row));
+        const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0);
+        return { kind: 'expense_aggregate', rows, totalAmount };
+      }
 
       if (item.origin === 'office_expense') {
         const bySite = new Map<string, SiteSkkumiRow>();
         doc.sales
-          .filter((s) => s.source === 'auto' && s.origin === 'daily_report' && (s.kind === '도급' || s.kind === '직영'))
+          .filter((s) => s.source === 'auto' && (s.origin === 'daily_report' || s.origin === 'support_client_site') && (s.kind === '도급' || s.kind === '직영'))
           .forEach((s) => {
             const siteName = String(s.siteName ?? '').trim() || '현장 미지정';
             const prev = bySite.get(siteName) ?? { siteName, quantity: 0, manDay: 0, amount: 0 };
@@ -1138,9 +2018,18 @@ export const TeamSettlementPage: React.FC = () => {
         );
 
         const itemIdParts = itemIdText.split(':');
-        const rawKey = itemIdParts.length >= 3 ? itemIdParts.slice(2).join(':') : '';
+        const rawKey = isAggregateDetailItem ? '' : (itemIdParts.length >= 3 ? itemIdParts.slice(2).join(':') : '');
         const isLedgerItem = rawKey.startsWith('ledger:');
         const targetDocId = !isLedgerItem && rawKey ? rawKey : '';
+        const accommodationNameById = new Map<string, string>();
+        const accommodationNameByUtilityRecordId = new Map<string, string>();
+        deductionSourceData.utilityRecords.forEach((record) => {
+          const accommodationId = String(record.accommodationId ?? '').trim();
+          const accommodationName = String(record.accommodationName ?? '').trim();
+          const recordId = String(record.id ?? '').trim();
+          if (accommodationId && accommodationName) accommodationNameById.set(accommodationId, accommodationName);
+          if (recordId && accommodationName) accommodationNameByUtilityRecordId.set(recordId, accommodationName);
+        });
 
         const docRows = selectedDocs
           .filter((billing) => {
@@ -1151,7 +2040,11 @@ export const TeamSettlementPage: React.FC = () => {
           .flatMap((billing) => {
             const billedTo = billing.teamName ? String(billing.teamName) : selectedTeamName || '팀';
             return (billing.lineItems ?? []).map((li) => ({
-              subject: billedTo,
+              subject:
+                (li.sourceUtilityRecordId ? accommodationNameByUtilityRecordId.get(String(li.sourceUtilityRecordId).trim()) : undefined) ||
+                (li.sourceAccommodationId ? accommodationNameById.get(String(li.sourceAccommodationId).trim()) : undefined) ||
+                String(li.sourceAccommodationId ?? '').trim() ||
+                billedTo,
               label: String(li.label ?? '').trim() || mapAccommodationTargetFieldLabel(String(li.targetField ?? '')),
               amount: safeNumber(li.amount)
             }));
@@ -1267,10 +2160,11 @@ export const TeamSettlementPage: React.FC = () => {
             matchesTeamByIdOrName(row.teamId ?? row.assignedTeamId, row.teamName ?? row.assignedTeamName)
           )
         );
-        const isLedgerVehicleItem = itemIdText.endsWith(':ledger');
+        const isLedgerVehicleItem = !isAggregateDetailItem && itemIdText.endsWith(':ledger');
         const targetPlate = extractBracketValue(deductionCategory, '차량비');
 
         const matchedDocs = selectedDocs.filter((row) => {
+          if (isAggregateDetailItem) return true;
           if (isLedgerVehicleItem) return false;
           const plate = String(row.vehiclePlate ?? '').trim();
           const id = String(row.vehicleId ?? '').trim();
@@ -1329,7 +2223,7 @@ export const TeamSettlementPage: React.FC = () => {
             const plate = String(vehicle.licensePlate ?? '').trim();
             const vehicleId = String(vehicle.id ?? '').trim();
             if (targetPlate && plate !== targetPlate) return [];
-            if (!targetPlate && vehicleId && !itemIdText.includes(vehicleId) && plate && !itemIdText.includes(plate)) return [];
+            if (!isAggregateDetailItem && !targetPlate && vehicleId && !itemIdText.includes(vehicleId) && plate && !itemIdText.includes(plate)) return [];
 
             let isAssignedTeam = false;
             if (vehicle.currentAssigneeType === 'TEAM') {
@@ -1388,10 +2282,11 @@ export const TeamSettlementPage: React.FC = () => {
             matchesTeamByIdOrName(row.teamId ?? row.assignedTeamId, row.teamName ?? row.assignedTeamName)
           )
         );
-        const isLedgerCardItem = itemIdText.endsWith(':ledger');
+        const isLedgerCardItem = !isAggregateDetailItem && itemIdText.endsWith(':ledger');
         const targetCardLabel = extractBracketValue(deductionCategory, '카드비');
 
         const matchedDocs = selectedDocs.filter((row) => {
+          if (isAggregateDetailItem) return true;
           if (isLedgerCardItem) return false;
           const cardId = String(row.cardId ?? '').trim();
           const cardLabel = String(row.cardLabel ?? '').trim();
@@ -1445,7 +2340,7 @@ export const TeamSettlementPage: React.FC = () => {
             const cardLabel = `${String(card.name ?? '').trim()} (${String(card.last4 ?? '').trim()})`.trim();
 
             if (targetCardLabel && cardLabel !== targetCardLabel) return [];
-            if (!targetCardLabel && cardId && !itemIdText.includes(cardId) && cardLabel && !itemIdText.includes(cardLabel)) return [];
+            if (!isAggregateDetailItem && !targetCardLabel && cardId && !itemIdText.includes(cardId) && cardLabel && !itemIdText.includes(cardLabel)) return [];
 
             let isAssignedTeam = false;
             if (card.currentAssigneeType === 'TEAM') {
@@ -1517,11 +2412,7 @@ export const TeamSettlementPage: React.FC = () => {
     (line: SettlementUnifiedLine): LineDetailRow[] => {
       if (line.source !== 'auto') return [];
 
-      const isSupportOrigin =
-        line.origin === 'support_outgoing' ||
-        line.origin === 'support_incoming' ||
-        line.origin === 'support_fee_outgoing' ||
-        line.origin === 'support_fee_incoming';
+      const supportOrigin = isSupportOrigin(line.origin);
 
       const matchesSiteByIdOrName = (args: { lineSiteId?: string; lineSiteName: string; rowSiteId?: string; rowSiteName?: string }): boolean => {
         const lineSiteId = args.lineSiteId ? String(args.lineSiteId).trim() : '';
@@ -1534,59 +2425,77 @@ export const TeamSettlementPage: React.FC = () => {
         return false;
       };
 
-      if (isSupportOrigin) {
-        const items: LaborExchangeItem[] =
-          line.origin === 'support_outgoing' || line.origin === 'support_fee_outgoing'
-            ? (laborExchangeSummary?.outgoing.items ?? [])
-            : (laborExchangeSummary?.incoming.items ?? []);
-
-        const isFeeLine = line.origin === 'support_fee_outgoing' || line.origin === 'support_fee_incoming';
+      if (supportOrigin) {
         const lineCounterId = line.counterTeamId ? String(line.counterTeamId).trim() : '';
         const lineCounterName = line.counterTeamName ? String(line.counterTeamName).trim() : '';
 
-        return items
-          .filter((item) => {
+        const matchesCounterByIdOrName = (args: {
+          lineCounterId?: string;
+          lineCounterName?: string;
+          rowCounterId?: string;
+          rowCounterName?: string;
+        }): boolean => {
+          const expectedId = String(args.lineCounterId ?? '').trim();
+          const expectedName = String(args.lineCounterName ?? '').trim();
+          const rowId = String(args.rowCounterId ?? '').trim();
+          const rowName = String(args.rowCounterName ?? '').trim();
+          if (!expectedId && !expectedName) return true;
+          if (expectedId && rowId && expectedId === rowId) return true;
+          if (expectedName && rowName && normalizeRateLookupKey(expectedName) === normalizeRateLookupKey(rowName)) return true;
+          return false;
+        };
+
+        const supportDirections = (() => {
+          if (line.origin === '내부지원간곳' || line.origin === '외부지원간곳' || line.origin === '내부지원온곳' || line.origin === '외부지원온곳') {
+            return [line.origin];
+          }
+          if (isSupportSalesOrigin(line.origin)) return ['내부지원간곳', '외부지원간곳'];
+          if (isSupportPurchaseOrigin(line.origin)) return ['내부지원온곳', '외부지원온곳'];
+          return [];
+        })();
+
+        const rows = supportDetailRows
+          .filter((row) => {
+            if (!supportDirections.includes(row.direction)) return false;
             const okSite = matchesSiteByIdOrName({
               lineSiteId: line.siteId,
               lineSiteName: line.siteName,
-              rowSiteId: item.siteId,
-              rowSiteName: item.siteName
+              rowSiteId: row.siteId,
+              rowSiteName: row.siteName
             });
             if (!okSite) return false;
 
-            const counterId =
-              line.origin === 'support_outgoing' || line.origin === 'support_fee_outgoing'
-                ? String(item.reportTeamId ?? '').trim()
-                : String(item.workerTeamId ?? '').trim();
-            const counterName =
-              line.origin === 'support_outgoing' || line.origin === 'support_fee_outgoing'
-                ? String(item.reportTeamName ?? '').trim()
-                : String(item.workerTeamName ?? '').trim();
-
-            if (lineCounterId) return counterId === lineCounterId;
-            if (lineCounterName) return counterName === lineCounterName;
-            return true;
+            return matchesCounterByIdOrName({
+              lineCounterId,
+              lineCounterName,
+              rowCounterId: row.counterTeamId,
+              rowCounterName: row.counterTeamName
+            });
           })
-          .map((item) => {
-            const manDay = safeNumber(item.manDay);
-            const unitPrice = isFeeLine ? safeNumber(item.supportRate) : safeNumber(item.unitPrice);
-            const amount = isFeeLine ? safeNumber(item.amount) : Math.round(manDay * unitPrice);
-            const siteName = String(item.siteName ?? '').trim() || '현장 미지정';
-            const workerTeamName = String(item.workerTeamName ?? '').trim() || (item.workerTeamId ? String(item.workerTeamId) : '-');
+          .map((row) => {
             return {
-              id: `${item.date}__${item.siteId}__${item.workerId}__${line.origin}`,
-              date: item.date,
-              siteName,
-              workerName: item.workerName,
-              workerTeamName,
-              manDay,
-              unitPrice,
-              amount
+              id: `${row.id}__${line.id}`,
+              date: row.date,
+              siteName: String(row.siteName ?? '').trim() || '현장 미지정',
+              workerName: row.workerName,
+              workerTeamName: String(row.workerTeamName ?? '').trim() || '-',
+              manDay: safeNumber(row.manDay),
+              unitPrice: safeNumber(row.unitPrice),
+              amount: safeNumber(row.amount)
             };
           });
+
+        const targetAmount = Math.round(safeNumber(line.amount));
+        const currentAmount = rows.reduce((sum, row) => sum + safeNumber(row.amount), 0);
+        const diff = Math.round(targetAmount - currentAmount);
+        if (rows.length > 0 && diff !== 0) {
+          rows[rows.length - 1].amount = safeNumber(rows[rows.length - 1].amount) + diff;
+        }
+
+        return rows;
       }
 
-      if (line.origin !== 'daily_report') return [];
+      if (line.origin !== 'daily_report' && line.origin !== 'support_client_site') return [];
 
       const matchesSite = (r: DailyReportWorkerRow): boolean => {
         return matchesSiteByIdOrName({
@@ -1627,8 +2536,9 @@ export const TeamSettlementPage: React.FC = () => {
         })
         .map((r) => {
           const manDay = safeNumber(r.manDay);
-          const unitPrice = safeNumber(r.unitPrice);
-          const amount = safeNumber(r.amount);
+          const settlementUnitPrice = line.origin === 'support_client_site' ? (safeAverage(line.amount, line.manDay) ?? 0) : 0;
+          const unitPrice = settlementUnitPrice > 0 ? settlementUnitPrice : safeNumber(r.unitPrice);
+          const amount = settlementUnitPrice > 0 ? Math.round(manDay * settlementUnitPrice) : safeNumber(r.amount);
           const siteName = String(r.siteName ?? '').trim() || '현장 미지정';
           const workerTeamName = String(r.workerTeamName ?? r.teamName ?? '').trim() || '-';
           return {
@@ -1643,7 +2553,7 @@ export const TeamSettlementPage: React.FC = () => {
           };
         });
     },
-    [detailRows, laborExchangeSummary, matchesTeam]
+    [detailRows, matchesTeam, supportDetailRows]
   );
 
   const salesLines = useMemo(() => unifiedLines.filter((x) => x.direction === 'sales'), [unifiedLines]);
@@ -1715,16 +2625,51 @@ export const TeamSettlementPage: React.FC = () => {
     return [...lines].sort((a, b) => a.kind.localeCompare(b.kind, 'ko'));
   }, [salesLines]);
 
+  const settlementAmountMissingRows = useMemo<SettlementAmountMissingRow[]>(() => {
+    return salesLines
+      .filter((line) => {
+        if (line.source !== 'auto') return false;
+        if (line.kind !== '도급' && line.kind !== '직영') return false;
+        if (safeNumber(line.amount) > 0) return false;
+        return safeNumber(line.manDay) > 0 || safeNumber(line.quantity) > 0;
+      })
+      .map((line) => ({
+        key: line.id,
+        kind: line.kind,
+        originLabel: line.originLabel,
+        siteName: String(line.siteName ?? '').trim() || '현장 미지정',
+        manDay: safeNumber(line.manDay),
+        amount: safeNumber(line.amount),
+        reason: '정산금액 미입력'
+      }))
+      .sort((a, b) => {
+        const kindSort = a.kind.localeCompare(b.kind, 'ko');
+        if (kindSort !== 0) return kindSort;
+        return a.siteName.localeCompare(b.siteName, 'ko');
+      });
+  }, [salesLines]);
+
   const purchaseSupportLinesMerged = useMemo(() => {
     return mergeSupportLines(purchaseLines.filter((x) => x.kind === '지원'));
   }, [mergeSupportLines, purchaseLines]);
 
-  const renderTransactionLineRows = (lines: SettlementUnifiedLine[]) => {
+
+
+  const renderTransactionLineRows = (
+    lines: SettlementUnifiedLine[],
+    options?: { showKindColumn?: boolean; originDisplay?: 'origin' | 'kind'; showSupportRateColumn?: boolean }
+  ) => {
+    const showKindColumn = options?.showKindColumn ?? true;
+    const originDisplay = options?.originDisplay ?? 'origin';
+    const showSupportRateColumn = options?.showSupportRateColumn ?? false;
+    const detailColSpan = (showKindColumn ? 7 : 6) + (showSupportRateColumn ? 1 : 0);
+
     return lines.map((line) => {
       const isExpanded = expandedLineIds.has(line.id);
       const editableManual = canEdit && line.source === 'manual';
       const isMergedSupportLine = line.source === 'auto' && line.id.startsWith('merged_support:');
       const showSiteInsteadOfCounterTeam = line.kind === '도급' || line.kind === '직영';
+      const showSupportCounterAndSite = line.kind === '지원' && line.source === 'auto' && !isMergedSupportLine;
       const editableAmount =
         canEdit && (line.source === 'manual' || (line.direction === 'sales' && (line.kind === '도급' || line.kind === '직영')));
 
@@ -1741,18 +2686,10 @@ export const TeamSettlementPage: React.FC = () => {
               : 'bg-white';
 
       const detail = isExpanded ? getLineDetailRows(line) : [];
-      const isSupportFeeLine = line.origin === 'support_fee_outgoing' || line.origin === 'support_fee_incoming';
-      const isSupportOrigin =
-        line.origin === 'support_outgoing' ||
-        line.origin === 'support_incoming' ||
-        line.origin === 'support_fee_outgoing' ||
-        line.origin === 'support_fee_incoming';
-      const supportRateAvg = isSupportFeeLine
-        ? safeAverage(
-          detail.reduce((sum, r) => sum + safeNumber(r.amount), 0),
-          detail.reduce((sum, r) => sum + safeNumber(r.manDay), 0)
-        )
-        : null;
+      const isSupportFeeLine = isSupportSettlementOrigin(line.origin);
+      const lineIsSupportOrigin = isSupportOrigin(line.origin);
+      const supportUnitPrice = line.kind === '지원' ? safeAverage(safeNumber(line.amount), safeNumber(line.manDay)) : null;
+      const supportRateAvg = isSupportFeeLine ? supportUnitPrice : null;
 
       const siteSummaries = (() => {
         if (detail.length === 0) return [] as Array<{ siteName: string; manDay: number; amount: number; rows: LineDetailRow[] }>;
@@ -1773,18 +2710,28 @@ export const TeamSettlementPage: React.FC = () => {
       return (
         <React.Fragment key={line.id}>
           <tr className={summaryRowClassName}>
-            <td className="px-2 py-2 border whitespace-nowrap">
-              <span
-                className={`inline-flex items-center px-2 py-1 rounded-full border text-xs font-semibold ${getKindBadgeClassName(
-                  line.kind
-                )}`}
-              >
-                {line.kind}
-              </span>
+            {showKindColumn && (
+              <td className="px-2 py-2 border whitespace-nowrap">
+                <span
+                  className={`inline-flex items-center px-2 py-1 rounded-full border text-xs font-semibold ${getKindBadgeClassName(
+                    line.kind
+                  )}`}
+                >
+                  {line.kind}
+                </span>
+              </td>
+            )}
+            <td className="px-2 py-2 border text-slate-700 whitespace-nowrap">
+              {originDisplay === 'kind' ? line.kind : line.originLabel}
             </td>
-            <td className="px-2 py-2 border text-slate-700 whitespace-nowrap">{line.originLabel}</td>
             <td className="px-2 py-2 border whitespace-nowrap">
-              {showSiteInsteadOfCounterTeam ? (
+              {showSupportCounterAndSite ? (
+                <div className="space-y-0.5">
+                  <div className="text-[11px] font-medium text-slate-500">해당 {selectedTeamName || '-'}</div>
+                  <div className="text-slate-800 font-medium">상대 {String(line.counterTeamName ?? '').trim() || '-'}</div>
+                  <div className="text-[11px] text-slate-500">현장 {String(line.siteName ?? '').trim() || '현장 미지정'}</div>
+                </div>
+              ) : showSiteInsteadOfCounterTeam ? (
                 editableManual ? (
                   <input
                     className="w-full border rounded px-2 py-1"
@@ -1851,6 +2798,11 @@ export const TeamSettlementPage: React.FC = () => {
                 }}
               />
             </td>
+            {showSupportRateColumn && (
+              <td className="px-2 py-2 border text-right whitespace-nowrap text-slate-800 font-medium">
+                {formatAverageCurrency(supportUnitPrice)}
+              </td>
+            )}
             <td className="px-1 py-2 border text-right whitespace-nowrap">
               <CurrencyInput
                 className="w-28 border rounded px-2 py-1 text-right"
@@ -1901,35 +2853,15 @@ export const TeamSettlementPage: React.FC = () => {
                 >
                   {isExpanded ? '닫기' : '상세'}
                 </button>
-                <button
-                  type="button"
-                  className={ghostButtonClassName}
-                  disabled={!editableManual}
-                  onClick={() => {
-                    if (line.direction === 'sales') {
-                      updateDoc((prev) => ({
-                        ...prev,
-                        sales: prev.sales.filter((x) => x.id !== line.id)
-                      }));
-                    } else {
-                      updateDoc((prev) => ({
-                        ...prev,
-                        purchases: prev.purchases.filter((x) => x.id !== line.id)
-                      }));
-                    }
-                  }}
-                >
-                  삭제
-                </button>
               </div>
             </td>
           </tr>
 
           {isExpanded && (
             <tr className={summaryRowClassName}>
-              <td className="px-3 py-3 border" colSpan={7}>
+              <td className="px-3 py-3 border" colSpan={detailColSpan}>
                 <div className="rounded-lg border bg-white p-3">
-                  <div className="text-sm font-semibold text-slate-800">{isSupportOrigin ? '인력교류 상세' : '출력 상세'}</div>
+                  <div className="text-sm font-semibold text-slate-800">{lineIsSupportOrigin ? '인력교류 상세' : '출력 상세'}</div>
                   <div className="text-xs text-slate-500 mt-1">
                     {detail.length > 0
                       ? `총 ${detail.length}건 / ${siteSummaries.length}개 현장`
@@ -1977,7 +2909,7 @@ export const TeamSettlementPage: React.FC = () => {
                               <th className="text-left px-2 py-2 border">현장</th>
                               <th className="text-right px-2 py-2 border">작업자수</th>
                               <th className="text-right px-2 py-2 border">공수 합계</th>
-                              <th className="text-right px-2 py-2 border">금액 합계</th>
+                              <th className="text-right px-2 py-2 border">{lineIsSupportOrigin ? '노임총액 합계' : '금액 합계'}</th>
                               <th className="text-center px-2 py-2 border">상세</th>
                             </tr>
                           </thead>
@@ -2041,7 +2973,7 @@ export const TeamSettlementPage: React.FC = () => {
                                                   <th className="text-left px-2 py-2 border">소속팀</th>
                                                   <th className="text-right px-2 py-2 border">공수</th>
                                                   <th className="text-right px-2 py-2 border">평균단가</th>
-                                                  <th className="text-right px-2 py-2 border">금액</th>
+                                                  <th className="text-right px-2 py-2 border">{lineIsSupportOrigin ? '노임총액' : '금액'}</th>
                                                 </tr>
                                               </thead>
                                               <tbody>
@@ -2082,14 +3014,23 @@ export const TeamSettlementPage: React.FC = () => {
   };
 
   return (
-    <div className="w-full p-6">
+    <div className="team-settlement-page w-full p-6">
+      <style>{`
+        .team-settlement-page .overflow-auto > table > thead {
+          position: sticky;
+          top: 0;
+          z-index: 20;
+          background: #f8fafc;
+          box-shadow: 0 1px 0 rgba(148, 163, 184, 0.45);
+        }
+      `}</style>
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <div className="text-2xl font-bold text-slate-800">팀정산 관리</div>
           <div className="text-sm text-slate-500 mt-1">월/팀 기준 자동집계 + 수기 조정 후 저장/확정</div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-start gap-2 flex-wrap">
           <button
             type="button"
             className={secondaryButtonClassName}
@@ -2099,14 +3040,20 @@ export const TeamSettlementPage: React.FC = () => {
             새로고침
           </button>
 
-          <button
-            type="button"
-            className={`${primaryButtonClassName} bg-indigo-600 text-white hover:bg-indigo-700`}
-            onClick={handleRecalculate}
-            disabled={!selectedTeamId || !yearMonth || loadState.status === 'loading'}
-          >
-            강제 재집계
-          </button>
+          <div className="flex flex-col items-start gap-1">
+            <button
+              type="button"
+              className={`${primaryButtonClassName} bg-indigo-600 text-white hover:bg-indigo-700`}
+              onClick={handleRecalculate}
+              disabled={!selectedTeamId || !yearMonth || loadState.status === 'loading'}
+            >
+              강제 재집계
+            </button>
+            <div className="text-[11px] font-semibold leading-tight text-slate-500">
+              <div>팀: {doc?.teamName || selectedTeamName || '-'}</div>
+              <div>상태: {confirmedAtLabel ? `확정 ${confirmedAtLabel}` : '미확정'}</div>
+            </div>
+          </div>
 
           <button
             type="button"
@@ -2137,46 +3084,72 @@ export const TeamSettlementPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="rounded-xl border bg-white p-4">
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2.1fr)_minmax(280px,1fr)]">
+        <div className="rounded-xl border bg-white p-2.5">
           <div className="text-sm font-semibold text-slate-700">정산월</div>
-          <div className="mt-2">
-            <YearMonthPicker
-              value={yearMonth}
-              onChange={setYearMonth}
-              inputClassName="month-input w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none text-left"
-            />
+          <div className="mt-1.5 flex flex-col gap-1.5 xl:flex-row xl:items-center">
+            <div className="inline-flex shrink-0 items-center rounded-lg border border-slate-200 bg-slate-50 p-1">
+              <button
+                type="button"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-sm font-bold text-slate-600 hover:bg-white hover:text-slate-900"
+                aria-label={`${selectedYearMonth.year - 1}년으로 이동`}
+                onClick={() => handleSettlementYearChange(-1)}
+              >
+                {'<'}
+              </button>
+              <div className="min-w-[58px] px-1 text-center text-sm font-bold text-slate-800">{selectedYearMonth.year}년</div>
+              <button
+                type="button"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-sm font-bold text-slate-600 hover:bg-white hover:text-slate-900"
+                aria-label={`${selectedYearMonth.year + 1}년으로 이동`}
+                onClick={() => handleSettlementYearChange(1)}
+              >
+                {'>'}
+              </button>
+            </div>
+
+            <div className="grid flex-1 grid-cols-6 gap-0.5 lg:grid-cols-12">
+              {MONTH_BUTTON_OPTIONS.map((month) => {
+                const isSelected = selectedYearMonth.month === month;
+                return (
+                  <button
+                    key={month}
+                    type="button"
+                    className={`h-6 min-w-0 rounded border px-0 text-sm font-bold leading-none transition ${isSelected
+                      ? 'border-blue-600 bg-blue-600 text-white shadow-sm'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50'
+                      }`}
+                    aria-pressed={isSelected}
+                    onClick={() => handleSettlementMonthSelect(month)}
+                  >
+                    {month}월
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
         <div className="rounded-xl border bg-white p-4">
           <div className="text-sm font-semibold text-slate-700">팀</div>
-          <div className="mt-2">
-            <select
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-              value={selectedTeamId}
-              onChange={(e) => setSelectedTeamId(e.target.value)}
-            >
-              {teams.map((t) => (
-                <option key={String(t.id ?? '')} value={String(t.id ?? '')}>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {teams.map((t) => {
+              const teamId = String(t.id ?? '');
+              const isSelected = teamId === String(selectedTeamId);
+              return (
+                <button
+                  key={teamId}
+                  type="button"
+                  className={`h-8 rounded-md border px-2 text-xs font-semibold transition hover:brightness-95 ${isSelected ? 'shadow-sm ring-1 ring-slate-900/10' : ''
+                    }`}
+                  style={getTeamButtonStyle(t.color, isSelected)}
+                  aria-pressed={isSelected}
+                  onClick={() => setSelectedTeamId(teamId)}
+                >
                   {t.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="rounded-xl border bg-white p-4">
-          <div className="text-sm font-semibold text-slate-700">상태</div>
-          <div className="mt-2 text-sm text-slate-700">
-            <div>
-              <span className="font-semibold">팀명</span>
-              <span className="ml-2">{doc?.teamName || selectedTeamName || '-'}</span>
-            </div>
-            <div className="mt-1">
-              <span className="font-semibold">확정일시</span>
-              <span className="ml-2">{confirmedAtLabel || '미확정'}</span>
-            </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -2199,7 +3172,7 @@ export const TeamSettlementPage: React.FC = () => {
             <div className="rounded-2xl border bg-white p-5 shadow-sm">
               <div className="text-xs text-slate-500">공제 합계</div>
               <div className="mt-1 text-2xl font-extrabold text-slate-900">{formatCurrency(totals.deductionsTotal)}원</div>
-              <div className="mt-2 text-xs text-slate-500">숙소/차량/카드 + 수기</div>
+              <div className="mt-2 text-xs text-slate-500">사무실비/급여/차량/숙소/카드/경비</div>
             </div>
 
             <div className="rounded-2xl border bg-white p-5 shadow-sm">
@@ -2227,13 +3200,89 @@ export const TeamSettlementPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4">
-            <div className="rounded-2xl border bg-white p-5 shadow-sm">
-              <div className="text-xs text-slate-500">도급 매출</div>
-              <div className="mt-1 text-2xl font-extrabold text-slate-900">{formatCurrency(dashboardMetrics.contractSalesTotal)}원</div>
-              <div className="mt-2 text-xs text-slate-500">도급(전체 원천) 합계</div>
+          {supportRateMissingRows.length > 0 && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div>
+                  <div className="text-sm font-bold text-amber-900">지원단가 누락</div>
+                  <div className="text-xs text-amber-800 mt-0.5">
+                    지원 매입/매출에 적용할 지원단가가 없거나 0원인 내역입니다. 정산 확정 전에 단가를 확인하세요.
+                  </div>
+                </div>
+                <div className="text-xs font-semibold text-amber-900">{supportRateMissingRows.length}건</div>
+              </div>
+
+              <div className="mt-3 overflow-auto">
+                <table className="w-full text-xs border-collapse bg-white">
+                  <thead>
+                    <tr className="bg-amber-100 text-amber-900">
+                      <th className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">구분</th>
+                      <th className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">현장</th>
+                      <th className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">상대팀</th>
+                      <th className="text-right px-2 py-2 border border-amber-200 whitespace-nowrap">공수</th>
+                      <th className="text-right px-2 py-2 border border-amber-200 whitespace-nowrap">현재단가</th>
+                      <th className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">사유</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {supportRateMissingRows.map((row) => (
+                      <tr key={row.key} className="text-slate-800">
+                        <td className="px-2 py-2 border border-amber-100 whitespace-nowrap">{row.directionLabel}</td>
+                        <td className="px-2 py-2 border border-amber-100 font-medium">{row.siteName}</td>
+                        <td className="px-2 py-2 border border-amber-100">{row.counterTeamName}</td>
+                        <td className="px-2 py-2 border border-amber-100 text-right">{formatManDay1(row.manDay)}</td>
+                        <td className="px-2 py-2 border border-amber-100 text-right">{formatCurrency(Math.round(row.currentRate))}</td>
+                        <td className="px-2 py-2 border border-amber-100 text-amber-800">{row.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          )}
+
+          {settlementAmountMissingRows.length > 0 && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div>
+                  <div className="text-sm font-bold text-rose-900">정산금액 누락</div>
+                  <div className="text-xs text-rose-800 mt-0.5">
+                    도급/직영 공수는 있으나 매출 정산금액이 0원인 현장입니다. 정산 확정 전에 금액을 확인하세요.
+                  </div>
+                </div>
+                <div className="text-xs font-semibold text-rose-900">{settlementAmountMissingRows.length}건</div>
+              </div>
+
+              <div className="mt-3 overflow-auto">
+                <table className="w-full text-xs border-collapse bg-white">
+                  <thead>
+                    <tr className="bg-rose-100 text-rose-900">
+                      <th className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">구분</th>
+                      <th className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">원천</th>
+                      <th className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">현장</th>
+                      <th className="text-right px-2 py-2 border border-rose-200 whitespace-nowrap">공수</th>
+                      <th className="text-right px-2 py-2 border border-rose-200 whitespace-nowrap">현재금액</th>
+                      <th className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">사유</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {settlementAmountMissingRows.map((row) => (
+                      <tr key={row.key} className="text-slate-800">
+                        <td className="px-2 py-2 border border-rose-100 whitespace-nowrap">{row.kind}</td>
+                        <td className="px-2 py-2 border border-rose-100 whitespace-nowrap">{row.originLabel}</td>
+                        <td className="px-2 py-2 border border-rose-100 font-medium">{row.siteName}</td>
+                        <td className="px-2 py-2 border border-rose-100 text-right">{formatManDay1(row.manDay)}</td>
+                        <td className="px-2 py-2 border border-rose-100 text-right">{formatCurrency(row.amount)}</td>
+                        <td className="px-2 py-2 border border-rose-100 text-rose-800">{row.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+
         </div>
       )}
 
@@ -2261,33 +3310,40 @@ export const TeamSettlementPage: React.FC = () => {
               <div>
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="font-semibold text-slate-800">매출</div>
-                  <button type="button" className={addButtonClassName} onClick={handleAddManualSale} disabled={!canEdit}>
-                    + 수기 매출
-                  </button>
                 </div>
 
                 <div className="mt-3">
-                  <div className="text-sm font-semibold text-slate-700">지원</div>
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="text-sm font-semibold text-slate-700">지원</div>
+                    <button type="button" className={addButtonClassName} onClick={() => handleAddManualSale('지원')} disabled={!canEdit}>
+                      + 수기 지원 매출
+                    </button>
+                  </div>
                   <div className="mt-2 overflow-auto">
                     <table className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
-                          <th className="text-left px-2 py-2 border whitespace-nowrap">구분</th>
                           <th className="text-left px-2 py-2 border whitespace-nowrap">원천</th>
-                          <th className="text-left px-2 py-2 border whitespace-nowrap">상대팀</th>
+                          <th className="text-left px-2 py-2 border whitespace-nowrap">해당/상대/현장</th>
                           <th className="text-right px-1 py-2 border whitespace-nowrap">공수</th>
-                          <th className="text-right px-1 py-2 border whitespace-nowrap">금액</th>
+                          <th className="text-right px-1 py-2 border whitespace-nowrap">지원단가</th>
+                          <th className="text-right px-1 py-2 border whitespace-nowrap">노임총액</th>
                           <th className="text-left px-2 py-2 border">비고</th>
                           <th className="px-2 py-2 border"></th>
                         </tr>
                       </thead>
-                      <tbody>{renderTransactionLineRows(salesSupportLinesMerged)}</tbody>
+                      <tbody>{renderTransactionLineRows(salesSupportLinesMerged, { showKindColumn: false, showSupportRateColumn: true })}</tbody>
                     </table>
                   </div>
                 </div>
 
                 <div className="mt-6">
-                  <div className="text-sm font-semibold text-slate-700">도급/직영</div>
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="text-sm font-semibold text-slate-700">도급/직영</div>
+                    <button type="button" className={addButtonClassName} onClick={() => handleAddManualSale('직영')} disabled={!canEdit}>
+                      + 수기 직영 매출
+                    </button>
+                  </div>
                   <div className="mt-2 overflow-auto">
                     <table className="w-full text-sm border-collapse">
                       <thead>
@@ -2301,7 +3357,7 @@ export const TeamSettlementPage: React.FC = () => {
                           <th className="px-2 py-2 border"></th>
                         </tr>
                       </thead>
-                      <tbody>{renderTransactionLineRows(salesContractDirectLines)}</tbody>
+                      <tbody>{renderTransactionLineRows(salesContractDirectLines, { originDisplay: 'kind' })}</tbody>
                     </table>
                   </div>
                 </div>
@@ -2310,26 +3366,32 @@ export const TeamSettlementPage: React.FC = () => {
               <div>
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="font-semibold text-slate-800">매입</div>
-                  <button type="button" className={addButtonClassName} onClick={handleAddManualPurchase} disabled={!canEdit}>
-                    + 수기 매입
-                  </button>
                 </div>
 
-                <div className="mt-3 overflow-auto">
-                  <table className="w-full text-sm border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50 text-slate-600">
-                        <th className="text-left px-2 py-2 border whitespace-nowrap">구분</th>
-                        <th className="text-left px-2 py-2 border whitespace-nowrap">원천</th>
-                        <th className="text-left px-2 py-2 border whitespace-nowrap">상대팀</th>
-                        <th className="text-right px-1 py-2 border whitespace-nowrap">공수</th>
-                        <th className="text-right px-1 py-2 border whitespace-nowrap">금액</th>
-                        <th className="text-left px-2 py-2 border">비고</th>
-                        <th className="px-2 py-2 border"></th>
-                      </tr>
-                    </thead>
-                    <tbody>{renderTransactionLineRows(purchaseSupportLinesMerged)}</tbody>
-                  </table>
+                <div className="mt-3">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="text-sm font-semibold text-slate-700">지원</div>
+                    <button type="button" className={addButtonClassName} onClick={handleAddManualPurchase} disabled={!canEdit}>
+                      + 수기 지원 매입
+                    </button>
+                  </div>
+
+                  <div className="mt-2 overflow-auto">
+                    <table className="w-full text-sm border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-600">
+                          <th className="text-left px-2 py-2 border whitespace-nowrap">원천</th>
+                          <th className="text-left px-2 py-2 border whitespace-nowrap">상대팀</th>
+                          <th className="text-right px-1 py-2 border whitespace-nowrap">공수</th>
+                          <th className="text-right px-1 py-2 border whitespace-nowrap">지원단가</th>
+                          <th className="text-right px-1 py-2 border whitespace-nowrap">노임총액</th>
+                          <th className="text-left px-2 py-2 border">비고</th>
+                          <th className="px-2 py-2 border"></th>
+                        </tr>
+                      </thead>
+                      <tbody>{renderTransactionLineRows(purchaseSupportLinesMerged, { showKindColumn: false, showSupportRateColumn: true })}</tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2346,26 +3408,59 @@ export const TeamSettlementPage: React.FC = () => {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="font-bold text-slate-800">공제</div>
-                <div className="text-xs text-slate-500 mt-0.5">숙소/차량/카드 청구 + 수기 공제</div>
+                <div className="text-xs text-slate-500 mt-0.5">사무실비·급여·차량·숙소·카드·경비 구분</div>
               </div>
               <button type="button" className={addButtonClassName} onClick={handleAddManualDeduction} disabled={!canEdit}>
                 + 수기 공제
               </button>
             </div>
 
-            <div className="mt-3 overflow-auto">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 text-slate-600">
-                    <th className="text-left px-2 py-2 border">구분</th>
-                    <th className="text-left px-2 py-2 border">항목</th>
-                    <th className="text-right px-2 py-2 border">금액</th>
-                    <th className="text-left px-2 py-2 border">비고</th>
-                    <th className="text-center px-2 py-2 border whitespace-nowrap">상세</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {doc.deductions.map((item) => {
+            <div className="mt-4 space-y-5">
+              {deductionGroups.map((group) => (
+                <div key={group.key} className="border-t border-slate-200 pt-4 first:border-t-0 first:pt-0">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-bold text-slate-800">{group.title}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{group.description}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-slate-500">{group.items.length}건</div>
+                      <div className="text-sm font-extrabold text-slate-900">{formatCurrency(group.totalAmount)}원</div>
+                      {group.sourceSummaries.length > 0 && (group.key === 'expense' || group.sourceSummaries.length > 1) && (
+                        <div className="mt-2 flex max-w-sm flex-wrap justify-end gap-1">
+                          {group.sourceSummaries.map((summary) => (
+                            <span
+                              key={`${group.key}-${summary.origin}`}
+                              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+                            >
+                              <span>{summary.label}</span>
+                              <span className="text-slate-900">{formatCurrency(summary.amount)}원</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-2 overflow-auto">
+                    <table className="w-full text-sm border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-600">
+                          <th className="text-left px-2 py-2 border">구분</th>
+                          <th className="text-left px-2 py-2 border">항목</th>
+                          <th className="text-right px-2 py-2 border">금액</th>
+                          <th className="text-left px-2 py-2 border">비고</th>
+                          <th className="text-center px-2 py-2 border whitespace-nowrap">상세</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.displayItems.length === 0 ? (
+                          <tr className="bg-white">
+                            <td className="px-2 py-3 border text-center text-slate-400" colSpan={5}>
+                              내역 없음
+                            </td>
+                          </tr>
+                        ) : group.displayItems.map((item) => {
                     const editableRow = canEdit && item.source === 'manual';
                     const canExpand =
                       item.source === 'auto' &&
@@ -2384,7 +3479,9 @@ export const TeamSettlementPage: React.FC = () => {
                     return (
                       <React.Fragment key={item.id}>
                         <tr className={item.source === 'auto' ? 'bg-white' : 'bg-amber-50'}>
-                          <td className="px-2 py-2 border text-slate-700">{formatDeductionOrigin(item.origin)}</td>
+                          <td className="px-2 py-2 border text-slate-700">
+                            {getDeductionDisplayOriginLabel(item)}
+                          </td>
                           <td className="px-2 py-2 border">
                             <input
                               className="w-full border rounded px-2 py-1"
@@ -2713,6 +3810,111 @@ export const TeamSettlementPage: React.FC = () => {
                                   </div>
                                 )}
 
+                                {detail.kind === 'expense_aggregate' && (
+                                  <div>
+                                    <div className="text-sm font-semibold text-slate-800">경비 상세</div>
+                                    <div className="text-xs text-slate-500 mt-1">
+                                      차량·숙소·카드·경비 청구 공제 항목 합계 기준
+                                    </div>
+
+                                    <div className="mt-3 overflow-auto">
+                                      <table className="w-full text-xs border-collapse">
+                                        <thead>
+                                          <tr className="bg-slate-50 text-slate-600">
+                                            <th className="text-left px-2 py-2 border">구분</th>
+                                            <th className="text-left px-2 py-2 border">대상</th>
+                                            <th className="text-left px-2 py-2 border">항목</th>
+                                            <th className="text-left px-2 py-2 border">비고</th>
+                                            <th className="text-right px-2 py-2 border">금액</th>
+                                            <th className="text-center px-2 py-2 border whitespace-nowrap">더상세</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {detail.rows.length === 0 ? (
+                                            <tr>
+                                              <td className="px-2 py-2 border text-slate-500" colSpan={6}>
+                                                데이터 없음
+                                              </td>
+                                            </tr>
+                                          ) : (
+                                            detail.rows.map((row, idx) => {
+                                              const hasMoreDetail = row.details.length > 0;
+                                              const isMoreDetailExpanded = expandedExpenseDetailKeys.has(row.key);
+                                              return (
+                                                <React.Fragment key={`expense-aggregate-row-${row.key}-${idx}`}>
+                                                  <tr className="bg-white">
+                                                    <td className="px-2 py-2 border text-slate-800 font-medium">{row.originLabel}</td>
+                                                    <td className="px-2 py-2 border">{row.subject}</td>
+                                                    <td className="px-2 py-2 border">{row.category}</td>
+                                                    <td className="px-2 py-2 border">{row.memo || '-'}</td>
+                                                    <td className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                                    <td className="px-2 py-2 border text-center">
+                                                      {hasMoreDetail ? (
+                                                        <button
+                                                          type="button"
+                                                          className={ghostButtonClassName}
+                                                          onClick={() => toggleExpenseDetailExpanded(row.key)}
+                                                        >
+                                                          {isMoreDetailExpanded ? '닫기' : '더상세'}
+                                                        </button>
+                                                      ) : (
+                                                        <span className="text-slate-400">-</span>
+                                                      )}
+                                                    </td>
+                                                  </tr>
+
+                                                  {hasMoreDetail && isMoreDetailExpanded && (
+                                                    <tr className="bg-slate-50">
+                                                      <td className="px-3 py-3 border" colSpan={6}>
+                                                        <div className="rounded-md border bg-white p-3">
+                                                          <div className="text-xs font-semibold text-slate-700">
+                                                            {row.originLabel}별 경비
+                                                          </div>
+                                                          <div className="mt-2 overflow-auto">
+                                                            <table className="w-full text-xs border-collapse">
+                                                              <thead>
+                                                                <tr className="bg-slate-50 text-slate-600">
+                                                                  <th className="text-left px-2 py-2 border">대상</th>
+                                                                  <th className="text-left px-2 py-2 border">항목</th>
+                                                                  <th className="text-left px-2 py-2 border">비고</th>
+                                                                  <th className="text-right px-2 py-2 border">세부</th>
+                                                                  <th className="text-right px-2 py-2 border">금액</th>
+                                                                </tr>
+                                                              </thead>
+                                                              <tbody>
+                                                                {row.details.map((child, childIdx) => (
+                                                                  <tr key={`expense-aggregate-child-${row.key}-${childIdx}`} className="bg-white">
+                                                                    <td className="px-2 py-2 border">{child.subject || child.label}</td>
+                                                                    <td className="px-2 py-2 border">{child.category || '-'}</td>
+                                                                    <td className="px-2 py-2 border">{child.note || '-'}</td>
+                                                                    <td className="px-2 py-2 border text-right">{child.allocation || '-'}</td>
+                                                                    <td className="px-2 py-2 border text-right">{formatCurrency(child.amount)}</td>
+                                                                  </tr>
+                                                                ))}
+                                                              </tbody>
+                                                            </table>
+                                                          </div>
+                                                        </div>
+                                                      </td>
+                                                    </tr>
+                                                  )}
+                                                </React.Fragment>
+                                              );
+                                            })
+                                          )}
+                                        </tbody>
+                                      </table>
+                                    </div>
+
+                                    <div className="mt-3 text-sm">
+                                      <div className="flex items-center justify-between mt-1">
+                                        <div className="text-slate-600">총금액</div>
+                                        <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
                                 {detail.kind === 'team_expense_claim' && (
                                   <div>
                                     <div className="text-sm font-semibold text-slate-800">경비 차감 상세</div>
@@ -2767,9 +3969,12 @@ export const TeamSettlementPage: React.FC = () => {
                         )}
                       </React.Fragment>
                     );
-                  })}
-                </tbody>
-              </table>
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
             </div>
 
             <div className="mt-6">

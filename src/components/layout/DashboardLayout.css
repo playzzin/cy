@@ -640,6 +640,31 @@ a {
     color: #0284c7;
 }
 
+.app.cheongyeon-mode.cy-light .cheongyeon-header .header-btn {
+    color: #475569 !important;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-header .header-btn:hover {
+    background: #f1f5f9 !important;
+    color: #0284c7 !important;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-header .fallback-icon {
+    color: #475569 !important;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-header .header-profile-position {
+    color: #334155 !important;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-header .header-profile-img {
+    border-color: #cbd5e1 !important;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-header .header-quick-tool-group {
+    border-right-color: rgba(100, 116, 139, 0.24);
+}
+
 .app.cheongyeon-mode.cy-light .header-tool-btn.active {
     background: #e0f2fe !important;
     color: #0284c7 !important;
@@ -1644,4 +1669,509 @@ a {
 .submenu-leaf-item:hover .submenu-open-new-btn,
 .nested-leaf-item:hover .submenu-open-new-btn {
     opacity: 1 !important;
+}
+
+/* Dashboard2 Codeit-inspired page shell */
+body.dashboard2-codeit-theme {
+    background: #ffffff !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode {
+    background: #ffffff !important;
+    color: #333236 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode #main-header {
+    background: #ffffff !important;
+    color: #333236 !important;
+    border-bottom: 1px solid #e8eaf1 !important;
+    box-shadow: 0 1px 0 rgba(21, 27, 45, 0.04);
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode #main-content.cheongyeon-main {
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #333236 !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode .cheongyeon-top-nav-link {
+    color: rgba(51, 50, 54, 0.78) !important;
+    font-weight: 800;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode .cheongyeon-top-nav-link:hover,
+body.dashboard2-codeit-theme .app.cheongyeon-mode .cheongyeon-top-nav-link.active {
+    color: #333236 !important;
+    border-bottom-color: #4f7cff !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode .cheongyeon-top-nav-link::after {
+    background: linear-gradient(90deg, #4f7cff, #9d2cff) !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode .cheongyeon-header-logo {
+    background: #f7f8fb !important;
+    border-color: #e2e5ee !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode .header-btn {
+    color: #5f6472 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode .header-btn:hover {
+    background: #f2f4f8 !important;
+    color: #4f7cff !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode .header-quick-tool-group {
+    border-right-color: #e2e5ee !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode .cheongyeon-top-nav-dropdown {
+    background: #ffffff !important;
+    border: 1px solid #e2e5ee !important;
+    box-shadow: 0 18px 45px rgba(21, 27, 45, 0.12) !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode .cheongyeon-top-nav-sub-item {
+    background: #ffffff !important;
+    border-color: #eef0f6 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode .cheongyeon-top-nav-sub-title {
+    color: #333236 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode.cy-light #main-content .codeit-dashboard2 .text-white,
+body.dashboard2-codeit-theme .app.cheongyeon-mode.cy-light #main-content .codeit-dashboard2 [class~="text-white"] {
+    color: #ffffff !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode.cy-light #main-content .codeit-dashboard2 [class*="bg-[#080c16]"] {
+    background-color: #080c16 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode.cy-light #main-content .codeit-dashboard2 [class*="bg-[#111827]"] {
+    background-color: #111827 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode.cy-light #main-content .codeit-dashboard2 [class*="bg-[#131d2e]"] {
+    background-color: #131d2e !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode.cy-light #main-content .codeit-dashboard2 [class*="bg-[#182133]"] {
+    background-color: #182133 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode.cy-light #main-content .codeit-dashboard2 [class*="bg-[#273244]"] {
+    background-color: #273244 !important;
+}
+
+/* Dashboard2 dark-mode readability */
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) {
+    background: #0b1120 !important;
+    color: #e5edf8 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-header {
+    background: #0f172a !important;
+    color: #e5edf8 !important;
+    border-bottom-color: #243049 !important;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content.cheongyeon-main {
+    background: #0b1120 !important;
+    color: #e5edf8 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) .cheongyeon-header-logo,
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) .header-quick-tool-group {
+    background: #111827 !important;
+    border-color: #26324d !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) .header-btn {
+    color: #cbd5e1 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) .header-btn:hover {
+    background: #172033 !important;
+    color: #9db6ff !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) .cheongyeon-top-nav-link {
+    color: rgba(226, 232, 240, 0.82) !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) .cheongyeon-top-nav-link:hover,
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) .cheongyeon-top-nav-link.active {
+    color: #ffffff !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) .cheongyeon-top-nav-dropdown {
+    background: #111827 !important;
+    border-color: #2b3854 !important;
+    box-shadow: 0 22px 55px rgba(0, 0, 0, 0.36) !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) .cheongyeon-top-nav-sub-item {
+    background: #0f172a !important;
+    border-color: #26324d !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) .cheongyeon-top-nav-sub-title {
+    color: #f8fafc !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 {
+    background: #0b1120 !important;
+    color: #e5edf8 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 nav {
+    background: rgba(15, 23, 42, 0.94) !important;
+    border-color: #243049 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 footer,
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="bg-[#f7f8fb]"] {
+    background-color: #0f172a !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .bg-white,
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class~="bg-white"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="bg-[#ffffff]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .bg-\[\#ffffff\] {
+    background-color: #111827 !important;
+    color: #e5edf8 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="bg-[#fbfcff]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="bg-[#f0f4ff]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="bg-[#f6f5ff]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="bg-[#dcfce7]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="bg-[#ecfff9]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="bg-[#fff4f0]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="bg-[#f8fafc]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .bg-\[\#fbfcff\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .bg-\[\#f0f4ff\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .bg-\[\#f6f5ff\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .bg-\[\#dcfce7\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .bg-\[\#ecfff9\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .bg-\[\#fff4f0\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .bg-\[\#f8fafc\] {
+    background-color: #172033 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="bg-[#080c16]"] {
+    background-color: #050816 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="bg-[#111827]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="bg-[#131d2e]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="bg-[#182133]"] {
+    background-color: #111827 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="bg-[#273244]"] {
+    background-color: #243049 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#24242a]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#111827]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#333236]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#24242a\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#111827\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#333236\] {
+    color: #f8fafc !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#4b5563]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#334155]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#475569]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#596173]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#656b7a]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#7a8191]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#4b5563\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#334155\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#475569\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#596173\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#656b7a\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#7a8191\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 nav button:not([class*="text-[#4f7cff]"]) {
+    color: #cbd5e1 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-white,
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class~="text-white"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#ffffff]"] {
+    color: #ffffff !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#4f7cff\] {
+    color: #9db6ff !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#1d4ed8]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#1d4ed8\] {
+    color: #93c5fd !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#5b43d6]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#7c3aed]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#5b43d6\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#7c3aed\] {
+    color: #c4b5fd !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#00a678]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#00b894]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#047857]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#00a678\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#00b894\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#047857\] {
+    color: #5eead4 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#0891b2]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#0891b2\] {
+    color: #67e8f9 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#c2410c]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#d3542f]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="text-[#ff8a00]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#c2410c\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#d3542f\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 .text-\[\#ff8a00\] {
+    color: #fdba74 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="border-[#dce2ef]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="border-[#d1fae5]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="border-[#a7f3d0]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="border-[#cbd7ff]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="border-[#dbe3ef]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="border-[#dedff5]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="border-[#dfe3ef]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="border-[#e2e8f0]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="border-[#e2e5ee]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="border-[#e4e8f2]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="border-[#e8eaf1]"],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content .codeit-dashboard2 [class*="border-[#eef0f6]"] {
+    border-color: #2b3854 !important;
+}
+
+.codeit-dashboard2 .cy-flow-line::after {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: 0;
+    width: 28%;
+    height: 6px;
+    border-radius: 8px;
+    background: linear-gradient(90deg, rgba(79, 124, 255, 0), #4f7cff, rgba(0, 184, 148, 0));
+    animation: cy-dashboard2-flow 3s ease-in-out infinite;
+}
+
+@keyframes cy-dashboard2-flow {
+    0% {
+        transform: translateX(0);
+        opacity: 0;
+    }
+
+    18% {
+        opacity: 1;
+    }
+
+    82% {
+        opacity: 1;
+    }
+
+    100% {
+        transform: translateX(260%);
+        opacity: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .codeit-dashboard2 .cy-flow-line::after {
+        animation: none;
+    }
+}
+
+/* Final Dashboard2 theme guards */
+body.dashboard2-codeit-theme .app.cheongyeon-mode.cy-light #main-content.cheongyeon-main .codeit-dashboard2 .text-\[\#4f7cff\] {
+    color: #315bdc !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode.cy-light #main-content.cheongyeon-main .codeit-dashboard2 .text-\[\#7a8191\] {
+    color: #596173 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode.cy-light #main-content.cheongyeon-main .codeit-dashboard2 .text-\[\#00a678\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode.cy-light #main-content.cheongyeon-main .codeit-dashboard2 .text-\[\#00b894\] {
+    color: #007a63 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode.cy-light #main-content.cheongyeon-main .codeit-dashboard2 .text-\[\#ff8a00\] {
+    color: #b45309 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content.cheongyeon-main .codeit-dashboard2 .bg-\[\#ffffff\] {
+    background: #111827 !important;
+    color: #e5edf8 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content.cheongyeon-main .codeit-dashboard2 .text-\[\#24242a\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content.cheongyeon-main .codeit-dashboard2 .text-\[\#333236\] {
+    color: #f8fafc !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content.cheongyeon-main .codeit-dashboard2 .text-\[\#4b5563\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content.cheongyeon-main .codeit-dashboard2 .text-\[\#596173\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content.cheongyeon-main .codeit-dashboard2 .text-\[\#656b7a\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content.cheongyeon-main .codeit-dashboard2 .text-\[\#7a8191\] {
+    color: #cbd5e1 !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content.cheongyeon-main .codeit-dashboard2 .text-\[\#4f7cff\] {
+    color: #9db6ff !important;
+}
+
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content.cheongyeon-main .codeit-dashboard2 .text-\[\#5b43d6\],
+body.dashboard2-codeit-theme .app.cheongyeon-mode:not(.cy-light) #main-content.cheongyeon-main .codeit-dashboard2 .text-\[\#7c3aed\] {
+    color: #c4b5fd !important;
+}
+
+/* Dashboard2 theme class fallback: /dashboard2 can render outside .cheongyeon-mode */
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark {
+    background: #0b1120 !important;
+    color: #e5edf8 !important;
+}
+
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark footer,
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-[#f7f8fb]"] {
+    background-color: #0f172a !important;
+}
+
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .bg-white,
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class~="bg-white"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-white/"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-[#ffffff]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .bg-\[\#ffffff\] {
+    background-color: #111827 !important;
+    color: #e5edf8 !important;
+}
+
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-[#fbfcff]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-[#f0f4ff]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-[#f6f5ff]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-[#dcfce7]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-[#ecfff9]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-[#fff4f0]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-[#f8fafc]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .bg-\[\#fbfcff\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .bg-\[\#f0f4ff\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .bg-\[\#f6f5ff\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .bg-\[\#dcfce7\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .bg-\[\#ecfff9\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .bg-\[\#fff4f0\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .bg-\[\#f8fafc\] {
+    background-color: #172033 !important;
+}
+
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-[#080c16]"] {
+    background-color: #050816 !important;
+}
+
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-[#111827]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-[#131d2e]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-[#182133]"] {
+    background-color: #111827 !important;
+}
+
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="bg-[#273244]"] {
+    background-color: #243049 !important;
+}
+
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#111827]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#24242a]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#333236]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#111827\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#24242a\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#333236\] {
+    color: #f8fafc !important;
+}
+
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#334155]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#475569]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#4b5563]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#596173]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#656b7a]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#7a8191]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#334155\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#475569\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#4b5563\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#596173\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#656b7a\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#7a8191\] {
+    color: #cbd5e1 !important;
+}
+
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#4f7cff]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#4f7cff\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#1d4ed8]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#1d4ed8\] {
+    color: #93c5fd !important;
+}
+
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#5b43d6]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#7c3aed]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#5b43d6\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#7c3aed\] {
+    color: #c4b5fd !important;
+}
+
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#00a678]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#00b894]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#047857]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#00a678\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#00b894\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#047857\] {
+    color: #5eead4 !important;
+}
+
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#0891b2]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#0891b2\] {
+    color: #67e8f9 !important;
+}
+
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#c2410c]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#d3542f]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="text-[#ff8a00]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#c2410c\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#d3542f\],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark .text-\[\#ff8a00\] {
+    color: #fdba74 !important;
+}
+
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-[#a7f3d0]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-[#cbd7ff]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-[#d1fae5]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-[#dbe3ef]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-[#dce2ef]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-[#dedff5]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-[#dfe3ef]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-[#e2e5ee]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-[#e2e8f0]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-[#e4e8f2]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-[#e8eaf1]"],
+body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-[#eef0f6]"] {
+    border-color: #2b3854 !important;
 }

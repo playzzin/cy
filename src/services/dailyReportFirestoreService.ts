@@ -140,6 +140,27 @@ export const dailyReportFirestoreService = {
         toast.updated('report');
     },
 
+    async updateReportsBatch(reports: Array<{ id: string; data: Partial<DailyReportInputZod> }>): Promise<void> {
+        const validReports = reports.filter(report => report.id);
+        const chunkSize = 450;
+
+        for (let index = 0; index < validReports.length; index += chunkSize) {
+            const batch = writeBatch(db);
+            validReports.slice(index, index + chunkSize).forEach(({ id, data }) => {
+                const docRef = doc(db, COLLECTION_NAME, id).withConverter(reportConverter);
+                batch.update(docRef, {
+                    ...data,
+                    updatedAt: serverTimestamp(),
+                } as any);
+            });
+            await batch.commit();
+        }
+
+        if (validReports.length > 0) {
+            toast.updated('report');
+        }
+    },
+
     async deleteReport(id: string): Promise<void> {
         await deleteDoc(doc(db, COLLECTION_NAME, id));
         toast.deleted('report', 1);

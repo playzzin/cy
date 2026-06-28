@@ -10,6 +10,21 @@ export interface TaskComment {
     isSystem: boolean;
 }
 
+export interface TaskAutomationInfo {
+    status: 'in_progress' | 'completed' | 'failed';
+    source?: 'browser' | 'codex_cli';
+    startedAt?: string;
+    completedAt?: string;
+    originalTitle?: string;
+    updatedTitle?: string;
+    feedback?: string;
+    error?: string;
+    runId?: string;
+    workerHost?: string;
+    exitCode?: number;
+    logPath?: string;
+}
+
 export interface Task {
     id: string;
     title: string;
@@ -23,6 +38,7 @@ export interface Task {
     image?: string | null;
     images?: string[];
     comments: TaskComment[];
+    automation?: TaskAutomationInfo;
 }
 
 export const STATUS_CONFIG: Record<string, { color: string; icon: string; label: string }> = {

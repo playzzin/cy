@@ -41,6 +41,7 @@ export interface DailyReportWorkerRow {
     teamName: string | undefined;
     siteId: string;
     siteName: string | undefined;
+    siteAddress?: string | undefined;
     responsibleTeamId?: string | undefined;
     responsibleTeamName?: string | undefined;
     siteManagerId?: string | undefined;
@@ -67,6 +68,25 @@ export interface DailyReportWorkerRow {
     createdAt: any;
     workerTeamName?: string | undefined;
     workerTeamId?: string | undefined;
+}
+
+export interface DailyReportWorkerBulkUpdateTarget {
+    reportId: string;
+    workerId: string;
+    workerIndex?: number;
+    updates: Partial<DailyReportWorker>;
+}
+
+export interface DailyReportWorkerBulkDeleteTarget {
+    reportId: string;
+    workerId: string;
+    workerIndex?: number;
+}
+
+interface DailyReportUpdateDraft {
+    id: string;
+    oldData: DailyReport;
+    newData: DailyReport;
 }
 
 const toSnapshotText = (value: unknown): string | undefined => {
@@ -186,6 +206,22 @@ const cleanWorker = (worker: any): DailyReportWorker => {
     return cleaned as DailyReportWorker;
 };
 
+const normalizeReportUpdates = (updates: Partial<DailyReport>): Partial<DailyReport> => {
+    let normalizedUpdates: Partial<DailyReport> = {
+        ...updates,
+        ...(updates.date !== undefined ? { date: normalizeLooseDateText(updates.date) } : {})
+    };
+
+    if (Array.isArray(normalizedUpdates.workers)) {
+        normalizedUpdates = {
+            ...normalizedUpdates,
+            workers: normalizedUpdates.workers.map(cleanWorker)
+        };
+    }
+
+    return normalizedUpdates;
+};
+
 const notifyDailyReportSystemMessage = async (
     event: 'dailyReport.created' | 'dailyReport.updated' | 'dailyReport.deleted',
     report: DailyReport,
@@ -217,6 +253,37 @@ const notifyDailyReportSystemMessage = async (
     } catch (error) {
         console.warn('[dailyReportService] system message notification failed:', error);
     }
+};
+
+const buildReportUpdateDraft = async (
+    id: string,
+    existingReport: Partial<DailyReport> & { date: string; teamId: string; siteId: string },
+    updates: Partial<DailyReport>,
+    resolveSiteSnapshot: SiteSnapshotResolver = createSiteSnapshotResolver()
+): Promise<DailyReportUpdateDraft> => {
+    const oldData = await normalizeReportForStats({ id, ...existingReport }, resolveSiteSnapshot);
+    const normalizedUpdates = normalizeReportUpdates(updates);
+    const newData = await normalizeReportForStats({ ...oldData, ...normalizedUpdates } as any, resolveSiteSnapshot);
+
+    return { id, oldData, newData };
+};
+
+const runReportUpdateSideEffects = async (
+    draft: DailyReportUpdateDraft,
+    source = 'dailyReportService'
+): Promise<void> => {
+    await dailyReportService._updateStatsDelta(draft.oldData, draft.newData);
+    await notifyDailyReportSystemMessage('dailyReport.updated', { ...draft.newData, id: draft.id } as DailyReport, draft.oldData, source);
+};
+
+const updateReportFromExistingData = async (
+    id: string,
+    existingReport: Partial<DailyReport> & { date: string; teamId: string; siteId: string },
+    updates: Partial<DailyReport>,
+): Promise<void> => {
+    const draft = await buildReportUpdateDraft(id, existingReport, updates);
+    await dailyReportFirestoreService.updateReport(id, draft.newData as any);
+    await runReportUpdateSideEffects(draft);
 };
 
 export const dailyReportService = {
@@ -293,17 +360,25 @@ export const dailyReportService = {
     },
 
     deleteReports: async (ids: string[]): Promise<void> => {
-        const batch = writeBatch(db);
+        const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
         const oldReports: DailyReport[] = [];
         const resolveSiteSnapshot = createSiteSnapshotResolver();
-        for (const id of ids) {
+        for (const id of uniqueIds) {
             const snap = await getDoc(doc(db, 'daily_reports', id));
             if (snap.exists()) {
                 oldReports.push(await normalizeReportForStats({ id, ...(snap.data() as any) }, resolveSiteSnapshot));
             }
-            batch.delete(doc(db, 'daily_reports', id));
         }
-        await batch.commit();
+
+        const chunkSize = 450;
+        for (let index = 0; index < uniqueIds.length; index += chunkSize) {
+            const batch = writeBatch(db);
+            uniqueIds.slice(index, index + chunkSize).forEach((id) => {
+                batch.delete(doc(db, 'daily_reports', id));
+            });
+            await batch.commit();
+        }
+
         for (const report of oldReports) {
             await dailyReportService._updateStats(report, -1);
             await notifyDailyReportSystemMessage('dailyReport.deleted', report, report, 'dailyReportBulkDelete');
@@ -341,6 +416,8 @@ export const dailyReportService = {
             const ranged = await dailyReportFirestoreService.getReportsByRange({
                 startDate: normalized.startDate,
                 endDate: normalized.endDate,
+                teamId: normalized.teamId,
+                siteId: normalized.siteId,
             });
             return filterReportsByParams(ranged as DailyReport[], normalized);
         }
@@ -408,6 +485,74 @@ export const dailyReportService = {
         }
     },
 
+    _updateStatsDelta: async (oldReport: DailyReport, newReport: DailyReport) => {
+        try {
+            const { manpowerService } = await import('./manpowerService');
+            const { teamService } = await import('./teamService');
+            const { siteService } = await import('./siteService');
+            const { companyService } = await import('./companyService');
+
+            const promises: Promise<any>[] = [];
+            const addDelta = (deltas: Map<string, number>, id: unknown, amount: number, skipUnknownId = false) => {
+                const normalizedId = String(id ?? '').trim();
+                if (!normalizedId) return;
+                if (skipUnknownId && normalizedId.startsWith('unknown')) return;
+                if (!Number.isFinite(amount) || Math.abs(amount) < 0.000001) return;
+                deltas.set(normalizedId, (deltas.get(normalizedId) ?? 0) + amount);
+            };
+            const positiveManDay = (value: unknown): number => {
+                const amount = Number(value ?? 0);
+                return Number.isFinite(amount) && amount > 0 ? amount : 0;
+            };
+            const addEntityDelta = (
+                oldId: unknown,
+                oldAmount: number,
+                newId: unknown,
+                newAmount: number,
+                incrementer: (id: string, amount: number) => Promise<void>
+            ) => {
+                const deltas = new Map<string, number>();
+                addDelta(deltas, oldId, -oldAmount);
+                addDelta(deltas, newId, newAmount);
+                deltas.forEach((amount, id) => {
+                    if (Math.abs(amount) >= 0.000001) {
+                        promises.push(incrementer(id, amount));
+                    }
+                });
+            };
+
+            const workerDeltas = new Map<string, number>();
+            oldReport.workers.forEach(worker => {
+                addDelta(workerDeltas, worker.workerId, -positiveManDay(worker.manDay), true);
+            });
+            newReport.workers.forEach(worker => {
+                addDelta(workerDeltas, worker.workerId, positiveManDay(worker.manDay), true);
+            });
+            workerDeltas.forEach((amount, workerId) => {
+                if (Math.abs(amount) >= 0.000001) {
+                    promises.push(manpowerService.incrementManDay(workerId, amount));
+                }
+            });
+
+            const oldTotalManDay = positiveManDay(oldReport.totalManDay);
+            const newTotalManDay = positiveManDay(newReport.totalManDay);
+            addEntityDelta(oldReport.teamId, oldTotalManDay, newReport.teamId, newTotalManDay, teamService.incrementManDay);
+            addEntityDelta(oldReport.siteId, oldTotalManDay, newReport.siteId, newTotalManDay, siteService.incrementManDay);
+            addEntityDelta(toSnapshotText(oldReport.companyId), oldTotalManDay, toSnapshotText(newReport.companyId), newTotalManDay, companyService.incrementManDay);
+            addEntityDelta(toSnapshotText(oldReport.constructorCompanyId), oldTotalManDay, toSnapshotText(newReport.constructorCompanyId), newTotalManDay, companyService.incrementConstructorManDay);
+            addEntityDelta(toSnapshotText(oldReport.partnerId), oldTotalManDay, toSnapshotText(newReport.partnerId), newTotalManDay, companyService.incrementPartnerManDay);
+
+            const results = await Promise.allSettled(promises);
+            results.forEach((result) => {
+                if (result.status === 'rejected') {
+                    console.warn('[dailyReportService] cumulative man-day delta update failed:', result.reason);
+                }
+            });
+        } catch (error) {
+            console.warn('[dailyReportService] _updateStatsDelta failed (ignored):', error);
+        }
+    },
+
     getWorkerRows: async (params: {
         startDate?: string;
         endDate?: string;
@@ -429,6 +574,7 @@ export const dailyReportService = {
                     teamName: report.teamName,
                     siteId: report.siteId,
                     siteName: report.siteName,
+                    ...(toSnapshotText((report as any).siteAddress) ? { siteAddress: toSnapshotText((report as any).siteAddress) } : {}),
                     responsibleTeamId: report.responsibleTeamId ?? report.teamId,
                     responsibleTeamName: report.responsibleTeamName ?? report.teamName,
                     siteManagerId: toSnapshotText((report as any).siteManagerId),
@@ -469,6 +615,7 @@ export const dailyReportService = {
                     teamName: report.teamName,
                     siteId: report.siteId,
                     siteName: report.siteName,
+                    ...(toSnapshotText((report as any).siteAddress) ? { siteAddress: toSnapshotText((report as any).siteAddress) } : {}),
                     responsibleTeamId: report.responsibleTeamId ?? report.teamId,
                     responsibleTeamName: report.responsibleTeamName ?? report.teamName,
                     siteManagerId: toSnapshotText((report as any).siteManagerId),
@@ -681,7 +828,180 @@ export const dailyReportService = {
         });
     },
 
-    updateWorkerInReport: async (reportId: string, workerId: string, updates: Partial<DailyReportWorker>, workerIndex?: number): Promise<void> => {
+    bulkUpdateWorkersInReports: async (
+        targets: DailyReportWorkerBulkUpdateTarget[]
+    ): Promise<{ updatedReportCount: number; updatedWorkerCount: number }> => {
+        const grouped = new Map<string, DailyReportWorkerBulkUpdateTarget[]>();
+        targets.forEach((target) => {
+            if (!target.reportId) return;
+            const current = grouped.get(target.reportId) ?? [];
+            current.push(target);
+            grouped.set(target.reportId, current);
+        });
+
+        let updatedReportCount = 0;
+        let updatedWorkerCount = 0;
+        const reportUpdateDrafts: DailyReportUpdateDraft[] = [];
+        const resolveSiteSnapshot = createSiteSnapshotResolver();
+
+        for (const [reportId, reportTargets] of grouped.entries()) {
+            const report = await dailyReportService.getReport(reportId);
+            if (!report) throw new Error('Report not found');
+
+            const updatedWorkers = [...report.workers];
+            const touchedIndexes = new Set<number>();
+
+            for (const target of reportTargets) {
+                const index = typeof target.workerIndex === 'number'
+                    ? target.workerIndex
+                    : updatedWorkers.findIndex(worker => worker.workerId === target.workerId);
+                if (index === -1) throw new Error('Worker not found in report');
+                if (updatedWorkers[index]?.workerId !== target.workerId) {
+                    throw new Error('Worker row no longer matches report');
+                }
+                if (touchedIndexes.has(index)) {
+                    throw new Error('Duplicate worker update target');
+                }
+
+                const nextWorker = syncPayTypeFields(
+                    { ...updatedWorkers[index], ...target.updates } as DailyReportWorker,
+                    { returnUndefinedOnEmpty: true, priority: 'salaryModel' }
+                );
+                const nextManDay = Number(nextWorker.manDay ?? 0);
+                const nextUnitPrice = Number(nextWorker.unitPrice ?? 0);
+                if (!Number.isFinite(nextManDay) || nextManDay < 0) {
+                    throw new Error('Invalid manDay');
+                }
+                if (!Number.isFinite(nextUnitPrice) || nextUnitPrice < 0) {
+                    throw new Error('Invalid unitPrice');
+                }
+
+                updatedWorkers[index] = {
+                    ...nextWorker,
+                    manDay: nextManDay,
+                    unitPrice: nextUnitPrice,
+                };
+                touchedIndexes.add(index);
+                updatedWorkerCount += 1;
+            }
+
+            const totalManDay = updatedWorkers.reduce((sum, worker) => sum + (worker.manDay || 0), 0);
+            const totalAmount = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) * (worker.unitPrice || 0)), 0);
+
+            const draft = await buildReportUpdateDraft(reportId, report, {
+                workers: updatedWorkers,
+                totalManDay,
+                totalAmount,
+            }, resolveSiteSnapshot);
+            reportUpdateDrafts.push(draft);
+            updatedReportCount += 1;
+        }
+
+        if (reportUpdateDrafts.length > 0) {
+            await dailyReportFirestoreService.updateReportsBatch(
+                reportUpdateDrafts.map(draft => ({ id: draft.id, data: draft.newData as any }))
+            );
+
+            for (const draft of reportUpdateDrafts) {
+                await runReportUpdateSideEffects(draft, 'dailyReportBulkUpdate');
+            }
+        }
+
+        return { updatedReportCount, updatedWorkerCount };
+    },
+
+    deleteWorkersFromReports: async (
+        targets: DailyReportWorkerBulkDeleteTarget[]
+    ): Promise<{ deletedReportCount: number; updatedReportCount: number; deletedWorkerCount: number }> => {
+        const grouped = new Map<string, DailyReportWorkerBulkDeleteTarget[]>();
+        targets.forEach((target) => {
+            if (!target.reportId) return;
+            const current = grouped.get(target.reportId) ?? [];
+            current.push(target);
+            grouped.set(target.reportId, current);
+        });
+
+        let deletedWorkerCount = 0;
+        const reportUpdateDrafts: DailyReportUpdateDraft[] = [];
+        const reportIdsToDelete: string[] = [];
+        const resolveSiteSnapshot = createSiteSnapshotResolver();
+
+        for (const [reportId, reportTargets] of grouped.entries()) {
+            const report = await dailyReportService.getReport(reportId);
+            if (!report) throw new Error('Report not found');
+
+            const deleteIndexes = new Set<number>();
+
+            for (const target of reportTargets) {
+                const index = typeof target.workerIndex === 'number'
+                    ? target.workerIndex
+                    : report.workers.findIndex((worker, workerIndex) => (
+                        !deleteIndexes.has(workerIndex) && worker.workerId === target.workerId
+                    ));
+
+                if (index < 0 || index >= report.workers.length) {
+                    throw new Error('Worker not found in report');
+                }
+                if (report.workers[index]?.workerId !== target.workerId) {
+                    throw new Error('Worker row no longer matches report');
+                }
+                if (deleteIndexes.has(index)) {
+                    throw new Error('Duplicate worker delete target');
+                }
+
+                deleteIndexes.add(index);
+            }
+
+            const updatedWorkers = report.workers
+                .filter((_, index) => !deleteIndexes.has(index))
+                .map(cleanWorker);
+
+            deletedWorkerCount += deleteIndexes.size;
+
+            if (updatedWorkers.length === 0) {
+                reportIdsToDelete.push(reportId);
+                continue;
+            }
+
+            const totalManDay = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) as number), 0);
+            const totalAmount = updatedWorkers.reduce((sum, worker) => sum + (((worker.manDay || 0) as number) * ((worker.unitPrice || 0) as number)), 0);
+
+            const draft = await buildReportUpdateDraft(reportId, report, {
+                workers: updatedWorkers,
+                totalManDay,
+                totalAmount,
+            }, resolveSiteSnapshot);
+            reportUpdateDrafts.push(draft);
+        }
+
+        if (reportUpdateDrafts.length > 0) {
+            await dailyReportFirestoreService.updateReportsBatch(
+                reportUpdateDrafts.map(draft => ({ id: draft.id, data: draft.newData as any }))
+            );
+
+            for (const draft of reportUpdateDrafts) {
+                await runReportUpdateSideEffects(draft, 'dailyReportBulkDelete');
+            }
+        }
+
+        if (reportIdsToDelete.length > 0) {
+            await dailyReportService.deleteReports(reportIdsToDelete);
+        }
+
+        return {
+            deletedReportCount: reportIdsToDelete.length,
+            updatedReportCount: reportUpdateDrafts.length,
+            deletedWorkerCount,
+        };
+    },
+
+    updateWorkerInReport: async (
+        reportId: string,
+        workerId: string,
+        updates: Partial<DailyReportWorker>,
+        workerIndex?: number,
+        reportUpdates: Partial<DailyReport> = {}
+    ): Promise<void> => {
         const report = await dailyReportService.getReport(reportId);
         if (!report) throw new Error('Report not found');
 
@@ -712,7 +1032,8 @@ export const dailyReportService = {
         const totalManDay = updatedWorkers.reduce((sum, worker) => sum + (worker.manDay || 0), 0);
         const totalAmount = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) * (worker.unitPrice || 0)), 0);
 
-        await dailyReportService.updateReport(reportId, {
+        await updateReportFromExistingData(reportId, report, {
+            ...reportUpdates,
             workers: updatedWorkers,
             totalManDay,
             totalAmount,
@@ -756,7 +1077,7 @@ export const dailyReportService = {
         const totalManDay = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) as number), 0);
         const totalAmount = updatedWorkers.reduce((sum, worker) => sum + (((worker.manDay || 0) as number) * ((worker.unitPrice || 0) as number)), 0);
 
-        await dailyReportService.updateReport(reportId, {
+        await updateReportFromExistingData(reportId, report, {
             workers: updatedWorkers,
             totalManDay,
             totalAmount,

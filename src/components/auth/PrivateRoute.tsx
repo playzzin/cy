@@ -1,6 +1,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import AppIntroScreen from '../common/AppIntroScreen';
 
 interface PrivateRouteProps {
     children: React.ReactNode;
@@ -11,11 +12,7 @@ const PrivateRoute: React.FC<PrivateRouteProps> = ({ children }) => {
     const location = useLocation();
 
     if (loading) {
-        return (
-            <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm font-semibold text-slate-500">
-                인증 상태를 확인하는 중입니다...
-            </div>
-        );
+        return <AppIntroScreen message="인증 상태를 확인하는 중" />;
     }
 
     if (!currentUser) {

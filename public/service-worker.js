@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'cy-erp-pwa-v2';
+const CACHE_VERSION = 'cy-erp-pwa-v3';
 const APP_SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
 const APP_SHELL_URLS = ['/', '/index.html'];
@@ -16,6 +16,13 @@ const shouldIgnoreRequest = (request) => {
 const isStaticAsset = (request) => (
   ['font', 'image', 'script', 'style', 'worker'].includes(request.destination)
 );
+
+const isPwaInstallAsset = (request) => {
+  const url = new URL(request.url);
+  return url.pathname === '/manifest.json' || url.pathname.startsWith('/icons/');
+};
+
+const fetchFresh = (request) => fetch(new Request(request, { cache: 'reload' }));
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -52,6 +59,13 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => caches.match('/index.html'))
+    );
+    return;
+  }
+
+  if (isPwaInstallAsset(request)) {
+    event.respondWith(
+      fetchFresh(request).catch(() => caches.match(request, { ignoreSearch: true }))
     );
     return;
   }

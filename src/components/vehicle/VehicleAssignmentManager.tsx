@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowRightFromBracket, faCar, faUser, faUsers } from '@fortawesome/free-solid-svg-icons';
+import { faArrowRightFromBracket, faCar, faPen, faRotateLeft, faTrash, faUser, faUsers } from '@fortawesome/free-solid-svg-icons';
 import { format, subDays } from 'date-fns';
 import { Vehicle, VehicleAssigneeType, VehicleAssignmentRecord } from '../../types/vehicle';
 import { Worker } from '../../services/manpowerService';
@@ -11,6 +11,7 @@ import { toast, showConfirmAlert } from '../../utils/swal';
 import { hexToRgba, normalizeHexColor } from '../../utils/color';
 import { normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
 import { buildOfficeStaffAssignmentOptions, isOfficeAssignmentTeam } from '../../utils/supportAssignmentTargets';
+import { getFriendlyErrorMessage, isDeadlineExceededError } from '../../utils/firebaseError';
 
 type AssigneeMode = VehicleAssigneeType;
 
@@ -54,6 +55,19 @@ const assignmentLabel = (vehicle: Vehicle): string => {
     return '미배정';
 };
 
+const normalizeKey = (value: unknown): string => String(value ?? '').trim();
+
+const getWorkerOptionId = (worker: Worker): string => (
+    normalizeKey(worker.id) || normalizeKey(worker.legacyId) || normalizeKey(worker.uid) || normalizeKey(worker.name)
+);
+
+const matchesWorkerReference = (worker: Worker, id?: unknown, name?: unknown): boolean => {
+    const targetId = normalizeKey(id);
+    const targetName = normalizeKey(name);
+    const ids = [worker.id, worker.legacyId, worker.uid, worker.name].map(normalizeKey).filter(Boolean);
+    return Boolean((targetId && ids.includes(targetId)) || (targetName && normalizeKey(worker.name) === targetName));
+};
+
 export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> = ({
     vehicles,
     workers = [],
@@ -69,11 +83,13 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
     const [selectedTeamId, setSelectedTeamId] = useState('');
     const [selectedWorkerId, setSelectedWorkerId] = useState('');
     const [startDate, setStartDate] = useState(today);
+    const [endDate, setEndDate] = useState('');
     const [autoUnassignExisting, setAutoUnassignExisting] = useState(true);
     const [saving, setSaving] = useState(false);
     const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
     const [assignmentRecords, setAssignmentRecords] = useState<VehicleAssignmentRecord[]>([]);
     const [assignmentRecordsLoading, setAssignmentRecordsLoading] = useState(false);
+    const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
 
     useEffect(() => {
         if (selectedTeamId || selectableTeams.length === 0) return;
@@ -153,14 +169,13 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
     const filteredWorkers = useMemo<AssignmentPersonOption[]>(() => {
         if (selectedTeamIsOffice) return officeStaffOptions;
         const workerOptions = workers.map((worker) => ({
-            id: String(worker.id ?? ''),
+            id: getWorkerOptionId(worker),
             name: String(worker.name ?? ''),
             teamId: worker.teamId,
             teamName: worker.teamName,
             source: 'worker' as const
         })).filter((worker) => Boolean(worker.id && worker.name));
-        if (!selectedTeamId) return workerOptions;
-        return workerOptions.filter((worker) => String(worker.teamId ?? '') === String(selectedTeamId));
+        return workerOptions;
     }, [officeStaffOptions, selectedTeamId, selectedTeamIsOffice, workers]);
 
     useEffect(() => {
@@ -189,8 +204,8 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
         }
 
         setMode('WORKER');
-        setSelectedWorkerId(assignment.assigneeId);
-        const assignedWorker = workers.find((worker) => String(worker.id) === String(assignment.assigneeId));
+        const assignedWorker = workers.find((worker) => matchesWorkerReference(worker, assignment.assigneeId, assignment.assigneeName));
+        setSelectedWorkerId(assignedWorker ? getWorkerOptionId(assignedWorker) : assignment.assigneeId);
         if (assignedWorker?.teamId) setSelectedTeamId(assignedWorker.teamId);
         if (!assignedWorker && officeStaffOptions.some((staff) => String(staff.id) === String(assignment.assigneeId))) {
             setSelectedTeamId(officeStaffOptions[0]?.teamId ?? '');
@@ -199,6 +214,8 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
 
     const pickVehicle = (vehicle: Vehicle) => {
         setSelectedVehicleId(vehicle.id);
+        setEditingAssignmentId(null);
+        setEndDate('');
         const latestAssignment = assignmentRecords
             .filter((record) => String(record.vehicleId) === String(vehicle.id))
             .sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')))[0];
@@ -237,6 +254,31 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
         pickVehicleById(String(initialVehicleId));
     }, [initialVehicleId, vehiclesById, workers, assignmentRecords]);
 
+    const handleStartDateChange = (value: string) => {
+        setStartDate(toShortYearDateInputValue(normalizeTypedDateInput(value) ?? value) || value);
+    };
+
+    const handleEndDateChange = (value: string) => {
+        setEndDate(value ? (toShortYearDateInputValue(normalizeTypedDateInput(value) ?? value) || value) : '');
+    };
+
+    const handleEditAssignment = (assignment: VehicleAssignmentRecord) => {
+        setSelectedVehicleId(assignment.vehicleId);
+        setEditingAssignmentId(assignment.id);
+        selectTargetFromAssignment(assignment);
+        setStartDate(toShortYearDateInputValue(assignment.startDate) || assignment.startDate);
+        setEndDate(toShortYearDateInputValue(assignment.endDate) || '');
+        setAutoUnassignExisting(false);
+    };
+
+    const handleCancelEditAssignment = () => {
+        setEditingAssignmentId(null);
+        setEndDate('');
+        setStartDate(today);
+        setAutoUnassignExisting(true);
+        if (selectedVehicle) pickVehicle(selectedVehicle);
+    };
+
     const handleAssign = async () => {
         if (!selectedVehicle) {
             toast.error('차량을 선택해주세요.');
@@ -251,10 +293,62 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
             toast.error('배정 정보를 확인해주세요.');
             return;
         }
+        const normalizedEndDate = endDate ? normalizeTypedDateInput(endDate) : '';
+        if (endDate && !normalizedEndDate) {
+            toast.error('배정 종료일을 확인해주세요.');
+            return;
+        }
+        if (normalizedEndDate && normalizedEndDate < normalizedStartDate) {
+            toast.error('배정 종료일은 시작일보다 빠를 수 없습니다.');
+            return;
+        }
         setStartDate(toShortYearDateInputValue(normalizedStartDate));
+        setEndDate(toShortYearDateInputValue(normalizedEndDate));
 
         if (!selectedTarget) {
             toast.error(mode === 'TEAM' ? '팀을 선택해주세요.' : '운전자를 선택해주세요.');
+            return;
+        }
+
+        const editingAssignment = editingAssignmentId
+            ? assignmentRecords.find((record) => String(record.id) === String(editingAssignmentId))
+            : null;
+        if (editingAssignment) {
+            const result = await showConfirmAlert(
+                '차량 배정 이력 수정',
+                `${selectedVehicle.licensePlate} 차량의 배정 이력을 ${selectedTarget.name}${selectedTarget.type === 'TEAM' ? '(팀)' : '(운전자)'} · ${normalizedStartDate}${normalizedEndDate ? `~${normalizedEndDate}` : '~계속'}으로 수정할까요?`
+            );
+            if (!result.isConfirmed) return;
+
+            setSaving(true);
+            try {
+                await vehicleService.updateVehicleAssignment({
+                    ...editingAssignment,
+                    assigneeId: selectedTarget.id,
+                    assigneeType: selectedTarget.type,
+                    assigneeName: selectedTarget.name,
+                    startDate: normalizedStartDate,
+                    endDate: normalizedEndDate || undefined
+                });
+                toast.success('차량 배정 이력이 수정되었습니다.');
+                setEditingAssignmentId(null);
+                setEndDate('');
+                setAutoUnassignExisting(true);
+                await loadAssignmentRecords();
+                onRefresh();
+            } catch (error: unknown) {
+                console.error(error);
+                if (isDeadlineExceededError(error)) {
+                    toast.delayed('차량 배정 수정');
+                    await loadAssignmentRecords().catch((reloadError) => console.error(reloadError));
+                    onRefresh();
+                    return;
+                }
+                const message = getFriendlyErrorMessage(error, '차량 배정 이력 수정에 실패했습니다.');
+                toast.error(message);
+            } finally {
+                setSaving(false);
+            }
             return;
         }
 
@@ -287,7 +381,46 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
             onRefresh();
         } catch (error: unknown) {
             console.error(error);
-            const message = error instanceof Error ? error.message : '차량 배정에 실패했습니다.';
+            if (isDeadlineExceededError(error)) {
+                toast.delayed('차량 배정');
+                await loadAssignmentRecords().catch((reloadError) => console.error(reloadError));
+                onRefresh();
+                return;
+            }
+            const message = getFriendlyErrorMessage(error, '차량 배정에 실패했습니다.');
+            toast.error(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDeleteAssignment = async (assignment: VehicleAssignmentRecord) => {
+        const result = await showConfirmAlert(
+            '차량 배정 이력 삭제',
+            `${assignment.vehiclePlate} · ${assignment.assigneeName} 배정 이력을 삭제할까요?`
+        );
+        if (!result.isConfirmed) return;
+
+        setSaving(true);
+        try {
+            await vehicleService.deleteVehicleAssignment(assignment);
+            if (editingAssignmentId === assignment.id) {
+                setEditingAssignmentId(null);
+                setEndDate('');
+                setAutoUnassignExisting(true);
+            }
+            toast.success('차량 배정 이력이 삭제되었습니다.');
+            await loadAssignmentRecords();
+            onRefresh();
+        } catch (error: unknown) {
+            console.error(error);
+            if (isDeadlineExceededError(error)) {
+                toast.delayed('차량 배정 삭제');
+                await loadAssignmentRecords().catch((reloadError) => console.error(reloadError));
+                onRefresh();
+                return;
+            }
+            const message = getFriendlyErrorMessage(error, '차량 배정 이력 삭제에 실패했습니다.');
             toast.error(message);
         } finally {
             setSaving(false);
@@ -306,7 +439,13 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
             onRefresh();
         } catch (error: unknown) {
             console.error(error);
-            const message = error instanceof Error ? error.message : '차량 배정 해제에 실패했습니다.';
+            if (isDeadlineExceededError(error)) {
+                toast.delayed('차량 배정 해제');
+                await loadAssignmentRecords().catch((reloadError) => console.error(reloadError));
+                onRefresh();
+                return;
+            }
+            const message = getFriendlyErrorMessage(error, '차량 배정 해제에 실패했습니다.');
             toast.error(message);
         } finally {
             setSaving(false);
@@ -345,7 +484,7 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
                             }`}
                         >
                             <FontAwesomeIcon icon={faCar} />
-                            {saving ? '처리 중...' : selectedVehicle?.currentAssigneeId ? '배정 변경' : '차량 배정'}
+                            {saving ? '처리 중...' : editingAssignmentId ? '이력 수정' : selectedVehicle?.currentAssigneeId ? '배정 변경' : '차량 배정'}
                         </button>
                     </div>
                 </div>
@@ -448,14 +587,54 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
                                 </div>
                             )}
 
-                            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-700">
-                                <input
-                                    type="checkbox"
-                                    checked={autoUnassignExisting}
-                                    onChange={(event) => setAutoUnassignExisting(event.target.checked)}
-                                />
-                                기존 배정 자동 해제
-                            </label>
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-1">배정 시작일</label>
+                                    <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        maxLength={10}
+                                        placeholder="YY-MM-DD"
+                                        value={startDate}
+                                        onChange={(event) => handleStartDateChange(event.target.value)}
+                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
+                                    />
+                                </div>
+                                {editingAssignmentId && (
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-600 mb-1">배정 종료일</label>
+                                        <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            maxLength={10}
+                                            placeholder="계속"
+                                            value={endDate}
+                                            onChange={(event) => handleEndDateChange(event.target.value)}
+                                            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
+                                        />
+                                    </div>
+                                )}
+                            </div>
+
+                            {editingAssignmentId ? (
+                                <button
+                                    type="button"
+                                    onClick={handleCancelEditAssignment}
+                                    className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50"
+                                >
+                                    <FontAwesomeIcon icon={faRotateLeft} />
+                                    이력 수정 취소
+                                </button>
+                            ) : (
+                                <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-700">
+                                    <input
+                                        type="checkbox"
+                                        checked={autoUnassignExisting}
+                                        onChange={(event) => setAutoUnassignExisting(event.target.checked)}
+                                    />
+                                    기존 배정 자동 해제
+                                </label>
+                            )}
                         </div>
 
                         {selectedVehicle && (
@@ -482,8 +661,14 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
                         )}
 
                         {selectedVehicle && (
-                            <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                                <h3 className="font-extrabold text-slate-800 mb-3">배정 이력</h3>
+                            <details open={Boolean(editingAssignmentId)} className="group bg-white rounded-2xl border border-slate-200">
+                                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+                                    <span className="font-extrabold text-slate-800">배정 이력</span>
+                                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-extrabold text-slate-500">
+                                        {selectedVehicleAssignments.length}건
+                                    </span>
+                                </summary>
+                                <div className="border-t border-slate-100 p-4">
                                 {assignmentRecordsLoading ? (
                                     <div className="text-sm text-slate-400">불러오는 중...</div>
                                 ) : selectedVehicleAssignments.length === 0 ? (
@@ -496,15 +681,36 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
                                                     <div className="min-w-0">
                                                         <div className="font-extrabold text-slate-800 truncate">{record.assigneeName}</div>
                                                         <div className="text-xs text-slate-500 mt-1">
-                                                            {record.assigneeType === 'TEAM' ? '팀' : '운전자'}
+                                                            {record.assigneeType === 'TEAM' ? '팀' : '운전자'} · {record.startDate || '-'}~{record.endDate || '계속'}
                                                         </div>
+                                                    </div>
+                                                    <div className="flex shrink-0 items-center gap-1">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleEditAssignment(record)}
+                                                            disabled={saving}
+                                                            className="rounded-lg p-2 text-slate-500 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            title="배정 이력 수정"
+                                                        >
+                                                            <FontAwesomeIcon icon={faPen} />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDeleteAssignment(record)}
+                                                            disabled={saving}
+                                                            className="rounded-lg p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            title="배정 이력 삭제"
+                                                        >
+                                                            <FontAwesomeIcon icon={faTrash} />
+                                                        </button>
                                                     </div>
                                                 </div>
                                             </div>
                                         ))}
                                     </div>
                                 )}
-                            </div>
+                                </div>
+                            </details>
                         )}
                     </div>
 

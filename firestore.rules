@@ -1,6 +1,138 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDocPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function hasUserProfile() {
+      return isSignedIn() && exists(userDocPath());
+    }
+
+    function userProfile() {
+      return get(userDocPath()).data;
+    }
+
+    function hasTokenRole(roles) {
+      return isSignedIn()
+        && (
+          request.auth.token.role in roles
+          || request.auth.token.position in roles
+          || request.auth.token.systemRole in roles
+          || (
+            request.auth.token.additionalPositions is list
+            && request.auth.token.additionalPositions.hasAny(roles)
+          )
+        );
+    }
+
+    function hasUserRole(roles) {
+      return hasUserProfile()
+        && (
+          userProfile().role in roles
+          || userProfile().position in roles
+          || userProfile().systemRole in roles
+          || (
+            userProfile().additionalPositions is list
+            && userProfile().additionalPositions.hasAny(roles)
+          )
+        );
+    }
+
+    function hasAnyRole(roles) {
+      return hasTokenRole(roles) || hasUserRole(roles);
+    }
+
+    function isRecruitingAdmin() {
+      return hasAnyRole([
+        'ADMIN',
+        'admin',
+        'administrator',
+        'super_admin',
+        'owner',
+        'DEV',
+        'dev',
+        'Dev',
+        'DEVELOPER',
+        'developer',
+        'Developer',
+        'SYSTEM_ADMIN',
+        'system_admin',
+        'jhl2VTnk9V3C4EiZ4QQI',
+        'pos_jhl2VTnk9V3C4EiZ4QQI',
+        '관리자',
+        '사장',
+        '실장',
+        '개발',
+        '개발자',
+        '시스템관리자'
+      ]);
+    }
+
+    function canRecruitingSettle() {
+      return isRecruitingAdmin()
+        || hasAnyRole([
+          'PAYROLL_MANAGER',
+          'payroll_manager',
+          '급여담당',
+          '정산담당',
+          '정산관리자'
+        ]);
+    }
+
+    function canRecruitingRegister() {
+      return canRecruitingSettle()
+        || hasAnyRole([
+          'OFFICE_STAFF',
+          'office_staff',
+          '사무실직원',
+          '사무직원'
+        ]);
+    }
+
+    function canRecruitingRead() {
+      return canRecruitingRegister()
+        || hasAnyRole([
+          'SITE_MANAGER',
+          'site_manager',
+          'MANAGER',
+          'manager',
+          '매니저',
+          '현장관리자',
+          '현장소장'
+        ]);
+    }
+
+    function isRecruitingCollection(collectionId) {
+      return collectionId in [
+        'recruiting_referrers',
+        'service_worker_referrals',
+        'service_referral_daily_lines',
+        'service_referral_monthly_settlements',
+        'service_referral_settings',
+        'service_worker_history',
+        'service_referral_payments',
+        'service_referral_deposits',
+        'service_referral_receivables'
+      ];
+    }
+
+    function keepsDevRecruitingMenuChildren() {
+      return !('pos_jhl2VTnk9V3C4EiZ4QQI' in request.resource.data)
+        || !('menu' in request.resource.data.pos_jhl2VTnk9V3C4EiZ4QQI)
+        || !(request.resource.data.pos_jhl2VTnk9V3C4EiZ4QQI.menu is list)
+        || request.resource.data.pos_jhl2VTnk9V3C4EiZ4QQI.menu.size() <= 9
+        || (
+          ('sub' in request.resource.data.pos_jhl2VTnk9V3C4EiZ4QQI.menu[9])
+          && request.resource.data.pos_jhl2VTnk9V3C4EiZ4QQI.menu[9].sub is list
+          && request.resource.data.pos_jhl2VTnk9V3C4EiZ4QQI.menu[9].sub.size() >= 11
+        );
+    }
+
     function isLoginFailureLogCreate() {
       return request.auth == null
         && request.resource.data.keys().hasOnly([
@@ -51,8 +183,78 @@ service cloud.firestore {
       allow create: if request.auth != null || isLoginFailureLogCreate();
     }
 
-    match /{allPaths=**} {
-      allow read, write: if request.auth != null;
+    match /recruiting_referrers/{referrerId} {
+      allow read: if canRecruitingRead();
+      allow create, update: if canRecruitingRegister();
+      allow delete: if canRecruitingSettle();
+    }
+
+    match /service_worker_referrals/{referralId} {
+      allow read: if canRecruitingRead();
+      allow create, update: if canRecruitingRegister();
+      allow delete: if canRecruitingSettle();
+    }
+
+    match /service_referral_daily_lines/{lineId} {
+      allow read: if canRecruitingRead();
+      allow create, update, delete: if canRecruitingSettle();
+    }
+
+    match /service_referral_monthly_settlements/{settlementId} {
+      allow read: if canRecruitingRead();
+      allow create, update, delete: if canRecruitingSettle();
+    }
+
+    match /service_referral_settings/{settingsId} {
+      allow read: if canRecruitingRead();
+      allow create, update, delete: if canRecruitingSettle();
+    }
+
+    match /service_worker_history/{historyId} {
+      allow read: if canRecruitingRead();
+      allow create, update: if canRecruitingRegister();
+      allow delete: if canRecruitingSettle();
+    }
+
+    match /service_referral_payments/{paymentId} {
+      allow read: if canRecruitingRead();
+      allow create, update, delete: if canRecruitingSettle();
+    }
+
+    match /service_referral_deposits/{depositId} {
+      allow read: if canRecruitingRead();
+      allow create, update: if canRecruitingSettle();
+      allow delete: if canRecruitingSettle();
+    }
+
+    match /service_referral_receivables/{receivableId} {
+      allow read: if canRecruitingRead();
+      allow create, update, delete: if canRecruitingSettle();
+    }
+
+    match /settings/{settingsId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && (settingsId != 'menus_v12' || keepsDevRecruitingMenuChildren());
+      allow delete: if isRecruitingAdmin();
+    }
+
+    match /server_settings/{settingsId} {
+      allow read, write: if false;
+    }
+
+    match /{collectionId}/{docId} {
+      allow read, write: if request.auth != null
+        && collectionId != 'settings'
+        && collectionId != 'server_settings'
+        && !isRecruitingCollection(collectionId);
+    }
+
+    match /{collectionId}/{docId}/{nested=**} {
+      allow read, write: if request.auth != null
+        && collectionId != 'settings'
+        && collectionId != 'server_settings'
+        && !isRecruitingCollection(collectionId);
     }
   }
 }

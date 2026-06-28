@@ -5,7 +5,8 @@ import {
     getDownloadURL,
     listAll,
     deleteObject,
-    ListResult
+    ListResult,
+    UploadMetadata
 } from 'firebase/storage';
 
 export interface StorageItem {
@@ -18,24 +19,29 @@ export interface StorageItem {
     url?: string;
 }
 
+export interface StorageUploadResult {
+    name: string;
+    fullPath: string;
+    size?: number;
+    contentType?: string;
+    url?: string;
+}
+
 export const storageService = {
-    /**
-     * Upload a file to the specified path
-     * @param path Directory path (e.g., 'documents/project1')
-     * @param file File object to upload
-     * @param onProgress Optional callback for upload progress (0-100)
-     * @returns Promise resolving to the download URL
-     */
-    uploadFile: (
+    uploadFileInfo: (
         path: string,
         file: File,
-        onProgress?: (progress: number) => void
-    ): Promise<string> => {
+        onProgress?: (progress: number) => void,
+        options?: {
+            includeDownloadUrl?: boolean;
+            metadata?: UploadMetadata;
+        }
+    ): Promise<StorageUploadResult> => {
         return new Promise((resolve, reject) => {
-            // Clean path to avoid double slashes
             const cleanPath = path.endsWith('/') ? path : `${path}/`;
             const storageRef = ref(storage, `${cleanPath}${file.name}`);
-            const uploadTask = uploadBytesResumable(storageRef, file);
+            const metadata = options?.metadata || (file.type ? { contentType: file.type } : undefined);
+            const uploadTask = uploadBytesResumable(storageRef, file, metadata);
 
             uploadTask.on(
                 'state_changed',
@@ -49,14 +55,38 @@ export const storageService = {
                 },
                 async () => {
                     try {
-                        const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-                        resolve(downloadURL);
+                        const downloadURL = options?.includeDownloadUrl === false
+                            ? undefined
+                            : await getDownloadURL(uploadTask.snapshot.ref);
+                        resolve({
+                            name: uploadTask.snapshot.ref.name,
+                            fullPath: uploadTask.snapshot.ref.fullPath,
+                            size: uploadTask.snapshot.metadata.size,
+                            contentType: uploadTask.snapshot.metadata.contentType,
+                            url: downloadURL,
+                        });
                     } catch (error) {
                         reject(error);
                     }
                 }
             );
         });
+    },
+
+    /**
+     * Upload a file to the specified path
+     * @param path Directory path (e.g., 'documents/project1')
+     * @param file File object to upload
+     * @param onProgress Optional callback for upload progress (0-100)
+     * @returns Promise resolving to the download URL
+     */
+    uploadFile: (
+        path: string,
+        file: File,
+        onProgress?: (progress: number) => void
+    ): Promise<string> => {
+        return storageService.uploadFileInfo(path, file, onProgress, { includeDownloadUrl: true })
+            .then((result) => result.url || storageService.getDownloadUrl(result.fullPath));
     },
 
     /**

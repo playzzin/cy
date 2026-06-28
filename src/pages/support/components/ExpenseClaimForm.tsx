@@ -1,4 +1,4 @@
-﻿import React, { useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -10,6 +10,7 @@ import { toast } from '../../../utils/swal';
 import type { Team } from '../../../services/teamService';
 import type { Site } from '../../../services/siteService';
 import type { ExpensePaymentOption } from '../hooks/useExpenseLedgerData';
+import type { TeamExpenseClaimInput } from '../../../types/teamExpenseLedger';
 
 const claimSchema = z.object({
   yearMonth: z.string(),
@@ -99,13 +100,19 @@ export const ExpenseClaimForm: React.FC<Props> = ({
 
   const visibleCardLabelOptions = React.useMemo(() => {
     const team = teamOptions.find((item) => String(item.id ?? item.legacyId ?? '') === watchPayerTeamId);
-    const teamIds = new Set([team?.id, team?.legacyId, team?.name, watchPayerTeamId].map((value) => String(value ?? '').trim()).filter(Boolean));
+    const teamIds = new Set(
+      [team?.id, team?.legacyId, team?.name, watchPayerTeamId]
+        .flatMap((value) => {
+          const raw = String(value ?? '').trim();
+          return raw ? [raw, normalizeKey(raw)] : [];
+        })
+    );
     if (!watchPayerTeamId) return cardLabelOptions;
 
     return cardLabelOptions.filter((option) => {
       if (option.kind !== 'card') return true;
       if (option.teamIds.length === 0) return true;
-      return option.teamIds.some((id) => teamIds.has(id));
+      return option.teamIds.some((id) => teamIds.has(String(id).trim()) || teamIds.has(normalizeKey(id)));
     });
   }, [cardLabelOptions, teamOptions, watchPayerTeamId]);
 
@@ -132,28 +139,42 @@ export const ExpenseClaimForm: React.FC<Props> = ({
 
   const onSubmit = async (data: ClaimFormValues) => {
     try {
-      const payload = {
-        ...data,
+      const payload: TeamExpenseClaimInput = {
+        yearMonth: data.yearMonth,
+        date: data.date,
+        claimType: data.claimType,
+        payerTeamId: data.payerTeamId,
+        payerTeamName: data.payerTeamName,
         chargeToTeamId: data.claimType === 'otherExpense' ? '' : data.chargeToTeamId ?? '',
         chargeToTeamName: data.claimType === 'otherExpense' ? '' : data.chargeToTeamName ?? '',
         siteId: data.siteId ?? '',
-        siteName: data.siteName ?? ''
+        siteName: data.siteName ?? '',
+        cardLabel: data.cardLabel,
+        category: data.category,
+        description: data.description,
+        amount: data.amount,
+        status: data.status,
+        memo: data.memo
       };
 
       await teamExpenseLedgerService.saveClaim(payload);
       toast.success('후청구 경비가 성공적으로 등록되었습니다.');
       // Keep repetitive fields but clear specific transaction details
       reset({
-        ...payload,
+        yearMonth: data.yearMonth,
         date: buildDefaultDate(yearMonth),
-        claimType: payload.claimType,
-        payerTeamId: payload.payerTeamId,
-        payerTeamName: payload.payerTeamName,
+        claimType: data.claimType,
+        payerTeamId: data.payerTeamId,
+        payerTeamName: data.payerTeamName,
+        chargeToTeamId: data.claimType === 'otherExpense' ? '' : data.chargeToTeamId ?? '',
+        chargeToTeamName: data.claimType === 'otherExpense' ? '' : data.chargeToTeamName ?? '',
         siteId: '',
         siteName: '',
-        cardLabel: payload.cardLabel === '현찰' ? '현찰' : '',
+        cardLabel: data.cardLabel === '현찰' ? '현찰' : '',
+        category: data.category,
         description: '',
         amount: 0,
+        status: data.status,
         memo: ''
       });
       onSuccess();

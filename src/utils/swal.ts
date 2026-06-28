@@ -1,6 +1,7 @@
 import Swal from 'sweetalert2';
 import withReactContent from 'sweetalert2-react-content';
 import { MESSAGES } from '../constants/messages';
+import { getFriendlyErrorMessage, isDeadlineExceededError } from './firebaseError';
 
 const MySwal = withReactContent(Swal);
 
@@ -38,13 +39,15 @@ const Toast = Swal.mixin({
 
 // Helper to fire generic toast with style overrides
 const fireToast = (icon: 'success' | 'error' | 'info' | 'warning', msg: any) => {
-    const text = typeof msg === 'string' ? msg : msg.text;
+    const rawText = typeof msg === 'string' ? msg : msg.text;
+    const text = icon === 'error' ? getFriendlyErrorMessage(rawText, rawText) : rawText;
+    const normalizedIcon = icon === 'error' && isDeadlineExceededError(rawText) ? 'info' : icon;
     const style = typeof msg === 'string' ? undefined : msg.style;
 
     if (style?.sound) playSound(style.sound);
 
     return Toast.fire({
-        icon: icon,
+        icon: normalizedIcon,
         title: text,
         background: style?.color ? style.color : undefined,
         color: style?.color ? '#fff' : undefined,
@@ -59,6 +62,7 @@ export const toast = {
     error: (message: string) => fireToast('error', message),
     info: (message: string) => fireToast('info', message),
     warning: (message: string) => fireToast('warning', message),
+    delayed: (action: string = '처리') => fireToast('info', `${action} 요청은 전달됐지만 완료 응답 확인이 지연되고 있습니다. 잠시 후 목록을 다시 불러와 완료 여부를 확인해주세요.`),
 
     // Smart Actions (Context-Aware)
     saved: (target: string, count: number = 1) => {

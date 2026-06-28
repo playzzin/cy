@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
   ClipboardList,
+  Image as ImageIcon,
+  Paperclip,
   Pencil,
   Plus,
   RefreshCw,
@@ -10,11 +12,14 @@ import {
   Save,
   Search,
   Trash2,
+  UploadCloud,
   WalletCards,
   X
 } from 'lucide-react';
 import { CurrencyInput } from '../../components/common/CurrencyInput';
 import { YearMonthPicker } from '../../components/common/YearMonthPicker';
+import { officeFixedExpenseService } from '../../services/officeFixedExpenseService';
+import { storageService } from '../../services/storageService';
 import { teamExpenseCategoryService } from '../../services/teamExpenseCategoryService';
 import { teamExpenseLedgerService } from '../../services/teamExpenseLedgerService';
 import { toast } from '../../utils/swal';
@@ -33,8 +38,10 @@ import {
 import type { ExpenseCategoryOption, ExpensePaymentOption } from './hooks/useExpenseLedgerData';
 import type { Site } from '../../services/siteService';
 import type { Team } from '../../services/teamService';
+import type { OfficeFixedExpense } from '../../types/officeFixedExpense';
 import type {
   TeamExpenseClaim,
+  TeamExpenseClaimAttachment,
   TeamExpenseClaimCategory,
   TeamExpenseCategory,
   TeamExpenseCategoryScope,
@@ -59,6 +66,13 @@ type ClaimFormState = {
   amount: number;
   status: TeamExpenseClaimStatus;
   memo: string;
+  attachments: TeamExpenseClaimAttachment[];
+};
+
+type PendingExpenseAttachment = {
+  id: string;
+  file: File;
+  previewUrl: string;
 };
 
 type CategoryFormState = {
@@ -67,8 +81,22 @@ type CategoryFormState = {
   scope: TeamExpenseCategoryScope;
 };
 
+type FixedExpenseFormState = {
+  id?: string;
+  name: string;
+  category: TeamExpenseClaimCategory;
+  amount: number;
+  dayOfMonth: number;
+  startYearMonth: string;
+  endYearMonth: string;
+  memo: string;
+  isActive: boolean;
+};
+
 const inputClass = 'h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100 disabled:text-slate-400';
 const labelClass = 'mb-1.5 block text-xs font-black text-slate-600';
+const MAX_EXPENSE_ATTACHMENTS = 10;
+const MAX_EXPENSE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 const claimTypeOptions: Array<{ value: TeamExpenseClaimType; label: string; description: string }> = [
   { value: 'teamCharge', label: '후청구', description: '사용팀과 청구대상팀을 함께 기록' },
@@ -85,6 +113,47 @@ const normalizeCategoryForType = (
 };
 
 const normalizeKey = (value: unknown) => String(value ?? '').replace(/\s+/g, '').toLowerCase();
+
+const sanitizeAttachmentName = (value: unknown) =>
+  String(value ?? 'photo')
+    .trim()
+    .replace(/[\\/#?%*:|"<>]/g, '_')
+    .replace(/\s+/g, '_')
+    .slice(0, 80) || 'photo';
+
+const getFileExtension = (file: File) => {
+  const fromName = file.name.split('.').pop();
+  if (fromName && fromName !== file.name) return fromName.toLowerCase();
+  const fromType = file.type.split('/').pop();
+  return fromType ? fromType.toLowerCase() : 'jpg';
+};
+
+const buildExpenseClaimId = () => {
+  const c: Crypto | undefined = typeof crypto !== 'undefined' ? crypto : undefined;
+  if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+  return `team-expense-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const buildPendingAttachmentId = () =>
+  `pending-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+const formatFileSize = (value?: number) => {
+  const size = Number(value ?? 0);
+  if (!Number.isFinite(size) || size <= 0) return '';
+  if (size < 1024) return `${size}B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)}KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)}MB`;
+};
+
+const makeAttachmentUploadFile = (file: File, index: number) => {
+  const extension = getFileExtension(file);
+  const baseName = sanitizeAttachmentName(file.name.replace(/\.[^.]+$/, ''));
+  const fileName = `${Date.now()}-${index + 1}-${baseName}.${extension}`;
+  return new File([file], fileName, {
+    type: file.type || 'image/jpeg',
+    lastModified: file.lastModified
+  });
+};
 
 const getTeamId = (team: Team | undefined | null) => String(team?.id ?? (team as any)?.legacyId ?? '').trim();
 const getTeamName = (team: Team | undefined | null) => String(team?.name ?? '').trim();
@@ -137,8 +206,48 @@ const createDefaultForm = (yearMonth: string): ClaimFormState => ({
   description: '',
   amount: 0,
   status: 'charged',
-  memo: ''
+  memo: '',
+  attachments: []
 });
+
+const createDefaultFixedExpenseForm = (yearMonth: string): FixedExpenseFormState => ({
+  name: '',
+  category: 'officeExpense',
+  amount: 0,
+  dayOfMonth: 1,
+  startYearMonth: yearMonth,
+  endYearMonth: '',
+  memo: '',
+  isActive: true
+});
+
+const normalizeDayOfMonth = (value: unknown) => {
+  const parsed = Math.trunc(Number(value));
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.min(31, Math.max(1, parsed));
+};
+
+const getLastDayOfMonth = (yearMonth: string) => {
+  const [year, month] = yearMonth.split('-').map((value) => Number(value));
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return 31;
+  return new Date(year, month, 0).getDate();
+};
+
+const buildFixedExpenseClaimDate = (yearMonth: string, dayOfMonth: number) => {
+  const safeDay = Math.min(normalizeDayOfMonth(dayOfMonth), getLastDayOfMonth(yearMonth));
+  return `${yearMonth}-${String(safeDay).padStart(2, '0')}`;
+};
+
+const isFixedExpenseDueForMonth = (expense: OfficeFixedExpense, yearMonth: string) => {
+  if (expense.isActive === false) return false;
+  if (expense.startYearMonth && expense.startYearMonth > yearMonth) return false;
+  if (expense.endYearMonth && expense.endYearMonth < yearMonth) return false;
+  return true;
+};
+
+const buildGeneratedFixedClaimId = (expenseId: string, yearMonth: string) => (
+  `office-fixed-${yearMonth}-${String(expenseId).replace(/[^a-zA-Z0-9_-]/g, '_')}`
+);
 
 const matchesTeam = (claim: TeamExpenseClaim, team: Team | undefined) => {
   if (!team) return true;
@@ -155,12 +264,22 @@ const ExpenseClaimManagementPage: React.FC = () => {
   const [yearMonth, setYearMonth] = useState(buildDefaultYearMonth());
   const [form, setForm] = useState<ClaimFormState>(() => createDefaultForm(buildDefaultYearMonth()));
   const [saving, setSaving] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingExpenseAttachment[]>([]);
+  const [removedAttachmentPaths, setRemovedAttachmentPaths] = useState<string[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [categorySaving, setCategorySaving] = useState(false);
   const [selectedTeamId, setSelectedTeamId] = useState('all');
   const [typeFilter, setTypeFilter] = useState<TeamExpenseClaimType | 'all'>('all');
   const [searchText, setSearchText] = useState('');
   const [categoryForm, setCategoryForm] = useState<CategoryFormState>({ label: '', scope: 'teamCharge' });
+  const [fixedExpenses, setFixedExpenses] = useState<OfficeFixedExpense[]>([]);
+  const [fixedExpenseForm, setFixedExpenseForm] = useState<FixedExpenseFormState>(() => createDefaultFixedExpenseForm(buildDefaultYearMonth()));
+  const [fixedExpenseLoading, setFixedExpenseLoading] = useState(false);
+  const [fixedExpenseSaving, setFixedExpenseSaving] = useState(false);
+  const [fixedExpenseGenerating, setFixedExpenseGenerating] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingAttachmentsRef = useRef<PendingExpenseAttachment[]>([]);
 
   const {
     loading,
@@ -176,6 +295,33 @@ const ExpenseClaimManagementPage: React.FC = () => {
     rawDocs,
     loadData
   } = useExpenseLedgerData(yearMonth, 'all', 'all', true);
+
+  const loadFixedExpenses = useCallback(async () => {
+    setFixedExpenseLoading(true);
+    try {
+      const rows = await officeFixedExpenseService.getExpenses({ includeInactive: true });
+      setFixedExpenses(rows);
+    } catch (error) {
+      console.error('[ExpenseClaimManagementPage] fixed expenses load failed', error);
+      toast.error('사무실 고정경비를 불러오지 못했습니다.');
+    } finally {
+      setFixedExpenseLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadFixedExpenses();
+  }, [loadFixedExpenses]);
+
+  useEffect(() => {
+    pendingAttachmentsRef.current = pendingAttachments;
+  }, [pendingAttachments]);
+
+  useEffect(() => {
+    return () => {
+      pendingAttachmentsRef.current.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+    };
+  }, []);
 
   const selectedFilterTeam = useMemo(
     () => teamOptions.find((team) => getTeamId(team) === selectedTeamId),
@@ -203,6 +349,10 @@ const ExpenseClaimManagementPage: React.FC = () => {
   const officeTeamName = getTeamName(officeTeam) || OFFICE_ASSIGNMENT_TEAM_NAME;
   const isOfficeExpense = form.claimType === 'officeExpense';
   const isStandaloneClaim = form.claimType !== 'teamCharge';
+  const payerTeamOptions = useMemo(
+    () => (isOtherClaim ? nonOfficeTeamOptions : teamOptions),
+    [isOtherClaim, nonOfficeTeamOptions, teamOptions]
+  );
   const payerTeamColor = getTeamColor(payerTeam);
   const chargeToTeamColor = getTeamColor(chargeToTeam);
   const formCategoryOptions = useMemo(
@@ -212,6 +362,12 @@ const ExpenseClaimManagementPage: React.FC = () => {
   const defaultTeamChargeCategory = categoryOptions[0]?.value || 'etc';
   const defaultOtherClaimCategory = otherClaimCategoryOptions[0]?.value || 'etc';
   const defaultOfficeExpenseCategory = officeExpenseCategoryOptions.find((option) => option.value === 'officeExpense')?.value || officeExpenseCategoryOptions[0]?.value || 'officeExpense';
+  const fixedExpenseCategoryOptions = useMemo<ExpenseCategoryOption[]>(
+    () => officeExpenseCategoryOptions.length > 0
+      ? officeExpenseCategoryOptions
+      : [{ value: 'officeExpense', label: '사무실경비', scope: 'officeExpense', isDefault: true }],
+    [officeExpenseCategoryOptions]
+  );
   const defaultCategoryForCurrentType = isOfficeExpense ? defaultOfficeExpenseCategory : isOtherClaim ? defaultOtherClaimCategory : defaultTeamChargeCategory;
   const getCategoryOptionsForType = (claimType: TeamExpenseClaimType) => {
     if (claimType === 'officeExpense') return officeExpenseCategoryOptions;
@@ -225,6 +381,29 @@ const ExpenseClaimManagementPage: React.FC = () => {
   };
   const normalizeFormCategory = (category: TeamExpenseClaimCategory | undefined, claimType: TeamExpenseClaimType) =>
     normalizeCategoryForType(category, getCategoryOptionsForType(claimType), getDefaultCategoryForType(claimType));
+  const generatedFixedExpenseIds = useMemo(() => {
+    const ids = new Set<string>();
+    rawDocs.claims.forEach((claim) => {
+      if (claim.sourceFixedExpenseId) ids.add(String(claim.sourceFixedExpenseId));
+    });
+    return ids;
+  }, [rawDocs.claims]);
+  const generatedFixedClaimIds = useMemo(() => new Set(rawDocs.claims.map((claim) => claim.id)), [rawDocs.claims]);
+  const isFixedExpenseGenerated = useCallback(
+    (expense: OfficeFixedExpense) => (
+      generatedFixedExpenseIds.has(expense.id) ||
+      generatedFixedClaimIds.has(buildGeneratedFixedClaimId(expense.id, yearMonth))
+    ),
+    [generatedFixedClaimIds, generatedFixedExpenseIds, yearMonth]
+  );
+  const dueFixedExpenses = useMemo(
+    () => fixedExpenses.filter((expense) => isFixedExpenseDueForMonth(expense, yearMonth)),
+    [fixedExpenses, yearMonth]
+  );
+  const pendingFixedExpenses = useMemo(
+    () => dueFixedExpenses.filter((expense) => !isFixedExpenseGenerated(expense)),
+    [dueFixedExpenses, isFixedExpenseGenerated]
+  );
 
   const visiblePaymentOptions = useMemo(() => {
     if (isStandaloneClaim) return [];
@@ -260,6 +439,9 @@ const ExpenseClaimManagementPage: React.FC = () => {
       const nextDate = current.date.startsWith(yearMonth) ? current.date : buildDefaultDate(yearMonth);
       return { ...current, yearMonth, date: nextDate };
     });
+    setFixedExpenseForm((current) => (
+      current.id ? current : { ...current, startYearMonth: yearMonth }
+    ));
   }, [yearMonth]);
 
   useEffect(() => {
@@ -348,12 +530,12 @@ const ExpenseClaimManagementPage: React.FC = () => {
       claimType,
       payerTeamId: claimType === 'officeExpense'
         ? officeTeamId
-        : isOfficeTeamReference(current.payerTeamId, current.payerTeamName)
+        : claimType === 'otherExpense' && isOfficeTeamReference(current.payerTeamId, current.payerTeamName)
           ? ''
           : current.payerTeamId,
       payerTeamName: claimType === 'officeExpense'
         ? officeTeamName
-        : isOfficeTeamReference(current.payerTeamId, current.payerTeamName)
+        : claimType === 'otherExpense' && isOfficeTeamReference(current.payerTeamId, current.payerTeamName)
           ? ''
           : current.payerTeamName,
       chargeToTeamId: nextIsStandalone || isOfficeTeamReference(current.chargeToTeamId, current.chargeToTeamName) ? '' : current.chargeToTeamId,
@@ -387,12 +569,134 @@ const ExpenseClaimManagementPage: React.FC = () => {
     applyResponsibleTeam(site);
   };
 
+  const clearPendingAttachments = useCallback(() => {
+    setPendingAttachments((current) => {
+      current.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+      return [];
+    });
+    if (attachmentInputRef.current) attachmentInputRef.current.value = '';
+  }, []);
+
+  const deleteAttachmentPaths = async (paths: string[]) => {
+    const uniquePaths = [...new Set(paths.map((path) => String(path ?? '').trim()).filter(Boolean))];
+    await Promise.all(uniquePaths.map(async (path) => {
+      try {
+        await storageService.deleteFile(path);
+      } catch (error) {
+        console.warn('[ExpenseClaimManagementPage] attachment cleanup skipped', path, error);
+      }
+    }));
+  };
+
+  const appendAttachmentFiles = (fileList: FileList | null) => {
+    if (!fileList) return;
+
+    const existingCount = form.attachments.length + pendingAttachments.length;
+    const capacity = Math.max(0, MAX_EXPENSE_ATTACHMENTS - existingCount);
+    if (capacity <= 0) {
+      toast.error(`사진은 최대 ${MAX_EXPENSE_ATTACHMENTS}장까지 첨부할 수 있습니다.`);
+      return;
+    }
+
+    const imageFiles = Array.from(fileList).filter((file) => file.type.startsWith('image/'));
+    if (imageFiles.length !== fileList.length) {
+      toast.error('이미지 파일만 첨부할 수 있습니다.');
+    }
+
+    const validFiles = imageFiles.filter((file) => file.size <= MAX_EXPENSE_ATTACHMENT_BYTES);
+    if (validFiles.length !== imageFiles.length) {
+      toast.error('10MB 이하의 사진만 첨부할 수 있습니다.');
+    }
+
+    const nextAttachments = validFiles.slice(0, capacity).map((file) => ({
+      id: buildPendingAttachmentId(),
+      file,
+      previewUrl: URL.createObjectURL(file)
+    }));
+
+    if (nextAttachments.length === 0) return;
+    setPendingAttachments((current) => [...current, ...nextAttachments]);
+  };
+
+  const handleAttachmentInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    appendAttachmentFiles(event.target.files);
+    event.target.value = '';
+  };
+
+  const removePendingAttachment = (attachmentId: string) => {
+    setPendingAttachments((current) => {
+      const target = current.find((attachment) => attachment.id === attachmentId);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return current.filter((attachment) => attachment.id !== attachmentId);
+    });
+  };
+
+  const removeSavedAttachment = (attachment: TeamExpenseClaimAttachment) => {
+    setForm((current) => ({
+      ...current,
+      attachments: current.attachments.filter((item) => item.id !== attachment.id && item.fullPath !== attachment.fullPath)
+    }));
+    if (attachment.fullPath) {
+      setRemovedAttachmentPaths((current) => [...current, attachment.fullPath]);
+    }
+  };
+
+  const uploadPendingAttachments = async (
+    claimYearMonth: string,
+    claimId: string
+  ): Promise<TeamExpenseClaimAttachment[]> => {
+    if (pendingAttachments.length === 0) return [];
+
+    const progressById = new Map(pendingAttachments.map((attachment) => [attachment.id, 0]));
+    const updateUploadProgress = (attachmentId: string, progress: number) => {
+      progressById.set(attachmentId, progress);
+      const total = Array.from(progressById.values()).reduce((sum, value) => sum + value, 0);
+      setUploadProgress(Math.round(total / Math.max(progressById.size, 1)));
+    };
+
+    const basePath = [
+      'team-expense-claims',
+      sanitizeAttachmentName(claimYearMonth),
+      sanitizeAttachmentName(claimId)
+    ].join('/');
+
+    return Promise.all(pendingAttachments.map(async (attachment, index) => {
+      const uploadFile = makeAttachmentUploadFile(attachment.file, index);
+      const uploadResult = await storageService.uploadFileInfo(
+        basePath,
+        uploadFile,
+        (progress) => updateUploadProgress(attachment.id, progress),
+        {
+          includeDownloadUrl: true,
+          metadata: {
+            contentType: uploadFile.type || 'image/jpeg',
+            customMetadata: {
+              claimId,
+              yearMonth: claimYearMonth,
+              originalName: attachment.file.name
+            }
+          }
+        }
+      );
+
+      return {
+        id: attachment.id,
+        name: attachment.file.name,
+        fullPath: uploadResult.fullPath,
+        url: uploadResult.url,
+        size: uploadResult.size || uploadFile.size,
+        contentType: uploadResult.contentType || uploadFile.type,
+        uploadedAt: new Date().toISOString()
+      };
+    }));
+  };
+
   const validateForm = () => {
     const errors: string[] = [];
     if (!form.date) errors.push('사용일자를 입력해주세요.');
     if (!form.payerTeamId) errors.push(isStandaloneClaim ? '청구팀을 선택해주세요.' : '사용팀을 선택해주세요.');
     if (form.claimType === 'officeExpense' && !isOfficeTeamReference(form.payerTeamId, form.payerTeamName)) errors.push('사무실경비는 청구팀을 사무실로 선택해주세요.');
-    if (form.claimType !== 'officeExpense' && isOfficeTeamReference(form.payerTeamId, form.payerTeamName)) errors.push('사무실은 사무실경비에서만 선택할 수 있습니다.');
+    if (form.claimType === 'otherExpense' && isOfficeTeamReference(form.payerTeamId, form.payerTeamName)) errors.push('사무실은 후청구 또는 사무실경비에서만 선택할 수 있습니다.');
     if (!isStandaloneClaim && !form.cardLabel) errors.push('결제수단을 선택해주세요.');
     if (!String(form.category ?? '').trim()) errors.push('구분을 선택해주세요.');
     if (!form.description.trim()) errors.push('내용을 입력해주세요.');
@@ -409,6 +713,9 @@ const ExpenseClaimManagementPage: React.FC = () => {
   };
 
   const resetForm = (preserveContext = false) => {
+    clearPendingAttachments();
+    setRemovedAttachmentPaths([]);
+    setUploadProgress(null);
     setForm((current) => {
       const next = createDefaultForm(yearMonth);
       if (!preserveContext) return next;
@@ -420,7 +727,8 @@ const ExpenseClaimManagementPage: React.FC = () => {
         payerTeamName: current.payerTeamName,
         cardLabel: current.claimType !== 'teamCharge' ? '' : current.cardLabel || '현찰',
         category: normalizeFormCategory(current.category, current.claimType),
-        status: current.status
+        status: current.status,
+        attachments: []
       };
     });
   };
@@ -439,9 +747,12 @@ const ExpenseClaimManagementPage: React.FC = () => {
       const payer = findTeam(form.payerTeamId);
       const chargeTo = isStandalone ? undefined : findTeam(form.chargeToTeamId);
       const claimYearMonth = form.yearMonth || yearMonth;
+      const claimId = form.id || buildExpenseClaimId();
+      const uploadedAttachments = await uploadPendingAttachments(claimYearMonth, claimId);
+      const nextAttachments = [...form.attachments, ...uploadedAttachments];
 
       await teamExpenseLedgerService.saveClaim({
-        id: form.id,
+        id: claimId,
         yearMonth: claimYearMonth,
         date: form.date,
         claimType: form.claimType,
@@ -456,8 +767,13 @@ const ExpenseClaimManagementPage: React.FC = () => {
         description: form.description.trim(),
         amount: form.amount,
         status: form.status,
-        memo: form.memo.trim()
+        memo: form.memo.trim(),
+        attachments: nextAttachments
       });
+
+      if (removedAttachmentPaths.length > 0) {
+        await deleteAttachmentPaths(removedAttachmentPaths);
+      }
 
       toast.success(form.id ? '후청구 내역을 수정했습니다.' : '후청구 내역을 등록했습니다.');
       resetForm(true);
@@ -467,12 +783,16 @@ const ExpenseClaimManagementPage: React.FC = () => {
       toast.error('저장에 실패했습니다. 다시 시도해주세요.');
     } finally {
       setSaving(false);
+      setUploadProgress(null);
     }
   };
 
   const handleEdit = (claim: TeamExpenseClaim) => {
     const claimType = getEffectiveClaimType(claim);
     const isStandalone = claimType !== 'teamCharge';
+    clearPendingAttachments();
+    setRemovedAttachmentPaths([]);
+    setUploadProgress(null);
 
     setForm({
       id: claim.id,
@@ -490,7 +810,8 @@ const ExpenseClaimManagementPage: React.FC = () => {
       description: claim.description || '',
       amount: Number(claim.amount || 0),
       status: claim.status || 'charged',
-      memo: claim.memo || ''
+      memo: claim.memo || '',
+      attachments: claim.attachments ?? []
     });
     formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
@@ -500,6 +821,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
     if (!ok) return;
 
     try {
+      await deleteAttachmentPaths((claim.attachments ?? []).map((attachment) => attachment.fullPath));
       await teamExpenseLedgerService.deleteClaim(claim.id);
       toast.success('후청구 내역을 삭제했습니다.');
       if (form.id === claim.id) resetForm(false);
@@ -580,6 +902,149 @@ const ExpenseClaimManagementPage: React.FC = () => {
     }
   };
 
+  const resetFixedExpenseForm = () => {
+    setFixedExpenseForm(createDefaultFixedExpenseForm(yearMonth));
+  };
+
+  const updateFixedExpenseForm = <K extends keyof FixedExpenseFormState>(key: K, value: FixedExpenseFormState[K]) => {
+    setFixedExpenseForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const handleEditFixedExpense = (expense: OfficeFixedExpense) => {
+    setFixedExpenseForm({
+      id: expense.id,
+      name: expense.name,
+      category: expense.category || defaultOfficeExpenseCategory,
+      amount: Number(expense.amount || 0),
+      dayOfMonth: normalizeDayOfMonth(expense.dayOfMonth),
+      startYearMonth: expense.startYearMonth || yearMonth,
+      endYearMonth: expense.endYearMonth || '',
+      memo: expense.memo || '',
+      isActive: expense.isActive !== false
+    });
+  };
+
+  const handleSaveFixedExpense = async () => {
+    const name = fixedExpenseForm.name.trim();
+    const category = normalizeCategoryForType(fixedExpenseForm.category, fixedExpenseCategoryOptions, defaultOfficeExpenseCategory);
+    const startYearMonth = String(fixedExpenseForm.startYearMonth || yearMonth).slice(0, 7);
+    const endYearMonth = String(fixedExpenseForm.endYearMonth || '').slice(0, 7);
+
+    if (!name) {
+      toast.error('고정경비 항목명을 입력해주세요.');
+      return;
+    }
+    if (fixedExpenseForm.amount <= 0) {
+      toast.error('고정경비 금액을 입력해주세요.');
+      return;
+    }
+    if (!/^\d{4}-\d{2}$/.test(startYearMonth)) {
+      toast.error('시작월을 선택해주세요.');
+      return;
+    }
+    if (endYearMonth && endYearMonth < startYearMonth) {
+      toast.error('종료월은 시작월보다 빠를 수 없습니다.');
+      return;
+    }
+
+    setFixedExpenseSaving(true);
+    try {
+      await officeFixedExpenseService.saveExpense({
+        id: fixedExpenseForm.id,
+        name,
+        category,
+        amount: fixedExpenseForm.amount,
+        dayOfMonth: normalizeDayOfMonth(fixedExpenseForm.dayOfMonth),
+        startYearMonth,
+        endYearMonth: endYearMonth || undefined,
+        memo: fixedExpenseForm.memo.trim(),
+        isActive: fixedExpenseForm.isActive
+      });
+      toast.success(fixedExpenseForm.id ? '사무실 고정경비를 수정했습니다.' : '사무실 고정경비를 추가했습니다.');
+      resetFixedExpenseForm();
+      await loadFixedExpenses();
+    } catch (error) {
+      console.error('[ExpenseClaimManagementPage] fixed expense save failed', error);
+      toast.error('사무실 고정경비 저장에 실패했습니다.');
+    } finally {
+      setFixedExpenseSaving(false);
+    }
+  };
+
+  const handleToggleFixedExpense = async (expense: OfficeFixedExpense) => {
+    setFixedExpenseSaving(true);
+    try {
+      await officeFixedExpenseService.setExpenseActive(expense.id, expense.isActive === false);
+      await loadFixedExpenses();
+    } catch (error) {
+      console.error('[ExpenseClaimManagementPage] fixed expense toggle failed', error);
+      toast.error('사무실 고정경비 상태 변경에 실패했습니다.');
+    } finally {
+      setFixedExpenseSaving(false);
+    }
+  };
+
+  const handleDeleteFixedExpense = async (expense: OfficeFixedExpense) => {
+    const ok = window.confirm(`${expense.name} 고정경비를 비활성 처리할까요? 이미 생성된 월별 경비는 삭제되지 않습니다.`);
+    if (!ok) return;
+
+    setFixedExpenseSaving(true);
+    try {
+      await officeFixedExpenseService.deleteExpense(expense.id);
+      if (fixedExpenseForm.id === expense.id) resetFixedExpenseForm();
+      await loadFixedExpenses();
+      toast.success('사무실 고정경비를 비활성 처리했습니다.');
+    } catch (error) {
+      console.error('[ExpenseClaimManagementPage] fixed expense delete failed', error);
+      toast.error('사무실 고정경비 비활성 처리에 실패했습니다.');
+    } finally {
+      setFixedExpenseSaving(false);
+    }
+  };
+
+  const handleGenerateFixedExpenses = async () => {
+    if (pendingFixedExpenses.length === 0) {
+      toast.info('이번 달에 생성할 사무실 고정경비가 없습니다.');
+      return;
+    }
+
+    setFixedExpenseGenerating(true);
+    try {
+      await Promise.all(pendingFixedExpenses.map((expense) => {
+        const category = normalizeCategoryForType(expense.category, fixedExpenseCategoryOptions, defaultOfficeExpenseCategory);
+        return teamExpenseLedgerService.saveClaim({
+          id: buildGeneratedFixedClaimId(expense.id, yearMonth),
+          yearMonth,
+          date: buildFixedExpenseClaimDate(yearMonth, expense.dayOfMonth),
+          claimType: 'officeExpense',
+          payerTeamId: officeTeamId,
+          payerTeamName: officeTeamName,
+          chargeToTeamId: '',
+          chargeToTeamName: '',
+          siteId: '',
+          siteName: '',
+          cardLabel: '',
+          category,
+          description: expense.name,
+          amount: expense.amount,
+          status: 'charged',
+          memo: expense.memo || '',
+          sourceType: 'office_fixed_expense',
+          sourceFixedExpenseId: expense.id,
+          sourceFixedExpenseName: expense.name,
+          generatedForYearMonth: yearMonth
+        });
+      }));
+      toast.success(`사무실 고정경비 ${pendingFixedExpenses.length}건을 생성했습니다.`);
+      await loadData();
+    } catch (error) {
+      console.error('[ExpenseClaimManagementPage] fixed expense generation failed', error);
+      toast.error('사무실 고정경비 생성에 실패했습니다.');
+    } finally {
+      setFixedExpenseGenerating(false);
+    }
+  };
+
   const filteredClaims = useMemo(() => {
     const query = normalizeKey(searchText);
 
@@ -597,7 +1062,8 @@ const ExpenseClaimManagementPage: React.FC = () => {
           claim.cardLabel,
           getCategoryLabel(claim.category, allCategoryOptions),
           claim.description,
-          claim.memo
+          claim.memo,
+          ...(claim.attachments ?? []).map((attachment) => attachment.name)
         ].some((value) => normalizeKey(value).includes(query));
       })
       .sort((a, b) => String(b.date).localeCompare(String(a.date), 'ko-KR'));
@@ -669,6 +1135,219 @@ const ExpenseClaimManagementPage: React.FC = () => {
           ))}
         </div>
 
+        <section className="border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
+                <ClipboardList size={16} />
+              </span>
+              <div>
+                <div className="text-sm font-black text-slate-900">사무실 고정경비</div>
+                <div className="text-xs font-bold text-slate-500">
+                  이번 달 대상 {dueFixedExpenses.length.toLocaleString('ko-KR')}건 · 미생성 {pendingFixedExpenses.length.toLocaleString('ko-KR')}건
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleGenerateFixedExpenses}
+              disabled={fixedExpenseGenerating || pendingFixedExpenses.length === 0}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 text-sm font-black text-white shadow-sm hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              <Plus size={16} />
+              이번 달 생성
+            </button>
+          </div>
+
+          <div className="grid gap-3 border-b border-slate-200 p-4 xl:grid-cols-[minmax(160px,1fr)_150px_150px_110px_150px_150px_minmax(180px,1fr)_auto]">
+            <label>
+              <span className={labelClass}>항목명</span>
+              <input
+                value={fixedExpenseForm.name}
+                onChange={(event) => updateFixedExpenseForm('name', event.target.value)}
+                className={inputClass}
+                placeholder="프린터 렌탈료"
+              />
+            </label>
+            <label>
+              <span className={labelClass}>구분</span>
+              <select
+                value={fixedExpenseForm.category}
+                onChange={(event) => updateFixedExpenseForm('category', event.target.value)}
+                className={inputClass}
+              >
+                {fixedExpenseCategoryOptions.map((option) => (
+                  <option key={`fixed-category-${option.value}`} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span className={labelClass}>금액</span>
+              <CurrencyInput
+                value={fixedExpenseForm.amount}
+                onChange={(value: number) => updateFixedExpenseForm('amount', value)}
+                emptyWhenZero
+                className={`${inputClass} text-right tabular-nums`}
+                placeholder="0"
+              />
+            </label>
+            <label>
+              <span className={labelClass}>납부일</span>
+              <input
+                type="number"
+                min={1}
+                max={31}
+                value={fixedExpenseForm.dayOfMonth}
+                onChange={(event) => updateFixedExpenseForm('dayOfMonth', normalizeDayOfMonth(event.target.value))}
+                className={`${inputClass} text-right tabular-nums`}
+              />
+            </label>
+            <label>
+              <span className={labelClass}>시작월</span>
+              <input
+                type="month"
+                value={fixedExpenseForm.startYearMonth}
+                onChange={(event) => updateFixedExpenseForm('startYearMonth', event.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label>
+              <span className={labelClass}>종료월</span>
+              <input
+                type="month"
+                value={fixedExpenseForm.endYearMonth}
+                onChange={(event) => updateFixedExpenseForm('endYearMonth', event.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label>
+              <span className={labelClass}>메모</span>
+              <input
+                value={fixedExpenseForm.memo}
+                onChange={(event) => updateFixedExpenseForm('memo', event.target.value)}
+                className={inputClass}
+                placeholder="업체명, 결제수단"
+              />
+            </label>
+            <div className="flex items-end gap-2">
+              <label className="inline-flex h-11 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={fixedExpenseForm.isActive}
+                  onChange={(event) => updateFixedExpenseForm('isActive', event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                />
+                활성
+              </label>
+              <button
+                type="button"
+                onClick={handleSaveFixedExpense}
+                disabled={fixedExpenseSaving}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-black text-white hover:bg-slate-800 disabled:opacity-50"
+              >
+                <Save size={16} />
+                {fixedExpenseForm.id ? '수정' : '추가'}
+              </button>
+              {fixedExpenseForm.id && (
+                <button
+                  type="button"
+                  onClick={resetFixedExpenseForm}
+                  className="inline-flex h-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-600 hover:bg-slate-50"
+                >
+                  취소
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="overflow-auto">
+            <table className="w-full min-w-[920px] border-collapse text-xs">
+              <thead>
+                <tr className="bg-white text-slate-600">
+                  <th className="border border-slate-200 px-2 py-2 text-left">항목</th>
+                  <th className="border border-slate-200 px-2 py-2 text-center">구분</th>
+                  <th className="border border-slate-200 px-2 py-2 text-right">금액</th>
+                  <th className="border border-slate-200 px-2 py-2 text-center">납부일</th>
+                  <th className="border border-slate-200 px-2 py-2 text-center">기간</th>
+                  <th className="border border-slate-200 px-2 py-2 text-center">상태</th>
+                  <th className="border border-slate-200 px-2 py-2 text-left">메모</th>
+                  <th className="border border-slate-200 px-2 py-2 text-center">관리</th>
+                </tr>
+              </thead>
+              <tbody>
+                {fixedExpenses.length > 0 ? fixedExpenses.map((expense) => {
+                  const due = isFixedExpenseDueForMonth(expense, yearMonth);
+                  const generated = isFixedExpenseGenerated(expense);
+                  const statusLabel = expense.isActive === false ? '비활성' : due ? generated ? '생성됨' : '미생성' : '기간 외';
+                  const statusClass = expense.isActive === false
+                    ? 'bg-slate-100 text-slate-500'
+                    : due && generated
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : due
+                        ? 'bg-amber-50 text-amber-700'
+                        : 'bg-slate-50 text-slate-500';
+
+                  return (
+                    <tr key={expense.id} className={fixedExpenseForm.id === expense.id ? 'bg-sky-50/60' : 'hover:bg-slate-50'}>
+                      <td className="border border-slate-200 px-2 py-2 font-black text-slate-900">{expense.name}</td>
+                      <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-600">{getCategoryLabel(expense.category, allCategoryOptions)}</td>
+                      <td className="border border-slate-200 px-2 py-2 text-right font-black tabular-nums text-slate-900">{formatCurrency(expense.amount)}</td>
+                      <td className="border border-slate-200 px-2 py-2 text-center font-bold tabular-nums">{expense.dayOfMonth}일</td>
+                      <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-600">
+                        {expense.startYearMonth || '-'} ~ {expense.endYearMonth || '계속'}
+                      </td>
+                      <td className="border border-slate-200 px-2 py-2 text-center">
+                        <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-black ${statusClass}`}>
+                          {statusLabel}
+                        </span>
+                      </td>
+                      <td className="border border-slate-200 px-2 py-2 font-bold text-slate-500">{expense.memo || '-'}</td>
+                      <td className="border border-slate-200 px-2 py-2 text-center">
+                        <div className="inline-flex overflow-hidden rounded-lg border border-slate-200">
+                          <button
+                            type="button"
+                            onClick={() => handleEditFixedExpense(expense)}
+                            className="inline-flex h-8 w-8 items-center justify-center bg-white text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+                            title="수정"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleFixedExpense(expense)}
+                            disabled={fixedExpenseSaving}
+                            className="inline-flex h-8 w-8 items-center justify-center border-l border-slate-200 bg-white text-slate-500 hover:bg-sky-50 hover:text-sky-700 disabled:opacity-40"
+                            title={expense.isActive === false ? '활성' : '비활성'}
+                          >
+                            {expense.isActive === false ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteFixedExpense(expense)}
+                            disabled={fixedExpenseSaving || expense.isActive === false}
+                            className="inline-flex h-8 w-8 items-center justify-center border-l border-slate-200 bg-white text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                            title="비활성"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }) : (
+                  <tr>
+                    <td colSpan={8} className="border border-slate-200 px-4 py-8 text-center font-bold text-slate-500">
+                      {fixedExpenseLoading ? '사무실 고정경비를 불러오는 중입니다.' : '등록된 사무실 고정경비가 없습니다.'}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         <div className="grid gap-4 xl:grid-cols-[520px_minmax(0,1fr)]">
           <section ref={formRef} className="border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
@@ -691,6 +1370,14 @@ const ExpenseClaimManagementPage: React.FC = () => {
             </div>
 
             <form onSubmit={handleSave} className="space-y-4 p-4">
+              <input
+                ref={attachmentInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handleAttachmentInputChange}
+              />
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {claimTypeOptions.map((option) => {
                   const active = form.claimType === option.value;
@@ -749,7 +1436,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
                       <option value={officeTeamId} style={{ color: getTeamColor(officeTeam) }}>
                         {officeTeamName}
                       </option>
-                    ) : nonOfficeTeamOptions.map((team) => (
+                    ) : payerTeamOptions.map((team) => (
                       <option key={`payer-${getTeamId(team) || getTeamName(team)}`} value={getTeamId(team)} style={{ color: getTeamColor(team) }}>
                         {getTeamName(team)}
                       </option>
@@ -950,6 +1637,95 @@ const ExpenseClaimManagementPage: React.FC = () => {
                 </label>
               </div>
 
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 text-xs font-black text-slate-700">
+                      <Paperclip size={14} />
+                      사진 첨부
+                      <span className="text-slate-400">
+                        {form.attachments.length + pendingAttachments.length}/{MAX_EXPENSE_ATTACHMENTS}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-[11px] font-bold text-slate-500">
+                      영수증, 현장 사진 등 10MB 이하 이미지를 첨부할 수 있습니다.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => attachmentInputRef.current?.click()}
+                    disabled={saving || form.attachments.length + pendingAttachments.length >= MAX_EXPENSE_ATTACHMENTS}
+                    className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-black text-blue-700 hover:bg-blue-100 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    <UploadCloud size={14} />
+                    사진 선택
+                  </button>
+                </div>
+
+                {uploadProgress !== null && (
+                  <div className="mt-3">
+                    <div className="mb-1 flex items-center justify-between text-[11px] font-black text-slate-500">
+                      <span>사진 업로드</span>
+                      <span>{uploadProgress}%</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-white">
+                      <div className="h-full rounded-full bg-blue-600" style={{ width: `${uploadProgress}%` }} />
+                    </div>
+                  </div>
+                )}
+
+                {form.attachments.length + pendingAttachments.length > 0 ? (
+                  <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
+                    {form.attachments.map((attachment) => (
+                      <div key={attachment.id || attachment.fullPath} className="relative overflow-hidden rounded-lg border border-white bg-white shadow-sm">
+                        {attachment.url ? (
+                          <a href={attachment.url} target="_blank" rel="noreferrer" title={attachment.name}>
+                            <img src={attachment.url} alt={attachment.name || '첨부 사진'} className="h-20 w-full object-cover" />
+                          </a>
+                        ) : (
+                          <div className="flex h-20 w-full flex-col items-center justify-center gap-1 bg-slate-100 text-slate-400">
+                            <ImageIcon size={18} />
+                            <span className="max-w-full truncate px-1 text-[10px] font-bold">{attachment.name}</span>
+                          </div>
+                        )}
+                        <div className="truncate px-1.5 py-1 text-[10px] font-bold text-slate-500">
+                          {attachment.name} {formatFileSize(attachment.size)}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeSavedAttachment(attachment)}
+                          disabled={saving}
+                          className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-slate-950/75 text-white disabled:bg-slate-400"
+                          aria-label="첨부 사진 삭제"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))}
+                    {pendingAttachments.map((attachment) => (
+                      <div key={attachment.id} className="relative overflow-hidden rounded-lg border border-blue-100 bg-white shadow-sm">
+                        <img src={attachment.previewUrl} alt={attachment.file.name || '첨부 예정 사진'} className="h-20 w-full object-cover" />
+                        <div className="truncate px-1.5 py-1 text-[10px] font-bold text-blue-600">
+                          {attachment.file.name} {formatFileSize(attachment.file.size)}
+                        </div>
+                        <span className="absolute left-1 top-1 rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-black text-white">
+                          신규
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removePendingAttachment(attachment.id)}
+                          disabled={saving}
+                          className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-slate-950/75 text-white disabled:bg-slate-400"
+                          aria-label="첨부 예정 사진 삭제"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
               <div
                 className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs font-bold ${
                   form.claimType === 'officeExpense'
@@ -1084,6 +1860,33 @@ const ExpenseClaimManagementPage: React.FC = () => {
                             <span>{getCategoryLabel(claim.category, allCategoryOptions)}</span>
                             {claim.memo ? <span className="truncate">· {claim.memo}</span> : null}
                           </div>
+                          {(claim.attachments ?? []).length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {(claim.attachments ?? []).map((attachment) => (
+                                attachment.url ? (
+                                  <a
+                                    key={attachment.id || attachment.fullPath || attachment.url}
+                                    href={attachment.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    title={attachment.name}
+                                    className="inline-flex h-9 w-9 overflow-hidden rounded-md border border-slate-200 bg-white"
+                                  >
+                                    <img src={attachment.url} alt={attachment.name || '첨부 사진'} className="h-full w-full object-cover" />
+                                  </a>
+                                ) : (
+                                  <span
+                                    key={attachment.id || attachment.fullPath || attachment.name}
+                                    title={attachment.name}
+                                    className="inline-flex h-9 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[10px] font-black text-slate-500"
+                                  >
+                                    <ImageIcon size={12} />
+                                    {attachment.name || '첨부'}
+                                  </span>
+                                )
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-500">{isStandalone ? '-' : claim.cardLabel || '-'}</td>
                         <td className="border border-slate-200 px-2 py-2 text-right font-black tabular-nums text-slate-900">{formatCurrency(claim.amount)}</td>

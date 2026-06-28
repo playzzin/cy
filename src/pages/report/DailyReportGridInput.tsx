@@ -15,6 +15,7 @@ import {
     applyDailyReportSiteSnapshotToReport,
     buildDailyReportSiteSnapshot,
 } from '../../utils/dailyReportSiteSnapshot';
+import { getOpenSites } from '../../utils/siteStatus';
 
 import { AnalyzedDailyReport, geminiService, KakaoAnalyzeContext } from '../../services/geminiService';
 import { useAuth } from '../../contexts/AuthContext';
@@ -71,6 +72,31 @@ interface ReviewCandidate {
     originalText?: string;
     createdAt: number;
 }
+
+const DAILY_REPORT_TEMP_STORAGE_KEY = 'daily_report_temp_data';
+
+interface DailyReportTempState {
+    ledgers: Ledger[];
+    date: string;
+    reviewCandidates: ReviewCandidate[];
+    scheduleSnapshot: Ledger[];
+    kakaoSnapshot: Ledger[];
+}
+
+const isInitialTempState = (state: DailyReportTempState): boolean => (
+    (state.ledgers.length === 0 || (
+        state.ledgers.length === 1
+        && !state.ledgers[0].siteId
+        && state.ledgers[0].rows.every(row => !row.name || row.name.trim() === '')
+    ))
+    && state.reviewCandidates.length === 0
+    && state.scheduleSnapshot.length === 0
+    && state.kakaoSnapshot.length === 0
+);
+
+const getTempStateSignature = (state: DailyReportTempState): string => (
+    JSON.stringify(state)
+);
 
 const REVIEW_SOURCE_LABELS: Record<ReviewCandidateSource, string> = {
     schedule: '일정',
@@ -368,9 +394,16 @@ const DailyReportTable: React.FC<{
     }, [syncDuplicateFromHot, ledger.id, ledger.rows, onUpdate, teams, workerMap, retiredWorkerMap]);
 
     const normalizedLedgerSiteId = String(ledger.siteId ?? '').trim();
+    const selectedSite = sites.find((s) => String(s.id ?? '').trim() === normalizedLedgerSiteId);
+    const selectedSiteOption = selectedSite
+        ? {
+            id: String(selectedSite.id ?? '').trim(),
+            name: String(selectedSite.name ?? '').trim()
+        }
+        : null;
     const siteOptions = useMemo(
         () =>
-            sites
+            getOpenSites(sites)
                 .map((site) => ({
                     id: String(site.id ?? '').trim(),
                     name: String(site.name ?? '').trim()
@@ -378,7 +411,6 @@ const DailyReportTable: React.FC<{
                 .filter((site) => Boolean(site.id) && Boolean(site.name)),
         [sites]
     );
-    const selectedSite = sites.find((s) => String(s.id ?? '').trim() === normalizedLedgerSiteId);
     const selectedSiteSnapshot = useMemo(() => buildDailyReportSiteSnapshot({
         site: selectedSite,
         siteId: normalizedLedgerSiteId,
@@ -475,6 +507,7 @@ const DailyReportTable: React.FC<{
                             <SingleSelectPopover
                                 options={siteOptions}
                                 selectedId={normalizedLedgerSiteId || null}
+                                selectedOptionOverride={selectedSiteOption}
                                 onSelect={(siteId) => {
                                     const nextSiteId = String(siteId ?? '').trim();
                                     const nextSite = sites.find((site) => String(site.id ?? '').trim() === nextSiteId);
@@ -663,6 +696,7 @@ const DailyReportGridInput: React.FC = () => {
     const [teams, setTeams] = useState<Team[]>([]);
     const [companies, setCompanies] = useState<Company[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
+    const reportInputSites = useMemo(() => getOpenSites(sites), [sites]);
 
     useEffect(() => {
         const unsubscribe = manpowerService.subscribeWorkers((newWorkers) => {
@@ -811,7 +845,8 @@ const DailyReportGridInput: React.FC = () => {
         [buildWorkerSearchMap]
     );
 
-    const stateRef = useRef({ ledgers, date, reviewCandidates, scheduleSnapshot, kakaoSnapshot });
+    const stateRef = useRef<DailyReportTempState>({ ledgers, date, reviewCandidates, scheduleSnapshot, kakaoSnapshot });
+    const ignoredTempStateSignaturesRef = useRef<Set<string>>(new Set());
     const [hasTempData, setHasTempData] = useState(false);
 
     useEffect(() => {
@@ -821,11 +856,9 @@ const DailyReportGridInput: React.FC = () => {
     const performSave = useCallback(() => {
         try {
             const current = stateRef.current;
-            const isInitialEmpty = (current.ledgers.length === 0 || (current.ledgers.length === 1 && !current.ledgers[0].siteId && current.ledgers[0].rows.every(r => !r.name || r.name.trim() === '')))
-                && current.reviewCandidates.length === 0
-                && current.scheduleSnapshot.length === 0
-                && current.kakaoSnapshot.length === 0;
-            if (isInitialEmpty) return;
+            const currentSignature = getTempStateSignature(current);
+            if (ignoredTempStateSignaturesRef.current.has(currentSignature)) return;
+            if (isInitialTempState(current)) return;
             const tempData = {
                 ledgers: current.ledgers,
                 date: current.date,
@@ -834,42 +867,50 @@ const DailyReportGridInput: React.FC = () => {
                 kakaoSnapshot: current.kakaoSnapshot,
                 savedAt: Date.now()
             };
-            localStorage.setItem('daily_report_temp_data', JSON.stringify(tempData));
+            ignoredTempStateSignaturesRef.current.clear();
+            localStorage.setItem(DAILY_REPORT_TEMP_STORAGE_KEY, JSON.stringify(tempData));
             setHasTempData(true);
         } catch (e) {
             console.error("Temp save failed", e);
         }
     }, []);
 
-    const loadTempData = useCallback(async () => {
+    const loadTempData = useCallback(async (targetDate: string) => {
         try {
-            const tempDataStr = localStorage.getItem('daily_report_temp_data');
+            const tempDataStr = localStorage.getItem(DAILY_REPORT_TEMP_STORAGE_KEY);
             if (!tempDataStr) return false;
             const tempData = JSON.parse(tempDataStr);
             if (Date.now() - tempData.savedAt > 24 * 60 * 60 * 1000) {
-                localStorage.removeItem('daily_report_temp_data');
+                localStorage.removeItem(DAILY_REPORT_TEMP_STORAGE_KEY);
+                setHasTempData(false);
+                return false;
+            }
+            if (tempData.date && tempData.date !== targetDate) {
+                setHasTempData(false);
                 return false;
             }
             setLedgers(tempData.ledgers);
-            if (tempData.date) setDate(tempData.date);
             if (Array.isArray(tempData.reviewCandidates)) setReviewCandidates(tempData.reviewCandidates);
             if (Array.isArray(tempData.scheduleSnapshot)) setScheduleSnapshot(tempData.scheduleSnapshot);
             if (Array.isArray(tempData.kakaoSnapshot)) setKakaoSnapshot(tempData.kakaoSnapshot);
+            ignoredTempStateSignaturesRef.current.clear();
             setHasTempData(true);
             return true;
         } catch (e) {
             console.error("Failed to load temp data", e);
-            localStorage.removeItem('daily_report_temp_data');
+            localStorage.removeItem(DAILY_REPORT_TEMP_STORAGE_KEY);
+            setHasTempData(false);
             return false;
         }
     }, []);
 
-    const clearTempData = useCallback(() => {
-        localStorage.removeItem('daily_report_temp_data');
+    const clearTempData = useCallback((stateToIgnore?: DailyReportTempState) => {
+        localStorage.removeItem(DAILY_REPORT_TEMP_STORAGE_KEY);
+        ignoredTempStateSignaturesRef.current.add(getTempStateSignature(stateRef.current));
+        if (stateToIgnore) {
+            ignoredTempStateSignaturesRef.current.add(getTempStateSignature(stateToIgnore));
+        }
         setHasTempData(false);
-        setReviewCandidates([]);
-        setScheduleSnapshot([]);
-        setKakaoSnapshot([]);
     }, []);
 
     useEffect(() => {
@@ -970,24 +1011,12 @@ const DailyReportGridInput: React.FC = () => {
                 setKakaoSnapshot([]);
                 setHasTempData(false);
             } else {
-                const loaded = await loadTempData();
+                const loaded = await loadTempData(date);
                 if (!loaded) {
                     setLedgers([{ id: Date.now().toString(), siteId: '', rows: createEmptyRows(20), description: '' }]);
                     setReviewCandidates([]);
                     setScheduleSnapshot([]);
                     setKakaoSnapshot([]);
-                } else {
-                    const tempDataStr = localStorage.getItem('daily_report_temp_data');
-                    if (tempDataStr) {
-                        const parsed = JSON.parse(tempDataStr);
-                        if (parsed.date !== date) {
-                            setLedgers([{ id: Date.now().toString(), siteId: '', rows: createEmptyRows(20), description: '' }]);
-                            setReviewCandidates([]);
-                            setScheduleSnapshot([]);
-                            setKakaoSnapshot([]);
-                            setHasTempData(false);
-                        }
-                    }
                 }
             }
             setFetching(false);
@@ -1019,20 +1048,20 @@ const DailyReportGridInput: React.FC = () => {
 
     const buildKakaoAnalyzeContext = useCallback((): KakaoAnalyzeContext => ({
         today: date,
-        sites: sites.map(s => s.name).filter(Boolean),
+        sites: reportInputSites.map(s => s.name).filter(Boolean),
         teams: teams.map(t => t.name).filter(Boolean),
         workers: workers.map(w => w.name).filter(Boolean)
-    }), [date, sites, teams, workers]);
+    }), [date, reportInputSites, teams, workers]);
 
     const findSiteByAnalyzedName = useCallback((siteName?: string | null): Site | undefined => {
         const normalized = normalizeLookupText(siteName);
         if (!normalized) return undefined;
-        return sites.find(s => normalizeLookupText(s.name) === normalized)
-            || sites.find(s => {
+        return reportInputSites.find(s => normalizeLookupText(s.name) === normalized)
+            || reportInputSites.find(s => {
                 const candidate = normalizeLookupText(s.name);
                 return Boolean(candidate) && (candidate.includes(normalized) || normalized.includes(candidate));
             });
-    }, [normalizeLookupText, sites]);
+    }, [normalizeLookupText, reportInputSites]);
 
     const findWorkerByAnalyzedName = useCallback((workerName?: string | null): (Worker & { isDuplicateName?: boolean }) | undefined => {
         const normalized = normalizeLookupText(workerName);
@@ -1679,7 +1708,7 @@ const DailyReportGridInput: React.FC = () => {
         const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
         const candidates: ReviewCandidate[] = [];
 
-        sites.forEach(site => {
+        reportInputSites.forEach(site => {
             const siteName = String(site.name ?? '').trim();
             const siteKey = normalizeLookupText(siteName);
             if (!siteKey) return;
@@ -1707,11 +1736,11 @@ const DailyReportGridInput: React.FC = () => {
             setReviewCandidates(prev => [...prev, ...candidates]);
         }
         return candidates.length;
-    }, [createCandidateId, hasCancelKeyword, normalizeLookupText, normalizeSiteId, sites]);
+    }, [createCandidateId, hasCancelKeyword, normalizeLookupText, normalizeSiteId, reportInputSites]);
 
     const appendScheduleAssignments = useCallback((assignments: DispatchAssignment[]) => {
         const siteById = new Map<string, Site>();
-        sites.forEach(site => {
+        reportInputSites.forEach(site => {
             const siteId = normalizeSiteId(site.id);
             const legacyId = normalizeSiteId(site.legacyId);
             if (siteId) siteById.set(siteId, site);
@@ -1864,7 +1893,7 @@ const DailyReportGridInput: React.FC = () => {
         });
 
         const scheduleLedgers: Ledger[] = Array.from(scheduleGroups.values()).map((group) => {
-            const site = sites.find((candidate) => normalizeSiteId(candidate.id) === normalizeSiteId(group.siteId));
+            const site = reportInputSites.find((candidate) => normalizeSiteId(candidate.id) === normalizeSiteId(group.siteId));
             const rows = group.rows.map(row => ({ ...row }));
             const needed = 20 - rows.length;
             if (needed > 0) rows.push(...createEmptyRows(needed));
@@ -1899,7 +1928,7 @@ const DailyReportGridInput: React.FC = () => {
             duplicateWorkerCount,
             supportTeamPlaceholderCount
         };
-    }, [cloneLedgers, createEmptyRows, findSiteByAnalyzedName, getScheduleWorkerIds, normalizeLookupText, normalizeSiteId, sites, teams, workers]);
+    }, [cloneLedgers, createEmptyRows, findSiteByAnalyzedName, getScheduleWorkerIds, normalizeLookupText, normalizeSiteId, reportInputSites, teams, workers]);
 
     const addLedger = useCallback(() => {
         setLedgers(prev => [...prev, { id: Date.now().toString(), siteId: '', rows: createEmptyRows(20), description: '' }]);
@@ -1911,12 +1940,46 @@ const DailyReportGridInput: React.FC = () => {
     const handleReset = useCallback(async () => {
         const result = await Swal.fire({ title: '작성 내용 초기화', text: '현재 입력된 모든 내용을 삭제하고 새로 시작하시겠습니까?', icon: 'warning', showCancelButton: true, confirmButtonText: '초기화', cancelButtonText: '취소', confirmButtonColor: '#d33' });
         if (result.isConfirmed) {
-            setLedgers([{ id: Date.now().toString(), siteId: '', rows: createEmptyRows(20), description: '' }]);
+            const nextLedgers = [{ id: Date.now().toString(), siteId: '', rows: createEmptyRows(20), description: '' }];
+            clearTempData({
+                ledgers: nextLedgers,
+                date,
+                reviewCandidates: [],
+                scheduleSnapshot: [],
+                kakaoSnapshot: [],
+            });
+            setLedgers(nextLedgers);
             setReviewCandidates([]);
             setScheduleSnapshot([]);
             setKakaoSnapshot([]);
         }
-    }, []);
+    }, [clearTempData, createEmptyRows, date]);
+
+    const handleDeleteTempData = useCallback(async () => {
+        const result = await Swal.fire({
+            title: '임시데이터 삭제',
+            text: '임시 저장된 데이터와 현재 입력 내용을 삭제하고 새로 시작하시겠습니까?',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '삭제',
+            cancelButtonText: '취소',
+            confirmButtonColor: '#d33'
+        });
+        if (!result.isConfirmed) return;
+
+        const nextLedgers = [{ id: Date.now().toString(), siteId: '', rows: createEmptyRows(20), description: '' }];
+        clearTempData({
+            ledgers: nextLedgers,
+            date,
+            reviewCandidates: [],
+            scheduleSnapshot: [],
+            kakaoSnapshot: [],
+        });
+        setLedgers(nextLedgers);
+        setReviewCandidates([]);
+        setScheduleSnapshot([]);
+        setKakaoSnapshot([]);
+    }, [clearTempData, createEmptyRows, date]);
     const addRowToLedger = useCallback((id: string) => {
         setLedgers(prev => prev.map(l => l.id !== id ? l : { ...l, rows: [...l.rows, ...createEmptyRows(5)] }));
     }, []);
@@ -2002,7 +2065,15 @@ const DailyReportGridInput: React.FC = () => {
             }
             if (allReports.length > 0) {
                 await dailyReportService.overwriteReports(date, allReports, Array.from(involvedTeamIds));
-                clearTempData();
+                clearTempData({
+                    ...stateRef.current,
+                    reviewCandidates: [],
+                    scheduleSnapshot: [],
+                    kakaoSnapshot: [],
+                });
+                setReviewCandidates([]);
+                setScheduleSnapshot([]);
+                setKakaoSnapshot([]);
                 alert(`${allReports.length}건의 일보가 저장되었습니다.`);
             } else {
                 alert('저장할 데이터가 없습니다.');
@@ -2467,7 +2538,7 @@ const DailyReportGridInput: React.FC = () => {
             {hasTempData && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 mx-6 flex items-center justify-between mt-4">
                     <div className="flex items-center gap-2"><FontAwesomeIcon icon={faFloppyDisk} className="text-blue-600" /><span className="text-blue-800 font-medium text-sm">임시 저장된 데이터를 불러왔습니다.</span></div>
-                    <button onClick={() => { clearTempData(); handleReset(); }} className="text-xs text-red-500 hover:text-red-700 underline">임시데이터 삭제</button>
+                    <button onClick={handleDeleteTempData} className="text-xs text-red-500 hover:text-red-700 underline">임시데이터 삭제</button>
                 </div>
             )}
 

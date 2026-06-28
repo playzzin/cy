@@ -12,15 +12,20 @@ import { VehicleBillingTargetManager } from '../../components/vehicle/VehicleBil
 import { VehicleStatusBoard } from '../../components/vehicle/VehicleStatusBoard';
 import { AssignmentBillingSetupModal, type AssignmentBillingSection } from '../../components/support/AssignmentBillingSetupModal';
 import { SupportTeamFilterTabs } from '../../components/support/SupportTeamFilterTabs';
+import { SupportCancellationHistory } from '../../components/support/SupportCancellationHistory';
+import { SupportCancellationModal, type SupportCancellationFormValue } from '../../components/support/SupportCancellationModal';
+import { supportCancellationLogService } from '../../services/supportCancellationLogService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faCar, faChartPie, faTableCellsLarge, faRotateRight, faCircleExclamation, faHistory, faSearch } from '@fortawesome/free-solid-svg-icons';
+import { faPlus, faCar, faChartPie, faTableCellsLarge, faRotateRight, faCircleExclamation, faHistory, faSearch, faOilCan, faScrewdriverWrench } from '@fortawesome/free-solid-svg-icons';
 import { VehicleMonthlyLedger } from '../../components/vehicle/VehicleMonthlyLedger';
 import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
-import { appendOfficeAssignmentTeam, isOfficeAssignmentTeam, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
+import { appendOfficeAssignmentTeam, isOfficeAssignmentReference, isOfficeAssignmentTeam, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
 
 interface VehicleManagerPageProps {
     embedded?: boolean;
 }
+
+const normalizeKey = (value: unknown): string => String(value ?? '').trim();
 
 export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded = false }) => {
     const navigate = useNavigate();
@@ -40,7 +45,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
     const [searchTerm, setSearchTerm] = useState('');
 
     // Tab State
-    const [activeTab, setActiveTab] = useState<'status' | 'ledger'>('status');
+    const [activeTab, setActiveTab] = useState<'status' | 'ledger' | 'history'>('status');
 
     // Modal State
     const [isFormOpen, setIsFormOpen] = useState(false);
@@ -49,6 +54,8 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
     const [setupInitialVehicleId, setSetupInitialVehicleId] = useState<string | null>(null);
     const [setupInitialSection, setSetupInitialSection] = useState<AssignmentBillingSection>('assignment');
     const [billingTargetInitialSplitMode, setBillingTargetInitialSplitMode] = useState(false);
+    const [cancellationTarget, setCancellationTarget] = useState<Vehicle | null>(null);
+    const [savingCancellation, setSavingCancellation] = useState(false);
 
     // 데이터 로드 함수
     const loadData = async () => {
@@ -84,19 +91,129 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
         loadData();
     }, [refreshKey]);
 
+    const teamByAnyId = React.useMemo(() => {
+        const map = new Map<string, Team>();
+        teams.forEach((team) => {
+            const id = normalizeKey(team.id);
+            const legacyId = normalizeKey(team.legacyId);
+            if (id) map.set(id, team);
+            if (legacyId) map.set(legacyId, team);
+        });
+        return map;
+    }, [teams]);
+
+    const teamByName = React.useMemo(() => {
+        const map = new Map<string, Team>();
+        teams.forEach((team) => {
+            const name = normalizeKey(team.name);
+            if (name && !map.has(name)) map.set(name, team);
+        });
+        return map;
+    }, [teams]);
+
+    const workerByAnyId = React.useMemo(() => {
+        const map = new Map<string, Worker>();
+        workers.forEach((worker) => {
+            [worker.id, worker.legacyId, worker.uid].forEach((key) => {
+                const normalized = normalizeKey(key);
+                if (normalized) map.set(normalized, worker);
+            });
+        });
+        return map;
+    }, [workers]);
+
+    const workerByName = React.useMemo(() => {
+        const map = new Map<string, Worker>();
+        workers.forEach((worker) => {
+            const name = normalizeKey(worker.name);
+            if (name && !map.has(name)) map.set(name, worker);
+        });
+        return map;
+    }, [workers]);
+
+    const selectedTeamIdentity = React.useMemo(() => {
+        const selectedId = normalizeKey(selectedTeamId);
+        const selectedTeam = teamByAnyId.get(selectedId) ?? teamByName.get(selectedId) ?? null;
+        const ids = new Set(
+            [selectedId, selectedTeam?.id, selectedTeam?.legacyId]
+                .map((value) => normalizeKey(value))
+                .filter(Boolean)
+        );
+        const names = new Set(
+            [selectedTeam?.name]
+                .map((value) => normalizeKey(value))
+                .filter(Boolean)
+        );
+        const memberIds = new Set(
+            [selectedTeam?.leaderId, ...(selectedTeam?.memberIds ?? [])]
+                .map((value) => normalizeKey(value))
+                .filter(Boolean)
+        );
+        const memberNames = new Set(
+            [selectedTeam?.leaderName, ...(selectedTeam?.memberNames ?? [])]
+                .map((value) => normalizeKey(value))
+                .filter(Boolean)
+        );
+
+        return {
+            team: selectedTeam,
+            ids,
+            names,
+            memberIds,
+            memberNames
+        };
+    }, [selectedTeamId, teamByAnyId, teamByName]);
+
     // 차량 필터링
     const filteredVehicles = React.useMemo(() => {
         const query = searchTerm.trim().toLowerCase();
-        const selectedTeam = teams.find(t => String(t.id) === String(selectedTeamId));
+        const selectedTeam = selectedTeamIdentity.team;
         const selectedTeamIsOffice = isOfficeAssignmentTeam(selectedTeam);
         return vehicles.filter(v => {
+            const assigneeId = normalizeKey(v.currentAssigneeId);
+            const assigneeName = normalizeKey(v.currentAssigneeName);
+            const isOfficeStaffAssignee = (
+                v.currentAssigneeType === 'WORKER' &&
+                isOfficeStaffAssignmentReference(officeStaffRows, v.currentAssigneeId, v.currentAssigneeName)
+            );
+            const assigneeTeam = v.currentAssigneeType === 'TEAM'
+                ? (teamByAnyId.get(assigneeId) ?? teamByName.get(assigneeName))
+                : null;
+            const isOfficeTeamAssignee = (
+                v.currentAssigneeType === 'TEAM' &&
+                (
+                    isOfficeAssignmentReference(v.currentAssigneeId, v.currentAssigneeName) ||
+                    isOfficeAssignmentTeam(assigneeTeam)
+                )
+            );
+            const worker = v.currentAssigneeType === 'WORKER' && !isOfficeStaffAssignee
+                ? (workerByAnyId.get(assigneeId) ?? workerByName.get(assigneeName))
+                : null;
             const teamMatches = !selectedTeamId
-                || (v.currentAssigneeType === 'TEAM' && String(v.currentAssigneeId) === String(selectedTeamId))
-                || (v.currentAssigneeType === 'WORKER' && selectedTeam?.leaderId && String(v.currentAssigneeId) === String(selectedTeam.leaderId))
+                || (
+                    v.currentAssigneeType === 'TEAM' &&
+                    !isOfficeTeamAssignee &&
+                    (
+                        selectedTeamIdentity.ids.has(assigneeId) ||
+                        selectedTeamIdentity.names.has(assigneeName) ||
+                        selectedTeamIdentity.ids.has(normalizeKey(assigneeTeam?.id)) ||
+                        selectedTeamIdentity.ids.has(normalizeKey(assigneeTeam?.legacyId)) ||
+                        selectedTeamIdentity.names.has(normalizeKey(assigneeTeam?.name))
+                    )
+                )
+                || (
+                    v.currentAssigneeType === 'WORKER' &&
+                    !isOfficeStaffAssignee &&
+                    (
+                        selectedTeamIdentity.memberIds.has(assigneeId) ||
+                        selectedTeamIdentity.memberNames.has(assigneeName) ||
+                        selectedTeamIdentity.ids.has(normalizeKey(worker?.teamId)) ||
+                        selectedTeamIdentity.names.has(normalizeKey(worker?.teamName))
+                    )
+                )
                 || (
                     selectedTeamIsOffice &&
-                    v.currentAssigneeType === 'WORKER' &&
-                    isOfficeStaffAssignmentReference(officeStaffRows, v.currentAssigneeId, v.currentAssigneeName)
+                    (isOfficeTeamAssignee || isOfficeStaffAssignee)
                 );
 
             const searchMatches = !query || [
@@ -118,7 +235,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
 
             return teamMatches && searchMatches;
         });
-    }, [vehicles, selectedTeamId, teams, searchTerm, officeStaffRows]);
+    }, [vehicles, selectedTeamId, selectedTeamIdentity, teamByAnyId, teamByName, workerByAnyId, workerByName, searchTerm, officeStaffRows]);
 
     // 핸들러 함수들
     const handleRefresh = () => {
@@ -140,13 +257,67 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
         setBillingTargetInitialSplitMode(Boolean(options?.split));
         setIsSetupModalOpen(true);
     };
-    const handleDelete = async (vehicle: Vehicle) => {
-        const label = vehicle.licensePlate || vehicle.model || '선택한 차량';
-        const ok = window.confirm(`${label} 차량을 삭제하시겠습니까?\n삭제 후에는 복구할 수 없습니다.`);
-        if (!ok) return;
+    const openCancellationModal = (vehicle: Vehicle) => {
+        setCancellationTarget(vehicle);
+    };
+    const handleCancellationSubmit = async (form: SupportCancellationFormValue) => {
+        if (!cancellationTarget) return;
+        const vehicle = cancellationTarget;
+        setSavingCancellation(true);
 
         try {
-            await vehicleService.deleteVehicle(vehicle.id);
+            const activeBillingTargets = (await vehicleService.listAllVehicleBillingTargets(vehicle.id))
+                .filter((target) => !String(target.endDate ?? '').trim());
+
+            if (vehicle.currentAssigneeId || vehicle.currentAssigneeName) {
+                await vehicleService.unassignVehicle(vehicle.id, form.processedDate);
+            }
+
+            if (activeBillingTargets.length > 0) {
+                await vehicleService.applyVehicleBillingTargetChanges({
+                    vehicleId: vehicle.id,
+                    closeRecords: activeBillingTargets.map((target) => ({ id: target.id, endDate: form.processedDate })),
+                    clearSnapshot: true
+                });
+            }
+
+            await vehicleService.updateVehicle(vehicle.id, {
+                status: 'DISPOSED',
+                currentAssigneeId: null,
+                currentAssigneeType: null,
+                currentAssigneeName: null,
+                billingTargetId: null,
+                billingTargetType: null,
+                billingTargetName: null
+            } as unknown as Partial<Vehicle>);
+
+            await supportCancellationLogService.createLog({
+                resourceType: 'vehicle',
+                resourceId: vehicle.id,
+                resourceLabel: vehicle.licensePlate || vehicle.model || '차량',
+                reason: form.reason,
+                reasonLabel: form.reasonLabel,
+                processedDate: form.processedDate,
+                statusBefore: vehicle.status,
+                statusAfter: 'DISPOSED',
+                assigneeName: vehicle.currentAssigneeName || undefined,
+                billingTargetName: vehicle.billingTargetName || undefined,
+                settlementAmount: form.settlementAmount,
+                note: form.note,
+                snapshot: {
+                    licensePlate: vehicle.licensePlate,
+                    model: vehicle.model,
+                    type: vehicle.type,
+                    status: vehicle.status,
+                    assigneeName: vehicle.currentAssigneeName,
+                    billingTargetName: vehicle.billingTargetName,
+                    contractStartDate: vehicle.contract?.startDate,
+                    contractEndDate: vehicle.contract?.endDate,
+                    monthlyFee: vehicle.contract?.monthlyFee,
+                    financeCompany: vehicle.contract?.financeCompany?.name
+                }
+            });
+
             if (editingVehicle?.id === vehicle.id) {
                 setEditingVehicle(null);
                 setIsFormOpen(false);
@@ -156,10 +327,14 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                 setBillingTargetInitialSplitMode(false);
                 setIsSetupModalOpen(false);
             }
+            setCancellationTarget(null);
+            setActiveTab('history');
             handleRefresh();
         } catch (error) {
-            console.error('Failed to delete vehicle', error);
-            window.alert('차량 삭제 중 오류가 발생했습니다.');
+            console.error('Failed to process vehicle cancellation', error);
+            window.alert('차량 사용취소 처리 중 오류가 발생했습니다.');
+        } finally {
+            setSavingCancellation(false);
         }
     };
     const handleFormSuccess = () => {
@@ -180,6 +355,27 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
         () => vehicles.find((vehicle) => String(vehicle.id) === String(setupInitialVehicleId)) ?? null,
         [setupInitialVehicleId, vehicles]
     );
+    const setupVehicleAssigneeLabel = React.useMemo(() => {
+        if (!setupVehicle?.currentAssigneeName) return '미배정';
+        return `${setupVehicle.currentAssigneeType === 'TEAM' ? '팀' : '운전자'} · ${setupVehicle.currentAssigneeName}`;
+    }, [setupVehicle]);
+    const setupVehicleBillingLabel = React.useMemo(() => {
+        if (!setupVehicle) return '미설정';
+        if (setupVehicle.billingTargetName) {
+            const targetType = setupVehicle.billingTargetType === 'TEAM'
+                ? '팀'
+                : setupVehicle.billingTargetType === 'WORKER'
+                    ? '작업자'
+                    : setupVehicle.billingTargetType === 'OFFICE'
+                        ? '사무실'
+                        : setupVehicle.billingTargetType === 'OFFICE_STAFF'
+                            ? '사무실직원'
+                            : '청구대상';
+            return `${targetType} · ${setupVehicle.billingTargetName}`;
+        }
+        if (setupVehicle.currentAssigneeName) return '청구 탭에서 확인';
+        return '미설정';
+    }, [setupVehicle]);
 
     return (
         <div className={`${embedded ? 'space-y-5 sm:space-y-6 bg-transparent min-h-full w-full min-w-0 max-w-full overflow-x-hidden' : 'p-3 sm:p-6 space-y-5 sm:space-y-6 bg-slate-50 min-h-full w-full max-w-[calc(100vw-30px)] sm:max-w-full min-w-0 overflow-x-hidden'}`}>
@@ -196,6 +392,20 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                 </div>
 
                 <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                    <button
+                        onClick={() => navigate('/support/vehicles/oil-cycle')}
+                        className="flex flex-1 items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all border border-slate-700 shadow-sm sm:flex-none"
+                    >
+                        <FontAwesomeIcon icon={faOilCan} />
+                        <span>엔진오일 주기</span>
+                    </button>
+                    <button
+                        onClick={() => navigate('/support/vehicles/team-equipment')}
+                        className="flex flex-1 items-center justify-center gap-2 px-4 py-2.5 bg-white text-slate-700 rounded-xl font-bold hover:text-blue-700 hover:border-blue-200 transition-all border border-slate-200 shadow-sm sm:flex-none"
+                    >
+                        <FontAwesomeIcon icon={faScrewdriverWrench} />
+                        <span>팀 장비여부</span>
+                    </button>
                     <button
                         onClick={() => navigate('/support/vehicles/logs')}
                         className="flex flex-1 items-center justify-center gap-2 px-4 py-2.5 bg-white text-slate-700 rounded-xl font-bold hover:text-indigo-700 hover:border-indigo-200 transition-all border border-slate-200 shadow-sm sm:flex-none"
@@ -242,6 +452,13 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                             >
                                 <FontAwesomeIcon icon={faTableCellsLarge} className="mr-2" />
                                 차량 통합관리대장
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('history')}
+                                className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold transition-all sm:px-6 ${activeTab === 'history' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                                <FontAwesomeIcon icon={faHistory} className="mr-2" />
+                                처리내역
                             </button>
                         </div>
                     </div>
@@ -290,15 +507,20 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                         onAssign={openAssignmentVehicle}
                         onBillingTargetAssign={openBillingTargetVehicle}
                         onFineChargeTargetChange={handleFineChargeTargetChange}
-                        onDelete={handleDelete}
+                        onCancelUse={openCancellationModal}
                     />
-                ) : (
+                ) : activeTab === 'ledger' ? (
                     <VehicleMonthlyLedger
                         vehicles={filteredVehicles}
                         teams={teams}
                         teamFilterId={selectedTeamId}
                         loadingVehicles={loading}
                         onOpenSetup={openAssignmentVehicle}
+                    />
+                ) : (
+                    <SupportCancellationHistory
+                        resourceType="vehicle"
+                        title="차량 사용취소 처리내역"
                     />
                 )}
             </div>
@@ -321,6 +543,12 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                 subtitle={setupVehicle ? `${setupVehicle.model || '모델 미입력'} · ${setupVehicle.type || '유형 미입력'}` : '차량 운전자와 청구대상을 한 화면에서 설정합니다.'}
                 resourceLabel="차량"
                 initialSection={setupInitialSection}
+                summaryItems={[
+                    { label: '현재 배정', value: setupVehicleAssigneeLabel, tone: setupVehicle?.currentAssigneeName ? 'indigo' : 'amber' },
+                    { label: '현재 청구', value: setupVehicleBillingLabel, tone: setupVehicle?.billingTargetName ? 'indigo' : setupVehicle?.currentAssigneeName ? 'emerald' : 'amber' },
+                    { label: '대장 반영', value: '저장 즉시 업데이트', tone: 'emerald' }
+                ]}
+                ledgerHint="저장하면 차량 현황, 차량 통합관리대장, 월별 청구대장에 바로 반영됩니다."
                 onClose={() => {
                     setIsSetupModalOpen(false);
                     setBillingTargetInitialSplitMode(false);
@@ -346,6 +574,16 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                         onRefresh={handleRefresh}
                     />
                 )}
+            />
+
+            <SupportCancellationModal
+                isOpen={!!cancellationTarget}
+                resourceType="vehicle"
+                resourceLabel={cancellationTarget?.licensePlate || cancellationTarget?.model || '차량'}
+                resourceDescription={cancellationTarget ? `${cancellationTarget.model || '모델 미입력'} · ${cancellationTarget.currentAssigneeName || '배정자 없음'}` : undefined}
+                submitting={savingCancellation}
+                onClose={() => setCancellationTarget(null)}
+                onSubmit={handleCancellationSubmit}
             />
 
         </div>

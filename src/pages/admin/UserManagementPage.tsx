@@ -16,6 +16,7 @@ import Swal from 'sweetalert2';
 import { useAuth } from '../../contexts/AuthContext';
 import { userService, UserData } from '../../services/userService';
 import { manpowerService, Worker } from '../../services/manpowerService';
+import { officeStaffService, OfficeStaff } from '../../services/officeStaffService';
 import { positionService, Position } from '../../services/positionService';
 import { userMenuPositionService, UserMenuPositionMap } from '../../services/userMenuPositionService';
 import { menuServiceV11 } from '../../services/menuServiceV11';
@@ -107,6 +108,7 @@ const UserManagementPage: React.FC = () => {
     const [refreshing, setRefreshing] = useState(false);
     const [users, setUsers] = useState<UserData[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
+    const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
     const [positions, setPositions] = useState<Position[]>([]);
     const [menuConfig, setMenuConfig] = useState<SiteDataType | null>(null);
     const [userPositionMap, setUserPositionMap] = useState<UserMenuPositionMap>({});
@@ -125,13 +127,15 @@ const UserManagementPage: React.FC = () => {
     const [runningAutoFix, setRunningAutoFix] = useState(false);
 
     const loadAll = useCallback(async () => {
-        const [usersData, workersData, positionsData] = await Promise.all([
+        const [usersData, workersData, officeStaffData, positionsData] = await Promise.all([
             userService.getAllUsers(),
             manpowerService.getWorkers(),
+            officeStaffService.getOfficeStaff(true),
             positionService.getPositions()
         ]);
         setUsers(usersData);
         setWorkers(workersData);
+        setOfficeStaffRows(officeStaffData);
         setPositions(positionsData);
     }, []);
 
@@ -167,6 +171,15 @@ const UserManagementPage: React.FC = () => {
         return map;
     }, [workers]);
 
+    const officeStaffById = useMemo(() => {
+        const map = new Map<string, OfficeStaff>();
+        officeStaffRows.forEach((staff) => {
+            if (staff.id) map.set(String(staff.id), staff);
+            if (staff.legacyId) map.set(String(staff.legacyId), staff);
+        });
+        return map;
+    }, [officeStaffRows]);
+
     const linkedWorkersByUserId = useMemo(() => {
         const map = new Map<string, Worker[]>();
         users.forEach((user) => {
@@ -183,6 +196,22 @@ const UserManagementPage: React.FC = () => {
         return map;
     }, [users, workers, workerById]);
 
+    const linkedOfficeStaffByUserId = useMemo(() => {
+        const map = new Map<string, OfficeStaff[]>();
+        users.forEach((user) => {
+            const linked = new Map<string, OfficeStaff>();
+            (user.linkedOfficeStaffIds || []).forEach((id) => {
+                const staff = officeStaffById.get(String(id));
+                if (staff?.id) linked.set(String(staff.id), staff);
+            });
+            officeStaffRows.forEach((staff) => {
+                if (staff.uid === user.uid && staff.id) linked.set(String(staff.id), staff);
+            });
+            map.set(user.uid, Array.from(linked.values()));
+        });
+        return map;
+    }, [users, officeStaffRows, officeStaffById]);
+
     const validPositionNames = useMemo(() => {
         return new Set(positions.map((position) => String(position.name).trim()).filter(Boolean));
     }, [positions]);
@@ -190,16 +219,20 @@ const UserManagementPage: React.FC = () => {
     const integrityRows = useMemo(() => {
         return users.map((user) => {
             const linkedWorkers = linkedWorkersByUserId.get(user.uid) || [];
-            const primaryLinkedWorker = linkedWorkers[0] || null;
+            const linkedOfficeStaff = linkedOfficeStaffByUserId.get(user.uid) || [];
 
             const basePosition = String(user.position || '').trim();
-            const linkedRole = String(primaryLinkedWorker?.role || '').trim();
+            const linkedRoles = Array.from(new Set([
+                ...linkedWorkers.map((worker) => String(worker.role || '').trim()),
+                ...linkedOfficeStaff.map((staff) => String(staff.role || '').trim())
+            ].filter(Boolean)));
+            const linkedRole = linkedRoles.join(', ');
             const additionalPositions = userPositionMap[user.uid] || [];
             const invalidAdditionalPositions = additionalPositions.filter((name) => !validPositionNames.has(String(name).trim()));
 
             const missingBasePosition = basePosition.length === 0;
             const invalidBasePosition = basePosition.length > 0 && !validPositionNames.has(basePosition);
-            const mismatchWithLinkedWorker = Boolean(basePosition && linkedRole && basePosition !== linkedRole);
+            const mismatchWithLinkedWorker = Boolean(basePosition && linkedRoles.length > 0 && !linkedRoles.includes(basePosition));
 
             return {
                 uid: user.uid,
@@ -213,7 +246,7 @@ const UserManagementPage: React.FC = () => {
                 invalidAdditionalPositions
             };
         });
-    }, [users, linkedWorkersByUserId, userPositionMap, validPositionNames]);
+    }, [users, linkedOfficeStaffByUserId, linkedWorkersByUserId, userPositionMap, validPositionNames]);
 
     const integritySummary = useMemo(() => {
         return {
@@ -252,13 +285,17 @@ const UserManagementPage: React.FC = () => {
         if (!selectedUser) return [];
         return linkedWorkersByUserId.get(selectedUser.uid) || [];
     }, [selectedUser, linkedWorkersByUserId]);
+    const selectedLinkedOfficeStaff = useMemo(() => {
+        if (!selectedUser) return [];
+        return linkedOfficeStaffByUserId.get(selectedUser.uid) || [];
+    }, [selectedUser, linkedOfficeStaffByUserId]);
 
     useEffect(() => {
         if (!selectedUser) return;
         setDraftRole(normalizeSystemRole(selectedUser.role));
-        setDraftPosition(String(selectedUser.position || selectedLinkedWorkers[0]?.role || '일반'));
+        setDraftPosition(String(selectedUser.position || selectedLinkedWorkers[0]?.role || selectedLinkedOfficeStaff[0]?.role || '일반'));
         setDraftAdditionalPositions(userPositionMap[selectedUser.uid] || []);
-    }, [selectedUser, selectedLinkedWorkers, userPositionMap]);
+    }, [selectedUser, selectedLinkedOfficeStaff, selectedLinkedWorkers, userPositionMap]);
 
     const refreshAll = async () => {
         setRefreshing(true);
@@ -297,9 +334,10 @@ const UserManagementPage: React.FC = () => {
             position,
             users: users.filter((user) => String(user.position || '').trim() === position.name).length,
             extraUsers: users.filter((user) => (userPositionMap[user.uid] || []).includes(position.name)).length,
-            workers: workers.filter((worker) => String(worker.role || '').trim() === position.name).length
+            workers: workers.filter((worker) => String(worker.role || '').trim() === position.name).length,
+            officeStaff: officeStaffRows.filter((staff) => String(staff.role || '').trim() === position.name).length
         }));
-    }, [positions, users, userPositionMap, workers]);
+    }, [officeStaffRows, positions, users, userPositionMap, workers]);
 
     const handleAutoSyncUserPositionFromLinkedWorker = async () => {
         setRunningAutoFix(true);
@@ -308,7 +346,8 @@ const UserManagementPage: React.FC = () => {
             for (const user of users) {
                 const basePosition = String(user.position || '').trim();
                 const linkedWorkers = linkedWorkersByUserId.get(user.uid) || [];
-                const linkedRole = String(linkedWorkers[0]?.role || '').trim();
+                const linkedOfficeStaff = linkedOfficeStaffByUserId.get(user.uid) || [];
+                const linkedRole = String(linkedWorkers[0]?.role || linkedOfficeStaff[0]?.role || '').trim();
                 if (!linkedRole) continue;
                 if (!validPositionNames.has(linkedRole)) continue;
                 if (basePosition === linkedRole) continue;
@@ -317,7 +356,7 @@ const UserManagementPage: React.FC = () => {
                 updatedCount += 1;
             }
             await loadAll();
-            Swal.fire('자동 동기화 완료', `${updatedCount}명의 기본 직책을 연동 작업자 기준으로 맞췄습니다.`, 'success');
+            Swal.fire('자동 동기화 완료', `${updatedCount}명의 기본 직책을 연동 인원 기준으로 맞췄습니다.`, 'success');
         } catch (error) {
             console.error('[UserManagementPage] auto sync user position failed:', error);
             Swal.fire('오류', '사용자 기본 직책 자동 동기화에 실패했습니다.', 'error');
@@ -339,9 +378,15 @@ const UserManagementPage: React.FC = () => {
                     await manpowerService.updateWorker(String(linkedWorker.id), { role: basePosition });
                     updatedCount += 1;
                 }
+                for (const linkedStaff of linkedOfficeStaffByUserId.get(user.uid) || []) {
+                    if (!linkedStaff?.id) continue;
+                    if (String(linkedStaff.role || '').trim() === basePosition) continue;
+                    await officeStaffService.updateOfficeStaff(String(linkedStaff.id), { role: basePosition });
+                    updatedCount += 1;
+                }
             }
             await loadAll();
-            Swal.fire('자동 동기화 완료', `${updatedCount}건의 연동 작업자 직책을 사용자 기본 직책으로 맞췄습니다.`, 'success');
+            Swal.fire('자동 동기화 완료', `${updatedCount}건의 연동 인원 직책을 사용자 기본 직책으로 맞췄습니다.`, 'success');
         } catch (error) {
             console.error('[UserManagementPage] auto sync linked worker role failed:', error);
             Swal.fire('오류', '연동 작업자 직책 자동 동기화에 실패했습니다.', 'error');
@@ -378,7 +423,10 @@ const UserManagementPage: React.FC = () => {
             await userService.updateUserRole(selectedUser.uid, draftRole);
             await userService.updateUserProfile(selectedUser.uid, { position: draftPosition });
             if (syncLinkedWorkerRole && draftPosition) {
-                await Promise.all(selectedLinkedWorkers.map((worker) => worker.id ? manpowerService.updateWorker(String(worker.id), { role: draftPosition }) : Promise.resolve()));
+                await Promise.all([
+                    ...selectedLinkedWorkers.map((worker) => worker.id ? manpowerService.updateWorker(String(worker.id), { role: draftPosition }) : Promise.resolve()),
+                    ...selectedLinkedOfficeStaff.map((staff) => staff.id ? officeStaffService.updateOfficeStaff(String(staff.id), { role: draftPosition }) : Promise.resolve())
+                ]);
             }
             await loadAll();
             Swal.fire('저장 완료', '사용자 권한과 기본 직책을 저장했습니다.', 'success');
@@ -460,7 +508,7 @@ const UserManagementPage: React.FC = () => {
                             className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-bold disabled:opacity-60"
                         >
                             <FontAwesomeIcon icon={runningAutoFix ? faSpinner : faArrowsRotate} spin={runningAutoFix} className="mr-2" />
-                            연동 작업자 직책 동기화
+                            연동 인원 직책 동기화
                         </button>
                         <button
                             type="button"
@@ -484,7 +532,7 @@ const UserManagementPage: React.FC = () => {
                         <div className="text-lg font-bold text-amber-800">{integritySummary.invalidBasePosition}</div>
                     </div>
                     <div className="rounded-lg bg-indigo-50 border border-indigo-200 px-3 py-2">
-                        <div className="text-[11px] text-indigo-700">사용자-작업자 직책 불일치</div>
+                        <div className="text-[11px] text-indigo-700">사용자-연동직책 불일치</div>
                         <div className="text-lg font-bold text-indigo-800">{integritySummary.mismatchWithLinkedWorker}</div>
                     </div>
                     <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2">
@@ -531,7 +579,7 @@ const UserManagementPage: React.FC = () => {
                                         {selectedUserIntegrity?.missingBasePosition ? '기본직책 미지정' : '기본직책 정상'}
                                     </span>
                                     <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${selectedUserIntegrity?.mismatchWithLinkedWorker ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
-                                        {selectedUserIntegrity?.mismatchWithLinkedWorker ? '작업자 직책 불일치' : '작업자 직책 일치'}
+                                        {selectedUserIntegrity?.mismatchWithLinkedWorker ? '연동 직책 불일치' : '연동 직책 일치'}
                                     </span>
                                     <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${(selectedUserIntegrity?.invalidAdditionalPositions.length || 0) > 0 ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>
                                         {(selectedUserIntegrity?.invalidAdditionalPositions.length || 0) > 0 ? `잘못된 추가직책 ${selectedUserIntegrity?.invalidAdditionalPositions.length}건` : '추가직책 정상'}
@@ -545,7 +593,7 @@ const UserManagementPage: React.FC = () => {
                                     <select value={draftRole} onChange={(e) => setDraftRole(e.target.value as CanonicalSystemRole)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm">{SYSTEM_ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label} ({option.value})</option>)}</select>
                                     <select value={draftPosition} onChange={(e) => setDraftPosition(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm">{positions.map((position) => <option key={position.id || position.name} value={position.name}>{position.name} ({position.systemRole})</option>)}</select>
                                 </div>
-                                <label className="inline-flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={syncLinkedWorkerRole} onChange={(e) => setSyncLinkedWorkerRole(e.target.checked)} className="rounded border-slate-300" />연동 작업자 직책 동기화</label>
+                                <label className="inline-flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={syncLinkedWorkerRole} onChange={(e) => setSyncLinkedWorkerRole(e.target.checked)} className="rounded border-slate-300" />연동 작업자/사무실 직원 직책 동기화</label>
                             </section>
 
                             <section className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
@@ -580,9 +628,9 @@ const UserManagementPage: React.FC = () => {
                 <div className="p-5 border-b border-slate-100 bg-slate-50"><h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2"><FontAwesomeIcon icon={faUserTag} className="text-indigo-500" />직책 모드 통합 현황</h2></div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                        <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500"><tr><th className="px-4 py-3 text-left">직책</th><th className="px-4 py-3 text-left">기본 사용자</th><th className="px-4 py-3 text-left">추가 배정</th><th className="px-4 py-3 text-left">작업자 수</th><th className="px-4 py-3 text-left">시스템 권한</th></tr></thead>
+                        <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500"><tr><th className="px-4 py-3 text-left">직책</th><th className="px-4 py-3 text-left">기본 사용자</th><th className="px-4 py-3 text-left">추가 배정</th><th className="px-4 py-3 text-left">작업자 수</th><th className="px-4 py-3 text-left">사무실 직원 수</th><th className="px-4 py-3 text-left">시스템 권한</th></tr></thead>
                         <tbody className="divide-y divide-slate-100">
-                            {positionSummary.map((row) => <tr key={row.position.id || row.position.name}><td className="px-4 py-3"><div className="font-bold text-slate-800">{row.position.name}</div><div className="text-[11px] text-slate-400">rank: {row.position.rank}</div></td><td className="px-4 py-3">{row.users}</td><td className="px-4 py-3">{row.extraUsers}</td><td className="px-4 py-3">{row.workers}</td><td className="px-4 py-3"><select value={row.position.systemRole} onChange={(e) => handlePositionRoleChange(row.position, e.target.value as UserRole)} disabled={!row.position.id || savingPositionRoleId === row.position.id} className="px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-bold">{POSITION_ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>{savingPositionRoleId === row.position.id && <FontAwesomeIcon icon={faSpinner} spin className="ml-2 text-slate-400" />}</td></tr>)}
+                            {positionSummary.map((row) => <tr key={row.position.id || row.position.name}><td className="px-4 py-3"><div className="font-bold text-slate-800">{row.position.name}</div><div className="text-[11px] text-slate-400">rank: {row.position.rank}</div></td><td className="px-4 py-3">{row.users}</td><td className="px-4 py-3">{row.extraUsers}</td><td className="px-4 py-3">{row.workers}</td><td className="px-4 py-3">{row.officeStaff}</td><td className="px-4 py-3"><select value={row.position.systemRole} onChange={(e) => handlePositionRoleChange(row.position, e.target.value as UserRole)} disabled={!row.position.id || savingPositionRoleId === row.position.id} className="px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-bold">{POSITION_ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>{savingPositionRoleId === row.position.id && <FontAwesomeIcon icon={faSpinner} spin className="ml-2 text-slate-400" />}</td></tr>)}
                         </tbody>
                     </table>
                 </div>

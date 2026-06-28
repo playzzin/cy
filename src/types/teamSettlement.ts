@@ -13,13 +13,23 @@ export type TeamSettlementWorkKind = z.infer<typeof TeamSettlementWorkKindSchema
 export const TeamSettlementSalesOriginSchema = z.enum([
   'tax_invoice',
   'daily_report',
+  'support_client_site',
+  '내부지원간곳',
+  '외부지원간곳',
   'support_outgoing',
   'support_fee_outgoing',
   'manual'
 ]);
 export type TeamSettlementSalesOrigin = z.infer<typeof TeamSettlementSalesOriginSchema>;
 
-export const TeamSettlementPurchaseOriginSchema = z.enum(['daily_report', 'support_incoming', 'support_fee_incoming', 'manual']);
+export const TeamSettlementPurchaseOriginSchema = z.enum([
+  'daily_report',
+  '내부지원온곳',
+  '외부지원온곳',
+  'support_incoming',
+  'support_fee_incoming',
+  'manual'
+]);
 export type TeamSettlementPurchaseOrigin = z.infer<typeof TeamSettlementPurchaseOriginSchema>;
 
 export const TeamSettlementDeductionOriginSchema = z.enum([

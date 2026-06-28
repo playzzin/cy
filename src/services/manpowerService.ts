@@ -204,6 +204,12 @@ export const manpowerService = {
         const normalizedUpdates = stripUndefinedFields(syncWorkerSalaryFields(updates) as Record<string, unknown>);
         await workerFirestoreService.updateWorker(id, normalizedUpdates);
         cachedWorkers = null;
+        if (hasOwn(normalizedUpdates, 'role') && before?.uid) {
+            const { userService } = await import('./userService');
+            await userService.updateUserProfile(String(before.uid), {
+                position: String(normalizedUpdates.role ?? '').trim()
+            });
+        }
         await logWorkerChange(
             'updated',
             before ? snapshotWorker(id, before as Record<string, unknown>) : null,

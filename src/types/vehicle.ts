@@ -43,14 +43,16 @@ export interface Vehicle {
     insurance?: VehicleInsurance;
 
     // Denormalized Assignment Snapshot
-    currentAssigneeId?: string;
-    currentAssigneeType?: VehicleAssigneeType;
-    currentAssigneeName?: string; // Display Name for Grid
+    currentAssigneeId?: string | null;
+    currentAssigneeType?: VehicleAssigneeType | null;
+    currentAssigneeName?: string | null; // Display Name for Grid
 
     // Billing target can differ from physical assignment.
     billingTargetId?: string | null;
     billingTargetType?: VehicleBillingTargetType | null;
     billingTargetName?: string | null;
+    billingTargetStartDate?: string | null;
+    billingTargetEndDate?: string | null;
     fineChargeTarget?: VehicleFineChargeTarget;
     memo?: string;
 

@@ -4,7 +4,8 @@ import {
     InboundTransaction,
     OutboundTransaction,
     Inventory,
-    TransactionFilters
+    TransactionFilters,
+    MaterialPhotoBatch
 } from '../types/materials';
 import { Timestamp } from '../types/timestamp';
 import {
@@ -15,10 +16,18 @@ import {
 import type { MaterialLogAction, MaterialLogEntityType } from '../types/materialLog';
 import { EXCEL_MATERIAL_CATALOG } from '../constants/materialCatalog';
 import { sortMaterialDisplayRows } from '../utils/materialOrdering';
+import { storageService } from './storageService';
 
 // Helper to generate IDs
 const generateId = (prefix: string = 'mat'): string => {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+};
+
+const MATERIAL_SELECTION_CACHE_TTL_MS = 60 * 1000;
+let selectableMaterialsCache: { rows: Material[]; expiresAt: number } | null = null;
+
+const clearMaterialSelectionCache = () => {
+    selectableMaterialsCache = null;
 };
 
 const logMaterialChange = async (
@@ -39,6 +48,36 @@ const logMaterialChange = async (
         });
     } catch (error) {
         console.warn('[materialService] material log failed:', error);
+    }
+};
+
+const cleanupMaterialPhotoBatchIfUnreferenced = async (photoBatchId?: string): Promise<void> => {
+    if (!photoBatchId) return;
+
+    try {
+        const remainingReferences = await materialFirestoreService.countPhotoBatchReferences(photoBatchId);
+        if (remainingReferences > 0) return;
+
+        const photoBatch = await materialFirestoreService.getPhotoBatch(photoBatchId) as MaterialPhotoBatch | null;
+        if (!photoBatch) return;
+
+        const photoPaths = Array.from(new Set(
+            (photoBatch.photos || [])
+                .map((photo) => String(photo.path || '').trim())
+                .filter(Boolean)
+        ));
+
+        await Promise.all(photoPaths.map(async (path) => {
+            try {
+                await storageService.deleteFile(path);
+            } catch (error) {
+                console.warn('[materialService] material photo cleanup skipped:', path, error);
+            }
+        }));
+
+        await materialFirestoreService.deletePhotoBatch(photoBatchId);
+    } catch (error) {
+        console.warn('[materialService] material photo batch cleanup failed:', error);
     }
 };
 
@@ -224,11 +263,20 @@ const ensureCatalogMaterialsPersisted = async (rows: Material[]): Promise<Materi
 };
 
 const getSelectableMaterials = async (): Promise<Material[]> => {
+    if (selectableMaterialsCache && selectableMaterialsCache.expiresAt > Date.now()) {
+        return selectableMaterialsCache.rows;
+    }
+
     const masterRows = await materialFirestoreService.getAllMaterials({ includeInactive: true }) as any[];
     const persistedCatalogRows = await ensureCatalogMaterialsPersisted(masterRows);
     const rows = [...masterRows, ...persistedCatalogRows].filter((row) => row.isActive !== false && row.hiddenCatalogDefault !== true);
 
-    return mergeMaterialsForSelection(rows);
+    const selectableRows = mergeMaterialsForSelection(rows);
+    selectableMaterialsCache = {
+        rows: selectableRows,
+        expiresAt: Date.now() + MATERIAL_SELECTION_CACHE_TTL_MS,
+    };
+    return selectableRows;
 };
 
 const normalizeMaterialSnapshot = async () => {
@@ -307,6 +355,7 @@ export const addMaterial = async (material: Omit<Material, 'id' | 'createdAt' | 
         updatedAt: now
     };
     await materialFirestoreService.saveMaterial(id, data);
+    clearMaterialSelectionCache();
     await logMaterialChange('created', 'material', null, data as any);
     return id;
 };
@@ -337,6 +386,7 @@ export const updateMaterial = async (
         updatedAt: new Date()
     };
     await materialFirestoreService.saveMaterial(id, data);
+    clearMaterialSelectionCache();
     await logMaterialChange('updated', 'material', current as any, data as any);
 };
 
@@ -379,6 +429,7 @@ export const deleteMaterial = async (materialOrId: string | Material): Promise<v
             updatedAt: now,
         } as any)),
     ]);
+    clearMaterialSelectionCache();
     await logMaterialChange('deleted', 'material', target as any, deletedSnapshot as any);
 };
 
@@ -407,7 +458,8 @@ export const addInboundTransaction = async (
 };
 
 export const addInboundTransactionsBatch = async (
-    transactions: Array<Omit<InboundTransaction, 'id' | 'createdAt' | 'updatedAt'>>
+    transactions: Array<Omit<InboundTransaction, 'id' | 'createdAt' | 'updatedAt'>>,
+    photoBatch?: Omit<MaterialPhotoBatch, 'createdAt' | 'updatedAt'>
 ): Promise<void> => {
     const now = new Date();
     const data: MaterialInboundZod[] = transactions.map(t => ({
@@ -417,7 +469,10 @@ export const addInboundTransactionsBatch = async (
         createdAt: now,
         updatedAt: now
     } as any));
-    await materialFirestoreService.saveInboundsBatch(data);
+    await materialFirestoreService.saveInboundsBatch(
+        data,
+        photoBatch ? { ...photoBatch, createdAt: now, updatedAt: now } as any : undefined
+    );
     for (const row of data) {
         await logMaterialChange('created', 'inbound', null, row as any, 'materialInboundBatch');
     }
@@ -471,8 +526,10 @@ export const deleteInboundTransaction = async (id: string): Promise<void> => {
     if (!current) {
         throw new Error('삭제할 입고 내역을 찾을 수 없습니다.');
     }
+    const photoBatchId = String((current as any).photoBatchId || '').trim() || undefined;
     await materialFirestoreService.deleteInbound(id);
     await logMaterialChange('deleted', 'inbound', current as any, null);
+    await cleanupMaterialPhotoBatchIfUnreferenced(photoBatchId);
 };
 
 // --- Outbound Transactions ---
@@ -495,7 +552,8 @@ export const addOutboundTransaction = async (
 };
 
 export const addOutboundTransactionsBatch = async (
-    transactions: Array<Omit<OutboundTransaction, 'id' | 'createdAt' | 'updatedAt'>>
+    transactions: Array<Omit<OutboundTransaction, 'id' | 'createdAt' | 'updatedAt'>>,
+    photoBatch?: Omit<MaterialPhotoBatch, 'createdAt' | 'updatedAt'>
 ): Promise<void> => {
     const now = new Date();
     const data: MaterialOutboundZod[] = transactions.map(t => ({
@@ -505,7 +563,10 @@ export const addOutboundTransactionsBatch = async (
         createdAt: now,
         updatedAt: now
     } as any));
-    await materialFirestoreService.saveOutboundsBatch(data);
+    await materialFirestoreService.saveOutboundsBatch(
+        data,
+        photoBatch ? { ...photoBatch, createdAt: now, updatedAt: now } as any : undefined
+    );
     for (const row of data) {
         await logMaterialChange('created', 'outbound', null, row as any, 'materialOutboundBatch');
     }
@@ -558,8 +619,27 @@ export const deleteOutboundTransaction = async (id: string): Promise<void> => {
     if (!current) {
         throw new Error('삭제할 출고 내역을 찾을 수 없습니다.');
     }
+    const photoBatchId = String((current as any).photoBatchId || '').trim() || undefined;
     await materialFirestoreService.deleteOutbound(id);
     await logMaterialChange('deleted', 'outbound', current as any, null);
+    await cleanupMaterialPhotoBatchIfUnreferenced(photoBatchId);
+};
+
+export const getMaterialPhotoBatch = async (id: string): Promise<MaterialPhotoBatch | null> => {
+    return await materialFirestoreService.getPhotoBatch(id) as MaterialPhotoBatch | null;
+};
+
+export const getMaterialPhotoDownloadUrls = async (photoBatchId: string): Promise<string[]> => {
+    const photoBatch = await getMaterialPhotoBatch(photoBatchId);
+    if (!photoBatch) return [];
+
+    const paths = Array.from(new Set(
+        (photoBatch.photos || [])
+            .map((photo) => String(photo.path || '').trim())
+            .filter(Boolean)
+    ));
+
+    return Promise.all(paths.map((path) => storageService.getDownloadUrl(path)));
 };
 
 // --- Inventory Calculations ---
@@ -761,6 +841,8 @@ const materialService = {
     getOutboundTransactions,
     updateOutboundTransaction,
     deleteOutboundTransaction,
+    getMaterialPhotoBatch,
+    getMaterialPhotoDownloadUrls,
     calculateInventory,
     getAllInventory,
     getInventoryBySite,
@@ -769,5 +851,3 @@ const materialService = {
 };
 
 export default materialService;
-
-

@@ -3,6 +3,23 @@
 @tailwind components;
 @tailwind utilities;
 
+.app-intro--runtime {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  width: 100%;
+  min-height: 100vh;
+}
+
+#field-schedule-board[data-capture-clean='true'],
+#field-schedule-board[data-capture-clean='true'] * {
+  cursor: none !important;
+}
+
+#field-schedule-board[data-capture-clean='true'] [data-board-capture-ignore='true'] {
+  visibility: hidden !important;
+}
+
 @layer utilities {
   .animate-progress-indeterminate {
     animation: progress-indeterminate 1.5s infinite linear;
@@ -48,6 +65,38 @@
   font-family: 'Pretendard', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
+}
+
+@keyframes engineOilDangerBlink {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(239, 68, 68, 0);
+    background-color: rgba(127, 29, 29, 0.42);
+  }
+
+  50% {
+    box-shadow: 0 0 28px rgba(239, 68, 68, 0.8);
+    background-color: rgba(239, 68, 68, 0.58);
+  }
+}
+
+@keyframes engineOilDangerCellBlink {
+  0%,
+  100% {
+    background-color: #7f1d1d;
+  }
+
+  50% {
+    background-color: #ef4444;
+  }
+}
+
+.engine-oil-danger-blink {
+  animation: engineOilDangerBlink 1.05s infinite;
+}
+
+.engine-oil-danger-cell-blink {
+  animation: engineOilDangerCellBlink 1.05s infinite;
 }
 
 .support-compact-table {

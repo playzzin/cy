@@ -25,6 +25,8 @@ type CaptureHistoryItem = {
 
 type CaptureMode = 'screen' | 'scroll';
 
+type DisplayCursorConstraint = 'always' | 'motion' | 'never';
+
 type ScrollCaptureRange = {
     left: number;
     width: number;
@@ -57,10 +59,13 @@ type ScrollSelectionAnchor = {
 const MIN_SIZE = 12;
 const CAPTURE_EXCLUDE_SELECTOR = '[data-capture-exclude="true"]';
 const CAPTURE_OVERLAY_SELECTOR = '[data-capture-overlay="true"]';
+const SCREEN_CAPTURE_EXPORT_SCALE = 2;
+const MAX_SCREEN_CAPTURE_EXPORT_SIDE = 24000;
+const MAX_SCREEN_CAPTURE_EXPORT_AREA = 120_000_000;
 const SCROLL_CAPTURE_OVERLAP_CSS = 24;
 const MAX_SCROLL_CAPTURE_STEPS = 2000;
-const MAX_SCROLL_CAPTURE_CANVAS_HEIGHT = 30000;
-const MAX_SCROLL_CAPTURE_CANVAS_AREA = 120_000_000;
+const MAX_SCROLL_CAPTURE_CANVAS_HEIGHT = 32767;
+const MAX_SCROLL_CAPTURE_CANVAS_AREA = 180_000_000;
 const SCROLL_CAPTURE_WARN_HEIGHT_CSS = 12000;
 const SCROLL_CAPTURE_BLOCK_HEIGHT_CSS = 28000;
 const SCROLL_CAPTURE_WARN_STEPS = 24;
@@ -226,12 +231,57 @@ const hideCaptureInterference = (target: HTMLElement | null = null) => {
 };
 
 type DisplayMediaOptions = {
-    video: MediaTrackConstraints | boolean;
+    video: (MediaTrackConstraints & { cursor?: DisplayCursorConstraint }) | boolean;
     audio: boolean;
     preferCurrentTab?: boolean;
     selfBrowserSurface?: 'include' | 'exclude';
     surfaceSwitching?: 'include' | 'exclude';
     monitorTypeSurfaces?: 'include' | 'exclude';
+};
+
+type DisplayMediaTrackConstraints = MediaTrackConstraints & {
+    cursor?: DisplayCursorConstraint;
+    resizeMode?: 'none' | 'crop-and-scale';
+};
+
+const QUICK_CAMERA_CURSOR_HIDE_STYLE_ID = 'quick-camera-cursor-hide-style';
+const QUICK_CAMERA_CURSOR_HIDE_ATTR = 'data-quick-camera-cursor-hidden';
+
+const hideDocumentCursorForCapture = () => {
+    const root = document.documentElement;
+    const previousAttr = root.getAttribute(QUICK_CAMERA_CURSOR_HIDE_ATTR);
+    const hadAttr = root.hasAttribute(QUICK_CAMERA_CURSOR_HIDE_ATTR);
+
+    if (!document.getElementById(QUICK_CAMERA_CURSOR_HIDE_STYLE_ID)) {
+        const style = document.createElement('style');
+        style.id = QUICK_CAMERA_CURSOR_HIDE_STYLE_ID;
+        style.textContent = `
+html[${QUICK_CAMERA_CURSOR_HIDE_ATTR}='true'],
+html[${QUICK_CAMERA_CURSOR_HIDE_ATTR}='true'] * {
+  cursor: none !important;
+}`;
+        document.head.appendChild(style);
+    }
+
+    root.setAttribute(QUICK_CAMERA_CURSOR_HIDE_ATTR, 'true');
+
+    return () => {
+        if (hadAttr && previousAttr !== null) {
+            root.setAttribute(QUICK_CAMERA_CURSOR_HIDE_ATTR, previousAttr);
+            return;
+        }
+
+        root.removeAttribute(QUICK_CAMERA_CURSOR_HIDE_ATTR);
+    };
+};
+
+const applyNoCursorCaptureConstraint = async (track: MediaStreamTrack) => {
+    try {
+        const constraints: DisplayMediaTrackConstraints = { cursor: 'never' };
+        await track.applyConstraints(constraints);
+    } catch {
+        // Some browsers ignore display-capture cursor constraints. CSS cursor hiding is still applied.
+    }
 };
 
 const getViewportMetrics = () => {
@@ -240,6 +290,50 @@ const getViewportMetrics = () => {
         width: Math.max(1, Math.round(vv?.width ?? window.innerWidth)),
         height: Math.max(1, Math.round(vv?.height ?? window.innerHeight))
     };
+};
+
+const getHighResolutionDisplayMediaConstraints = (): DisplayMediaTrackConstraints => {
+    const viewport = getViewportMetrics();
+    const sourceScale = Math.min(3, Math.max(SCREEN_CAPTURE_EXPORT_SCALE, window.devicePixelRatio || 1));
+
+    return {
+        frameRate: { ideal: 30, max: 30 },
+        width: { ideal: Math.round(viewport.width * sourceScale), max: 7680 },
+        height: { ideal: Math.round(viewport.height * sourceScale), max: 4320 },
+        cursor: 'never',
+        resizeMode: 'none'
+    };
+};
+
+const getSafeScreenCaptureExportScale = (width: number, height: number): number => {
+    if (width < 1 || height < 1) return 1;
+
+    const widthScale = MAX_SCREEN_CAPTURE_EXPORT_SIDE / width;
+    const heightScale = MAX_SCREEN_CAPTURE_EXPORT_SIDE / height;
+    const areaScale = Math.sqrt(MAX_SCREEN_CAPTURE_EXPORT_AREA / (width * height));
+
+    return Math.max(1, Math.min(SCREEN_CAPTURE_EXPORT_SCALE, widthScale, heightScale, areaScale));
+};
+
+const createScaledCanvasForExport = (sourceCanvas: HTMLCanvasElement): { canvas: HTMLCanvasElement; scale: number } => {
+    const scale = getSafeScreenCaptureExportScale(sourceCanvas.width, sourceCanvas.height);
+    if (scale <= 1.01) {
+        return { canvas: sourceCanvas, scale: 1 };
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(sourceCanvas.width * scale));
+    canvas.height = Math.max(1, Math.round(sourceCanvas.height * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        return { canvas: sourceCanvas, scale: 1 };
+    }
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(sourceCanvas, 0, 0, canvas.width, canvas.height);
+
+    return { canvas, scale };
 };
 
 const getVideoSourceRect = (video: HTMLVideoElement, rect: Rect) => {
@@ -731,6 +825,12 @@ const waitForCapturedFrame = async (video: HTMLVideoElement) => {
     await new Promise((resolve) => window.setTimeout(resolve, 120));
 };
 
+const waitForCursorlessCaptureFrame = async (video: HTMLVideoElement) => {
+    await waitNextPaint();
+    await waitForCapturedFrame(video);
+    await waitForCapturedFrame(video);
+};
+
 const QuickCameraCapture: React.FC = () => {
     const [captureMode, setCaptureMode] = useState<CaptureMode>('screen');
     const [isSelecting, setIsSelecting] = useState(false);
@@ -882,7 +982,7 @@ const QuickCameraCapture: React.FC = () => {
             return;
         }
         scrollCapturePlanRef.current = null;
-        setMessage('기본 화면방식은 현재 탭의 실제 화면 픽셀을 기준으로 캡처합니다.');
+        setMessage('기본 화면방식은 실제 화면을 그대로 캡처한 뒤 2배 크기 PNG로 저장합니다.');
     }, [captureMode]);
 
     const pushCaptureHistory = useCallback((blob: Blob, width: number, height: number) => {
@@ -933,16 +1033,18 @@ const QuickCameraCapture: React.FC = () => {
         setIsSuccess(null);
 
         let restoreExcludedRoots: (() => void) | null = null;
+        let restoreCursorForCapture: (() => void) | null = null;
 
         try {
             if (!navigator.mediaDevices?.getDisplayMedia) {
                 throw new Error('unsupported');
             }
 
+            restoreCursorForCapture = hideDocumentCursorForCapture();
+            await waitNextPaint();
+
             const stream = await navigator.mediaDevices.getDisplayMedia({
-                video: {
-                    frameRate: { ideal: 30, max: 30 }
-                },
+                video: getHighResolutionDisplayMediaConstraints(),
                 audio: false,
                 preferCurrentTab: true,
                 selfBrowserSurface: 'include',
@@ -955,6 +1057,7 @@ const QuickCameraCapture: React.FC = () => {
             if (!track) {
                 throw new Error('no-track');
             }
+            await applyNoCursorCaptureConstraint(track);
 
             const video = document.createElement('video');
             video.srcObject = stream;
@@ -966,28 +1069,31 @@ const QuickCameraCapture: React.FC = () => {
             await video.play();
 
             restoreExcludedRoots = hideExcludedRoots();
-            await waitNextPaint();
             setProcessingStatusText('선택 영역을 캡처하는 중입니다.');
-            await waitForCapturedFrame(video);
+            await waitForCursorlessCaptureFrame(video);
 
             const crop = getVideoSourceRect(video, rect);
             const croppedCanvas = cropVideoFrameToCanvas(video, crop);
+            const { canvas: exportCanvas, scale: exportScale } = createScaledCanvasForExport(croppedCanvas);
 
-            const blob = await toPngBlob(croppedCanvas);
+            const blob = await toPngBlob(exportCanvas);
 
-            pushCaptureHistory(blob, crop.sourceW, crop.sourceH);
+            pushCaptureHistory(blob, exportCanvas.width, exportCanvas.height);
+            const exportNotice = exportScale > 1
+                ? ` ${Math.round(exportScale * 100)}% 크기 PNG로 저장했습니다.`
+                : '';
 
             if (await copyBlobToClipboard(blob)) {
                 const displaySurface = track.getSettings().displaySurface;
                 setMessage(
                     displaySurface === 'browser'
-                        ? '선택 영역이 클립보드에 저장되었습니다.'
-                        : '선택 영역이 저장되었습니다. 다음에는 현재 탭을 선택하면 더 정확합니다.'
+                        ? `선택 영역이 클립보드에 저장되었습니다.${exportNotice}`
+                        : `선택 영역이 저장되었습니다. 다음에는 현재 탭을 선택하면 더 정확합니다.${exportNotice}`
                 );
                 setIsSuccess(true);
             } else {
                 saveBlobAsFile(blob, `capture-${Date.now()}.png`);
-                setMessage('클립보드 API 미지원 브라우저입니다. PNG 파일로 다운로드했습니다.');
+                setMessage(`클립보드 API 미지원 브라우저입니다. PNG 파일로 다운로드했습니다.${exportNotice}`);
                 setIsSuccess(true);
             }
         } catch (error) {
@@ -1006,6 +1112,7 @@ const QuickCameraCapture: React.FC = () => {
             }
             setIsSuccess(false);
         } finally {
+            restoreCursorForCapture?.();
             restoreExcludedRoots?.();
             stopActiveCaptureResources();
             restoreHiddenPanel();
@@ -1050,6 +1157,7 @@ const QuickCameraCapture: React.FC = () => {
         abortProcessingRef.current = false;
 
         let captureInterferenceRestore: { hiddenCount: number; restore: () => void } | null = null;
+        let restoreCursorForCapture: (() => void) | null = null;
         let hiddenInterferenceCount = 0;
         let restoreScrollFailed = false;
 
@@ -1070,10 +1178,11 @@ const QuickCameraCapture: React.FC = () => {
                 throw new Error('unsupported');
             }
 
+            restoreCursorForCapture = hideDocumentCursorForCapture();
+            await waitNextPaint();
+
             const stream = await navigator.mediaDevices.getDisplayMedia({
-                video: {
-                    frameRate: { ideal: 30, max: 30 }
-                },
+                video: getHighResolutionDisplayMediaConstraints(),
                 audio: false,
                 preferCurrentTab: true,
                 selfBrowserSurface: 'include',
@@ -1085,6 +1194,7 @@ const QuickCameraCapture: React.FC = () => {
             if (!track) {
                 throw new Error('no-track');
             }
+            await applyNoCursorCaptureConstraint(track);
 
             setProcessingStatusText('2/4 현재 탭 공유 여부를 확인하는 중입니다.');
             if (track.getSettings().displaySurface !== 'browser') {
@@ -1103,14 +1213,13 @@ const QuickCameraCapture: React.FC = () => {
 
             captureInterferenceRestore = hideCaptureInterference(plan.target);
             hiddenInterferenceCount = captureInterferenceRestore.hiddenCount;
-            await waitNextPaint();
             ensureNotAborted(track);
             setProcessingStatusText(
                 plan.canScroll
                     ? `3/4 스크롤 캡처 준비 중 1/${plan.estimatedSteps}`
                     : '스크롤 대상이 없어 현재 화면만 캡처하는 중입니다.'
             );
-            await waitForCapturedFrame(video);
+            await waitForCursorlessCaptureFrame(video);
 
             if (plan.range && plan.target) {
                 const scrollTarget = plan.target;
@@ -1409,6 +1518,7 @@ const QuickCameraCapture: React.FC = () => {
                     restoreScrollFailed = true;
                 }
             }
+            restoreCursorForCapture?.();
             captureInterferenceRestore?.restore();
             stopActiveCaptureResources();
             restoreHiddenPanel();
@@ -1709,7 +1819,7 @@ const QuickCameraCapture: React.FC = () => {
             </div>
 
             <p className="mt-3 text-xs leading-relaxed text-slate-400">
-                기본 화면방식은 보이는 픽셀 그대로 잘라 저장합니다. 스크롤 방식은 선택한 박스를 실제 스크롤 프레임으로 자동 정렬한 뒤 아래까지 이어붙입니다.
+                기본 화면방식은 실제 화면을 그대로 캡처한 뒤 2배 크기 PNG로 저장합니다. 스크롤 방식은 선택한 박스를 실제 스크롤 프레임으로 자동 정렬한 뒤 아래까지 이어붙입니다.
             </p>
 
             <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1724,7 +1834,7 @@ const QuickCameraCapture: React.FC = () => {
                     }`}
                 >
                     <div className="text-sm font-semibold">기본 화면방식</div>
-                    <div className="mt-1 text-[11px] leading-relaxed text-slate-400">공유 창에서 현재 탭을 고른 뒤 실제 화면 픽셀 기준으로 잘라 복사합니다.</div>
+                    <div className="mt-1 text-[11px] leading-relaxed text-slate-400">현재 탭의 실제 배치를 유지하면서 더 큰 PNG로 복사합니다.</div>
                 </button>
                 <button
                     type="button"

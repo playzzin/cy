@@ -5,6 +5,13 @@ import { Task, TaskComment } from '../types/task';
 const COLLECTION_NAME = 'tasks';
 
 export const taskService = {
+    // Get single task
+    async getTask(taskId: string): Promise<Task | null> {
+        const taskRef = doc(db, COLLECTION_NAME, taskId);
+        const taskSnap = await getDoc(taskRef);
+        return taskSnap.exists() ? ({ id: taskSnap.id, ...taskSnap.data() } as Task) : null;
+    },
+
     // Get all tasks
     async getTasks(): Promise<Task[]> {
         const snapshot = await getDocs(collection(db, COLLECTION_NAME));

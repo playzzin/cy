@@ -45,7 +45,7 @@ const EstimateManagePage: React.FC = () => {
     // 엑셀 다운로드 핸들러
     const handleExcelDownload = async () => {
         try {
-            await downloadEstimateExcel(draft, itemsWithCalc, subtotal, tax, total, 'estimate');
+            await downloadEstimateExcel(draft, itemsWithCalc, subtotal, tax, total, 'estimate', { freezePanes: false });
             Swal.fire({
                 icon: 'success',
                 title: '엑셀 변환 완료',

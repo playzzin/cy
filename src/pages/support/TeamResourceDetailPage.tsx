@@ -164,8 +164,11 @@ const buildEmptySummary = (team: Team | null): LedgerSummary => ({
     internet: 0,
     accommodationOther: 0,
     vehicleRent: 0,
+    vehicleLease: 0,
+    vehicleFuel: 0,
     vehicleFine: 0,
     vehicleRepair: 0,
+    vehicleToll: 0,
     vehicleOther: 0,
     card: 0,
     otherClaim: 0,
@@ -184,7 +187,7 @@ const getAccommodationTotal = (summary: LedgerSummary) =>
     summary.accommodationOther;
 
 const getVehicleTotal = (summary: LedgerSummary) =>
-    summary.vehicleRent + summary.vehicleFine + summary.vehicleRepair + summary.vehicleOther;
+    summary.vehicleRent + summary.vehicleLease + summary.vehicleFuel + summary.vehicleFine + summary.vehicleRepair + summary.vehicleToll + summary.vehicleOther;
 
 const getExpenseDirection = (claim: TeamExpenseClaim, selectedTeam: Team | null) => {
     const claimType = getEffectiveClaimType(claim);
@@ -193,6 +196,9 @@ const getExpenseDirection = (claim: TeamExpenseClaim, selectedTeam: Team | null)
     if (valueMatchesTeam(selectedTeam, claim.chargeToTeamId, claim.chargeToTeamName)) return '내야 할 후청구';
     return '받을 후청구';
 };
+
+const isPersonalBillingTarget = (issuedToType?: unknown) =>
+    String(issuedToType ?? '').trim().toLowerCase() === 'worker';
 
 const buildSummaryFromDocs = (
     team: Team | null,
@@ -221,8 +227,11 @@ const buildSummaryFromDocs = (
     docs.vehicleDocs.forEach(doc => {
         const breakdown = summarizeVehicleBillingCosts(doc);
         summary.vehicleRent += breakdown.rent;
+        summary.vehicleLease += breakdown.lease;
+        summary.vehicleFuel += breakdown.fuel;
         summary.vehicleFine += breakdown.fine;
         summary.vehicleRepair += breakdown.repair;
+        summary.vehicleToll += breakdown.toll;
         summary.vehicleOther += breakdown.other;
     });
 
@@ -448,7 +457,7 @@ const TeamResourceDetailPage: React.FC = () => {
 
     const matchesBillingTarget = useCallback(
         (issuedToType?: unknown, workerId?: unknown, workerName?: unknown) => {
-            if (canViewWholeTeam) return true;
+            if (canViewWholeTeam) return !isPersonalBillingTarget(issuedToType);
             const targetType = String(issuedToType ?? '').trim().toLowerCase();
             if (targetType && targetType !== 'worker') return false;
             return matchesCurrentWorker(workerId, workerName);
@@ -1279,7 +1288,7 @@ const TeamResourceDetailPage: React.FC = () => {
                                             <div><span>배정 숙소 월세</span><strong>{formatCurrency(selectedStats.accommodationRentTotal)}</strong></div>
                                             <div><span>개인숙소</span><strong>{formatCurrency(selectedSummary.privateRoom)}</strong></div>
                                             <div><span>전기/가스/수도/유선</span><strong>{formatCurrency(selectedSummary.electricity + selectedSummary.gas + selectedSummary.water + selectedSummary.internet)}</strong></div>
-                                            <div><span>차량 렌트/수리/기타</span><strong>{formatCurrency(getVehicleTotal(selectedSummary))}</strong></div>
+                                            <div><span>차량 렌트/리스/유지비</span><strong>{formatCurrency(getVehicleTotal(selectedSummary))}</strong></div>
                                             <div><span>배정 차량 고정비</span><strong>{formatCurrency(selectedStats.vehicleFixedTotal)}</strong></div>
                                             <div><span>카드 사용액</span><strong>{formatCurrency(selectedSummary.card)}</strong></div>
                                             <div><span>기타경비/후청구</span><strong>{formatCurrency(selectedStats.expenseTotal)}</strong></div>
@@ -1420,9 +1429,12 @@ const TeamResourceDetailPage: React.FC = () => {
                                                     <tr>
                                                         <th>차량</th>
                                                         <th>상태</th>
-                                                        <th className="tw-number">렌트료</th>
+                                                        <th className="tw-number">렌트비</th>
+                                                        <th className="tw-number">리스비</th>
+                                                        <th className="tw-number">주유비</th>
+                                                        <th className="tw-number">수리비</th>
+                                                        <th className="tw-number">통행료</th>
                                                         <th className="tw-number">과태료</th>
-                                                        <th className="tw-number">수리</th>
                                                         <th className="tw-number">기타</th>
                                                         <th className="tw-number">합계</th>
                                                     </tr>
@@ -1430,7 +1442,7 @@ const TeamResourceDetailPage: React.FC = () => {
                                                 <tbody>
                                                     {selectedVehicleDocs.length === 0 ? (
                                                         <tr>
-                                                            <td colSpan={7} className="tw-table-empty">선택한 월의 차량 청구내역이 없습니다.</td>
+                                                            <td colSpan={10} className="tw-table-empty">선택한 월의 차량 청구내역이 없습니다.</td>
                                                         </tr>
                                                     ) : (
                                                         selectedVehicleDocs.map(doc => {
@@ -1439,9 +1451,12 @@ const TeamResourceDetailPage: React.FC = () => {
                                                                 <tr key={doc.id}>
                                                                     <td data-label="차량"><strong>{doc.vehiclePlate || EMPTY_TEXT}</strong></td>
                                                                     <td data-label="상태">{getBillingStatusLabel(doc.status)}</td>
-                                                                    <td data-label="렌트료" className="tw-number">{formatCurrency(breakdown.rent)}</td>
+                                                                    <td data-label="렌트비" className="tw-number">{formatCurrency(breakdown.rent)}</td>
+                                                                    <td data-label="리스비" className="tw-number">{formatCurrency(breakdown.lease)}</td>
+                                                                    <td data-label="주유비" className="tw-number">{formatCurrency(breakdown.fuel)}</td>
+                                                                    <td data-label="수리비" className="tw-number">{formatCurrency(breakdown.repair)}</td>
+                                                                    <td data-label="통행료" className="tw-number">{formatCurrency(breakdown.toll)}</td>
                                                                     <td data-label="과태료" className="tw-number">{formatCurrency(breakdown.fine)}</td>
-                                                                    <td data-label="수리" className="tw-number">{formatCurrency(breakdown.repair)}</td>
                                                                     <td data-label="기타" className="tw-number">{formatCurrency(breakdown.other)}</td>
                                                                     <td data-label="합계" className="tw-number"><strong>{formatCurrency(breakdown.total)}</strong></td>
                                                                 </tr>

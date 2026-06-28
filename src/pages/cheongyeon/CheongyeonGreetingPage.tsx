@@ -54,7 +54,7 @@ const CheongyeonGreetingPage: React.FC = () => {
                     <div className="absolute inset-0 bg-gradient-to-b from-slate-950/30 via-slate-950/60 to-slate-950/90" />
                 </div>
             ) : (
-                <div className="fixed inset-0 z-0 bg-gradient-to-br from-slate-50 via-white to-emerald-50/30" />
+                <div className="fixed inset-0 z-0 bg-gradient-to-br from-slate-50 via-white to-cyan-50/60" />
             )}
 
             {/* Content */}
@@ -77,7 +77,11 @@ const CheongyeonGreetingPage: React.FC = () => {
                             >
                                 <div className="relative">
                                     {/* Glow Effect */}
-                                    <div className="absolute inset-0 blur-3xl bg-gradient-to-br from-emerald-500/30 to-cyan-500/30 rounded-full scale-110" />
+                                    <div
+                                        className={`absolute inset-0 blur-3xl bg-gradient-to-br rounded-full scale-110 ${
+                                            isDarkMode ? 'from-emerald-500/30 to-cyan-500/30' : 'from-emerald-300/28 to-cyan-300/24'
+                                        }`}
+                                    />
                                     <div className="relative">
                                         <img
                                             src={ceoCharacter}
@@ -89,10 +93,14 @@ const CheongyeonGreetingPage: React.FC = () => {
                                             initial={{ opacity: 0, y: 20 }}
                                             animate={{ opacity: 1, y: 0 }}
                                             transition={{ delay: 0.8 }}
-                                            className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-6 py-3 bg-slate-900/90 backdrop-blur-sm rounded-2xl border border-emerald-500/30 shadow-xl"
+                                            className={`absolute -bottom-2 left-1/2 -translate-x-1/2 px-6 py-3 backdrop-blur-sm rounded-2xl border shadow-xl ${
+                                                isDarkMode
+                                                    ? 'bg-slate-900/90 border-emerald-500/30 text-white'
+                                                    : 'bg-white/95 border-emerald-200 text-slate-900 shadow-emerald-900/10'
+                                            }`}
                                         >
                                             <div className="text-center">
-                                                <div className="text-xs text-emerald-400 font-medium tracking-wider">CEO</div>
+                                                <div className={`text-xs font-medium tracking-wider ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>CEO</div>
                                                 <div className="text-xl font-bold tracking-widest">이 재 욱</div>
                                             </div>
                                         </motion.div>
@@ -107,40 +115,56 @@ const CheongyeonGreetingPage: React.FC = () => {
                                 transition={{ duration: 0.8, delay: 0.5 }}
                                 className="lg:col-span-3 space-y-6"
                             >
-                                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-300">
+                                <div
+                                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border text-sm ${
+                                        isDarkMode
+                                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                            : 'bg-white/90 border-emerald-200 text-emerald-700 shadow-sm shadow-emerald-900/5'
+                                    }`}
+                                >
                                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                                     청연이엔지 대표 인사말
                                 </div>
 
                                 <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold leading-tight">
-                                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-400">
+                                    <span className={`text-transparent bg-clip-text bg-gradient-to-r ${
+                                        isDarkMode ? 'from-emerald-400 via-cyan-400 to-blue-400' : 'from-emerald-700 via-cyan-700 to-blue-800'
+                                    }`}>
                                         신뢰
                                     </span>와{' '}
-                                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-emerald-400">
+                                    <span className={`text-transparent bg-clip-text bg-gradient-to-r ${
+                                        isDarkMode ? 'from-cyan-400 to-emerald-400' : 'from-cyan-700 to-emerald-700'
+                                    }`}>
                                         기술
                                     </span>로
                                     <br />
                                     건설의 미래를 열다
                                 </h1>
 
-                                <p className="text-lg text-slate-300 leading-relaxed max-w-2xl">
+                                <p className={`text-lg leading-relaxed max-w-2xl ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                                     안녕하십니까. 청연이엔지 대표 이재욱입니다.
-                                    저희는 <span className="text-emerald-400 font-medium">"정직한 시공, 신뢰의 품질"</span>이라는
+                                    저희는 <span className={`font-medium ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>"정직한 시공, 신뢰의 품질"</span>이라는
                                     철학을 바탕으로 고객과 함께 성장하는 기업이 되고자 합니다.
                                 </p>
 
                                 <div className="flex flex-wrap gap-4 pt-4">
-                                    <div className="px-5 py-3 rounded-xl bg-white/5 border border-white/10 backdrop-blur-sm">
+                                    <div className={`px-5 py-3 rounded-xl border backdrop-blur-sm ${
+                                        isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white/90 border-slate-200 shadow-sm'
+                                    }`}>
                                         <div className="text-2xl font-bold text-emerald-400">10+</div>
-                                        <div className="text-xs text-slate-400">Years Experience</div>
+                                        <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Years Experience</div>
                                     </div>
-                                    <div className="px-5 py-3 rounded-xl bg-white/5 border border-white/10 backdrop-blur-sm">
+                                    <div className={`px-5 py-3 rounded-xl border backdrop-blur-sm ${
+                                        isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white/90 border-slate-200 shadow-sm'
+                                    }`}>
                                         <div className="text-2xl font-bold text-cyan-400">100+</div>
-                                        <div className="text-xs text-slate-400">Projects Done</div>
+                                        <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Projects Done</div>
                                     </div>
-                                    <div className="px-5 py-3 rounded-xl bg-white/5 border border-white/10 backdrop-blur-sm">
+                                    <div className={`px-5 py-3 rounded-xl border backdrop-blur-sm ${
+                                        isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white/90 border-slate-200 shadow-sm'
+                                    }`}>
                                         <div className="text-2xl font-bold text-blue-400">99%</div>
-                                        <div className="text-xs text-slate-400">Satisfaction</div>
+                                        <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Satisfaction</div>
                                     </div>
                                 </div>
                             </motion.div>
@@ -149,7 +173,9 @@ const CheongyeonGreetingPage: React.FC = () => {
                 </div>
 
                 {/* Bento Grid Section */}
-                <div className="px-6 pt-4 pb-16 bg-gradient-to-b from-transparent via-slate-950/50 to-slate-950">
+                <div className={`px-6 pt-4 pb-16 bg-gradient-to-b ${
+                    isDarkMode ? 'from-transparent via-slate-950/50 to-slate-950' : 'from-transparent via-slate-100/80 to-slate-100'
+                }`}>
                     <div className="max-w-6xl mx-auto">
                         <motion.div
                             variants={containerVariants}
@@ -161,12 +187,16 @@ const CheongyeonGreetingPage: React.FC = () => {
                             {/* Main Message Card - Wide */}
                             <motion.div
                                 variants={itemVariants}
-                                className="col-span-2 md:col-span-4 lg:col-span-4 row-span-2 rounded-3xl p-8 bg-gradient-to-br from-slate-800/80 to-slate-900/80 backdrop-blur-xl border border-white/10 shadow-2xl"
+                                className={`col-span-2 md:col-span-4 lg:col-span-4 row-span-2 rounded-3xl p-8 backdrop-blur-xl border shadow-2xl ${
+                                    isDarkMode
+                                        ? 'bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-white/10'
+                                        : 'bg-white/95 border-slate-200 shadow-slate-200/80'
+                                }`}
                             >
                                 <FontAwesomeIcon icon={faQuoteLeft} className="text-3xl text-emerald-500/40 mb-6" />
-                                <div className="space-y-4 text-slate-300 leading-relaxed">
+                                <div className={`space-y-4 leading-relaxed ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                                     <p className="text-lg">
-                                        저희 청연이엔지에 보내주시는 <span className="text-white font-semibold">관심과 성원</span>에
+                                        저희 청연이엔지에 보내주시는 <span className={`font-semibold ${isDarkMode ? 'text-white' : 'text-slate-950'}`}>관심과 성원</span>에
                                         깊은 감사를 드립니다.
                                     </p>
                                     <p>
@@ -174,18 +204,22 @@ const CheongyeonGreetingPage: React.FC = () => {
                                         현장의 안전을 최우선으로 생각하며, 모든 프로젝트에서 정확한 공정 관리와 투명한 운영을 실천합니다.
                                     </p>
                                     <p>
-                                        앞으로도 <span className="text-emerald-400 font-medium">혁신적인 기술</span>과
+                                        앞으로도 <span className={`font-medium ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>혁신적인 기술</span>과
                                         축적된 노하우를 바탕으로 건설업계의 모범이 되는 기업으로 성장해 나가겠습니다.
                                     </p>
                                 </div>
-                                <div className="flex items-center justify-end gap-4 mt-8 pt-6 border-t border-white/10">
+                                <div className={`flex items-center justify-end gap-4 mt-8 pt-6 border-t ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`}>
                                     <div className="text-right">
-                                        <div className="text-sm text-slate-500">청연이엔지 대표이사</div>
-                                        <div className="text-2xl font-bold text-white tracking-wider">이 재 욱</div>
+                                        <div className={`text-sm ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>청연이엔지 대표이사</div>
+                                        <div className={`text-2xl font-bold tracking-wider ${isDarkMode ? 'text-white' : 'text-slate-950'}`}>이 재 욱</div>
                                     </div>
-                                    <div className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30">
-                                        <span className="text-xs text-emerald-400">SIGN</span>
-                                        <div className="text-lg italic text-emerald-300">이재욱</div>
+                                    <div className={`px-4 py-2 rounded-xl bg-gradient-to-r border ${
+                                        isDarkMode
+                                            ? 'from-emerald-500/20 to-cyan-500/20 border-emerald-500/30'
+                                            : 'from-emerald-50 to-cyan-50 border-emerald-200'
+                                    }`}>
+                                        <span className={`text-xs ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>SIGN</span>
+                                        <div className={`text-lg italic ${isDarkMode ? 'text-emerald-300' : 'text-emerald-700'}`}>이재욱</div>
                                     </div>
                                 </div>
                             </motion.div>
@@ -217,7 +251,9 @@ const CheongyeonGreetingPage: React.FC = () => {
                             {/* Core Values Grid */}
                             <motion.div
                                 variants={itemVariants}
-                                className="col-span-2 md:col-span-4 lg:col-span-3 rounded-3xl p-6 bg-slate-800/60 backdrop-blur-xl border border-white/10"
+                                className={`col-span-2 md:col-span-4 lg:col-span-3 rounded-3xl p-6 backdrop-blur-xl border ${
+                                    isDarkMode ? 'bg-slate-800/60 border-white/10' : 'bg-white/95 border-slate-200 shadow-xl shadow-slate-200/70'
+                                }`}
                             >
                                 <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                                     <span className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400">
@@ -232,7 +268,12 @@ const CheongyeonGreetingPage: React.FC = () => {
                                         { icon: faHandshake, title: '신뢰경영', color: 'blue' },
                                         { icon: faHardHat, title: '현장중심', color: 'purple' }
                                     ].map((item, idx) => (
-                                        <div key={idx} className="p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-3">
+                                        <div
+                                            key={idx}
+                                            className={`p-3 rounded-xl transition-colors flex items-center gap-3 ${
+                                                isDarkMode ? 'bg-white/5 hover:bg-white/10' : 'bg-slate-50 border border-slate-200 hover:bg-white'
+                                            }`}
+                                        >
                                             <div className={`w-10 h-10 rounded-lg bg-${item.color}-500/20 flex items-center justify-center`}>
                                                 <FontAwesomeIcon icon={item.icon} className={`text-${item.color}-400`} />
                                             </div>
@@ -245,14 +286,18 @@ const CheongyeonGreetingPage: React.FC = () => {
                             {/* Promise */}
                             <motion.div
                                 variants={itemVariants}
-                                className="col-span-2 md:col-span-2 lg:col-span-3 rounded-3xl p-6 bg-gradient-to-br from-slate-800/80 to-slate-900/80 backdrop-blur-xl border border-white/10"
+                                className={`col-span-2 md:col-span-2 lg:col-span-3 rounded-3xl p-6 backdrop-blur-xl border ${
+                                    isDarkMode
+                                        ? 'bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-white/10'
+                                        : 'bg-white/95 border-slate-200 shadow-xl shadow-slate-200/70'
+                                }`}
                             >
                                 <FontAwesomeIcon icon={faQuoteLeft} className="text-xl text-emerald-500/40 mb-3" />
-                                <blockquote className="text-lg font-medium text-white leading-relaxed mb-3">
+                                <blockquote className={`text-lg font-medium leading-relaxed mb-3 ${isDarkMode ? 'text-white' : 'text-slate-950'}`}>
                                     "한 번의 거래가 아닌,<br />
                                     평생의 파트너가 되겠습니다."
                                 </blockquote>
-                                <div className="flex items-center gap-2 text-sm text-slate-400">
+                                <div className={`flex items-center gap-2 text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                                     <FontAwesomeIcon icon={faCheck} className="text-emerald-500" />
                                     청연이엔지의 약속
                                 </div>
@@ -261,7 +306,11 @@ const CheongyeonGreetingPage: React.FC = () => {
                             {/* Contact Card */}
                             <motion.div
                                 variants={itemVariants}
-                                className="col-span-2 md:col-span-4 lg:col-span-6 rounded-3xl p-6 bg-gradient-to-r from-slate-800/80 via-slate-900/80 to-slate-800/80 backdrop-blur-xl border border-white/10"
+                                className={`col-span-2 md:col-span-4 lg:col-span-6 rounded-3xl p-6 backdrop-blur-xl border ${
+                                    isDarkMode
+                                        ? 'bg-gradient-to-r from-slate-800/80 via-slate-900/80 to-slate-800/80 border-white/10'
+                                        : 'bg-white/95 border-slate-200 shadow-xl shadow-slate-200/70'
+                                }`}
                             >
                                 <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                                     <span className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400">
@@ -270,30 +319,30 @@ const CheongyeonGreetingPage: React.FC = () => {
                                     청연이엔지
                                 </h3>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div className="flex items-center gap-4 p-4 rounded-xl bg-white/5">
+                                    <div className={`flex items-center gap-4 p-4 rounded-xl ${isDarkMode ? 'bg-white/5' : 'bg-slate-50 border border-slate-200'}`}>
                                         <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center">
                                             <FontAwesomeIcon icon={faPhone} className="text-emerald-400" />
                                         </div>
                                         <div>
-                                            <div className="text-xs text-slate-400">대표전화</div>
+                                            <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>대표전화</div>
                                             <div className="font-medium">010-XXXX-XXXX</div>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-4 p-4 rounded-xl bg-white/5">
+                                    <div className={`flex items-center gap-4 p-4 rounded-xl ${isDarkMode ? 'bg-white/5' : 'bg-slate-50 border border-slate-200'}`}>
                                         <div className="w-12 h-12 rounded-xl bg-cyan-500/20 flex items-center justify-center">
                                             <FontAwesomeIcon icon={faEnvelope} className="text-cyan-400" />
                                         </div>
                                         <div>
-                                            <div className="text-xs text-slate-400">이메일</div>
+                                            <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>이메일</div>
                                             <div className="font-medium">info@cheongyeon.co.kr</div>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-4 p-4 rounded-xl bg-white/5">
+                                    <div className={`flex items-center gap-4 p-4 rounded-xl ${isDarkMode ? 'bg-white/5' : 'bg-slate-50 border border-slate-200'}`}>
                                         <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center">
                                             <FontAwesomeIcon icon={faMapMarkerAlt} className="text-blue-400" />
                                         </div>
                                         <div>
-                                            <div className="text-xs text-slate-400">주소</div>
+                                            <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>주소</div>
                                             <div className="font-medium">서울특별시 강남구</div>
                                         </div>
                                     </div>
@@ -304,9 +353,11 @@ const CheongyeonGreetingPage: React.FC = () => {
                 </div>
 
                 {/* Footer */}
-                <div className="border-t border-white/10 bg-slate-950/80 backdrop-blur-sm">
+                <div className={`border-t backdrop-blur-sm ${
+                    isDarkMode ? 'border-white/10 bg-slate-950/80' : 'border-slate-200 bg-white/90'
+                }`}>
                     <div className="max-w-6xl mx-auto px-6 py-8 text-center">
-                        <p className="text-slate-500 text-sm">
+                        <p className={`text-sm ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
                             © 2024 청연이엔지. All rights reserved.
                         </p>
                     </div>

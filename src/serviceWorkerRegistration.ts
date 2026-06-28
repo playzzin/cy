@@ -41,8 +41,15 @@ export function registerServiceWorker() {
     const publicUrl = process.env.PUBLIC_URL || '';
     const serviceWorkerUrl = `${publicUrl}/service-worker.js`;
 
-    navigator.serviceWorker.register(serviceWorkerUrl).catch((error) => {
-      console.warn('Service worker registration failed:', error);
-    });
+    navigator.serviceWorker
+      .register(serviceWorkerUrl, { updateViaCache: 'none' })
+      .then((registration) => {
+        registration.update().catch((error) => {
+          console.warn('Service worker update check failed:', error);
+        });
+      })
+      .catch((error) => {
+        console.warn('Service worker registration failed:', error);
+      });
   });
 }

@@ -87,7 +87,58 @@ export const vehicleService = {
                 currentAssigneeType: data.assigneeType,
                 currentAssigneeName: data.assigneeName
             } as Partial<Vehicle> & { id: string });
+            return;
         }
+
+        if (data.endDate) {
+            const activeAssignment = (await vehicleFirestoreService.listVehicleAssignments(data.vehicleId))
+                .filter((assignment) => !assignment.endDate)
+                .sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')))[0];
+
+            await vehicleFirestoreService.saveVehicle(activeAssignment ? {
+                id: data.vehicleId,
+                status: 'ASSIGNED',
+                currentAssigneeId: activeAssignment.assigneeId,
+                currentAssigneeType: activeAssignment.assigneeType,
+                currentAssigneeName: activeAssignment.assigneeName
+            } as Partial<Vehicle> & { id: string } : {
+                id: data.vehicleId,
+                status: 'AVAILABLE',
+                currentAssigneeId: null,
+                currentAssigneeType: null,
+                currentAssigneeName: null
+            } as Partial<Vehicle> & { id: string });
+        }
+    },
+
+    deleteVehicleAssignment: async (record: Pick<VehicleAssignmentRecord, 'id' | 'vehicleId' | 'endDate'>): Promise<void> => {
+        await vehicleFirestoreService.deleteVehicleAssignment(record.id);
+
+        if (record.endDate) return;
+
+        const remainingAssignments = await vehicleFirestoreService.listVehicleAssignments(record.vehicleId);
+        const activeAssignment = remainingAssignments
+            .filter((assignment) => !assignment.endDate)
+            .sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')))[0];
+
+        if (activeAssignment) {
+            await vehicleFirestoreService.saveVehicle({
+                id: record.vehicleId,
+                status: 'ASSIGNED',
+                currentAssigneeId: activeAssignment.assigneeId,
+                currentAssigneeType: activeAssignment.assigneeType,
+                currentAssigneeName: activeAssignment.assigneeName
+            } as Partial<Vehicle> & { id: string });
+            return;
+        }
+
+        await vehicleFirestoreService.saveVehicle({
+            id: record.vehicleId,
+            status: 'AVAILABLE',
+            currentAssigneeId: null,
+            currentAssigneeType: null,
+            currentAssigneeName: null
+        } as Partial<Vehicle> & { id: string });
     },
 
     listAllVehicleBillingTargets: async (vehicleId?: string): Promise<VehicleBillingTargetRecord[]> => {

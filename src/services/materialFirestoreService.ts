@@ -11,7 +11,8 @@ import {
     where,
     orderBy,
     writeBatch,
-    Timestamp
+    Timestamp,
+    getCountFromServer
 } from 'firebase/firestore';
 import { createConverter } from '../utils/firestoreConverter';
 import {
@@ -20,12 +21,15 @@ import {
     MaterialInboundSchema,
     MaterialInboundZod,
     MaterialOutboundSchema,
-    MaterialOutboundZod
+    MaterialOutboundZod,
+    MaterialPhotoBatchSchema,
+    MaterialPhotoBatchZod
 } from '../types/zod/materialSchema';
 
 const MASTER_COLLECTION = 'materials';
 const INBOUND_COLLECTION = 'materialInbounds';
 const OUTBOUND_COLLECTION = 'materialOutbounds';
+const PHOTO_BATCH_COLLECTION = 'materialPhotoBatches';
 
 /**
  * MaterialFirestoreService
@@ -66,8 +70,12 @@ export const materialFirestoreService = {
         await setDoc(ref, data, { merge: true });
     },
 
-    saveInboundsBatch: async (transactions: MaterialInboundZod[]) => {
+    saveInboundsBatch: async (transactions: MaterialInboundZod[], photoBatch?: MaterialPhotoBatchZod) => {
         const batch = writeBatch(db);
+        if (photoBatch) {
+            const photoRef = doc(db, PHOTO_BATCH_COLLECTION, photoBatch.id).withConverter(createConverter(MaterialPhotoBatchSchema));
+            batch.set(photoRef, photoBatch, { merge: true });
+        }
         transactions.forEach(t => {
             const ref = doc(db, INBOUND_COLLECTION, t.id).withConverter(createConverter(MaterialInboundSchema));
             batch.set(ref, t, { merge: true });
@@ -107,8 +115,12 @@ export const materialFirestoreService = {
         await setDoc(ref, data, { merge: true });
     },
 
-    saveOutboundsBatch: async (transactions: MaterialOutboundZod[]) => {
+    saveOutboundsBatch: async (transactions: MaterialOutboundZod[], photoBatch?: MaterialPhotoBatchZod) => {
         const batch = writeBatch(db);
+        if (photoBatch) {
+            const photoRef = doc(db, PHOTO_BATCH_COLLECTION, photoBatch.id).withConverter(createConverter(MaterialPhotoBatchSchema));
+            batch.set(photoRef, photoBatch, { merge: true });
+        }
         transactions.forEach(t => {
             const ref = doc(db, OUTBOUND_COLLECTION, t.id).withConverter(createConverter(MaterialOutboundSchema));
             batch.set(ref, t, { merge: true });
@@ -134,6 +146,27 @@ export const materialFirestoreService = {
 
     deleteOutbound: async (id: string) => {
         await deleteDoc(doc(db, OUTBOUND_COLLECTION, id));
+    },
+
+    getPhotoBatch: async (id: string) => {
+        const ref = doc(db, PHOTO_BATCH_COLLECTION, id).withConverter(createConverter(MaterialPhotoBatchSchema));
+        const snap = await getDoc(ref);
+        return snap.exists() ? snap.data() : null;
+    },
+
+    deletePhotoBatch: async (id: string) => {
+        await deleteDoc(doc(db, PHOTO_BATCH_COLLECTION, id));
+    },
+
+    countPhotoBatchReferences: async (photoBatchId: string): Promise<number> => {
+        const inboundRef = collection(db, INBOUND_COLLECTION);
+        const outboundRef = collection(db, OUTBOUND_COLLECTION);
+        const [inboundCount, outboundCount] = await Promise.all([
+            getCountFromServer(query(inboundRef, where('photoBatchId', '==', photoBatchId))),
+            getCountFromServer(query(outboundRef, where('photoBatchId', '==', photoBatchId))),
+        ]);
+
+        return inboundCount.data().count + outboundCount.data().count;
     }
 };
 

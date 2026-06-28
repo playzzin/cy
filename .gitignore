@@ -1,40 +1,75 @@
-# dependencies
-/node_modules
+# Dependencies
+node_modules/
+**/node_modules/
 /.pnp
 .pnp.js
 
-# testing
-/coverage
+# Build output
+/build/
+/dist/
+/coverage/
+/functions/lib/
+*.tsbuildinfo
 
-# production
-/build
+# Environment variables
+.env
+.env.*
+!.env.example
+!.env.*.example
+functions/.env
+functions/.env.*
+!functions/.env.example
+!functions/.env.*.example
 
-# misc
-.DS_Store
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
+# Logs and local runtime files
+*.log
+*.err
+*.err.log
+*.out.log
+*.pid
+*.pid.txt
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# IDE
+# OS and editor files
+.DS_Store
+Thumbs.db
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# Environment variables
-.env
+# Firebase and generated caches
+.firebase/
 
-# Large files and folders
+# Local browser, automation, and capture artifacts
+.agents/
+.chrome-codex*/
+.playwright-mcp/
+.codex-*.log
+.codex-todo-worker/
+review-captures/
+tmp/
+output/
+
+# Root-level screenshots and diagnostic exports
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
+/*-state.json
+/cdp-tabs.json
+/daily-list-*.json
+/firestore-samples.json
+/monthly-wage-*.json
+/recovery/*.json
+/support-*.json
+/team-resource-*.json
+
+# Large local files and secrets
 cyee/
 **/oracleJdk*/
 **/*.pack
-.firebase/
-
-# Backup & Secrets
 service-account.json
 backups/

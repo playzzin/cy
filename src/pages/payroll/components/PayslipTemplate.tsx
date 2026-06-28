@@ -1,5 +1,11 @@
 import React, { forwardRef } from 'react';
 import { formatPayrollPaymentDate } from '../utils/paymentDate';
+import {
+    PAYSLIP_ISSUE_RULE_VERSION,
+    buildPayslipPayComponents,
+    maskAccountNumber,
+    maskResidentId,
+} from '../utils/payslipIssue';
 
 interface WorkerWorkEntry {
     date: string;
@@ -105,6 +111,10 @@ export interface PaymentData {
     grossAmount: number;
     totalDeduction: number;
     totalAmount: number;
+    invoiceManDay?: number;
+    invoiceGrossAmount?: number;
+    laborManDay?: number;
+    laborGrossAmount?: number;
     bankName?: string;
     bankCode?: string;
     accountNumber?: string;
@@ -263,6 +273,9 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
     };
     const withholdingDetailText = resolveWithholdingDetailText(data.taxRateSnapshot);
     const paymentDateText = formatPayrollPaymentDate(data.month || month);
+    const payComponents = buildPayslipPayComponents(data);
+    const maskedWorkerIdentifier = maskResidentId(data.idNumber || data.workerId);
+    const maskedAccountNumber = maskAccountNumber(data.accountNumber);
 
     return (
         <div ref={ref} className="bg-white border-2 border-slate-200 rounded-xl shadow-sm w-full max-w-none mx-auto text-slate-900 mb-8 page-break-inside-avoid">
@@ -287,8 +300,8 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                     <div className="border-b border-slate-200 p-2 text-center">{data.teamName}</div>
                 </div>
                 <div className="grid grid-cols-4 text-sm">
-                    <div className="border-r border-b border-slate-200 p-2 text-center font-medium bg-slate-50">주민번호</div>
-                    <div className="border-r border-b border-slate-200 p-2 text-center font-mono">{data.idNumber || '-'}</div>
+                    <div className="border-r border-b border-slate-200 p-2 text-center font-medium bg-slate-50">근로자 식별</div>
+                    <div className="border-r border-b border-slate-200 p-2 text-center font-mono">{maskedWorkerIdentifier}</div>
                     <div className="border-r border-b border-slate-200 p-2 text-center font-medium bg-slate-50">시공사</div>
                     <div className="border-b border-slate-200 p-2 text-center">{data.companyName || '-'}</div>
                 </div>
@@ -297,6 +310,12 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                     <div className="border-r border-b border-slate-200 p-2 text-center">{data.month || month}</div>
                     <div className="border-r border-b border-slate-200 p-2 text-center font-medium bg-slate-50">지급일</div>
                     <div className="border-b border-slate-200 p-2 text-center font-semibold text-emerald-700">{paymentDateText}</div>
+                </div>
+                <div className="grid grid-cols-4 text-sm">
+                    <div className="border-r border-b border-slate-200 p-2 text-center font-medium bg-slate-50">입금은행</div>
+                    <div className="border-r border-b border-slate-200 p-2 text-center">{data.bankName || '-'}</div>
+                    <div className="border-r border-b border-slate-200 p-2 text-center font-medium bg-slate-50">계좌번호</div>
+                    <div className="border-b border-slate-200 p-2 text-center font-mono">{maskedAccountNumber}</div>
                 </div>
             </section>
 
@@ -313,6 +332,43 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                 <div className="p-4 text-center">
                     <p className="text-xs text-slate-500 mb-1">실 지급</p>
                     <p className="text-lg font-bold text-emerald-600">{data.totalAmount.toLocaleString()}원</p>
+                </div>
+            </section>
+
+            <section className="p-4 border-t border-slate-200 bg-white">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                    <h4 className="text-sm font-bold text-slate-700">임금 구성 및 계산식</h4>
+                    <span className="text-[11px] text-slate-400">기준 {PAYSLIP_ISSUE_RULE_VERSION}</span>
+                </div>
+                <div className="border border-slate-200 rounded-lg overflow-hidden">
+                    <table className="w-full text-xs">
+                        <thead className="bg-slate-50 text-slate-600">
+                            <tr>
+                                <th className="px-3 py-2 text-left font-semibold border-b border-slate-200">항목</th>
+                                <th className="px-3 py-2 text-right font-semibold border-b border-slate-200 w-20">공수</th>
+                                <th className="px-3 py-2 text-right font-semibold border-b border-slate-200 w-24">단가</th>
+                                <th className="px-3 py-2 text-left font-semibold border-b border-slate-200">계산식</th>
+                                <th className="px-3 py-2 text-right font-semibold border-b border-slate-200 w-28">금액</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {payComponents.map((component) => (
+                                <tr key={component.label} className="odd:bg-white even:bg-slate-50/60">
+                                    <td className="px-3 py-2 border-b border-slate-100 font-semibold text-slate-700">{component.label}</td>
+                                    <td className="px-3 py-2 border-b border-slate-100 text-right font-mono">{component.manDay.toFixed(1)}</td>
+                                    <td className="px-3 py-2 border-b border-slate-100 text-right font-mono">{component.unitPrice.toLocaleString()}원</td>
+                                    <td className="px-3 py-2 border-b border-slate-100 text-slate-600">{component.formula}</td>
+                                    <td className="px-3 py-2 border-b border-slate-100 text-right font-mono font-semibold">{component.amount.toLocaleString()}원</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                        <tfoot>
+                            <tr className="bg-purple-50 font-bold text-purple-800">
+                                <td className="px-3 py-2" colSpan={4}>임금 총액</td>
+                                <td className="px-3 py-2 text-right font-mono">{data.grossAmount.toLocaleString()}원</td>
+                            </tr>
+                        </tfoot>
+                    </table>
                 </div>
             </section>
 

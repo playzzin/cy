@@ -13,6 +13,7 @@ export interface AdvancePayment {
     workerName: string;
     teamId: string;
     teamName: string;
+    salaryModel?: string;
     yearMonth: string; // "YYYY-MM"
 
     // Dynamic deduction items (custom fields)
@@ -40,6 +41,31 @@ export interface AdvancePayment {
 }
 
 const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+const YEAR_MONTH_PATTERN = /^\d{4}-\d{2}$/;
+
+type AdvancePaymentSalaryModelKey = 'daily' | 'monthly' | 'service';
+
+const normalizeAdvancePaymentSalaryModelKey = (value: unknown): AdvancePaymentSalaryModelKey | '' => {
+    const normalized = String(value ?? '').trim();
+    if (!normalized) return '';
+    const lower = normalized.toLowerCase();
+    if (normalized.includes('용역') || lower === 'service' || lower.includes('service')) return 'service';
+    if (normalized.includes('월급') || lower === 'monthly' || lower.includes('monthly')) return 'monthly';
+    if (normalized.includes('일급') || normalized.includes('일당') || lower === 'daily' || lower.includes('daily')) return 'daily';
+    return '';
+};
+
+const getAdvancePaymentSalaryModelLabel = (key: AdvancePaymentSalaryModelKey): '일급제' | '월급제' | '용역팀' => {
+    if (key === 'monthly') return '월급제';
+    if (key === 'service') return '용역팀';
+    return '일급제';
+};
+
+const normalizeAdvancePaymentSalaryModelLabel = (value: unknown): string => {
+    const key = normalizeAdvancePaymentSalaryModelKey(value);
+    if (key) return getAdvancePaymentSalaryModelLabel(key);
+    return String(value ?? '').trim();
+};
 
 let dcWorkersLoaded = false;
 let dcTeamsLoaded = false;
@@ -199,21 +225,35 @@ const normalizeItems = (items?: Record<string, number>): Record<string, number> 
 
 const parseAdvancePaymentCompositeId = (
     rawId: string
-): { teamId: string; workerId: string; yearMonth: string } | null => {
+): { teamId: string; workerId: string; yearMonth: string; salaryModel?: string } | null => {
     const id = String(rawId ?? '').trim();
     if (!id) return null;
 
     const parts = id.split('_');
     if (parts.length < 3) return null;
 
-    const yearMonth = parts[parts.length - 1];
-    const workerId = parts[parts.length - 2];
-    const teamId = parts.slice(0, parts.length - 2).join('_');
+    let yearMonthIndex = parts.length - 1;
+    let salaryModel = '';
+    if (!YEAR_MONTH_PATTERN.test(parts[yearMonthIndex] ?? '')) {
+        salaryModel = normalizeAdvancePaymentSalaryModelLabel(parts[parts.length - 1]);
+        yearMonthIndex = parts.length - 2;
+    }
+
+    if (yearMonthIndex < 2) return null;
+
+    const yearMonth = parts[yearMonthIndex];
+    const workerId = parts[yearMonthIndex - 1];
+    const teamId = parts.slice(0, yearMonthIndex - 1).join('_');
 
     if (!yearMonth || !workerId || !teamId) return null;
-    if (!/^\d{4}-\d{2}$/.test(yearMonth)) return null;
+    if (!YEAR_MONTH_PATTERN.test(yearMonth)) return null;
 
-    return { teamId, workerId, yearMonth };
+    return {
+        teamId,
+        workerId,
+        yearMonth,
+        ...(salaryModel ? { salaryModel } : {})
+    };
 };
 
 const listEveryAdvancePaymentRow = async (): Promise<any[]> => {
@@ -277,6 +317,7 @@ const mapAdvancePaymentRow = (row: any): AdvancePayment => {
                 ? String(row.team.legacyId)
                 : String(row?.team?.id ?? row?.teamId ?? (parsed?.teamId ?? '')),
         teamName: row?.teamName ? String(row.teamName) : (row?.team?.name ? String(row.team.name) : ''),
+        salaryModel: normalizeAdvancePaymentSalaryModelLabel(row?.salaryModel ?? parsed?.salaryModel) || undefined,
         yearMonth: String(row?.yearMonth ?? (parsed?.yearMonth ?? '')),
         items: rawItems,
         prevMonthCarryover: asFiniteNumber(row?.prevMonthCarryover),
@@ -354,7 +395,11 @@ export const advancePaymentService = {
             const safeTeamId = String(data.teamId ?? '').trim();
             const safeWorkerId = String(data.workerId ?? '').trim();
             const safeYearMonth = String(data.yearMonth ?? '').trim();
-            const docId = `${safeTeamId}_${safeWorkerId}_${safeYearMonth}`;
+            const salaryModel = normalizeAdvancePaymentSalaryModelLabel(data.salaryModel);
+            const salaryModelKey = normalizeAdvancePaymentSalaryModelKey(salaryModel);
+            const docId = salaryModelKey
+                ? `${safeTeamId}_${safeWorkerId}_${safeYearMonth}_${salaryModelKey}`
+                : `${safeTeamId}_${safeWorkerId}_${safeYearMonth}`;
             const [teamUuid, workerUuid] = await Promise.all([
                 resolveTeamUuid(safeTeamId),
                 resolveWorkerUuid(safeWorkerId)
@@ -390,6 +435,7 @@ export const advancePaymentService = {
                 workerName: data.workerName ?? null,
                 teamId: resolvedTeamId,
                 teamName: data.teamName ?? null,
+                salaryModel: salaryModel || null,
                 items: JSON.stringify(normalizedItems),
                 prevMonthCarryover: data.prevMonthCarryover ?? 0,
                 accommodation: data.accommodation ?? 0,

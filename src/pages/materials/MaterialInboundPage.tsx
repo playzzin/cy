@@ -2,20 +2,47 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowDown, faSave, faRotateRight, faFloppyDisk, faTrash, faEdit, faSearch } from '@fortawesome/free-solid-svg-icons';
+import {
+    faArrowDown,
+    faSave,
+    faRotateRight,
+    faFloppyDisk,
+    faTrash,
+    faEdit,
+    faSearch,
+    faFileInvoice,
+    faDownload,
+    faShareNodes,
+    faCamera,
+    faSpinner,
+} from '@fortawesome/free-solid-svg-icons';
 import materialService from '../../services/materialService';
+import { geminiService } from '../../services/geminiService';
 import { siteService, Site } from '../../services/siteService';
 import { Material, InboundTransaction } from '../../types/materials';
 import { useAuth } from '../../contexts/AuthContext';
 import { filterCheongyeonMaterialSites } from './materialSiteFilters';
 import { handleMaterialQuantityInputKeyDown } from './materialKeyboardNavigation';
 import { getMaterialGroupKey, sortMaterialDisplayRows } from '../../utils/materialOrdering';
+import {
+    applyAnalyzedMaterialItemsToQuantities,
+    buildMaterialAnalyzeContext,
+    describeAnalyzedItem,
+    findMatchingSite,
+    normalizeAnalyzedDate,
+} from './materialPhotoAnalysisUtils';
 import MaterialPhotoPicker, {
+    deleteUploadedMaterialPhotos,
     MaterialPhotoAttachment,
+    MaterialPhotoUpload,
     revokeMaterialPhotoAttachments,
     uploadMaterialPhotoAttachments,
 } from './MaterialPhotoPicker';
 import MaterialSelectionActionBar, { SelectedMaterial } from './MaterialSelectionActionBar';
+import {
+    createInboundCertificateDraftId,
+    saveInboundCertificateDraft,
+} from './materialInboundCertificateDraftStore';
 
 // 임시저장 데이터 타입
 type InboundTempData = {
@@ -24,6 +51,7 @@ type InboundTempData = {
     siteName: string;
     vehicleNumber: string;
     supplier: string;
+    notes?: string;
     quantities: Record<string, number>;
     savedAt: number;
 };
@@ -32,6 +60,9 @@ type MobileMaterialGroup = 'scaffolding' | 'dongbari' | 'other';
 
 const ITEMS_PER_COLUMN = 10;
 const QUICK_QUANTITY_STEPS = [-1, -10, -100, 1, 10, 100];
+
+const createMaterialPhotoBatchId = (transactionType: 'inbound' | 'outbound') =>
+    `matphoto_${transactionType}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
 const getMaterialChunkGridClass = (chunkCount: number) => {
     if (chunkCount >= 7) return 'grid-cols-7 min-w-[1330px]';
@@ -61,6 +92,281 @@ const getQuantityAccentClasses = (colorClass: string) => {
     };
 };
 
+type InboundCertificateInput = {
+    transactionDate: string;
+    siteName: string;
+    vehicleNumber: string;
+    supplier: string;
+    registeredByName: string;
+    items: SelectedMaterial[];
+    photos: MaterialPhotoAttachment[];
+};
+
+const sanitizeCertificateFileName = (value: unknown): string =>
+    String(value ?? '')
+        .trim()
+        .replace(/[\\/:*?"<>|]/g, '-')
+        .replace(/\s+/g, '_')
+        .slice(0, 90) || '입고증';
+
+const formatCertificateQuantity = (value: unknown): string => {
+    const numeric = Number(value || 0);
+    return Number.isFinite(numeric) ? numeric.toLocaleString('ko-KR') : '0';
+};
+
+const fitCanvasText = (ctx: CanvasRenderingContext2D, value: unknown, maxWidth: number): string => {
+    const text = String(value ?? '').trim() || '-';
+    if (ctx.measureText(text).width <= maxWidth) return text;
+
+    let next = text;
+    while (next.length > 1 && ctx.measureText(`${next}...`).width > maxWidth) {
+        next = next.slice(0, -1);
+    }
+
+    return `${next}...`;
+};
+
+const canvasToJpegFile = (canvas: HTMLCanvasElement, fileName: string): Promise<File> =>
+    new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+            if (!blob) {
+                reject(new Error('입고증 이미지를 만들지 못했습니다.'));
+                return;
+            }
+            resolve(new File([blob], fileName, { type: 'image/jpeg' }));
+        }, 'image/jpeg', 0.92);
+    });
+
+const downloadGeneratedFile = (file: File) => {
+    const url = URL.createObjectURL(file);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = file.name;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+const loadCertificatePhoto = (file: File): Promise<{ image: HTMLImageElement; url: string }> =>
+    new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const image = new Image();
+        image.onload = () => resolve({ image, url });
+        image.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error('첨부사진을 입고증에 불러오지 못했습니다.'));
+        };
+        image.src = url;
+    });
+
+const drawContainedImage = (
+    ctx: CanvasRenderingContext2D,
+    image: HTMLImageElement,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+) => {
+    const sourceWidth = image.naturalWidth || image.width;
+    const sourceHeight = image.naturalHeight || image.height;
+    if (sourceWidth <= 0 || sourceHeight <= 0) return;
+
+    const scale = Math.min(width / sourceWidth, height / sourceHeight);
+    const drawWidth = sourceWidth * scale;
+    const drawHeight = sourceHeight * scale;
+    const drawX = x + ((width - drawWidth) / 2);
+    const drawY = y + ((height - drawHeight) / 2);
+    ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+};
+
+const createInboundCertificateImageFile = async ({
+    transactionDate,
+    siteName,
+    vehicleNumber,
+    supplier,
+    registeredByName,
+    items,
+    photos,
+}: InboundCertificateInput): Promise<File> => {
+    const width = 1080;
+    const padding = 56;
+    const metaTop = 165;
+    const metaRowHeight = 46;
+    const tableTop = metaTop + (metaRowHeight * 4) + 42;
+    const tableHeaderHeight = 50;
+    const rowHeight = 44;
+    const footerHeight = 150;
+    const photoColumns = 3;
+    const photoGap = 18;
+    const photoCellHeight = 238;
+    const photoRows = photos.length > 0 ? Math.ceil(photos.length / photoColumns) : 0;
+    const photoSectionHeight = photos.length > 0
+        ? 72 + (photoRows * photoCellHeight) + (Math.max(0, photoRows - 1) * photoGap) + 34
+        : 0;
+    const height = tableTop + tableHeaderHeight + (items.length * rowHeight) + photoSectionHeight + footerHeight + 42;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('입고증 이미지를 만들 수 없습니다.');
+
+    const tableWidth = width - (padding * 2);
+    const certificatePhotos = await Promise.all(photos.map((photo) => loadCertificatePhoto(photo.file)));
+    const totalQuantity = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    const fileName = `${sanitizeCertificateFileName(`입고증_${transactionDate}_${siteName || '현장'}_${vehicleNumber || ''}`)}.jpg`;
+
+    try {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        ctx.strokeStyle = '#111827';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(28, 28, width - 56, height - 56);
+
+        ctx.fillStyle = '#111827';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        ctx.font = '700 54px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+        ctx.fillText('자재 입고증', width / 2, 92);
+        ctx.font = '500 24px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+        ctx.fillStyle = '#64748b';
+        ctx.fillText(`발행일 ${new Date().toLocaleDateString('ko-KR')}`, width / 2, 130);
+
+        const metaRows = [
+            ['입고일자', transactionDate || '-', '현장명', siteName || '-'],
+            ['공급업체', supplier || '-', '차량번호', vehicleNumber || '-'],
+            ['등록자', registeredByName || '-', '첨부사진', `${photos.length}장`],
+            ['총 품목', `${items.length}개`, '총 수량', formatCertificateQuantity(totalQuantity)],
+        ];
+        const metaWidths = [150, 390, 150, tableWidth - 150 - 390 - 150];
+        let y = metaTop;
+        metaRows.forEach((row) => {
+            let x = padding;
+            row.forEach((cell, index) => {
+                const widthForCell = metaWidths[index];
+                ctx.fillStyle = index % 2 === 0 ? '#f1f5f9' : '#ffffff';
+                ctx.fillRect(x, y, widthForCell, metaRowHeight);
+                ctx.strokeStyle = '#cbd5e1';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(x, y, widthForCell, metaRowHeight);
+                ctx.fillStyle = index % 2 === 0 ? '#334155' : '#111827';
+                ctx.font = `${index % 2 === 0 ? '700' : '600'} 22px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif`;
+                ctx.textAlign = index % 2 === 0 ? 'center' : 'left';
+                const textX = index % 2 === 0 ? x + (widthForCell / 2) : x + 16;
+                ctx.fillText(fitCanvasText(ctx, cell, widthForCell - 24), textX, y + 31);
+                x += widthForCell;
+            });
+            y += metaRowHeight;
+        });
+
+        const columns = [
+            { label: 'No', width: 70, align: 'center' as const },
+            { label: '품명', width: 330, align: 'left' as const },
+            { label: '규격', width: 260, align: 'left' as const },
+            { label: '수량', width: 130, align: 'right' as const },
+            { label: '단위', width: tableWidth - 70 - 330 - 260 - 130, align: 'center' as const },
+        ];
+        let x = padding;
+        y = tableTop;
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(padding, y, tableWidth, tableHeaderHeight);
+        ctx.font = '700 22px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+        ctx.fillStyle = '#ffffff';
+        columns.forEach((column) => {
+            const textX = column.align === 'left' ? x + 14 : column.align === 'right' ? x + column.width - 14 : x + (column.width / 2);
+            ctx.textAlign = column.align;
+            ctx.fillText(column.label, textX, y + 33);
+            x += column.width;
+        });
+
+        y += tableHeaderHeight;
+        items.forEach((item, index) => {
+            x = padding;
+            ctx.fillStyle = index % 2 === 0 ? '#ffffff' : '#f8fafc';
+            ctx.fillRect(padding, y, tableWidth, rowHeight);
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(padding, y + rowHeight);
+            ctx.lineTo(padding + tableWidth, y + rowHeight);
+            ctx.stroke();
+
+            const values = [
+                String(index + 1),
+                item.itemName || '-',
+                item.spec || '-',
+                formatCertificateQuantity(item.quantity),
+                item.unit || '-',
+            ];
+            ctx.font = '600 21px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+            ctx.fillStyle = '#111827';
+            columns.forEach((column, columnIndex) => {
+                const textX = column.align === 'left' ? x + 14 : column.align === 'right' ? x + column.width - 14 : x + (column.width / 2);
+                ctx.textAlign = column.align;
+                ctx.fillText(fitCanvasText(ctx, values[columnIndex], column.width - 24), textX, y + 30);
+                x += column.width;
+            });
+            y += rowHeight;
+        });
+
+        if (certificatePhotos.length > 0) {
+            const photoSectionTop = y + 34;
+            ctx.fillStyle = '#111827';
+            ctx.textAlign = 'left';
+            ctx.font = '700 30px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+            ctx.fillText('첨부 사진', padding, photoSectionTop + 30);
+            ctx.font = '600 18px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+            ctx.fillStyle = '#64748b';
+            ctx.fillText(`자재 입고 확인 사진 ${certificatePhotos.length}장`, padding + 150, photoSectionTop + 30);
+
+            const photoCellWidth = (tableWidth - (photoGap * (photoColumns - 1))) / photoColumns;
+            certificatePhotos.forEach(({ image }, index) => {
+                const col = index % photoColumns;
+                const row = Math.floor(index / photoColumns);
+                const photoX = padding + (col * (photoCellWidth + photoGap));
+                const photoY = photoSectionTop + 56 + (row * (photoCellHeight + photoGap));
+                ctx.fillStyle = '#f8fafc';
+                ctx.fillRect(photoX, photoY, photoCellWidth, photoCellHeight);
+                ctx.strokeStyle = '#cbd5e1';
+                ctx.strokeRect(photoX, photoY, photoCellWidth, photoCellHeight);
+                drawContainedImage(ctx, image, photoX + 10, photoY + 10, photoCellWidth - 20, photoCellHeight - 48);
+                ctx.fillStyle = '#334155';
+                ctx.font = '700 18px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(`사진 ${index + 1}`, photoX + (photoCellWidth / 2), photoY + photoCellHeight - 16);
+            });
+            y = photoSectionTop + 56 + (photoRows * photoCellHeight) + (Math.max(0, photoRows - 1) * photoGap);
+        }
+
+        y += 70;
+        ctx.fillStyle = '#334155';
+        ctx.textAlign = 'center';
+        ctx.font = '700 25px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+        ctx.fillText('위 자재를 입고함', width / 2, y);
+        y += 76;
+        ctx.strokeStyle = '#94a3b8';
+        ctx.lineWidth = 2;
+        const signatureWidth = 280;
+        const leftSignatureX = width / 2 - signatureWidth - 72;
+        const rightSignatureX = width / 2 + 72;
+        ctx.beginPath();
+        ctx.moveTo(leftSignatureX, y);
+        ctx.lineTo(leftSignatureX + signatureWidth, y);
+        ctx.moveTo(rightSignatureX, y);
+        ctx.lineTo(rightSignatureX + signatureWidth, y);
+        ctx.stroke();
+        ctx.fillStyle = '#475569';
+        ctx.font = '700 20px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+        ctx.fillText('입고 확인', leftSignatureX + signatureWidth / 2, y + 31);
+        ctx.fillText('담당 확인', rightSignatureX + signatureWidth / 2, y + 31);
+
+        return canvasToJpegFile(canvas, fileName);
+    } finally {
+        certificatePhotos.forEach((photo) => URL.revokeObjectURL(photo.url));
+    }
+};
+
 const MaterialInboundPage: React.FC = () => {
     const navigate = useNavigate();
     const { currentUser } = useAuth();
@@ -70,6 +376,7 @@ const MaterialInboundPage: React.FC = () => {
     const [siteName, setSiteName] = useState('');
     const [vehicleNumber, setVehicleNumber] = useState('');
     const [supplier, setSupplier] = useState('');
+    const [notes, setNotes] = useState('');
     const [searchFilter, setSearchFilter] = useState('');
 
     const [sites, setSites] = useState<Site[]>([]);
@@ -80,6 +387,9 @@ const MaterialInboundPage: React.FC = () => {
     const [mobileSelectedItemName, setMobileSelectedItemName] = useState('');
     const [photoAttachments, setPhotoAttachments] = useState<MaterialPhotoAttachment[]>([]);
     const [photoUploadProgress, setPhotoUploadProgress] = useState<number | null>(null);
+    const [sharingCertificate, setSharingCertificate] = useState(false);
+    const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
+    const photoAnalysisInputRef = React.useRef<HTMLInputElement | null>(null);
 
     // 임시저장 데이터 로드
     const loadTempData = () => {
@@ -102,6 +412,7 @@ const MaterialInboundPage: React.FC = () => {
             setSiteName(tempData.siteName);
             setVehicleNumber(tempData.vehicleNumber);
             setSupplier(tempData.supplier);
+            setNotes(tempData.notes || '');
             setQuantities(tempData.quantities || {});
             setHasTempData(true);
 
@@ -112,6 +423,7 @@ const MaterialInboundPage: React.FC = () => {
                 siteName: tempData.siteName,
                 vehicleNumber: tempData.vehicleNumber,
                 supplier: tempData.supplier,
+                notes: tempData.notes || '',
                 quantities: tempData.quantities || {}
             };
 
@@ -131,6 +443,7 @@ const MaterialInboundPage: React.FC = () => {
                 siteName,
                 vehicleNumber,
                 supplier,
+                notes,
                 quantities,
                 savedAt: Date.now()
             };
@@ -154,6 +467,7 @@ const MaterialInboundPage: React.FC = () => {
         siteName,
         vehicleNumber,
         supplier,
+        notes,
         quantities
     });
 
@@ -165,9 +479,10 @@ const MaterialInboundPage: React.FC = () => {
             siteName,
             vehicleNumber,
             supplier,
+            notes,
             quantities
         };
-    }, [transactionDate, siteId, siteName, vehicleNumber, supplier, quantities]);
+    }, [transactionDate, siteId, siteName, vehicleNumber, supplier, notes, quantities]);
 
     // 실제 저장 로직 (Ref 기준)
     const performSave = () => {
@@ -179,6 +494,7 @@ const MaterialInboundPage: React.FC = () => {
                 siteName: current.siteName,
                 vehicleNumber: current.vehicleNumber,
                 supplier: current.supplier,
+                notes: current.notes,
                 quantities: current.quantities,
                 savedAt: Date.now()
             };
@@ -214,7 +530,7 @@ const MaterialInboundPage: React.FC = () => {
         }, 1000);
 
         return () => clearTimeout(timer);
-    }, [transactionDate, siteId, siteName, vehicleNumber, supplier, quantities]);
+    }, [transactionDate, siteId, siteName, vehicleNumber, supplier, notes, quantities]);
 
     const loadData = async () => {
         setLoading(true);
@@ -263,6 +579,77 @@ const MaterialInboundPage: React.FC = () => {
         }));
     };
 
+    const handlePhotoAnalysisClick = () => {
+        photoAnalysisInputRef.current?.click();
+    };
+
+    const handlePhotoAnalysisFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(event.target.files || []).filter((file) =>
+            file.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/i.test(file.name)
+        );
+        event.target.value = '';
+        if (files.length === 0) {
+            alert('분석할 이미지 파일을 선택해주세요.');
+            return;
+        }
+        if (!geminiService.getKey()) {
+            alert('Gemini API 키가 설정되지 않았습니다. /settings/ai 또는 .env.local의 REACT_APP_GOOGLE_API_KEY를 확인해주세요.');
+            return;
+        }
+
+        setAnalyzingPhoto(true);
+        try {
+            const analysis = await geminiService.analyzeMaterialTransactionImages(
+                files,
+                buildMaterialAnalyzeContext({
+                    transactionType: 'inbound',
+                    sites,
+                    materials,
+                })
+            );
+
+            const analyzedDate = normalizeAnalyzedDate(analysis.transactionDate);
+            if (analyzedDate) setTransactionDate(analyzedDate);
+
+            const matchedSite = findMatchingSite(sites, analysis.siteName);
+            if (matchedSite?.id) {
+                setSiteId(matchedSite.id);
+                setSiteName(matchedSite.name || '');
+            }
+
+            if (analysis.vehicleNumber?.trim()) setVehicleNumber(analysis.vehicleNumber.trim());
+            if (analysis.supplier?.trim()) setSupplier(analysis.supplier.trim());
+            if (analysis.notes?.trim()) {
+                setNotes((prev) => prev.trim() ? prev : analysis.notes!.trim());
+            }
+
+            const applied = applyAnalyzedMaterialItemsToQuantities({
+                analysis,
+                materials,
+                currentQuantities: quantities,
+            });
+            setQuantities(applied.nextQuantities);
+            if (applied.matchedCount > 0) setSearchFilter('');
+
+            const unmatchedPreview = applied.unmatchedItems
+                .slice(0, 5)
+                .map(describeAnalyzedItem)
+                .join(', ');
+            const messages = [
+                `사진분석 완료: ${applied.matchedCount}개 품목 적용`,
+                applied.unmatchedItems.length > 0 ? `미매칭 ${applied.unmatchedItems.length}개${unmatchedPreview ? ` (${unmatchedPreview})` : ''}` : '',
+                analysis.siteName && !matchedSite ? `현장명 "${analysis.siteName}"은 현장 목록에서 찾지 못했습니다.` : '',
+                '저장 전 수량과 현장을 확인해주세요.',
+            ].filter(Boolean);
+            alert(messages.join('\n'));
+        } catch (error: any) {
+            console.error('Failed to analyze inbound material photo:', error);
+            alert(error?.message || '사진분석에 실패했습니다.');
+        } finally {
+            setAnalyzingPhoto(false);
+        }
+    };
+
     const handleSave = async () => {
         if (!siteId) {
             alert('현장을 선택하세요.');
@@ -293,7 +680,7 @@ const MaterialInboundPage: React.FC = () => {
                         quantity,
                         unit: String(material.unit || '').trim(),
                         supplier: supplier || '',
-                        notes: '',
+                        notes: notes.trim(),
                         registeredBy: currentUser?.uid || '',
                         registeredByName: currentUser?.displayName || currentUser?.email || '관리자'
                     });
@@ -307,29 +694,45 @@ const MaterialInboundPage: React.FC = () => {
         }
 
         setLoading(true);
+        let uploadedPhotos: MaterialPhotoUpload[] = [];
         try {
             setPhotoUploadProgress(photoAttachments.length > 0 ? 0 : null);
-            const photoUrls = await uploadMaterialPhotoAttachments({
+            uploadedPhotos = await uploadMaterialPhotoAttachments({
                 photos: photoAttachments,
                 transactionType: 'inbound',
                 transactionDate,
                 siteId,
                 onProgress: setPhotoUploadProgress,
             });
-            const sharedPhotoUrls = photoUrls.length > 0 ? photoUrls : undefined;
+            const photoBatchId = uploadedPhotos.length > 0 ? createMaterialPhotoBatchId('inbound') : undefined;
+            const photoBatch = photoBatchId
+                ? {
+                    id: photoBatchId,
+                    transactionType: 'inbound' as const,
+                    transactionDate,
+                    siteId,
+                    photoCount: uploadedPhotos.length,
+                    photos: uploadedPhotos,
+                    createdBy: currentUser?.uid || '',
+                    createdByName: currentUser?.displayName || currentUser?.email || 'admin',
+                }
+                : undefined;
 
             const payload = transactions.map((transaction) => ({
                 ...transaction,
-                ...(sharedPhotoUrls ? { photoUrls: sharedPhotoUrls } : {}),
+                ...(photoBatch ? { photoBatchId: photoBatch.id, photoCount: photoBatch.photoCount } : {}),
             }));
 
-            await materialService.addInboundTransactionsBatch(payload);
+            await materialService.addInboundTransactionsBatch(payload, photoBatch);
             alert(`${transactions.length}건의 입고가 등록되었습니다.`);
             // 저장 성공 후 임시저장 데이터 삭제
             clearTempData();
             handleReset();
         } catch (error) {
             console.error('Failed to save inbound transactions:', error);
+            if (uploadedPhotos.length > 0) {
+                await deleteUploadedMaterialPhotos(uploadedPhotos);
+            }
             alert('입고 등록에 실패했습니다.');
         } finally {
             setLoading(false);
@@ -340,6 +743,7 @@ const MaterialInboundPage: React.FC = () => {
         setQuantities({});
         setVehicleNumber('');
         setSupplier('');
+        setNotes('');
         revokeMaterialPhotoAttachments(photoAttachments);
         setPhotoAttachments([]);
         setPhotoUploadProgress(null);
@@ -404,6 +808,106 @@ const MaterialInboundPage: React.FC = () => {
         { label: '차량번호', value: vehicleNumber },
         { label: '공급업체', value: supplier },
     ];
+
+    const createCurrentInboundCertificateFile = async (): Promise<File | null> => {
+        if (!siteId) {
+            alert('현장을 선택하세요.');
+            return null;
+        }
+        if (selectedMaterials.length === 0) {
+            alert('입고증에 넣을 자재 수량을 입력하세요.');
+            return null;
+        }
+
+        return createInboundCertificateImageFile({
+            transactionDate,
+            siteName: siteName || sites.find((site) => site.id === siteId)?.name || '',
+            vehicleNumber,
+            supplier,
+            registeredByName: currentUser?.displayName || currentUser?.email || '관리자',
+            items: selectedMaterials,
+            photos: photoAttachments,
+        });
+    };
+
+    const handleOpenInboundCertificatePage = () => {
+        if (!siteId) {
+            alert('현장을 선택하세요.');
+            return;
+        }
+        if (selectedMaterials.length === 0) {
+            alert('입고증에 넣을 자재 수량을 입력하세요.');
+            return;
+        }
+
+        const draftId = createInboundCertificateDraftId();
+        saveInboundCertificateDraft({
+            id: draftId,
+            transactionDate,
+            siteId,
+            siteName: siteName || sites.find((site) => site.id === siteId)?.name || '',
+            vehicleNumber,
+            supplier,
+            registeredByName: currentUser?.displayName || currentUser?.email || '관리자',
+            items: selectedMaterials,
+            photos: photoAttachments.map((photo) => ({
+                id: photo.id,
+                file: photo.file,
+                source: photo.source,
+            })),
+            createdAt: Date.now(),
+        });
+
+        navigate(`/materials/inbound-certificate?draftId=${encodeURIComponent(draftId)}`);
+    };
+
+    const handleDownloadInboundCertificate = async () => {
+        setSharingCertificate(true);
+        try {
+            const file = await createCurrentInboundCertificateFile();
+            if (!file) return;
+            downloadGeneratedFile(file);
+        } catch (error) {
+            console.error('Failed to download inbound certificate:', error);
+            alert('입고증 이미지를 만들지 못했습니다.');
+        } finally {
+            setSharingCertificate(false);
+        }
+    };
+
+    const handleShareInboundCertificate = async () => {
+        setSharingCertificate(true);
+        try {
+            const certificateFile = await createCurrentInboundCertificateFile();
+            if (!certificateFile) return;
+
+            const shareFiles = [certificateFile];
+            const shareTitle = '자재 입고증';
+            const shareText = `${transactionDate} ${siteName || '현장'} 자재 입고증`;
+            const shareTarget = navigator as any;
+
+            if (shareTarget.canShare?.({ files: shareFiles })) {
+                await shareTarget.share({ title: shareTitle, text: shareText, files: shareFiles });
+                return;
+            }
+
+            if (shareTarget.canShare?.({ files: [certificateFile] })) {
+                await shareTarget.share({ title: shareTitle, text: shareText, files: [certificateFile] });
+                return;
+            }
+
+            downloadGeneratedFile(certificateFile);
+            alert('이 브라우저에서는 파일 공유를 지원하지 않아 입고증 이미지를 저장했습니다.');
+        } catch (error: any) {
+            if (error?.name !== 'AbortError') {
+                console.error('Failed to share inbound certificate:', error);
+                alert('입고증 공유에 실패했습니다.');
+            }
+        } finally {
+            setSharingCertificate(false);
+        }
+    };
+
     const mobileGroupOptions = [
         { key: 'scaffolding' as const, title: '시스템 비계', items: scaffoldingList, colorClass: 'blue' },
         { key: 'dongbari' as const, title: '시스템 동바리', items: dongbariList, colorClass: 'blue' },
@@ -623,6 +1127,14 @@ const MaterialInboundPage: React.FC = () => {
 
     return (
         <div className="mx-auto w-full max-w-[calc(100vw-30px)] space-y-4 overflow-x-hidden p-3 sm:max-w-[2100px] sm:space-y-6 sm:p-4">
+            <input
+                ref={photoAnalysisInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handlePhotoAnalysisFileChange}
+            />
             <div className="flex items-center justify-between sm:hidden">
                 <div className="flex items-center gap-2 text-base font-bold text-slate-800">
                     <FontAwesomeIcon icon={faArrowDown} className="text-blue-600" />
@@ -646,6 +1158,15 @@ const MaterialInboundPage: React.FC = () => {
                     title="입고 등록 품목"
                     details={selectionActionDetails}
                 />
+                <button
+                    type="button"
+                    onClick={handlePhotoAnalysisClick}
+                    disabled={loading || analyzingPhoto || materials.length === 0}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm font-bold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                    <FontAwesomeIcon icon={analyzingPhoto ? faSpinner : faCamera} spin={analyzingPhoto} />
+                    {analyzingPhoto ? '분석 중' : '사진분석'}
+                </button>
             </div>
             <div className="hidden gap-4 sm:flex sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -669,6 +1190,15 @@ const MaterialInboundPage: React.FC = () => {
                         title="입고 등록 품목"
                         details={selectionActionDetails}
                     />
+                    <button
+                        type="button"
+                        onClick={handlePhotoAnalysisClick}
+                        disabled={loading || analyzingPhoto || materials.length === 0}
+                        className="justify-center px-3 py-2.5 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 font-bold hover:bg-blue-100 transition flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4"
+                    >
+                        <FontAwesomeIcon icon={analyzingPhoto ? faSpinner : faCamera} spin={analyzingPhoto} />
+                        {analyzingPhoto ? '분석 중...' : '사진분석'}
+                    </button>
                     <button
                         onClick={handleReset}
                         disabled={loading}
@@ -742,6 +1272,49 @@ const MaterialInboundPage: React.FC = () => {
                     disabled={loading}
                     uploadProgress={photoUploadProgress}
                 />
+
+                <div className="mb-5 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-sm font-extrabold text-slate-800">
+                            <FontAwesomeIcon icon={faFileInvoice} className="text-blue-600" />
+                            입고증
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+                            <span>공급업체 {supplier || '미입력'}</span>
+                            <span>품목 {selectedItemCount}개</span>
+                            <span>사진 {photoAttachments.length}장</span>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center">
+                        <button
+                            type="button"
+                            onClick={handleOpenInboundCertificatePage}
+                            disabled={sharingCertificate || selectedMaterials.length === 0}
+                            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-extrabold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3 sm:text-sm"
+                        >
+                            <FontAwesomeIcon icon={faFileInvoice} />
+                            입고증 페이지
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleDownloadInboundCertificate}
+                            disabled={sharingCertificate || selectedMaterials.length === 0}
+                            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2.5 py-2 text-xs font-extrabold text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3 sm:text-sm"
+                        >
+                            <FontAwesomeIcon icon={faDownload} />
+                            입고증 저장
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleShareInboundCertificate}
+                            disabled={sharingCertificate || selectedMaterials.length === 0}
+                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-2.5 py-2 text-xs font-extrabold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3 sm:text-sm"
+                        >
+                            <FontAwesomeIcon icon={faShareNodes} />
+                            {sharingCertificate ? '준비 중...' : '카카오톡 공유'}
+                        </button>
+                    </div>
+                </div>
 
                         <div className="mb-5 hidden flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between md:flex">
                             <div className="relative flex-1">
@@ -833,6 +1406,19 @@ const MaterialInboundPage: React.FC = () => {
                                 </div>
                             )}
                         </div>
+                <div className="mb-6 mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <label htmlFor="inbound-notes" className="block text-sm font-bold text-slate-700">
+                        비고
+                    </label>
+                    <textarea
+                        id="inbound-notes"
+                        value={notes}
+                        onChange={(event) => setNotes(event.target.value)}
+                        rows={3}
+                        placeholder="입고 등록에 남길 비고를 입력하세요"
+                        className="mt-2 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                </div>
                 {/* 임시저장 안내 */}
                 {hasTempData && (
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">

@@ -5,6 +5,8 @@ import materialService, { buildMaterialBusinessKey } from '../../services/materi
 import { Material } from '../../types/materials';
 import { getMaterialGroupKey, sortMaterialDisplayRows, MaterialGroupKey } from '../../utils/materialOrdering';
 
+const formatWon = (value?: number) => value ? `${value.toLocaleString('ko-KR')}원` : '-';
+
 const MaterialMasterPage: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [materials, setMaterials] = useState<Material[]>([]);
@@ -21,6 +23,7 @@ const MaterialMasterPage: React.FC = () => {
         itemName: '',
         spec: '',
         unit: 'EA',
+        unitPrice: 0,
         safetyStock: 0,
         description: '',
         isActive: true
@@ -82,6 +85,7 @@ const MaterialMasterPage: React.FC = () => {
             itemName: '',
             spec: '',
             unit: 'EA',
+            unitPrice: 0,
             safetyStock: 0,
             description: '',
             isActive: true
@@ -96,6 +100,7 @@ const MaterialMasterPage: React.FC = () => {
             itemName: material.itemName,
             spec: material.spec,
             unit: material.unit,
+            unitPrice: material.unitPrice || 0,
             safetyStock: material.safetyStock || 0,
             description: material.description || '',
             isActive: material.isActive !== false
@@ -198,6 +203,9 @@ const MaterialMasterPage: React.FC = () => {
                                             안전재고 {material.safetyStock || '-'} · {material.description || '설명 없음'}
                                         </div>
                                     )}
+                                    <div className="mt-2 text-xs font-bold text-indigo-600">
+                                        기본단가 {formatWon(material.unitPrice)}
+                                    </div>
                                 </div>
                                 <div className="flex shrink-0 gap-1">
                                     <button
@@ -221,12 +229,13 @@ const MaterialMasterPage: React.FC = () => {
                 </div>
 
                 <div className="hidden h-full overflow-auto md:block">
-                    <table className="w-full min-w-[760px] text-sm">
+                    <table className="w-full min-w-[860px] text-sm">
                         <colgroup>
                             <col className="w-32" />
                             <col className="w-40" />
                             <col className="w-32" />
                             <col className="w-20" />
+                            <col className="w-28" />
                             <col className="w-28" />
                             <col />
                             <col className="w-24" />
@@ -237,6 +246,7 @@ const MaterialMasterPage: React.FC = () => {
                                 <th className="p-3 text-left font-bold text-slate-700">품명</th>
                                 <th className="p-3 text-left font-bold text-slate-700">규격</th>
                                 <th className="p-3 text-center font-bold text-slate-700">단위</th>
+                                <th className="p-3 text-right font-bold text-slate-700">기본단가</th>
                                 <th className="p-3 text-right font-bold text-slate-700">안전재고</th>
                                 <th className="p-3 text-left font-bold text-slate-700">설명</th>
                                 <th className="p-3 text-center font-bold text-slate-700">액션</th>
@@ -249,6 +259,7 @@ const MaterialMasterPage: React.FC = () => {
                                     <td className="p-3 font-semibold">{material.itemName}</td>
                                     <td className="p-3">{material.spec}</td>
                                     <td className="p-3 text-center">{material.unit}</td>
+                                    <td className="p-3 text-right font-semibold text-indigo-700">{formatWon(material.unitPrice)}</td>
                                     <td className="p-3 text-right">{material.safetyStock || '-'}</td>
                                     <td className="p-3">{material.description || '-'}</td>
                                     <td className="p-3 text-center">
@@ -359,6 +370,16 @@ const MaterialMasterPage: React.FC = () => {
                                 value={formData.unit}
                                 onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
                                 placeholder="EA, SET 등"
+                                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 mb-2">기본단가</label>
+                            <input
+                                type="number"
+                                value={formData.unitPrice}
+                                onChange={(e) => setFormData({ ...formData, unitPrice: parseInt(e.target.value) || 0 })}
+                                placeholder="0"
                                 className="w-full border border-slate-300 rounded-lg px-3 py-2"
                             />
                         </div>

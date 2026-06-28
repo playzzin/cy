@@ -139,10 +139,24 @@ export const AI_MANAGED_PAGES: AiManagedPage[] = [
         modelScope: 'textModel'
     },
     {
+        id: 'materials-transaction-photo-analysis',
+        name: '자재 입출고 사진분석',
+        description: '입고/출고 전표와 현장 메모 이미지 Gemini 분석',
+        paths: ['/materials/inbound', '/materials/outbound'],
+        modelScope: 'textModel'
+    },
+    {
         id: 'support-card-billing',
         name: '법인카드 청구관리',
         description: '첨부 문서 Gemini 분석(Cloud Function)',
         paths: ['/support/cards'],
+        modelScope: 'server'
+    },
+    {
+        id: 'partner-photo-registration',
+        name: '사진 거래처 등록',
+        description: '명함/업체자료 사진 Gemini 분석(Cloud Function)',
+        paths: ['/database/partner-photo-registration'],
         modelScope: 'server'
     },
     {
@@ -366,6 +380,13 @@ export const aiSettingsService = {
                 model: 'server-managed',
                 source: 'server',
                 note: '서버 함수 내부 모델 정책 사용'
+            },
+            {
+                id: 'binding-partner-recognition',
+                service: '사진 거래처 등록 (Cloud Function)',
+                model: 'server-managed',
+                source: 'server',
+                note: '서버 AI 설정의 Gemini 키/모델 사용'
             }
         ];
     },

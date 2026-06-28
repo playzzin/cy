@@ -221,6 +221,39 @@
     box-shadow: 0 -1px 0 #ffffff inset;
 }
 
+.workbook-summary-mode-tabs-cell {
+    background: #f8fafc;
+    padding: 8px 10px;
+}
+
+.workbook-summary-mode-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(92px, 1fr));
+    gap: 8px;
+}
+
+.workbook-summary-mode-tab {
+    min-height: 36px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.workbook-summary-mode-tab.active {
+    border-color: #0f766e;
+    background: #0f766e;
+    color: #f8fafc;
+    box-shadow: 0 8px 16px rgba(15, 118, 110, 0.18);
+}
+
+.workbook-summary-mode-tab:hover {
+    border-color: #0f766e;
+}
+
 /* 하단 워크북 탭(입력폼/DB/조회/전체조회): 청연 보라 테마 */
 .workbook-tabs.tenant-cheongyeon .workbook-tab {
     border-color: #c7d2fe;
@@ -257,6 +290,10 @@
     .workbook-tenant-tab {
         padding: 7px 12px;
         font-size: 12px;
+    }
+
+    .workbook-summary-mode-tabs {
+        grid-template-columns: repeat(2, minmax(92px, 1fr));
     }
 }
 
@@ -1246,6 +1283,210 @@
     }
 
     .workbook-match-manual-input {
+        grid-template-columns: 1fr;
+    }
+}
+
+.workbook-vat-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.workbook-vat-filter-table input[type='number'] {
+    min-width: 96px;
+}
+
+.workbook-vat-notice {
+    margin: 10px 0;
+    border: 1px solid #bbf7d0;
+    border-radius: 8px;
+    background: #f0fdf4;
+    color: #166534;
+    padding: 10px 12px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.workbook-vat-notice-warning {
+    border-color: #fde68a;
+    background: #fffbeb;
+    color: #92400e;
+}
+
+.workbook-vat-metric-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 12px 0;
+}
+
+.workbook-vat-metric-card {
+    border: 1px solid #dbe3ef;
+    border-radius: 8px;
+    background: #ffffff;
+    padding: 12px;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+
+.workbook-vat-metric-card div {
+    font-size: 12px;
+    font-weight: 800;
+    color: #64748b;
+}
+
+.workbook-vat-metric-card strong {
+    display: block;
+    margin-top: 6px;
+    font-size: 20px;
+    line-height: 1.2;
+    color: #0f172a;
+    word-break: break-all;
+}
+
+.workbook-vat-metric-sales {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+}
+
+.workbook-vat-metric-purchase {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+}
+
+.workbook-vat-metric-payable {
+    border-color: #fecaca;
+    background: #fff1f2;
+}
+
+.workbook-vat-metric-refund {
+    border-color: #c7d2fe;
+    background: #eef2ff;
+}
+
+.workbook-vat-metric-warning {
+    border-color: #fde68a;
+    background: #fffbeb;
+}
+
+.workbook-vat-metric-muted {
+    background: #f8fafc;
+}
+
+.workbook-vat-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+    gap: 12px;
+}
+
+.workbook-vat-panel {
+    margin-top: 12px;
+    border: 1px solid #dbe3ef;
+    border-radius: 8px;
+    background: #ffffff;
+    padding: 12px;
+}
+
+.workbook-vat-panel-title {
+    margin-bottom: 8px;
+    color: #172554;
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.workbook-vat-table th,
+.workbook-vat-table td {
+    white-space: nowrap;
+}
+
+.workbook-vat-selected-row td {
+    background: #eef2ff;
+    font-weight: 800;
+}
+
+.workbook-vat-detail-wrapper {
+    max-height: 520px;
+}
+
+.workbook-vat-detail-table {
+    min-width: 1340px;
+    table-layout: fixed;
+}
+
+.workbook-vat-detail-table th,
+.workbook-vat-detail-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: top;
+}
+
+.workbook-vat-detail-table td:nth-child(6),
+.workbook-vat-detail-table td:nth-child(7),
+.workbook-vat-detail-table td:nth-child(8) {
+    white-space: normal;
+    line-height: 1.35;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+}
+
+.workbook-vat-detail-table td:nth-child(1),
+.workbook-vat-detail-table td:nth-child(2),
+.workbook-vat-detail-table td:nth-child(5),
+.workbook-vat-detail-table td:nth-child(12) {
+    text-align: center;
+}
+
+.workbook-vat-col-no {
+    width: 44px;
+}
+
+.workbook-vat-col-type {
+    width: 52px;
+}
+
+.workbook-vat-col-date {
+    width: 88px;
+}
+
+.workbook-vat-col-period {
+    width: 82px;
+}
+
+.workbook-vat-col-quarter {
+    width: 58px;
+}
+
+.workbook-vat-col-partner {
+    width: 210px;
+}
+
+.workbook-vat-col-site {
+    width: 230px;
+}
+
+.workbook-vat-col-description {
+    width: 180px;
+}
+
+.workbook-vat-col-amount {
+    width: 112px;
+}
+
+.workbook-vat-col-vat {
+    width: 96px;
+}
+
+.workbook-vat-col-total {
+    width: 112px;
+}
+
+.workbook-vat-col-team {
+    width: 70px;
+}
+
+@media (max-width: 1180px) {
+    .workbook-vat-metric-grid,
+    .workbook-vat-grid {
         grid-template-columns: 1fr;
     }
 }

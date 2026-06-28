@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { FilePlus2, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { YearMonthPicker } from '../../components/common/YearMonthPicker';
@@ -25,10 +25,13 @@ const tableColumns: Array<{ key: keyof LedgerSummary | 'total'; label: string; c
   { key: 'water', label: '수도세' },
   { key: 'internet', label: '유선비' },
   { key: 'accommodationOther', label: '숙소기타' },
-  { key: 'vehicleRent', label: '렌트료' },
+  { key: 'vehicleRent', label: '렌트비' },
+  { key: 'vehicleLease', label: '리스비' },
+  { key: 'vehicleFuel', label: '주유비' },
+  { key: 'vehicleRepair', label: '수리비' },
+  { key: 'vehicleToll', label: '통행료' },
   { key: 'vehicleFine', label: '과태료' },
-  { key: 'vehicleRepair', label: '차량수리' },
-  { key: 'vehicleOther', label: '차량기타' },
+  { key: 'vehicleOther', label: '기타' },
   { key: 'card', label: '카드값' },
   { key: 'otherClaim', label: '기타청구', className: 'text-amber-700' },
   { key: 'officeExpense', label: '사무실경비', className: 'text-sky-700' },
@@ -51,7 +54,8 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
     statusCounts,
     allCategoryOptions,
     loadData,
-    selectedRawDocs
+    selectedRawDocs,
+    rawDocs
   } = useExpenseLedgerData(yearMonth, selectedTeamId, billingScope);
 
   const draftCount =
@@ -67,6 +71,17 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
     statusCounts.claimSettled;
 
   const selectedSummary = summaries[0];
+  const allSummaryColumnTotals = useMemo(
+    () =>
+      tableColumns.reduce((acc, column) => {
+        acc[column.key] = summaries.reduce(
+          (sum, row) => sum + (column.key === 'total' ? getSummaryTotal(row) : Number(row[column.key] ?? 0)),
+          0
+        );
+        return acc;
+      }, {} as Record<(typeof tableColumns)[number]['key'], number>),
+    [summaries]
+  );
 
   return (
     <div className={`${embedded ? 'min-h-0' : 'min-h-screen'} bg-slate-100 p-4 xl:p-6`}>
@@ -75,7 +90,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
           <div>
             <h1 className="text-xl font-black text-slate-950">팀별 경비내역</h1>
             <p className="mt-1 text-sm font-medium text-slate-500">
-              청구완료와 정산완료로 확정된 숙소, 차량, 카드, 후청구 내역만 표시합니다.
+              원장 대장에서 청구 처리한 숙소/차량/카드와 청구완료·정산완료 후청구 내역을 표시합니다.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -105,7 +120,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
 
         <div className="grid gap-2 text-xs font-bold text-slate-600 md:grid-cols-3">
           <div className="border border-slate-200 bg-white px-3 py-2">
-            조회 기준: 청구완료/정산완료 내역
+            조회 기준: 원장 청구/청구완료/정산완료 내역
           </div>
           <div className="border border-slate-200 bg-white px-3 py-2">
             반영 문서: {postedCount.toLocaleString('ko-KR')}건
@@ -182,68 +197,107 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
         </div>
 
         {selectedTeamId === 'all' ? (
-          <section className="min-w-0 overflow-hidden border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 bg-pink-100 px-4 py-3 text-center text-base font-black text-slate-950">
-              {yearMonth.replace('-', '년 ')}월 전체 팀별 공제/후청구 요약
-            </div>
-            <div className="overflow-auto">
-              <table className="w-full min-w-[1400px] border-collapse text-sm">
-                <thead>
-                  <tr className="bg-slate-100 text-xs text-slate-700">
-                    <th className="sticky left-0 z-10 border border-slate-300 bg-slate-100 px-3 py-2 text-left">팀</th>
-                    {tableColumns.map((column) => (
-                      <th key={column.key} className="border border-slate-300 px-3 py-2 text-right">
-                        {column.label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {summaries.length > 0 ? summaries.map((row) => (
-                    <tr key={row.teamId || row.teamName} className="hover:bg-slate-50">
-                      <td
-                        className="sticky left-0 z-10 border border-slate-300 bg-white px-3 py-2 font-black text-slate-900"
-                        style={{ boxShadow: `inset 4px 0 0 ${row.color}` }}
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <span className="h-3 w-3 rounded-full" style={{ backgroundColor: row.color }} />
-                          {row.teamName}
-                        </span>
-                      </td>
-                      {tableColumns.map((column) => {
-                        const amount = column.key === 'total' ? getSummaryTotal(row) : Number(row[column.key] ?? 0);
-                        return (
-                          <td
-                            key={column.key}
-                            className={`border border-slate-300 px-3 py-2 text-right tabular-nums ${column.className ?? ''}`}
-                            style={
-                              column.key === 'receivable' && amount > 0
-                                ? { backgroundColor: hexToRgba('#059669', 0.08) }
-                                : column.key === 'payable' && amount > 0
-                                  ? { backgroundColor: hexToRgba('#dc2626', 0.08) }
-                                  : column.key === 'otherClaim' && amount > 0
-                                    ? { backgroundColor: hexToRgba('#d97706', 0.08) }
-                                    : column.key === 'officeExpense' && amount > 0
-                                      ? { backgroundColor: hexToRgba('#0284c7', 0.08) }
-                                    : undefined
-                            }
-                          >
-                            {amount ? formatCurrency(amount) : '-'}
-                          </td>
-                        );
-                      })}
+          <>
+            <section className="min-w-0 overflow-hidden border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-200 bg-pink-100 px-4 py-3 text-center text-base font-black text-slate-950">
+                {yearMonth.replace('-', '년 ')}월 전체 팀별 공제/후청구 요약
+              </div>
+              <div className="overflow-auto">
+                <table className="w-full min-w-[1650px] border-collapse text-sm">
+                  <thead>
+                    <tr className="bg-slate-100 text-xs text-slate-700">
+                      <th className="sticky left-0 z-10 border border-slate-300 bg-slate-100 px-3 py-2 text-left">팀</th>
+                      {tableColumns.map((column) => (
+                        <th key={column.key} className="border border-slate-300 px-3 py-2 text-right">
+                          {column.label}
+                        </th>
+                      ))}
                     </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan={tableColumns.length + 1} className="border border-slate-300 px-4 py-10 text-center font-bold text-slate-500">
-                        표시할 청구완료 내역이 없습니다.
-                      </td>
-                    </tr>
+                  </thead>
+                  <tbody>
+                    {summaries.length > 0 ? summaries.map((row) => (
+                      <tr key={row.teamId || row.teamName} className="hover:bg-slate-50">
+                        <td
+                          className="sticky left-0 z-10 border border-slate-300 bg-white px-3 py-2 font-black text-slate-900"
+                          style={{ boxShadow: `inset 4px 0 0 ${row.color}` }}
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            <span className="h-3 w-3 rounded-full" style={{ backgroundColor: row.color }} />
+                            {row.teamName}
+                          </span>
+                        </td>
+                        {tableColumns.map((column) => {
+                          const amount = column.key === 'total' ? getSummaryTotal(row) : Number(row[column.key] ?? 0);
+                          return (
+                            <td
+                              key={column.key}
+                              className={`border border-slate-300 px-3 py-2 text-right tabular-nums ${column.className ?? ''}`}
+                              style={
+                                column.key === 'receivable' && amount > 0
+                                  ? { backgroundColor: hexToRgba('#059669', 0.08) }
+                                  : column.key === 'payable' && amount > 0
+                                    ? { backgroundColor: hexToRgba('#dc2626', 0.08) }
+                                    : column.key === 'otherClaim' && amount > 0
+                                      ? { backgroundColor: hexToRgba('#d97706', 0.08) }
+                                      : column.key === 'officeExpense' && amount > 0
+                                        ? { backgroundColor: hexToRgba('#0284c7', 0.08) }
+                                      : undefined
+                              }
+                            >
+                              {amount ? formatCurrency(amount) : '-'}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan={tableColumns.length + 1} className="border border-slate-300 px-4 py-10 text-center font-bold text-slate-500">
+                          표시할 원장 청구/청구완료 내역이 없습니다.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                  {summaries.length > 0 && (
+                    <tfoot>
+                      <tr className="border-t-2 border-slate-400 bg-slate-100 text-sm font-black text-slate-950">
+                        <td className="sticky left-0 z-10 border border-slate-300 bg-slate-100 px-3 py-3 text-left">
+                          가로 합계
+                        </td>
+                        {tableColumns.map((column) => {
+                          const amount = allSummaryColumnTotals[column.key] ?? 0;
+                          return (
+                            <td
+                              key={column.key}
+                              className={`border border-slate-300 px-3 py-3 text-right tabular-nums ${column.className ?? ''}`}
+                            >
+                              {amount ? formatCurrency(amount) : '-'}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    </tfoot>
                   )}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                </table>
+              </div>
+            </section>
+
+            <section className="min-h-[600px] bg-slate-50">
+              <ExpenseLedgerDetailBoard
+                teamName="전체 팀"
+                color="#64748b"
+                accommodationDocs={rawDocs.accommodationDocs}
+                vehicleDocs={rawDocs.vehicleDocs}
+                cardDocs={rawDocs.cardDocs}
+                receivableClaims={[]}
+                payableClaims={[]}
+                otherClaims={[]}
+                officeClaims={[]}
+                categoryOptions={allCategoryOptions}
+                showClaims={false}
+                showTeamColumn
+              />
+            </section>
+          </>
         ) : (
           <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
             <section className="flex h-full flex-col border border-slate-200 bg-white shadow-sm">

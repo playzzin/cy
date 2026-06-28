@@ -11,9 +11,22 @@ export interface MaterialPhotoAttachment {
     source: MaterialPhotoSource;
 }
 
+export interface MaterialPhotoUpload {
+    path: string;
+    name: string;
+    contentType?: string;
+    size?: number;
+    originalSize: number;
+    compressedSize: number;
+    compressed: boolean;
+    source: MaterialPhotoSource;
+}
+
 export type MaterialPhotoTone = 'blue' | 'red';
 
-const MAX_MATERIAL_PHOTOS = 6;
+const MAX_MATERIAL_PHOTOS = 20;
+const MAX_MATERIAL_PHOTO_DIMENSION = 1600;
+const MATERIAL_PHOTO_QUALITY = 0.78;
 
 const toneClasses = {
     blue: {
@@ -46,14 +59,102 @@ const getFileExtension = (file: File): string => {
     return fromType ? fromType.toLowerCase() : 'jpg';
 };
 
-const makeStorageFile = (attachment: MaterialPhotoAttachment, index: number): File => {
-    const extension = getFileExtension(attachment.file);
+const loadImageFromFile = (file: File): Promise<HTMLImageElement> =>
+    new Promise((resolve, reject) => {
+        const previewUrl = URL.createObjectURL(file);
+        const image = new Image();
+
+        image.onload = () => {
+            URL.revokeObjectURL(previewUrl);
+            resolve(image);
+        };
+        image.onerror = () => {
+            URL.revokeObjectURL(previewUrl);
+            reject(new Error('Failed to load material photo for compression.'));
+        };
+        image.src = previewUrl;
+    });
+
+const canvasToBlob = (
+    canvas: HTMLCanvasElement,
+    type: string,
+    quality: number
+): Promise<Blob | null> =>
+    new Promise((resolve) => {
+        canvas.toBlob(resolve, type, quality);
+    });
+
+const encodeCompressedPhoto = async (canvas: HTMLCanvasElement): Promise<Blob | null> => {
+    const webpBlob = await canvasToBlob(canvas, 'image/webp', MATERIAL_PHOTO_QUALITY);
+    if (webpBlob?.type === 'image/webp') return webpBlob;
+    return canvasToBlob(canvas, 'image/jpeg', MATERIAL_PHOTO_QUALITY);
+};
+
+const compressMaterialPhoto = async (file: File): Promise<File> => {
+    if (!file.type.startsWith('image/') || file.type === 'image/gif' || file.type === 'image/svg+xml') {
+        return file;
+    }
+
+    try {
+        const image = await loadImageFromFile(file);
+        const sourceWidth = image.naturalWidth || image.width;
+        const sourceHeight = image.naturalHeight || image.height;
+        if (sourceWidth <= 0 || sourceHeight <= 0) return file;
+
+        const scale = Math.min(1, MAX_MATERIAL_PHOTO_DIMENSION / Math.max(sourceWidth, sourceHeight));
+        const targetWidth = Math.max(1, Math.round(sourceWidth * scale));
+        const targetHeight = Math.max(1, Math.round(sourceHeight * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+
+        const context = canvas.getContext('2d');
+        if (!context) return file;
+
+        context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+        const compressedBlob = await encodeCompressedPhoto(canvas);
+        if (!compressedBlob || compressedBlob.size >= file.size) return file;
+
+        const extension = compressedBlob.type === 'image/webp' ? 'webp' : 'jpg';
+        const nameWithoutExtension = file.name.replace(/\.[^.]+$/, '') || 'photo';
+        return new File([compressedBlob], `${nameWithoutExtension}.${extension}`, {
+            type: compressedBlob.type || 'image/jpeg',
+            lastModified: file.lastModified,
+        });
+    } catch (error) {
+        console.warn('[MaterialPhotoPicker] Photo compression failed. Uploading original file.', error);
+        return file;
+    }
+};
+
+const makeStorageFile = async (
+    attachment: MaterialPhotoAttachment,
+    index: number
+): Promise<{ file: File; originalSize: number; compressed: boolean }> => {
+    const file = await compressMaterialPhoto(attachment.file);
+    const extension = getFileExtension(file);
     const fileName = `${Date.now()}-${index + 1}-${sanitizePathPart(attachment.file.name.replace(/\.[^.]+$/, ''))}.${extension}`;
-    return new File([attachment.file], fileName, { type: attachment.file.type || 'image/jpeg' });
+    return {
+        file: new File([file], fileName, { type: file.type || attachment.file.type || 'image/jpeg' }),
+        originalSize: attachment.file.size,
+        compressed: file.size < attachment.file.size,
+    };
 };
 
 export const revokeMaterialPhotoAttachments = (photos: MaterialPhotoAttachment[]) => {
     photos.forEach((photo) => URL.revokeObjectURL(photo.previewUrl));
+};
+
+export const deleteUploadedMaterialPhotos = async (photos: MaterialPhotoUpload[]): Promise<void> => {
+    await Promise.all(photos.map(async (photo) => {
+        if (!photo.path) return;
+        try {
+            await storageService.deleteFile(photo.path);
+        } catch (error) {
+            console.warn('[MaterialPhotoPicker] Uploaded photo cleanup skipped:', photo.path, error);
+        }
+    }));
 };
 
 export const uploadMaterialPhotoAttachments = async (options: {
@@ -62,7 +163,7 @@ export const uploadMaterialPhotoAttachments = async (options: {
     transactionDate: string;
     siteId: string;
     onProgress?: (progress: number) => void;
-}): Promise<string[]> => {
+}): Promise<MaterialPhotoUpload[]> => {
     const { photos, transactionType, transactionDate, siteId, onProgress } = options;
     if (photos.length === 0) return [];
 
@@ -82,13 +183,39 @@ export const uploadMaterialPhotoAttachments = async (options: {
     ].join('/');
 
     return Promise.all(
-        photos.map((photo, index) =>
-            storageService.uploadFile(
+        photos.map(async (photo, index) => {
+            const storageFile = await makeStorageFile(photo, index);
+            const uploadResult = await storageService.uploadFileInfo(
                 basePath,
-                makeStorageFile(photo, index),
-                (progress) => updateProgress(photo.id, progress)
-            )
-        )
+                storageFile.file,
+                (progress) => updateProgress(photo.id, progress),
+                {
+                    includeDownloadUrl: false,
+                    metadata: {
+                        contentType: storageFile.file.type || 'image/jpeg',
+                        customMetadata: {
+                            source: photo.source,
+                            originalSize: String(storageFile.originalSize),
+                            compressedSize: String(storageFile.file.size),
+                            compressed: String(storageFile.compressed),
+                            maxDimension: String(MAX_MATERIAL_PHOTO_DIMENSION),
+                            quality: String(MATERIAL_PHOTO_QUALITY),
+                        },
+                    },
+                }
+            );
+
+            return {
+                path: uploadResult.fullPath,
+                name: uploadResult.name,
+                contentType: uploadResult.contentType || storageFile.file.type,
+                size: uploadResult.size || storageFile.file.size,
+                originalSize: storageFile.originalSize,
+                compressedSize: storageFile.file.size,
+                compressed: storageFile.compressed,
+                source: photo.source,
+            };
+        })
     );
 };
 

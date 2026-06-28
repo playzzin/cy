@@ -1243,42 +1243,27 @@ const FieldGoodsProgramPage: React.FC = () => {
             workbook.creator = 'Smart Construction';
             workbook.created = new Date();
             workbook.modified = new Date();
-            addExcelTableSheet(workbook, {
-                sheetName: '품목',
-                tableName: 'FieldGoodsItemsTable',
-                title: '품목 관리',
-                headers: ['품목', '단위', '매입단가', '판매단가', '사용여부'],
-                rows: items.map((item) => [
-                    item.name,
-                    item.unit,
-                    item.purchasePrice,
-                    item.salePrice,
-                    item.active ? '사용' : '삭제',
-                ]),
-                columnWidths: [28, 10, 14, 14, 12],
-                numberColumnIndexes: [3, 4],
-            });
+            const exportLedgerRows = sortTransactions(billingIssueTransactions);
 
             addExcelTableSheet(workbook, {
                 sheetName: 'DB',
                 tableName: 'FieldGoodsLedgerTable',
                 title: 'DB 원장',
-                headers: ['일자', '팀', '구분', '품목', '단위', '수량', '매입단가', '판매단가', '금액', '비고', '입력방식'],
-                rows: sortTransactions(transactions).map((transaction) => [
+                headers: ['일자', '팀', '구분', '품목', '단위', '수량', '판매단가', '금액', '비고', '입력방식'],
+                rows: exportLedgerRows.map((transaction) => [
                     transaction.date,
                     getTransactionTeamName(transaction),
                     kindLabels[transaction.kind],
                     transaction.itemName,
                     transaction.unit,
                     transaction.quantity,
-                    transaction.purchasePrice,
                     transaction.salePrice,
-                    transaction.quantity * (transaction.kind === 'issue' ? transaction.salePrice : transaction.purchasePrice),
+                    transaction.quantity * transaction.salePrice,
                     transaction.memo,
                     transaction.source === 'excel' ? '엑셀' : '수기',
                 ]),
-                columnWidths: [13, 18, 10, 28, 10, 10, 14, 14, 16, 32, 12],
-                numberColumnIndexes: [6, 7, 8, 9],
+                columnWidths: [13, 18, 10, 28, 10, 10, 14, 16, 32, 12],
+                numberColumnIndexes: [6, 7, 8],
             });
 
             addExcelTableSheet(workbook, {

@@ -158,7 +158,7 @@ export const CardRegistrySheet: React.FC<CardRegistrySheetProps> = ({
                                             className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100"
                                         >
                                             <FontAwesomeIcon icon={faLink} className="mr-1" />
-                                            배정
+                                            배정/청구
                                         </button>
                                     </div>
                                 </td>

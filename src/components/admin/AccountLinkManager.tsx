@@ -22,6 +22,7 @@ import {
     AccountLink,
     AccountRelationRole,
     ACCOUNT_RELATION_ROLE_LABELS,
+    getAccountRelationRoleLabel,
 } from '../../types/accountLink';
 
 interface AccountLinkManagerProps {
@@ -1008,7 +1009,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                                             요청 계정: {user ? getUserLabel(user) : link.userEmail || link.uid}
                                         </div>
                                         <div className="mt-1 text-xs text-slate-500">
-                                            역할: {ACCOUNT_RELATION_ROLE_LABELS[link.relationRole] || link.relationRole}
+                                            역할: {getAccountRelationRoleLabel(link.relationRole, link.entityType)}
                                         </div>
                                         {link.requestedEntity && (
                                             <div className="mt-2 rounded border border-amber-100 bg-white p-2 text-xs text-slate-600">

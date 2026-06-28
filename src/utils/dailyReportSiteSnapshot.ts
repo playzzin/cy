@@ -11,6 +11,7 @@ export interface DailyReportSiteSnapshot {
     source: 'site' | 'fallback';
     siteId: string;
     siteName: string;
+    siteAddress?: string;
     clientCompanyId: string;
     clientCompanyName: string;
     constructorCompanyId: string;
@@ -28,6 +29,8 @@ export interface DailyReportSiteSnapshot {
 export interface DailyReportSiteSnapshotFallback {
     siteId?: unknown;
     siteName?: unknown;
+    siteAddress?: unknown;
+    address?: unknown;
     companyId?: unknown;
     companyName?: unknown;
     clientCompanyId?: unknown;
@@ -138,6 +141,9 @@ export const buildDailyReportSiteSnapshot = (params: {
     const siteName = hasSite
         ? siteValue(site?.name) || toDailyReportSnapshotText(params.siteName) || toDailyReportSnapshotText(fallback?.siteName)
         : toDailyReportSnapshotText(params.siteName) || fallbackValue(fallback?.siteName);
+    const siteAddress = hasSite
+        ? siteValue(site?.address)
+        : fallbackValue(fallback?.siteAddress) || fallbackValue(fallback?.address);
 
     const responsibleTeamSeedId = hasSite
         ? siteValue(site?.responsibleTeamId) || toDailyReportSnapshotText(fallback?.responsibleTeamId)
@@ -181,6 +187,7 @@ export const buildDailyReportSiteSnapshot = (params: {
         source,
         siteId,
         siteName,
+        ...(siteAddress ? { siteAddress } : {}),
         clientCompanyId,
         clientCompanyName: toDailyReportSnapshotText(clientCompany?.name) || clientCompanyName,
         constructorCompanyId,
@@ -215,6 +222,7 @@ export const applyDailyReportSiteSnapshotToReport = <T extends {
         ...report,
         siteId: snapshot.siteId,
         siteName: snapshot.siteName,
+        ...(snapshot.siteAddress ? { siteAddress: snapshot.siteAddress } : {}),
         companyId: snapshot.clientCompanyId,
         companyName: snapshot.clientCompanyName,
         constructorCompanyId: snapshot.constructorCompanyId,

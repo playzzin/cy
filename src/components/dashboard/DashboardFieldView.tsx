@@ -3,7 +3,6 @@ import styled from 'styled-components';
 import { useDashboardData } from '../../hooks/useDashboardData';
 import { MyTeamStatusWidget } from './widgets/MyTeamStatusWidget';
 import { WeeklyTrendWidget } from './widgets/WeeklyTrendWidget';
-import { QuickActionsWidget } from './widgets/QuickActionsWidget';
 import { format, subDays } from 'date-fns';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
@@ -80,13 +79,6 @@ export const DashboardFieldView: React.FC<DashboardFieldViewProps> = ({ modeConf
                     </Col>
                 </Grid>
             )}
-
-            {/* Quick Actions */}
-            <Grid>
-                <Col $span={12}>
-                    <QuickActionsWidget modeConfig={modeConfig} />
-                </Col>
-            </Grid>
         </Container>
     );
 };

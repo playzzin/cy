@@ -49,11 +49,20 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                 sub: [
                     "일급제",
                     "월급제",
+                    "사무실 직원 급여",
                     "프리랜서 관리",
-                    "지원팀",
-                    "내부지원팀",
+                    "외부지원간곳",
+                    "외부지원온곳",
+                    "내부지원간곳",
+                    "내부지원온곳",
+                    "협력사별 지원 출력",
+                    "기성관리",
+                    "기성청구서",
+                    "바이백 정리",
                     "팀정산 관리",
-                    { text: "가불관리", sub: ["가불등록", "세금/가불"] }
+                    "팀정산 통계",
+                    "팀별 연간 통계",
+                    { text: "가불관리", sub: ["가불신청", "가불등록", "세금/가불"] }
                 ]
             },
             {
@@ -64,7 +73,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "재고 현황", "현장별 재고", "자재관리 로그"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장일자 입출고", "현장물품", "재고 현황", "현장별 재고", "자재관리 로그"]
             },
             {
                 text: "지원 관리",
@@ -113,9 +122,6 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             { id: 'manager1', name: '메니저1', icon: 'fa-user-tie', color: 'from-blue-600 to-blue-400', order: 2 },
             { id: 'manager2', name: '메니저2', icon: 'fa-user-tie', color: 'from-indigo-600 to-indigo-400', order: 3 },
             { id: 'manager3', name: '메니저3', icon: 'fa-user-tie', color: 'from-purple-600 to-purple-400', order: 4 },
-            { id: 'teamLead', name: '팀장', icon: 'fa-user-gear', color: 'from-emerald-600 to-emerald-400', order: 5 },
-            { id: 'foreman', name: '반장', icon: 'fa-users', color: 'from-teal-600 to-teal-400', order: 6 },
-            { id: 'general', name: '일반', icon: 'fa-user', color: 'from-slate-500 to-slate-400', order: 7 },
             { id: 'newbie', name: '신규', icon: 'fa-user-plus', color: 'from-pink-500 to-rose-400', order: 8 }
         ]
     },
@@ -136,7 +142,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "재고 현황", "현장별 재고", "자재관리 로그"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장일자 입출고", "현장물품", "재고 현황", "현장별 재고", "자재관리 로그"]
             },
             {
                 text: "지원 관리",
@@ -172,7 +178,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
-                sub: ["일급제", "월급제", "지원팀", "팀정산 관리", { text: "가불관리", sub: ["가불등록", "세금/가불"] }]
+                sub: ["일급제", "월급제", "사무실 직원 급여", "외부지원간곳", "외부지원온곳", "내부지원간곳", "내부지원온곳", "협력사별 지원 출력", "기성관리", "기성청구서", "바이백 정리", "팀정산 관리", "팀정산 통계", "팀별 연간 통계", { text: "가불관리", sub: ["가불신청", "가불등록", "세금/가불"] }]
             },
             {
                 text: "세금관리",
@@ -187,7 +193,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "재고 현황", "현장별 재고", "자재관리 로그"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장일자 입출고", "현장물품", "재고 현황", "현장별 재고", "자재관리 로그"]
             },
             {
                 text: "지원 관리",
@@ -206,7 +212,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
-                sub: ["일급제", "월급제", "지원팀", "팀정산 관리", { text: "가불관리", sub: ["가불등록", "세금/가불"] }]
+                sub: ["일급제", "월급제", "사무실 직원 급여", "외부지원간곳", "외부지원온곳", "내부지원간곳", "내부지원온곳", "협력사별 지원 출력", "기성관리", "기성청구서", "바이백 정리", "팀정산 관리", "팀정산 통계", "팀별 연간 통계", { text: "가불관리", sub: ["가불신청", "가불등록", "세금/가불"] }]
             }
         ]
     },
@@ -220,7 +226,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
-                sub: ["일급제", "월급제", "지원팀", "팀정산 관리", { text: "가불관리", sub: ["가불등록", "세금/가불"] }]
+                sub: ["일급제", "월급제", "사무실 직원 급여", "외부지원간곳", "외부지원온곳", "내부지원간곳", "내부지원온곳", "협력사별 지원 출력", "기성관리", "기성청구서", "바이백 정리", "팀정산 관리", "팀정산 통계", "팀별 연간 통계", { text: "가불관리", sub: ["가불신청", "가불등록", "세금/가불"] }]
             }
         ]
     },
@@ -234,49 +240,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
-                sub: ["일급제", "월급제", "지원팀", "팀정산 관리", { text: "가불관리", sub: ["가불등록", "세금/가불"] }]
-            }
-        ]
-    },
-    pos_teamLead: {
-        name: "팀장",
-        icon: "fa-user-gear",
-        menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
-            { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
-            {
-                text: "급여관리",
-                icon: "fa-money-bill-wave",
-                sub: ["일급제", "월급제", "지원팀", "팀정산 관리", { text: "가불관리", sub: ["가불등록", "세금/가불"] }]
-            }
-        ]
-    },
-    pos_foreman: {
-        name: "반장",
-        icon: "fa-users",
-        menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
-            { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
-            {
-                text: "급여관리",
-                icon: "fa-money-bill-wave",
-                sub: ["일급제", "월급제", "지원팀", "팀정산 관리", { text: "가불관리", sub: ["가불등록", "세금/가불"] }]
-            }
-        ]
-    },
-    pos_general: {
-        name: "일반",
-        icon: "fa-user",
-        menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
-            { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
-            {
-                text: "급여관리",
-                icon: "fa-money-bill-wave",
-                sub: ["일급제", "월급제", "지원팀", "팀정산 관리", { text: "가불관리", sub: ["가불등록", "세금/가불"] }]
+                sub: ["일급제", "월급제", "사무실 직원 급여", "외부지원간곳", "외부지원온곳", "내부지원간곳", "내부지원온곳", "협력사별 지원 출력", "기성관리", "기성청구서", "바이백 정리", "팀정산 관리", "팀정산 통계", "팀별 연간 통계", { text: "가불관리", sub: ["가불신청", "가불등록", "세금/가불"] }]
             }
         ]
     },
@@ -290,7 +254,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
-                sub: ["일급제", "월급제", "지원팀", "팀정산 관리", { text: "가불관리", sub: ["가불등록", "세금/가불"] }]
+                sub: ["일급제", "월급제", "사무실 직원 급여", "외부지원간곳", "외부지원온곳", "내부지원간곳", "내부지원온곳", "협력사별 지원 출력", "기성관리", "기성청구서", "바이백 정리", "팀정산 관리", "팀정산 통계", "팀별 연간 통계", { text: "가불관리", sub: ["가불신청", "가불등록", "세금/가불"] }]
             }
         ]
     }

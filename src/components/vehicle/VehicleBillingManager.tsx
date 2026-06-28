@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCalculator, faCheckDouble, faFileInvoiceDollar, faFloppyDisk, faPlus, faSearch, faTrash, faUser, faUsers } from '@fortawesome/free-solid-svg-icons';
+import { faCalculator, faCheckDouble, faFileInvoiceDollar, faFloppyDisk, faPlus, faRotateLeft, faSearch, faTrash, faUser, faUsers } from '@fortawesome/free-solid-svg-icons';
 import { teamService, Team } from '../../services/teamService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { companyService } from '../../services/companyService';
@@ -9,6 +9,7 @@ import { vehicleBillingService } from '../../services/vehicleBillingService';
 import { vehicleService } from '../../services/vehicleService';
 import { VehicleBillingDocument, VehicleBillingIssuedToType } from '../../types/vehicleBilling';
 import { toast, showConfirmAlert } from '../../utils/swal';
+import { getFriendlyErrorMessage, isDeadlineExceededError } from '../../utils/firebaseError';
 import { format, subMonths } from 'date-fns';
 import { Vehicle } from '../../types/vehicle';
 import { Timestamp } from '../../types/timestamp';
@@ -489,7 +490,12 @@ export const VehicleBillingManager: React.FC = () => {
             setSelectedDocumentId(nextId);
         } catch (e) {
             console.error(e);
-            toast.error('저장에 실패했습니다.');
+            if (isDeadlineExceededError(e)) {
+                toast.delayed('차량 청구 저장');
+                await loadBillings().catch((reloadError) => console.error(reloadError));
+                return;
+            }
+            toast.error(getFriendlyErrorMessage(e, '저장에 실패했습니다.'));
         } finally {
             setSaving(false);
         }
@@ -550,7 +556,76 @@ export const VehicleBillingManager: React.FC = () => {
             setSelectedDocumentId(nextId);
         } catch (e) {
             console.error(e);
-            toast.error('확정에 실패했습니다.');
+            if (isDeadlineExceededError(e)) {
+                toast.delayed('차량 청구 확정');
+                await loadBillings().catch((reloadError) => console.error(reloadError));
+                return;
+            }
+            toast.error(getFriendlyErrorMessage(e, '확정에 실패했습니다.'));
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleCancelConfirm = async () => {
+        if (!draft || draft.status !== 'CONFIRMED') return;
+
+        const result = await showConfirmAlert(
+            '확정 취소',
+            `${draft.vehiclePlate || '선택한 차량'} 청구서의 확정을 취소하고 다시 수정 가능하게 변경할까요?`,
+            '확정 취소'
+        );
+        if (!result.isConfirmed) return;
+
+        setSaving(true);
+        try {
+            const next = {
+                ...draft,
+                status: 'DRAFT',
+                confirmedAt: null
+            } as unknown as VehicleBillingDocument;
+            await vehicleBillingService.saveBilling(next);
+            toast.success('확정이 취소되었습니다.');
+            await loadBillings();
+            setSelectedDocumentId(next.id);
+        } catch (e) {
+            console.error(e);
+            if (isDeadlineExceededError(e)) {
+                toast.delayed('차량 청구 확정 취소');
+                await loadBillings().catch((reloadError) => console.error(reloadError));
+                return;
+            }
+            toast.error(getFriendlyErrorMessage(e, '확정 취소에 실패했습니다.'));
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleCancelSelected = async () => {
+        if (!draft) return;
+
+        const result = await showConfirmAlert(
+            '차량 청구 취소',
+            `${draft.vehiclePlate || '선택한 차량'} 청구서를 취소할까요? 취소하면 해당 청구 문서가 삭제됩니다.`,
+            '청구 취소'
+        );
+        if (!result.isConfirmed) return;
+
+        setSaving(true);
+        try {
+            await vehicleBillingService.deleteBilling(draft.id);
+            toast.success('차량 청구가 취소되었습니다.');
+            setSelectedDocumentId('');
+            setDraft(null);
+            await loadBillings();
+        } catch (e) {
+            console.error(e);
+            if (isDeadlineExceededError(e)) {
+                toast.delayed('차량 청구 취소');
+                await loadBillings().catch((reloadError) => console.error(reloadError));
+                return;
+            }
+            toast.error(getFriendlyErrorMessage(e, '청구 취소에 실패했습니다.'));
         } finally {
             setSaving(false);
         }
@@ -817,6 +892,24 @@ export const VehicleBillingManager: React.FC = () => {
                                         >
                                             <FontAwesomeIcon icon={faCheckDouble} />
                                             확정
+                                        </button>
+                                        {draft.status === 'CONFIRMED' && (
+                                            <button
+                                                onClick={handleCancelConfirm}
+                                                disabled={saving}
+                                                className={`px-4 py-2.5 rounded-xl font-bold text-sm bg-amber-50 text-amber-700 border border-amber-100 hover:bg-amber-100 transition-all active:scale-95 flex items-center gap-2 ${saving ? 'opacity-60 cursor-wait' : ''}`}
+                                            >
+                                                <FontAwesomeIcon icon={faRotateLeft} />
+                                                확정 취소
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={handleCancelSelected}
+                                            disabled={saving}
+                                            className={`px-4 py-2.5 rounded-xl font-bold text-sm bg-rose-50 text-rose-700 border border-rose-100 hover:bg-rose-100 transition-all active:scale-95 flex items-center gap-2 ${saving ? 'opacity-60 cursor-wait' : ''}`}
+                                        >
+                                            <FontAwesomeIcon icon={faTrash} />
+                                            청구 삭제
                                         </button>
                                     </div>
                                 </div>

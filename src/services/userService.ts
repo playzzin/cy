@@ -210,7 +210,7 @@ export const userService = {
                 entityId: worker.id,
                 entityName: worker.name || '작업자',
                 entitySubType: '작업자',
-                relationRole: 'owner',
+                relationRole: 'staff',
                 status: 'active',
             });
 
@@ -219,6 +219,10 @@ export const userService = {
                 accountType: 'worker',
                 status: 'active',
                 primaryLinkId: existing?.primaryLinkId || linkId,
+                displayName: existing?.displayName || worker.name,
+                phoneNumber: existing?.phoneNumber || worker.contact,
+                position: worker.role || existing?.position,
+                department: existing?.department || worker.teamName,
             };
 
             if (existing) {
@@ -385,7 +389,7 @@ export const userService = {
             primaryLinkId: existing?.primaryLinkId || linkId,
             displayName: existing?.displayName || staff.name,
             phoneNumber: existing?.phoneNumber || staff.contact,
-            position: existing?.position || staff.role,
+            position: staff.role || existing?.position,
             department: existing?.department || staff.department,
         };
 

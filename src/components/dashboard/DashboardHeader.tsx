@@ -37,10 +37,22 @@ const ContentHelper = styled.div`
 const LogoSection = styled.div`
     display: flex;
     align-items: center;
+    gap: 12px;
 
     @media (max-width: 768px) {
         align-items: flex-start;
     }
+`;
+
+const BrandLogo = styled.img`
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
+    border-radius: 10px;
+    object-fit: contain;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 5px;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
 `;
 
 const TextSection = styled.div``;
@@ -128,9 +140,10 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
     onPositionChange
 }) => {
     return (
-        <HeaderContainer $gradient={modeConfig.gradient}>
+            <HeaderContainer $gradient={modeConfig.gradient}>
             <ContentHelper>
                 <LogoSection>
+                    <BrandLogo src="/icons/icon-192.png?v=20260524" alt="청연ENG ERP 로고" />
                     <TextSection>
                         <Title>청연ENG ERP</Title>
                         <Subtitle>{modeConfig.label} · {modeConfig.roleGroup}</Subtitle>

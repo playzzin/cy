@@ -1,4 +1,4 @@
-﻿import React, { useMemo } from 'react';
+import React, { useMemo } from 'react';
 import type { AccommodationBillingDocument } from '../../../types/accommodationBilling';
 import type { VehicleBillingDocument } from '../../../types/vehicleBilling';
 import type { CardBillingDocument } from '../../../types/cardBilling';
@@ -67,8 +67,11 @@ export const ExpenseDetailBoard: React.FC<Props> = ({
         id: doc.id,
         plate,
         rent: breakdown.rent,
+        lease: breakdown.lease,
+        fuel: breakdown.fuel,
         fine: breakdown.fine,
         repair: breakdown.repair,
+        toll: breakdown.toll,
         other: breakdown.other,
         user,
         status: getBillingStatusLabel(doc.status),
@@ -212,9 +215,12 @@ export const ExpenseDetailBoard: React.FC<Props> = ({
             <thead>
               <tr className="bg-slate-100 text-slate-600">
                 <th className="border border-slate-200 px-2 py-1.5 text-center">차량번호</th>
-                <th className="border border-slate-200 px-2 py-1.5 text-right">렌트료</th>
-                <th className="border border-slate-200 px-2 py-1.5 text-right">과태료</th>
+                <th className="border border-slate-200 px-2 py-1.5 text-right">렌트비</th>
+                <th className="border border-slate-200 px-2 py-1.5 text-right">리스비</th>
+                <th className="border border-slate-200 px-2 py-1.5 text-right">주유비</th>
                 <th className="border border-slate-200 px-2 py-1.5 text-right">수리비</th>
+                <th className="border border-slate-200 px-2 py-1.5 text-right">통행료</th>
+                <th className="border border-slate-200 px-2 py-1.5 text-right">과태료</th>
                 <th className="border border-slate-200 px-2 py-1.5 text-right">기타</th>
                 <th className="border border-slate-200 px-2 py-1.5 text-center">사용자</th>
                 <th className="border border-slate-200 px-2 py-1.5 text-right font-bold text-slate-900 bg-slate-200">합계</th>
@@ -225,8 +231,11 @@ export const ExpenseDetailBoard: React.FC<Props> = ({
                 <tr key={row.id} className="hover:bg-slate-50">
                   <td className="border border-slate-200 px-2 py-1.5 font-bold text-slate-800">{row.plate}</td>
                   <td className="border border-slate-200 px-2 py-1.5 text-right tabular-nums">{row.rent ? formatCurrency(row.rent) : '-'}</td>
-                  <td className="border border-slate-200 px-2 py-1.5 text-right tabular-nums text-orange-600">{row.fine ? formatCurrency(row.fine) : '-'}</td>
+                  <td className="border border-slate-200 px-2 py-1.5 text-right tabular-nums">{row.lease ? formatCurrency(row.lease) : '-'}</td>
+                  <td className="border border-slate-200 px-2 py-1.5 text-right tabular-nums">{row.fuel ? formatCurrency(row.fuel) : '-'}</td>
                   <td className="border border-slate-200 px-2 py-1.5 text-right tabular-nums">{row.repair ? formatCurrency(row.repair) : '-'}</td>
+                  <td className="border border-slate-200 px-2 py-1.5 text-right tabular-nums">{row.toll ? formatCurrency(row.toll) : '-'}</td>
+                  <td className="border border-slate-200 px-2 py-1.5 text-right tabular-nums text-orange-600">{row.fine ? formatCurrency(row.fine) : '-'}</td>
                   <td className="border border-slate-200 px-2 py-1.5 text-right tabular-nums">{row.other ? formatCurrency(row.other) : '-'}</td>
                   <td className="border border-slate-200 px-2 py-1.5 text-center font-medium text-slate-700">
                     <div>{row.user}</div>
@@ -236,7 +245,7 @@ export const ExpenseDetailBoard: React.FC<Props> = ({
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={7} className="border border-slate-200 px-4 py-6 text-center text-slate-400 font-bold">차량비 내역이 없습니다.</td>
+                  <td colSpan={10} className="border border-slate-200 px-4 py-6 text-center text-slate-400 font-bold">차량비 내역이 없습니다.</td>
                 </tr>
               )}
             </tbody>
@@ -245,8 +254,11 @@ export const ExpenseDetailBoard: React.FC<Props> = ({
                 <tr className="bg-slate-50 border-t-2 border-slate-300">
                   <td className="border border-slate-200 px-2 py-2 text-center font-black">총 합계</td>
                   <td className="border border-slate-200 px-2 py-2 text-right tabular-nums font-bold">{formatCurrency(vehicleRows.reduce((s, r) => s + r.rent, 0))}</td>
-                  <td className="border border-slate-200 px-2 py-2 text-right tabular-nums font-bold text-orange-600">{formatCurrency(vehicleRows.reduce((s, r) => s + r.fine, 0))}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right tabular-nums font-bold">{formatCurrency(vehicleRows.reduce((s, r) => s + r.lease, 0))}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right tabular-nums font-bold">{formatCurrency(vehicleRows.reduce((s, r) => s + r.fuel, 0))}</td>
                   <td className="border border-slate-200 px-2 py-2 text-right tabular-nums font-bold">{formatCurrency(vehicleRows.reduce((s, r) => s + r.repair, 0))}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right tabular-nums font-bold">{formatCurrency(vehicleRows.reduce((s, r) => s + r.toll, 0))}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right tabular-nums font-bold text-orange-600">{formatCurrency(vehicleRows.reduce((s, r) => s + r.fine, 0))}</td>
                   <td className="border border-slate-200 px-2 py-2 text-right tabular-nums font-bold">{formatCurrency(vehicleRows.reduce((s, r) => s + r.other, 0))}</td>
                   <td className="border border-slate-200 px-2 py-2 text-center"></td>
                   <td className="border border-slate-200 px-2 py-2 text-right tabular-nums font-black text-red-600 bg-red-50">{formatCurrency(vehicleRows.reduce((s, r) => s + r.total, 0))}</td>

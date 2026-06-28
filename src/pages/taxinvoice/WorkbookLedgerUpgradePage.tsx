@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { useAuth } from '../../contexts/AuthContext';
+import AppIntroScreen from '../../components/common/AppIntroScreen';
 import { accountDirectoryService, type AccountDirectory } from '../../services/accountDirectoryService';
 import { teamService, type Team } from '../../services/teamService';
 import { taxInvoiceListService } from '../../services/taxInvoiceListService';
@@ -1101,6 +1102,7 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
   const [searchText, setSearchText] = useState('');
   const [taxIssues, setTaxIssues] = useState<TaxInvoiceIssue[]>([]);
   const [taxIssueLoading, setTaxIssueLoading] = useState(false);
+  const [ledgerLoaded, setLedgerLoaded] = useState(false);
   const [selectedSalesIds, setSelectedSalesIds] = useState<Set<string>>(new Set());
   const [selectedPurchaseIds, setSelectedPurchaseIds] = useState<Set<string>>(new Set());
   const [manualDraft, setManualDraft] = useState<ManualEntryDraft>(() => createEmptyManualDraft());
@@ -1151,6 +1153,7 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
       console.error('[WorkbookLedgerUpgradePage] load failed', error);
       toast.error('매입매출 장부 데이터를 불러오지 못했습니다.');
     } finally {
+      setLedgerLoaded(true);
       setLoading(false);
     }
   }, [ledgerService]);
@@ -2241,6 +2244,10 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
       </div>
     );
   };
+
+  if (loading && !ledgerLoaded) {
+    return <AppIntroScreen message={`${companyLabel} 매입매출 장부를 불러오는 중`} />;
+  }
 
   return (
     <div className="min-h-screen bg-zinc-50 px-4 py-5 text-slate-900 xl:px-6">

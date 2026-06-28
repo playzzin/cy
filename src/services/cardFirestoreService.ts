@@ -44,6 +44,35 @@ const BILLING_TARGETS_COLLECTION = 'cardBillingTargets';
 const TRANSACTIONS_COLLECTION = 'cardTransactions';
 const BILLINGS_COLLECTION = 'cardBillings';
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+    if (!value || typeof value !== 'object') return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+};
+
+const cleanForFirestore = (value: unknown): unknown => {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    if (value instanceof Date || value instanceof FirestoreTimestamp) return value;
+    if (typeof (value as { toDate?: unknown })?.toDate === 'function') {
+        return FirestoreTimestamp.fromDate((value as { toDate: () => Date }).toDate());
+    }
+    if (Array.isArray(value)) {
+        return value.map((child) => {
+            const cleaned = cleanForFirestore(child);
+            return cleaned === undefined ? null : cleaned;
+        });
+    }
+    if (isPlainObject(value)) {
+        return Object.fromEntries(
+            Object.entries(value)
+                .map(([key, child]) => [key, cleanForFirestore(child)] as const)
+                .filter(([, child]) => child !== undefined)
+        );
+    }
+    return value;
+};
+
 const getDayBefore = (dateText: string): string => {
     const [year, month, day] = dateText.split('-').map(Number);
     const date = new Date(year, month - 1, day);
@@ -206,8 +235,9 @@ export const cardFirestoreService = {
     async saveCardBillingTarget(data: Partial<CardBillingTargetRecord> & { id: string }): Promise<void> {
         const { id, createdAt, updatedAt, ...payload } = data;
         const validated = CardBillingTargetRecordSchema.parse(payload);
+        const cleanedPayload = cleanForFirestore(validated) as Record<string, unknown>;
         await setDoc(doc(db, BILLING_TARGETS_COLLECTION, id), {
-            ...validated,
+            ...cleanedPayload,
             createdAt: createdAt ?? serverTimestamp(),
             updatedAt: serverTimestamp(),
         }, { merge: true });
@@ -237,8 +267,9 @@ export const cardFirestoreService = {
         (params.upserts ?? []).forEach((record) => {
             const { id, createdAt, updatedAt, ...payload } = record;
             const validated = CardBillingTargetRecordSchema.parse(payload);
+            const cleanedPayload = cleanForFirestore(validated) as Record<string, unknown>;
             batch.set(doc(db, BILLING_TARGETS_COLLECTION, id), {
-                ...validated,
+                ...cleanedPayload,
                 ...(createdAt ? { createdAt } : { createdAt: serverTimestamp() }),
                 updatedAt: serverTimestamp()
             }, { merge: true });
@@ -277,9 +308,10 @@ export const cardFirestoreService = {
 
     async addTransaction(data: Omit<CardTransaction, 'id' | 'createdAt'>): Promise<string> {
         const validated = CardTransactionSchema.parse(data);
+        const cleanedData = cleanForFirestore(validated) as Record<string, unknown>;
         const docRef = doc(collection(db, TRANSACTIONS_COLLECTION));
         await setDoc(docRef, {
-            ...validated,
+            ...cleanedData,
             createdAt: serverTimestamp(),
         });
         return docRef.id;
@@ -308,8 +340,9 @@ export const cardFirestoreService = {
     async saveBilling(billing: CardBillingDocument): Promise<void> {
         const docRef = doc(db, BILLINGS_COLLECTION, billing.id);
         const { id, ...data } = billing;
+        const cleanedData = cleanForFirestore(data) as Record<string, unknown>;
         await setDoc(docRef, {
-            ...data,
+            ...cleanedData,
             updatedAt: serverTimestamp(),
         }, { merge: true });
     },

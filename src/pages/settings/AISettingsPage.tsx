@@ -8,7 +8,11 @@ import {
     faFloppyDisk,
     faImage,
     faKey,
+    faRotateRight,
     faRobot,
+    faServer,
+    faTrash,
+    faTriangleExclamation,
     faTableList
 } from '@fortawesome/free-solid-svg-icons';
 import {
@@ -19,6 +23,10 @@ import {
     AiModelSettings,
     AiModelScope
 } from '../../services/aiSettingsService';
+import {
+    serverAiSettingsService,
+    ServerAiSettingsStatus,
+} from '../../services/serverAiSettingsService';
 
 const scopeLabelMap: Record<AiModelScope, string> = {
     textModel: '공통 분석 모델',
@@ -35,7 +43,13 @@ const AISettingsPage: React.FC = () => {
         imageModel: ''
     });
     const [pageEnabledById, setPageEnabledById] = useState<Record<string, boolean>>({});
+    const [serverApiKey, setServerApiKey] = useState('');
+    const [serverModel, setServerModel] = useState('gemini-2.5-flash');
+    const [serverBatchModel, setServerBatchModel] = useState('gemini-2.5-flash');
+    const [serverStatus, setServerStatus] = useState<ServerAiSettingsStatus | null>(null);
+    const [serverStatusError, setServerStatusError] = useState('');
     const [isSaving, setIsSaving] = useState(false);
+    const [isLoadingServer, setIsLoadingServer] = useState(false);
     const [savedAt, setSavedAt] = useState<string>('');
 
     useEffect(() => {
@@ -44,6 +58,26 @@ const AISettingsPage: React.FC = () => {
         setModels(settings.models);
         setPageEnabledById(settings.pageEnabledById);
         setSavedAt(settings.updatedAt);
+    }, []);
+
+    const loadServerStatus = async () => {
+        setIsLoadingServer(true);
+        setServerStatusError('');
+        try {
+            const status = await serverAiSettingsService.getStatus();
+            setServerStatus(status);
+            setServerModel(status.model || 'gemini-2.5-flash');
+            setServerBatchModel(status.batchModel || status.model || 'gemini-2.5-flash');
+        } catch (error) {
+            console.error('[AISettingsPage] load server settings failed:', error);
+            setServerStatusError(error instanceof Error ? error.message : '서버 AI 설정 상태를 불러오지 못했습니다.');
+        } finally {
+            setIsLoadingServer(false);
+        }
+    };
+
+    useEffect(() => {
+        loadServerStatus();
     }, []);
 
     const maskedApiKey = useMemo(() => {
@@ -56,7 +90,7 @@ const AISettingsPage: React.FC = () => {
         if (scope === 'textModel') return models.textModel;
         if (scope === 'analyticsModel') return models.analyticsModel;
         if (scope === 'imageModel') return models.imageModel;
-        return 'server-managed';
+        return serverStatus?.model || serverModel || 'server-managed';
     };
 
     const currentModelBindings = useMemo(
@@ -88,11 +122,17 @@ const AISettingsPage: React.FC = () => {
             {
                 id: 'binding-card-billing',
                 service: 'CardBillingManager (Cloud Function)',
-                model: 'server-managed',
+                model: serverStatus?.model || serverModel || 'server-managed',
                 note: '서버 함수 내부 모델 정책 사용'
+            },
+            {
+                id: 'binding-partner-recognition',
+                service: '사진 거래처 등록 (Cloud Function)',
+                model: serverStatus?.model || serverModel || 'server-managed',
+                note: '명함/업체자료 사진 인식'
             }
         ],
-        [models]
+        [models, serverModel, serverStatus]
     );
 
     const setAllPagesEnabled = (enabled: boolean) => {
@@ -111,11 +151,38 @@ const AISettingsPage: React.FC = () => {
                 models,
                 pageEnabledById
             });
+            const status = await serverAiSettingsService.save({
+                apiKey: serverApiKey.trim() || undefined,
+                model: serverModel,
+                batchModel: serverBatchModel,
+            });
+            setServerStatus(status);
+            setServerApiKey('');
             setSavedAt(next.updatedAt);
             alert('AI 설정이 저장되었습니다.');
         } catch (error) {
             console.error('[AISettingsPage] save failed:', error);
             alert('AI 설정 저장 중 오류가 발생했습니다.');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleClearServerKey = async () => {
+        if (!window.confirm('서버용 Gemini API Key를 삭제할까요? 사진 거래처 등록 등 서버 AI 분석이 중지됩니다.')) return;
+        setIsSaving(true);
+        try {
+            const status = await serverAiSettingsService.save({
+                model: serverModel,
+                batchModel: serverBatchModel,
+                clearApiKey: true,
+            });
+            setServerStatus(status);
+            setServerApiKey('');
+            alert('서버용 Gemini API Key를 삭제했습니다.');
+        } catch (error) {
+            console.error('[AISettingsPage] clear server key failed:', error);
+            alert(error instanceof Error ? error.message : '서버용 Gemini API Key 삭제 중 오류가 발생했습니다.');
         } finally {
             setIsSaving(false);
         }
@@ -181,6 +248,102 @@ const AISettingsPage: React.FC = () => {
                         <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
                             현재 키: <span className="font-mono text-slate-700">{maskedApiKey}</span>
                         </div>
+                    </div>
+                </section>
+
+                <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                    <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                        <div>
+                            <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                                <FontAwesomeIcon icon={faServer} className="text-blue-500" />
+                                서버용 Gemini 설정
+                            </h2>
+                            <p className="text-sm text-slate-500 mt-1">
+                                사진 거래처 등록, 법인카드 청구관리처럼 Cloud Function에서 실행되는 Gemini 기능에 사용됩니다.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={loadServerStatus}
+                            disabled={isLoadingServer}
+                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                            <FontAwesomeIcon icon={faRotateRight} spin={isLoadingServer} />
+                            상태 새로고침
+                        </button>
+                    </div>
+
+                    {serverStatusError && (
+                        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                            <FontAwesomeIcon icon={faTriangleExclamation} className="mr-2" />
+                            {serverStatusError}
+                        </div>
+                    )}
+
+                    <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-3">
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                            <div className="text-xs font-bold text-slate-500">서버 키 상태</div>
+                            <div className={`mt-1 text-sm font-extrabold ${serverStatus?.configured ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                {serverStatus?.configured ? '설정됨' : '미설정'}
+                            </div>
+                            <div className="mt-1 text-xs font-mono text-slate-500">
+                                {serverStatus?.maskedApiKey || '키 없음'}
+                            </div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                            <div className="text-xs font-bold text-slate-500">서버 분석 모델</div>
+                            <div className="mt-1 text-sm font-mono font-bold text-slate-800">
+                                {serverStatus?.model || serverModel}
+                            </div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                            <div className="text-xs font-bold text-slate-500">Batch 모델</div>
+                            <div className="mt-1 text-sm font-mono font-bold text-slate-800">
+                                {serverStatus?.batchModel || serverBatchModel}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="mt-5 grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr_0.8fr_auto] gap-3 items-end">
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">서버 Gemini API Key</label>
+                            <input
+                                type="password"
+                                value={serverApiKey}
+                                onChange={(e) => setServerApiKey(e.target.value)}
+                                placeholder={serverStatus?.configured ? '새 키 입력 시에만 교체됩니다' : '서버용 Gemini API Key'}
+                                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">서버 분석 모델</label>
+                            <input
+                                type="text"
+                                value={serverModel}
+                                onChange={(e) => setServerModel(e.target.value)}
+                                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono"
+                                placeholder="gemini-2.5-flash"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Batch 모델</label>
+                            <input
+                                type="text"
+                                value={serverBatchModel}
+                                onChange={(e) => setServerBatchModel(e.target.value)}
+                                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono"
+                                placeholder="gemini-2.5-flash"
+                            />
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleClearServerKey}
+                            disabled={isSaving || !serverStatus?.configured}
+                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                        >
+                            <FontAwesomeIcon icon={faTrash} />
+                            키 삭제
+                        </button>
                     </div>
                 </section>
 
@@ -409,4 +572,3 @@ const AISettingsPage: React.FC = () => {
 };
 
 export default AISettingsPage;
-

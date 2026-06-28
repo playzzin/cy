@@ -1,1736 +1,584 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import {
-    faBoxesStacked,
+    faBriefcase,
     faBuilding,
-    faCalculator,
-    faChartLine,
-    faChevronDown,
+    faBullhorn,
+    faCode,
     faCrown,
-    faHardHat,
     faHelmetSafety,
-    faLayerGroup,
-    faMapMarkerAlt,
+    faMagnifyingGlass,
     faSitemap,
     faUserTie,
     faUsers,
 } from '@fortawesome/free-solid-svg-icons';
-import { AnimatePresence, motion, Variants } from 'framer-motion';
-import { Site, siteService } from '../../services/siteService';
 import { OrgNode, useOrganizationTree } from './hooks/useOrganizationTree';
-import { useSiteMode } from '../../contexts/SiteModeContext';
+import { officeStaffService, type OfficeStaff } from '../../services/officeStaffService';
+import logoConstruction from '../../assets/logo_construction.jpg';
 import './CheongyeonOrgChartPage.css';
 
-type DepartmentKey = 'construction' | 'hrPeople' | 'accounting' | 'management' | 'sales' | 'development';
+type DepartmentKey = 'construction' | 'management' | 'sales' | 'development';
 
-type TeamDetailItem = {
-    title: string;
-    description: string;
-};
-
-type TeamSlot = {
-    slot: number;
-    displayName: string;
-    originalName: string;
+type TeamView = {
+    id: string;
+    name: string;
     leaderName: string;
-    leaderImageUrl: string;
-    visualImageUrl: string;
+    leaderRole: string;
     memberCount: number;
     siteNames: string[];
-    statusLabel: string;
-    summary: string;
-    focusAreas: string[];
-    detailItems: TeamDetailItem[];
-    members: OrgNode[];
-    isPlaceholder: boolean;
+    status: string;
+    workers: OrgNode[];
     source?: OrgNode;
 };
 
-type DepartmentCardConfig = {
+type DepartmentView = {
     key: DepartmentKey;
     title: string;
-    english: string;
+    subtitle: string;
     description: string;
-    icon: IconDefinition;
-    accent: string;
-    iconGradient: string;
-    highlights: string[];
-    members: Array<{ name: string; role: string }>;
-    value: string;
+    icon: any;
+    color: string;
+    stat: string;
+    helper: string;
+    tasks: string[];
 };
 
-type TeamTone = {
-    selectedCard: string;
-    normalCard: string;
-    statusBadge: string;
-    iconText: string;
+const normalize = (value: unknown): string => String(value ?? '').trim();
+
+const CONSTRUCTION_TEAM_ORDER = [
+    '이재욱팀',
+    '김봉수팀',
+    '김세흔팀',
+    '김진민팀',
+    '김군회팀',
+    '김덕기팀',
+    '박상국팀',
+    '김동혁팀',
+    '임효재팀',
+    '심진섭팀',
+] as const;
+
+const MANAGEMENT_TASKS = ['사무', '회계', '세무 업무', '출력관리'];
+const SALES_TASKS = ['자재', '현장 영업', '거래처 응대', '수주 지원'];
+const DEVELOPMENT_TASKS = ['ERP 시스템 설계', '업무 자동화', '데이터 연동', '운영 개선'];
+
+const normalizeTeamName = (name: unknown): string => normalize(name).replace(/\s+/g, '').replace(/팀$/, '');
+
+const getConstructionTeamOrder = (name: unknown): number => {
+    const teamName = normalizeTeamName(name);
+    const index = CONSTRUCTION_TEAM_ORDER.findIndex((item) => normalizeTeamName(item) === teamName);
+    return index >= 0 ? index : Number.MAX_SAFE_INTEGER;
 };
 
-const TEAM_GRID_COLUMNS = 5;
-const TEAM_SLOT_LEADERS: Array<string | undefined> = [
-    '이재욱',
-    '김봉수',
-    '김세흔',
-    '김덕기',
-    '김군회',
-    '박상국',
-    undefined,
-    '김동혁',
-    '임효재',
-    '유재훈',
-];
-
-const DEPARTMENT_TEAM_PRESETS: Record<Exclude<DepartmentKey, 'construction'>, Array<{
-    displayName: string;
-    originalName: string;
-    leaderName: string;
-    memberCount: number;
-    statusLabel: string;
-    siteNames: string[];
-    summary: string;
-    focusAreas: string[];
-    detailItems: TeamDetailItem[];
-    visualImageUrl: string;
-}>> = {
-    hrPeople: [
-        {
-            displayName: '인사팀 1팀',
-            originalName: '채용·배치 운영 라인',
-            leaderName: '김팀장',
-            memberCount: 5,
-            statusLabel: '운영 중',
-            siteNames: ['채용 운영'],
-            summary: '현장과 본사에서 올라오는 채용 요청을 접수하고, 면접 일정 조율, 입사 확정, 배치 통보까지 채용 오퍼레이션을 빠르게 연결합니다.',
-            focusAreas: ['채용 요청 접수', '면접·입사 확정', '현장 배치 조율'],
-            detailItems: [
-                {
-                    title: '채용 파이프라인 운영',
-                    description: '모집 공고 관리, 지원자 소싱, 면접 일정 조율, 채용 확정까지 초기 채용 흐름을 빠르게 연결합니다.'
-                },
-                {
-                    title: '현장 배치 커뮤니케이션',
-                    description: '현장별 인력 요청과 근무 조건을 반영해 합격자 배치 일정을 조율하고 현장 리더에게 인수인계를 진행합니다.'
-                },
-                {
-                    title: '인력 데이터 관리',
-                    description: '지원자 이력, 투입 이력, 직무 적합도 데이터를 정리해 다음 채용과 배치 의사결정에 활용합니다.'
-                }
-            ],
-            visualImageUrl: 'https://images.unsplash.com/photo-1521737711867-e3b97375f902?auto=format&fit=crop&q=80&w=1200',
-        },
-        {
-            displayName: '인사팀 2팀',
-            originalName: '교육·평가·노무 운영 라인',
-            leaderName: '박팀장',
-            memberCount: 4,
-            statusLabel: '운영 중',
-            siteNames: ['교육·평가'],
-            summary: '입사 이후 교육, 복무 관리, 평가, 4대보험, 퇴직 정산과 노무 이슈 대응까지 인사 운영의 후반 프로세스를 책임지는 팀입니다.',
-            focusAreas: ['교육 체계 운영', '평가·보상 관리', '노무·복무 대응'],
-            detailItems: [
-                {
-                    title: '교육 프로그램 운영',
-                    description: '신규 입사자 온보딩, 직무 교육, 안전 교육 일정을 편성하고 이수 현황을 추적합니다.'
-                },
-                {
-                    title: '평가·보상 체계 지원',
-                    description: '성과 리뷰, 직무 평가, 보상 기준을 정리해 팀장과 관리자가 일관된 기준으로 인사를 운영할 수 있게 돕습니다.'
-                },
-                {
-                    title: '노무·복무 실무 대응',
-                    description: '근태, 4대보험, 퇴직 정산, 각종 노무 문의와 이슈를 처리하며 법적 리스크를 줄입니다.'
-                }
-            ],
-            visualImageUrl: 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&q=80&w=1200',
-        },
-    ],
-    accounting: [
-        {
-            displayName: '회계팀 1팀',
-            originalName: '회계·세무·원가 관리 라인',
-            leaderName: '이과장',
-            memberCount: 3,
-            statusLabel: '운영 중',
-            siteNames: ['회계·세무'],
-            summary: '거래처 정산, 매입·매출 마감, 자금 집행, 세금계산서와 부가세 신고, 현장 원가 반영까지 숫자로 회사를 통제하는 재무 실무 라인입니다.',
-            focusAreas: ['일일 자금 집행', '월 마감·세무 신고', '현장 원가 분석'],
-            detailItems: [
-                {
-                    title: '자금·정산 집행',
-                    description: '협력사 지급, 외주 정산, 경비 집행, 법인카드 사용 내역을 일자별로 정리하고 승인 흐름을 관리합니다.'
-                },
-                {
-                    title: '회계 마감·세무 신고',
-                    description: '매입·매출 전표, 세금계산서, 부가세 신고 자료를 월 단위로 정리해 마감 정확도를 유지합니다.'
-                },
-                {
-                    title: '현장 원가·손익 관리',
-                    description: '프로젝트별 투입 원가와 매출 실적을 연결해 손익 흐름과 이익률 변화를 경영진에게 보고합니다.'
-                }
-            ],
-            visualImageUrl: 'https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&q=80&w=1200',
-        },
-    ],
-    management: [
-        {
-            displayName: '관리팀',
-            originalName: '총무·자산·문서 관리 라인',
-            leaderName: '고대리',
-            memberCount: 4,
-            statusLabel: '운영 중',
-            siteNames: ['총무·자산'],
-            summary: '본사 운영에 필요한 차량, 비품, 계약 문서, 사내 시설, 공문 수발신을 통합 관리하며 조직이 끊기지 않게 받쳐주는 운영 지원 부서입니다.',
-            focusAreas: ['자산·비품 관리', '문서·계약 지원', '사내 운영 총괄'],
-            detailItems: [
-                {
-                    title: '자산·차량·비품 운영',
-                    description: '사무기기, 차량, 사내 자산과 소모품 재고를 점검해 필요한 시점에 바로 사용할 수 있도록 유지합니다.'
-                },
-                {
-                    title: '문서·계약 행정 지원',
-                    description: '공문, 계약 문서, 발주 관련 서류, 사내 승인 문서를 정리하고 보관·배포 체계를 관리합니다.'
-                },
-                {
-                    title: '사내 환경·총무 관리',
-                    description: '시설, 사무환경, 행사 준비, 복리후생성 지원 업무를 맡아 내부 운영이 끊기지 않도록 뒷받침합니다.'
-                }
-            ],
-            visualImageUrl: 'https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&q=80&w=1200',
-        },
-    ],
-    sales: [
-        {
-            displayName: '영업팀 1팀',
-            originalName: '입찰·견적 영업 라인',
-            leaderName: '이차장',
-            memberCount: 6,
-            statusLabel: '운영 중',
-            siteNames: ['입찰·견적'],
-            summary: '발주 정보 수집부터 입찰 검토, 견적서 정리, 제안 자료 작성, 수주 가능성 분석까지 초기 영업 파이프라인을 전담합니다.',
-            focusAreas: ['입찰 공고 분석', '견적·제안서 작성', '수주 가능성 검토'],
-            detailItems: [
-                {
-                    title: '입찰 공고 스크리닝',
-                    description: '신규 발주 공고를 검토해 참여 우선순위를 정하고, 사업성 있는 프로젝트를 선별합니다.'
-                },
-                {
-                    title: '견적·제안 자료 작성',
-                    description: '도급 조건과 물량을 반영해 견적서, 제안서, 발표 자료를 준비하고 제출 전 검토를 마칩니다.'
-                },
-                {
-                    title: '수주 전략 회의',
-                    description: '원가, 일정, 경쟁사 동향을 함께 검토해 어떤 조건으로 수주를 가져갈지 내부 전략을 정리합니다.'
-                }
-            ],
-            visualImageUrl: 'https://images.unsplash.com/photo-1515169067868-5387ec356754?auto=format&fit=crop&q=80&w=1200',
-        },
-        {
-            displayName: '영업팀 2팀',
-            originalName: '협력사·고객 관계 라인',
-            leaderName: '이차장',
-            memberCount: 5,
-            statusLabel: '운영 중',
-            siteNames: ['고객·협력사'],
-            summary: '기존 고객사와 협력사 네트워크를 유지하고, 신규 프로젝트 상담, 조건 협의, 후속 커뮤니케이션까지 관계형 영업을 담당합니다.',
-            focusAreas: ['고객 커뮤니케이션', '협력사 네트워크', '수주 후속 대응'],
-            detailItems: [
-                {
-                    title: '고객사 관계 유지',
-                    description: '기존 발주처와 프로젝트 진행 현황, 후속 공사, 만족도 이슈를 주기적으로 소통하며 거래를 이어갑니다.'
-                },
-                {
-                    title: '협력사 네트워크 운영',
-                    description: '협력사 미팅, 공급 조건 협의, 신규 파트너 발굴을 통해 영업 채널과 공급망 기반을 넓힙니다.'
-                },
-                {
-                    title: '수주 후속 커뮤니케이션',
-                    description: '협상 이후 필요한 자료 전달, 조건 재조정, 일정 협의를 이어가며 수주 확정 가능성을 높입니다.'
-                }
-            ],
-            visualImageUrl: 'https://images.unsplash.com/photo-1542744173-8e7e53415bb0?auto=format&fit=crop&q=80&w=1200',
-        },
-    ],
-    development: [
-        {
-            displayName: '개발팀 1팀',
-            originalName: 'ERP·업무 플랫폼 개발 라인',
-            leaderName: '최실장',
-            memberCount: 5,
-            statusLabel: '운영 중',
-            siteNames: ['ERP·플랫폼'],
-            summary: '사내 ERP와 업무 포털, 관리자 화면, 모바일 입력 화면을 설계·개발하고 배포까지 이어가는 내부 플랫폼 메인 개발 라인입니다.',
-            focusAreas: ['ERP 기능 개발', '관리자 화면 운영', '배포·유지보수'],
-            detailItems: [
-                {
-                    title: 'ERP 기능 개발',
-                    description: '현장 보고, 정산, 자재, 인력 데이터가 한 화면에서 연결되도록 핵심 업무 기능을 설계하고 구현합니다.'
-                },
-                {
-                    title: '관리자·모바일 화면 운영',
-                    description: '본사 관리자 화면과 현장용 모바일 입력 화면을 개선해 실제 사용자 흐름에 맞는 인터페이스를 만듭니다.'
-                },
-                {
-                    title: '배포·장애 대응',
-                    description: '개발 서버와 운영 서버 배포, 오류 수정, 사용성 개선 요청을 반영해 시스템을 안정적으로 유지합니다.'
-                }
-            ],
-            visualImageUrl: 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&q=80&w=1200',
-        },
-        {
-            displayName: '개발팀 2팀',
-            originalName: 'AI·자동화·데이터 라인',
-            leaderName: '최실장',
-            memberCount: 4,
-            statusLabel: '세팅 중',
-            siteNames: ['AI·자동화'],
-            summary: 'OCR, 이미지 분석, 데이터 자동정리, 반복 업무 스크립트화 등 운영 효율을 높이는 자동화 과제를 발굴하고 적용하는 실험·고도화 라인입니다.',
-            focusAreas: ['OCR·AI 자동화', '반복업무 스크립트화', '데이터 연동 고도화'],
-            detailItems: [
-                {
-                    title: 'OCR·AI 자동 처리',
-                    description: '문서, 영수증, 이미지 데이터를 자동 인식해 사람이 하던 입력 작업을 줄이는 기능을 실험하고 적용합니다.'
-                },
-                {
-                    title: '반복업무 스크립트화',
-                    description: '엑셀 정리, 대량 업로드, 보고서 생성처럼 반복되는 운영 작업을 스크립트와 툴로 자동화합니다.'
-                },
-                {
-                    title: '데이터 연동 고도화',
-                    description: '서비스 간 데이터 연결, 동기화 구조, 관리자 분석 화면을 개선해 운영 정보가 더 빠르게 이어지도록 만듭니다.'
-                }
-            ],
-            visualImageUrl: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&q=80&w=1200',
-        },
-    ],
+const isActiveOfficeStaff = (staff: OfficeStaff): boolean => {
+    const status = normalize(staff.status).toLowerCase();
+    return staff.isActive !== false && !['퇴사', 'inactive', '출입금지'].includes(status);
 };
 
-const getTeamTone = (departmentKey: DepartmentKey, displayName: string, isDarkMode: boolean): TeamTone => {
-    const isManagementTeam = displayName.includes('관리팀');
-    const isAccountingTeam = displayName.includes('회계팀');
+const matchesOfficeDepartment = (staff: OfficeStaff, keywords: string[]): boolean => {
+    const department = normalize(staff.department);
+    if (department) return keywords.some((keyword) => department.includes(keyword));
 
-    if (isManagementTeam) {
-        return isDarkMode
-            ? {
-                selectedCard: 'border-cyan-300/70 bg-gradient-to-br from-cyan-400/18 via-slate-900 to-slate-950',
-                normalCard: 'border-cyan-300/35 bg-slate-950/72 hover:border-cyan-300/55',
-                statusBadge: 'border-cyan-300/20 bg-cyan-400/12 text-cyan-100',
-                iconText: 'text-cyan-300/90'
-            }
-            : {
-                selectedCard: 'border-cyan-400 bg-gradient-to-br from-cyan-100 via-white to-sky-50',
-                normalCard: 'border-cyan-200 bg-white hover:border-cyan-300',
-                statusBadge: 'border-cyan-300/60 bg-cyan-50 text-cyan-700',
-                iconText: 'text-cyan-600'
-            };
-    }
-
-    if (isAccountingTeam || departmentKey === 'accounting') {
-        return isDarkMode
-            ? {
-                selectedCard: 'border-amber-300/70 bg-gradient-to-br from-amber-400/18 via-slate-900 to-slate-950',
-                normalCard: 'border-amber-300/25 bg-slate-950/72 hover:border-amber-300/45',
-                statusBadge: 'border-amber-300/20 bg-amber-400/12 text-amber-100',
-                iconText: 'text-amber-300/90'
-            }
-            : {
-                selectedCard: 'border-amber-400 bg-gradient-to-br from-amber-100 via-white to-orange-50',
-                normalCard: 'border-amber-200 bg-white hover:border-amber-300',
-                statusBadge: 'border-amber-300/60 bg-amber-50 text-amber-700',
-                iconText: 'text-amber-600'
-            };
-    }
-
-    if (departmentKey === 'management') {
-        return isDarkMode
-            ? {
-                selectedCard: 'border-cyan-300/70 bg-gradient-to-br from-cyan-400/18 via-slate-900 to-slate-950',
-                normalCard: 'border-cyan-300/35 bg-slate-950/72 hover:border-cyan-300/55',
-                statusBadge: 'border-cyan-300/20 bg-cyan-400/12 text-cyan-100',
-                iconText: 'text-cyan-300/90'
-            }
-            : {
-                selectedCard: 'border-cyan-400 bg-gradient-to-br from-cyan-100 via-white to-sky-50',
-                normalCard: 'border-cyan-200 bg-white hover:border-cyan-300',
-                statusBadge: 'border-cyan-300/60 bg-cyan-50 text-cyan-700',
-                iconText: 'text-cyan-600'
-            };
-    }
-
-    if (departmentKey === 'hrPeople') {
-        return isDarkMode
-            ? {
-                selectedCard: 'border-emerald-300/70 bg-gradient-to-br from-emerald-400/18 via-slate-900 to-slate-950',
-                normalCard: 'border-emerald-300/25 bg-slate-950/72 hover:border-emerald-300/45',
-                statusBadge: 'border-emerald-300/20 bg-emerald-400/12 text-emerald-100',
-                iconText: 'text-emerald-300/90'
-            }
-            : {
-                selectedCard: 'border-emerald-400 bg-gradient-to-br from-emerald-100 via-white to-teal-50',
-                normalCard: 'border-emerald-200 bg-white hover:border-emerald-300',
-                statusBadge: 'border-emerald-300/60 bg-emerald-50 text-emerald-700',
-                iconText: 'text-emerald-600'
-            };
-    }
-
-    if (departmentKey === 'sales') {
-        return isDarkMode
-            ? {
-                selectedCard: 'border-fuchsia-300/70 bg-gradient-to-br from-fuchsia-400/18 via-slate-900 to-slate-950',
-                normalCard: 'border-fuchsia-300/25 bg-slate-950/72 hover:border-fuchsia-300/45',
-                statusBadge: 'border-fuchsia-300/20 bg-fuchsia-400/12 text-fuchsia-100',
-                iconText: 'text-fuchsia-300/90'
-            }
-            : {
-                selectedCard: 'border-fuchsia-400 bg-gradient-to-br from-fuchsia-100 via-white to-violet-50',
-                normalCard: 'border-fuchsia-200 bg-white hover:border-fuchsia-300',
-                statusBadge: 'border-fuchsia-300/60 bg-fuchsia-50 text-fuchsia-700',
-                iconText: 'text-fuchsia-600'
-            };
-    }
-
-    return isDarkMode
-        ? {
-            selectedCard: 'border-sky-300/70 bg-gradient-to-br from-sky-400/18 via-slate-900 to-slate-950',
-            normalCard: 'border-sky-300/25 bg-slate-950/72 hover:border-sky-300/45',
-            statusBadge: 'border-sky-300/20 bg-sky-400/12 text-sky-100',
-            iconText: 'text-sky-300/90'
-        }
-        : {
-            selectedCard: 'border-sky-400 bg-gradient-to-br from-sky-100 via-white to-blue-50',
-            normalCard: 'border-sky-200 bg-white hover:border-sky-300',
-            statusBadge: 'border-sky-300/60 bg-sky-50 text-sky-700',
-            iconText: 'text-sky-600'
-        };
+    const fallbackText = [staff.role, staff.memo].map(normalize).join(' ');
+    return keywords.some((keyword) => fallbackText.includes(keyword));
 };
 
-const isCheongyeonName = (value?: string) => {
-    const normalized = String(value ?? '').replace(/\s+/g, '').toLowerCase();
-    return normalized.includes('청연') || normalized.includes('cheongyeon');
+const isCheongyeonName = (name: unknown): boolean => {
+    const text = normalize(name).toLowerCase();
+    return text.includes('청연') || text.includes('cheongyeon') || text.includes('chungyun');
 };
 
-const normalizeName = (value?: string) => String(value ?? '').replace(/\s+/g, '').trim().toLowerCase();
+const formatNumber = (value: number): string => Number(value || 0).toLocaleString('ko-KR');
 
-const getTeamWorkers = (team: OrgNode) => team.children.filter((child) => child.type === 'worker');
-
-const findWorkerByName = (team: OrgNode, targetName?: string) => {
-    if (!targetName) {
-        return undefined;
-    }
-
-    const normalizedTarget = normalizeName(targetName);
-    return getTeamWorkers(team).find((worker) => normalizeName(worker.name) === normalizedTarget);
+const getNodeTypeLabel = (node: OrgNode): string => {
+    const rawType = normalize(node.data?.type);
+    if (rawType) return rawType;
+    if (node.type === 'company') return '회사';
+    if (node.type === 'team') return '팀';
+    return '구성원';
 };
 
-const getWorkerProfileImageUrl = (worker?: OrgNode) => {
-    if (!worker) return '';
-
-    return String(
-        worker.data?.profileImageUrl ??
-        worker.data?.ProfileImageUrl ??
-        worker.data?.photoURL ??
-        worker.data?.photoUrl ??
-        worker.data?.imageUrl ??
-        worker.data?.ImageUrl ??
-        ''
-    ).trim();
-};
-
-const getTeamLeader = (team: OrgNode) => {
-    const leaderId = String(team.data?.leaderId ?? '');
-    const leaderName = String(team.data?.leaderName ?? '');
-    const normalizedLeaderName = normalizeName(leaderName);
-
-    return getTeamWorkers(team).find((worker) => {
-        const rank = String(worker.data?.rank ?? '');
-        const role = String(worker.data?.role ?? '');
-        const profile = `${rank} ${role}`;
-
-        return (
-            (leaderId && worker.id === leaderId) ||
-            (normalizedLeaderName && normalizeName(worker.name) === normalizedLeaderName) ||
-            /(팀장|소장|반장|부장|이사)/.test(profile)
-        );
-    });
-};
-
-const getSiteNames = (team: OrgNode) => {
-    const rawValues = [
-        ...(Array.isArray(team.data?.siteNames) ? team.data.siteNames : []),
-        team.data?.assignedSiteName,
-    ];
-
-    return Array.from(
-        new Set(
-            rawValues
-                .map((value) => String(value ?? '').trim())
-                .filter(Boolean)
-        )
+const getWorkerRole = (worker?: OrgNode): string => {
+    if (!worker) return '리더';
+    return (
+        normalize(worker.data?.role) ||
+        normalize(worker.data?.position) ||
+        normalize(worker.data?.rank) ||
+        '구성원'
     );
 };
 
-const getTeamSiteNames = (team: OrgNode, sites: Site[]) => {
-    const teamId = String(team.id ?? '').trim();
-    const teamName = String(team.name ?? '').trim();
-    const baseSiteNames = getSiteNames(team);
-    const responsibleSiteNames = sites
-        .filter((site) => {
-            const responsibleTeamId = String(site.responsibleTeamId ?? '').trim();
-            const responsibleTeamName = String(site.responsibleTeamName ?? '').trim();
-
-            return (
-                (teamId && responsibleTeamId === teamId) ||
-                (teamName && responsibleTeamName === teamName)
-            );
-        })
-        .map((site) => String(site.name ?? '').trim())
-        .filter(Boolean);
-
-    return Array.from(new Set([...baseSiteNames, ...responsibleSiteNames]));
+const getWorkerImage = (worker?: OrgNode): string => {
+    if (!worker) return '';
+    return (
+        normalize(worker.data?.profileImageUrl) ||
+        normalize(worker.data?.photoURL) ||
+        normalize(worker.data?.imageUrl) ||
+        normalize(worker.data?.avatarUrl)
+    );
 };
 
-const getStatusLabel = (status?: string) => {
-    switch (String(status ?? 'active')) {
-        case 'active':
-            return '운영 중';
-        case 'waiting':
-            return '세팅 중';
-        case 'closed':
-            return '종료';
-        default:
-            return String(status ?? '운영 중');
+const getTeamWorkers = (team: OrgNode): OrgNode[] =>
+    team.children.filter((child) => child.type === 'worker');
+
+const getTeamLeader = (team: OrgNode): OrgNode | undefined => {
+    const leaderName = normalize(team.data?.leaderName);
+    const workers = getTeamWorkers(team);
+    if (leaderName) {
+        const byName = workers.find((worker) => normalize(worker.name) === leaderName);
+        if (byName) return byName;
     }
+
+    return workers.find((worker) => {
+        const label = `${getWorkerRole(worker)} ${normalize(worker.data?.rank)}`;
+        return /팀장|반장|소장|리더|leader|manager/i.test(label);
+    }) || workers[0];
 };
 
-const getTeamSortOrder = (team: OrgNode) => {
-    const matchedNumber = team.name.match(/(\d+)\s*팀/);
-    if (matchedNumber) {
-        return Number(matchedNumber[1]);
-    }
-    return Number.MAX_SAFE_INTEGER;
+const getTeamSites = (team: OrgNode): string[] => {
+    const values = [
+        team.data?.siteName,
+        team.data?.siteNames,
+        team.data?.assignedSiteNames,
+        team.data?.currentSiteName,
+    ];
+
+    const result = new Set<string>();
+    values.forEach((value) => {
+        if (Array.isArray(value)) {
+            value.map(normalize).filter(Boolean).forEach((item) => result.add(item));
+            return;
+        }
+        const text = normalize(value);
+        if (text) result.add(text);
+    });
+
+    return Array.from(result).slice(0, 3);
 };
 
-const formatNumber = (value: number) => new Intl.NumberFormat('ko-KR').format(value);
-
-const pyramidRevealVariants: Variants = {
-    hidden: { opacity: 0, y: 28, filter: 'blur(16px)' },
-    visible: {
-        opacity: 1,
-        y: 0,
-        filter: 'blur(0px)',
-        transition: {
-            duration: 0.5,
-            ease: 'easeOut',
-            when: 'beforeChildren',
-            staggerChildren: 0.06,
-            delayChildren: 0.08,
-        },
-    },
-    exit: {
-        opacity: 0,
-        y: -18,
-        filter: 'blur(12px)',
-        transition: { duration: 0.28, ease: 'easeInOut' },
-    },
+const getTeamStatus = (team: OrgNode): string => {
+    const status = normalize(team.data?.status);
+    if (!status || status === 'active') return '운영중';
+    if (status === 'inactive') return '대기';
+    return status;
 };
 
-const pyramidItemVariants: Variants = {
-    hidden: { opacity: 0, y: 22, scale: 0.97, filter: 'blur(10px)' },
-    visible: {
-        opacity: 1,
-        y: 0,
-        scale: 1,
-        filter: 'blur(0px)',
-        transition: { duration: 0.42, ease: 'easeOut' },
-    },
-    exit: { opacity: 0, y: -10, scale: 0.98, filter: 'blur(8px)', transition: { duration: 0.2 } },
+const flattenCompanies = (treeData: OrgNode[]): OrgNode[] =>
+    treeData.filter((node) => node.type === 'company');
+
+const flattenTeams = (companies: OrgNode[]): OrgNode[] =>
+    companies.flatMap((company) => company.children.filter((child) => child.type === 'team'));
+
+const flattenWorkers = (teams: OrgNode[]): OrgNode[] =>
+    teams.flatMap((team) => getTeamWorkers(team));
+
+const buildTeamView = (team: OrgNode): TeamView => {
+    const leader = getTeamLeader(team);
+
+    return {
+        id: team.id,
+        name: team.name,
+        leaderName: normalize(team.data?.leaderName) || leader?.name || '리더 미지정',
+        leaderRole: getWorkerRole(leader),
+        memberCount: getTeamWorkers(team).length,
+        siteNames: getTeamSites(team),
+        status: getTeamStatus(team),
+        workers: getTeamWorkers(team)
+            .sort((left, right) => left.name.localeCompare(right.name, 'ko'))
+            .slice(0, 6),
+        source: team,
+    };
+};
+
+const getOfficeStaffKey = (staff: OfficeStaff, index: number, departmentKey: DepartmentKey): string =>
+    normalize(staff.id) || normalize(staff.legacyId) || `${departmentKey}-${normalize(staff.name) || index}`;
+
+const officeStaffToOrgNode = (staff: OfficeStaff, index: number, departmentKey: DepartmentKey): OrgNode => ({
+    id: getOfficeStaffKey(staff, index, departmentKey),
+    type: 'worker',
+    name: normalize(staff.name) || '이름 미등록',
+    parentId: `office-${departmentKey}`,
+    children: [],
+    data: staff,
+    isExpanded: false,
+});
+
+const getOfficeLeader = (members: OrgNode[]): OrgNode | undefined =>
+    members.find((member) => /대표|이사|실장|부장|팀장|리더|manager/i.test(getWorkerRole(member))) || members[0];
+
+const buildOfficeTeamView = (
+    departmentKey: DepartmentKey,
+    name: string,
+    staffRows: OfficeStaff[],
+    departmentLabel: string,
+    tasks: string[],
+): TeamView => {
+    const members = staffRows
+        .map((staff, index) => officeStaffToOrgNode(staff, index, departmentKey))
+        .sort((left, right) => left.name.localeCompare(right.name, 'ko'));
+    const leader = getOfficeLeader(members);
+
+    return {
+        id: `office-${departmentKey}`,
+        name,
+        leaderName: leader?.name || '담당자 미지정',
+        leaderRole: leader ? getWorkerRole(leader) : departmentLabel,
+        memberCount: members.length,
+        siteNames: tasks,
+        status: `${departmentLabel} / 사무실직원`,
+        workers: members,
+    };
+};
+
+const isConstructionTeamView = (team: TeamView): boolean => {
+    const teamName = normalizeTeamName(team.name);
+    if (CONSTRUCTION_TEAM_ORDER.some((name) => normalizeTeamName(name) === teamName)) return true;
+
+    const type = normalize(team.source?.data?.type);
+    return ['시공팀', '시공사팀', '직영팀', '본팀'].includes(type);
 };
 
 const CheongyeonOrgChartPage: React.FC = () => {
-    const { isDarkMode } = useSiteMode();
     const { treeData, loading } = useOrganizationTree();
-    const [selectedSlot, setSelectedSlot] = useState<number>(1);
-    const [activeDepartmentKey, setActiveDepartmentKey] = useState<DepartmentKey>('construction');
-    const [sites, setSites] = useState<Site[]>([]);
-    const [sitesLoading, setSitesLoading] = useState(true);
-    const pyramidSectionRef = useRef<HTMLElement | null>(null);
+    const [activeDepartment, setActiveDepartment] = useState<DepartmentKey>('construction');
+    const [query, setQuery] = useState('');
+    const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
+
+    useEffect(() => {
+        document.body.classList.add('cheongyeon-org-codeit-theme');
+        return () => document.body.classList.remove('cheongyeon-org-codeit-theme');
+    }, []);
 
     useEffect(() => {
         let mounted = true;
 
-        const loadSites = async () => {
-            try {
-                const siteList = await siteService.getSites();
-                if (mounted) {
-                    setSites(siteList);
-                }
-            } catch (error) {
-                console.error('Failed to load sites for organization chart', error);
-            } finally {
-                if (mounted) {
-                    setSitesLoading(false);
-                }
-            }
-        };
-
-        void loadSites();
+        officeStaffService.getOfficeStaff()
+            .then((rows) => {
+                if (mounted) setOfficeStaffRows(rows);
+            })
+            .catch((error) => {
+                console.error('[CheongyeonOrgChartPage] Failed to load office staff:', error);
+            });
 
         return () => {
             mounted = false;
         };
     }, []);
 
-    const workerProfileImageByName = useMemo(() => {
-        const map: Record<string, string> = {};
-        const walk = (node: OrgNode) => {
-            if (node.type === 'worker') {
-                const normalizedWorkerName = normalizeName(node.name);
-                const profileImageUrl = getWorkerProfileImageUrl(node);
-                if (normalizedWorkerName && profileImageUrl && !map[normalizedWorkerName]) {
-                    map[normalizedWorkerName] = profileImageUrl;
-                }
-            }
-            node.children.forEach(walk);
-        };
+    const companies = useMemo(() => flattenCompanies(treeData), [treeData]);
 
-        treeData.forEach(walk);
-        return map;
-    }, [treeData]);
+    const primaryCompany = useMemo(() => {
+        return companies.find((company) => isCheongyeonName(company.name)) || companies[0] || null;
+    }, [companies]);
 
-    const resolveLeaderImageFromWorker = (leaderName: string, fallback = '') => {
-        return workerProfileImageByName[normalizeName(leaderName)] ?? fallback;
-    };
+    const allTeams = useMemo(() => flattenTeams(companies), [companies]);
+    const teamViews = useMemo(() => allTeams.map(buildTeamView), [allTeams]);
+    const allWorkers = useMemo(() => flattenWorkers(allTeams), [allTeams]);
 
-    const companyNodes = useMemo(
-        () => treeData.filter((node) => node.type === 'company'),
-        [treeData]
-    );
-
-    const cheongyeonCompanies = useMemo(
-        () => companyNodes.filter((node) => isCheongyeonName(node.name)),
-        [companyNodes]
-    );
-
-    const primaryCompany = useMemo(
-        () =>
-            cheongyeonCompanies[0] ??
-            companyNodes.find((node) => node.data?.type === '시공사') ??
-            null,
-        [cheongyeonCompanies, companyNodes]
-    );
-
-    const constructionTeams = useMemo(() => {
-        const sourceCompanies =
-            cheongyeonCompanies.length > 0
-                ? cheongyeonCompanies
-                : primaryCompany
-                    ? [primaryCompany]
-                    : [];
-
-        return sourceCompanies
-            .flatMap((company) => company.children.filter((child) => child.type === 'team'))
+    const constructionTeamViews = useMemo(() => {
+        return teamViews
+            .filter(isConstructionTeamView)
             .sort((left, right) => {
-                const orderGap = getTeamSortOrder(left) - getTeamSortOrder(right);
-                if (orderGap !== 0) {
-                    return orderGap;
-                }
+                const leftOrder = getConstructionTeamOrder(left.name);
+                const rightOrder = getConstructionTeamOrder(right.name);
+                if (leftOrder !== rightOrder) return leftOrder - rightOrder;
                 return left.name.localeCompare(right.name, 'ko');
             });
-    }, [cheongyeonCompanies, primaryCompany]);
+    }, [teamViews]);
 
-    const uniqueSiteCount = useMemo(
-        () => new Set(constructionTeams.flatMap((team) => getTeamSiteNames(team, sites))).size,
-        [constructionTeams, sites]
+    const activeOfficeStaffRows = useMemo(
+        () => officeStaffRows.filter(isActiveOfficeStaff),
+        [officeStaffRows]
     );
 
-    const totalMembers = useMemo(
-        () => constructionTeams.reduce((sum, team) => sum + getTeamWorkers(team).length, 0),
-        [constructionTeams]
+    const managementStaff = useMemo(
+        () => activeOfficeStaffRows.filter((staff) => matchesOfficeDepartment(staff, ['관리부', '관리팀', '관리'])),
+        [activeOfficeStaffRows]
     );
 
-    const slottedConstructionTeams = useMemo(() => {
-        const remainingTeams = [...constructionTeams];
+    const salesStaff = useMemo(
+        () => activeOfficeStaffRows.filter((staff) => matchesOfficeDepartment(staff, ['영업부', '영업팀', '영업'])),
+        [activeOfficeStaffRows]
+    );
 
-        return Array.from({ length: 10 }, (_, index) => {
-            const preferredLeaderName = TEAM_SLOT_LEADERS[index];
+    const developmentStaff = useMemo(
+        () => activeOfficeStaffRows.filter((staff) => matchesOfficeDepartment(staff, ['개발부', '개발팀', '개발', '전산', 'ERP', '시스템'])),
+        [activeOfficeStaffRows]
+    );
 
-            if (preferredLeaderName) {
-                const matchedIndex = remainingTeams.findIndex((team) => {
-                    const directLeaderName = normalizeName(team.data?.leaderName);
-                    return (
-                        directLeaderName === normalizeName(preferredLeaderName) ||
-                        Boolean(findWorkerByName(team, preferredLeaderName))
-                    );
-                });
+    const departmentTeamViews = useMemo<Record<DepartmentKey, TeamView[]>>(() => ({
+        construction: constructionTeamViews,
+        management: [buildOfficeTeamView('management', '관리팀', managementStaff, '관리부', MANAGEMENT_TASKS)],
+        sales: [buildOfficeTeamView('sales', '영업팀', salesStaff, '영업부', SALES_TASKS)],
+        development: [buildOfficeTeamView('development', '개발팀', developmentStaff, '개발팀', DEVELOPMENT_TASKS)],
+    }), [constructionTeamViews, developmentStaff, managementStaff, salesStaff]);
 
-                if (matchedIndex >= 0) {
-                    return remainingTeams.splice(matchedIndex, 1)[0];
-                }
-            }
+    const selectedDepartmentTeams = useMemo(() => {
+        const normalizedQuery = query.trim().toLowerCase();
+        const departmentFiltered = departmentTeamViews[activeDepartment] || [];
 
-            return remainingTeams.shift();
+        if (!normalizedQuery) return departmentFiltered;
+
+        return departmentFiltered.filter((team) => {
+            const text = [
+                team.name,
+                team.leaderName,
+                team.leaderRole,
+                team.status,
+                team.siteNames.join(' '),
+                team.workers.map((worker) => `${worker.name} ${getWorkerRole(worker)}`).join(' '),
+            ].join(' ').toLowerCase();
+            return text.includes(normalizedQuery);
         });
-    }, [constructionTeams]);
+    }, [activeDepartment, departmentTeamViews, query]);
 
-    const teamSlots = useMemo<TeamSlot[]>(
-        () =>
-            Array.from({ length: 10 }, (_, index) => {
-                const source = slottedConstructionTeams[index];
-                const members = source ? getTeamWorkers(source) : [];
-                const preferredLeaderName = TEAM_SLOT_LEADERS[index];
-                const preferredLeader = source ? findWorkerByName(source, preferredLeaderName) : undefined;
-                const leader = preferredLeader ?? (source ? getTeamLeader(source) : undefined);
+    const departments = useMemo<DepartmentView[]>(() => [
+        {
+            key: 'construction',
+            title: '시공팀',
+            subtitle: 'Construction Team',
+            description: '현장 시공팀을 지정된 순서대로 정리하고, 팀장과 투입 인원을 빠르게 확인합니다.',
+            icon: faHelmetSafety,
+            color: '#4f7cff',
+            stat: `${formatNumber(constructionTeamViews.length)}팀`,
+            helper: `${formatNumber(constructionTeamViews.reduce((sum, team) => sum + team.memberCount, 0))}명`,
+            tasks: ['현장 시공', '팀별 투입관리', '작업 진행 확인'],
+        },
+        {
+            key: 'management',
+            title: '관리팀',
+            subtitle: 'Administration',
+            description: '사무실 관리부 직원을 기준으로 사무, 회계, 세무 업무와 출력관리를 담당합니다.',
+            icon: faBriefcase,
+            color: '#7c3aed',
+            stat: `${formatNumber(managementStaff.length)}명`,
+            helper: '관리부 사무실직원',
+            tasks: MANAGEMENT_TASKS,
+        },
+        {
+            key: 'sales',
+            title: '영업팀',
+            subtitle: 'Sales',
+            description: '사무실 영업부 직원을 기준으로 자재, 현장, 영업 업무를 연결합니다.',
+            icon: faBullhorn,
+            color: '#00b894',
+            stat: `${formatNumber(salesStaff.length)}명`,
+            helper: '영업부 사무실직원',
+            tasks: SALES_TASKS,
+        },
+        {
+            key: 'development',
+            title: '개발팀',
+            subtitle: 'ERP Development',
+            description: 'ERP 전반 시스템 설계와 업무 프로세스 자동화, 데이터 연동을 담당합니다.',
+            icon: faCode,
+            color: '#ff8a00',
+            stat: developmentStaff.length > 0 ? `${formatNumber(developmentStaff.length)}명` : 'ERP',
+            helper: '시스템 설계',
+            tasks: DEVELOPMENT_TASKS,
+        },
+    ], [constructionTeamViews, developmentStaff.length, managementStaff.length, salesStaff.length]);
 
-                return {
-                    slot: index + 1,
-                    displayName: `청연 ${index + 1}팀`,
-                    originalName: source?.name ?? '확장 예정 라인',
-                    leaderName:
-                        preferredLeaderName ??
-                        leader?.name ??
-                        source?.data?.leaderName ??
-                        (source ? '현장 리더 확인 필요' : '배치 예정'),
-                    leaderImageUrl:
-                        getWorkerProfileImageUrl(preferredLeader) ||
-                        getWorkerProfileImageUrl(leader) ||
-                        resolveLeaderImageFromWorker(
-                            preferredLeaderName ?? leader?.name ?? source?.data?.leaderName ?? ''
-                        ) ||
-                        '',
-                    visualImageUrl:
-                        getWorkerProfileImageUrl(preferredLeader) ||
-                        getWorkerProfileImageUrl(leader) ||
-                        resolveLeaderImageFromWorker(
-                            preferredLeaderName ?? leader?.name ?? source?.data?.leaderName ?? ''
-                        ) ||
-                        '',
-                    memberCount: members.length,
-                    siteNames: source ? getTeamSiteNames(source, sites) : [],
-                    statusLabel: source ? getStatusLabel(source.data?.status) : '확장 예정',
-                    summary: source
-                        ? `${source.name}은(는) 연결된 현장의 공정 일정, 작업 인력, 안전·품질 체크포인트를 일일 기준으로 운영하는 시공 실행 라인입니다.`
-                        : '확장 예정 시공 라인으로, 현장 배치가 확정되면 팀 리더와 운영 정보가 자동 연결됩니다.',
-                    focusAreas: source
-                        ? ['공정 일정 관리', '작업 인력 운영', '안전·품질 점검']
-                        : ['현장 배치 예정', '운영 라인 세팅', '팀 구성 대기'],
-                    detailItems: source
-                        ? [
-                            {
-                                title: '공정 실행 관리',
-                                description: `${source.name}의 일일 작업 순서와 공정 흐름을 조율해 현장 운영이 끊기지 않도록 관리합니다.`
-                            },
-                            {
-                                title: '투입 계획 조정',
-                                description: `${formatNumber(members.length)}명의 인력과 ${formatNumber(source ? getTeamSiteNames(source, sites).length : 0)}개 현장 연결 정보를 바탕으로 당일 배치를 조정합니다.`
-                            },
-                            {
-                                title: '안전·품질 체크',
-                                description: '작업 시작 전 안전 요소와 품질 리스크를 점검하고, 현장 이슈를 빠르게 공유해 후속 조치를 진행합니다.'
-                            }
-                        ]
-                        : [
-                            {
-                                title: '팀 세팅 준비',
-                                description: '추가 시공 라인이 열리면 팀 리더, 담당 현장, 작업 인력이 자동으로 연결될 수 있도록 초기 세팅을 준비합니다.'
-                            },
-                            {
-                                title: '운영 구조 확장',
-                                description: '현장 증가 시 현재 팀 구조를 확장해 빠르게 투입할 수 있는 예비 운영 슬롯입니다.'
-                            },
-                            {
-                                title: '후속 배치 대기',
-                                description: '배치 확정 전까지는 담당 공정과 인력 구성이 비어 있으며, 확정 시 상세 정보가 업데이트됩니다.'
-                            }
-                        ],
-                    members,
-                    isPlaceholder: !source,
-                    source,
-                };
-            }),
-        [sites, slottedConstructionTeams, workerProfileImageByName]
-    );
+    const activeDepartmentMeta = departments.find((item) => item.key === activeDepartment) || departments[0];
+    const ceoName = normalize(primaryCompany?.data?.ceoName) || normalize(primaryCompany?.data?.representativeName) || '대표';
+    const companyName = primaryCompany?.name || '청연이엔지';
 
-    const nonConstructionTeamSlots = useMemo<Record<Exclude<DepartmentKey, 'construction'>, TeamSlot[]>>(
-        () => ({
-            hrPeople: DEPARTMENT_TEAM_PRESETS.hrPeople.map((team, index) => ({
-                slot: index + 1,
-                displayName: team.displayName,
-                originalName: team.originalName,
-                leaderName: team.leaderName,
-                leaderImageUrl: resolveLeaderImageFromWorker(team.leaderName),
-                visualImageUrl: team.visualImageUrl,
-                memberCount: team.memberCount,
-                siteNames: team.siteNames,
-                statusLabel: team.statusLabel,
-                summary: team.summary,
-                focusAreas: team.focusAreas,
-                detailItems: team.detailItems,
-                members: [],
-                isPlaceholder: true,
-            })),
-            accounting: DEPARTMENT_TEAM_PRESETS.accounting.map((team, index) => ({
-                slot: index + 1,
-                displayName: team.displayName,
-                originalName: team.originalName,
-                leaderName: team.leaderName,
-                leaderImageUrl: resolveLeaderImageFromWorker(team.leaderName),
-                visualImageUrl: team.visualImageUrl,
-                memberCount: team.memberCount,
-                siteNames: team.siteNames,
-                statusLabel: team.statusLabel,
-                summary: team.summary,
-                focusAreas: team.focusAreas,
-                detailItems: team.detailItems,
-                members: [],
-                isPlaceholder: true,
-            })),
-            management: DEPARTMENT_TEAM_PRESETS.management.map((team, index) => ({
-                slot: index + 1,
-                displayName: team.displayName,
-                originalName: team.originalName,
-                leaderName: team.leaderName,
-                leaderImageUrl: resolveLeaderImageFromWorker(team.leaderName),
-                visualImageUrl: team.visualImageUrl,
-                memberCount: team.memberCount,
-                siteNames: team.siteNames,
-                statusLabel: team.statusLabel,
-                summary: team.summary,
-                focusAreas: team.focusAreas,
-                detailItems: team.detailItems,
-                members: [],
-                isPlaceholder: true,
-            })),
-            sales: DEPARTMENT_TEAM_PRESETS.sales.map((team, index) => ({
-                slot: index + 1,
-                displayName: team.displayName,
-                originalName: team.originalName,
-                leaderName: team.leaderName,
-                leaderImageUrl: resolveLeaderImageFromWorker(team.leaderName),
-                visualImageUrl: team.visualImageUrl,
-                memberCount: team.memberCount,
-                siteNames: team.siteNames,
-                statusLabel: team.statusLabel,
-                summary: team.summary,
-                focusAreas: team.focusAreas,
-                detailItems: team.detailItems,
-                members: [],
-                isPlaceholder: true,
-            })),
-            development: DEPARTMENT_TEAM_PRESETS.development.map((team, index) => ({
-                slot: index + 1,
-                displayName: team.displayName,
-                originalName: team.originalName,
-                leaderName: team.leaderName,
-                leaderImageUrl: resolveLeaderImageFromWorker(team.leaderName),
-                visualImageUrl: team.visualImageUrl,
-                memberCount: team.memberCount,
-                siteNames: team.siteNames,
-                statusLabel: team.statusLabel,
-                summary: team.summary,
-                focusAreas: team.focusAreas,
-                detailItems: team.detailItems,
-                members: [],
-                isPlaceholder: true,
-            })),
-        }),
-        [workerProfileImageByName]
-    );
-
-    const activeTeamSlots = useMemo(
-        () =>
-            activeDepartmentKey === 'construction'
-                ? teamSlots
-                : nonConstructionTeamSlots[activeDepartmentKey],
-        [activeDepartmentKey, nonConstructionTeamSlots, teamSlots]
-    );
-
-    const teamGridRows = useMemo(() => {
-        let cursor = 0;
-        const rows: TeamSlot[][] = [];
-        while (cursor < activeTeamSlots.length) {
-            const row = activeTeamSlots.slice(cursor, cursor + TEAM_GRID_COLUMNS);
-            rows.push(row);
-            cursor += TEAM_GRID_COLUMNS;
-        }
-        return rows;
-    }, [activeTeamSlots]);
-
-    const selectedTeam = activeTeamSlots.find((slot) => slot.slot === selectedSlot) ?? activeTeamSlots[0];
-    const extraTeamCount = Math.max(0, constructionTeams.length - 10);
-    const isConstructionDepartment = activeDepartmentKey === 'construction';
-    const selectedTeamMembers = useMemo(() => {
-        if (!selectedTeam) {
-            return [];
-        }
-        const selectedLeaderName = selectedTeam.leaderName;
-
-        return [...selectedTeam.members].sort((left, right) => {
-            const leftLabel = `${String(left.data?.rank ?? '')} ${String(left.data?.role ?? '')}`;
-            const rightLabel = `${String(right.data?.rank ?? '')} ${String(right.data?.role ?? '')}`;
-            const leftPriority =
-                left.name === selectedLeaderName || /(팀장|소장|반장|부장|이사)/.test(leftLabel) ? 0 : 1;
-            const rightPriority =
-                right.name === selectedLeaderName || /(팀장|소장|반장|부장|이사)/.test(rightLabel) ? 0 : 1;
-
-            if (leftPriority !== rightPriority) {
-                return leftPriority - rightPriority;
-            }
-
-            return left.name.localeCompare(right.name, 'ko');
-        });
-    }, [selectedTeam]);
-    const selectedTeamDetailItems = selectedTeam?.detailItems ?? [];
-
-    const departmentCards = useMemo<DepartmentCardConfig[]>(
-        () => [
-            {
-                key: 'construction',
-                title: '시공팀',
-                english: 'Construction Operations',
-                description: '현장 공정, 인력 운영, 품질과 안전을 실시간으로 총괄합니다.',
-                icon: faHelmetSafety,
-                accent: 'from-cyan-500/25 via-sky-500/15 to-white/5',
-                iconGradient: 'from-cyan-400 to-blue-500',
-                value: `${Math.min(constructionTeams.length, 10)}/10`,
-                highlights: [
-                    `${formatNumber(totalMembers)}명 투입`,
-                    `${formatNumber(uniqueSiteCount)}개 현장`,
-                    '1~10팀 5열 배열 운영',
-                ],
-                members: [
-                    { name: '청연 1팀~10팀', role: `전체 ${formatNumber(totalMembers)}명 운영` },
-                ],
-            },
-            {
-                key: 'hrPeople',
-                title: '인사팀',
-                english: 'HR Operations',
-                description: '현장과 본사의 채용 요청 접수, 입퇴사 처리, 근로계약, 교육, 평가, 노무 대응까지 사람 관련 운영 프로세스를 끝까지 관리하는 부서입니다.',
-                icon: faChartLine,
-                accent: 'from-emerald-500/25 via-teal-500/15 to-white/5',
-                iconGradient: 'from-emerald-400 to-teal-500',
-                value: 'HR Core',
-                highlights: ['채용 요청 접수·면접 운영', '입퇴사·근로계약·4대보험', '교육·평가·노무 이슈 대응'],
-                members: [
-                    { name: '채용/배치', role: '현장 인력 요청 접수부터 입사 확정, 배치 통보까지 연결' },
-                    { name: '평가/노무', role: '교육, 복무, 평가, 퇴직 정산과 노무 이슈를 관리' },
-                ],
-            },
-            {
-                key: 'accounting',
-                title: '회계팀',
-                english: 'Accounting Team',
-                description: '현장별 비용과 매입·매출 흐름을 정리하고, 자금 집행, 세무 신고, 정산 마감, 원가 분석까지 숫자로 경영 판단을 지원하는 재무 부서입니다.',
-                icon: faCalculator,
-                accent: 'from-amber-500/25 via-orange-500/15 to-white/5',
-                iconGradient: 'from-amber-400 to-orange-500',
-                value: 'Accounting Core',
-                highlights: ['일일 자금 집행·정산 관리', '월 마감·세금계산서·부가세 신고', '현장 원가·손익 데이터 관리'],
-                members: [
-                    { name: '회계/마감', role: '매입·매출, 자금일보, 월별 마감 데이터를 관리' },
-                    { name: '세무/원가', role: '세무 신고와 프로젝트별 원가·수익성 분석을 담당' },
-                ],
-            },
-            {
-                key: 'management',
-                title: '관리팀',
-                english: 'Management Team',
-                description: '차량, 비품, 계약 문서, 사내 시설, 공문, 총무성 구매 등 조직 운영에 필요한 기반 업무를 안정적으로 유지하는 지원 부서입니다.',
-                icon: faLayerGroup,
-                accent: 'from-cyan-500/25 via-sky-500/15 to-white/5',
-                iconGradient: 'from-cyan-400 to-sky-500',
-                value: 'Management Core',
-                highlights: ['자산·비품·차량 관리', '계약 문서·공문·행정 지원', '사내 운영·총무 프로세스 유지'],
-                members: [
-                    { name: '자산/총무', role: '비품, 차량, 시설, 소모품과 같은 사내 자산 운영' },
-                    { name: '문서/행정', role: '계약, 공문, 대관, 내부 운영 지원 업무를 관리' },
-                ],
-            },
-            {
-                key: 'sales',
-                title: '영업팀',
-                english: 'Sales & Bidding',
-                description: '발주 정보 수집, 입찰 검토, 견적서 작성, 제안 미팅, 협력사와 고객 커뮤니케이션을 통해 수주 파이프라인을 관리하는 대외 영업 부서입니다.',
-                icon: faBoxesStacked,
-                accent: 'from-fuchsia-500/20 via-violet-500/10 to-white/5',
-                iconGradient: 'from-fuchsia-400 to-violet-500',
-                value: 'Bid Flow',
-                highlights: ['입찰 공고 분석·수주 전략', '견적서·제안서 작성', '고객사·협력사 관계 관리'],
-                members: [
-                    { name: '입찰/견적', role: '공고 분석, 조건 검토, 제안서와 견적서 작성' },
-                    { name: '고객/협력사', role: '미팅, 후속 대응, 네트워크 유지로 수주를 연결' },
-                ],
-            },
-            {
-                key: 'development',
-                title: '개발팀',
-                english: 'Development Team',
-                description: 'ERP, 관리자 화면, 모바일 입력 기능, OCR·AI 자동화, 데이터 연동을 개발해 현장과 본사 업무를 디지털로 연결하는 기술 조직입니다.',
-                icon: faSitemap,
-                accent: 'from-sky-500/20 via-indigo-500/12 to-white/5',
-                iconGradient: 'from-sky-400 to-indigo-500',
-                value: 'Build Ops',
-                highlights: ['ERP·업무 플랫폼 개발', 'AI·OCR 기반 자동화', '데이터 연동·운영 고도화'],
-                members: [
-                    { name: '플랫폼 개발', role: '사내 시스템, 관리자 화면, 모바일 입력 기능을 개발' },
-                    { name: '자동화/데이터', role: 'OCR, AI 처리, 데이터 연동과 반복업무 자동화 담당' },
-                ],
-            },
-        ],
-        [constructionTeams.length, totalMembers, uniqueSiteCount]
-    );
-
-    const activeDepartmentCard =
-        departmentCards.find((card) => card.key === activeDepartmentKey) ?? departmentCards[0];
-
-    const handleDepartmentSelect = (departmentKey: DepartmentKey) => {
-        setActiveDepartmentKey(departmentKey);
-        setSelectedSlot(1);
-        window.setTimeout(() => {
-            pyramidSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 80);
-    };
-
-    const ceoName = String(primaryCompany?.data?.ceoName ?? '').trim() || '대표이사';
-    const companyName = primaryCompany?.name ?? '청연ENG';
-
-    if (loading || sitesLoading) {
+    if (loading) {
         return (
-            <div className={`flex min-h-screen flex-col items-center justify-center ${isDarkMode ? 'bg-slate-950 text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
-                <div className="relative mb-8 h-20 w-20">
-                    <div className="absolute inset-0 rounded-full border border-cyan-400/30" />
-                    <div className="absolute inset-2 rounded-full border-2 border-t-cyan-300 border-r-transparent border-b-transparent border-l-transparent animate-spin" />
-                    <div className="absolute inset-0 flex items-center justify-center text-cyan-300">
+            <div className="cheongyeon-org-codeit-page flex min-h-screen items-center justify-center bg-white text-[#333236]">
+                <div className="text-center">
+                    <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-[8px] bg-[#f6f5ff] text-[#7c3aed]">
                         <FontAwesomeIcon icon={faSitemap} className="text-2xl" />
                     </div>
+                    <p className="text-sm font-black tracking-[0.18em] text-[#7a8191]">ORGANIZATION LOADING</p>
                 </div>
-                <p className="text-lg font-semibold tracking-[0.3em] text-cyan-100/80">ORGANIZATION LOADING</p>
             </div>
         );
     }
 
     return (
-        <div
-            className={`org-chart-page min-h-screen ${isDarkMode ? 'is-dark bg-[#08111f] text-slate-100' : 'is-light bg-slate-50 text-slate-900'}`}
-            style={{ fontFamily: "'Pretendard Variable','Pretendard','SUIT Variable','Noto Sans KR',sans-serif" }}
-        >
-            {isDarkMode && (
-                <div className="pointer-events-none fixed inset-0 overflow-hidden">
-                    <div className="absolute left-[-10%] top-[-18%] h-[32rem] w-[32rem] rounded-full bg-cyan-500/12 blur-[160px]" />
-                    <div className="absolute bottom-[-20%] right-[-6%] h-[30rem] w-[30rem] rounded-full bg-fuchsia-500/10 blur-[180px]" />
-                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(14,165,233,0.08),transparent_32%),linear-gradient(to_bottom,rgba(8,17,31,0.18),rgba(8,17,31,0.94))]" />
-                </div>
-            )}
+        <div className="cheongyeon-org-codeit-page min-h-screen bg-white text-[#333236]">
+            <div className="bg-[#080c16] px-4 py-3 text-center text-sm font-semibold text-white">
+                조직 구조를 더 짧은 주기로 보고, 팀 배치를 더 빠르게 파악하세요
+            </div>
 
-            <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-8 px-4 py-6 md:px-8 md:py-8 xl:px-10">
-                <motion.section
-                    initial={{ opacity: 0, y: 22 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5, delay: 0.05 }}
-                    className="rounded-[36px] border border-white/10 bg-slate-950/55 px-4 py-6 shadow-[0_32px_110px_rgba(2,6,23,0.55)] backdrop-blur-2xl md:px-6 md:py-8 xl:px-8"
-                >
-                    <div className="flex justify-center">
-                        <motion.div
-                            whileHover={{ y: -4, scale: 1.01 }}
-                            className="relative w-full max-w-[420px] overflow-hidden rounded-[28px] border border-cyan-300/25 bg-gradient-to-br from-slate-900 via-slate-950 to-cyan-950/60 px-6 py-6 text-center shadow-[0_24px_60px_rgba(34,211,238,0.18)]"
-                        >
-                            <div className="absolute inset-x-[18%] top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/80 to-transparent" />
-                            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-blue-500 text-white shadow-[0_16px_32px_rgba(59,130,246,0.35)]">
-                                <FontAwesomeIcon icon={faCrown} className="text-xl" />
+            <section className="bg-[#f7f8fb] px-5 py-16 md:px-8">
+                <div className="mx-auto max-w-[1180px]">
+                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[0.85fr_1.15fr]">
+                        <div className="rounded-[8px] border border-[#e2e5ee] bg-white p-7 shadow-[0_18px_45px_rgba(21,27,45,0.05)]">
+                            <div className="flex items-center gap-4">
+                                <img src={logoConstruction} alt="청연이엔지 로고" className="h-16 w-16 rounded-[8px] object-cover" />
+                                <div className="min-w-0 text-left">
+                                    <div className="text-sm font-bold text-[#7a8191]">Chief Executive Officer</div>
+                                    <div className="mt-1 truncate text-3xl font-black text-[#24242a]">{ceoName}</div>
+                                    <div className="mt-1 truncate text-sm font-bold text-[#4f7cff]">{companyName}</div>
+                                </div>
                             </div>
-                            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/80">
-                                Chief Executive Officer
-                            </div>
-                            <div className="text-3xl font-black tracking-tight text-white">{ceoName}</div>
-                            <div className="mt-2 text-sm text-slate-300">{companyName}</div>
-                            <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs text-slate-300">
-                                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
-                                    최고 의사결정
-                                </span>
-                                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
-                                    조직 운영 총괄
-                                </span>
-                                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
-                                    현장 전략 컨트롤타워
-                                </span>
-                            </div>
-                        </motion.div>
-                    </div>
 
-                    <div className="relative mt-10">
-                        <div className="absolute left-1/2 top-[-38px] hidden h-10 w-px -translate-x-1/2 bg-gradient-to-b from-cyan-300/80 to-transparent xl:block" />
-                        <div className="absolute left-[12.5%] right-[12.5%] top-0 hidden h-px bg-gradient-to-r from-transparent via-cyan-300/65 to-transparent xl:block" />
+                            <div className="mt-7 grid grid-cols-3 gap-3">
+                                {[
+                                    { label: '회사', value: formatNumber(companies.length) },
+                                    { label: '팀', value: formatNumber(teamViews.length) },
+                                    { label: '인원', value: formatNumber(allWorkers.length) },
+                                ].map((item) => (
+                                    <div key={item.label} className="rounded-[8px] border border-[#eef0f6] bg-[#f7f8fb] px-3 py-4 text-center">
+                                        <div className="text-2xl font-black text-[#24242a]">{item.value}</div>
+                                        <div className="mt-1 text-xs font-bold text-[#7a8191]">{item.label}</div>
+                                    </div>
+                                ))}
+                            </div>
 
-                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-                            {departmentCards.map((card) => (
-                                <DepartmentCard
-                                    key={card.key}
-                                    card={card}
-                                    isActive={card.key === activeDepartmentKey}
-                                    onClick={() => handleDepartmentSelect(card.key)}
-                                    isDarkMode={isDarkMode}
-                                />
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                            {departments.map((department) => (
+                                <button
+                                    key={department.key}
+                                    type="button"
+                                    onClick={() => setActiveDepartment(department.key)}
+                                    className={`rounded-[8px] border p-5 text-left transition ${
+                                        activeDepartment === department.key
+                                            ? 'border-[#4f7cff] bg-white shadow-[0_18px_45px_rgba(79,124,255,0.14)]'
+                                            : 'border-[#e2e5ee] bg-white hover:border-[#bfc9e5]'
+                                    }`}
+                                >
+                                    <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-[8px] text-lg text-white" style={{ backgroundColor: department.color }}>
+                                        <FontAwesomeIcon icon={department.icon} />
+                                    </div>
+                                    <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[#7a8191]">{department.subtitle}</div>
+                                    <div className="mt-1 text-xl font-black text-[#24242a]">{department.title}</div>
+                                    <div className="mt-4 text-2xl font-black" style={{ color: department.color }}>{department.stat}</div>
+                                    <div className="mt-1 text-xs font-bold text-[#7a8191]">{department.helper}</div>
+                                </button>
                             ))}
                         </div>
                     </div>
-                </motion.section>
+                </div>
+            </section>
 
-                <section
-                    ref={pyramidSectionRef}
-                    className={isConstructionDepartment ? 'grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_380px]' : 'grid gap-6'}
-                >
-                    <motion.div
-                        initial={{ opacity: 0, y: 24 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.5, delay: 0.1 }}
-                        className="overflow-hidden rounded-[34px] border border-white/10 bg-white/[0.045] px-5 py-6 shadow-[0_30px_100px_rgba(2,6,23,0.5)] backdrop-blur-xl md:px-6 md:py-7 xl:px-8"
-                    >
-                        <AnimatePresence mode="wait" initial={false}>
-                            <motion.div
-                                key={`department-panel-${activeDepartmentKey}`}
-                                variants={pyramidRevealVariants}
-                                initial="hidden"
-                                animate="visible"
-                                exit="exit"
-                            >
-                                    <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                                        <div className="space-y-2">
-                                            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.3em] text-cyan-100/80">
-                                                <FontAwesomeIcon icon={activeDepartmentCard?.icon ?? faHardHat} />
-                                                {activeDepartmentCard?.english ?? 'Department Grid'}
-                                            </div>
-                                            <h2 className="text-2xl font-black tracking-tight text-white md:text-3xl">
-                                                {activeDepartmentCard?.title ?? '부서'} 팀 운영 그리드
-                                            </h2>
-                                            <p className="max-w-3xl text-sm leading-7 text-slate-300">
-                                                선택된 부서의 팀 카드를 5개씩 정렬해 한 번에 비교하기 쉽게 구성했습니다.
-                                                팀 카드를 누르면 대표 이미지와 핵심 담당 업무를 오른쪽에서 바로 확인할 수 있습니다.
-                                            </p>
-                                        </div>
-
-                                        <div className="rounded-2xl border border-cyan-300/15 bg-cyan-400/8 px-4 py-3 text-sm text-cyan-50">
-                                            <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-100/70">Current Coverage</div>
-                                            <div className="mt-1 text-xl font-black">
-                                                {activeDepartmentKey === 'construction'
-                                                    ? `${formatNumber(Math.min(constructionTeams.length, 10))} / 10 팀 연결`
-                                                    : `${formatNumber(activeTeamSlots.length)}개 팀 구성`}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {isConstructionDepartment ? (
-                                        <>
-                                            <div className="relative mt-10 space-y-4">
-                                                <div className="pointer-events-none absolute left-1/2 top-[-12px] hidden h-[calc(100%-4rem)] w-px -translate-x-1/2 bg-gradient-to-b from-cyan-300/25 via-white/0 to-white/0 xl:block" />
-                                                {teamGridRows.map((row, rowIndex) => (
-                                                    <motion.div
-                                                        key={`row-${rowIndex}`}
-                                                        variants={pyramidItemVariants}
-                                                        className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-5"
-                                                    >
-                                                        {row.map((slot) => {
-                                                            const teamTone = getTeamTone(activeDepartmentKey, slot.displayName, isDarkMode);
-                                                            return (
-                                                                <motion.button
-                                                                    key={slot.slot}
-                                                                    type="button"
-                                                                    onClick={() => setSelectedSlot(slot.slot)}
-                                                                    className="w-full text-left focus:outline-none"
-                                                                    variants={pyramidItemVariants}
-                                                                >
-                                                                    <motion.div
-                                                                        whileHover={{ y: -6, scale: 1.02 }}
-                                                                        animate={{
-                                                                            y: selectedSlot === slot.slot ? -4 : 0,
-                                                                            scale: selectedSlot === slot.slot ? 1.02 : 1,
-                                                                        }}
-                                                                        transition={{ duration: 0.28, ease: 'easeOut' }}
-                                                                        className={`relative overflow-hidden rounded-[26px] border px-5 py-5 shadow-[0_18px_46px_rgba(2,6,23,0.35)] transition-all duration-300 ${
-                                                                            selectedSlot === slot.slot
-                                                                                ? teamTone.selectedCard
-                                                                                : slot.isPlaceholder
-                                                                                    ? (isDarkMode ? 'border-white/10 bg-white/[0.035] hover:border-white/20' : 'border-slate-200 bg-white hover:border-slate-300')
-                                                                                    : teamTone.normalCard
-                                                                        }`}
-                                                                    >
-                                                                        <div className="absolute inset-x-[18%] top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent opacity-60" />
-                                                                        <div className="flex items-start justify-between gap-3">
-                                                                            <div>
-                                                                                <div className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                                                                    Team {slot.slot}
-                                                                                </div>
-                                                                                <div className={`mt-2 text-xl font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                                                                                    {slot.displayName}
-                                                                                </div>
-                                                                            </div>
-                                                                            <div className="flex w-36 flex-col items-end gap-2">
-                                                                                <LeaderAvatar
-                                                                                    imageUrl={slot.visualImageUrl || slot.leaderImageUrl}
-                                                                                    name={slot.leaderName}
-                                                                                    size="tile"
-                                                                                    isDarkMode={isDarkMode}
-                                                                                />
-                                                                                <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${teamTone.statusBadge}`}>
-                                                                                    {slot.statusLabel}
-                                                                                </div>
-                                                                            </div>
-                                                                        </div>
-
-                                                                        <div className={`mt-4 text-sm ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-                                                                            {slot.originalName}
-                                                                        </div>
-
-                                                                        <div className={`mt-5 grid grid-cols-2 gap-2 text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-                                                                            <SmallStat label="현장" value={`${formatNumber(slot.siteNames.length)}개`} isDarkMode={isDarkMode} />
-                                                                            <SmallStat label="인원" value={`${formatNumber(slot.memberCount)}명`} isDarkMode={isDarkMode} />
-                                                                        </div>
-
-                                                                        <div className={`mt-4 flex items-center gap-2 text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                                                            <FontAwesomeIcon icon={faMapMarkerAlt} className={teamTone.iconText} />
-                                                                            {slot.siteNames.length > 0 ? `${slot.siteNames.length}개 현장 연결·담당` : '현장 연결 대기'}
-                                                                        </div>
-                                                                    </motion.div>
-                                                                </motion.button>
-                                                            );
-                                                        })}
-                                                    </motion.div>
-                                                ))}
-                                            </div>
-
-                                            {extraTeamCount > 0 && (
-                                                <div className="mt-8 rounded-2xl border border-amber-300/15 bg-amber-400/10 px-4 py-3 text-sm text-amber-50">
-                                                    10팀 이후 추가로 연결된 시공팀이 {formatNumber(extraTeamCount)}개 있습니다. 현재 화면은 요청 기준에 맞춰 1팀부터 10팀까지만 4열 구조로 노출합니다.
-                                                </div>
-                                            )}
-                                        </>
-                                    ) : (
-                                        <div className="mt-10 space-y-6">
-                                            {selectedTeam && (
-                                                <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.1fr)]">
-                                                    <motion.div
-                                                        variants={pyramidItemVariants}
-                                                        className="relative min-h-[540px] overflow-hidden rounded-[32px] border border-white/10 bg-slate-950/75 shadow-[0_28px_80px_rgba(2,6,23,0.46)]"
-                                                    >
-                                                        {selectedTeam.visualImageUrl || selectedTeam.leaderImageUrl ? (
-                                                            <img
-                                                                src={selectedTeam.visualImageUrl || selectedTeam.leaderImageUrl}
-                                                                alt={selectedTeam.displayName}
-                                                                className="absolute inset-0 h-full w-full object-cover"
-                                                                loading="lazy"
-                                                            />
-                                                        ) : (
-                                                            <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/25 via-slate-950 to-blue-950" />
-                                                        )}
-                                                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/45 to-slate-950/10" />
-                                                        <div className="relative z-10 flex h-full flex-col justify-between p-6 md:p-8">
-                                                            <div className="flex items-center justify-between gap-3">
-                                                                <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-black/20 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-50 backdrop-blur-md">
-                                                                    Team Introduction
-                                                                </div>
-                                                                <div className="rounded-full border border-cyan-300/20 bg-cyan-400/12 px-3 py-1.5 text-xs font-semibold text-cyan-50 backdrop-blur-md">
-                                                                    {selectedTeam.statusLabel}
-                                                                </div>
-                                                            </div>
-                                                            <div>
-                                                                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-100/80">
-                                                                    {activeDepartmentCard?.title ?? '부서'} Selected Team
-                                                                </p>
-                                                                <h3 className="mt-3 text-4xl font-black tracking-tight text-white md:text-5xl">
-                                                                    {selectedTeam.displayName}
-                                                                </h3>
-                                                                <p className="mt-3 text-lg font-medium text-slate-200">
-                                                                    {selectedTeam.originalName}
-                                                                </p>
-                                                                <p className="mt-6 max-w-xl text-sm leading-7 text-slate-200/90">
-                                                                    {selectedTeam.summary}
-                                                                </p>
-                                                            </div>
-                                                            <div className="flex flex-wrap gap-2">
-                                                                {selectedTeam.focusAreas.map((focus) => (
-                                                                    <span
-                                                                        key={`${selectedTeam.slot}-intro-${focus}`}
-                                                                        className="rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs text-white backdrop-blur-md"
-                                                                    >
-                                                                        {focus}
-                                                                    </span>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    </motion.div>
-
-                                                    <motion.div
-                                                        variants={pyramidItemVariants}
-                                                        className="rounded-[32px] border border-white/10 bg-slate-950/72 p-6 shadow-[0_28px_80px_rgba(2,6,23,0.46)] md:p-8"
-                                                    >
-                                                        <div className="flex items-start justify-between gap-4">
-                                                            <div>
-                                                                <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-50">
-                                                                    <FontAwesomeIcon icon={faChartLine} />
-                                                                    Detailed Responsibilities
-                                                                </div>
-                                                                <h3 className="mt-4 text-3xl font-black tracking-tight text-white">
-                                                                    업무 상세 설명
-                                                                </h3>
-                                                                <p className="mt-3 text-sm leading-7 text-slate-300">
-                                                                    빈 공간 대신 팀이 실제로 수행하는 실무를 단계별로 풀어 적었습니다. 어떤 일을 중심으로 운영되는 팀인지 바로 읽히도록 구성했습니다.
-                                                                </p>
-                                                            </div>
-                                                            <div className="rounded-full border border-cyan-300/15 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold text-cyan-50">
-                                                                핵심 업무 {formatNumber(selectedTeamDetailItems.length)}개
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="mt-6 grid grid-cols-2 gap-3">
-                                                            <DetailMetric icon={faBuilding} label="운영 상태" value={selectedTeam.statusLabel} isDarkMode={isDarkMode} />
-                                                            <DetailMetric icon={faSitemap} label="조직 단계" value={`${activeDepartmentCard?.title ?? '부서'} > ${selectedTeam.slot}팀`} isDarkMode={isDarkMode} />
-                                                            <DetailMetric icon={faChartLine} label="핵심 업무" value={selectedTeam.focusAreas[0] ?? '업무 운영'} isDarkMode={isDarkMode} />
-                                                            <DetailMetric icon={faLayerGroup} label="지원 축" value={selectedTeam.focusAreas[1] ?? '운영 지원'} isDarkMode={isDarkMode} />
-                                                        </div>
-
-                                                        <div className="mt-6 space-y-3">
-                                                            {selectedTeamDetailItems.map((item, index) => (
-                                                                <motion.div
-                                                                    key={`${selectedTeam.slot}-${item.title}`}
-                                                                    initial={{ opacity: 0, x: 18 }}
-                                                                    animate={{ opacity: 1, x: 0 }}
-                                                                    transition={{ duration: 0.26, delay: Math.min(index * 0.05, 0.22) }}
-                                                                    className="rounded-[24px] border border-white/10 bg-white/[0.04] px-4 py-4"
-                                                                >
-                                                                    <div className="flex items-start gap-3">
-                                                                        <div className="mt-1 h-3 w-3 rounded-full bg-cyan-300/80 shadow-[0_0_18px_rgba(103,232,249,0.55)]" />
-                                                                        <div className="min-w-0">
-                                                                            <div className="text-base font-black tracking-tight text-white">{item.title}</div>
-                                                                            <p className="mt-2 text-sm leading-7 text-slate-300">
-                                                                                {item.description}
-                                                                            </p>
-                                                                        </div>
-                                                                    </div>
-                                                                </motion.div>
-                                                            ))}
-                                                        </div>
-
-                                                        <div className="mt-6 rounded-[24px] border border-white/10 bg-black/10 px-4 py-4">
-                                                            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                                                                팀 운영 설명
-                                                            </div>
-                                                            <p className="mt-3 text-sm leading-7 text-slate-300">
-                                                                {selectedTeam.summary}
-                                                            </p>
-                                                        </div>
-                                                    </motion.div>
-                                                </div>
-                                            )}
-
-                                            <div className="rounded-[30px] border border-white/10 bg-slate-950/52 px-5 py-5 shadow-[0_24px_60px_rgba(2,6,23,0.42)] md:px-6 md:py-6">
-                                                <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-                                                    <div>
-                                                        <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-100/75">
-                                                            Team Selector
-                                                        </div>
-                                                        <h3 className="mt-2 text-xl font-black tracking-tight text-white">
-                                                            팀 선택 카드
-                                                        </h3>
-                                                        <p className="mt-2 text-sm leading-7 text-slate-300">
-                                                            아래 카드에서 팀을 선택하면 좌측 사진 중심 소개와 우측 업무 설명이 즉시 바뀝니다.
-                                                        </p>
-                                                    </div>
-                                                    <div className="rounded-full border border-cyan-300/15 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold text-cyan-50">
-                                                        총 {formatNumber(activeTeamSlots.length)}개 팀
-                                                    </div>
-                                                </div>
-
-                                                <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                                                    {activeTeamSlots.map((slot) => {
-                                                        const teamTone = getTeamTone(activeDepartmentKey, slot.displayName, isDarkMode);
-                                                        const previewImageUrl = slot.visualImageUrl || slot.leaderImageUrl;
-
-                                                        return (
-                                                            <motion.button
-                                                                key={`selector-${slot.slot}`}
-                                                                type="button"
-                                                                onClick={() => setSelectedSlot(slot.slot)}
-                                                                variants={pyramidItemVariants}
-                                                                whileHover={{ y: -4, scale: 1.015 }}
-                                                                whileTap={{ scale: 0.99 }}
-                                                                className="w-full text-left focus:outline-none"
-                                                            >
-                                                                <div
-                                                                    className={`overflow-hidden rounded-[24px] border shadow-[0_16px_40px_rgba(2,6,23,0.34)] transition-all duration-300 ${
-                                                                        selectedSlot === slot.slot
-                                                                            ? teamTone.selectedCard
-                                                                            : teamTone.normalCard
-                                                                    }`}
-                                                                >
-                                                                    <div className="relative h-40 overflow-hidden">
-                                                                        {previewImageUrl ? (
-                                                                            <img
-                                                                                src={previewImageUrl}
-                                                                                alt={slot.displayName}
-                                                                                className="h-full w-full object-cover transition-transform duration-700 hover:scale-105"
-                                                                                loading="lazy"
-                                                                            />
-                                                                        ) : (
-                                                                            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-cyan-400/20 to-blue-500/20">
-                                                                                <FontAwesomeIcon icon={faUserTie} className="text-3xl text-white/70" />
-                                                                            </div>
-                                                                        )}
-                                                                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/25 to-transparent" />
-                                                                        <div className="absolute left-4 top-4 rounded-full border border-white/15 bg-black/20 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-white backdrop-blur-md">
-                                                                            Team {slot.slot}
-                                                                        </div>
-                                                                        <div className="absolute bottom-4 left-4 right-4">
-                                                                            <div className="text-lg font-black tracking-tight text-white">{slot.displayName}</div>
-                                                                            <div className="mt-1 text-xs text-white/80">{slot.originalName}</div>
-                                                                        </div>
-                                                                    </div>
-                                                                    <div className="px-4 py-4">
-                                                                        <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold inline-flex ${teamTone.statusBadge}`}>
-                                                                            {slot.statusLabel}
-                                                                        </div>
-                                                                        <p className={`mt-3 line-clamp-3 text-xs leading-6 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-                                                                            {slot.summary}
-                                                                        </p>
-                                                                    </div>
-                                                                </div>
-                                                            </motion.button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </motion.div>
-                        </AnimatePresence>
-                    </motion.div>
-
-                    {isConstructionDepartment && (
-                        <AnimatePresence initial={false}>
-                            {selectedTeam && (
-                                <motion.aside
-                                    variants={pyramidItemVariants}
-                                    initial="hidden"
-                                    animate="visible"
-                                    exit="exit"
-                                    className="rounded-[34px] border border-white/10 bg-slate-950/65 px-5 py-6 shadow-[0_28px_90px_rgba(2,6,23,0.52)] backdrop-blur-2xl md:px-6 xl:sticky xl:top-6 xl:self-start"
-                                >
-                                    <AnimatePresence mode="wait">
-                                        <motion.div
-                                            key={`${activeDepartmentKey}-${selectedTeam.slot}`}
-                                            initial={{ opacity: 0, y: 18, scale: 0.985 }}
-                                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                                            exit={{ opacity: 0, y: -14, scale: 0.985 }}
-                                            transition={{ duration: 0.32, ease: 'easeOut' }}
-                                        >
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div>
-                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-cyan-100/70">
-                                                        Focus Team
-                                                    </div>
-                                                    <h3 className="mt-2 text-2xl font-black tracking-tight text-white">
-                                                        {selectedTeam.displayName}
-                                                    </h3>
-                                                    <p className="mt-2 text-sm text-slate-300">{selectedTeam.originalName}</p>
-                                                </div>
-                                                <div className="flex flex-col items-end gap-3">
-                                                    <LeaderAvatar
-                                                        imageUrl={selectedTeam.visualImageUrl || selectedTeam.leaderImageUrl}
-                                                        name={selectedTeam.leaderName}
-                                                        size="feature"
-                                                        isDarkMode={isDarkMode}
-                                                    />
-                                                    <div className="rounded-full border border-cyan-300/15 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold text-cyan-50">
-                                                        {selectedTeam.statusLabel}
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div className="mt-6 grid grid-cols-2 gap-3">
-                                                <DetailMetric icon={faMapMarkerAlt} label="현장 수" value={`${formatNumber(selectedTeam.siteNames.length)}개`} isDarkMode={isDarkMode} />
-                                                <DetailMetric icon={faUsers} label="인원" value={`${formatNumber(selectedTeam.memberCount)}명`} isDarkMode={isDarkMode} />
-                                                <DetailMetric icon={faBuilding} label="상태" value={selectedTeam.statusLabel} isDarkMode={isDarkMode} />
-                                                <DetailMetric icon={faSitemap} label="조직 단계" value={`${activeDepartmentCard?.title ?? '부서'} > ${selectedTeam.slot}팀`} isDarkMode={isDarkMode} />
-                                            </div>
-
-                                            <div className="mt-6">
-                                                <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                                                    연결 현장 / 담당팀 현장
-                                                </div>
-                                                <div className="mt-3 flex flex-wrap gap-2">
-                                                    {selectedTeam.siteNames.length > 0 ? (
-                                                        selectedTeam.siteNames.map((siteName, index) => (
-                                                            <motion.span
-                                                                key={`${selectedTeam.slot}-${siteName}`}
-                                                                initial={{ opacity: 0, y: 10 }}
-                                                                animate={{ opacity: 1, y: 0 }}
-                                                                transition={{ duration: 0.24, delay: index * 0.03 }}
-                                                                className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs text-slate-200"
-                                                            >
-                                                                {siteName}
-                                                            </motion.span>
-                                                        ))
-                                                    ) : (
-                                                        <span className="rounded-full border border-dashed border-white/15 px-3 py-1.5 text-xs text-slate-400">
-                                                            연결된 현장이 없습니다.
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            <div className="mt-6">
-                                                <div className="flex items-center justify-between gap-3">
-                                                    <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                                                        팀 인원
-                                                    </div>
-                                                    <motion.div
-                                                        key={`member-count-${selectedTeam.slot}`}
-                                                        initial={{ opacity: 0, scale: 0.9 }}
-                                                        animate={{ opacity: 1, scale: 1 }}
-                                                        className="rounded-full border border-cyan-300/15 bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-50"
-                                                    >
-                                                        전체 {formatNumber(selectedTeam.memberCount)}명
-                                                    </motion.div>
-                                                </div>
-                                                <div className="mt-3 max-h-[28rem] space-y-2 overflow-y-auto pr-1">
-                                                    {selectedTeamMembers.length > 0 ? (
-                                                        selectedTeamMembers.map((member, index) => (
-                                                            <motion.div
-                                                                key={`${selectedTeam.slot}-${member.id ?? member.name}`}
-                                                                initial={{ opacity: 0, x: 18 }}
-                                                                animate={{ opacity: 1, x: 0 }}
-                                                                transition={{ duration: 0.26, delay: Math.min(index * 0.025, 0.28) }}
-                                                                className="flex items-center justify-between rounded-2xl border border-white/8 bg-white/[0.035] px-3 py-2.5"
-                                                            >
-                                                                <div>
-                                                                    <div className="text-sm font-semibold text-white">{member.name}</div>
-                                                                    <div className="text-xs text-slate-400">
-                                                                        {String(member.data?.rank ?? member.data?.role ?? '직책 미등록')}
-                                                                    </div>
-                                                                </div>
-                                                                <div className="text-xs text-slate-500">
-                                                                    {String(member.data?.status ?? '재직')}
-                                                                </div>
-                                                            </motion.div>
-                                                        ))
-                                                    ) : (
-                                                        <div className="rounded-2xl border border-dashed border-white/12 px-4 py-4 text-sm text-slate-400">
-                                                            연결된 팀원이 없습니다.
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </motion.div>
-                                    </AnimatePresence>
-                                </motion.aside>
-                            )}
-                        </AnimatePresence>
-                    )}
-                </section>
-            </main>
-        </div>
-    );
-};
-
-const OverviewCard = ({
-    label,
-    value,
-    accent,
-}: {
-    label: string;
-    value: string;
-    accent: string;
-}) => (
-    <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-slate-950/55 p-4 shadow-[0_18px_40px_rgba(2,6,23,0.42)]">
-        <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${accent}`} />
-        <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">{label}</div>
-        <div className="mt-4 text-2xl font-black text-white md:text-3xl">{value}</div>
-    </div>
-);
-
-const DepartmentCard = ({
-    card,
-    isActive = false,
-    onClick,
-    isDarkMode = true,
-}: {
-    card: DepartmentCardConfig;
-    isActive?: boolean;
-    onClick?: () => void;
-    isDarkMode?: boolean;
-}) => {
-    const body = (
-        <>
-            <div className={`absolute inset-0 bg-gradient-to-br ${card.accent}`} />
-            <div className="absolute left-1/2 top-[-24px] hidden h-6 w-px -translate-x-1/2 bg-gradient-to-b from-cyan-300/70 to-transparent xl:block" />
-            <div className="relative z-10">
-                <div className="flex items-start justify-between gap-3">
-                    <div
-                        className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${card.iconGradient} text-white shadow-[0_16px_28px_rgba(15,23,42,0.38)]`}
-                    >
-                        <FontAwesomeIcon icon={card.icon} className="text-lg" />
-                    </div>
-                    <div className="flex items-center gap-2">
-                        {onClick && (
-                            <motion.span
-                                animate={{ rotate: isActive ? 180 : 0 }}
-                                transition={{ duration: 0.28, ease: 'easeOut' }}
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-cyan-300/15 bg-cyan-400/10 text-cyan-50"
-                            >
-                                <FontAwesomeIcon icon={faChevronDown} className="text-xs" />
-                            </motion.span>
-                        )}
-                        <div className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold ${isDarkMode ? 'border-white/10 bg-white/10 text-white/90' : 'border-slate-200 bg-white text-slate-700'}`}>
-                            {card.value}
+            <section className="px-5 py-16 md:px-8">
+                <div className="mx-auto max-w-[1180px]">
+                    <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
+                        <div>
+                            <p className="text-base font-extrabold text-[#4f7cff]">{activeDepartmentMeta.subtitle}</p>
+                            <h2 className="mt-3 text-3xl font-black text-[#24242a] md:text-5xl">
+                                {activeDepartmentMeta.title}
+                            </h2>
+                            <p className="mt-4 max-w-[640px] text-base leading-7 text-[#656b7a]">
+                                {activeDepartmentMeta.description}
+                            </p>
+                            <div className="mt-5 flex max-w-[720px] flex-wrap gap-2">
+                                {activeDepartmentMeta.tasks.map((task) => (
+                                    <span key={task} className="rounded-[8px] bg-[#eef4ff] px-3 py-1.5 text-xs font-black text-[#4f7cff]">
+                                        {task}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="relative w-full md:w-[360px]">
+                            <FontAwesomeIcon icon={faMagnifyingGlass} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#8d94a3]" />
+                            <input
+                                value={query}
+                                onChange={(event) => setQuery(event.target.value)}
+                                placeholder="팀, 리더, 구성원 검색"
+                                className="h-12 w-full rounded-[8px] border border-[#dfe3ef] bg-white pl-11 pr-4 text-sm font-bold outline-none focus:border-[#4f7cff]"
+                            />
                         </div>
                     </div>
+
+                    {selectedDepartmentTeams.length > 0 ? (
+                        <div className="mt-10 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+                            {selectedDepartmentTeams.map((team, index) => {
+                                const leader = team.source ? getTeamLeader(team.source) : team.workers[0];
+                                const leaderImage = getWorkerImage(leader);
+                                return (
+                                    <article key={team.id} className="rounded-[8px] border border-[#e2e5ee] bg-white p-6 shadow-[0_18px_45px_rgba(21,27,45,0.05)]">
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-black text-[#4f7cff]">{String(index + 1).padStart(2, '0')}</div>
+                                                <h3 className="mt-2 truncate text-2xl font-black text-[#24242a]">{team.name}</h3>
+                                                <div className="mt-1 text-sm font-bold text-[#7a8191]">{team.status}</div>
+                                            </div>
+                                            <div className="rounded-[8px] bg-[#f6f5ff] px-3 py-2 text-sm font-black text-[#7c3aed]">
+                                                {formatNumber(team.memberCount)}명
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-6 flex items-center gap-3 rounded-[8px] border border-[#eef0f6] bg-[#f7f8fb] p-4">
+                                            {leaderImage ? (
+                                                <img src={leaderImage} alt={team.leaderName} className="h-12 w-12 rounded-[8px] object-cover" />
+                                            ) : (
+                                                <div className="flex h-12 w-12 items-center justify-center rounded-[8px] bg-[#4f7cff] text-lg font-black text-white">
+                                                    {team.leaderName.slice(0, 1)}
+                                                </div>
+                                            )}
+                                            <div className="min-w-0">
+                                                <div className="truncate text-base font-black text-[#24242a]">{team.leaderName}</div>
+                                                <div className="truncate text-sm font-bold text-[#7a8191]">{team.leaderRole}</div>
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-5 flex flex-wrap gap-2">
+                                            {team.siteNames.length > 0 ? team.siteNames.map((siteName) => (
+                                                <span key={siteName} className="rounded-[8px] bg-[#eef4ff] px-3 py-1 text-xs font-black text-[#4f7cff]">
+                                                    {siteName}
+                                                </span>
+                                            )) : (
+                                                <span className="rounded-[8px] bg-[#f0f2f6] px-3 py-1 text-xs font-black text-[#7a8191]">
+                                                    현장 연결 대기
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        <div className="mt-6 border-t border-[#eef0f6] pt-5">
+                                            <div className="mb-3 text-sm font-black text-[#24242a]">구성원</div>
+                                            <div className="space-y-2">
+                                                {team.workers.length > 0 ? team.workers.map((worker) => (
+                                                    <div key={worker.id} className="flex items-center justify-between gap-3 text-sm">
+                                                        <span className="truncate font-extrabold text-[#333236]">{worker.name}</span>
+                                                        <span className="flex-shrink-0 font-bold text-[#7a8191]">{getWorkerRole(worker)}</span>
+                                                    </div>
+                                                )) : (
+                                                    <div className="rounded-[8px] bg-[#f7f8fb] px-4 py-3 text-sm font-bold text-[#7a8191]">
+                                                        등록된 구성원이 없습니다.
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </article>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="mt-10 rounded-[8px] border border-[#e2e5ee] bg-[#f7f8fb] p-10 text-center">
+                            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-[8px] bg-white text-[#4f7cff]">
+                                <FontAwesomeIcon icon={faUsers} />
+                            </div>
+                            <p className="text-xl font-black text-[#24242a]">표시할 팀이 없습니다</p>
+                            <p className="mt-3 text-base text-[#656b7a]">검색어를 지우거나 다른 조직 영역을 선택해 주세요.</p>
+                        </div>
+                    )}
                 </div>
+            </section>
 
-                <div className="mt-5">
-                    <div className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                        {card.english}
-                    </div>
-                    <div className={`mt-2 text-2xl font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{card.title}</div>
-                    <p className={`mt-3 text-sm leading-7 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>{card.description}</p>
-                </div>
-
-                {onClick && (
-                    <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-cyan-300/15 bg-cyan-400/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-50">
-                        {isActive ? '팀 열람중' : '팀 펼치기'}
-                    </div>
-                )}
-
-                <div className="mt-5 flex flex-wrap gap-2">
-                    {card.highlights.map((highlight) => (
-                        <span
-                            key={highlight}
-                            className={`rounded-full border px-3 py-1.5 text-xs ${isDarkMode ? 'border-white/10 bg-white/5 text-slate-200' : 'border-slate-200 bg-white text-slate-600'}`}
-                        >
-                            {highlight}
-                        </span>
+            <section className="bg-[#111827] px-5 py-16 text-white md:px-8">
+                <div className="mx-auto grid max-w-[1180px] grid-cols-1 gap-5 md:grid-cols-3">
+                    {[
+                        { icon: faCrown, label: '대표', value: ceoName, helper: companyName },
+                        { icon: faBuilding, label: '조직 단위', value: `${formatNumber(companies.length)}개`, helper: '회사 및 협력사' },
+                        { icon: faUserTie, label: '운영 리더', value: `${formatNumber(teamViews.length)}명`, helper: '팀 리더 기준' },
+                    ].map((item) => (
+                        <div key={item.label} className="rounded-[8px] border border-[#273244] bg-[#182133] p-7">
+                            <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-[8px] bg-[#4f7cff] text-xl">
+                                <FontAwesomeIcon icon={item.icon} />
+                            </div>
+                            <div className="text-sm font-bold text-[#aab6c8]">{item.label}</div>
+                            <div className="mt-2 text-3xl font-black">{item.value}</div>
+                            <div className="mt-2 text-sm font-semibold text-[#c7d0df]">{item.helper}</div>
+                        </div>
                     ))}
                 </div>
-
-                <div className="mt-5 space-y-2">
-                    {card.members.map((member, index) => (
-                        <motion.div
-                            key={`${card.key}-${member.name}`}
-                            initial={{ opacity: 0, y: 10 }}
-                            whileInView={{ opacity: 1, y: 0 }}
-                            viewport={{ once: true, amount: 0.5 }}
-                            transition={{ duration: 0.24, delay: index * 0.06 }}
-                            className={`flex items-center justify-between rounded-2xl border px-3 py-2.5 ${isDarkMode ? 'border-white/10 bg-black/10' : 'border-slate-200 bg-white'}`}
-                        >
-                            <div className={`text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{member.name}</div>
-                            <div className={`text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-500'}`}>{member.role}</div>
-                        </motion.div>
-                    ))}
-                </div>
-            </div>
-        </>
-    );
-
-    if (onClick) {
-        return (
-            <motion.button
-                type="button"
-                whileHover={{ y: -6, scale: 1.01 }}
-                whileTap={{ scale: 0.985 }}
-                transition={{ duration: 0.2 }}
-                onClick={onClick}
-                className={`relative overflow-hidden rounded-[28px] border p-5 text-left shadow-[0_18px_48px_rgba(2,6,23,0.36)] ${
-                    isActive
-                        ? (isDarkMode ? 'border-cyan-300/40 bg-white/[0.04]' : 'border-cyan-400 bg-white')
-                        : (isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-slate-200 bg-white')
-                }`}
-            >
-                {body}
-            </motion.button>
-        );
-    }
-
-    return (
-        <motion.div
-            whileHover={{ y: -6, scale: 1.01 }}
-            transition={{ duration: 0.2 }}
-            className={`relative overflow-hidden rounded-[28px] border p-5 shadow-[0_18px_48px_rgba(2,6,23,0.36)] ${isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-slate-200 bg-white'}`}
-        >
-            {body}
-        </motion.div>
-    );
-};
-
-const SmallStat = ({ label, value, isDarkMode = true }: { label: string; value: string; isDarkMode?: boolean }) => (
-    <div className={`rounded-2xl border px-3 py-2 ${isDarkMode ? 'border-white/8 bg-white/[0.04]' : 'border-slate-200 bg-slate-50'}`}>
-        <div className={`text-[10px] font-semibold uppercase tracking-[0.22em] ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>{label}</div>
-        <div className={`mt-1 truncate text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-slate-700'}`}>{value}</div>
-    </div>
-);
-
-const DetailMetric = ({
-    icon,
-    label,
-    value,
-    isDarkMode = true,
-}: {
-    icon: IconDefinition;
-    label: string;
-    value: string;
-    isDarkMode?: boolean;
-}) => (
-    <div className={`rounded-[22px] border p-3 ${isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-slate-200 bg-white'}`}>
-        <div className={`flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-            <FontAwesomeIcon icon={icon} />
-            {label}
-        </div>
-        <div className={`mt-3 text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{value}</div>
-    </div>
-);
-
-const LeaderAvatar = ({
-    imageUrl,
-    name,
-    size,
-    isDarkMode = true,
-}: {
-    imageUrl?: string;
-    name: string;
-    size: 'sm' | 'lg' | 'tile' | 'feature';
-    isDarkMode?: boolean;
-}) => {
-    const [hasImageError, setHasImageError] = useState(false);
-    const dimensions =
-        size === 'feature'
-            ? 'h-[13rem] w-[9.4rem] rounded-[1.4rem]'
-            : size === 'tile'
-                ? 'h-[8.8rem] w-full rounded-[1rem]'
-            : size === 'lg'
-                ? 'h-16 w-16 rounded-2xl'
-                : 'h-11 w-11 rounded-xl';
-    const labelSize = size === 'feature' ? 'text-3xl' : size === 'lg' ? 'text-lg' : 'text-sm';
-    const resolvedImageUrl = String(imageUrl ?? '').trim();
-    const shouldRenderImage = Boolean(resolvedImageUrl) && !hasImageError;
-    const wrapperClass =
-        size === 'feature'
-            ? `relative overflow-hidden border ${isDarkMode ? 'border-cyan-300/30 bg-slate-900/90 shadow-[0_28px_60px_rgba(8,145,178,0.28)]' : 'border-cyan-300/60 bg-white shadow-[0_18px_40px_rgba(6,182,212,0.2)]'} ${dimensions}`
-            : size === 'tile'
-                ? `relative overflow-hidden border ${isDarkMode ? 'border-cyan-300/25 bg-slate-900/90 shadow-[0_18px_42px_rgba(14,116,144,0.28)]' : 'border-cyan-300/50 bg-white shadow-[0_12px_28px_rgba(14,116,144,0.18)]'} ${dimensions}`
-                : `overflow-hidden border ${isDarkMode ? 'border-white/10 bg-slate-900/80' : 'border-slate-200 bg-white'} ${dimensions}`;
-    const imageClass = size === 'feature' || size === 'tile' ? 'h-full w-full object-cover object-top' : 'h-full w-full object-cover';
-
-    return (
-        <div className={wrapperClass}>
-            {shouldRenderImage ? (
-                <img
-                    src={resolvedImageUrl}
-                    alt={name}
-                    className={imageClass}
-                    loading="lazy"
-                    onError={() => setHasImageError(true)}
-                />
-            ) : (
-                <div className={`flex h-full w-full items-center justify-center ${isDarkMode ? 'bg-gradient-to-br from-cyan-400/30 to-blue-500/20' : 'bg-gradient-to-br from-cyan-100 to-sky-100'} ${labelSize}`}>
-                    <FontAwesomeIcon icon={faUserTie} className={`${isDarkMode ? 'text-white/75' : 'text-cyan-700'}`} />
-                </div>
-            )}
+            </section>
         </div>
     );
 };

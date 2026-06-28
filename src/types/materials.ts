@@ -18,6 +18,30 @@ export interface Material {
     updatedAt?: Timestamp | FieldValue | null;
 }
 
+export interface MaterialPhotoFile {
+    path: string;
+    name: string;
+    contentType?: string;
+    size?: number;
+    originalSize?: number;
+    compressedSize?: number;
+    compressed?: boolean;
+    source?: 'camera' | 'gallery';
+}
+
+export interface MaterialPhotoBatch {
+    id: string;
+    transactionType: 'inbound' | 'outbound';
+    transactionDate: string;
+    siteId: string;
+    photoCount: number;
+    photos: MaterialPhotoFile[];
+    createdBy?: string;
+    createdByName?: string;
+    createdAt?: Timestamp | FieldValue | null;
+    updatedAt?: Timestamp | FieldValue | null;
+}
+
 export interface InboundTransaction {
     id: string;
     transactionDate: string;
@@ -35,6 +59,8 @@ export interface InboundTransaction {
     invoiceNumber?: string;
     notes?: string;
     photoUrls?: string[];
+    photoBatchId?: string;
+    photoCount?: number;
     registeredBy: string;
     registeredByName: string;
     createdAt?: Timestamp | FieldValue | null;
@@ -56,9 +82,13 @@ export interface OutboundTransaction {
     unit: string;
     recipient?: string;
     recipientPhone?: string;
+    rentalCompanyId?: string;
+    rentalCompanyName?: string;
     deliveryStatus: 'pending' | 'in-transit' | 'delivered';
     notes?: string;
     photoUrls?: string[];
+    photoBatchId?: string;
+    photoCount?: number;
     registeredBy: string;
     registeredByName: string;
     createdAt?: Timestamp | FieldValue | null;

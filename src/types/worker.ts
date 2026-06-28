@@ -4,6 +4,7 @@ export interface Worker {
     team: string; // Team ID or Name
     role: string; // e.g., '팀장', '기능공'
     payType?: string; // 급여 방식 (일급, 월급 등)
+    laborStatementPayType?: 'direct' | 'delegate';
     unitPrice: number;
     residentNumber?: string;
     phone?: string;

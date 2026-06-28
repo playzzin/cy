@@ -187,4 +187,15 @@ export {
     seedWelfareAssetMasters,
     upsertWelfareCategory,
 } from './services/welfareAssetLedger';
+export {
+    analyzePartnerRecognitionJob,
+    commitPartnerRecognitionResults,
+    createPartnerRecognitionBatchJob,
+    rematchPartnerRecognitionResult,
+    syncPartnerRecognitionBatchJob,
+} from './partnerRecognition';
+export {
+    getServerAiSettingsStatus,
+    saveServerAiSettings,
+} from './serverAiSettings';
 
