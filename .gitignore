@@ -53,6 +53,11 @@ review-captures/
 tmp/
 output/
 
+# One-off local analysis and Codex attachment artifacts
+/.codex-remote-attachments/
+/.tmp_buyback_audit/
+/outputs/
+
 # Root-level screenshots and diagnostic exports
 /*.png
 /*.jpg
