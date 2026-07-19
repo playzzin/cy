@@ -1,8 +1,168 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    match /{allPaths=**} {
-      allow read, write: if request.auth != null;
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function adminRoles() {
+      return [
+        'ADMIN', 'admin', 'administrator', 'super_admin', 'owner',
+        'DEV', 'dev', 'developer', 'system_admin',
+        '관리자', '사장', '실장', '개발', '개발자', '시스템관리자',
+        '愿由ъ옄', '?ъ옣', '?ㅼ옣', '媛쒕컻', '媛쒕컻??', '?쒖뒪?쒓?由ъ옄'
+      ];
+    }
+
+    function payrollRoles() {
+      return [
+        'PAYROLL_MANAGER', 'payroll_manager',
+        '급여담당', '정산담당', '정산관리자',
+        '湲됱뿬?대떦', '?뺤궛?대떦', '?뺤궛愿由ъ옄'
+      ];
+    }
+
+    function financeRoles() {
+      return [
+        'FINANCE', 'finance', 'finance_manager',
+        'ACCOUNTING', 'accounting', 'accounting_manager',
+        '회계', '재무', '경리', '회계담당', '재무담당'
+      ];
+    }
+
+    function officeRoles() {
+      return [
+        'OFFICE_STAFF', 'office_staff', 'office',
+        '사무실직원', '사무직원', '사무',
+        '?щТ?ㅼ쭅??', '?щТ吏곸썝'
+      ];
+    }
+
+    function supportRoles() {
+      return [
+        'SUPPORT', 'support', 'support_manager',
+        'manager1', 'pos_manager1', 'MANAGER1',
+        '매니저1', '메니저1',
+        '지원담당', '지원 담당', '자산관리', '자산 관리',
+        '숙소관리', '숙소 관리', '차량관리', '차량 관리'
+      ];
+    }
+
+    function hasTokenRole(roles) {
+      return isSignedIn()
+        && (
+          request.auth.token.role in roles
+          || request.auth.token.position in roles
+          || request.auth.token.systemRole in roles
+          || request.auth.token.accountType in roles
+          || (
+            request.auth.token.roles is list
+            && request.auth.token.roles.hasAny(roles)
+          )
+          || (
+            request.auth.token.additionalPositions is list
+            && request.auth.token.additionalPositions.hasAny(roles)
+          )
+        );
+    }
+
+    function isAdmin() {
+      return hasTokenRole(adminRoles());
+    }
+
+    function canAccessCardBillingStatements() {
+      return isAdmin()
+        || hasTokenRole(officeRoles())
+        || hasTokenRole(supportRoles())
+        || hasTokenRole(financeRoles())
+        || hasTokenRole(payrollRoles());
+    }
+
+    function isValidBusinessUpload() {
+      return request.resource != null
+        && request.resource.size < 25 * 1024 * 1024
+        && request.resource.contentType is string
+        && (
+          request.resource.contentType.matches('image/.*')
+          || request.resource.contentType == 'application/pdf'
+          || request.resource.contentType == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          || request.resource.contentType == 'application/vnd.ms-excel'
+          || request.resource.contentType == 'text/csv'
+        );
+    }
+
+    function isValidCardBillingAttachment() {
+      return request.resource != null
+        && request.resource.size < 25 * 1024 * 1024
+        && request.resource.contentType is string
+        && (
+          request.resource.contentType.matches('image/.*')
+          || request.resource.contentType == 'application/pdf'
+        );
+    }
+
+    // These paths have their own least-privilege rules below. They must stay
+    // out of the authenticated fallback because overlapping matches are ORed.
+    function isExplicitlyProtectedTopLevel(topLevel) {
+      return topLevel in [
+        'public',
+        'profiles',
+        'users',
+        'backups',
+        'system',
+        'card-billing-statements'
+      ];
+    }
+
+    match /public/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidBusinessUpload();
+    }
+
+    match /profiles/{userId}/{allPaths=**} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if isSignedIn()
+        && (request.auth.uid == userId || isAdmin())
+        && isValidBusinessUpload();
+    }
+
+    match /users/{userId}/{allPaths=**} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if isSignedIn()
+        && (request.auth.uid == userId || isAdmin())
+        && isValidBusinessUpload();
+    }
+
+    match /backups/{allPaths=**} {
+      allow read, write: if isAdmin();
+    }
+
+    match /system/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() && isValidBusinessUpload();
+    }
+
+    match /card-billing-statements/{yearMonth}/imports/{batchId}/{fileName} {
+      allow read: if canAccessCardBillingStatements();
+      allow write: if canAccessCardBillingStatements()
+        && isValidCardBillingAttachment()
+        && request.resource.contentType == 'application/pdf';
+    }
+
+    // Monthly-card-ledger attachments use a billing document id instead of an
+    // AI import session id. This explicit path keeps those PDFs/images private
+    // while allowing the same card-billing roles to upload and view them.
+    match /card-billing-statements/{yearMonth}/{documentId}/{fileName} {
+      allow read: if canAccessCardBillingStatements();
+      allow write: if canAccessCardBillingStatements()
+        && isValidCardBillingAttachment();
+    }
+
+    match /{topLevel}/{allPaths=**} {
+      allow read: if !isExplicitlyProtectedTopLevel(topLevel) && isSignedIn();
+      allow write: if !isExplicitlyProtectedTopLevel(topLevel)
+        && isSignedIn()
+        && isValidBusinessUpload();
     }
   }
 }
