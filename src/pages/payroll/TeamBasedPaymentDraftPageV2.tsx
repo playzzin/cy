@@ -34,6 +34,14 @@ const CUSTOM_PAYSLIP_CONTRACTOR_VALUE = '__custom_contractor__';
 const KB_MAX_DEPOSIT_DISPLAY_LENGTH = 10;
 const KB_MAX_WITHDRAW_DISPLAY_LENGTH = 14;
 
+const getAverageUnitPrice = (totalAmount: number, totalManDay: number, fallback = 0): number => {
+    if (!Number.isFinite(totalAmount) || !Number.isFinite(totalManDay) || totalManDay <= 0) {
+        return fallback;
+    }
+
+    return Math.round(totalAmount / totalManDay);
+};
+
 type AdvanceDeductionLine = {
     id: string;
     label: string;
@@ -1091,6 +1099,9 @@ const TeamBasedPaymentDraftPageV2: React.FC = () => {
                             if (existing) {
                                 existing.totalManDay += manDay;
                                 existing.totalAmount = supportModel === 'fixed' ? supportRate : existing.totalAmount + nextAmount;
+                                if (supportModel !== 'fixed') {
+                                    existing.unitPrice = getAverageUnitPrice(existing.totalAmount, existing.totalManDay, existing.unitPrice);
+                                }
                                 if (reportYearMonth) {
                                     existing.amountByYearMonth[reportYearMonth] = supportModel === 'fixed'
                                         ? supportRate
@@ -1141,6 +1152,7 @@ const TeamBasedPaymentDraftPageV2: React.FC = () => {
                     if (existing) {
                         existing.totalManDay += manDay;
                         existing.totalAmount += grossPay;
+                        existing.unitPrice = getAverageUnitPrice(existing.totalAmount, existing.totalManDay, existing.unitPrice);
                         if (reportYearMonth) {
                             existing.amountByYearMonth[reportYearMonth] = (existing.amountByYearMonth[reportYearMonth] ?? 0) + grossPay;
                         }

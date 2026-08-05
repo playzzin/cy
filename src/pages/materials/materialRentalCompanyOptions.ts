@@ -38,7 +38,8 @@ export const buildMaterialRentalCompanyOptions = (
         .forEach((company) => {
             const name = trimText(company.name);
             addOption({
-                id: `company:${trimText(company.id || company.legacyId || name)}`,
+                // 회사 계정의 linkedCompanyIds와 동일한 원본 ID를 저장해야 포털 범위를 정확히 비교할 수 있다.
+                id: trimText(company.id || company.legacyId || name),
                 name,
                 source: 'company',
             });

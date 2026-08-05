@@ -9,7 +9,7 @@ import {
     faList
 } from '@fortawesome/free-solid-svg-icons';
 import FileCard from '../../components/developer/FileCard';
-import { projectFiles, FileInfo } from '../../data/projectFiles';
+import { projectFiles } from '../../data/projectFiles';
 
 type CategoryFilter = 'all' | 'page' | 'component' | 'service' | 'hook' | 'util';
 

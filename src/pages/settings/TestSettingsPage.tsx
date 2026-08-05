@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faRobot, faUsers, faBuilding, faUserGroup, faArrowLeft, faTrash, faCheckCircle, faExclamationCircle } from '@fortawesome/free-solid-svg-icons';
+import { faArrowLeft, faExclamationCircle } from '@fortawesome/free-solid-svg-icons';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';

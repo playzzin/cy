@@ -18,6 +18,7 @@ import { Vehicle } from '../../types/vehicle';
 import { vehicleService } from '../../services/vehicleService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
+import { supportSharedDataService } from '../../services/supportSharedDataService';
 
 type OilStatusType = 'danger' | 'warning' | 'normal';
 type OilFilterType = OilStatusType | 'all';
@@ -62,6 +63,7 @@ type EngineOilMetricInput = {
 };
 
 const STORAGE_KEY = 'engine_oil_vehicle_metrics_v2';
+const MIGRATION_KEY = 'engine_oil_vehicle_metrics_firestore_migrated_v1';
 const DEFAULT_TEAM_COLOR = '#94a3b8';
 
 const defaultMetric = (id: string, cycleKm = 10000): EngineOilMetric => ({
@@ -93,33 +95,68 @@ const normalizeColor = (value: unknown): string => {
     return DEFAULT_TEAM_COLOR;
 };
 
-const loadSavedMetrics = (): Record<string, EngineOilMetric> => {
+const normalizeMetricMap = (value: unknown): Record<string, EngineOilMetric> => {
+    if (!value || typeof value !== 'object') return {};
+    const entries = Array.isArray(value)
+        ? value.map((item) => [String((item as EngineOilMetricInput).id ?? ''), item] as const)
+        : Object.entries(value);
+
+    return entries.reduce<Record<string, EngineOilMetric>>((acc, [id, metric]) => {
+        const key = normalizeKey(id);
+        if (!key) return acc;
+        acc[key] = normalizeMetric(key, metric as EngineOilMetricInput);
+        return acc;
+    }, {});
+};
+
+const mergeMetricMaps = (
+    sharedMetrics: Record<string, EngineOilMetric>,
+    localMetrics: Record<string, EngineOilMetric>
+): Record<string, EngineOilMetric> => {
+    const merged = { ...sharedMetrics };
+    Object.entries(localMetrics).forEach(([id, localMetric]) => {
+        const sharedMetric = sharedMetrics[id];
+        if (!sharedMetric) {
+            merged[id] = localMetric;
+            return;
+        }
+
+        merged[id] = {
+            id,
+            currentKm: sharedMetric.currentKm > 0 ? sharedMetric.currentKm : localMetric.currentKm,
+            lastOilKm: sharedMetric.lastOilKm > 0 ? sharedMetric.lastOilKm : localMetric.lastOilKm,
+            cycleKm: sharedMetric.cycleKm !== 10000 ? sharedMetric.cycleKm : localMetric.cycleKm
+        };
+    });
+    return merged;
+};
+
+const needsLocalMigration = (): boolean => (
+    typeof window !== 'undefined'
+    && Boolean(window.localStorage.getItem(STORAGE_KEY))
+    && window.localStorage.getItem(MIGRATION_KEY) !== 'done'
+);
+
+const markLocalMigrationComplete = () => {
+    if (typeof window !== 'undefined') {
+        window.localStorage.setItem(MIGRATION_KEY, 'done');
+    }
+};
+
+const loadLocalSavedMetrics = (): Record<string, EngineOilMetric> => {
     if (typeof window === 'undefined') return {};
 
     try {
         const raw = window.localStorage.getItem(STORAGE_KEY);
-        const parsed = raw ? JSON.parse(raw) : null;
-        if (!parsed || typeof parsed !== 'object') return {};
-
-        const entries = Array.isArray(parsed)
-            ? parsed.map((item) => [String((item as EngineOilMetricInput).id ?? ''), item] as const)
-            : Object.entries(parsed);
-
-        return entries.reduce<Record<string, EngineOilMetric>>((acc, [id, value]) => {
-            const key = normalizeKey(id);
-            if (!key) return acc;
-            acc[key] = normalizeMetric(key, value as EngineOilMetricInput);
-            return acc;
-        }, {});
+        return normalizeMetricMap(raw ? JSON.parse(raw) : null);
     } catch (error) {
-        console.warn('[EngineOilCyclePage] Failed to load oil metrics:', error);
+        console.warn('[EngineOilCyclePage] Failed to load local oil metrics:', error);
         return {};
     }
 };
 
-const persistMetrics = (records: EngineOilRecord[]) => {
-    if (typeof window === 'undefined') return;
-    const payload = records.reduce<Record<string, EngineOilMetric>>((acc, record) => {
+const buildMetricPayload = (records: EngineOilRecord[]) => (
+    records.reduce<Record<string, EngineOilMetric>>((acc, record) => {
         acc[record.id] = {
             id: record.id,
             currentKm: record.currentKm,
@@ -127,13 +164,13 @@ const persistMetrics = (records: EngineOilRecord[]) => {
             cycleKm: record.cycleKm
         };
         return acc;
-    }, {});
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-};
+    }, {})
+);
 
-const clearSavedMetrics = () => {
+const persistLocalMetrics = (records: EngineOilRecord[]) => {
     if (typeof window === 'undefined') return;
-    window.localStorage.removeItem(STORAGE_KEY);
+    const payload = buildMetricPayload(records);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
 };
 
 const toDraft = (record: EngineOilRecord): EngineOilDraft => ({
@@ -165,16 +202,21 @@ const getOilStatus = (record: EngineOilRecord): OilStatus => {
     return { type: 'normal', label: '정상', nextKm, remainKm };
 };
 
-const sortByOilStatus = (records: EngineOilRecord[]): EngineOilRecord[] => {
-    const order: Record<OilStatusType, number> = { danger: 0, warning: 1, normal: 2 };
+const OIL_STATUS_ORDER: Record<OilStatusType, number> = { danger: 0, warning: 1, normal: 2 };
+
+const compareByOilStatus = (a: EngineOilRecord, b: EngineOilRecord): number => {
+    const left = getOilStatus(a);
+    const right = getOilStatus(b);
+    if (OIL_STATUS_ORDER[left.type] !== OIL_STATUS_ORDER[right.type]) return OIL_STATUS_ORDER[left.type] - OIL_STATUS_ORDER[right.type];
+    if (left.remainKm !== right.remainKm) return left.remainKm - right.remainKm;
+    return a.plate.localeCompare(b.plate, 'ko-KR');
+};
+
+const sortByTeamAndOilStatus = (records: EngineOilRecord[]): EngineOilRecord[] => {
     return [...records].sort((a, b) => {
-        const left = getOilStatus(a);
-        const right = getOilStatus(b);
-        if (order[left.type] !== order[right.type]) return order[left.type] - order[right.type];
-        if (left.remainKm !== right.remainKm) return left.remainKm - right.remainKm;
         const teamCompare = a.team.localeCompare(b.team, 'ko-KR');
         if (teamCompare !== 0) return teamCompare;
-        return a.plate.localeCompare(b.plate, 'ko-KR');
+        return compareByOilStatus(a, b);
     });
 };
 
@@ -288,6 +330,7 @@ const EngineOilCyclePage: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [globalCycleKm, setGlobalCycleKm] = useState('10000');
     const [changedIds, setChangedIds] = useState<Set<string>>(() => new Set());
+    const [saving, setSaving] = useState(false);
     const [toastMessage, setToastMessage] = useState('');
     const [toastVisible, setToastVisible] = useState(false);
     const toastTimerRef = useRef<number | null>(null);
@@ -313,7 +356,33 @@ const EngineOilCyclePage: React.FC = () => {
                 teamService.getTeams().catch(() => [] as Team[])
             ]);
 
-            const savedMetrics = loadSavedMetrics();
+            const localMetrics = loadLocalSavedMetrics();
+            let savedMetrics = localMetrics;
+            let loadWarning: string | null = null;
+            let migratedLocalData = false;
+
+            try {
+                const sharedMetrics = await supportSharedDataService.load<Record<string, EngineOilMetric>>('engine_oil_cycle');
+                if (sharedMetrics) {
+                    const normalizedSharedMetrics = normalizeMetricMap(sharedMetrics);
+                    if (needsLocalMigration()) {
+                        savedMetrics = mergeMetricMaps(normalizedSharedMetrics, localMetrics);
+                        await supportSharedDataService.save('engine_oil_cycle', savedMetrics);
+                        migratedLocalData = true;
+                    } else {
+                        savedMetrics = normalizedSharedMetrics;
+                    }
+                    markLocalMigrationComplete();
+                } else if (Object.keys(localMetrics).length > 0) {
+                    await supportSharedDataService.save('engine_oil_cycle', localMetrics);
+                    migratedLocalData = true;
+                    markLocalMigrationComplete();
+                }
+            } catch (sharedDataError) {
+                console.error('[EngineOilCyclePage] Failed to load shared oil metrics:', sharedDataError);
+                loadWarning = '공용 DB를 불러오지 못해 이 브라우저의 임시 사본을 표시합니다. 새로고침 후 다시 확인해 주세요.';
+            }
+
             const workerLookup = buildLookup(workers);
             const teamLookup = buildLookup(teams);
             const records = vehicles
@@ -336,9 +405,14 @@ const EngineOilCyclePage: React.FC = () => {
                 records,
                 drafts: toDraftMap(records)
             });
+            persistLocalMetrics(records);
+            setLoadError(loadWarning);
             setChangedIds(new Set());
             const firstCycle = records.find((record) => record.cycleKm > 0)?.cycleKm;
             if (firstCycle) setGlobalCycleKm(String(firstCycle));
+            if (migratedLocalData) {
+                showToast('기존 오일 기록을 공용 DB로 이전했습니다.');
+            }
         } catch (error) {
             console.error('[EngineOilCyclePage] Failed to load vehicles:', error);
             setLoadError(error instanceof Error ? error.message : '차량 정보를 불러오지 못했습니다.');
@@ -351,12 +425,24 @@ const EngineOilCyclePage: React.FC = () => {
         loadVehicleRecords();
     }, [refreshKey]);
 
-    const commitRecords = (records: EngineOilRecord[], drafts?: Record<string, EngineOilDraft>) => {
-        persistMetrics(records);
-        setOilState((prev) => ({
-            records,
-            drafts: drafts ?? prev.drafts
-        }));
+    const commitRecords = async (records: EngineOilRecord[], drafts?: Record<string, EngineOilDraft>): Promise<boolean> => {
+        setSaving(true);
+        try {
+            await supportSharedDataService.save('engine_oil_cycle', buildMetricPayload(records));
+            persistLocalMetrics(records);
+            setOilState((prev) => ({
+                records,
+                drafts: drafts ?? prev.drafts
+            }));
+            setLoadError(null);
+            return true;
+        } catch (error) {
+            console.error('[EngineOilCyclePage] Failed to save shared oil metrics:', error);
+            showToast('공용 DB 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+            return false;
+        } finally {
+            setSaving(false);
+        }
     };
 
     const setDraftValue = (id: string, field: keyof Omit<EngineOilDraft, 'id'>, value: string) => {
@@ -388,13 +474,13 @@ const EngineOilCyclePage: React.FC = () => {
     }, [oilState.records]);
 
     const emergencyRecords = useMemo(
-        () => sortByOilStatus(oilState.records).filter((record) => getOilStatus(record).type === 'danger'),
+        () => sortByTeamAndOilStatus(oilState.records).filter((record) => getOilStatus(record).type === 'danger'),
         [oilState.records]
     );
 
     const visibleRecords = useMemo(() => {
         const query = searchTerm.trim().toLowerCase();
-        return sortByOilStatus(oilState.records).filter((record) => {
+        return sortByTeamAndOilStatus(oilState.records).filter((record) => {
             const status = getOilStatus(record);
             const matchesFilter = activeFilter === 'all' || status.type === activeFilter;
             const matchesQuery = !query || `${record.plate} ${record.team}`.toLowerCase().includes(query);
@@ -402,7 +488,7 @@ const EngineOilCyclePage: React.FC = () => {
         });
     }, [activeFilter, oilState.records, searchTerm]);
 
-    const saveRecord = (id: string) => {
+    const saveRecord = async (id: string) => {
         const draft = oilState.drafts[id];
         if (!draft) return;
 
@@ -415,10 +501,11 @@ const EngineOilCyclePage: React.FC = () => {
         const nextRecords = oilState.records.map((record) => (
             record.id === id ? { ...record, ...metric } : record
         ));
-        commitRecords(nextRecords, {
+        const saved = await commitRecords(nextRecords, {
             ...oilState.drafts,
             [id]: toDraft(nextRecords.find((record) => record.id === id) as EngineOilRecord)
         });
+        if (!saved) return;
         setChangedIds((prev) => {
             const next = new Set(prev);
             next.delete(id);
@@ -427,7 +514,53 @@ const EngineOilCyclePage: React.FC = () => {
         showToast('저장되었습니다.');
     };
 
-    const applyGlobalCycle = () => {
+    const saveChangedRecords = async () => {
+        const ids = Array.from(changedIds).filter((id) => (
+            Boolean(oilState.drafts[id]) && oilState.records.some((record) => record.id === id)
+        ));
+
+        if (ids.length === 0) {
+            showToast('저장할 변경사항이 없습니다.');
+            return;
+        }
+
+        const metricsById = new Map<string, EngineOilMetric>();
+        const invalidRecord = ids
+            .map((id) => {
+                const metric = parseDraft(oilState.drafts[id]);
+                metricsById.set(id, metric);
+                return metric.lastOilKm > metric.currentKm
+                    ? oilState.records.find((record) => record.id === id)
+                    : null;
+            })
+            .find((record): record is EngineOilRecord => Boolean(record));
+
+        if (invalidRecord) {
+            showToast(`${invalidRecord.plate} 최근교체거리는 현재거리보다 클 수 없습니다.`);
+            return;
+        }
+
+        const nextRecords = oilState.records.map((record) => {
+            const metric = metricsById.get(record.id);
+            return metric ? { ...record, ...metric } : record;
+        });
+        const nextDrafts = { ...oilState.drafts };
+        ids.forEach((id) => {
+            const savedRecord = nextRecords.find((record) => record.id === id);
+            if (savedRecord) nextDrafts[id] = toDraft(savedRecord);
+        });
+
+        const saved = await commitRecords(nextRecords, nextDrafts);
+        if (!saved) return;
+        setChangedIds((prev) => {
+            const next = new Set(prev);
+            ids.forEach((id) => next.delete(id));
+            return next;
+        });
+        showToast(`${ids.length.toLocaleString('ko-KR')}건 저장되었습니다.`);
+    };
+
+    const applyGlobalCycle = async () => {
         const cycleKm = Math.max(1, toNumber(globalCycleKm));
         if (!cycleKm) {
             showToast('전체교체주기를 입력하세요.');
@@ -441,23 +574,21 @@ const EngineOilCyclePage: React.FC = () => {
             return acc;
         }, {});
 
-        commitRecords(records, drafts);
+        const saved = await commitRecords(records, drafts);
+        if (!saved) return;
         setChangedIds(new Set());
         showToast(`전체교체주기를 ${cycleKm.toLocaleString('ko-KR')}km로 적용했습니다.`);
     };
 
-    const resetOilData = () => {
+    const resetOilData = async () => {
         if (!window.confirm('엔진오일 거리 기록만 초기화할까요? 차량번호와 팀은 차량 관리에서 다시 불러옵니다.')) return;
-        clearSavedMetrics();
         const cycleKm = Math.max(1, toNumber(globalCycleKm) || 10000);
         const records = oilState.records.map((record) => ({
             ...record,
             ...defaultMetric(record.id, cycleKm)
         }));
-        setOilState({
-            records,
-            drafts: toDraftMap(records)
-        });
+        const saved = await commitRecords(records, toDraftMap(records));
+        if (!saved) return;
         setChangedIds(new Set());
         showToast('엔진오일 기록을 초기화했습니다.');
     };
@@ -465,7 +596,7 @@ const EngineOilCyclePage: React.FC = () => {
     const handleInlineKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, id: string) => {
         if (event.key === 'Enter') {
             event.preventDefault();
-            saveRecord(id);
+            void saveRecord(id);
         }
     };
 
@@ -521,7 +652,7 @@ const EngineOilCyclePage: React.FC = () => {
                                 차량정보 새로고침
                             </button>
                             <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700">
-                                차량 관리 연동 · 차량번호/팀 자동반영 · 거리값 로컬저장
+                                차량 관리 연동 · 차량번호/팀 자동반영 · 공용 DB 저장
                             </div>
                         </div>
                     </div>
@@ -549,7 +680,7 @@ const EngineOilCyclePage: React.FC = () => {
                 </section>
 
                 <main className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-                    <div className="grid gap-2 xl:grid-cols-[minmax(240px,1fr)_auto_auto_auto] xl:items-center">
+                    <div className="grid gap-2 xl:grid-cols-[minmax(240px,1fr)_auto_auto_auto_auto] xl:items-center">
                         <label className="relative block min-w-0">
                             <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400" />
                             <input
@@ -582,6 +713,7 @@ const EngineOilCyclePage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={applyGlobalCycle}
+                                disabled={saving}
                                 className="h-8 rounded-lg bg-blue-600 px-3 text-xs font-black text-white transition-colors hover:bg-blue-700"
                             >
                                 전체 적용
@@ -590,7 +722,22 @@ const EngineOilCyclePage: React.FC = () => {
 
                         <button
                             type="button"
+                            onClick={saveChangedRecords}
+                            disabled={changedIds.size === 0 || saving}
+                            className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-black transition-colors ${
+                                changedIds.size > 0 && !saving
+                                    ? 'bg-slate-900 text-white hover:bg-slate-800'
+                                    : 'cursor-not-allowed bg-slate-100 text-slate-400'
+                            }`}
+                        >
+                            <FontAwesomeIcon icon={faFloppyDisk} />
+                            {changedIds.size > 0 ? `변경 ${changedIds.size.toLocaleString('ko-KR')}건 저장` : '일괄 저장'}
+                        </button>
+
+                        <button
+                            type="button"
                             onClick={resetOilData}
+                            disabled={saving}
                             className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-black text-red-700 transition-colors hover:bg-red-100"
                         >
                             <FontAwesomeIcon icon={faRotateLeft} />
@@ -724,6 +871,7 @@ const EngineOilCyclePage: React.FC = () => {
                                                     <button
                                                         type="button"
                                                         onClick={() => saveRecord(record.id)}
+                                                        disabled={saving}
                                                         className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-black transition-colors ${
                                                             changed
                                                                 ? 'bg-blue-600 text-white hover:bg-blue-700'
@@ -746,7 +894,7 @@ const EngineOilCyclePage: React.FC = () => {
                         <span>조회 {visibleRecords.length.toLocaleString('ko-KR')} / {oilState.records.length.toLocaleString('ko-KR')}대</span>
                         <span className="inline-flex items-center gap-1.5">
                             <FontAwesomeIcon icon={faGaugeHigh} />
-                            남은거리 오름차순 자동정렬
+                            팀명 기준 자동정렬
                         </span>
                     </div>
                 </main>

@@ -6,22 +6,21 @@ import {
     faRotateRight,
     faDownload,
     faTrash,
-    faCheckCircle,
-    faClock,
-    faForward,
-    faBan,
-    faFileSignature,
     faBuilding,
     faChevronLeft,
     faChevronRight,
     faFilter,
     faSearch,
+    faSort,
     faFileExcel,
+    faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import { taxInvoiceListService } from '../../services/taxInvoiceListService';
 import { TaxInvoiceIssue, IssueStatus, SiteWorkSummary, STATUS_CONFIG } from '../../types/taxInvoiceList';
 import { exportIssuesToExcel } from '../../utils/taxInvoiceExcelUtils';
 import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
+import PayrollIssueTopTabs from '../../components/payroll/PayrollIssueTopTabs';
+import { showConfirmAlert, toast } from '../../utils/swal';
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -53,6 +52,7 @@ const getMonthEndDate = (yearMonth: string) => {
 const SITE_TYPE_OPTIONS = ['전체', '지원', '도급', '직영'];
 const PAYMENT_TYPE_OPTIONS = ['전체', '계산서', '노무'];
 const ISSUE_TYPE_OPTIONS = ['입력', '신규', '다원'];
+const EMPTY_CELL_FILTER_OPTION = '(빈 셀)';
 
 const EMPTY_ISSUE = (yearMonth: string, no: number): Omit<TaxInvoiceIssue, 'id' | 'createdAt' | 'updatedAt'> => ({
     yearMonth,
@@ -76,6 +76,61 @@ const EMPTY_ISSUE = (yearMonth: string, no: number): Omit<TaxInvoiceIssue, 'id' 
 
 const fmt = (n: number) => n.toLocaleString('ko-KR');
 
+type IssueSortMode = 'no' | 'team';
+type SaveFeedbackStatus = 'idle' | 'saving' | 'saved' | 'error';
+
+interface SaveFeedback {
+    status: SaveFeedbackStatus;
+    message: string;
+    updatedAt?: number;
+}
+
+const COLUMN_FILTER_LABELS: Record<string, string> = {
+    no: 'No',
+    isNew: '신규',
+    issueDate: '발행일',
+    recipient: '공급받는자',
+    item: '품목',
+    supplyAmount: '공급가',
+    note: '비고',
+    manDays: '공수',
+    teamName: '팀',
+    siteType: '현장구분',
+    paymentType: '결제구분',
+    issueStatus: '발행',
+    scanCompleted: '노임서류',
+    remark: '특이사항',
+};
+
+const getIssueNoSortValue = (value: unknown): number => {
+    const no = Number(value);
+    return Number.isFinite(no) && no > 0 ? no : Number.MAX_SAFE_INTEGER;
+};
+
+const compareIssuesByNo = (a: TaxInvoiceIssue, b: TaxInvoiceIssue): number => {
+    const noDiff = getIssueNoSortValue(a.no) - getIssueNoSortValue(b.no);
+    if (noDiff !== 0) return noDiff;
+    return String(a.id ?? '').localeCompare(String(b.id ?? ''), 'ko-KR');
+};
+
+const compareIssuesByTeam = (a: TaxInvoiceIssue, b: TaxInvoiceIssue): number => {
+    const leftTeam = String(a.teamName ?? '').trim();
+    const rightTeam = String(b.teamName ?? '').trim();
+    if (leftTeam && !rightTeam) return -1;
+    if (!leftTeam && rightTeam) return 1;
+
+    const teamDiff = leftTeam.localeCompare(rightTeam, 'ko-KR');
+    if (teamDiff !== 0) return teamDiff;
+
+    const siteDiff = String(a.siteName || a.note || a.item || '').localeCompare(
+        String(b.siteName || b.note || b.item || ''),
+        'ko-KR'
+    );
+    if (siteDiff !== 0) return siteDiff;
+
+    return compareIssuesByNo(a, b);
+};
+
 const getIssueTypeLabel = (value: TaxInvoiceIssue['isNew'] | boolean | null | undefined) => {
     if (typeof value === 'boolean') return value ? '입력' : '';
     return String(value ?? '');
@@ -94,19 +149,13 @@ const getCarryoverSourceId = (issue: TaxInvoiceIssue) =>
 const getCarryoverSourceKey = (issue: TaxInvoiceIssue) =>
     `${issue.yearMonth}:${getCarryoverSourceId(issue)}`;
 
+const getCarryoverIssueDate = (source: TaxInvoiceIssue, fallbackDate: string): string =>
+    normalizeTypedDateInput(String(source.issueDate ?? '')) || fallbackDate;
+
 // ─────────────────────────────────────────────
 // Sub-components
 // ─────────────────────────────────────────────
 
-const StatusBadge: React.FC<{ status: IssueStatus }> = ({ status }) => {
-    const cfg = STATUS_CONFIG[status];
-    return (
-        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${cfg.bg} ${cfg.color} border ${cfg.border}`}>
-            <FontAwesomeIcon icon={cfg.icon} className="text-[10px]" />
-            {cfg.label}
-        </span>
-    );
-};
 
 // ─────────────────────────────────────────────
 // Site Data Import Modal
@@ -115,13 +164,15 @@ const StatusBadge: React.FC<{ status: IssueStatus }> = ({ status }) => {
 interface SiteImportModalProps {
     sites: SiteWorkSummary[];
     onClose: () => void;
-    onImport: (selected: SiteWorkSummary[]) => void;
+    onImport: (selected: SiteWorkSummary[]) => Promise<boolean>;
 }
 
 const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImport }) => {
     const [checked, setChecked] = useState<Set<string>>(new Set());
     const [filterSiteType, setFilterSiteType] = useState<string>('전체');
     const [filterPaymentType, setFilterPaymentType] = useState<string>('전체');
+    const [searchTerm, setSearchTerm] = useState('');
+    const [importing, setImporting] = useState(false);
 
     // Include team/company because the same site can be imported as separate invoice rows.
     const rowKey = (s: SiteWorkSummary) => [
@@ -133,10 +184,21 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
         s.paymentType,
     ].join('|');
 
+    const normalizedSearchTerm = searchTerm.trim().toLowerCase();
+
     const filtered = sites.filter(s => {
         const matchSiteType = filterSiteType === '전체' || s.siteType === filterSiteType;
         const matchPaymentType = filterPaymentType === '전체' || s.paymentType === filterPaymentType;
-        return matchSiteType && matchPaymentType;
+        const searchableText = [
+            s.siteName,
+            s.companyName,
+            s.teamName,
+            s.siteType,
+            s.paymentType,
+            s.siteId,
+        ].map(value => String(value ?? '').toLowerCase()).join(' ');
+        const matchSearch = !normalizedSearchTerm || searchableText.includes(normalizedSearchTerm);
+        return matchSiteType && matchPaymentType && matchSearch;
     });
 
     const toggle = (key: string) => {
@@ -172,18 +234,21 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
     const selectedSites = sites.filter(s => checked.has(rowKey(s)));
 
     return (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="site-import-title">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl">
                 <div className="p-5 border-b border-slate-100 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <div className="p-2 bg-indigo-600 rounded-xl">
                             <FontAwesomeIcon icon={faBuilding} className="text-white text-sm" />
                         </div>
-                        <h2 className="text-base font-black text-slate-900">현장 데이터 가져오기</h2>
+                        <h2 id="site-import-title" className="text-base font-black text-slate-900">현장 데이터 가져오기</h2>
                     </div>
                     <button
                         onClick={onClose}
-                        className="text-slate-400 hover:text-slate-600 text-xl font-bold w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100"
+                        type="button"
+                        aria-label="현장 데이터 가져오기 창 닫기"
+                        disabled={importing}
+                        className="text-slate-400 hover:text-slate-600 text-xl font-bold w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                         ×
                     </button>
@@ -191,12 +256,26 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
 
                 {/* Filters */}
                 <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-4 flex-wrap">
+                    <div className="relative min-w-[240px] flex-1">
+                        <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs" />
+                        <input
+                            type="search"
+                            aria-label="현장 데이터 검색"
+                            value={searchTerm}
+                            onChange={e => setSearchTerm(e.target.value)}
+                            placeholder="현장명, 발주사, 담당팀 검색"
+                            className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-8 pr-3 text-xs font-semibold text-slate-700 outline-none transition-all placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                            autoFocus
+                        />
+                    </div>
                     <div className="flex items-center gap-2">
                         <span className="text-xs font-bold text-slate-500">현장구분</span>
                         <div className="flex gap-1">
                             {SITE_TYPE_OPTIONS.map(opt => (
                                 <button
                                     key={opt}
+                                    type="button"
+                                    aria-pressed={filterSiteType === opt}
                                     onClick={() => setFilterSiteType(opt)}
                                     className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
                                         filterSiteType === opt
@@ -215,6 +294,8 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
                             {PAYMENT_TYPE_OPTIONS.map(opt => (
                                 <button
                                     key={opt}
+                                    type="button"
+                                    aria-pressed={filterPaymentType === opt}
                                     onClick={() => setFilterPaymentType(opt)}
                                     className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
                                         filterPaymentType === opt
@@ -240,6 +321,7 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
                                     <th className="px-2 py-2 w-8">
                                         <input
                                             type="checkbox"
+                                            aria-label="표시된 현장 전체 선택"
                                             checked={allFilteredChecked}
                                             onChange={toggleAll}
                                             className="w-4 h-4 rounded accent-indigo-600"
@@ -267,6 +349,7 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
                                             <td className="px-2 py-2 text-center">
                                                 <input
                                                     type="checkbox"
+                                                    aria-label={`${s.siteName} 선택`}
                                                     checked={checked.has(key)}
                                                     onChange={() => toggle(key)}
                                                     onClick={e => e.stopPropagation()}
@@ -302,18 +385,24 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
                         {selectedSites.length > 0 ? `${selectedSites.length}건 선택됨` : '선택 없음'}
                     </span>
                     <div className="flex gap-2">
-                        <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-all">
+                        <button type="button" onClick={onClose} disabled={importing} className="px-4 py-2 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-all disabled:cursor-not-allowed disabled:opacity-40">
                             취소
                         </button>
                         <button
-                            onClick={() => {
-                                onImport(selectedSites);
-                                onClose();
+                            type="button"
+                            onClick={async () => {
+                                setImporting(true);
+                                try {
+                                    const imported = await onImport(selectedSites);
+                                    if (imported) onClose();
+                                } finally {
+                                    setImporting(false);
+                                }
                             }}
-                            disabled={selectedSites.length === 0}
+                            disabled={selectedSites.length === 0 || importing}
                             className="px-5 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                            발행리스트에 추가 ({selectedSites.length}건)
+                            {importing ? '추가하는 중...' : `발행리스트에 추가 (${selectedSites.length}건)`}
                         </button>
                     </div>
                 </div>
@@ -425,6 +514,7 @@ const EditableCell: React.FC<EditableCellProps> = ({
                 ref={inputRef}
                 // number 타입은 selectionStart를 지원하지 않아 text로 변경하여 엑셀 스타일 이동 지원
                 type="text"
+                aria-label={`${COLUMN_FILTER_LABELS[String(field)] ?? String(field)} 값 편집`}
                 inputMode={type === 'number' ? 'decimal' : (type === 'date' ? 'numeric' : undefined)}
                 maxLength={type === 'date' ? 10 : undefined}
                 placeholder={type === 'date' ? 'YYYY-MM-DD' : undefined}
@@ -444,7 +534,7 @@ const EditableCell: React.FC<EditableCellProps> = ({
                 }}
                 onBlur={commit}
                 onKeyDown={handleKeyDown}
-                className={`w-full px-2 py-1 text-xs border border-indigo-400 rounded-lg outline-none bg-indigo-50 focus:ring-2 focus:ring-indigo-200 ${className}`}
+                className={`w-full px-2 py-1 text-sm border border-indigo-400 rounded-lg outline-none bg-indigo-50 focus:ring-2 focus:ring-indigo-200 ${className}`}
             />
         );
     }
@@ -452,7 +542,17 @@ const EditableCell: React.FC<EditableCellProps> = ({
     return (
         <span
             onClick={() => { setDraft(String(value)); setEditing(true); }}
-            className={`block cursor-pointer px-1 py-0.5 rounded hover:bg-indigo-50 hover:text-indigo-700 transition-colors min-h-[1.25rem] min-w-[2rem] truncate ${className}`}
+            onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === 'F2') {
+                    event.preventDefault();
+                    setDraft(String(value));
+                    setEditing(true);
+                }
+            }}
+            role="button"
+            tabIndex={0}
+            aria-label={`${COLUMN_FILTER_LABELS[String(field)] ?? String(field)} 값 편집${String(value) ? `, 현재 ${String(value)}` : ''}`}
+            className={`block cursor-pointer px-1 py-0.5 rounded hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 transition-colors min-h-[1.25rem] min-w-[2rem] truncate ${className}`}
             title={String(value)}
         >
             {type === 'number' 
@@ -537,10 +637,15 @@ const ColumnFilter: React.FC<ColumnFilterProps> = ({ label, value, onChange, opt
     return (
         <div className="relative inline-block ml-1" ref={popoverRef}>
             <button
+                type="button"
                 onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
-                className={`p-1 rounded transition-colors ${value ? 'text-indigo-600 bg-indigo-50' : 'text-slate-300 hover:text-slate-500 hover:bg-slate-100'}`}
+                aria-label={`${label} 필터${value ? `, 현재 ${value}` : ''}`}
+                aria-expanded={isOpen}
+                aria-haspopup="dialog"
+                title={`${label} 필터`}
+                className={`inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${value ? 'border-indigo-200 bg-indigo-50 text-indigo-600' : 'border-slate-200 bg-white text-slate-500 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600'}`}
             >
-                <FontAwesomeIcon icon={faFilter} className="text-[10px]" />
+                <FontAwesomeIcon icon={faFilter} className="text-[11px]" />
             </button>
 
             {isOpen && (
@@ -552,6 +657,7 @@ const ColumnFilter: React.FC<ColumnFilterProps> = ({ label, value, onChange, opt
                         <input
                             autoFocus
                             type="text"
+                            aria-label={`${label} 필터 검색`}
                             value={options ? searchTerm : value}
                             onChange={(e) => {
                                 if (options) {
@@ -568,21 +674,33 @@ const ColumnFilter: React.FC<ColumnFilterProps> = ({ label, value, onChange, opt
                     </div>
 
                     {options && (
-                        <div className="space-y-1 max-h-48 overflow-y-auto border-t pt-2 border-slate-100">
+                        <div
+                            className="flex max-h-64 w-full flex-col gap-1 overflow-y-auto whitespace-normal border-t border-slate-100 pt-2"
+                            role="listbox"
+                            aria-label={`${label} 필터 항목`}
+                        >
                             <button
+                                type="button"
                                 onClick={clearFilter}
-                                className={`w-full text-left px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${!value ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-slate-50 text-slate-600'}`}
+                                role="option"
+                                aria-selected={!value}
+                                className={`flex w-full shrink-0 items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs font-bold transition-all ${!value ? 'bg-indigo-50 text-indigo-600' : 'text-slate-600 hover:bg-slate-50'}`}
                             >
-                                전체 (All)
+                                <span>전체</span>
+                                {!value && <span aria-hidden="true">✓</span>}
                             </button>
                             {filteredOptions.length > 0 ? (
                                 filteredOptions.map(opt => (
                                     <button
+                                        type="button"
                                         key={opt}
                                         onClick={() => applyOption(opt)}
-                                        className={`w-full text-left px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${value === opt ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-slate-50 text-slate-600'}`}
+                                        role="option"
+                                        aria-selected={value === opt}
+                                        className={`flex w-full shrink-0 items-start justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-bold leading-5 transition-all ${value === opt ? 'bg-indigo-50 text-indigo-600' : 'text-slate-600 hover:bg-slate-50'}`}
                                     >
-                                        {opt}
+                                        <span className="min-w-0 break-words">{opt}</span>
+                                        {value === opt && <span className="shrink-0" aria-hidden="true">✓</span>}
                                     </button>
                                 ))
                             ) : (
@@ -595,6 +713,7 @@ const ColumnFilter: React.FC<ColumnFilterProps> = ({ label, value, onChange, opt
                     
                     {value && (
                         <button 
+                            type="button"
                             onClick={clearFilter}
                             className="mt-2 w-full py-1 text-[10px] font-bold text-red-500 hover:bg-red-50 rounded-lg transition-all"
                         >
@@ -661,6 +780,7 @@ const SelectCell: React.FC<SelectCellProps> = ({
     return (
         <select
             ref={selectRef}
+            aria-label={`${COLUMN_FILTER_LABELS[String(field)] ?? String(field)} 값 선택`}
             value={value || ''}
             onChange={e => onCommit(rowId, field, e.target.value)}
             onKeyDown={handleKeyDown}
@@ -670,7 +790,7 @@ const SelectCell: React.FC<SelectCellProps> = ({
                     onNavigate('none' as any); 
                 }
             }}
-            className={`text-xs border-0 bg-transparent cursor-pointer outline-none font-bold w-full focus:ring-2 focus:ring-indigo-400 rounded ${badgeClass}`}
+            className={`text-sm border-0 bg-transparent cursor-pointer outline-none font-bold w-full focus:ring-2 focus:ring-indigo-400 rounded ${badgeClass}`}
         >
             <option value="">-</option>
             {options.map(opt => (
@@ -689,6 +809,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
     const [issues, setIssues] = useState<TaxInvoiceIssue[]>([]);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState<Set<string>>(new Set());
+    const [saveFeedback, setSaveFeedback] = useState<SaveFeedback>({
+        status: 'idle',
+        message: '자동 저장 준비됨',
+    });
 
     // Site import
     const [siteData, setSiteData] = useState<SiteWorkSummary[]>([]);
@@ -700,24 +824,59 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
     // Column Filters State
     const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+    const [globalSearch, setGlobalSearch] = useState('');
+    const [sortMode, setSortMode] = useState<IssueSortMode>('no');
 
     const updateFilter = (field: string, val: string) => {
         setColumnFilters(prev => ({ ...prev, [field]: val }));
     };
 
+    const markSaving = (message: string) => {
+        setSaveFeedback({ status: 'saving', message });
+    };
+
+    const markSaved = (message: string) => {
+        setSaveFeedback({ status: 'saved', message, updatedAt: Date.now() });
+    };
+
+    const markSaveError = (message: string) => {
+        setSaveFeedback({ status: 'error', message, updatedAt: Date.now() });
+    };
+
+    const clearAllFilters = () => {
+        setGlobalSearch('');
+        setStatusFilter('all');
+        setColumnFilters({});
+    };
+
     // Column Filter Options (Unique Values)
+    const uniqueIssueNos = useMemo(() => Array.from(new Set(
+        issues.map(i => String(i.no ?? '').trim()).filter(Boolean)
+    )).sort((a, b) => Number(a) - Number(b)), [issues]);
+    const uniqueIssueDates = useMemo(() => Array.from(new Set(
+        issues.map(i => String(i.issueDate ?? '').trim()).filter(Boolean)
+    )).sort((a, b) => b.localeCompare(a, 'ko')), [issues]);
     const uniqueRecipients = useMemo(() => Array.from(new Set(issues.map(i => i.recipient))).filter((v): v is string => !!v).sort(), [issues]);
     const uniqueItems = useMemo(() => Array.from(new Set(issues.map(i => i.item))).filter((v): v is string => !!v).sort(), [issues]);
+    const uniqueSupplyAmounts = useMemo(() => Array.from(new Set(
+        issues.map(i => String(i.supplyAmount ?? '').trim()).filter(Boolean)
+    )).sort((a, b) => Number(a) - Number(b)), [issues]);
     const uniqueNotes = useMemo(() => Array.from(new Set(issues.map(i => i.note))).filter((v): v is string => !!v).sort(), [issues]);
+    const uniqueManDays = useMemo(() => Array.from(new Set(
+        issues.map(i => String(i.manDays ?? '').trim()).filter(Boolean)
+    )).sort((a, b) => Number(a) - Number(b)), [issues]);
     const uniqueTeams = useMemo(() => Array.from(new Set(
         issues.map(i => String(i.teamName ?? '').trim()).filter(Boolean)
     )).sort((a, b) => a.localeCompare(b, 'ko')), [issues]);
+    const uniqueRemarks = useMemo(() => Array.from(new Set(
+        issues.map(i => String(i.remark ?? '').trim()).filter(Boolean)
+    )).sort((a, b) => a.localeCompare(b, 'ko')), [issues]);
     const uniqueIssueTypes = useMemo(() => {
-        const extraValues = Array.from(new Set(issues.map(i => getIssueTypeLabel(i.isNew))))
+        const extraValues = Array.from(new Set(issues.map(i => getIssueTypeLabel(i.isNew).trim())))
             .filter((v): v is string => !!v && !ISSUE_TYPE_OPTIONS.includes(v))
             .sort((a, b) => a.localeCompare(b, 'ko'));
 
-        return [...ISSUE_TYPE_OPTIONS, ...extraValues];
+        return [EMPTY_CELL_FILTER_OPTION, ...ISSUE_TYPE_OPTIONS, ...extraValues];
     }, [issues]);
     const importedCarryoverKeys = useMemo(() => new Set(
         issues
@@ -788,7 +947,8 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         } catch (e) {
             console.error('발행리스트 로드 실패:', e);
             setIssues([]);
-            alert(`${yearMonth} 데이터 로드에 실패했습니다. 콘솔을 확인해주세요.`);
+            markSaveError(`${formatYearMonth(yearMonth)} 목록을 불러오지 못했습니다.`);
+            toast.error(`${formatYearMonth(yearMonth)} 데이터 로드에 실패했습니다.`);
         } finally {
             setLoading(false);
         }
@@ -803,6 +963,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         } catch (e) {
             console.error('전월 이월 현장 로드 실패:', e);
             setPreviousDeferredIssues([]);
+            toast.warning('전월 이월 현장을 불러오지 못했습니다.');
         } finally {
             setLoadingDeferredSites(false);
         }
@@ -827,18 +988,25 @@ const TaxInvoiceIssueListPage: React.FC = () => {
     const handleAddRow = async () => {
         const nextNo = issues.length + 1;
         const newIssue = EMPTY_ISSUE(yearMonth, nextNo);
+        markSaving('새 행을 추가하는 중입니다.');
         try {
             const id = await taxInvoiceListService.addIssue(newIssue);
             setIssues(prev => [...prev, { ...newIssue, id }].sort((a, b) => a.no - b.no));
+            markSaved('새 행이 저장되었습니다.');
+            toast.success('새 행을 추가했습니다.');
         } catch (e) {
             console.error(e);
+            markSaveError('새 행을 저장하지 못했습니다.');
+            toast.error('새 행 추가에 실패했습니다. 다시 시도해주세요.');
         }
     };
 
     // ── Delete row ──
     const handleDelete = async (id: string | undefined) => {
         if (!id) return;
-        if (!window.confirm('이 항목을 삭제하시겠습니까?')) return;
+        const confirmation = await showConfirmAlert('항목 삭제', '선택한 항목을 삭제하시겠습니까?', '삭제');
+        if (!confirmation.isConfirmed) return;
+        markSaving('항목을 삭제하는 중입니다.');
         try {
             await taxInvoiceListService.deleteIssue(id);
             const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
@@ -848,36 +1016,52 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                 next.delete(id);
                 return next;
             });
+            markSaved('항목을 삭제했습니다.');
+            toast.success('항목을 삭제했습니다.');
         } catch (e) {
             console.error(e);
+            markSaveError('항목 삭제에 실패했습니다.');
+            toast.error('항목 삭제에 실패했습니다. 다시 시도해주세요.');
         }
     };
 
     const handleBulkDelete = async () => {
         if (selectedIds.size === 0) return;
-        if (!window.confirm(`선택한 ${selectedIds.size}개의 항목을 모두 삭제하시겠습니까?`)) return;
+        const confirmation = await showConfirmAlert(
+            '선택 항목 삭제',
+            `선택한 ${selectedIds.size}개의 항목을 모두 삭제하시겠습니까?`,
+            '모두 삭제'
+        );
+        if (!confirmation.isConfirmed) return;
         
         setLoading(true);
+        markSaving(`${selectedIds.size}개 항목을 삭제하는 중입니다.`);
         try {
+            const deleteCount = selectedIds.size;
             const ids = Array.from(selectedIds);
             await taxInvoiceListService.deleteIssuesBatch(ids);
             const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
             setIssues(renumbered);
             setSelectedIds(new Set());
+            markSaved(`${deleteCount}개 항목을 삭제했습니다.`);
+            toast.success(`${deleteCount}개 항목을 삭제했습니다.`);
         } catch (e) {
             console.error('일괄 삭제 실패:', e);
-            alert('일괄 삭제 중 오류가 발생했습니다.');
+            markSaveError('선택 항목 삭제에 실패했습니다.');
+            toast.error('일괄 삭제 중 오류가 발생했습니다.');
         } finally {
             setLoading(false);
         }
     };
 
     const toggleSelectAll = () => {
-        if (selectedIds.size === filteredIssues.length) {
-            setSelectedIds(new Set());
-        } else {
-            setSelectedIds(new Set(filteredIssues.map(i => i.id).filter(Boolean) as string[]));
-        }
+        const filteredIds = filteredIssues.map(issue => issue.id).filter(Boolean) as string[];
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            const allVisibleSelected = filteredIds.length > 0 && filteredIds.every(id => next.has(id));
+            filteredIds.forEach(id => allVisibleSelected ? next.delete(id) : next.add(id));
+            return next;
+        });
     };
 
     const toggleSelection = (id: string | undefined) => {
@@ -898,12 +1082,16 @@ const TaxInvoiceIssueListPage: React.FC = () => {
     ) => {
         if (!id) return;
         setSaving(prev => new Set(prev).add(id));
+        markSaving('변경사항을 저장하는 중입니다.');
         try {
             const update: Partial<TaxInvoiceIssue> = { [field]: value };
             await taxInvoiceListService.updateIssue(id, update);
             setIssues(prev => prev.map(i => i.id === id ? { ...i, [field]: value } : i));
+            markSaved('모든 변경사항이 저장되었습니다.');
         } catch (e) {
             console.error(e);
+            markSaveError('변경사항을 저장하지 못했습니다.');
+            toast.error('변경사항 저장에 실패했습니다. 다시 시도해주세요.');
         } finally {
             setSaving(prev => { const n = new Set(prev); n.delete(id); return n; });
         }
@@ -930,13 +1118,17 @@ const TaxInvoiceIssueListPage: React.FC = () => {
             setShowImportModal(true);
         } catch (e) {
             console.error(e);
+            toast.error('현장 데이터를 불러오지 못했습니다.');
         } finally {
             setLoadingSites(false);
         }
     };
 
     // ── Import sites as issues ──
-    const handleImportSites = async (selected: SiteWorkSummary[]) => {
+    const handleImportSites = async (selected: SiteWorkSummary[]): Promise<boolean> => {
+        if (selected.length === 0) return false;
+
+        markSaving(`${selected.length}개 현장을 발행리스트에 추가하는 중입니다.`);
         const startNo = issues.length;
         const monthEndDate = getMonthEndDate(yearMonth);
         const newIssues: Omit<TaxInvoiceIssue, 'id' | 'createdAt' | 'updatedAt'>[] = selected.map((s, idx) => ({
@@ -960,18 +1152,42 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         }));
 
         const added: TaxInvoiceIssue[] = [];
+        let failedCount = 0;
         for (const issue of newIssues) {
             try {
                 const id = await taxInvoiceListService.addIssue(issue);
                 added.push({ ...issue, id });
             } catch (e) {
                 console.error(e);
+                failedCount += 1;
             }
         }
-        if (added.length > 0) {
-            const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
-            setIssues(renumbered);
+
+        try {
+            if (added.length > 0) {
+                const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
+                setIssues(renumbered);
+            }
+        } catch (e) {
+            console.error('현장 데이터 순번 정리 실패:', e);
+            failedCount += added.length;
         }
+
+        if (added.length === 0 || failedCount >= selected.length) {
+            markSaveError('현장 데이터를 추가하지 못했습니다.');
+            toast.error('선택한 현장 데이터를 추가하지 못했습니다.');
+            return false;
+        }
+
+        if (failedCount > 0) {
+            markSaveError(`${added.length}건 추가, ${failedCount}건 실패했습니다.`);
+            toast.warning(`${added.length}건을 추가했고 ${failedCount}건은 실패했습니다.`);
+        } else {
+            markSaved(`${added.length}개 현장을 발행리스트에 추가했습니다.`);
+            toast.success(`${added.length}개 현장을 추가했습니다.`);
+        }
+
+        return true;
     };
 
     const handleImportDeferredIssues = async (selected: TaxInvoiceIssue[]) => {
@@ -979,9 +1195,11 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         if (importTargets.length === 0) return;
 
         setLoading(true);
+        markSaving(`${importTargets.length}개 이월 현장을 추가하는 중입니다.`);
         const startNo = issues.length;
         const monthEndDate = getMonthEndDate(yearMonth);
         const added: TaxInvoiceIssue[] = [];
+        let failedCount = 0;
 
         for (const [idx, source] of importTargets.entries()) {
             const sourceId = getCarryoverSourceId(source);
@@ -990,7 +1208,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                 yearMonth,
                 no: startNo + idx + 1,
                 isNew: getIssueTypeLabel(source.isNew),
-                issueDate: monthEndDate,
+                issueDate: getCarryoverIssueDate(source, monthEndDate),
                 recipient: source.recipient || '',
                 item: source.item || '',
                 supplyAmount: Number(source.supplyAmount) || 0,
@@ -1013,6 +1231,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                 added.push({ ...newIssue, id });
             } catch (e) {
                 console.error('이월 현장 가져오기 실패:', e);
+                failedCount += 1;
             }
         }
 
@@ -1021,6 +1240,17 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                 const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
                 setIssues(renumbered);
             }
+            if (failedCount > 0) {
+                markSaveError(`${added.length}건 추가, ${failedCount}건 실패했습니다.`);
+                toast.warning(`${added.length}건을 추가했고 ${failedCount}건은 실패했습니다.`);
+            } else {
+                markSaved(`${added.length}개 이월 현장을 추가했습니다.`);
+                toast.success(`${added.length}개 이월 현장을 추가했습니다.`);
+            }
+        } catch (e) {
+            console.error('이월 현장 순번 정리 실패:', e);
+            markSaveError('이월 현장 추가를 마무리하지 못했습니다.');
+            toast.error('이월 현장 추가 중 오류가 발생했습니다.');
         } finally {
             setLoading(false);
         }
@@ -1034,39 +1264,93 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         deferred: issues.filter(i => i.issueStatus === 'deferred').length,
     };
 
-    const totalSupply = issues
-        .reduce((acc, i) => acc + (i.supplyAmount || 0), 0);
-
-    const totalManDays = issues
-        .reduce((acc, i) => acc + (i.manDays || 0), 0);
-    const totalManDaysRounded = Math.round(totalManDays * 10) / 10;
-
     // Filtered issues by all criteria
-    const filteredIssues = issues.filter(issue => {
-        // 1. Sidebar Status Filter
-        if (statusFilter !== 'all' && issue.issueStatus !== statusFilter) return false;
+    const filteredIssues = useMemo(() => {
+        const searchTokens = globalSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        const filtered = issues.filter(issue => {
+            // 1. Sidebar Status Filter
+            if (statusFilter !== 'all' && issue.issueStatus !== statusFilter) return false;
 
-        // 2. Column Header Filters
-        for (const [field, val] of Object.entries(columnFilters)) {
-            if (!val) continue;
-            
-            const rawIssueVal = field === 'isNew'
-                ? getIssueTypeLabel(issue.isNew)
-                : field === 'issueStatus'
-                    ? STATUS_CONFIG[issue.issueStatus]?.label ?? issue.issueStatus
-                    : String((issue as any)[field] ?? '');
-            const issueVal = rawIssueVal.trim().toLowerCase();
-            const searchVal = val.trim().toLowerCase();
+            // 2. Global Search
+            if (searchTokens.length > 0) {
+                const searchableText = [
+                    issue.no,
+                    getIssueTypeLabel(issue.isNew),
+                    issue.issueDate,
+                    issue.recipient,
+                    issue.item,
+                    issue.supplyAmount,
+                    issue.note,
+                    issue.manDays,
+                    issue.teamName,
+                    issue.siteName,
+                    issue.siteType,
+                    issue.paymentType,
+                    STATUS_CONFIG[issue.issueStatus]?.label ?? issue.issueStatus,
+                    issue.remark,
+                ].map(value => String(value ?? '').toLowerCase()).join(' ');
 
-            // Status, Type 필터는 정확히 일치, 나머지는 포함 여부
-            if (['isNew', 'issueStatus', 'siteType', 'paymentType', 'teamName'].includes(field)) {
-                if (issueVal !== searchVal) return false;
-            } else {
-                if (!issueVal.includes(searchVal)) return false;
+                if (!searchTokens.every(token => searchableText.includes(token))) return false;
             }
-        }
-        return true;
-    });
+
+            // 3. Column Header Filters
+            for (const [field, val] of Object.entries(columnFilters)) {
+                if (!val) continue;
+
+                const rawIssueVal = field === 'isNew'
+                    ? getIssueTypeLabel(issue.isNew)
+                    : field === 'issueStatus'
+                        ? STATUS_CONFIG[issue.issueStatus]?.label ?? issue.issueStatus
+                        : field === 'scanCompleted'
+                            ? issue.scanCompleted ? '완료' : '미완료'
+                        : String((issue as any)[field] ?? '');
+                const issueVal = rawIssueVal.trim().toLowerCase();
+
+                if (field === 'isNew' && val === EMPTY_CELL_FILTER_OPTION) {
+                    if (issueVal !== '') return false;
+                    continue;
+                }
+
+                const searchVal = val.trim().toLowerCase();
+
+                if (issueVal !== searchVal) return false;
+            }
+            return true;
+        });
+
+        return [...filtered].sort(sortMode === 'team' ? compareIssuesByTeam : compareIssuesByNo);
+    }, [columnFilters, globalSearch, issues, sortMode, statusFilter]);
+
+    const filteredTotals = useMemo(() => filteredIssues.reduce(
+        (totals, issue) => ({
+            supply: totals.supply + (issue.supplyAmount || 0),
+            manDays: totals.manDays + (issue.manDays || 0),
+        }),
+        { supply: 0, manDays: 0 }
+    ), [filteredIssues]);
+    const filteredTotalSupply = filteredTotals.supply;
+    const filteredTotalManDaysRounded = Math.round(filteredTotals.manDays * 10) / 10;
+    const activeColumnFilters = Object.entries(columnFilters).filter(([, value]) => Boolean(value));
+    const activeFilterCount = activeColumnFilters.length
+        + (statusFilter === 'all' ? 0 : 1)
+        + (globalSearch.trim() ? 1 : 0);
+    const allFilteredSelected = filteredIssues.length > 0
+        && filteredIssues.every(issue => Boolean(issue.id) && selectedIds.has(issue.id as string));
+    const saveFeedbackClass = {
+        idle: 'border-slate-200 bg-white text-slate-500',
+        saving: 'border-indigo-200 bg-indigo-50 text-indigo-700',
+        saved: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+        error: 'border-red-200 bg-red-50 text-red-700',
+    }[saveFeedback.status];
+    const saveFeedbackDotClass = {
+        idle: 'bg-slate-300',
+        saving: 'bg-indigo-500 animate-pulse',
+        saved: 'bg-emerald-500',
+        error: 'bg-red-500',
+    }[saveFeedback.status];
+    const savedTimeLabel = saveFeedback.updatedAt
+        ? new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(saveFeedback.updatedAt)
+        : '';
 
     // Deferred sites from the previous month.
     const deferredSites = previousDeferredIssues
@@ -1096,98 +1380,172 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                     }
                 `}
             </style>
+            <PayrollIssueTopTabs />
+
             {/* ── Header ── */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                    <div className="p-3 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-100">
-                        <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-white text-xl" />
+            <section className="flex flex-col gap-3" aria-labelledby="tax-invoice-list-title">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="p-3 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-100" aria-hidden="true">
+                            <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-white text-xl" />
+                        </div>
+                        <div>
+                            <h1 id="tax-invoice-list-title" className="text-2xl font-black text-slate-900 tracking-tight">세금계산서 발행리스트</h1>
+                            <p className="text-sm text-slate-500 font-medium">월별 발행 내역을 관리합니다.</p>
+                        </div>
                     </div>
-                    <div>
-                        <h1 className="text-2xl font-black text-slate-900 tracking-tight">세금계산서 발행리스트</h1>
-                        <p className="text-sm text-slate-500 font-medium">월별 발행 내역을 관리합니다.</p>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div
+                            role={saveFeedback.status === 'error' ? 'alert' : 'status'}
+                            aria-live="polite"
+                            className={`inline-flex min-h-10 items-center gap-2 rounded-xl border px-3 text-xs font-bold ${saveFeedbackClass}`}
+                            title={saveFeedback.message}
+                        >
+                            <span className={`h-2 w-2 rounded-full ${saveFeedbackDotClass}`} aria-hidden="true" />
+                            <span>{saveFeedback.message}</span>
+                            {savedTimeLabel && saveFeedback.status !== 'saving' && <span className="font-medium opacity-70">{savedTimeLabel}</span>}
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={handleLoadSites}
+                            disabled={loadingSites}
+                            className="flex min-h-10 items-center gap-2 rounded-xl bg-slate-700 px-4 py-2 text-sm font-bold text-white shadow-sm transition-all hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            <FontAwesomeIcon icon={faDownload} className={loadingSites ? 'animate-spin' : ''} />
+                            현장 데이터 가져오기
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={handleAddRow}
+                            className="flex min-h-10 items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-indigo-100 transition-all hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 active:scale-95"
+                        >
+                            <FontAwesomeIcon icon={faPlus} />
+                            행 추가
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => exportIssuesToExcel(filteredIssues, yearMonth)}
+                            disabled={filteredIssues.length === 0}
+                            className="flex min-h-10 items-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2 text-sm font-bold text-emerald-700 transition-all hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                            <FontAwesomeIcon icon={faFileExcel} />
+                            엑셀
+                        </button>
+
+                        {selectedIds.size > 0 && (
+                            <button
+                                type="button"
+                                onClick={handleBulkDelete}
+                                className="flex min-h-10 items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-600 transition-all hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 active:scale-95"
+                            >
+                                <FontAwesomeIcon icon={faTrash} />
+                                선택 삭제 ({selectedIds.size})
+                            </button>
+                        )}
+
+                        <button
+                            type="button"
+                            onClick={() => {
+                                loadIssues();
+                                loadPreviousDeferredSites();
+                            }}
+                            disabled={loading || loadingDeferredSites}
+                            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-all hover:border-indigo-200 hover:text-indigo-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+                            title="목록 새로고침"
+                            aria-label="목록 새로고침"
+                        >
+                            <FontAwesomeIcon icon={faRotateRight} className={(loading || loadingDeferredSites) ? 'animate-spin' : ''} />
+                        </button>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2 flex-wrap">
-                    {/* Month Selector */}
-                    <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl px-2 py-1 shadow-sm">
-                        <button
-                            onClick={() => stepMonth(-1)}
-                            className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-50 transition-all"
-                        >
-                            <FontAwesomeIcon icon={faChevronLeft} className="text-xs" />
-                        </button>
-                        <span className="px-3 text-sm font-black text-slate-800 min-w-[80px] text-center">
-                            {formatYearMonth(yearMonth)}
+                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:flex-row xl:items-center xl:justify-between">
+                    <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+                        <label className="relative block min-w-0 flex-1 xl:max-w-md">
+                            <span className="sr-only">발행리스트 통합검색</span>
+                            <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400" />
+                            <input
+                                type="search"
+                                value={globalSearch}
+                                onChange={event => setGlobalSearch(event.target.value)}
+                                placeholder="공급받는자, 현장, 팀, 품목 통합검색"
+                                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-10 text-sm font-medium text-slate-700 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                            />
+                            {globalSearch && (
+                                <button
+                                    type="button"
+                                    onClick={() => setGlobalSearch('')}
+                                    className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-200 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                                    aria-label="통합검색어 지우기"
+                                >
+                                    <FontAwesomeIcon icon={faXmark} />
+                                </button>
+                            )}
+                        </label>
+                        <span className="whitespace-nowrap text-xs font-bold text-slate-500" aria-live="polite">
+                            {filteredIssues.length} / {issues.length}건 표시
                         </span>
-                        <button
-                            onClick={() => stepMonth(1)}
-                            className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-50 transition-all"
-                        >
-                            <FontAwesomeIcon icon={faChevronRight} className="text-xs" />
-                        </button>
                     </div>
 
-                    <button
-                        onClick={() => exportIssuesToExcel(filteredIssues, yearMonth)}
-                        disabled={filteredIssues.length === 0}
-                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 disabled:opacity-50"
-                    >
-                        <FontAwesomeIcon icon={faFileExcel} />
-                        엑셀 다운로드
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex min-h-10 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 shadow-sm" aria-label="조회 월 선택">
+                            <button
+                                type="button"
+                                onClick={() => stepMonth(-1)}
+                                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-50 hover:text-indigo-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                                aria-label="이전 달 보기"
+                                title="이전 달"
+                            >
+                                <FontAwesomeIcon icon={faChevronLeft} className="text-xs" />
+                            </button>
+                            <span className="min-w-[92px] px-2 text-center text-sm font-black text-slate-800" aria-live="polite">
+                                {formatYearMonth(yearMonth)}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => stepMonth(1)}
+                                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-50 hover:text-indigo-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                                aria-label="다음 달 보기"
+                                title="다음 달"
+                            >
+                                <FontAwesomeIcon icon={faChevronRight} className="text-xs" />
+                            </button>
+                        </div>
 
-                    <button
-                        onClick={handleLoadSites}
-                        disabled={loadingSites}
-                        className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-xl text-sm font-bold hover:bg-slate-800 transition-all shadow-sm disabled:opacity-60"
-                    >
-                        <FontAwesomeIcon icon={faDownload} className={loadingSites ? 'animate-spin' : ''} />
-                        현장 데이터 가져오기
-                    </button>
-
-                    <button
-                        onClick={handleAddRow}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 active:scale-95"
-                    >
-                        <FontAwesomeIcon icon={faPlus} />
-                        행 추가
-                    </button>
-
-                    {selectedIds.size > 0 && (
                         <button
-                            onClick={handleBulkDelete}
-                            className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-xl text-sm font-bold hover:bg-red-100 transition-all border border-red-200 active:scale-95"
+                            type="button"
+                            onClick={() => setSortMode(prev => prev === 'team' ? 'no' : 'team')}
+                            aria-pressed={sortMode === 'team'}
+                            className={`flex min-h-10 items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold shadow-sm transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                                sortMode === 'team'
+                                    ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                                    : 'border-slate-200 bg-white text-slate-700 hover:border-indigo-200 hover:text-indigo-700'
+                            }`}
                         >
-                            <FontAwesomeIcon icon={faTrash} />
-                            선택 삭제 ({selectedIds.size})
+                            <FontAwesomeIcon icon={faSort} />
+                            {sortMode === 'team' ? '번호순으로 전환' : '팀별 정렬'}
                         </button>
-                    )}
-
-                    <button
-                        onClick={() => {
-                            loadIssues();
-                            loadPreviousDeferredSites();
-                        }}
-                        disabled={loading || loadingDeferredSites}
-                        className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-xl transition-all border border-transparent hover:border-slate-200"
-                        title="새로고침"
-                    >
-                        <FontAwesomeIcon icon={faRotateRight} className={(loading || loadingDeferredSites) ? 'animate-spin' : ''} />
-                    </button>
+                    </div>
                 </div>
-            </div>
+
+            </section>
 
             {/* ── Main Layout (Sidebar + Table) ── */}
-            <div className="flex gap-5 flex-1 min-h-0">
+            <div className="flex min-h-0 flex-1 flex-col gap-4 2xl:flex-row 2xl:gap-5">
                 {/* ── Sidebar ── */}
-                <aside className="w-[300px] flex-shrink-0 flex flex-col gap-4">
+                <aside className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:flex 2xl:w-[300px] 2xl:flex-shrink-0 2xl:flex-col" aria-label="발행리스트 요약 및 가져오기">
                     {/* Status Summary Card */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
                         <h3 className="text-xs font-black text-slate-500 uppercase tracking-wider mb-3">상태 요약</h3>
-                        <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 2xl:flex 2xl:flex-col">
                             <button
+                                type="button"
                                 onClick={() => setStatusFilter('all')}
+                                aria-pressed={statusFilter === 'all'}
                                 className={`w-full flex items-center justify-between p-2.5 rounded-xl border transition-all ${
                                     statusFilter === 'all'
                                         ? 'bg-slate-200 border-slate-400 ring-2 ring-slate-400/30'
@@ -1202,8 +1560,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                      const cfg = STATUS_CONFIG[key];
                                      return (
                                          <button
+                                             type="button"
                                              key={key}
                                              onClick={() => setStatusFilter(prev => prev === key ? 'all' : key as IssueStatus)}
+                                             aria-pressed={statusFilter === key}
                                              className={`w-full flex items-center justify-between p-2.5 rounded-xl border transition-all ${
                                                  statusFilter === key
                                                      ? `${cfg.bg} ${cfg.border} ring-2 ring-offset-1 ring-current ${cfg.color}`
@@ -1222,14 +1582,14 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                  }
                             )}
                         </div>
-                        <div className="mt-3 pt-3 border-t border-slate-100">
-                            <div className="flex justify-between text-xs text-slate-500 mb-1">
-                                <span>합계 공급가</span>
-                                <span className="font-black text-slate-800">{fmt(totalSupply)}원</span>
+                        <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 2xl:block">
+                            <div className="flex justify-between text-xs text-slate-500 2xl:mb-1">
+                                <span>조회 합계 공급가</span>
+                                <span className="font-black text-slate-800">{fmt(filteredTotalSupply)}원</span>
                             </div>
                             <div className="flex justify-between text-xs text-slate-500">
-                                <span>합계 공수</span>
-                                <span className="font-black text-slate-800">{totalManDaysRounded}</span>
+                                <span>조회 합계 공수</span>
+                                <span className="font-black text-slate-800">{filteredTotalManDaysRounded}</span>
                             </div>
                         </div>
                     </div>
@@ -1242,6 +1602,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                             </h3>
                             {deferredSites.length > 0 && (
                                 <button
+                                    type="button"
                                     onClick={() => handleImportDeferredIssues(previousDeferredIssues)}
                                     disabled={loading || importableDeferredCount === 0}
                                     className="text-[11px] font-bold text-blue-700 hover:text-blue-900 disabled:text-slate-300 disabled:cursor-not-allowed"
@@ -1268,10 +1629,12 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                 <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-bold text-slate-400">추가됨</span>
                                             ) : (
                                                 <button
+                                                    type="button"
                                                     onClick={() => handleImportDeferredIssues([s.source])}
                                                     disabled={loading}
-                                                    className="w-6 h-6 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
+                                                    className="w-6 h-6 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
                                                     title="현재 월 발행리스트에 추가"
+                                                    aria-label={`${s.siteName} 현재 월 발행리스트에 추가`}
                                                 >
                                                     <FontAwesomeIcon icon={faPlus} className="text-[10px]" />
                                                 </button>
@@ -1291,6 +1654,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                     노무 현장 ({siteData.length})
                                 </h3>
                                 <button
+                                    type="button"
                                     onClick={() => setShowImportModal(true)}
                                     className="text-xs text-indigo-600 font-bold hover:underline"
                                 >
@@ -1310,9 +1674,11 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                         </div>
                                         <span className="text-xs font-black text-slate-600 ml-1">{s.manDays}</span>
                                         <button
+                                            type="button"
                                             onClick={() => handleImportSites([s])}
                                             className="ml-1.5 opacity-0 group-hover:opacity-100 px-1.5 py-0.5 text-[10px] font-bold text-white bg-indigo-500 hover:bg-indigo-600 rounded-md transition-all active:scale-95"
                                             title="발행리스트로 넘기기"
+                                            aria-label={`${s.siteName} 발행리스트로 넘기기`}
                                         >
                                             →
                                         </button>
@@ -1324,20 +1690,29 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                 </aside>
 
                 {/* ── Main Table ── */}
-                <div className="flex-1 min-w-0 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-                    <div className="overflow-auto flex-1">
-                        <table className="w-full text-xs">
+                <div className="flex min-h-[280px] max-h-[calc(100dvh-var(--header-height)-80px)] min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <div className="min-h-0 flex-1 overflow-auto overscroll-auto" tabIndex={0} aria-label="세금계산서 발행 목록 표, 가로와 세로로 스크롤할 수 있습니다">
+                        <table className="w-full min-w-[1240px] text-sm">
                             <thead className="sticky top-0 z-20 bg-slate-50 shadow-sm">
-                                <tr className="border-b border-slate-200">
-                                    <th className="px-3 py-3 text-center w-10">
+                                <tr className="border-b border-slate-200 whitespace-nowrap">
+                                    <th scope="col" className="sticky left-0 z-30 w-10 bg-slate-50 px-3 py-2.5 text-center">
                                         <input 
                                             type="checkbox" 
                                             className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                                            checked={filteredIssues.length > 0 && selectedIds.size === filteredIssues.length}
+                                            checked={allFilteredSelected}
                                             onChange={toggleSelectAll}
+                                            aria-label="현재 조회된 항목 전체 선택"
                                         />
                                     </th>
-                                    <th className="px-3 py-3 text-left font-black text-slate-500 w-10">No</th>
+                                    <th scope="col" className="sticky left-10 z-30 w-10 bg-slate-50 px-3 py-2.5 text-left font-black text-slate-500">
+                                        No
+                                        <ColumnFilter
+                                            label="No"
+                                            value={columnFilters.no || ''}
+                                            onChange={(v) => updateFilter('no', v)}
+                                            options={uniqueIssueNos}
+                                        />
+                                    </th>
                                     <th className="px-2 py-3 text-center font-black text-slate-500 w-12">
                                         신규
                                         <ColumnFilter
@@ -1347,7 +1722,15 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                             options={uniqueIssueTypes}
                                         />
                                     </th>
-                                    <th className="px-3 py-3 text-left font-black text-slate-500 w-24">발행일</th>
+                                    <th className="px-3 py-3 text-left font-black text-slate-500 w-24">
+                                        발행일
+                                        <ColumnFilter
+                                            label="발행일"
+                                            value={columnFilters.issueDate || ''}
+                                            onChange={(v) => updateFilter('issueDate', v)}
+                                            options={uniqueIssueDates}
+                                        />
+                                    </th>
                                     <th className="px-3 py-3 text-left font-black text-slate-500 w-28">
                                         공급받는자
                                         <ColumnFilter 
@@ -1366,7 +1749,15 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                             options={uniqueItems}
                                         />
                                     </th>
-                                    <th className="px-3 py-3 text-right font-black text-slate-500 w-24">공급가</th>
+                                    <th className="px-3 py-3 text-right font-black text-slate-500 w-24">
+                                        공급가
+                                        <ColumnFilter
+                                            label="공급가"
+                                            value={columnFilters.supplyAmount || ''}
+                                            onChange={(v) => updateFilter('supplyAmount', v)}
+                                            options={uniqueSupplyAmounts}
+                                        />
+                                    </th>
                                     <th className="px-3 py-3 text-left font-black text-slate-500 w-32">
                                         비고
                                         <ColumnFilter 
@@ -1376,7 +1767,15 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                             options={uniqueNotes}
                                         />
                                     </th>
-                                    <th className="px-3 py-3 text-right font-black text-slate-500 w-16">공수</th>
+                                    <th className="px-3 py-3 text-right font-black text-slate-500 w-16">
+                                        공수
+                                        <ColumnFilter
+                                            label="공수"
+                                            value={columnFilters.manDays || ''}
+                                            onChange={(v) => updateFilter('manDays', v)}
+                                            options={uniqueManDays}
+                                        />
+                                    </th>
                                     <th className="px-3 py-3 text-center font-black text-slate-500 w-20">
                                         팀
                                         <ColumnFilter 
@@ -1408,14 +1807,34 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                         발행
                                         <ColumnFilter 
                                             label="발행상태" 
-                                            value={columnFilters.issueStatus || ''} 
-                                            onChange={(v) => updateFilter('issueStatus', v)} 
+                                            value={statusFilter === 'all' ? '' : STATUS_CONFIG[statusFilter].label}
+                                            onChange={(value) => {
+                                                const nextStatus = (Object.keys(STATUS_CONFIG) as IssueStatus[])
+                                                    .find(key => STATUS_CONFIG[key].label === value);
+                                                setStatusFilter(nextStatus ?? 'all');
+                                            }}
                                             options={Object.values(STATUS_CONFIG).map(c => c.label)}
                                         />
                                     </th>
-                                    <th className="px-3 py-3 text-center font-black text-slate-500 w-16">노임서류</th>
-                                    <th className="px-3 py-3 text-left font-black text-slate-500 w-56">특이사항</th>
-                                    <th className="px-3 py-3 text-center font-black text-slate-500 w-10">삭제</th>
+                                    <th className="px-3 py-3 text-center font-black text-slate-500 whitespace-nowrap w-24">
+                                        노임서류
+                                        <ColumnFilter
+                                            label="노임서류"
+                                            value={columnFilters.scanCompleted || ''}
+                                            onChange={(v) => updateFilter('scanCompleted', v)}
+                                            options={['완료', '미완료']}
+                                        />
+                                    </th>
+                                    <th className="px-3 py-3 text-left font-black text-slate-500 w-56">
+                                        특이사항
+                                        <ColumnFilter
+                                            label="특이사항"
+                                            value={columnFilters.remark || ''}
+                                            onChange={(v) => updateFilter('remark', v)}
+                                            options={uniqueRemarks}
+                                        />
+                                    </th>
+                                    <th className="px-3 py-3 text-center font-black text-slate-500 whitespace-nowrap w-14">삭제</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -1429,8 +1848,19 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                 ) : filteredIssues.length === 0 ? (
                                     <tr>
                                         <td colSpan={16} className="py-16 text-center text-slate-400">
-                                            <p className="font-bold">데이터가 없습니다</p>
-                                            <p className="text-xs mt-1">행 추가 또는 현장 데이터 가져오기로 시작하세요.</p>
+                                            <p className="font-bold">{issues.length > 0 ? '조건에 맞는 결과가 없습니다' : '데이터가 없습니다'}</p>
+                                            <p className="text-sm mt-1">
+                                                {issues.length > 0 ? '검색어나 적용된 필터를 확인해주세요.' : '행 추가 또는 현장 데이터 가져오기로 시작하세요.'}
+                                            </p>
+                                            {issues.length > 0 && activeFilterCount > 0 && (
+                                                <button
+                                                    type="button"
+                                                    onClick={clearAllFilters}
+                                                    className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                                                >
+                                                    필터 전체 초기화
+                                                </button>
+                                            )}
                                         </td>
                                     </tr>
                                 ) : (
@@ -1439,35 +1869,41 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                         const isSelected = selectedIds.has(issue.id ?? '');
                                         const statusCfg = STATUS_CONFIG[issue.issueStatus] || STATUS_CONFIG.pending;
                                         const issueTypeLabel = getIssueTypeLabel(issue.isNew);
+                                        const rowToneClass = isSelected
+                                            ? 'bg-indigo-100 ring-2 ring-inset ring-indigo-500'
+                                            : issue.issueStatus === 'issued'
+                                                ? 'bg-green-200'
+                                                : issue.issueStatus === 'pending'
+                                                    ? 'bg-amber-200'
+                                                    : issue.issueStatus === 'deferred'
+                                                        ? 'bg-blue-200'
+                                                        : 'bg-white';
+                                        const statusAccentClass = issue.issueStatus === 'issued'
+                                            ? 'border-l-4 border-l-emerald-500'
+                                            : issue.issueStatus === 'pending'
+                                                ? 'border-l-4 border-l-amber-400'
+                                                : issue.issueStatus === 'deferred'
+                                                    ? 'border-l-4 border-l-blue-500'
+                                                    : 'border-l-4 border-l-violet-500';
                                         return (
                                             <tr
                                                 key={issue.id}
-                                                style={{
-                                                    backgroundColor:
-                                                        isSelected ? '#e0e7ff' : // Indigo 100 for selection
-                                                        issue.issueStatus === 'ready' ? '#ffffff' :
-                                                        issue.issueStatus === 'issued' ? '#bbf7d0' :
-                                                        issue.issueStatus === 'pending' ? '#fde68a' :
-                                                        issue.issueStatus === 'deferred' ? '#bfdbfe' :
-                                                        
-                                                        undefined,
-                                                }}
-                                                className={`group transition-all hover:brightness-95 ${isSelected ? 'ring-2 ring-inset ring-indigo-500 z-10' : ''} ${isSaving ? 'opacity-60 pointer-events-none' : ''} ${
-                                                    ''
-                                                }`}
+                                                aria-busy={isSaving}
+                                                className={`group transition-colors hover:brightness-[0.98] ${rowToneClass} ${isSaving ? 'pointer-events-none opacity-60' : ''}`}
                                             >
                                                 {/* Checkbox */}
-                                                <td className="px-3 py-2 text-center">
+                                                <td className={`sticky left-0 z-10 bg-inherit px-3 py-2 text-center ${statusAccentClass}`}>
                                                     <input 
                                                         type="checkbox" 
                                                         className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                                                         checked={isSelected}
                                                         onChange={() => toggleSelection(issue.id)}
+                                                        aria-label={`${issue.no}번 ${issue.recipient || '이름 없는'} 항목 선택`}
                                                     />
                                                 </td>
 
                                                 {/* No */}
-                                                <td className="px-3 py-2 font-bold text-slate-600">{issue.no}</td>
+                                                <td className="sticky left-10 z-10 bg-inherit px-3 py-2 font-bold text-slate-600">{issue.no}</td>
 
                                                 {/* 신규 */}
                                                 <td className="px-2 py-2 text-center">
@@ -1630,7 +2066,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                         options={['ready', 'pending', 'issued', 'deferred'].map(k => STATUS_CONFIG[k as IssueStatus].label)}
                                                         field="issueStatus"
                                                         rowId={issue.id}
-                                                        onCommit={(id, f, v) => {
+                                                        onCommit={(id, _f, v) => {
                                                             const key = (Object.entries(STATUS_CONFIG) as [IssueStatus, any][]).find(([_, cfg]) => cfg.label === v)?.[0] || 'ready';
                                                             handleStatusChange(id, key as IssueStatus);
                                                         }}
@@ -1644,9 +2080,12 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                 {/* 노임서류 */}
                                                 <td className="px-3 py-2 text-center">
                                                     <button
+                                                        type="button"
                                                         onClick={() => handleScanToggle(issue.id, issue.scanCompleted)}
-                                                        title="노임서류"
-                                                        className={`w-5 h-5 rounded border-2 transition-colors flex items-center justify-center mx-auto ${
+                                                        title={issue.scanCompleted ? '노임서류 완료 해제' : '노임서류 완료 처리'}
+                                                        aria-label={`${issue.no}번 노임서류 ${issue.scanCompleted ? '완료 해제' : '완료 처리'}`}
+                                                        aria-pressed={issue.scanCompleted}
+                                                        className={`w-5 h-5 rounded border-2 transition-colors flex items-center justify-center mx-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 ${
                                                             issue.scanCompleted
                                                                 ? 'bg-green-500 border-green-500 text-white'
                                                                 : 'border-slate-300 hover:border-green-400'
@@ -1667,7 +2106,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                         field="remark"
                                                         rowId={issue.id}
                                                         onCommit={handleCellCommit}
-                                                        className="text-slate-500 text-xs"
+                                                        className="text-slate-500 text-sm"
                                                         rowIndex={idx}
                                                         colIndex={11}
                                                         isFocused={activeCell?.r === idx && activeCell?.c === 11}
@@ -1678,8 +2117,11 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                 {/* 삭제 */}
                                                 <td className="px-3 py-2 text-center">
                                                     <button
+                                                        type="button"
                                                         onClick={() => handleDelete(issue.id)}
-                                                        className="text-slate-300 hover:text-red-500 transition-colors p-1 rounded-lg hover:bg-red-50"
+                                                        className="text-slate-300 hover:text-red-500 transition-colors p-1 rounded-lg hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                                                        aria-label={`${issue.no}번 ${issue.recipient || '이름 없는'} 항목 삭제`}
+                                                        title="항목 삭제"
                                                     >
                                                         <FontAwesomeIcon icon={faTrash} className="text-xs" />
                                                     </button>
@@ -1694,14 +2136,14 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                             {issues.length > 0 && (
                                 <tfoot>
                                     <tr className="bg-slate-50 border-t-2 border-slate-200 font-black text-slate-700">
-                                        <td colSpan={5} className="px-3 py-3 text-sm">
-                                            합계 ({issues.length}건)
+                                        <td colSpan={5} className="px-3 py-3 text-base">
+                                            조회 합계 ({filteredIssues.length}건)
                                         </td>
-                                        <td className="px-3 py-3 text-right text-sm">
-                                            {fmt(totalSupply)}
+                                        <td className="px-3 py-3 text-right text-base">
+                                            {fmt(filteredTotalSupply)}
                                         </td>
                                         <td />
-                                        <td className="px-3 py-3 text-right text-sm">{totalManDaysRounded}</td>
+                                        <td className="px-3 py-3 text-right text-base">{filteredTotalManDaysRounded}</td>
                                         <td colSpan={7} />
                                     </tr>
                                 </tfoot>

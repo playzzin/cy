@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faDownload, faExclamationTriangle, faSearch, faFileExcel, faSpinner, faInbox, faCalendarDay, faCalendarDays, faHandshake } from '@fortawesome/free-solid-svg-icons';
+import { faDownload, faExclamationTriangle, faSearch, faFileExcel, faSpinner, faCalendarDay, faCalendarDays, faHandshake } from '@fortawesome/free-solid-svg-icons';
 import { dailyReportService } from '../../services/dailyReportService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
@@ -14,6 +14,14 @@ import * as XLSX from 'xlsx-js-style';
 
 const KB_MAX_DEPOSIT_DISPLAY_LENGTH = 10;
 const KB_MAX_WITHDRAW_DISPLAY_LENGTH = 14;
+
+const getAverageUnitPrice = (totalAmount: number, totalManDay: number, fallback = 0): number => {
+    if (!Number.isFinite(totalAmount) || !Number.isFinite(totalManDay) || totalManDay <= 0) {
+        return fallback;
+    }
+
+    return Math.round(totalAmount / totalManDay);
+};
 
 const CONSTRUCTION_TEAM_TYPES = new Set<string>(['본팀', '관리팀', '새끼팀', '직영팀', '시공팀']);
 
@@ -1005,6 +1013,7 @@ const TeamBasedPaymentDraftPage: React.FC = () => {
                                     existing.totalAmount = supportRate;
                                 } else {
                                     existing.totalAmount += nextAmount;
+                                    existing.unitPrice = getAverageUnitPrice(existing.totalAmount, existing.totalManDay, existing.unitPrice);
                                 }
                                 if (!validation.isValid) {
                                     existing.isValid = false;
@@ -1043,6 +1052,7 @@ const TeamBasedPaymentDraftPage: React.FC = () => {
                     if (existing) {
                         existing.totalManDay += manDay;
                         existing.totalAmount += Math.round(manDay * unitPrice);
+                        existing.unitPrice = getAverageUnitPrice(existing.totalAmount, existing.totalManDay, existing.unitPrice);
                         return;
                     }
 

@@ -20,6 +20,49 @@ export const isCheongyeonEngCompanyName = (value: unknown): boolean => {
     );
 };
 
+export type WorkerAffiliationCategory = 'cheongyeon' | 'external' | 'unassigned';
+
+interface WorkerAffiliationSource {
+    companyId?: unknown;
+    companyName?: unknown;
+    teamType?: unknown;
+}
+
+const isUnassignedCompanyLabel = (value: unknown): boolean => {
+    const normalized = String(value ?? '').trim();
+    return !normalized || ['미배정', '미지정', '미소속'].includes(normalized);
+};
+
+/**
+ * 작업자 목록의 소속 구분에 사용하는 공통 판정 규칙입니다.
+ * 회사명/코드가 청연이면 청연 소속, 그 외 회사나 외부 지원팀이면 외부팀으로 봅니다.
+ */
+export const classifyWorkerAffiliation = (
+    source: WorkerAffiliationSource,
+    cheongyeonCompanyIds: ReadonlySet<string> = new Set<string>()
+): WorkerAffiliationCategory => {
+    const companyId = String(source.companyId ?? '').trim();
+    const companyName = String(source.companyName ?? '').trim();
+    const teamType = String(source.teamType ?? '').trim();
+
+    if (
+        isCheongyeonEngCompanyName(companyName) ||
+        (companyId.length > 0 && cheongyeonCompanyIds.has(companyId))
+    ) {
+        return 'cheongyeon';
+    }
+
+    if (
+        companyId.length > 0 ||
+        !isUnassignedCompanyLabel(companyName) ||
+        teamType === '지원팀'
+    ) {
+        return 'external';
+    }
+
+    return 'unassigned';
+};
+
 const isCheongyeonEngCompany = (company: Company): boolean => (
     isCheongyeonEngCompanyName(company.name) ||
     ['cy', 'cyeng'].includes(normalizeCompanyKey(company.code))

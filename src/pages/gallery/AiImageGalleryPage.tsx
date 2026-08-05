@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faMagic, faImages, faTrash, faCopy, faDownload, faPen, faTimes, faSpinner,
-    faCheck, faSave, faSearch, faExpand, faExclamationCircle, faUpload, faCog,
+    faCheck, faSave, faSearch, faExclamationCircle, faUpload, faCog,
     faStar, faCrown, faCube, faFlag, faComment, faPlus, faGlobe, faBullhorn,
     faShareNodes, faAddressCard, faBuilding,
     faUserAstronaut,

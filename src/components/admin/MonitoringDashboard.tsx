@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { Card as MTCard, Typography as MTTypography, Button as MTButton, Spinner as MTSpinner } from '@material-tailwind/react';
@@ -24,8 +24,9 @@ interface SystemMetrics {
 
 const MonitoringDashboard: React.FC = () => {
     const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const initialFetchStartedRef = useRef(false);
 
     const fetchMetrics = async () => {
         setLoading(true);
@@ -45,7 +46,9 @@ const MonitoringDashboard: React.FC = () => {
     };
 
     useEffect(() => {
-        fetchMetrics();
+        if (initialFetchStartedRef.current) return;
+        initialFetchStartedRef.current = true;
+        void fetchMetrics();
     }, []);
 
     if (loading && !metrics) {

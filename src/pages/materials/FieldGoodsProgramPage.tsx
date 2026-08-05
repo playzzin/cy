@@ -928,20 +928,6 @@ const FieldGoodsProgramPage: React.FC = () => {
         }
     };
 
-    const handleRestoreItem = async (item: FieldGoodsItem) => {
-        setSaving(true);
-        try {
-            await fieldGoodsService.restoreItem(item.id);
-            setItems((prev) =>
-                sortItems(prev.map((entry) => (entry.id === item.id ? { ...entry, active: true } : entry)))
-            );
-        } catch (error) {
-            console.error('Failed to restore field goods item:', error);
-            alert('품목 복구에 실패했습니다.');
-        } finally {
-            setSaving(false);
-        }
-    };
 
     const startEditTransaction = (transaction: FieldGoodsTransaction) => {
         setEditingTransactionId(transaction.id);

@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { AnalyticsResult } from '../../../services/geminiAnalyticsService';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-    LineChart, Line, PieChart, Pie, Cell, AreaChart, Area
+    PieChart, Pie, Cell, AreaChart, Area
 } from 'recharts';
 
 interface AiResultChartsProps {
@@ -126,7 +126,7 @@ export const AiResultCharts: React.FC<AiResultChartsProps> = ({ result }) => {
                             paddingAngle={5}
                             dataKey="value"
                         >
-                            {data.map((entry, index) => (
+                            {data.map((_entry, index) => (
                                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                             ))}
                         </Pie>

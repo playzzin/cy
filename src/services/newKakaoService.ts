@@ -1,5 +1,3 @@
-import { functions } from '../config/firebase';
-import { httpsCallable } from 'firebase/functions';
 import { z } from 'zod';
 
 // --- Zod Schemas ---
@@ -129,13 +127,6 @@ export interface KakaoManagementUrlResponse {
     message?: string;
 }
 
-export interface BarobillErrStringResponse {
-    success: boolean;
-    errCode: number;
-    errString?: string;
-    message: string;
-}
-
 export interface DefaultSmsSenderNumResponse {
     success: boolean;
     senderNum?: string;
@@ -175,22 +166,10 @@ export const kakaoService = {
             };
         }
 
-        const templateName = request.templateName ?? request.templateCode ?? request.templateId ?? '';
-
-        try {
-            const sendFn = httpsCallable<AlimTalkRequest, KakaoResponse>(functions, 'sendKakaoAlimtalk');
-            const result = await sendFn({
-                ...request,
-                templateName,
-            });
-            return result.data;
-        } catch (error: unknown) {
-            console.error('[KakaoService] Send AlimTalk Error:', error);
-            return {
-                success: false,
-                message: normalizeErrorMessage(error, '알림톡 발송 중 오류가 발생했습니다.')
-            };
-        }
+        return {
+            success: false,
+            message: 'Kakao notification provider is not configured.'
+        };
     },
 
     /**
@@ -205,101 +184,32 @@ export const kakaoService = {
             };
         }
 
-        try {
-            const sendFn = httpsCallable<FriendTalkRequest, KakaoResponse>(functions, 'sendFriendTalk');
-            const result = await sendFn(request);
-            return result.data;
-        } catch (error: unknown) {
-            console.error('[KakaoService] Send FriendTalk Error:', error);
-            return {
-                success: false,
-                message: normalizeErrorMessage(error, '친구톡 발송 중 오류가 발생했습니다.')
-            };
-        }
+        return {
+            success: false,
+            message: 'Kakao notification provider is not configured.'
+        };
     },
 
     getChannels: async (): Promise<KakaoChannelListResponse> => {
-        try {
-            const fn = httpsCallable<unknown, { success: boolean; channels?: unknown }>(functions, 'getKakaotalkChannels');
-            const res = await fn({});
-            const channels = Array.isArray(res.data.channels) ? (res.data.channels as Array<Record<string, unknown>>) : [];
-            return { success: res.data.success === true, channels };
-        } catch (error: unknown) {
-            console.error('[KakaoService] Get Channels Error:', error);
-            return { success: false, message: normalizeErrorMessage(error, '채널 목록 조회 중 오류가 발생했습니다.') };
-        }
+        return { success: false, channels: [], message: 'Kakao notification provider is not configured.' };
     },
 
     getTemplates: async (channelId: string): Promise<KakaoTemplateListResponse> => {
-        try {
-            const fn = httpsCallable<{ channelId: string }, { success: boolean; templates?: unknown }>(functions, 'getKakaotalkTemplates');
-            const res = await fn({ channelId });
-            const templates = Array.isArray(res.data.templates) ? (res.data.templates as Array<Record<string, unknown>>) : [];
-            return { success: res.data.success === true, templates };
-        } catch (error: unknown) {
-            console.error('[KakaoService] Get Templates Error:', error);
-            return { success: false, message: normalizeErrorMessage(error, '템플릿 목록 조회 중 오류가 발생했습니다.') };
-        }
+        void channelId;
+        return { success: false, templates: [], message: 'Kakao notification provider is not configured.' };
     },
 
     getManagementUrl: async (type: KakaoManagementType): Promise<KakaoManagementUrlResponse> => {
-        try {
-            const fn = httpsCallable<{ type: KakaoManagementType }, { success: boolean; url?: unknown; error?: unknown }>(
-                functions,
-                'getKakaoManagementUrl'
-            );
-            const res = await fn({ type });
-            const url = typeof res.data.url === 'string' ? res.data.url : '';
-            const errorMessage = typeof res.data.error === 'string' ? res.data.error : '';
-            return {
-                success: res.data.success === true,
-                url: url || undefined,
-                ...(errorMessage ? { message: errorMessage } : {})
-            };
-        } catch (error: unknown) {
-            console.error('[KakaoService] Get Management URL Error:', error);
-            return { success: false, message: normalizeErrorMessage(error, '관리 URL 조회 중 오류가 발생했습니다.') };
-        }
-    },
-
-    getBarobillErrString: async (errCode: number): Promise<BarobillErrStringResponse> => {
-        try {
-            const fn = httpsCallable<{ errCode: number }, BarobillErrStringResponse>(functions, 'getBarobillErrString');
-            const res = await fn({ errCode });
-            return res.data;
-        } catch (error: unknown) {
-            console.error('[KakaoService] Get Barobill ErrString Error:', error);
-            return {
-                success: false,
-                errCode,
-                message: normalizeErrorMessage(error, '바로빌 오류 문자열 조회 중 오류가 발생했습니다.')
-            };
-        }
+        void type;
+        return { success: false, message: 'Kakao notification provider is not configured.' };
     },
 
     getDefaultSmsSenderNum: async (): Promise<DefaultSmsSenderNumResponse> => {
-        try {
-            const fn = httpsCallable<unknown, DefaultSmsSenderNumResponse>(functions, 'getDefaultSmsSenderNum');
-            const res = await fn({});
-            return res.data;
-        } catch (error: unknown) {
-            console.error('[KakaoService] Get Default SMS SenderNum Error:', error);
-            return {
-                success: false,
-                message: normalizeErrorMessage(error, '대체문자 발신번호 조회 중 오류가 발생했습니다.')
-            };
-        }
+        return { success: false, message: 'Kakao notification provider is not configured.' };
     },
 
     getSendKakaotalkEx: async (sendKey: string): Promise<GetSendKakaotalkExResponse> => {
-        try {
-            const fn = httpsCallable<{ sendKey: string }, { success: boolean; result?: unknown }>(functions, 'getSendKakaotalkEx');
-            const res = await fn({ sendKey });
-            const result = (res.data.result && typeof res.data.result === 'object') ? (res.data.result as Record<string, unknown>) : undefined;
-            return { success: res.data.success === true, result };
-        } catch (error: unknown) {
-            console.error('[KakaoService] Get SendKakaotalkEx Error:', error);
-            return { success: false, message: normalizeErrorMessage(error, '전송상태 조회 중 오류가 발생했습니다.') };
-        }
+        void sendKey;
+        return { success: false, message: 'Kakao notification provider is not configured.' };
     }
 };

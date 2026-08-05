@@ -1,11 +1,11 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faCloudUploadAlt, faArrowRight, faCheckCircle, faSpinner,
     faExclamationTriangle, faFileExcel, faLink, faDatabase,
-    faBuilding, faUser, faTable
+    faTable
 } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { dailyReportService } from '../../services/dailyReportService';

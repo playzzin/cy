@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import styled from 'styled-components';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import Swal from 'sweetalert2';
@@ -15,7 +15,6 @@ import {
   faUser, 
   faPhone, 
   faEnvelope,
-  faCircleCheck,
   faSpinner
 } from '@fortawesome/free-solid-svg-icons';
 import { db, storage } from '../../config/firebase';

@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBuilding, faFileInvoiceDollar, faPlus, faChartPie, faMapMarkerAlt, faUser, faBed, faWonSign, faExclamationTriangle, faBell, faBoxArchive, faList, faTh, faUsers, faStickyNote, faPen, faRotateRight, faHistory, faSearch } from '@fortawesome/free-solid-svg-icons';
+import { faBuilding, faFileInvoiceDollar, faPlus, faChartPie, faMapMarkerAlt, faUser, faBed, faWonSign, faExclamationTriangle, faBell, faBoxArchive, faList, faTh, faUsers, faStickyNote, faPen, faRotateRight, faHistory, faSearch, faChevronDown, faChevronUp } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { iconMap } from '../../constants/iconMap';
 import { accommodationService } from '../../services/accommodationService';
@@ -10,30 +11,46 @@ import { Accommodation, UtilityRecord } from '../../types/accommodation';
 import AccommodationForm from '../../components/accommodation/AccommodationForm';
 import AccommodationQuickAssignmentModal from '../../components/accommodation/QuickAssignmentModal';
 import UtilityLedger from '../../components/accommodation/UtilityLedger';
-import BillingPeriodTimeline, { BillingPeriodTimelineItem } from '../../components/support/BillingPeriodTimeline';
 import { SupportTeamFilterTabs } from '../../components/support/SupportTeamFilterTabs';
+import { SupportPageHeader } from '../../components/support/SupportPageHeader';
+import { SupportSegmentedTabs, type SupportSegmentedTabOption } from '../../components/support/SupportSegmentedTabs';
+import { db } from '../../config/firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { userService } from '../../services/userService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService } from '../../services/companyService';
-import { UserRole } from '../../types/roles';
 import { AccommodationAssignment } from '../../types/accommodationAssignment';
 import { accommodationBillingTargetService } from '../../services/accommodationBillingTargetService';
 import { AccommodationBillingTarget } from '../../types/accommodationBillingTarget';
+import { menuServiceV11 } from '../../services/menuServiceV11';
+import { userMenuPositionService } from '../../services/userMenuPositionService';
 import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
 import { appendOfficeAssignmentTeam } from '../../utils/supportAssignmentTargets';
+import { uniqueAccessRoles } from '../../utils/accessRoles';
+import { buildMenuAccessRoles, canAccessMenuRoute } from '../../utils/menuAccess';
 import { SupportCancellationHistory } from '../../components/support/SupportCancellationHistory';
 import { SupportCancellationModal, type SupportCancellationFormValue } from '../../components/support/SupportCancellationModal';
 import { supportCancellationLogService } from '../../services/supportCancellationLogService';
 import { getContrastingTextColor } from '../../utils/color';
+import type { SiteDataType } from '../../types/menu';
 
 interface AccommodationManagerProps {
     embedded?: boolean;
 }
 
+type AccommodationTabId = 'status' | 'ledger' | 'history';
+type AccommodationStatusFilter = 'todo' | 'all' | 'active' | 'inactive';
+
+const accommodationTabs: SupportSegmentedTabOption<AccommodationTabId>[] = [
+    { id: 'status', label: '배정 및 청구현황', icon: faChartPie },
+    { id: 'ledger', label: '숙소 통합관리대장', icon: faFileInvoiceDollar },
+    { id: 'history', label: '처리내역', icon: faHistory }
+];
+
 const DAY_MS = 1000 * 60 * 60 * 24;
 const RENT_DUE_SOON_DAYS = 5;
+const RENT_DUE_ALERT_COLLAPSED_LIMIT = 6;
 const EXPIRATION_ALERT_ACK_STORAGE_KEY = 'cy.accommodation.expirationAlertAcknowledgements';
+const ACCOMMODATION_MANAGER_ROUTE = '/support/accommodation';
 
 const getInitialSupportViewMode = (): 'list' | 'card' => {
     if (typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches) {
@@ -75,7 +92,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
     const navigate = useNavigate();
     const { currentUser } = useAuth();
     const [canUseAccommodationManager, setCanUseAccommodationManager] = useState<boolean | null>(null);
-    const [activeTab, setActiveTab] = useState<'status' | 'ledger' | 'history'>('status');
+    const [activeTab, setActiveTab] = useState<AccommodationTabId>('status');
     const [accommodations, setAccommodations] = useState<Accommodation[]>([]);
     const [assignments, setAssignments] = useState<AccommodationAssignment[]>([]);
     const [billingTargets, setBillingTargets] = useState<AccommodationBillingTarget[]>([]);
@@ -87,7 +104,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
     const [quickAssignItem, setQuickAssignItem] = useState<Accommodation | null>(null);
     const [cancellationTarget, setCancellationTarget] = useState<Accommodation | null>(null);
     const [savingCancellation, setSavingCancellation] = useState(false);
-    const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('active');
+    const [filterStatus, setFilterStatus] = useState<AccommodationStatusFilter>('active');
     const [viewMode, setViewMode] = useState<'list' | 'card'>(getInitialSupportViewMode);
 
     // Team Search State
@@ -108,31 +125,105 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
         }
     });
     const [selectedExpirationAlertKeys, setSelectedExpirationAlertKeys] = useState<string[]>([]);
+    const [isRentDueAlertExpanded, setIsRentDueAlertExpanded] = useState(true);
 
     useEffect(() => {
         let isCancelled = false;
+        let menuConfig: SiteDataType | null = null;
+        let userProfile: any = null;
+        let additionalMenuPositions: string[] = [];
+        let linkedEntityRoles: string[] = [];
+        let menuLoaded = false;
+        let userProfileLoaded = false;
+        let linkedRolesLoaded = false;
 
-        const resolveAccess = async () => {
-            if (!currentUser) {
-                if (!isCancelled) setCanUseAccommodationManager(false);
+        if (!currentUser?.uid) {
+            setCanUseAccommodationManager(false);
+            return () => {
+                isCancelled = true;
+            };
+        }
+
+        const uid = currentUser.uid;
+        additionalMenuPositions = userMenuPositionService.getPositions(uid);
+        setCanUseAccommodationManager(null);
+
+        const updateAccess = () => {
+            if (isCancelled) return;
+
+            if (!menuLoaded || !userProfileLoaded || !linkedRolesLoaded) {
+                setCanUseAccommodationManager(null);
                 return;
             }
 
-            try {
-                const user = await userService.getUser(currentUser.uid);
-                const role = user?.role;
-                const isAdminRole = role === 'admin' || role === UserRole.ADMIN;
-                if (!isCancelled) setCanUseAccommodationManager(isAdminRole);
-            } catch {
-                if (!isCancelled) setCanUseAccommodationManager(false);
-            }
+            const accessRoles = buildMenuAccessRoles(
+                linkedEntityRoles.length > 0 ? linkedEntityRoles : userProfile?.position,
+                userProfile?.role,
+                userProfile?.systemRole,
+                userProfile?.accountType,
+                userProfile?.additionalPositions,
+                additionalMenuPositions
+            );
+
+            setCanUseAccommodationManager(
+                canAccessMenuRoute(menuConfig, ACCOMMODATION_MANAGER_ROUTE, accessRoles, { siteKey: 'admin' })
+            );
         };
 
-        resolveAccess();
+        const menuUnsubscribe = menuServiceV11.subscribe((config) => {
+            menuConfig = config;
+            menuLoaded = true;
+            updateAccess();
+        });
+
+        const positionUnsubscribe = userMenuPositionService.subscribe((map) => {
+            additionalMenuPositions = map[uid] || [];
+            updateAccess();
+        });
+
+        const userUnsubscribe = onSnapshot(
+            doc(db, 'users', uid),
+            (docSnap) => {
+                userProfile = docSnap.exists() ? { ...(docSnap.data() as any), uid } : null;
+                userProfileLoaded = true;
+                updateAccess();
+            },
+            (error) => {
+                console.error('[AccommodationManager] Failed to subscribe user profile:', error);
+                userProfile = null;
+                userProfileLoaded = true;
+                updateAccess();
+            }
+        );
+
+        void (async () => {
+            try {
+                const [{ manpowerService }, { officeStaffService }] = await Promise.all([
+                    import('../../services/manpowerService'),
+                    import('../../services/officeStaffService')
+                ]);
+                const [linkedWorker, linkedOfficeStaff] = await Promise.all([
+                    manpowerService.getWorkerByUid(uid).catch(() => null),
+                    officeStaffService.getOfficeStaffByUid(uid).catch(() => null)
+                ]);
+
+                linkedEntityRoles = uniqueAccessRoles([linkedWorker?.role, linkedOfficeStaff?.role]);
+            } catch (error) {
+                console.error('[AccommodationManager] Failed to load linked entity roles:', error);
+                linkedEntityRoles = [];
+            } finally {
+                linkedRolesLoaded = true;
+                updateAccess();
+            }
+        })();
+
         return () => {
             isCancelled = true;
+            menuUnsubscribe();
+            positionUnsubscribe();
+            userUnsubscribe();
         };
-    }, [currentUser]);
+    }, [currentUser?.uid]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -550,9 +641,14 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
         const query = searchTerm.trim().toLowerCase();
 
         return selectedTeamScopedAccommodations.filter(acc => {
-            if (filterStatus !== 'all' && acc.status !== filterStatus) return false;
-
             const activeList = getActiveAssignmentsForAccommodation(acc);
+
+            if (filterStatus === 'todo') {
+                if (acc.status !== 'active') return false;
+                if (activeList.length > 0) return false;
+            } else if (filterStatus !== 'all' && acc.status !== filterStatus) {
+                return false;
+            }
 
             if (!query) return true;
 
@@ -695,66 +791,6 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
         return getBillingTargetsForAccommodation(accommodation).at(-1);
     };
 
-    const formatBillingPeriodLabel = (startDate?: unknown, endDate?: unknown) => {
-        const start = normalizeKey(startDate);
-        const end = normalizeKey(endDate);
-        if (!start && !end) return '';
-        return `${start || '시작일 없음'} ~ ${end || '계속'}`;
-    };
-
-    const getBillingTargetPeriodLabel = (accommodation: Accommodation) => {
-        const target = getBillingTargetForAccommodation(accommodation);
-        return target ? formatBillingPeriodLabel(target.startDate, target.endDate) : '';
-    };
-
-    const getBillingTargetPeriodTitle = (accommodation: Accommodation) => {
-        const rows = getBillingTargetsForAccommodation(accommodation);
-        if (rows.length === 0) return getBillingTargetPeriodLabel(accommodation);
-        return rows
-            .map((target) => {
-                const name = target.targetType === 'team'
-                    ? target.teamName
-                    : target.targetType === 'worker' || target.targetType === 'office_staff'
-                        ? target.workerName
-                        : target.teamName || target.workerName || '청구대상';
-                return `${formatBillingPeriodLabel(target.startDate, target.endDate)} · ${name || '청구대상'}`;
-            })
-            .join('\n');
-    };
-
-    const getBillingTargetTypeText = (type?: AccommodationBillingTarget['targetType'] | null) => {
-        if (type === 'team') return '팀';
-        if (type === 'worker') return '작업자';
-        if (type === 'office') return '사무실';
-        if (type === 'office_staff') return '사무실직원';
-        return '청구대상';
-    };
-
-    const getBillingTimelineItems = (accommodation: Accommodation): BillingPeriodTimelineItem[] => (
-        getBillingTargetsForAccommodation(accommodation).map((target) => {
-            const name = target.targetType === 'team'
-                ? target.teamName
-                : target.targetType === 'worker' || target.targetType === 'office_staff'
-                    ? target.workerName
-                    : target.teamName || target.workerName || '청구대상';
-            const teamInfo = target.targetType === 'team'
-                ? getTeamInfo(target.teamId, target.teamName)
-                : undefined;
-            return {
-                id: normalizeKey(target.id) || `${normalizeKey(target.accommodationId)}:${normalizeKey(target.startDate)}`,
-                label: normalizeKey(name) || '청구대상',
-                typeLabel: getBillingTargetTypeText(target.targetType),
-                startDate: target.startDate,
-                endDate: target.endDate,
-                color: teamInfo?.color
-            };
-        })
-    );
-
-    const shouldShowBillingTimeline = (items: BillingPeriodTimelineItem[]) => (
-        items.length > 1 || items.some((item) => Boolean(normalizeKey(item.endDate)))
-    );
-
     const getBillingModeBadge = (
         accommodation: Accommodation,
         separatedTarget: AccommodationBillingTarget | undefined,
@@ -857,6 +893,33 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
         }
 
         return 0;
+    }
+
+    function getRentDuePaymentBreakdown(accommodation: Accommodation): { rent: number; maintenance: number; total: number } {
+        const ledgerRecord = getCurrentMonthLedgerRecord(accommodation);
+        const ledgerCosts = (ledgerRecord as any)?.costs ?? {};
+        const hasLedgerRent = Object.prototype.hasOwnProperty.call(ledgerCosts, 'rent');
+        const hasLedgerMaintenance = Object.prototype.hasOwnProperty.call(ledgerCosts, 'maintenance');
+        const rent = hasLedgerRent
+            ? toSafeNumber(ledgerCosts.rent)
+            : getAccommodationRent(accommodation);
+
+        let maintenance = hasLedgerMaintenance
+            ? toSafeNumber(ledgerCosts.maintenance)
+            : 0;
+
+        if (!hasLedgerMaintenance) {
+            const costProfile = (accommodation as any)?.costProfile;
+            if (costProfile?.maintenance === 'fixed') {
+                maintenance = toSafeNumber(costProfile.fixedMaintenance);
+            }
+        }
+
+        return {
+            rent,
+            maintenance,
+            total: rent + maintenance
+        };
     }
 
     function getAccommodationDeposit(accommodation: Accommodation): number {
@@ -1134,6 +1197,58 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
         }
     };
 
+    const handleRestoreClick = async (e: React.MouseEvent, item: Accommodation) => {
+        e.stopPropagation();
+        if (item.status !== 'inactive') return;
+
+        const result = await Swal.fire({
+            title: '처리취소',
+            text: `${item.name || item.address || '숙소'} 사용취소/만료 처리를 취소하고 다시 계약중으로 변경할까요?`,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: '처리취소',
+            cancelButtonText: '닫기',
+            confirmButtonColor: '#059669'
+        });
+        if (!result.isConfirmed) return;
+
+        try {
+            await accommodationService.updateAccommodation(item.id, { status: 'active' });
+            await supportCancellationLogService.createLog({
+                resourceType: 'accommodation',
+                resourceId: item.id,
+                resourceLabel: item.name || item.address || '숙소',
+                reason: 'OTHER',
+                reasonLabel: '처리취소',
+                processedDate: new Date().toISOString().slice(0, 10),
+                statusBefore: item.status,
+                statusAfter: 'active',
+                assigneeName: item.currentOccupantName,
+                note: '사용취소/만료 처리 번복',
+                snapshot: {
+                    name: item.name,
+                    address: item.address,
+                    status: item.status,
+                    contractEndDate: item.contract?.endDate,
+                    currentOccupantName: item.currentOccupantName
+                }
+            });
+            loadData();
+            Swal.fire({
+                toast: true,
+                position: 'top-end',
+                icon: 'success',
+                title: '처리취소되었습니다.',
+                showConfirmButton: false,
+                timer: 1800,
+                timerProgressBar: true
+            });
+        } catch (error) {
+            console.error('Failed to restore accommodation status', error);
+            Swal.fire('오류', '숙소 처리취소 중 오류가 발생했습니다.', 'error');
+        }
+    };
+
     if (canUseAccommodationManager === null) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-slate-50">
@@ -1150,7 +1265,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                         <FontAwesomeIcon icon={faUsers} size="2x" />
                     </div>
                     <h2 className="text-xl font-bold text-slate-800 mb-2">접근 권한 없음</h2>
-                    <p className="text-slate-500">관리자(admin) 계정만 숙소 관리를 사용할 수 있습니다.</p>
+                    <p className="text-slate-500">관리자 또는 권한 관리에서 숙소 관리 메뉴 권한이 부여된 계정만 사용할 수 있습니다.</p>
                 </div>
             </div>
         );
@@ -1158,6 +1273,9 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
 
     // Stats Logic
     const totalCount = selectedTeamScopedAccommodations.length;
+    const currentWorkCount = selectedTeamScopedAccommodations.filter((accommodation) => (
+        accommodation.status === 'active' && getActiveAssignmentsForAccommodation(accommodation).length === 0
+    )).length;
     const occupiedCount = selectedTeamScopedAccommodations.filter(a => a.status === 'active').reduce((acc, _) => acc + 1, 0); // safe count
     const vacantCount = selectedTeamScopedAccommodations.filter(a => a.status === 'inactive').reduce((acc, _) => acc + 1, 0);
     const totalRent = selectedTeamScopedAccommodations
@@ -1227,9 +1345,15 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
             return String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko-KR');
         });
 
-    const visibleUpcomingRentAccommodations = upcomingRentAccommodations.slice(0, 6);
-    const hiddenUpcomingRentCount = Math.max(0, upcomingRentAccommodations.length - visibleUpcomingRentAccommodations.length);
-    const upcomingRentTotal = upcomingRentAccommodations.reduce((sum, accommodation) => sum + getAccommodationRent(accommodation), 0);
+    const displayedUpcomingRentAccommodations = isRentDueAlertExpanded
+        ? upcomingRentAccommodations
+        : upcomingRentAccommodations.slice(0, RENT_DUE_ALERT_COLLAPSED_LIMIT);
+    const hiddenUpcomingRentCount = Math.max(0, upcomingRentAccommodations.length - displayedUpcomingRentAccommodations.length);
+    const canToggleUpcomingRentList = upcomingRentAccommodations.length > RENT_DUE_ALERT_COLLAPSED_LIMIT;
+    const upcomingRentTotal = upcomingRentAccommodations.reduce(
+        (sum, accommodation) => sum + getRentDuePaymentBreakdown(accommodation).total,
+        0
+    );
 
 
 
@@ -1240,77 +1364,57 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
         <div className={embedded ? 'space-y-5 sm:space-y-6 bg-transparent min-h-full w-full min-w-0 max-w-full overflow-x-hidden' : 'p-3 sm:p-6 space-y-5 sm:space-y-6 bg-slate-50 min-h-full w-full max-w-[calc(100vw-30px)] sm:max-w-full min-w-0 overflow-x-hidden'}>
             <div className={embedded ? 'space-y-5 sm:space-y-6 w-full min-w-0' : 'space-y-5 sm:space-y-6 w-full min-w-0'}>
 
-                {/* Header Section */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="flex min-w-0 items-center gap-3">
-                        <div className="shrink-0 p-3 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-100">
-                            <FontAwesomeIcon icon={faBuilding} className="text-white text-xl" />
-                        </div>
-                        <div className="min-w-0">
-                            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">숙소 통합관리</h1>
-                            <p className="text-sm text-slate-500 font-medium">숙소 배정 현황 및 공과금/청구 내역을 관리합니다.</p>
-                        </div>
-                    </div>
-                    <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                <SupportPageHeader
+                    icon={faBuilding}
+                    title="숙소 통합관리"
+                    description="숙소 배정 현황 및 공과금/청구 내역을 관리합니다."
+                    tone="emerald"
+                    actions={(
+                        <>
                         <button
+                            type="button"
                             onClick={() => navigate('/support/accommodation/logs')}
-                            className="flex flex-1 items-center justify-center gap-2 px-4 py-2.5 bg-white text-slate-700 rounded-xl font-bold hover:text-indigo-700 hover:border-indigo-200 transition-all border border-slate-200 shadow-sm sm:flex-none"
+                            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 font-bold text-slate-700 shadow-sm transition-all hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 sm:flex-none"
                         >
                             <FontAwesomeIcon icon={faHistory} />
                             <span>청구 로그</span>
                         </button>
                         <button
+                            type="button"
                             onClick={loadData}
-                            className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-xl transition-all border border-transparent hover:border-slate-200"
+                            className="rounded-lg border border-transparent p-2.5 text-slate-400 transition-all hover:border-slate-200 hover:bg-white hover:text-indigo-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                             aria-label="새로고침"
                             title="새로고침"
                         >
                             <FontAwesomeIcon icon={faRotateRight} className={loading ? 'spin' : ''} />
                         </button>
                         <button
+                            type="button"
                             onClick={handleAddClick}
-                            className="flex flex-1 items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 active:scale-95 sm:flex-none"
+                            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 font-bold text-white shadow-lg shadow-indigo-100 transition-all hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 active:scale-95 sm:flex-none"
                         >
                             <FontAwesomeIcon icon={faPlus} />
                             신규 숙소 등록
                         </button>
-                    </div>
-                </div>
+                        </>
+                    )}
+                />
 
                 {/* 필터 및 탭 섹션 */}
                 <div className="flex max-w-full flex-col gap-2 overflow-hidden bg-white p-2 rounded-2xl border border-slate-200 shadow-sm xl:flex-row xl:items-center">
                     <div className="flex min-w-0 flex-1 flex-col gap-2 lg:flex-row lg:items-center">
-                        <div className="support-scroll-x w-full lg:w-auto lg:shrink-0">
-                            <div className="support-scroll-inner flex p-1 bg-slate-100 rounded-xl">
-                                <button
-                                    onClick={() => setActiveTab('status')}
-                                    className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold transition-all sm:px-6 ${activeTab === 'status' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                                >
-                                    <FontAwesomeIcon icon={faChartPie} className="mr-2" />
-                                    배정 및 청구현황
-                                </button>
-                                <button
-                                    onClick={() => setActiveTab('ledger')}
-                                    className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold transition-all sm:px-6 ${activeTab === 'ledger' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                                >
-                                    <FontAwesomeIcon icon={faFileInvoiceDollar} className="mr-2" />
-                                    숙소 통합관리대장
-                                </button>
-                                <button
-                                    onClick={() => setActiveTab('history')}
-                                    className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold transition-all sm:px-6 ${activeTab === 'history' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                                >
-                                    <FontAwesomeIcon icon={faHistory} className="mr-2" />
-                                    처리내역
-                                </button>
-                            </div>
-                        </div>
+                        <SupportSegmentedTabs
+                            options={accommodationTabs}
+                            activeId={activeTab}
+                            onChange={setActiveTab}
+                            ariaLabel="숙소 관리 보기"
+                        />
 
                         <SupportTeamFilterTabs
                             teams={selectableTeams}
                             selectedTeamId={selectedTeamId}
                             onChange={setSelectedTeamId}
-                            disabled={activeTab !== 'status'}
+              disabled={activeTab !== 'status' && activeTab !== 'ledger'}
                             className="flex-1"
                         />
                     </div>
@@ -1327,7 +1431,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                             <input
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
-                                disabled={activeTab !== 'status'}
+                                aria-label="숙소 검색"
+                                disabled={activeTab === 'history'}
                                 placeholder="숙소명, 주소, 배정자 검색"
                                 className="block w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm font-bold text-slate-700 outline-none focus:border-indigo-500 focus:ring-indigo-500 disabled:text-slate-300"
                             />
@@ -1403,27 +1508,55 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                             <FontAwesomeIcon icon={faBell} className="animate-swing" />
                                         </div>
                                         <div className="min-w-0 flex-1">
-                                            <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                                            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                                 <h3 className="font-bold text-amber-800 text-sm">월세 납부일 임박 ({upcomingRentAccommodations.length}건)</h3>
-                                                <span className="w-fit rounded-lg bg-white px-2.5 py-1 text-xs font-black text-amber-800 border border-amber-200">
-                                                    총 {upcomingRentTotal.toLocaleString()}원
-                                                </span>
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className="w-fit rounded-lg bg-white px-2.5 py-1 text-xs font-black text-amber-800 border border-amber-200">
+                                                        총 {upcomingRentTotal.toLocaleString()}원
+                                                    </span>
+                                                    {canToggleUpcomingRentList && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setIsRentDueAlertExpanded((current) => !current)}
+                                                            className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-white px-2.5 py-1 text-xs font-black text-amber-700 hover:bg-amber-100"
+                                                            aria-expanded={isRentDueAlertExpanded}
+                                                        >
+                                                            <FontAwesomeIcon icon={isRentDueAlertExpanded ? faChevronUp : faChevronDown} className="text-[10px]" />
+                                                            {isRentDueAlertExpanded ? '접기' : `전체 ${upcomingRentAccommodations.length}건 펼치기`}
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
-                                            <div className="flex flex-wrap gap-2">
-                                                {visibleUpcomingRentAccommodations.map(acc => {
+                                            <div className={isRentDueAlertExpanded ? 'grid grid-cols-1 gap-2 lg:grid-cols-2 2xl:grid-cols-3' : 'flex flex-wrap gap-2'}>
+                                                {displayedUpcomingRentAccommodations.map(acc => {
                                                     const dueInfo = getRentDueInfo(acc);
                                                     const dayLabel = dueInfo?.daysLeft === 0 ? 'D-day' : `D-${dueInfo?.daysLeft ?? '-'}`;
+                                                    const paymentBreakdown = getRentDuePaymentBreakdown(acc);
                                                     return (
-                                                        <span key={acc.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-amber-200 text-xs font-bold text-amber-700 shadow-sm">
-                                                            <FontAwesomeIcon icon={faBuilding} className="text-amber-400" />
-                                                            {acc.name} (매월 {dueInfo?.payDay ?? getRentPaymentDay(acc)}일 · {dayLabel} · {getAccommodationRent(acc).toLocaleString()}원)
+                                                        <span
+                                                            key={acc.id}
+                                                            className={`${isRentDueAlertExpanded ? 'flex w-full items-center justify-between gap-2' : 'inline-flex items-center gap-1.5'} rounded-lg bg-white border border-amber-200 px-2.5 py-1 text-xs font-bold text-amber-700 shadow-sm`}
+                                                            title={`월세 ${paymentBreakdown.rent.toLocaleString()}원 + 관리비 ${paymentBreakdown.maintenance.toLocaleString()}원`}
+                                                        >
+                                                            <span className="inline-flex min-w-0 items-center gap-1.5">
+                                                                <FontAwesomeIcon icon={faBuilding} className="shrink-0 text-amber-400" />
+                                                                <span className="truncate">{acc.name} (매월 {dueInfo?.payDay ?? getRentPaymentDay(acc)}일 · {dayLabel})</span>
+                                                            </span>
+                                                            <span className="shrink-0 text-amber-900">
+                                                                입금 {paymentBreakdown.total.toLocaleString()}원
+                                                            </span>
                                                         </span>
                                                     );
                                                 })}
-                                                {hiddenUpcomingRentCount > 0 && (
-                                                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-amber-100 text-xs font-bold text-amber-700">
-                                                        외 {hiddenUpcomingRentCount}건
-                                                    </span>
+                                                {!isRentDueAlertExpanded && hiddenUpcomingRentCount > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setIsRentDueAlertExpanded(true)}
+                                                        className="inline-flex items-center gap-1 rounded-lg bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-700 hover:bg-amber-200"
+                                                    >
+                                                        <FontAwesomeIcon icon={faChevronDown} className="text-[10px]" />
+                                                        전체 {upcomingRentAccommodations.length}건 보기
+                                                    </button>
                                                 )}
                                             </div>
                                         </div>
@@ -1432,37 +1565,41 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                             </div>
 
                             <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
-                                <div className="flex items-center gap-4">
-                                    <button
-                                        onClick={() => setFilterStatus('all')}
-                                        className={`px-4 py-2 rounded-xl text-sm font-bold transition-all
-                                            ${filterStatus === 'all' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}
-                                        `}
-                                    >
-                                        전체 ({totalCount}호)
-                                    </button>
-                                    <button
-                                        onClick={() => setFilterStatus('active')}
-                                        className={`px-4 py-2 rounded-xl text-sm font-bold transition-all
-                                            ${filterStatus === 'active' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}
-                                        `}
-                                    >
-                                        운영 중인 숙소 ({occupiedCount}호)
-                                    </button>
-                                    <button
-                                        onClick={() => setFilterStatus('inactive')}
-                                        className={`px-4 py-2 rounded-xl text-sm font-bold transition-all
-                                            ${filterStatus === 'inactive' ? 'bg-slate-100 text-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}
-                                        `}
-                                    >
-                                        계약 종료 / 보관함 ({vacantCount}호)
-                                    </button>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {([
+                                        ['active', `운영 중 ${occupiedCount}호`],
+                                        ['inactive', `보관/종료 ${vacantCount}호`],
+                                        ['all', `전체 ${totalCount}호`]
+                                    ] as Array<[AccommodationStatusFilter, string]>).map(([status, label]) => (
+                                        <button
+                                            key={status}
+                                            type="button"
+                                            onClick={() => setFilterStatus(status)}
+                                            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all
+                                                ${filterStatus === status ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}
+                                            `}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                    {currentWorkCount > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setFilterStatus('todo')}
+                                            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all
+                                                ${filterStatus === 'todo' ? 'bg-amber-500 text-white shadow-sm' : 'text-amber-700 hover:bg-amber-50'}
+                                            `}
+                                        >
+                                            확인 필요 {currentWorkCount}호
+                                        </button>
+                                    )}
                                 </div>
 
                                 <div className="flex items-center gap-3">
                                     {/* View Mode Toggle */}
                                     <div className="flex bg-slate-100 rounded-lg p-0.5">
                                         <button
+                                            type="button"
                                             onClick={() => setViewMode('list')}
                                             className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5
                                                 ${viewMode === 'list'
@@ -1475,6 +1612,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                             목록
                                         </button>
                                         <button
+                                            type="button"
                                             onClick={() => setViewMode('card')}
                                             className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5
                                                 ${viewMode === 'card'
@@ -1491,25 +1629,27 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                             </div>
 
                             {/* Summary Stats Cards */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-5">
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+                                {currentWorkCount > 0 && (
                                 <button
                                     type="button"
-                                    onClick={() => setFilterStatus('all')}
-                                    aria-pressed={filterStatus === 'all'}
-                                    className={`w-full text-left bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-lg transition-shadow relative overflow-hidden group ${filterStatus === 'all' ? 'ring-2 ring-indigo-500 ring-offset-2' : ''}`}
+                                    onClick={() => setFilterStatus('todo')}
+                                    aria-pressed={filterStatus === 'todo'}
+                                    className={`w-full text-left bg-white p-6 rounded-2xl border border-amber-100 shadow-[0_4px_20px_-4px_rgba(245,158,11,0.12)] hover:shadow-lg transition-shadow relative overflow-hidden group ${filterStatus === 'todo' ? 'ring-2 ring-indigo-500 ring-offset-2' : ''}`}
                                 >
-                                    <div className="absolute right-0 top-0 w-32 h-32 bg-slate-50 rounded-full -mr-10 -mt-10 group-hover:scale-110 transition-transform"></div>
+                                    <div className="absolute right-0 top-0 w-32 h-32 bg-amber-50 rounded-full -mr-10 -mt-10 group-hover:scale-110 transition-transform"></div>
                                     <div className="relative z-10">
-                                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">총 관리 숙소</p>
+                                        <p className="text-xs font-bold text-amber-600/80 uppercase tracking-wider mb-2">현재 업무</p>
                                         <div className="flex items-baseline gap-2">
-                                            <h3 className="text-3xl font-extrabold text-slate-800">{totalCount}</h3>
+                                            <h3 className="text-3xl font-extrabold text-slate-800">{currentWorkCount}</h3>
                                             <span className="text-sm font-bold text-slate-400">호</span>
                                         </div>
-                                        <div className="mt-4 flex items-center gap-2 text-xs font-medium text-slate-500 bg-slate-100 w-fit px-2 py-1 rounded-lg">
-                                            <FontAwesomeIcon icon={faBuilding} className="text-slate-400" /> 전체 등록된 숙소
+                                        <div className="mt-4 flex items-center gap-2 text-xs font-medium text-amber-700 bg-amber-50 w-fit px-2 py-1 rounded-lg">
+                                            <FontAwesomeIcon icon={faExclamationTriangle} /> 입실/배정 필요
                                         </div>
                                     </div>
                                 </button>
+                                )}
 
                                 <button
                                     type="button"
@@ -1595,6 +1735,29 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                         className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition"
                                     >
                                         숙소 등록하기
+                                    </button>
+                                </div>
+                            ) : sortedFilteredAccommodations.length === 0 ? (
+                                <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-sm">
+                                    <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                                        <FontAwesomeIcon icon={faChartPie} />
+                                    </div>
+                                    <h3 className="text-base font-black text-slate-800">
+                                        {filterStatus === 'active'
+                                            ? '운영 중인 숙소가 없습니다'
+                                            : filterStatus === 'inactive'
+                                                ? '보관/종료된 숙소가 없습니다'
+                                                : filterStatus === 'todo'
+                                                    ? '확인할 숙소 배정/청구 업무가 없습니다'
+                                                    : '조건에 맞는 숙소가 없습니다'}
+                                    </h3>
+                                    <p className="mt-1 text-sm font-medium text-slate-500">다른 보기를 선택하면 운영 중이거나 종료된 숙소까지 함께 확인할 수 있습니다.</p>
+                                    <button
+                                        type="button"
+                                        onClick={() => setFilterStatus(filterStatus === 'active' ? 'all' : 'active')}
+                                        className="mt-5 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                                    >
+                                        {filterStatus === 'active' ? '전체 보기' : '운영 중 보기'}
                                     </button>
                                 </div>
                             ) : viewMode === 'list' ? (
@@ -1718,21 +1881,19 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                             ? getTeamInfo(separatedTeam?.id ?? primaryTeamAssign?.teamId, billingTargetName)
                                                             : undefined;
                                                         const billingModeBadge = getBillingModeBadge(acc, separatedBillingTarget, activeList.length > 0);
-                                                        const billingTargetPeriodLabel = getBillingTargetPeriodLabel(acc);
-                                                        const billingTargetPeriodTitle = getBillingTargetPeriodTitle(acc);
-                                                        const billingTimelineItems = getBillingTimelineItems(acc);
-                                                        const showBillingTimeline = shouldShowBillingTimeline(billingTimelineItems);
                                                         const tc = primaryTeamInfo?.color;
                                                         const tcText = tc ? getContrastingTextColor(tc) : undefined;
                                                         const paymentDay = acc.contract.paymentDay || acc.contract.rentPayDate;
                                                         const isContractExpired = acc.contract.endDate && new Date(acc.contract.endDate) < new Date();
 
+                                                        const needsWork = acc.status === 'active' && activeList.length === 0;
+
                                                         return (
                                                             <tr
                                                                 key={acc.id}
                                                                 onClick={() => handleOpenAssignmentCenter(acc)}
-                                                                className="hover:bg-indigo-50/40 cursor-pointer transition-colors group"
-                                                                style={tc ? { borderLeft: `3px solid ${tc}` } : undefined}
+                                                                className={`hover:bg-indigo-50/40 cursor-pointer transition-colors group ${needsWork ? 'bg-amber-50/35' : ''}`}
+                                                                style={tc ? { borderLeft: `3px solid ${tc}` } : needsWork ? { borderLeft: '3px solid #f59e0b' } : undefined}
                                                             >
                                                                 <td className="px-4 py-3 text-xs text-slate-400 font-mono">{rowIdx + 1}</td>
                                                                 <td className="px-4 py-3">
@@ -1854,46 +2015,37 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                     )}
                                                                 </td>
                                                                 <td className="px-4 py-3 text-xs text-slate-600">
-                                                                    <div className="flex min-w-0 flex-col gap-1">
-                                                                        {billingTargetType && billingTargetName ? (
-                                                                            <span
-                                                                                className={`inline-flex max-w-[190px] items-center gap-1.5 rounded-md px-2 py-1 text-xs font-bold ${billingTargetType === 'team'
-                                                                                    ? ''
-                                                                                    : 'bg-indigo-50 text-indigo-600 border border-indigo-100'
-                                                                                    }`}
-                                                                                 style={billingTargetType === 'team'
-                                                                                     ? (billingTargetTeamInfo?.color ? {
-                                                                                         backgroundColor: billingTargetTeamInfo.color,
-                                                                                         color: getContrastingTextColor(billingTargetTeamInfo.color),
-                                                                                         border: `1px solid ${billingTargetTeamInfo.color}`
-                                                                                     } : {
-                                                                                        backgroundColor: '#f1f5f9',
-                                                                                        color: '#475569',
-                                                                                        border: '1px solid #e2e8f0'
-                                                                                    })
-                                                                                    : undefined}
-                                                                            >
-                                                                                <FontAwesomeIcon
-                                                                                    icon={billingTargetType === 'team'
-                                                                                        ? getTeamFaIcon(billingTargetTeamInfo?.icon)
-                                                                                        : billingTargetType === 'office'
-                                                                                            ? faBuilding
-                                                                                            : faUser}
-                                                                                    className="text-[10px]"
-                                                                                />
-                                                                                <span className="truncate">{billingTargetName}</span>
-                                                                            </span>
-                                                                        ) : (
-                                                                            <span className="text-xs text-slate-300">-</span>
-                                                                        )}
-                                                                        {showBillingTimeline ? (
-                                                                            <BillingPeriodTimeline items={billingTimelineItems} compact />
-                                                                        ) : billingTargetPeriodLabel && (
-                                                                            <span className="truncate text-[11px] font-medium text-slate-400" title={billingTargetPeriodTitle}>
-                                                                                청구기간 {billingTargetPeriodLabel}
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
+                                                                    {billingTargetType && billingTargetName ? (
+                                                                        <span
+                                                                            className={`inline-flex max-w-[190px] items-center gap-1.5 rounded-md px-2 py-1 text-xs font-bold ${billingTargetType === 'team'
+                                                                                ? ''
+                                                                                : 'bg-indigo-50 text-indigo-600 border border-indigo-100'
+                                                                                }`}
+                                                                             style={billingTargetType === 'team'
+                                                                                 ? (billingTargetTeamInfo?.color ? {
+                                                                                     backgroundColor: billingTargetTeamInfo.color,
+                                                                                     color: getContrastingTextColor(billingTargetTeamInfo.color),
+                                                                                     border: `1px solid ${billingTargetTeamInfo.color}`
+                                                                                 } : {
+                                                                                    backgroundColor: '#f1f5f9',
+                                                                                    color: '#475569',
+                                                                                    border: '1px solid #e2e8f0'
+                                                                                })
+                                                                                : undefined}
+                                                                        >
+                                                                            <FontAwesomeIcon
+                                                                                icon={billingTargetType === 'team'
+                                                                                    ? getTeamFaIcon(billingTargetTeamInfo?.icon)
+                                                                                    : billingTargetType === 'office'
+                                                                                        ? faBuilding
+                                                                                        : faUser}
+                                                                                className="text-[10px]"
+                                                                            />
+                                                                            <span className="truncate">{billingTargetName}</span>
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="text-xs text-slate-300">-</span>
+                                                                    )}
                                                                 </td>
                                                                 <td className="px-4 py-3 text-center">
                                                                     <span className={`inline-flex min-w-[46px] items-center justify-center rounded-md border px-2 py-1 text-[11px] font-extrabold ${billingModeBadge.className}`}>
@@ -1931,7 +2083,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                         <button
                                                                             onClick={(e) => handleQuickAssignClick(e, acc)}
                                                                             className="px-2.5 h-7 rounded-md bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 flex items-center justify-center gap-1.5 text-indigo-700 transition-colors text-[11px] font-bold"
-                                                                            title="배정/청구대상 관리"
+                                                                            title="배정/청구대상 관리 및 청구이력 확인"
                                                                         >
                                                                             <FontAwesomeIcon icon={faUsers} className="text-[10px]" />
                                                                             배정/청구
@@ -1946,13 +2098,23 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                         >
                                                                             <FontAwesomeIcon icon={faPen} className="text-xs" />
                                                                         </button>
-                                                                        <button
-                                                                            onClick={(e) => handleCancellationClick(e, acc)}
-                                                                            className="w-7 h-7 rounded-md bg-slate-50 hover:bg-amber-50 flex items-center justify-center text-slate-300 hover:text-amber-600 transition-colors"
-                                                                            title="사용취소 처리"
-                                                                        >
-                                                                            <FontAwesomeIcon icon={faBoxArchive} className="text-xs" />
-                                                                        </button>
+                                                                        {acc.status === 'inactive' ? (
+                                                                            <button
+                                                                                onClick={(e) => handleRestoreClick(e, acc)}
+                                                                                className="w-7 h-7 rounded-md bg-emerald-50 hover:bg-emerald-100 flex items-center justify-center text-emerald-600 hover:text-emerald-700 transition-colors"
+                                                                                title="처리취소"
+                                                                            >
+                                                                                <FontAwesomeIcon icon={faRotateRight} className="text-xs" />
+                                                                            </button>
+                                                                        ) : (
+                                                                            <button
+                                                                                onClick={(e) => handleCancellationClick(e, acc)}
+                                                                                className="w-7 h-7 rounded-md bg-slate-50 hover:bg-amber-50 flex items-center justify-center text-slate-300 hover:text-amber-600 transition-colors"
+                                                                                title="사용취소 처리"
+                                                                            >
+                                                                                <FontAwesomeIcon icon={faBoxArchive} className="text-xs" />
+                                                                            </button>
+                                                                        )}
                                                                     </div>
                                                                 </td>
                                                             </tr>
@@ -1973,11 +2135,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                             const billingTargetLabel = buildBillingTargetLabel(acc, activeList);
                                             const billingTargetWorkers = buildBillingTargetWorkerList(acc, activeList);
                                             const billingModeBadge = getBillingModeBadge(acc, separatedBillingTarget, activeList.length > 0);
-                                            const billingTargetPeriodLabel = getBillingTargetPeriodLabel(acc);
-                                            const billingTargetPeriodTitle = getBillingTargetPeriodTitle(acc);
-                                            const billingTimelineItems = getBillingTimelineItems(acc);
-                                            const showBillingTimeline = shouldShowBillingTimeline(billingTimelineItems);
                                             const isExpired = acc.status === 'inactive';
+                                            const needsWork = acc.status === 'active' && activeList.length === 0;
 
                                             const primaryTeamAssign = activeList.find(
                                                 (a) => !!normalizeKey(a.teamId) || !!normalizeKey(a.teamName)
@@ -1993,7 +2152,9 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                     key={acc.id}
                                                     onClick={() => handleOpenAssignmentCenter(acc)}
                                                     className={`group bg-white rounded-2xl border transition-all cursor-pointer relative overflow-hidden
-                                                        ${isExpired
+                                                        ${needsWork
+                                                            ? 'border-amber-200 shadow-[0_8px_24px_-16px_rgba(245,158,11,0.65)]'
+                                                            : isExpired
                                                             ? 'border-slate-200 hover:border-slate-300 opacity-80 hover:opacity-100'
                                                             : 'border-slate-200 hover:border-slate-300 hover:-translate-y-1'
                                                         }
@@ -2026,13 +2187,23 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                 {{ Cheongyeon: '청연', Dawon: '다원', Individual: '개인(사모님)' }[acc.ownership || 'Cheongyeon']}
                                                             </span>
                                                             <div className="flex gap-2 items-center">
-                                                                <button
-                                                                    onClick={(e) => handleCancellationClick(e, acc)}
-                                                                    className="w-8 h-8 rounded-full bg-slate-50 hover:bg-amber-50 flex items-center justify-center text-slate-300 hover:text-amber-600 transition-colors z-10"
-                                                                    title="사용취소 처리"
-                                                                >
-                                                                    <FontAwesomeIcon icon={faBoxArchive} className="text-xs" />
-                                                                </button>
+                                                                {acc.status === 'inactive' ? (
+                                                                    <button
+                                                                        onClick={(e) => handleRestoreClick(e, acc)}
+                                                                        className="w-8 h-8 rounded-full bg-emerald-50 hover:bg-emerald-100 flex items-center justify-center text-emerald-600 hover:text-emerald-700 transition-colors z-10"
+                                                                        title="처리취소"
+                                                                    >
+                                                                        <FontAwesomeIcon icon={faRotateRight} className="text-xs" />
+                                                                    </button>
+                                                                ) : (
+                                                                    <button
+                                                                        onClick={(e) => handleCancellationClick(e, acc)}
+                                                                        className="w-8 h-8 rounded-full bg-slate-50 hover:bg-amber-50 flex items-center justify-center text-slate-300 hover:text-amber-600 transition-colors z-10"
+                                                                        title="사용취소 처리"
+                                                                    >
+                                                                        <FontAwesomeIcon icon={faBoxArchive} className="text-xs" />
+                                                                    </button>
+                                                                )}
                                                                 <button
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
@@ -2158,16 +2329,6 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                     {billingTargetLabel}
                                                                 </span>
                                                             </div>
-                                                            {showBillingTimeline ? (
-                                                                <BillingPeriodTimeline items={billingTimelineItems} compact />
-                                                            ) : billingTargetPeriodLabel && (
-                                                                <div className="flex items-center justify-between gap-2 text-sm">
-                                                                    <span className="text-slate-400 font-medium text-xs">청구 기간</span>
-                                                                    <span className="max-w-[180px] truncate rounded bg-slate-50 px-2 py-0.5 text-[11px] font-bold text-slate-500" title={billingTargetPeriodTitle}>
-                                                                        {billingTargetPeriodLabel}
-                                                                    </span>
-                                                                </div>
-                                                            )}
                                                             <div className="flex justify-between items-center text-sm">
                                                                 <span className="text-slate-400 font-medium text-xs">청구 방식</span>
                                                                 <span className={`inline-flex min-w-[46px] items-center justify-center rounded-md border px-2 py-0.5 text-[11px] font-extrabold ${billingModeBadge.className}`}>
@@ -2213,7 +2374,12 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                 <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 flex justify-between items-center">
                                     <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
                                         <FontAwesomeIcon icon={faChartPie} className="text-indigo-500" />
-                                        명의별 현황 요약 ({filterStatus === 'all' ? '전체' : filterStatus === 'active' ? '운영 중' : '보관함'})
+                                        명의별 현황 요약 ({
+                                            filterStatus === 'all' ? '전체' :
+                                            filterStatus === 'active' ? '운영 중' :
+                                            filterStatus === 'todo' ? '확인 필요' :
+                                            '보관/종료'
+                                        })
                                     </h3>
                                     <div className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded uppercase tracking-wider">
                                         {selectedTeamId ? '필터링된 결과' : '전체 결과'}
@@ -2297,7 +2463,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                             </div>
                         </div>
                     ) : activeTab === 'ledger' ? (
-                        <UtilityLedger />
+                        <UtilityLedger selectedTeamId={selectedTeamId} searchText={searchTerm} />
                     ) : (
                         <SupportCancellationHistory
                             resourceType="accommodation"

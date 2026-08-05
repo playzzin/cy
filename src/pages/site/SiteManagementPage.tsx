@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -86,6 +86,150 @@ const pickFallbackBirdseyeImage = (site: Site, pool: string[]): string => {
     const seed = seedSource.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
     return pool[seed % pool.length] || '';
 };
+
+const BIRDSEYE_URL_CACHE_KEY = 'site-management-birdseye-urls-v1';
+const OPTIMIZED_BIRDSEYE_IMAGE_IDS = new Set([
+    'birdseye_1774047026148',
+    'birdseye_1774047124635',
+    'birdseye_1776116842323',
+    'birdseye_1776116877637',
+    'birdseye_1776116927326',
+    'birdseye_1776116965248',
+    'birdseye_1776117044575',
+    'birdseye_1776117074770',
+    'birdseye_1776117117011',
+    'birdseye_1776117173931',
+    'birdseye_1776117230488',
+    'birdseye_1776117297663',
+    'birdseye_1776117385934',
+    'birdseye_1776117423961',
+    'birdseye_1776614682782',
+    'birdseye_1776843533735',
+]);
+
+const getPrioritySiteImageCount = (): number => {
+    if (typeof window === 'undefined') return 4;
+    if (window.innerWidth >= 1536) return 6;
+    if (window.innerWidth >= 1280) return 4;
+    if (window.innerWidth >= 1024) return 3;
+    if (window.innerWidth >= 640) return 2;
+    return 1;
+};
+
+const getOptimizedBirdseyeUrl = (url: string): string => {
+    if (!url) return '';
+
+    try {
+        const decodedPath = decodeURIComponent(new URL(url, window.location.origin).pathname);
+        const fileName = decodedPath.split('/').pop() || '';
+        const imageId = fileName.replace(/\.[^.]+$/, '');
+        return OPTIMIZED_BIRDSEYE_IMAGE_IDS.has(imageId)
+            ? `/assets/site-thumbnails/${imageId}.webp`
+            : '';
+    } catch {
+        return '';
+    }
+};
+
+const readCachedBirdseyeUrls = (): string[] => {
+    try {
+        const cached = window.localStorage.getItem(BIRDSEYE_URL_CACHE_KEY);
+        if (!cached) return [];
+        const parsed = JSON.parse(cached);
+        return Array.isArray(parsed)
+            ? parsed.map((url) => String(url || '').trim()).filter(Boolean).slice(0, 64)
+            : [];
+    } catch {
+        return [];
+    }
+};
+
+interface SitePreviewImageProps {
+    siteName: string;
+    originalUrl: string;
+    optimizedFallbackUrl: string;
+    fallbackUrl: string;
+    priority: boolean;
+}
+
+const SitePreviewImage = React.memo<SitePreviewImageProps>(({ siteName, originalUrl, optimizedFallbackUrl, fallbackUrl, priority }) => {
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const [shouldLoad, setShouldLoad] = useState(priority);
+    const [activeIndex, setActiveIndex] = useState(0);
+    const [loaded, setLoaded] = useState(false);
+    const [failed, setFailed] = useState(false);
+    const candidateUrls = useMemo(
+        () => Array.from(new Set([originalUrl, optimizedFallbackUrl, fallbackUrl].filter(Boolean))),
+        [originalUrl, optimizedFallbackUrl, fallbackUrl]
+    );
+    const activeUrl = candidateUrls[activeIndex] || '';
+
+    useEffect(() => {
+        setActiveIndex(0);
+        setLoaded(false);
+        setFailed(false);
+    }, [originalUrl, optimizedFallbackUrl, fallbackUrl]);
+
+    useEffect(() => {
+        if (priority || shouldLoad) {
+            setShouldLoad(true);
+            return;
+        }
+
+        const target = containerRef.current;
+        if (!target || typeof IntersectionObserver === 'undefined') {
+            setShouldLoad(true);
+            return;
+        }
+
+        const observer = new IntersectionObserver((entries) => {
+            if (!entries.some((entry) => entry.isIntersecting)) return;
+            setShouldLoad(true);
+            observer.disconnect();
+        }, { rootMargin: '600px 0px' });
+
+        observer.observe(target);
+        return () => observer.disconnect();
+    }, [priority, shouldLoad]);
+
+    const handleError = () => {
+        if (activeIndex + 1 < candidateUrls.length) {
+            setLoaded(false);
+            setActiveIndex((index) => index + 1);
+            return;
+        }
+        setFailed(true);
+    };
+
+    return (
+        <div ref={containerRef} className="absolute inset-0">
+            {!loaded && !failed && activeUrl && (
+                <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-slate-700 via-slate-600 to-slate-700" />
+            )}
+            {shouldLoad && activeUrl && !failed ? (
+                <img
+                    src={activeUrl}
+                    alt={siteName}
+                    width={320}
+                    height={240}
+                    loading={priority ? 'eager' : 'lazy'}
+                    decoding="async"
+                    {...{ fetchpriority: priority ? 'high' : 'low' }}
+                    className={`h-full w-full object-cover transition-[opacity,transform] duration-300 group-hover:scale-[1.02] ${loaded ? 'opacity-80 group-hover:opacity-100' : 'opacity-0'}`}
+                    onLoad={() => setLoaded(true)}
+                    onError={handleError}
+                />
+            ) : null}
+            {(!activeUrl || failed) && (
+                <div className="flex h-full w-full items-center justify-center bg-slate-800 text-slate-600">
+                    <FontAwesomeIcon icon={faBuilding} size="2x" />
+                </div>
+            )}
+        </div>
+    );
+});
+
+SitePreviewImage.displayName = 'SitePreviewImage';
 
 // ----------------------------------------------------------------------
 // Component: SiteDetailModal (Dark Theme)
@@ -602,18 +746,20 @@ const SiteManagementPageBase: React.FC<SiteManagementPageProps> = ({ closedOnly 
     const [loading, setLoading] = useState(true);
     const [selectedSite, setSelectedSite] = useState<Site | null>(null);
     const [siteReportSummaryMap, setSiteReportSummaryMap] = useState<Record<string, SiteReportSummary>>({});
-    const [birdseyeUrls, setBirdseyeUrls] = useState<string[]>([]);
-    const [siteImageErrorMap, setSiteImageErrorMap] = useState<Record<string, boolean>>({});
+    const [birdseyeUrls, setBirdseyeUrls] = useState<string[]>(readCachedBirdseyeUrls);
+    const reportSummaryLoadStartedRef = useRef(false);
+    const priorityImageCount = useMemo(getPrioritySiteImageCount, []);
 
     // Initial Load & Query Param Handling
     useEffect(() => {
+        let mounted = true;
+
         const init = async () => {
             setLoading(true);
             try {
-                const [data, allReports] = await Promise.all([
-                    siteService.getSites(),
-                    dailyReportService.getReports(),
-                ]);
+                const data = await siteService.getSites();
+                if (!mounted) return;
+
                 // '외부팀' 현장 제외
                 let filtered = closedOnly ? data.filter(isClosedSite) : data;
                 filtered = filtered.filter(site => {
@@ -629,6 +775,38 @@ const SiteManagementPageBase: React.FC<SiteManagementPageProps> = ({ closedOnly 
                 });
                 setSites(filtered);
                 setFilteredSites(filtered);
+
+                // Auto-open modal if siteId is present in URL
+                const targetSiteId = searchParams.get('siteId');
+                if (targetSiteId) {
+                    const targetSite = filtered.find(s => s.id === targetSiteId);
+                    if (targetSite) {
+                        setSelectedSite(targetSite);
+                    }
+                }
+            } catch (error) {
+                console.error(error);
+            } finally {
+                if (mounted) setLoading(false);
+            }
+        };
+        init();
+
+        return () => {
+            mounted = false;
+        };
+    }, [closedOnly, searchParams]);
+
+    // Render site cards first. The much larger report collection is summarized in the background.
+    useEffect(() => {
+        if (loading || reportSummaryLoadStartedRef.current) return;
+        reportSummaryLoadStartedRef.current = true;
+        let mounted = true;
+
+        const loadReportSummaries = async () => {
+            try {
+                const allReports = await dailyReportService.getReports();
+                if (!mounted) return;
 
                 const summaryMap: Record<string, SiteReportSummary> = {};
                 allReports.forEach((report) => {
@@ -649,50 +827,52 @@ const SiteManagementPageBase: React.FC<SiteManagementPageProps> = ({ closedOnly 
                     existing.totalManDay += reportManDay;
                 });
                 setSiteReportSummaryMap(summaryMap);
-
-                // Auto-open modal if siteId is present in URL
-                const targetSiteId = searchParams.get('siteId');
-                if (targetSiteId) {
-                    const targetSite = filtered.find(s => s.id === targetSiteId);
-                    if (targetSite) {
-                        setSelectedSite(targetSite);
-                    }
-                }
             } catch (error) {
-                console.error(error);
-            } finally {
-                setLoading(false);
+                console.error('Failed to load site report summaries:', error);
             }
         };
-        init();
-    }, [closedOnly, searchParams]);
+
+        loadReportSummaries();
+        return () => {
+            mounted = false;
+        };
+    }, [loading]);
 
     useEffect(() => {
         let mounted = true;
 
         const loadBirdseyeFallbackPool = async () => {
             try {
-                // 1) 전체에서 조감도(category/tag) 우선 수집
-                const { images: allImages } = await listGalleryImages(undefined, 400);
+                // Query the small category first instead of scanning hundreds of gallery documents.
+                const { images: categoryImages } = await listGalleryImages('birdseye', 64);
                 if (!mounted) return;
 
-                const urlsFromAll = allImages
-                    .filter((image) => {
-                        if (image.category === 'birdseye') return true;
-                        const tags = Array.isArray(image.tags) ? image.tags : [];
-                        return tags.some((tag) => /birdseye|조감도/i.test(String(tag)));
-                    })
+                let urls = categoryImages
                     .map((image) => String(image.url || '').trim())
                     .filter(Boolean);
 
-                // 2) 부족하면 카테고리 전용 조회로 보강
-                let urls = Array.from(new Set(urlsFromAll));
+                // Keep compatibility with older metadata that used tags instead of a category.
                 if (urls.length === 0) {
-                    const { images } = await listGalleryImages('birdseye', 200);
-                    urls = images.map((image) => String(image.url || '').trim()).filter(Boolean);
+                    const { images } = await listGalleryImages(undefined, 96);
+                    urls = images
+                        .filter((image) => {
+                            if (image.category === 'birdseye') return true;
+                            const tags = Array.isArray(image.tags) ? image.tags : [];
+                            return tags.some((tag) => /birdseye|조감도/i.test(String(tag)));
+                        })
+                        .map((image) => String(image.url || '').trim())
+                        .filter(Boolean);
                 }
 
-                setBirdseyeUrls(urls);
+                const uniqueUrls = Array.from(new Set(urls)).slice(0, 64);
+                if (uniqueUrls.length === 0) return;
+
+                setBirdseyeUrls(uniqueUrls);
+                try {
+                    window.localStorage.setItem(BIRDSEYE_URL_CACHE_KEY, JSON.stringify(uniqueUrls));
+                } catch {
+                    // Local cache is an optional speed-up; memory state is enough for this visit.
+                }
             } catch (error) {
                 console.error('Failed to load birdseye fallback pool for site management:', error);
             }
@@ -768,18 +948,14 @@ const SiteManagementPageBase: React.FC<SiteManagementPageProps> = ({ closedOnly 
                 </div>
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-4">
-                    {filteredSites.map(site => (
+                    {filteredSites.map((site, index) => (
                         (() => {
-                            const siteKey = String(site.id || site.code || site.name || 'site');
                             const siteSummary = getSiteSummary(site);
                             const periodText = siteSummary ? `${siteSummary.firstDate} ~ ${siteSummary.lastDate}` : '- ~ -';
                             const totalManDayText = siteSummary ? siteSummary.totalManDay.toFixed(1) : '0.0';
                             const fallbackImageUrl = pickFallbackBirdseyeImage(site, birdseyeUrls);
-                            const hasOriginalImage = Boolean(site.imageUrl);
-                            const useFallbackByError = Boolean(siteImageErrorMap[siteKey]);
-                            const previewImageUrl = !useFallbackByError && hasOriginalImage
-                                ? String(site.imageUrl)
-                                : fallbackImageUrl;
+                            const optimizedFallbackImageUrl = getOptimizedBirdseyeUrl(fallbackImageUrl);
+                            const originalImageUrl = String(site.imageUrl || '').trim();
                             return (
                         <motion.div
                             key={site.id}
@@ -790,22 +966,13 @@ const SiteManagementPageBase: React.FC<SiteManagementPageProps> = ({ closedOnly 
                             className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 overflow-hidden cursor-pointer group flex flex-col h-full"
                         >
                             <div className="aspect-[4/3] w-full bg-slate-700 relative overflow-hidden">
-                                {previewImageUrl ? (
-                                    <img
-                                        src={previewImageUrl}
-                                        alt={site.name}
-                                        className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
-                                        onError={() => {
-                                            if (hasOriginalImage && fallbackImageUrl) {
-                                                setSiteImageErrorMap((prev) => ({ ...prev, [siteKey]: true }));
-                                            }
-                                        }}
-                                    />
-                                ) : (
-                                    <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-600">
-                                        <FontAwesomeIcon icon={faBuilding} size="2x" />
-                                    </div>
-                                )}
+                                <SitePreviewImage
+                                    siteName={site.name}
+                                    originalUrl={originalImageUrl}
+                                    optimizedFallbackUrl={optimizedFallbackImageUrl}
+                                    fallbackUrl={fallbackImageUrl}
+                                    priority={index < priorityImageCount}
+                                />
                                 <div className="absolute top-3 right-3">
                                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shadow-sm backdrop-blur-sm ${site.status === 'active'
                                         ? 'bg-green-500/80 text-white'

@@ -49,61 +49,14 @@ const formatDateTime = (timestamp?: Timestamp): string => {
     return `${yyyy}.${mm}.${dd} ${hh}:${mi}`;
 };
 
-const getStatusLabel = (status: HomepageRequestStatus): string => {
-    switch (status) {
-        case 'requested':
-            return '요청';
-        case 'accepted':
-            return '접수';
-        case 'in_progress':
-            return '진행 중';
-        case 'review':
-            return '검토';
-        case 'completed':
-            return '완료';
-        default:
-            return status;
-    }
-};
 
-const getStatusClass = (status: HomepageRequestStatus): string => {
-    switch (status) {
-        case 'requested':
-            return 'bg-slate-50 text-slate-700 border-slate-200';
-        case 'accepted':
-            return 'bg-blue-50 text-blue-700 border-blue-200';
-        case 'in_progress':
-            return 'bg-indigo-50 text-indigo-700 border-indigo-200';
-        case 'review':
-            return 'bg-amber-50 text-amber-700 border-amber-200';
-        case 'completed':
-            return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-        default:
-            return 'bg-slate-50 text-slate-700 border-slate-200';
-    }
-};
 
 const getTypeLabel = (type: HomepageRequestType): string => {
     return type === 'build' ? '제작' : '수정';
 };
 
-const getPriorityLabel = (priority: HomepageRequestPriority): string => {
-    if (priority === 'high') return '높음';
-    if (priority === 'medium') return '보통';
-    return '낮음';
-};
 
-const getPriorityClass = (priority: HomepageRequestPriority): string => {
-    if (priority === 'high') return 'bg-rose-50 text-rose-700 border-rose-200';
-    if (priority === 'medium') return 'bg-amber-50 text-amber-700 border-amber-200';
-    return 'bg-slate-50 text-slate-700 border-slate-200';
-};
 
-const getChecklistStatusLabel = (status: HomepageChecklistStatus): string => {
-    if (status === 'todo') return '대기';
-    if (status === 'doing') return '진행 중';
-    return '완료';
-};
 
 const getEstimateStatusLabel = (status: HomepageEstimate['status']): string => {
     if (status === 'approved') return '승인됨';

@@ -164,12 +164,11 @@ import * as XLSX from 'xlsx';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faCloudUploadAlt, faCheckCircle, faSpinner, faExclamationTriangle,
-    faFileExcel, faArrowRight, faDatabase, faTimes, faDownload, faCog,
+    faFileExcel, faArrowRight, faTimes, faDownload, faCog,
     faBuilding, faMapMarkerAlt, faUsers, faUser, faClipboardList,
-    faPlay, faEye, faLayerGroup, faChevronDown, faChevronRight,
-    faInfoCircle, faExclamationCircle, faCheck, faSyncAlt,
-    faSearch, faFilter, faSortAmountDown, faTable, faThLarge
-} from '@fortawesome/free-solid-svg-icons';
+    faPlay, faLayerGroup, faChevronDown, faChevronRight,
+    faInfoCircle, faCheck, faSyncAlt,
+    faSearch, faTable} from '@fortawesome/free-solid-svg-icons';
 import { companyService, Company } from '../../services/companyService';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';

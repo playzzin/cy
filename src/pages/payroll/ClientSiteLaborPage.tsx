@@ -5,23 +5,44 @@ import {
     CalendarDays,
     ChevronDown,
     ChevronRight,
+    Download,
+    Edit3,
     ExternalLink,
     FileText,
     Loader2,
     MapPin,
     Printer,
     RefreshCw,
+    Save,
     Search,
+    Trash2,
     UsersRound,
     WalletCards,
+    X,
 } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
-import { companyService, type Company } from '../../services/companyService';
 import { dailyReportService, type DailyReportWorkerRow } from '../../services/dailyReportService';
 import { manpowerService, type Worker } from '../../services/manpowerService';
 import { supportRateService, type SupportRate } from '../../services/supportRateService';
-import { userService, type UserData } from '../../services/userService';
+import { useCompanyDataScope } from '../../hooks/useCompanyDataScope';
+import { companyDataScopeMatchesLaborRow } from '../../utils/companyDataScope';
 import { estimateService, type Estimate } from '../../services/estimateService';
+import { progressClaimService } from '../../services/progressClaimService';
+import {
+    buildClientSiteLaborAdjustmentId,
+    clientSiteLaborAdjustmentService,
+    type ClientSiteLaborAdjustment,
+    type ClientSiteLaborProcessStatus,
+} from '../../services/clientSiteLaborAdjustmentService';
+import { payrollConfigService, type PayrollConfig } from '../../services/payrollConfigService';
+import type {
+    ProgressAllocationCalculatedRow,
+    ProgressClaim,
+    ProgressClaimStatus,
+    ProgressClaimSummary,
+    ProgressContract,
+    ProgressDailyManDaySummary,
+    ProgressItemCalculatedRow,
+} from '../../types/progressClaim';
 import {
     AmountBarComponent,
     InfoTableComponent,
@@ -44,6 +65,18 @@ import {
     type EstimateDraft,
 } from '../../utils/estimateUtils';
 import { calculateRentalLineAmount } from '../../utils/rentalTransactionGenerator';
+import {
+    calculateProgressClaimSummary,
+    formatProgressMoney,
+    formatProgressQuantity,
+} from '../../utils/progressClaimCalculations';
+import {
+    calculateClientSiteLaborRow,
+    calculateClientSiteLaborTotals,
+    DEFAULT_CLIENT_SITE_LABOR_TAX_CONFIG,
+    type ClientSiteLaborCalculationResult,
+    type ClientSiteLaborTaxConfig,
+} from '../../utils/clientSiteLaborCalculator';
 
 interface EnrichedWorkerRow extends DailyReportWorkerRow {
     constructionCompanyKey: string;
@@ -130,15 +163,27 @@ interface ConstructionCompanySummary {
     clients: ClientCompanySummary[];
 }
 
-type CompanyAccessMode = 'all' | 'construction-company';
 type StatementPayType = 'direct' | 'delegate';
+type ClientSiteDocumentView = 'labor' | 'progress' | 'transaction';
+type WorkStatusFilter = 'all' | DailyReportWorkerRow['status'];
+type ProcessStatusFilter = 'all' | ClientSiteLaborProcessStatus;
 
-interface ConstructionCompanyAccessScope {
-    loading: boolean;
-    mode: CompanyAccessMode;
-    label: string;
-    companyIds: string[];
-    companyNameKeys: string[];
+interface ClientSiteLaborEditDraft {
+    manDay: string;
+    unitPrice: string;
+    workStatus: DailyReportWorkerRow['status'];
+    allowance: string;
+    deduction: string;
+    processStatus: ClientSiteLaborProcessStatus;
+    memo: string;
+}
+
+interface ClientSiteLaborManagementRow {
+    key: string;
+    worker: WorkerSummary;
+    entry: EnrichedWorkerRow;
+    adjustment?: ClientSiteLaborAdjustment;
+    calculation: ClientSiteLaborCalculationResult;
 }
 
 interface SiteLaborStatementRow {
@@ -184,6 +229,14 @@ interface SiteLaborStatementPreviewData {
     rows: SiteLaborStatementRow[];
     totalManDay: number;
     totalAmount: number;
+}
+
+interface ProgressClaimPreviewData {
+    claim: ProgressClaim;
+    contract?: ProgressContract;
+    itemRows: ProgressItemCalculatedRow[];
+    allocationRows: ProgressAllocationCalculatedRow[];
+    summary: ProgressClaimSummary;
 }
 
 const numberFormatter = new Intl.NumberFormat('ko-KR');
@@ -261,9 +314,6 @@ const text = (value: unknown, fallback = ''): string => {
 const normalizeKey = (value: unknown): string =>
     text(value).replace(/\s+/g, '').toLowerCase();
 
-const normalizeAccountType = (value: unknown): string =>
-    normalizeKey(value).replace(/[-_]/g, '');
-
 const buildIdentityKey = (prefix: string, id: unknown, name: unknown, fallback: string): string => {
     const idText = text(id);
     if (idText) return `${prefix}:id:${idText}`;
@@ -289,6 +339,62 @@ const calculateBillingAmount = (manDay: unknown, billingUnitPrice: unknown): num
 
 const SUPPORT_CLIENT_SITE_BILLING_RATE_STORAGE_PREFIX = 'support-client-site-billing-rates';
 const SUPPORT_TRANSACTION_STATEMENT_SOURCE = 'support-client-site' as const;
+const PROGRESS_TRANSACTION_STATEMENT_SOURCE = 'progress-claims' as const;
+
+const PROGRESS_STATUS_BADGE_CLASS: Record<ProgressClaimStatus, string> = {
+    draft: 'border-slate-200 bg-slate-100 text-slate-700',
+    review: 'border-amber-200 bg-amber-50 text-amber-700',
+    confirmed: 'border-indigo-200 bg-indigo-50 text-indigo-700',
+    billed: 'border-blue-200 bg-blue-50 text-blue-700',
+    paid: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+};
+
+const PROGRESS_STATUS_LABELS: Record<ProgressClaimStatus, string> = {
+    draft: '작성중',
+    review: '검토중',
+    confirmed: '확정',
+    billed: '청구완료',
+    paid: '입금완료',
+};
+
+const WORK_STATUS_OPTIONS: Array<{ value: WorkStatusFilter; label: string }> = [
+    { value: 'all', label: '전체 근태' },
+    { value: 'attendance', label: '출근' },
+    { value: 'half', label: '반일' },
+    { value: 'absent', label: '결근' },
+];
+
+const PROCESS_STATUS_OPTIONS: Array<{ value: ProcessStatusFilter; label: string }> = [
+    { value: 'all', label: '전체 처리' },
+    { value: 'draft', label: '미확정' },
+    { value: 'review', label: '검토' },
+    { value: 'confirmed', label: '확정' },
+    { value: 'paid', label: '지급완료' },
+];
+
+const PROCESS_STATUS_LABELS: Record<ClientSiteLaborProcessStatus, string> = {
+    draft: '미확정',
+    review: '검토',
+    confirmed: '확정',
+    paid: '지급완료',
+};
+
+const PROCESS_STATUS_BADGE_CLASS: Record<ClientSiteLaborProcessStatus, string> = {
+    draft: 'border-slate-200 bg-slate-100 text-slate-600',
+    review: 'border-amber-200 bg-amber-50 text-amber-700',
+    confirmed: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    paid: 'border-blue-200 bg-blue-50 text-blue-700',
+};
+
+const createDefaultEditDraft = (): ClientSiteLaborEditDraft => ({
+    manDay: '0',
+    unitPrice: '0',
+    workStatus: 'attendance',
+    allowance: '0',
+    deduction: '0',
+    processStatus: 'draft',
+    memo: '',
+});
 
 const getBillingRateStorageKey = (yearMonth: string): string =>
     `${SUPPORT_CLIENT_SITE_BILLING_RATE_STORAGE_PREFIX}:${yearMonth || 'unknown-month'}`;
@@ -307,6 +413,40 @@ const getSupportClientSiteStatementKey = (site: SiteSummary): string => {
     const siteKey = getSupportIdentityKey(site.siteId, site.siteName, 'site:unknown');
     return `site:${clientKey}::${siteKey}`;
 };
+
+const getProgressClaimSiteKey = (site: SiteSummary): string =>
+    text(site.siteId) || normalizeKey(site.siteName) || normalizeKey(site.key) || 'unknown-site';
+
+const getProgressClaimStatementKey = (site: SiteSummary, yearMonth: string): string =>
+    `progress-claims::${yearMonth || 'unknown-month'}::site::${getProgressClaimSiteKey(site)}`;
+
+const progressClaimMatchesSite = (claim: ProgressClaim, site: SiteSummary): boolean => {
+    const siteId = text(site.siteId);
+    const claimSiteIds = uniqueAccessTexts([claim.siteId, claim.siteSnapshot?.siteId]);
+    if (siteId && claimSiteIds.includes(siteId)) return true;
+
+    const siteNameKey = normalizeKey(site.siteName);
+    const claimNameKeys = uniqueAccessTexts([claim.siteName, claim.siteSnapshot?.siteName]).map(normalizeKey);
+    return Boolean(siteNameKey && claimNameKeys.includes(siteNameKey));
+};
+
+const progressContractMatchesSite = (contract: ProgressContract, site: SiteSummary): boolean => {
+    const siteId = text(site.siteId);
+    if (siteId && text(contract.siteId) === siteId) return true;
+    return Boolean(normalizeKey(site.siteName) && normalizeKey(contract.siteName) === normalizeKey(site.siteName));
+};
+
+const buildProgressDailySummary = (
+    site: SiteSummary,
+    claim: ProgressClaim
+): ProgressDailyManDaySummary => ({
+    siteId: text(claim.siteId) || text(site.siteId),
+    siteName: text(claim.siteName) || site.siteName,
+    siteType: text(claim.siteSnapshot?.siteType),
+    manDay: claim.confirmedSnapshot?.totalManDay ?? site.totalManDay,
+    amount: claim.confirmedSnapshot?.currentAmount ?? site.billingAmount,
+    rowCount: site.workers.reduce((sum, worker) => sum + worker.entries.length, 0),
+});
 
 const loadSupportClientBillingRates = (yearMonth: string): Record<string, string> => {
     if (typeof window === 'undefined') return {};
@@ -465,106 +605,6 @@ const uniqueTexts = (values: Array<string | undefined | null>): string[] => {
 
 const uniqueAccessTexts = (values: unknown[]): string[] =>
     Array.from(new Set(values.map((value) => text(value)).filter(Boolean)));
-
-const parseLinkedIds = (raw?: unknown): string[] => {
-    if (Array.isArray(raw)) return uniqueAccessTexts(raw);
-
-    const rawText = text(raw);
-    if (!rawText) return [];
-
-    try {
-        const parsed = JSON.parse(rawText);
-        return Array.isArray(parsed) ? uniqueAccessTexts(parsed) : [rawText];
-    } catch {
-        return [rawText];
-    }
-};
-
-const buildAllCompanyAccessScope = (loading = false): ConstructionCompanyAccessScope => ({
-    loading,
-    mode: 'all',
-    label: '\uC804\uCCB4',
-    companyIds: [],
-    companyNameKeys: [],
-});
-
-const isConstructionCompanyProfile = (profile: UserData | null): boolean =>
-    normalizeAccountType(profile?.accountType) === 'constructioncompany';
-
-const profileBypassesCompanyScope = (profile: UserData | null): boolean => {
-    const accountType = normalizeAccountType(profile?.accountType);
-    if (accountType === 'constructioncompany') return false;
-    if (accountType === 'office') return true;
-    if (parseLinkedIds(profile?.linkedOfficeStaffIds).length > 0) return true;
-
-    const role = normalizeKey(profile?.role);
-    if (!role) return false;
-
-    return [
-        'admin',
-        'administrator',
-        'manager',
-        'office',
-        '\uAD00\uB9AC\uC790',
-        '\uC0AC\uC7A5',
-        '\uC2E4\uC7A5',
-        '\uB9E4\uB2C8\uC800',
-        '\uBCF8\uC0AC',
-        '\uC0AC\uBB34',
-    ].some((keyword) => role.includes(normalizeKey(keyword)));
-};
-
-const resolveConstructionCompanyAccessScope = async (
-    profile: UserData | null
-): Promise<ConstructionCompanyAccessScope> => {
-    if (!profile || profileBypassesCompanyScope(profile) || !isConstructionCompanyProfile(profile)) {
-        return buildAllCompanyAccessScope();
-    }
-
-    const linkedCompanyIds = parseLinkedIds(profile.linkedCompanyIds);
-    const linkedCompanies = await Promise.all(
-        linkedCompanyIds.map(async (companyId) => {
-            try {
-                return await companyService.getCompanyById(companyId);
-            } catch (error) {
-                console.warn('[ClientSiteLaborPage] linked company load failed:', companyId, error);
-                return null;
-            }
-        })
-    );
-    const companyIds = uniqueAccessTexts([
-        ...linkedCompanyIds,
-        ...linkedCompanies.flatMap((company: Company | null) =>
-            company ? [company.id, company.legacyId] : []
-        ),
-    ]);
-    const companyNames = uniqueAccessTexts(
-        linkedCompanies.flatMap((company: Company | null) => company ? [company.name] : [])
-    );
-
-    return {
-        loading: false,
-        mode: 'construction-company',
-        label: companyNames.join(', ') || companyIds.join(', ') || '\uC5F0\uACB0 \uAC74\uC124\uC0AC \uC5C6\uC74C',
-        companyIds,
-        companyNameKeys: companyNames.map(normalizeKey).filter(Boolean),
-    };
-};
-
-const matchesCompanyAccessScope = (
-    row: EnrichedWorkerRow,
-    scope: ConstructionCompanyAccessScope
-): boolean => {
-    if (scope.loading) return false;
-    if (scope.mode === 'all') return true;
-
-    const allowedCompanyIds = new Set(scope.companyIds);
-    const rowCompanyIds = uniqueAccessTexts([row.constructorCompanyId]);
-    if (rowCompanyIds.some((companyId) => allowedCompanyIds.has(companyId))) return true;
-
-    const rowCompanyNameKey = normalizeKey(row.constructorCompanyName || row.constructionCompanyName);
-    return Boolean(rowCompanyNameKey && scope.companyNameKeys.includes(rowCompanyNameKey));
-};
 
 const getWorkerMap = (workers: Worker[]): Map<string, Worker> => {
     const map = new Map<string, Worker>();
@@ -841,6 +881,86 @@ const getTaxSummary = (grossAmount: number) => {
         deductionTotal,
         netAmount: grossAmount - deductionTotal,
     };
+};
+
+const parseEditableNumber = (value: string): number => {
+    const parsed = Number(String(value ?? '').replace(/,/g, '').trim());
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const getLaborAdjustmentIdForEntry = (yearMonth: string, entry: EnrichedWorkerRow): string =>
+    buildClientSiteLaborAdjustmentId({
+        yearMonth,
+        reportId: text(entry.reportId),
+        workerIndex: entry.workerIndex,
+        workerId: text(entry.workerId),
+    });
+
+const buildEditDraftFromRow = (row: ClientSiteLaborManagementRow): ClientSiteLaborEditDraft => ({
+    manDay: String(row.entry.manDay || 0),
+    unitPrice: String(row.entry.unitPrice || 0),
+    workStatus: row.entry.status || 'attendance',
+    allowance: String(row.adjustment?.allowance ?? 0),
+    deduction: String(row.adjustment?.deduction ?? 0),
+    processStatus: row.adjustment?.status ?? 'draft',
+    memo: row.adjustment?.memo ?? '',
+});
+
+const buildManagementRows = (
+    site: SiteSummary | undefined,
+    yearMonth: string,
+    adjustments: Record<string, ClientSiteLaborAdjustment>,
+    taxConfig: ClientSiteLaborTaxConfig,
+    processStatusFilter: ProcessStatusFilter
+): ClientSiteLaborManagementRow[] => {
+    if (!site) return [];
+
+    return site.workers
+        .flatMap((worker) => worker.entries.map((entry) => {
+            const key = getLaborAdjustmentIdForEntry(yearMonth, entry);
+            const adjustment = adjustments[key];
+            const calculation = calculateClientSiteLaborRow({
+                manDay: entry.manDay,
+                unitPrice: entry.unitPrice,
+                allowance: adjustment?.allowance ?? 0,
+                deduction: adjustment?.deduction ?? 0,
+            }, taxConfig);
+
+            return {
+                key,
+                worker,
+                entry,
+                adjustment,
+                calculation,
+            };
+        }))
+        .filter((row) => processStatusFilter === 'all' || (row.adjustment?.status ?? 'draft') === processStatusFilter)
+        .sort((a, b) =>
+            text(a.entry.date).localeCompare(text(b.entry.date)) ||
+            a.entry.workerName.localeCompare(b.entry.workerName, 'ko') ||
+            text(a.entry.teamName).localeCompare(text(b.entry.teamName), 'ko')
+        );
+};
+
+const csvCell = (value: unknown): string => {
+    const raw = String(value ?? '');
+    return /[",\n\r]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
+};
+
+const downloadCsv = (filename: string, headers: string[], rows: unknown[][]): void => {
+    const csv = [
+        headers.map(csvCell).join(','),
+        ...rows.map((row) => row.map(csvCell).join(',')),
+    ].join('\r\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
 };
 
 const StatCard: React.FC<{
@@ -1152,118 +1272,169 @@ const LinkedTransactionStatementPreview: React.FC<{
     );
 };
 
-const WorkerStatement: React.FC<{
+const ProgressClaimInvoicePreview: React.FC<{
+    data: ProgressClaimPreviewData;
     site: SiteSummary;
-    worker: WorkerSummary;
-    startDate: string;
-    endDate: string;
-}> = ({ site, worker, startDate, endDate }) => {
-    const tax = getTaxSummary(worker.totalAmount);
+    yearMonth: string;
+}> = ({ data, site, yearMonth }) => {
+    const { claim, contract, itemRows, allocationRows, summary } = data;
+    const statusClass = PROGRESS_STATUS_BADGE_CLASS[claim.status || 'draft'];
 
     return (
-        <div className="border border-slate-300 bg-white p-4 text-slate-900">
-            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-300 pb-3">
+        <div className="inline-block min-w-[1180px] bg-white p-6 shadow-sm">
+            <div className="grid gap-4 border-b border-slate-200 pb-4 md:grid-cols-[1fr_320px]">
                 <div>
-                    <h2 className="text-xl font-black tracking-normal">노임명세서</h2>
-                    <p className="mt-1 text-xs font-medium text-slate-500">{startDate} ~ {endDate}</p>
+                    <div className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-indigo-700">
+                        Progress Claim Invoice
+                    </div>
+                    <h3 className="mt-3 text-2xl font-black text-slate-950">{yearMonth} 기성청구서</h3>
+                    <div className="mt-3 grid gap-2 text-xs font-bold text-slate-600 sm:grid-cols-2">
+                        <div><span className="text-slate-400">현장</span><div className="mt-1 text-slate-900">{site.siteName}</div></div>
+                        <div><span className="text-slate-400">발주처</span><div className="mt-1 text-slate-900">{site.clientCompanyName || '-'}</div></div>
+                        <div><span className="text-slate-400">건설사</span><div className="mt-1 text-slate-900">{site.constructionCompanyName || '-'}</div></div>
+                        <div><span className="text-slate-400">계약</span><div className="mt-1 text-slate-900">{contract?.siteName || claim.siteName || '-'}</div></div>
+                    </div>
                 </div>
-                <div className="text-right text-xs text-slate-500">
-                    <p>{site.constructionCompanyName}</p>
-                    <p>{site.clientCompanyName}</p>
-                    <p>{site.siteName}</p>
+                <div className="rounded-lg border border-slate-900 bg-slate-950 p-4 text-white">
+                    <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-black text-slate-300">청구금액</span>
+                        <span className={`rounded-full border px-2 py-1 text-[11px] font-black ${statusClass}`}>
+                            {PROGRESS_STATUS_LABELS[claim.status || 'draft']}
+                        </span>
+                    </div>
+                    <div className="mt-3 text-right text-[26px] font-black leading-none">{formatProgressMoney(summary.billingAmount)}</div>
+                    <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                        <div className="rounded border border-white/10 bg-white/5 px-3 py-2">
+                            <span className="text-slate-300">금회기성</span>
+                            <div className="mt-1 text-right font-black">{formatProgressMoney(summary.currentAmount)}</div>
+                        </div>
+                        <div className="rounded border border-white/10 bg-white/5 px-3 py-2">
+                            <span className="text-slate-300">잔여기성</span>
+                            <div className="mt-1 text-right font-black">{formatProgressMoney(summary.remainingAmount)}</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm md:grid-cols-4">
-                <div>
-                    <dt className="text-xs font-semibold text-slate-500">성명</dt>
-                    <dd className="font-bold text-slate-900">{worker.workerName}</dd>
-                </div>
-                <div>
-                    <dt className="text-xs font-semibold text-slate-500">직종</dt>
-                    <dd className="font-medium">{worker.role || '-'}</dd>
-                </div>
-                <div>
-                    <dt className="text-xs font-semibold text-slate-500">주민번호</dt>
-                    <dd className="font-mono text-xs">{maskIdNumber(worker.idNumber)}</dd>
-                </div>
-                <div>
-                    <dt className="text-xs font-semibold text-slate-500">연락처</dt>
-                    <dd className="font-mono text-xs">{worker.contact || '-'}</dd>
-                </div>
-                <div className="col-span-2">
-                    <dt className="text-xs font-semibold text-slate-500">주소</dt>
-                    <dd className="truncate font-medium">{worker.address || '-'}</dd>
-                </div>
-                <div>
-                    <dt className="text-xs font-semibold text-slate-500">은행</dt>
-                    <dd className="font-medium">{worker.bankName || '-'}</dd>
-                </div>
-                <div>
-                    <dt className="text-xs font-semibold text-slate-500">계좌</dt>
-                    <dd className="truncate font-mono text-xs">{worker.accountNumber || '-'}</dd>
-                </div>
-            </dl>
+            <div className="mt-4 grid gap-3 md:grid-cols-5">
+                {[
+                    ['계약금액', summary.contractAmount],
+                    ['전회기성', summary.previousAmount],
+                    ['누계기성', summary.cumulativeAmount],
+                    ['출력공수', `${formatProgressQuantity(summary.totalManDay)} 공수`],
+                    ['스꾸미 단가', summary.sukumiUnitPrice],
+                ].map(([label, value]) => (
+                    <div key={String(label)} className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] font-black text-slate-500">{label}</div>
+                        <div className="mt-1 text-right text-sm font-black text-slate-900">
+                            {typeof value === 'number' ? formatProgressMoney(value) : value}
+                        </div>
+                    </div>
+                ))}
+            </div>
 
             <div className="mt-4 overflow-x-auto">
-                <table className="w-full min-w-[640px] border-collapse text-sm">
+                <table className="w-full min-w-[1080px] border-collapse text-xs">
                     <thead>
-                        <tr className="bg-slate-100 text-xs text-slate-600">
-                            <th className="border border-slate-300 px-2 py-2 text-left">일자</th>
-                            <th className="border border-slate-300 px-2 py-2 text-left">출력팀</th>
-                            <th className="border border-slate-300 px-2 py-2 text-center">상태</th>
-                            <th className="border border-slate-300 px-2 py-2 text-right">공수</th>
-                            <th className="border border-slate-300 px-2 py-2 text-right">단가</th>
-                            <th className="border border-slate-300 px-2 py-2 text-right">금액</th>
+                        <tr className="bg-slate-900 text-white">
+                            <th className="border border-slate-700 px-2 py-2" rowSpan={2}>분류</th>
+                            <th className="border border-slate-700 px-2 py-2" rowSpan={2}>공종명</th>
+                            <th className="border border-slate-700 px-2 py-2" rowSpan={2}>구분</th>
+                            <th className="border border-slate-700 px-2 py-2" colSpan={3}>계약</th>
+                            <th className="border border-slate-700 px-2 py-2" colSpan={2}>전회</th>
+                            <th className="border border-slate-700 px-2 py-2" colSpan={2}>금회</th>
+                            <th className="border border-slate-700 px-2 py-2" colSpan={2}>누계</th>
+                            <th className="border border-slate-700 px-2 py-2" colSpan={2}>잔여</th>
+                        </tr>
+                        <tr className="bg-slate-100 text-slate-700">
+                            <th className="border px-2 py-2">수량</th>
+                            <th className="border px-2 py-2">단위</th>
+                            <th className="border px-2 py-2">금액</th>
+                            <th className="border px-2 py-2">수량</th>
+                            <th className="border px-2 py-2">금액</th>
+                            <th className="border px-2 py-2">수량</th>
+                            <th className="border px-2 py-2">금액</th>
+                            <th className="border px-2 py-2">수량</th>
+                            <th className="border px-2 py-2">금액</th>
+                            <th className="border px-2 py-2">수량</th>
+                            <th className="border px-2 py-2">금액</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {worker.entries.map((entry) => (
-                            <tr key={`${entry.reportId}-${entry.workerIndex ?? entry.date}`}>
-                                <td className="border border-slate-300 px-2 py-2 font-mono text-xs">{entry.date}</td>
-                                <td className="border border-slate-300 px-2 py-2">{entry.teamName || entry.workerTeamName || '-'}</td>
-                                <td className="border border-slate-300 px-2 py-2 text-center">{getStatusLabel(entry.status)}</td>
-                                <td className="border border-slate-300 px-2 py-2 text-right font-mono">{formatManDay(entry.manDay)}</td>
-                                <td className="border border-slate-300 px-2 py-2 text-right font-mono">{formatNumber(entry.unitPrice)}</td>
-                                <td className="border border-slate-300 px-2 py-2 text-right font-mono font-bold">{formatNumber(entry.amount)}</td>
+                        {itemRows.map((row) => (
+                            <tr key={row.item.id}>
+                                <td className="border bg-slate-50 px-2 py-1 text-center">{row.item.category || '-'}</td>
+                                <td className="border bg-slate-50 px-2 py-1 font-bold">{row.item.workName || '-'}</td>
+                                <td className="border bg-slate-50 px-2 py-1 text-center">{row.item.workType || '-'}</td>
+                                <td className="border bg-blue-50 px-2 py-1 text-right">{formatProgressQuantity(row.item.contractQuantity)}</td>
+                                <td className="border bg-blue-50 px-2 py-1 text-center">{row.item.unit || '-'}</td>
+                                <td className="border bg-blue-50 px-2 py-1 text-right">{formatProgressMoney(row.contractAmount)}</td>
+                                <td className="border bg-amber-50 px-2 py-1 text-right">{formatProgressQuantity(row.previousQuantity)}</td>
+                                <td className="border bg-amber-50 px-2 py-1 text-right">{formatProgressMoney(row.previousAmount)}</td>
+                                <td className="border bg-indigo-50 px-2 py-1 text-right">{formatProgressQuantity(row.currentQuantity)}</td>
+                                <td className="border bg-indigo-50 px-2 py-1 text-right font-black text-indigo-700">{formatProgressMoney(row.currentAmount)}</td>
+                                <td className="border bg-emerald-50 px-2 py-1 text-right">{formatProgressQuantity(row.cumulativeQuantity)}</td>
+                                <td className="border bg-emerald-50 px-2 py-1 text-right">{formatProgressMoney(row.cumulativeAmount)}</td>
+                                <td className="border bg-rose-50 px-2 py-1 text-right">{formatProgressQuantity(row.remainingQuantity)}</td>
+                                <td className={`border bg-rose-50 px-2 py-1 text-right ${row.remainingAmount < 0 ? 'font-black text-rose-700' : 'text-rose-600'}`}>{formatProgressMoney(row.remainingAmount)}</td>
                             </tr>
                         ))}
+                        {itemRows.length === 0 && (
+                            <tr>
+                                <td colSpan={14} className="border px-4 py-8 text-center font-bold text-slate-400">청구 항목이 없습니다.</td>
+                            </tr>
+                        )}
                     </tbody>
-                    <tfoot>
-                        <tr className="bg-slate-50 font-black">
-                            <td className="border border-slate-300 px-2 py-2" colSpan={3}>합계</td>
-                            <td className="border border-slate-300 px-2 py-2 text-right font-mono">{formatManDay(worker.totalManDay)}</td>
-                            <td className="border border-slate-300 px-2 py-2 text-right font-mono">{formatNumber(worker.averageUnitPrice)}</td>
-                            <td className="border border-slate-300 px-2 py-2 text-right font-mono">{formatNumber(worker.totalAmount)}</td>
-                        </tr>
-                    </tfoot>
                 </table>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
-                <div className="border border-slate-200 bg-slate-50 px-3 py-2">
-                    <p className="text-xs font-semibold text-slate-500">총 노임</p>
-                    <p className="mt-1 font-black">{formatWon(worker.totalAmount)}</p>
-                </div>
-                <div className="border border-slate-200 bg-slate-50 px-3 py-2">
-                    <p className="text-xs font-semibold text-slate-500">소득세</p>
-                    <p className="mt-1 font-bold">{formatWon(tax.incomeTax)}</p>
-                </div>
-                <div className="border border-slate-200 bg-slate-50 px-3 py-2">
-                    <p className="text-xs font-semibold text-slate-500">지방소득세</p>
-                    <p className="mt-1 font-bold">{formatWon(tax.residentTax)}</p>
-                </div>
-                <div className="border border-slate-200 bg-emerald-50 px-3 py-2">
-                    <p className="text-xs font-semibold text-emerald-700">실지급액</p>
-                    <p className="mt-1 font-black text-emerald-900">{formatWon(tax.netAmount)}</p>
-                </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-[1fr_1.2fr]">
+                <table className="w-full border-collapse text-sm">
+                    <tbody>
+                        <tr><th className="border bg-slate-50 px-3 py-2 text-left">공급가액</th><td className="border px-3 py-2 text-right font-bold">{formatProgressMoney(summary.supplyAmount)}</td></tr>
+                        <tr><th className="border bg-slate-50 px-3 py-2 text-left">부가세</th><td className="border px-3 py-2 text-right font-bold">{formatProgressMoney(summary.vatAmount)}</td></tr>
+                        <tr><th className="border bg-slate-900 px-3 py-2 text-left text-white">청구금액</th><td className="border bg-slate-900 px-3 py-2 text-right text-lg font-black text-white">{formatProgressMoney(summary.billingAmount)}</td></tr>
+                    </tbody>
+                </table>
+                <table className="w-full border-collapse text-sm">
+                    <tbody>
+                        <tr><th className="border bg-slate-50 px-3 py-2 text-left">팀포지션 금액</th><td className="border px-3 py-2 text-right font-bold">{formatProgressMoney(summary.teamPositionAmount)}</td></tr>
+                        <tr><th className="border bg-slate-50 px-3 py-2 text-left">바이백 가능금액</th><td className="border px-3 py-2 text-right font-bold">{formatProgressMoney(summary.buybackPoolAmount)}</td></tr>
+                        <tr><th className="border bg-slate-50 px-3 py-2 text-left">배분잔액</th><td className={`border px-3 py-2 text-right font-bold ${summary.allocationRemainAmount < 0 ? 'text-rose-700' : 'text-slate-900'}`}>{formatProgressMoney(summary.allocationRemainAmount)}</td></tr>
+                    </tbody>
+                </table>
             </div>
+
+            {claim.showAllocationsOnInvoice && (
+                <div className="mt-4">
+                    <h4 className="mb-2 text-sm font-black text-slate-900">관계자 배분</h4>
+                    <table className="w-full border-collapse text-xs">
+                        <thead className="bg-slate-100">
+                            <tr><th className="border px-2 py-2">관계자</th><th className="border px-2 py-2">방식</th><th className="border px-2 py-2">금액</th><th className="border px-2 py-2">메모</th></tr>
+                        </thead>
+                        <tbody>
+                            {allocationRows.map((row) => (
+                                <tr key={row.allocation.id}>
+                                    <td className="border px-2 py-1">{row.allocation.targetName || '-'}</td>
+                                    <td className="border px-2 py-1 text-center">{row.allocation.method}</td>
+                                    <td className="border px-2 py-1 text-right font-bold">{formatProgressMoney(row.amount)}</td>
+                                    <td className="border px-2 py-1">{row.allocation.memo || ''}</td>
+                                </tr>
+                            ))}
+                            {allocationRows.length === 0 && (
+                                <tr><td colSpan={4} className="border px-3 py-4 text-center font-bold text-slate-400">배분 내역이 없습니다.</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            )}
         </div>
     );
 };
 
+
 const ClientSiteLaborPage: React.FC = () => {
-    const { currentUser, loading: authLoading } = useAuth();
+    const companyAccessScope = useCompanyDataScope();
     const defaultYearMonth = useMemo(() => getDefaultYearMonth(), []);
     const [selectedYearMonth, setSelectedYearMonth] = useState(defaultYearMonth);
     const { startDate, endDate } = useMemo(
@@ -1283,10 +1454,13 @@ const ClientSiteLaborPage: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
+    const [selectedWorkStatus, setSelectedWorkStatus] = useState<WorkStatusFilter>('all');
+    const [selectedProcessStatus, setSelectedProcessStatus] = useState<ProcessStatusFilter>('all');
     const [selectedConstructionCompanyKey, setSelectedConstructionCompanyKey] = useState('');
     const [selectedClientCompanyKey, setSelectedClientCompanyKey] = useState('');
     const [selectedSiteFilterKey, setSelectedSiteFilterKey] = useState('');
     const [activeSiteKey, setActiveSiteKey] = useState('');
+    const [activeDocumentView, setActiveDocumentView] = useState<ClientSiteDocumentView>('labor');
     const [expandedClientKeys, setExpandedClientKeys] = useState<string[]>([]);
     const laborStatementDefaults = useMemo(() => loadLaborStatementDefaults(), [selectedYearMonth, activeSiteKey]);
     const showBankColumn = laborStatementDefaults.showBankColumn;
@@ -1298,63 +1472,46 @@ const ClientSiteLaborPage: React.FC = () => {
     const delegateBankName = laborStatementDefaults.delegateBankName;
     const delegateAccountHolder = laborStatementDefaults.delegateAccountHolder;
     const delegateAccountNumber = laborStatementDefaults.delegateAccountNumber;
-    const [companyAccessScope, setCompanyAccessScope] = useState<ConstructionCompanyAccessScope>(() =>
-        buildAllCompanyAccessScope(true)
-    );
     const [transactionStatements, setTransactionStatements] = useState<Estimate[]>([]);
     const [transactionStatementsLoading, setTransactionStatementsLoading] = useState(false);
     const [transactionStatementError, setTransactionStatementError] = useState('');
     const [selectedTransactionStatementId, setSelectedTransactionStatementId] = useState('');
-
-    useEffect(() => {
-        let mounted = true;
-
-        const loadCompanyAccessScope = async () => {
-            if (authLoading) {
-                if (mounted) {
-                    setRows([]);
-                    setCompanyAccessScope(buildAllCompanyAccessScope(true));
-                }
-                return;
-            }
-
-            if (!currentUser?.uid) {
-                if (mounted) setCompanyAccessScope(buildAllCompanyAccessScope());
-                return;
-            }
-
-            setRows([]);
-            setCompanyAccessScope(buildAllCompanyAccessScope(true));
-
-            try {
-                const profile = await userService.getUser(currentUser.uid);
-                const nextScope = await resolveConstructionCompanyAccessScope(profile);
-                if (mounted) setCompanyAccessScope(nextScope);
-            } catch (accessError) {
-                console.error('[ClientSiteLaborPage] failed to resolve company access scope:', accessError);
-                if (mounted) setCompanyAccessScope(buildAllCompanyAccessScope());
-            }
-        };
-
-        void loadCompanyAccessScope();
-
-        return () => {
-            mounted = false;
-        };
-    }, [authLoading, currentUser?.uid]);
+    const [progressContracts, setProgressContracts] = useState<ProgressContract[]>([]);
+    const [progressClaims, setProgressClaims] = useState<ProgressClaim[]>([]);
+    const [progressDocumentsLoading, setProgressDocumentsLoading] = useState(false);
+    const [progressDocumentsError, setProgressDocumentsError] = useState('');
+    const [payrollConfig, setPayrollConfig] = useState<PayrollConfig | null>(null);
+    const [adjustments, setAdjustments] = useState<Record<string, ClientSiteLaborAdjustment>>({});
+    const [adjustmentsLoading, setAdjustmentsLoading] = useState(false);
+    const [adjustmentError, setAdjustmentError] = useState('');
+    const [editingRowKey, setEditingRowKey] = useState('');
+    const [editDraft, setEditDraft] = useState<ClientSiteLaborEditDraft>(() => createDefaultEditDraft());
+    const [savingRowKey, setSavingRowKey] = useState('');
+    const [deletingRowKey, setDeletingRowKey] = useState('');
 
     const loadData = useCallback(async () => {
         if (!startDate || !endDate || companyAccessScope.loading) return;
+        if (companyAccessScope.mode !== 'all' && companyAccessScope.mode !== 'construction-company') {
+            setRows([]);
+            return;
+        }
         setLoading(true);
         setError('');
         try {
+            const canLoadInternalMasters = companyAccessScope.mode === 'all';
             const [workerRows, workers, supportRates] = await Promise.all([
-                dailyReportService.getWorkerRows({ startDate, endDate }),
-                manpowerService.getWorkers(),
-                supportRateService.getAllSiteRates().catch((supportRateError) => {
+                dailyReportService.getWorkerRows({
+                    startDate,
+                    endDate,
+                    companyIds: companyAccessScope.mode === 'construction-company'
+                        ? companyAccessScope.companyIds
+                        : undefined,
+                }),
+                canLoadInternalMasters ? manpowerService.getWorkers() : Promise.resolve([] as Worker[]),
+                canLoadInternalMasters ? supportRateService.getAllSiteRates().catch((supportRateError) => {
                     console.error('[ClientSiteLaborPage] support rate load failed:', supportRateError);
                     return [] as SupportRate[];
-                }),
+                }) : Promise.resolve([] as SupportRate[]),
             ]);
             const enrichedRows = enrichRows(
                 workerRows,
@@ -1362,7 +1519,7 @@ const ClientSiteLaborPage: React.FC = () => {
                 supportRates,
                 loadSupportClientBillingRates(selectedYearMonth)
             );
-            setRows(enrichedRows.filter((row) => matchesCompanyAccessScope(row, companyAccessScope)));
+            setRows(enrichedRows.filter((row) => companyDataScopeMatchesLaborRow(companyAccessScope, row)));
         } catch (loadError) {
             console.error('[ClientSiteLaborPage] failed to load labor rows:', loadError);
             setError('출력 인원 정보를 불러오지 못했습니다.');
@@ -1377,13 +1534,21 @@ const ClientSiteLaborPage: React.FC = () => {
     }, [loadData]);
 
     const fetchTransactionStatements = useCallback(async () => {
+        if (companyAccessScope.mode !== 'all') {
+            setTransactionStatements([]);
+            setTransactionStatementError('');
+            return;
+        }
         setTransactionStatementsLoading(true);
         setTransactionStatementError('');
         try {
             const statements = await estimateService.getEstimates();
             setTransactionStatements(statements.filter((statement) =>
                 statement.documentType === 'transaction' &&
-                statement.supportStatementSource === SUPPORT_TRANSACTION_STATEMENT_SOURCE
+                (
+                    statement.supportStatementSource === SUPPORT_TRANSACTION_STATEMENT_SOURCE ||
+                    statement.supportStatementSource === PROGRESS_TRANSACTION_STATEMENT_SOURCE
+                )
             ));
         } catch (statementLoadError) {
             console.error('[ClientSiteLaborPage] transaction statement load failed:', statementLoadError);
@@ -1392,11 +1557,85 @@ const ClientSiteLaborPage: React.FC = () => {
         } finally {
             setTransactionStatementsLoading(false);
         }
-    }, []);
+    }, [companyAccessScope.mode]);
 
     useEffect(() => {
         void fetchTransactionStatements();
     }, [fetchTransactionStatements]);
+
+    const fetchProgressDocuments = useCallback(async () => {
+        if (companyAccessScope.mode !== 'all') {
+            setProgressContracts([]);
+            setProgressClaims([]);
+            setProgressDocumentsError('');
+            return;
+        }
+        setProgressDocumentsLoading(true);
+        setProgressDocumentsError('');
+        try {
+            const [contracts, claims] = await Promise.all([
+                progressClaimService.getContracts(),
+                progressClaimService.getClaims(),
+            ]);
+            setProgressContracts(contracts);
+            setProgressClaims(claims);
+        } catch (progressLoadError) {
+            console.error('[ClientSiteLaborPage] progress claim documents load failed:', progressLoadError);
+            setProgressContracts([]);
+            setProgressClaims([]);
+            setProgressDocumentsError('기성청구서 정보를 불러오지 못했습니다.');
+        } finally {
+            setProgressDocumentsLoading(false);
+        }
+    }, [companyAccessScope.mode]);
+
+    useEffect(() => {
+        void fetchProgressDocuments();
+    }, [fetchProgressDocuments]);
+
+    useEffect(() => {
+        if (companyAccessScope.mode !== 'all') {
+            setPayrollConfig(null);
+            return undefined;
+        }
+        let mounted = true;
+        payrollConfigService.getConfig()
+            .then((config) => {
+                if (mounted) setPayrollConfig(config);
+            })
+            .catch((configError) => {
+                console.error('[ClientSiteLaborPage] payroll config load failed:', configError);
+                if (mounted) setPayrollConfig(null);
+            });
+
+        return () => {
+            mounted = false;
+        };
+    }, [companyAccessScope.mode]);
+
+    const fetchAdjustments = useCallback(async () => {
+        if (companyAccessScope.mode !== 'all') {
+            setAdjustments({});
+            setAdjustmentError('');
+            return;
+        }
+        setAdjustmentsLoading(true);
+        setAdjustmentError('');
+        try {
+            const rows = await clientSiteLaborAdjustmentService.getAdjustmentsByYearMonth(selectedYearMonth);
+            setAdjustments(Object.fromEntries(rows.map((row) => [row.id, row])));
+        } catch (adjustmentLoadError) {
+            console.error('[ClientSiteLaborPage] adjustment load failed:', adjustmentLoadError);
+            setAdjustments({});
+            setAdjustmentError('수당/공제 조정값을 불러오지 못했습니다.');
+        } finally {
+            setAdjustmentsLoading(false);
+        }
+    }, [companyAccessScope.mode, selectedYearMonth]);
+
+    useEffect(() => {
+        void fetchAdjustments();
+    }, [fetchAdjustments]);
 
     const constructionCompanyOptions = useMemo(() => {
         const map = new Map<string, string>();
@@ -1471,6 +1710,11 @@ const ClientSiteLaborPage: React.FC = () => {
             if (selectedConstructionCompanyKey && row.constructionCompanyKey !== selectedConstructionCompanyKey) return false;
             if (selectedClientCompanyKey && row.clientCompanyKey !== selectedClientCompanyKey) return false;
             if (selectedSiteFilterKey && row.siteKey !== selectedSiteFilterKey) return false;
+            if (selectedWorkStatus !== 'all' && row.status !== selectedWorkStatus) return false;
+            if (selectedProcessStatus !== 'all') {
+                const adjustment = adjustments[getLaborAdjustmentIdForEntry(selectedYearMonth, row)];
+                if ((adjustment?.status ?? 'draft') !== selectedProcessStatus) return false;
+            }
             if (!normalizedTerm) return true;
 
             const haystack = normalizeKey([
@@ -1486,7 +1730,7 @@ const ClientSiteLaborPage: React.FC = () => {
             ].join(' '));
             return haystack.includes(normalizedTerm);
         });
-    }, [rows, searchTerm, selectedConstructionCompanyKey, selectedClientCompanyKey, selectedSiteFilterKey]);
+    }, [adjustments, rows, searchTerm, selectedConstructionCompanyKey, selectedClientCompanyKey, selectedProcessStatus, selectedSiteFilterKey, selectedWorkStatus, selectedYearMonth]);
 
     const constructionCompanySummaries = useMemo(() => buildSummaries(filteredRows), [filteredRows]);
     const expandedClientKeySet = useMemo(() => new Set(expandedClientKeys), [expandedClientKeys]);
@@ -1504,19 +1748,45 @@ const ClientSiteLaborPage: React.FC = () => {
         () => selectedSite ? getSupportClientSiteStatementKey(selectedSite) : '',
         [selectedSite]
     );
+    const selectedSiteProgressStatementKey = useMemo(
+        () => selectedSite ? getProgressClaimStatementKey(selectedSite, selectedYearMonth) : '',
+        [selectedSite, selectedYearMonth]
+    );
     const linkedTransactionStatements = useMemo(
-        () => transactionStatements
-            .filter((statement) =>
-                statement.supportStatementKey === selectedSiteSupportStatementKey &&
-                statement.supportStatementYearMonth === selectedYearMonth
-            )
-            .sort((a, b) => {
-                const modeOrder = (a.estimateMode === 'rental' ? 1 : 0) - (b.estimateMode === 'rental' ? 1 : 0);
-                if (modeOrder !== 0) return modeOrder;
-                return String(b.issueDate || '').localeCompare(String(a.issueDate || '')) ||
-                    String(a.projectName || a.title || '').localeCompare(String(b.projectName || b.title || ''), 'ko');
-            }),
-        [selectedSiteSupportStatementKey, selectedYearMonth, transactionStatements]
+        () => {
+            const selectedSiteNameKey = normalizeKey(selectedSite?.siteName);
+            return transactionStatements
+                .filter((statement) => {
+                    if (statement.supportStatementYearMonth !== selectedYearMonth) return false;
+                    if (
+                        statement.supportStatementSource === SUPPORT_TRANSACTION_STATEMENT_SOURCE &&
+                        statement.supportStatementKey === selectedSiteSupportStatementKey
+                    ) return true;
+                    const progressKeyMatches = statement.supportStatementKey === selectedSiteProgressStatementKey;
+                    const progressTargetMatches = Boolean(
+                        selectedSiteNameKey &&
+                        [
+                            statement.supportStatementTargetTitle,
+                            statement.projectName,
+                            statement.title,
+                        ].some((value) => normalizeKey(value) === selectedSiteNameKey)
+                    );
+                    return (
+                        statement.supportStatementSource === PROGRESS_TRANSACTION_STATEMENT_SOURCE &&
+                        (progressKeyMatches || progressTargetMatches)
+                    );
+                })
+                .sort((a, b) => {
+                    const sourceOrder = (a.supportStatementSource === PROGRESS_TRANSACTION_STATEMENT_SOURCE ? 0 : 1) -
+                        (b.supportStatementSource === PROGRESS_TRANSACTION_STATEMENT_SOURCE ? 0 : 1);
+                    if (sourceOrder !== 0) return sourceOrder;
+                    const modeOrder = (a.estimateMode === 'rental' ? 1 : 0) - (b.estimateMode === 'rental' ? 1 : 0);
+                    if (modeOrder !== 0) return modeOrder;
+                    return String(b.issueDate || '').localeCompare(String(a.issueDate || '')) ||
+                        String(a.projectName || a.title || '').localeCompare(String(b.projectName || b.title || ''), 'ko');
+                });
+        },
+        [selectedSite?.siteName, selectedSiteProgressStatementKey, selectedSiteSupportStatementKey, selectedYearMonth, transactionStatements]
     );
     const selectedTransactionStatement = useMemo(
         () => linkedTransactionStatements.find((statement) => statement.id === selectedTransactionStatementId) ??
@@ -1525,10 +1795,74 @@ const ClientSiteLaborPage: React.FC = () => {
     );
     const standardTransactionCount = linkedTransactionStatements.filter((statement) => statement.estimateMode !== 'rental').length;
     const rentalTransactionCount = linkedTransactionStatements.filter((statement) => statement.estimateMode === 'rental').length;
+    const progressTransactionCount = linkedTransactionStatements.filter((statement) =>
+        statement.supportStatementSource === PROGRESS_TRANSACTION_STATEMENT_SOURCE
+    ).length;
+    const selectedSiteProgressClaim = useMemo(
+        () => selectedSite
+            ? progressClaims.find((claim) =>
+                claim.yearMonth === selectedYearMonth &&
+                progressClaimMatchesSite(claim, selectedSite)
+            )
+            : undefined,
+        [progressClaims, selectedSite, selectedYearMonth]
+    );
+    const selectedSiteProgressContract = useMemo(
+        () => selectedSite ? progressContracts.find((contract) => progressContractMatchesSite(contract, selectedSite)) : undefined,
+        [progressContracts, selectedSite]
+    );
+    const selectedSiteProgressPreview = useMemo<ProgressClaimPreviewData | null>(() => {
+        if (!selectedSite || !selectedSiteProgressClaim) return null;
+        const computed = calculateProgressClaimSummary(
+            selectedSiteProgressContract,
+            progressClaims,
+            selectedSiteProgressClaim,
+            buildProgressDailySummary(selectedSite, selectedSiteProgressClaim),
+            selectedYearMonth
+        );
+        return {
+            claim: selectedSiteProgressClaim,
+            contract: selectedSiteProgressContract,
+            ...computed,
+        };
+    }, [progressClaims, selectedSite, selectedSiteProgressClaim, selectedSiteProgressContract, selectedYearMonth]);
+    const selectedSiteProgressInvoiceLink = useMemo(() => {
+        if (!selectedSite) return '/payroll/progress-claims?tab=invoice';
+        const params = new URLSearchParams({
+            tab: 'invoice',
+            month: selectedYearMonth,
+        });
+        if (selectedSite.siteId) params.set('siteId', selectedSite.siteId);
+        return `/payroll/progress-claims?${params.toString()}`;
+    }, [selectedSite, selectedYearMonth]);
     const selectedSiteDateRange = useMemo(() => {
         if (!selectedSite || selectedSite.activeDates.length === 0) return '-';
         return `${selectedSite.activeDates[0]}${selectedSite.activeDates.length > 1 ? ` ~ ${selectedSite.activeDates[selectedSite.activeDates.length - 1]}` : ''}`;
     }, [selectedSite]);
+    const activeDocumentMeta = useMemo(() => {
+        if (activeDocumentView === 'progress') {
+            return {
+                eyebrow: '기성청구 보기',
+                title: '기성청구서',
+                emptyTitle: '기성청구를 볼 현장을 선택하세요',
+                emptyDescription: '좌측 현장의 기성청구 버튼을 누르면 해당 월 기성청구서가 표시됩니다.',
+            };
+        }
+        if (activeDocumentView === 'transaction') {
+            return {
+                eyebrow: '거래명세서 보기',
+                title: '거래명세서',
+                emptyTitle: '거래명세서를 볼 현장을 선택하세요',
+                emptyDescription: '좌측 현장의 거래명세 버튼을 누르면 연결된 거래명세서가 표시됩니다.',
+            };
+        }
+        return {
+            eyebrow: '노임명세서 보기',
+            title: '노임명세서',
+            emptyTitle: '노임명세를 볼 현장을 선택하세요',
+            emptyDescription: '좌측 현장의 노임명세 버튼을 누르면 작업자 노임명세서가 표시됩니다.',
+        };
+    }, [activeDocumentView]);
     const workerPayTypes = useMemo(
         () => buildClientWorkerPayTypesFromDefaults(selectedSite, laborStatementDefaults.workerPayTypes),
         [selectedSite, laborStatementDefaults.workerPayTypes]
@@ -1552,6 +1886,37 @@ const ClientSiteLaborPage: React.FC = () => {
         () => selectedSite ? buildSiteLaborStatementPreview(selectedSite, statementOptions) : null,
         [selectedSite, statementOptions]
     );
+    const laborTaxConfig = useMemo<ClientSiteLaborTaxConfig>(() => ({
+        incomeTaxRate: payrollConfig?.incomeTaxRate ?? DEFAULT_CLIENT_SITE_LABOR_TAX_CONFIG.incomeTaxRate,
+        residentTaxRate: payrollConfig?.residentTaxRate ?? DEFAULT_CLIENT_SITE_LABOR_TAX_CONFIG.residentTaxRate,
+    }), [payrollConfig]);
+    const filteredLaborTotals = useMemo(() => calculateClientSiteLaborTotals(
+        filteredRows.map((row) => {
+            const adjustment = adjustments[getLaborAdjustmentIdForEntry(selectedYearMonth, row)];
+            return {
+                workerKey: buildIdentityKey('worker', row.workerId, row.workerName, 'worker'),
+                manDay: row.manDay,
+                unitPrice: row.unitPrice,
+                allowance: adjustment?.allowance ?? 0,
+                deduction: adjustment?.deduction ?? 0,
+            };
+        }),
+        laborTaxConfig
+    ), [adjustments, filteredRows, laborTaxConfig, selectedYearMonth]);
+    const selectedSiteManagementRows = useMemo(
+        () => buildManagementRows(selectedSite, selectedYearMonth, adjustments, laborTaxConfig, selectedProcessStatus),
+        [adjustments, laborTaxConfig, selectedProcessStatus, selectedSite, selectedYearMonth]
+    );
+    const selectedSiteLaborTotals = useMemo(() => calculateClientSiteLaborTotals(
+        selectedSiteManagementRows.map((row) => ({
+            workerKey: row.worker.key,
+            manDay: row.calculation.manDay,
+            unitPrice: row.calculation.unitPrice,
+            allowance: row.calculation.allowance,
+            deduction: row.calculation.manualDeduction,
+        })),
+        laborTaxConfig
+    ), [laborTaxConfig, selectedSiteManagementRows]);
 
     const totalSiteCount = visibleSites.length;
     const totalClientCount = constructionCompanySummaries.reduce((sum, constructionCompany) => sum + constructionCompany.clientCount, 0);
@@ -1561,8 +1926,6 @@ const ClientSiteLaborPage: React.FC = () => {
         return workers.size;
     }, [filteredRows]);
     const totalManDay = filteredRows.reduce((sum, row) => sum + safeNumber(row.manDay), 0);
-    const totalAmount = filteredRows.reduce((sum, row) => sum + safeNumber(row.amount), 0);
-
     useEffect(() => {
         const visibleClientKeys = new Set(
             constructionCompanySummaries.flatMap((constructionCompany) =>
@@ -1583,7 +1946,7 @@ const ClientSiteLaborPage: React.FC = () => {
 
     useEffect(() => {
         setSelectedTransactionStatementId('');
-    }, [selectedSiteSupportStatementKey, selectedYearMonth]);
+    }, [selectedSiteProgressStatementKey, selectedSiteSupportStatementKey, selectedYearMonth]);
 
     const expandClient = useCallback((clientKey: string) => {
         setExpandedClientKeys((prev) => prev[0] === clientKey ? prev : [clientKey]);
@@ -1593,12 +1956,185 @@ const ClientSiteLaborPage: React.FC = () => {
         setExpandedClientKeys((prev) => prev[0] === clientKey ? [] : [clientKey]);
     }, []);
 
-    const selectSite = (site: SiteSummary) => {
+    const selectSite = (site: SiteSummary, documentView: ClientSiteDocumentView = 'labor') => {
         expandClient(site.clientCompanyKey);
         setActiveSiteKey(site.key);
+        setActiveDocumentView(documentView);
+    };
+
+    useEffect(() => {
+        setEditingRowKey('');
+        setEditDraft(createDefaultEditDraft());
+    }, [activeSiteKey, selectedYearMonth]);
+
+    const startEditRow = (row: ClientSiteLaborManagementRow) => {
+        setAdjustmentError('');
+        setEditingRowKey(row.key);
+        setEditDraft(buildEditDraftFromRow(row));
+    };
+
+    const cancelEditRow = () => {
+        setEditingRowKey('');
+        setEditDraft(createDefaultEditDraft());
+    };
+
+    const saveManagementRow = async (row: ClientSiteLaborManagementRow) => {
+        const manDay = parseEditableNumber(editDraft.manDay);
+        const unitPrice = parseEditableNumber(editDraft.unitPrice);
+        const allowance = parseEditableNumber(editDraft.allowance);
+        const deduction = parseEditableNumber(editDraft.deduction);
+        const memo = editDraft.memo.trim();
+
+        if (!row.entry.reportId || typeof row.entry.workerIndex !== 'number') {
+            setAdjustmentError('원본 출력일보 행을 식별할 수 없어 저장할 수 없습니다.');
+            return;
+        }
+        if (manDay > 31) {
+            setAdjustmentError('공수는 한 달 기준 31을 초과할 수 없습니다.');
+            return;
+        }
+        if (unitPrice <= 0 && manDay > 0) {
+            setAdjustmentError('공수가 있으면 단가는 0보다 커야 합니다.');
+            return;
+        }
+
+        setSavingRowKey(row.key);
+        setAdjustmentError('');
+        try {
+            await dailyReportService.updateWorkerInReport(
+                row.entry.reportId,
+                row.entry.workerId,
+                {
+                    manDay,
+                    unitPrice,
+                    status: editDraft.workStatus,
+                },
+                row.entry.workerIndex
+            );
+
+            const hasAdjustment = allowance > 0 || deduction > 0 || editDraft.processStatus !== 'draft' || Boolean(memo);
+            if (hasAdjustment) {
+                const saved = await clientSiteLaborAdjustmentService.saveAdjustment({
+                    id: row.key,
+                    yearMonth: selectedYearMonth,
+                    reportId: row.entry.reportId,
+                    workerIndex: row.entry.workerIndex,
+                    workerId: row.entry.workerId,
+                    workerName: row.entry.workerName,
+                    siteId: row.entry.siteId,
+                    siteName: row.entry.siteName,
+                    constructionCompanyName: row.entry.constructionCompanyName,
+                    clientCompanyName: row.entry.clientCompanyName,
+                    allowance,
+                    deduction,
+                    status: editDraft.processStatus,
+                    memo,
+                });
+                setAdjustments((prev) => ({ ...prev, [saved.id]: saved }));
+            } else if (row.adjustment) {
+                await clientSiteLaborAdjustmentService.deleteAdjustment(row.key);
+                setAdjustments((prev) => {
+                    const next = { ...prev };
+                    delete next[row.key];
+                    return next;
+                });
+            }
+
+            setEditingRowKey('');
+            setEditDraft(createDefaultEditDraft());
+            await loadData();
+        } catch (saveError) {
+            console.error('[ClientSiteLaborPage] row save failed:', saveError);
+            setAdjustmentError('행 저장에 실패했습니다. 권한 또는 원본 일보 상태를 확인하세요.');
+        } finally {
+            setSavingRowKey('');
+        }
+    };
+
+    const deleteManagementRow = async (row: ClientSiteLaborManagementRow) => {
+        if (!row.entry.reportId || typeof row.entry.workerIndex !== 'number') {
+            setAdjustmentError('원본 출력일보 행을 식별할 수 없어 삭제할 수 없습니다.');
+            return;
+        }
+        const confirmed = window.confirm(`${row.entry.date} ${row.entry.workerName} 행을 원본 출력일보에서 삭제할까요?`);
+        if (!confirmed) return;
+
+        setDeletingRowKey(row.key);
+        setAdjustmentError('');
+        try {
+            await dailyReportService.removeWorkerFromReport(row.entry.reportId, row.entry.workerId, row.entry.workerIndex);
+            if (row.adjustment) {
+                await clientSiteLaborAdjustmentService.deleteAdjustment(row.key);
+                setAdjustments((prev) => {
+                    const next = { ...prev };
+                    delete next[row.key];
+                    return next;
+                });
+            }
+            if (editingRowKey === row.key) cancelEditRow();
+            await loadData();
+        } catch (deleteError) {
+            console.error('[ClientSiteLaborPage] row delete failed:', deleteError);
+            setAdjustmentError('행 삭제에 실패했습니다. 권한 또는 원본 일보 상태를 확인하세요.');
+        } finally {
+            setDeletingRowKey('');
+        }
+    };
+
+    const exportCsv = () => {
+        const exportRows = selectedSiteManagementRows.length > 0
+            ? selectedSiteManagementRows.map((row) => ({
+                entry: row.entry,
+                adjustment: row.adjustment,
+                calculation: row.calculation,
+            }))
+            : filteredRows.map((entry) => {
+                const adjustment = adjustments[getLaborAdjustmentIdForEntry(selectedYearMonth, entry)];
+                return {
+                    entry,
+                    adjustment,
+                    calculation: calculateClientSiteLaborRow({
+                        manDay: entry.manDay,
+                        unitPrice: entry.unitPrice,
+                        allowance: adjustment?.allowance ?? 0,
+                        deduction: adjustment?.deduction ?? 0,
+                    }, laborTaxConfig),
+                };
+            });
+
+        if (exportRows.length === 0) return;
+
+        downloadCsv(
+            `client-site-labor-${selectedYearMonth}${selectedSite ? `-${selectedSite.siteName}` : ''}.csv`,
+            ['월', '일자', '건설사', '발주사', '현장', '팀', '작업자', '직책', '근태', '공수', '단가', '기본급', '수당', '세전총액', '소득세', '지방소득세', '기타공제', '총공제', '실지급', '처리상태', '비고'],
+            exportRows.map(({ entry, adjustment, calculation }) => [
+                selectedYearMonth,
+                entry.date,
+                entry.constructionCompanyName,
+                entry.clientCompanyName,
+                entry.siteName,
+                entry.teamName || entry.workerTeamName || '',
+                entry.workerName,
+                entry.role || '',
+                getStatusLabel(entry.status),
+                formatManDay(calculation.manDay),
+                calculation.unitPrice,
+                calculation.baseAmount,
+                calculation.allowance,
+                calculation.grossAmount,
+                calculation.incomeTax,
+                calculation.residentTax,
+                calculation.manualDeduction,
+                calculation.totalDeduction,
+                calculation.netAmount,
+                PROCESS_STATUS_LABELS[adjustment?.status ?? 'draft'],
+                adjustment?.memo ?? '',
+            ])
+        );
     };
 
     const pageLoading = loading || companyAccessScope.loading;
+    const refreshLoading = pageLoading || transactionStatementsLoading || progressDocumentsLoading || adjustmentsLoading;
 
     return (
         <div className="flex h-full flex-col bg-slate-100 text-slate-900">
@@ -1613,21 +2149,34 @@ const ClientSiteLaborPage: React.FC = () => {
                             <p className="mt-1 text-sm font-medium text-slate-500">일보 기준 출력 인원과 노임 합계</p>
                         </div>
                     </div>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            void loadData();
-                            void fetchTransactionStatements();
-                        }}
-                        disabled={pageLoading}
-                        className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                        {pageLoading ? <Loader2 size={17} className="animate-spin" /> : <RefreshCw size={17} />}
-                        새로고침
-                    </button>
+                    <div className="flex shrink-0 items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                void loadData();
+                                void fetchAdjustments();
+                                void fetchTransactionStatements();
+                                void fetchProgressDocuments();
+                            }}
+                            disabled={refreshLoading}
+                            className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {refreshLoading ? <Loader2 size={17} className="animate-spin" /> : <RefreshCw size={17} />}
+                            새로고침
+                        </button>
+                        <button
+                            type="button"
+                            onClick={exportCsv}
+                            disabled={filteredRows.length === 0}
+                            className="inline-flex h-10 items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-600 px-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            <Download size={17} />
+                            CSV
+                        </button>
+                    </div>
                 </div>
 
-                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[220px_minmax(130px,1fr)_minmax(130px,1fr)_minmax(130px,1fr)_minmax(210px,1.1fr)]">
+                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[220px_minmax(130px,1fr)_minmax(130px,1fr)_minmax(130px,1fr)_120px_120px_minmax(210px,1.1fr)]">
                     <label className="flex flex-col gap-1 text-xs font-bold text-slate-500">
                         년/월
                         <span className="grid grid-cols-[1fr_88px] gap-2">
@@ -1714,6 +2263,30 @@ const ClientSiteLaborPage: React.FC = () => {
                         </select>
                     </label>
                     <label className="flex flex-col gap-1 text-xs font-bold text-slate-500">
+                        근태
+                        <select
+                            value={selectedWorkStatus}
+                            onChange={(event) => setSelectedWorkStatus(event.target.value as WorkStatusFilter)}
+                            className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                        >
+                            {WORK_STATUS_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                        </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-bold text-slate-500">
+                        처리
+                        <select
+                            value={selectedProcessStatus}
+                            onChange={(event) => setSelectedProcessStatus(event.target.value as ProcessStatusFilter)}
+                            className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                        >
+                            {PROCESS_STATUS_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                        </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-bold text-slate-500">
                         검색
                         <span className="relative">
                             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -1730,18 +2303,25 @@ const ClientSiteLaborPage: React.FC = () => {
             </header>
 
             <main className="flex-1 overflow-auto p-4">
-                <section className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+                <section className="grid grid-cols-2 gap-3 lg:grid-cols-4 2xl:grid-cols-8">
                     <StatCard icon={<Building2 size={20} />} label="건설사" value={`${constructionCompanySummaries.length}`} tone="bg-emerald-100 text-emerald-700" />
                     <StatCard icon={<Building2 size={20} />} label="발주사" value={`${totalClientCount}`} tone="bg-teal-100 text-teal-700" />
                     <StatCard icon={<MapPin size={20} />} label="현장" value={`${totalSiteCount}`} tone="bg-sky-100 text-sky-700" />
                     <StatCard icon={<UsersRound size={20} />} label="출력 인원" value={`${totalWorkerCount}`} tone="bg-indigo-100 text-indigo-700" />
                     <StatCard icon={<CalendarDays size={20} />} label="총 공수" value={formatManDay(totalManDay)} tone="bg-amber-100 text-amber-700" />
-                    <StatCard icon={<WalletCards size={20} />} label="총 노임" value={formatWon(totalAmount)} tone="bg-rose-100 text-rose-700" />
+                    <StatCard icon={<WalletCards size={20} />} label="세전 노임" value={formatWon(filteredLaborTotals.grossAmount)} tone="bg-rose-100 text-rose-700" />
+                    <StatCard icon={<WalletCards size={20} />} label="수당/공제" value={`${formatWon(filteredLaborTotals.allowance)} / ${formatWon(filteredLaborTotals.totalDeduction)}`} tone="bg-violet-100 text-violet-700" />
+                    <StatCard icon={<WalletCards size={20} />} label="실지급" value={formatWon(filteredLaborTotals.netAmount)} tone="bg-blue-100 text-blue-700" />
                 </section>
 
                 {error && (
                     <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
                         {error}
+                    </div>
+                )}
+                {adjustmentError && (
+                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+                        {adjustmentError}
                     </div>
                 )}
 
@@ -1854,6 +2434,9 @@ const ClientSiteLaborPage: React.FC = () => {
                                                                         const dateRange = site.activeDates.length > 0
                                                                             ? `${site.activeDates[0]}${site.activeDates.length > 1 ? ` ~ ${site.activeDates[site.activeDates.length - 1]}` : ''}`
                                                                             : '-';
+                                                                        const isLaborViewSelected = isSelected && activeDocumentView === 'labor';
+                                                                        const isProgressViewSelected = isSelected && activeDocumentView === 'progress';
+                                                                        const isTransactionViewSelected = isSelected && activeDocumentView === 'transaction';
 
                                                                         return (
                                                                             <div
@@ -1885,17 +2468,53 @@ const ClientSiteLaborPage: React.FC = () => {
                                                                                     <span className="rounded bg-white px-2 py-1 ring-1 ring-slate-200"><b className="font-mono">{formatManDay(site.totalManDay)}</b>공수</span>
                                                                                     <span className="rounded bg-white px-2 py-1 text-right font-mono font-black text-slate-900 ring-1 ring-slate-200">{formatWon(site.totalAmount)}</span>
                                                                                 </div>
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={(event) => {
-                                                                                        event.stopPropagation();
-                                                                                        selectSite(site);
-                                                                                    }}
-                                                                                    className="mt-2 ml-8 inline-flex h-8 w-fit items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-600 px-2.5 text-xs font-black text-white transition hover:bg-emerald-700"
-                                                                                >
-                                                                                    <FileText size={14} />
-                                                                                    명세서
-                                                                                </button>
+                                                                                <div className="mt-2 ml-8 flex flex-wrap gap-1.5">
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={(event) => {
+                                                                                            event.stopPropagation();
+                                                                                            selectSite(site, 'labor');
+                                                                                        }}
+                                                                                        className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-black transition ${
+                                                                                            isLaborViewSelected
+                                                                                                ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm'
+                                                                                                : 'border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50'
+                                                                                        }`}
+                                                                                    >
+                                                                                        <FileText size={14} />
+                                                                                        노임명세
+                                                                                    </button>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={(event) => {
+                                                                                            event.stopPropagation();
+                                                                                            selectSite(site, 'progress');
+                                                                                        }}
+                                                                                        className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-black transition ${
+                                                                                            isProgressViewSelected
+                                                                                                ? 'border-indigo-600 bg-indigo-600 text-white shadow-sm'
+                                                                                                : 'border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50'
+                                                                                        }`}
+                                                                                    >
+                                                                                        <FileText size={14} />
+                                                                                        기성청구
+                                                                                    </button>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={(event) => {
+                                                                                            event.stopPropagation();
+                                                                                            selectSite(site, 'transaction');
+                                                                                        }}
+                                                                                        className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-black transition ${
+                                                                                            isTransactionViewSelected
+                                                                                                ? 'border-teal-600 bg-teal-600 text-white shadow-sm'
+                                                                                                : 'border-teal-200 bg-white text-teal-700 hover:bg-teal-50'
+                                                                                        }`}
+                                                                                    >
+                                                                                        <FileText size={14} />
+                                                                                        거래명세
+                                                                                    </button>
+                                                                                </div>
                                                                             </div>
                                                                         );
                                                                     })}
@@ -1915,8 +2534,8 @@ const ClientSiteLaborPage: React.FC = () => {
                     <aside className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
                             <div className="min-w-0">
-                                <p className="text-xs font-black uppercase tracking-wide text-emerald-600">노임명세서 보기</p>
-                                <h2 className="mt-0.5 truncate text-lg font-black text-slate-900">{selectedSite?.siteName || '현장을 선택하세요'}</h2>
+                                <p className="text-xs font-black uppercase tracking-wide text-emerald-600">{activeDocumentMeta.eyebrow}</p>
+                                <h2 className="mt-0.5 truncate text-lg font-black text-slate-900">{selectedSite ? `${selectedSite.siteName} · ${activeDocumentMeta.title}` : '현장을 선택하세요'}</h2>
                                 {selectedSite && (
                                     <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] font-black">
                                         <span className="rounded bg-slate-200 px-2 py-1 text-slate-700">{selectedSite.constructionCompanyName}</span>
@@ -1946,6 +2565,7 @@ const ClientSiteLaborPage: React.FC = () => {
 
                         {selectedSite && selectedSiteLaborPreview ? (
                             <div className="max-h-[calc(100vh-260px)] overflow-auto bg-slate-50/50 p-4">
+                                {activeDocumentView === 'labor' && (
                                 <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
                                     <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
                                         <div>
@@ -1953,6 +2573,249 @@ const ClientSiteLaborPage: React.FC = () => {
                                             <h3 className="mt-0.5 text-base font-black text-slate-900">노임명세서</h3>
                                         </div>
                                         <span className="text-[11px] font-bold text-slate-400">{isSplitView ? '2줄 보기' : '1줄 보기'} · {showBankColumn ? '계좌 표시' : '계좌 숨김'}</span>
+                                    </div>
+                                    <div className="mb-4 rounded-lg border border-emerald-100 bg-emerald-50/50 p-3">
+                                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                                            <div>
+                                                <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Labor Control</p>
+                                                <h4 className="mt-0.5 text-sm font-black text-slate-900">현장별 근무/급여 입력</h4>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold text-slate-500">
+                                                {adjustmentsLoading && (
+                                                    <span className="inline-flex items-center gap-1 rounded bg-white px-2 py-1 text-emerald-700 ring-1 ring-emerald-100">
+                                                        <Loader2 size={13} className="animate-spin" />
+                                                        조정값 조회
+                                                    </span>
+                                                )}
+                                                <span className="rounded bg-white px-2 py-1 ring-1 ring-emerald-100">세율 {((laborTaxConfig.incomeTaxRate + laborTaxConfig.residentTaxRate) * 100).toFixed(1)}%</span>
+                                                <span className="rounded bg-white px-2 py-1 ring-1 ring-emerald-100">{PROCESS_STATUS_OPTIONS.find((option) => option.value === selectedProcessStatus)?.label ?? '전체 처리'}</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+                                            <div className="rounded-md border border-white bg-white px-3 py-2 shadow-sm">
+                                                <p className="text-[11px] font-black text-slate-400">근무자</p>
+                                                <p className="mt-1 font-mono text-base font-black text-slate-900">{selectedSiteLaborTotals.workerCount}</p>
+                                            </div>
+                                            <div className="rounded-md border border-white bg-white px-3 py-2 shadow-sm">
+                                                <p className="text-[11px] font-black text-slate-400">공수</p>
+                                                <p className="mt-1 font-mono text-base font-black text-slate-900">{formatManDay(selectedSiteLaborTotals.manDay)}</p>
+                                            </div>
+                                            <div className="rounded-md border border-white bg-white px-3 py-2 shadow-sm">
+                                                <p className="text-[11px] font-black text-slate-400">세전총액</p>
+                                                <p className="mt-1 font-mono text-base font-black text-slate-900">{formatWon(selectedSiteLaborTotals.grossAmount)}</p>
+                                            </div>
+                                            <div className="rounded-md border border-white bg-white px-3 py-2 shadow-sm">
+                                                <p className="text-[11px] font-black text-slate-400">수당</p>
+                                                <p className="mt-1 font-mono text-base font-black text-emerald-700">{formatWon(selectedSiteLaborTotals.allowance)}</p>
+                                            </div>
+                                            <div className="rounded-md border border-white bg-white px-3 py-2 shadow-sm">
+                                                <p className="text-[11px] font-black text-slate-400">공제</p>
+                                                <p className="mt-1 font-mono text-base font-black text-rose-700">{formatWon(selectedSiteLaborTotals.totalDeduction)}</p>
+                                            </div>
+                                            <div className="rounded-md border border-emerald-200 bg-white px-3 py-2 shadow-sm">
+                                                <p className="text-[11px] font-black text-emerald-500">실지급</p>
+                                                <p className="mt-1 font-mono text-base font-black text-emerald-900">{formatWon(selectedSiteLaborTotals.netAmount)}</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                                            <table className="w-full min-w-[1280px] border-collapse text-xs">
+                                                <thead className="bg-slate-100 text-slate-600">
+                                                    <tr>
+                                                        <th className="border-b border-slate-200 px-2 py-2 text-left">일자</th>
+                                                        <th className="border-b border-slate-200 px-2 py-2 text-left">작업자</th>
+                                                        <th className="border-b border-slate-200 px-2 py-2 text-left">팀</th>
+                                                        <th className="border-b border-slate-200 px-2 py-2 text-center">근태</th>
+                                                        <th className="border-b border-slate-200 px-2 py-2 text-right">공수</th>
+                                                        <th className="border-b border-slate-200 px-2 py-2 text-right">단가</th>
+                                                        <th className="border-b border-slate-200 px-2 py-2 text-right">기본급</th>
+                                                        <th className="border-b border-slate-200 px-2 py-2 text-right">수당</th>
+                                                        <th className="border-b border-slate-200 px-2 py-2 text-right">세금</th>
+                                                        <th className="border-b border-slate-200 px-2 py-2 text-right">기타공제</th>
+                                                        <th className="border-b border-slate-200 px-2 py-2 text-right">실지급</th>
+                                                        <th className="border-b border-slate-200 px-2 py-2 text-center">처리</th>
+                                                        <th className="border-b border-slate-200 px-2 py-2 text-left">비고</th>
+                                                        <th className="border-b border-slate-200 px-2 py-2 text-center">작업</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {selectedSiteManagementRows.map((row) => {
+                                                        const isEditing = editingRowKey === row.key;
+                                                        const isSaving = savingRowKey === row.key;
+                                                        const isDeleting = deletingRowKey === row.key;
+                                                        const processStatus = row.adjustment?.status ?? 'draft';
+
+                                                        return (
+                                                            <tr key={row.key} className={isEditing ? 'bg-emerald-50/70' : 'odd:bg-white even:bg-slate-50/70'}>
+                                                                <td className="border-b border-slate-100 px-2 py-2 font-mono text-slate-600">{row.entry.date}</td>
+                                                                <td className="border-b border-slate-100 px-2 py-2">
+                                                                    <div className="font-black text-slate-900">{row.entry.workerName}</div>
+                                                                    <div className="mt-0.5 text-[11px] font-semibold text-slate-400">{row.entry.role || '-'}</div>
+                                                                </td>
+                                                                <td className="border-b border-slate-100 px-2 py-2 text-slate-600">{row.entry.teamName || row.entry.workerTeamName || '-'}</td>
+                                                                <td className="border-b border-slate-100 px-2 py-2 text-center">
+                                                                    {isEditing ? (
+                                                                        <select
+                                                                            value={editDraft.workStatus}
+                                                                            onChange={(event) => setEditDraft((prev) => ({ ...prev, workStatus: event.target.value as DailyReportWorkerRow['status'] }))}
+                                                                            className="h-8 rounded border border-slate-300 bg-white px-2 text-xs font-bold outline-none focus:border-emerald-500"
+                                                                        >
+                                                                            {WORK_STATUS_OPTIONS.filter((option) => option.value !== 'all').map((option) => (
+                                                                                <option key={option.value} value={option.value}>{option.label}</option>
+                                                                            ))}
+                                                                        </select>
+                                                                    ) : (
+                                                                        <span className="rounded bg-slate-100 px-2 py-1 font-bold text-slate-600">{getStatusLabel(row.entry.status)}</span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="border-b border-slate-100 px-2 py-2 text-right">
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            type="number"
+                                                                            min="0"
+                                                                            step="0.1"
+                                                                            value={editDraft.manDay}
+                                                                            onChange={(event) => setEditDraft((prev) => ({ ...prev, manDay: event.target.value }))}
+                                                                            className="h-8 w-20 rounded border border-slate-300 px-2 text-right font-mono text-xs outline-none focus:border-emerald-500"
+                                                                        />
+                                                                    ) : (
+                                                                        <span className="font-mono font-black">{formatManDay(row.calculation.manDay)}</span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="border-b border-slate-100 px-2 py-2 text-right">
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            type="number"
+                                                                            min="0"
+                                                                            step="1000"
+                                                                            value={editDraft.unitPrice}
+                                                                            onChange={(event) => setEditDraft((prev) => ({ ...prev, unitPrice: event.target.value }))}
+                                                                            className="h-8 w-24 rounded border border-slate-300 px-2 text-right font-mono text-xs outline-none focus:border-emerald-500"
+                                                                        />
+                                                                    ) : (
+                                                                        <span className="font-mono">{formatNumber(row.calculation.unitPrice)}</span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="border-b border-slate-100 px-2 py-2 text-right font-mono font-bold">{formatNumber(row.calculation.baseAmount)}</td>
+                                                                <td className="border-b border-slate-100 px-2 py-2 text-right">
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            type="number"
+                                                                            min="0"
+                                                                            step="1000"
+                                                                            value={editDraft.allowance}
+                                                                            onChange={(event) => setEditDraft((prev) => ({ ...prev, allowance: event.target.value }))}
+                                                                            className="h-8 w-24 rounded border border-slate-300 px-2 text-right font-mono text-xs outline-none focus:border-emerald-500"
+                                                                        />
+                                                                    ) : (
+                                                                        <span className="font-mono text-emerald-700">{formatNumber(row.calculation.allowance)}</span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="border-b border-slate-100 px-2 py-2 text-right font-mono text-slate-600">{formatNumber(row.calculation.taxTotal)}</td>
+                                                                <td className="border-b border-slate-100 px-2 py-2 text-right">
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            type="number"
+                                                                            min="0"
+                                                                            step="1000"
+                                                                            value={editDraft.deduction}
+                                                                            onChange={(event) => setEditDraft((prev) => ({ ...prev, deduction: event.target.value }))}
+                                                                            className="h-8 w-24 rounded border border-slate-300 px-2 text-right font-mono text-xs outline-none focus:border-emerald-500"
+                                                                        />
+                                                                    ) : (
+                                                                        <span className="font-mono text-rose-700">{formatNumber(row.calculation.manualDeduction)}</span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="border-b border-slate-100 px-2 py-2 text-right font-mono font-black text-slate-900">{formatNumber(row.calculation.netAmount)}</td>
+                                                                <td className="border-b border-slate-100 px-2 py-2 text-center">
+                                                                    {isEditing ? (
+                                                                        <select
+                                                                            value={editDraft.processStatus}
+                                                                            onChange={(event) => setEditDraft((prev) => ({ ...prev, processStatus: event.target.value as ClientSiteLaborProcessStatus }))}
+                                                                            className="h-8 rounded border border-slate-300 bg-white px-2 text-xs font-bold outline-none focus:border-emerald-500"
+                                                                        >
+                                                                            {PROCESS_STATUS_OPTIONS.filter((option) => option.value !== 'all').map((option) => (
+                                                                                <option key={option.value} value={option.value}>{option.label}</option>
+                                                                            ))}
+                                                                        </select>
+                                                                    ) : (
+                                                                        <span className={`rounded border px-2 py-1 font-black ${PROCESS_STATUS_BADGE_CLASS[processStatus]}`}>
+                                                                            {PROCESS_STATUS_LABELS[processStatus]}
+                                                                        </span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="border-b border-slate-100 px-2 py-2">
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            type="text"
+                                                                            value={editDraft.memo}
+                                                                            onChange={(event) => setEditDraft((prev) => ({ ...prev, memo: event.target.value }))}
+                                                                            className="h-8 w-44 rounded border border-slate-300 px-2 text-xs outline-none focus:border-emerald-500"
+                                                                            placeholder="수당/공제 사유"
+                                                                        />
+                                                                    ) : (
+                                                                        <span className="block max-w-[220px] truncate text-slate-500">{row.adjustment?.memo || row.entry.workContent || '-'}</span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="border-b border-slate-100 px-2 py-2">
+                                                                    <div className="flex justify-center gap-1.5">
+                                                                        {isEditing ? (
+                                                                            <>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => void saveManagementRow(row)}
+                                                                                    disabled={isSaving}
+                                                                                    title="저장"
+                                                                                    className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-emerald-600 text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                                                                                >
+                                                                                    {isSaving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                                                                                </button>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={cancelEditRow}
+                                                                                    title="취소"
+                                                                                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-50"
+                                                                                >
+                                                                                    <X size={15} />
+                                                                                </button>
+                                                                            </>
+                                                                        ) : (
+                                                                            <>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => startEditRow(row)}
+                                                                                    title="수정"
+                                                                                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-50"
+                                                                                >
+                                                                                    <Edit3 size={15} />
+                                                                                </button>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => void deleteManagementRow(row)}
+                                                                                    disabled={isDeleting}
+                                                                                    title="삭제"
+                                                                                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-rose-200 bg-white text-rose-600 transition hover:bg-rose-50 disabled:opacity-50"
+                                                                                >
+                                                                                    {isDeleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                                                                                </button>
+                                                                            </>
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                    {selectedSiteManagementRows.length === 0 && (
+                                                        <tr>
+                                                            <td colSpan={14} className="px-4 py-8 text-center font-bold text-slate-400">
+                                                                선택한 처리상태에 해당하는 근무 행이 없습니다.
+                                                            </td>
+                                                        </tr>
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     </div>
                                     <div className="overflow-x-auto rounded-lg border border-slate-200 bg-slate-100 p-4">
                                         <div className={`inline-block ${isSplitView ? 'min-w-[1180px]' : 'min-w-[1680px]'} bg-white`}>
@@ -1965,8 +2828,59 @@ const ClientSiteLaborPage: React.FC = () => {
                                         </div>
                                     </div>
                                 </section>
+                                )}
 
-                                <section className="mt-4 min-w-0 rounded-lg border border-teal-200 bg-white p-3">
+                                {activeDocumentView === 'progress' && (
+                                <section className="min-w-0 rounded-lg border border-indigo-200 bg-white p-3">
+                                    <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                                        <div>
+                                            <p className="text-xs font-black uppercase tracking-wide text-indigo-600">기성청구서</p>
+                                            <h3 className="mt-0.5 text-base font-black text-slate-900">현장별 기성청구서</h3>
+                                            <p className="mt-1 text-xs font-bold text-slate-500">
+                                                기성관리에서 저장한 해당 월 청구서를 선택 현장 기준으로 표시합니다.
+                                            </p>
+                                        </div>
+                                        <Link
+                                            to={selectedSiteProgressInvoiceLink}
+                                            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-2.5 text-xs font-black text-indigo-700 transition hover:bg-indigo-50"
+                                        >
+                                            <ExternalLink size={14} />
+                                            기성관리
+                                        </Link>
+                                    </div>
+
+                                    {progressDocumentsError && (
+                                        <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
+                                            {progressDocumentsError}
+                                        </div>
+                                    )}
+
+                                    {progressDocumentsLoading ? (
+                                        <div className="flex min-h-32 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 text-sm font-bold text-slate-500">
+                                            <Loader2 size={18} className="animate-spin" />
+                                            기성청구서를 불러오는 중
+                                        </div>
+                                    ) : selectedSiteProgressPreview ? (
+                                        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-slate-100 p-4">
+                                            <ProgressClaimInvoicePreview
+                                                data={selectedSiteProgressPreview}
+                                                site={selectedSite}
+                                                yearMonth={selectedYearMonth}
+                                            />
+                                        </div>
+                                    ) : (
+                                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
+                                            <p className="text-sm font-black text-slate-700">해당 현장의 기성청구서가 없습니다.</p>
+                                            <p className="mt-1 text-xs font-semibold text-slate-500">
+                                                기성관리에서 이 현장과 {selectedYearMonth} 월 청구서를 저장하면 여기에 표시됩니다.
+                                            </p>
+                                        </div>
+                                    )}
+                                </section>
+                                )}
+
+                                {activeDocumentView === 'transaction' && (
+                                <section className="min-w-0 rounded-lg border border-teal-200 bg-white p-3">
                                     <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
                                         <div>
                                             <p className="text-xs font-black uppercase tracking-wide text-teal-600">거래명세서</p>
@@ -1981,6 +2895,9 @@ const ClientSiteLaborPage: React.FC = () => {
                                             </span>
                                             <span className="rounded bg-amber-50 px-2 py-1 text-[11px] font-black text-amber-700">
                                                 임대 {rentalTransactionCount}건
+                                            </span>
+                                            <span className="rounded bg-indigo-50 px-2 py-1 text-[11px] font-black text-indigo-700">
+                                                기성 {progressTransactionCount}건
                                             </span>
                                             <Link
                                                 to="/payroll/support-client-site"
@@ -2010,6 +2927,7 @@ const ClientSiteLaborPage: React.FC = () => {
                                                     const statementId = statement.id || `${statement.supportStatementKey}:${index}`;
                                                     const isSelectedStatement = selectedTransactionStatement.id === statement.id || (!selectedTransactionStatement.id && index === 0);
                                                     const isRentalStatement = statement.estimateMode === 'rental';
+                                                    const isProgressStatement = statement.supportStatementSource === PROGRESS_TRANSACTION_STATEMENT_SOURCE;
 
                                                     return (
                                                         <button
@@ -2028,6 +2946,13 @@ const ClientSiteLaborPage: React.FC = () => {
                                                                     : 'bg-teal-100 text-teal-700'
                                                             }`}>
                                                                 {isRentalStatement ? '임대거래' : '거래명세'}
+                                                            </span>
+                                                            <span className={`mb-1 ml-1 inline-flex rounded px-1.5 py-0.5 text-[10px] font-black ${
+                                                                isProgressStatement
+                                                                    ? 'bg-indigo-100 text-indigo-700'
+                                                                    : 'bg-slate-100 text-slate-600'
+                                                            }`}>
+                                                                {isProgressStatement ? '기성관리' : '발주처/현장'}
                                                             </span>
                                                             <span className="block max-w-[240px] truncate font-black">
                                                                 {statement.projectName || statement.title || '거래명세표'}
@@ -2052,6 +2977,7 @@ const ClientSiteLaborPage: React.FC = () => {
                                         </div>
                                     )}
                                 </section>
+                                )}
                             </div>
                         ) : (
                             <div className="flex min-h-[420px] items-center justify-center px-6 text-center">
@@ -2059,8 +2985,8 @@ const ClientSiteLaborPage: React.FC = () => {
                                     <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-slate-100 text-slate-400">
                                         <FileText size={24} />
                                     </div>
-                                    <p className="mt-3 text-base font-black text-slate-800">현장을 선택하세요</p>
-                                    <p className="mt-1 text-sm font-semibold text-slate-500">선택한 현장의 작업자와 노임명세서가 표시됩니다.</p>
+                                    <p className="mt-3 text-base font-black text-slate-800">{activeDocumentMeta.emptyTitle}</p>
+                                    <p className="mt-1 text-sm font-semibold text-slate-500">{activeDocumentMeta.emptyDescription}</p>
                                 </div>
                             </div>
                         )}

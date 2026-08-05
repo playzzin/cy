@@ -16,6 +16,44 @@ import AccommodationQuickAssignmentModal from './QuickAssignmentModal';
 import LedgerBillingEditorModal from '../support/LedgerBillingEditorModal';
 import { DEFAULT_SUPPORT_BILLING_START_DATE } from '../../utils/supportBillingPeriod';
 import { getContrastingTextColor } from '../../utils/color';
+import { Droplets, Flame, Sparkles, Zap } from 'lucide-react';
+import AccommodationUtilityBillImportModal from './AccommodationElectricityBillImportModal';
+import {
+    AccommodationUtilityBillApplyItem,
+    AccommodationUtilityBillType,
+} from '../../types/accommodationElectricityBillImport';
+import {
+    getAccommodationOvercharge,
+    stripAccommodationOverchargeMemo,
+} from '../../utils/accommodationOvercharge';
+
+const UTILITY_IMPORT_OPTIONS = [
+    {
+        type: 'electricity' as const,
+        label: '전기',
+        fullLabel: '전기요금',
+        Icon: Zap,
+        className: 'border-indigo-200 text-indigo-700 hover:bg-indigo-50',
+    },
+    {
+        type: 'gas' as const,
+        label: '가스',
+        fullLabel: '가스요금',
+        Icon: Flame,
+        className: 'border-amber-300 text-amber-800 hover:bg-amber-50',
+    },
+    {
+        type: 'water' as const,
+        label: '수도',
+        fullLabel: '수도요금',
+        Icon: Droplets,
+        className: 'border-cyan-200 text-cyan-700 hover:bg-cyan-50',
+    },
+];
+
+const getUtilityImportLabel = (utilityType: AccommodationUtilityBillType): string => (
+    UTILITY_IMPORT_OPTIONS.find((option) => option.type === utilityType)?.fullLabel || '공과금'
+);
 
 // ── 독립 EditableCell 컴포넌트 (Ref 기반 비제어 방식) ──────────
 // typing 중 React 리렌더 0회 → 커서 이탈 완전 방지
@@ -214,7 +252,12 @@ interface AccommodationSplitBillingRange {
     identityKey: string;
 }
 
-const UtilityLedger: React.FC = () => {
+interface UtilityLedgerProps {
+    selectedTeamId?: string;
+    searchText?: string;
+}
+
+const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', searchText = '' }) => {
     // State for Year-Month
     const [currentDate, setCurrentDate] = useState(new Date());
     const [yearMonth, setYearMonth] = useState('');
@@ -241,6 +284,10 @@ const UtilityLedger: React.FC = () => {
     const [isStickyHeader, setIsStickyHeader] = useState(false); // Sticky header toggle
     const [quickAssignAccommodation, setQuickAssignAccommodation] = useState<Accommodation | null>(null);
     const [quickAssignSplitMode, setQuickAssignSplitMode] = useState(false);
+    const [utilityBillImport, setUtilityBillImport] = useState<{
+        utilityType: AccommodationUtilityBillType;
+        files: File[];
+    } | null>(null);
 
     const normalizeKey = (value: unknown): string => String(value ?? '').trim();
 
@@ -302,7 +349,7 @@ const UtilityLedger: React.FC = () => {
         return map;
     }, [accommodations]);
 
-    const resolveAccommodation = (params: { id?: string; name?: string }): Accommodation | undefined => {
+    const resolveAccommodation = useCallback((params: { id?: string; name?: string }): Accommodation | undefined => {
         const id = normalizeKey(params.id);
         if (id) {
             const byId = accommodationByAnyId.get(id);
@@ -312,7 +359,12 @@ const UtilityLedger: React.FC = () => {
         const name = normalizeKey(params.name);
         if (!name) return undefined;
         return accommodationByName.get(name);
-    };
+    }, [accommodationByAnyId, accommodationByName]);
+
+    const removeAutomaticOverchargeMemoFromRecord = useCallback((record: UtilityRecord): UtilityRecord => {
+        const memo = stripAccommodationOverchargeMemo(record.memo);
+        return memo === (record.memo ?? '') ? record : { ...record, memo };
+    }, []);
 
     const isMatchingAccommodationAssignment = useCallback(
         (assignment: AccommodationAssignment, canonicalAccommodationId: string, canonicalAccommodationName: string): boolean => {
@@ -410,10 +462,12 @@ const UtilityLedger: React.FC = () => {
             setBillingTargets(billingTargetList);
             setBillingDocuments(billingDocList);
 
-            // Sort by accommodation name
-            ledger.sort((a, b) => a.accommodationName.localeCompare(b.accommodationName, undefined, { numeric: true }));
+            const ledgerWithManualMemos = ledger.map(removeAutomaticOverchargeMemoFromRecord);
 
-            setRecords(ledger);
+            // Sort by accommodation name
+            ledgerWithManualMemos.sort((a, b) => a.accommodationName.localeCompare(b.accommodationName, undefined, { numeric: true }));
+
+            setRecords(ledgerWithManualMemos);
             setIsDirty(false);
         } catch (error) {
             console.error(error);
@@ -449,23 +503,18 @@ const UtilityLedger: React.FC = () => {
                 (costs.other || 0);
 
             record.costs = costs;
-            newRecords[index] = record;
+            newRecords[index] = removeAutomaticOverchargeMemoFromRecord(record);
             return newRecords;
         });
         setIsDirty(true);
-    }, []);
-
-    const handleStatusChange = (index: number, status: 'paid' | 'unpaid' | 'pending') => {
-        const newRecords = [...records];
-        newRecords[index] = { ...newRecords[index], paymentStatus: status };
-        setRecords(newRecords);
-        setIsDirty(true);
-    };
+    }, [removeAutomaticOverchargeMemoFromRecord]);
 
     const handleSave = async () => {
         try {
             setSaving(true);
-            await accommodationService.saveUtilityRecords(records);
+            const recordsWithManualMemos = records.map(removeAutomaticOverchargeMemoFromRecord);
+            setRecords(recordsWithManualMemos);
+            await accommodationService.saveUtilityRecords(recordsWithManualMemos);
             setIsDirty(false);
 
             // Reload to get real IDs for new records
@@ -477,6 +526,42 @@ const UtilityLedger: React.FC = () => {
         } finally {
             setSaving(false);
         }
+    };
+
+    const handleApplyUtilityBills = (items: AccommodationUtilityBillApplyItem[]) => {
+        const itemByRecordId = new Map(items.map((item) => [item.recordId, item]));
+        const itemByAccommodationId = new Map(items.map((item) => [item.accommodationId, item]));
+        setRecords((current) => current.map((record) => {
+            const item = itemByRecordId.get(record.id) || itemByAccommodationId.get(record.accommodationId);
+            if (!item) return record;
+            const importedAmount = item.utilityType === 'gas'
+                ? item.gasAmount
+                : item.utilityType === 'water'
+                    ? item.waterAmount
+                    : item.electricityAmount;
+            const costs = {
+                ...record.costs,
+                [item.utilityType]: importedAmount,
+            };
+            costs.total = (costs.rent || 0)
+                + (costs.electricity || 0)
+                + (costs.gas || 0)
+                + (costs.water || 0)
+                + (costs.internet || 0)
+                + (costs.maintenance || 0)
+                + (costs.other || 0);
+            if (item.utilityType === 'gas') {
+                return removeAutomaticOverchargeMemoFromRecord({ ...record, costs, gasBillImport: item.meta });
+            }
+            if (item.utilityType === 'water') {
+                return removeAutomaticOverchargeMemoFromRecord({ ...record, costs, waterBillImport: item.meta });
+            }
+            return removeAutomaticOverchargeMemoFromRecord({ ...record, costs, electricityBillImport: item.meta });
+        }));
+        setIsDirty(true);
+        const label = getUtilityImportLabel(items[0]?.utilityType || 'electricity');
+        setUtilityBillImport(null);
+        alert(`${label} ${items.length}건을 대장에 반영했습니다. 변경사항 저장을 눌러 최종 저장해 주세요.`);
     };
 
     // Helper to check profile type for visual styling
@@ -989,6 +1074,53 @@ const UtilityLedger: React.FC = () => {
         return resolveAccommodationBillingIdentityForTarget(record, resolveBillingTarget(accommodationId, accommodationName));
     };
 
+    const recordMatchesSelectedTeam = (record: UtilityRecord): boolean => {
+        const normalizedSelectedTeamId = normalizeKey(selectedTeamId);
+        if (!normalizedSelectedTeamId) return true;
+
+        const selectedTeam = resolveTeamIdentity(normalizedSelectedTeamId);
+        const matchesTeam = (teamId?: string, teamName?: string): boolean => {
+            const candidate = resolveTeamIdentity(teamId, teamName);
+            return intersects(selectedTeam.teamIds, candidate.teamIds) ||
+                intersects(selectedTeam.teamNames, candidate.teamNames);
+        };
+
+        if (getActiveAssignmentsForRecord(record).some((assignment) => {
+            const team = resolveAssignmentTeamIdentity(assignment);
+            return matchesTeam(team.teamId, team.teamName);
+        })) {
+            return true;
+        }
+
+        const { accommodationId, accommodationName } = getCanonicalAccommodationForRecord(record);
+        const billingTarget = resolveBillingTarget(accommodationId, accommodationName);
+        return billingTarget?.targetType === 'team' && matchesTeam(billingTarget.teamId, billingTarget.teamName);
+    };
+
+    const recordMatchesSearchText = (record: UtilityRecord): boolean => {
+        const query = normalizeKey(searchText).replace(/\s+/g, '').toLocaleLowerCase();
+        if (!query) return true;
+
+        const { accommodation, accommodationId, accommodationName } = getCanonicalAccommodationForRecord(record);
+        const billingTarget = resolveBillingTarget(accommodationId, accommodationName);
+        const assignmentsForRecord = getActiveAssignmentsForRecord(record);
+        const values = [
+            record.accommodationName,
+            accommodation?.name,
+            accommodation?.address,
+            accommodation?.memo,
+            record.memo,
+            billingTarget?.teamName,
+            billingTarget?.workerName,
+            ...assignmentsForRecord.flatMap((assignment) => [
+                assignment.teamName,
+                assignment.workerName
+            ])
+        ];
+
+        return values.some((value) => normalizeKey(value).replace(/\s+/g, '').toLocaleLowerCase().includes(query));
+    };
+
     const matchesAccommodationTargetDocument = (
         document: AccommodationBillingDocument,
         record: UtilityRecord,
@@ -1085,13 +1217,50 @@ const UtilityLedger: React.FC = () => {
     const billingRows = useMemo(() => {
         return records
             .map((record, index) => ({ record, index, billingState: getRowBillingState(record) }))
+            .filter(({ record }) => recordMatchesSelectedTeam(record))
+            .filter(({ record }) => recordMatchesSearchText(record))
             .filter(({ billingState }) => {
                 if (billingFilter === 'all') return true;
                 if (billingFilter === 'unbilled') return billingState.status === 'unbilled' || billingState.status === 'blocked';
                 return billingState.status === billingFilter;
             })
             .sort(compareBillingRowsByTarget);
-    }, [records, billingDocuments, billingFilter, billingTargets, assignments, teams, workers, accommodations, yearMonth]);
+    }, [records, billingDocuments, billingFilter, billingTargets, assignments, teams, workers, accommodations, yearMonth, selectedTeamId, searchText]);
+
+    const overchargeTargets = useMemo(() => (
+        records
+            .filter((record) => recordMatchesSelectedTeam(record))
+            .filter((record) => recordMatchesSearchText(record))
+            .map((record) => {
+                const accommodation = resolveAccommodation({
+                    id: record.accommodationId,
+                    name: record.accommodationName
+                });
+                const summary = getAccommodationOvercharge(record, accommodation);
+                return summary ? { record, accommodation, summary } : null;
+            })
+            .filter((entry): entry is {
+                record: UtilityRecord;
+                accommodation: Accommodation | undefined;
+                summary: NonNullable<ReturnType<typeof getAccommodationOvercharge>>;
+            } => Boolean(entry))
+            .sort((left, right) => (
+                right.summary.exceededAmount - left.summary.exceededAmount
+                || left.record.accommodationName.localeCompare(right.record.accommodationName, 'ko-KR', { numeric: true })
+            ))
+    ), [records, selectedTeamId, searchText, billingTargets, assignments, teams, workers, accommodations, yearMonth, resolveAccommodation]);
+
+    const overchargeByRecordId = useMemo(
+        () => new Map(overchargeTargets.map((entry) => [entry.record.id, entry.summary])),
+        [overchargeTargets]
+    );
+
+    const blockedAccommodationIdsForElectricityImport = useMemo(() => new Set(
+        records
+            .filter((record) => getRowBillingState(record).documents.length > 0)
+            .map((record) => String(record.accommodationId || ''))
+            .filter(Boolean)
+    ), [records, billingDocuments, billingTargets, assignments, teams, workers, accommodations, yearMonth]);
 
     const bulkBillableCount = useMemo(
         () => billingRows.filter(({ billingState }) => billingState.status === 'unbilled').length,
@@ -1468,7 +1637,9 @@ const UtilityLedger: React.FC = () => {
                 lineItems: [...preserved, ...lineItems]
             };
 
-            await accommodationBillingService.upsertBillingDocument(next);
+            await accommodationBillingService.upsertBillingDocument(status === 'confirmed'
+                ? { ...next, status: 'draft', confirmedAt: undefined, postedAdvancePaymentId: undefined }
+                : next);
             if (status === 'confirmed') {
                 await accommodationBillingService.confirmAndPostToAdvancePayment(next.id);
             }
@@ -1501,6 +1672,18 @@ const UtilityLedger: React.FC = () => {
         }
     };
 
+    const makeBillingDocumentEditable = async (document: AccommodationBillingDocument): Promise<AccommodationBillingDocument> => {
+        if (document.status !== 'confirmed') return document;
+
+        await accommodationBillingService.cancelConfirmation(document.id);
+        return {
+            ...document,
+            status: 'draft',
+            confirmedAt: undefined,
+            postedAdvancePaymentId: undefined
+        };
+    };
+
     const handleCancelBilling = async (record: UtilityRecord, document?: AccommodationBillingDocument) => {
         const documents = document ? [document] : getRowBillingState(record).documents;
         if (documents.length === 0) return;
@@ -1509,18 +1692,19 @@ const UtilityLedger: React.FC = () => {
         setBillingProcessingId(record.id);
         try {
             for (const item of documents) {
-                const preserved = (item.lineItems ?? []).filter((lineItem) =>
+                const editableItem = await makeBillingDocumentEditable(item);
+                const preserved = (editableItem.lineItems ?? []).filter((lineItem) =>
                     !matchesAccommodationRecordLineItem(lineItem, record)
                 );
 
                 if (preserved.length > 0) {
                     await accommodationBillingService.upsertBillingDocument({
-                        ...item,
+                        ...editableItem,
                         status: 'draft',
                         lineItems: preserved
                     });
                 } else {
-                    await accommodationBillingService.deleteBillingDocument(item.id);
+                    await accommodationBillingService.deleteBillingDocument(editableItem.id);
                 }
             }
 
@@ -1599,22 +1783,23 @@ const UtilityLedger: React.FC = () => {
                         for (const item of billingState.documents) {
                             const current = workingDocuments.get(item.id);
                             if (!current) continue;
+                            const editableCurrent = await makeBillingDocumentEditable(current);
 
-                            const preserved = (current.lineItems ?? []).filter((lineItem) =>
+                            const preserved = (editableCurrent.lineItems ?? []).filter((lineItem) =>
                                 !matchesAccommodationRecordLineItem(lineItem, record)
                             );
 
                             if (preserved.length > 0) {
                                 const next: AccommodationBillingDocument = {
-                                    ...current,
+                                    ...editableCurrent,
                                     status: 'draft',
                                     lineItems: preserved
                                 };
                                 await accommodationBillingService.upsertBillingDocument(next);
                                 workingDocuments.set(next.id, next);
                             } else {
-                                await accommodationBillingService.deleteBillingDocument(current.id);
-                                workingDocuments.delete(current.id);
+                                await accommodationBillingService.deleteBillingDocument(editableCurrent.id);
+                                workingDocuments.delete(editableCurrent.id);
                             }
                         }
                     }
@@ -1662,6 +1847,29 @@ const UtilityLedger: React.FC = () => {
                 </div>
 
                 <div className="flex flex-wrap gap-2 sm:gap-3 items-center justify-start 2xl:justify-end">
+                    <div className="flex w-full items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm sm:w-auto" aria-label="공과금 청구서 AI 등록">
+                        <span className="hidden items-center gap-1.5 whitespace-nowrap px-2 text-[11px] font-extrabold text-slate-500 xl:inline-flex">
+                            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                            AI 청구서
+                        </span>
+                        {UTILITY_IMPORT_OPTIONS.map((option) => {
+                            const UtilityIcon = option.Icon;
+                            return (
+                                <button
+                                    key={option.type}
+                                    type="button"
+                                    onClick={() => setUtilityBillImport({ utilityType: option.type, files: [] })}
+                                    disabled={loading || saving || bulkBillingAction !== ''}
+                                    title={`${option.fullLabel} 이미지/PDF 일괄 분석`}
+                                    aria-label={`${option.fullLabel} AI 등록`}
+                                    className={`inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border bg-white px-2.5 text-xs font-extrabold transition sm:flex-none ${option.className} disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300`}
+                                >
+                                    <UtilityIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                                    {option.label}
+                                </button>
+                            );
+                        })}
+                    </div>
                     <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
                         <span className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 rounded-md border border-emerald-100 text-emerald-700">
                             <div className="w-2 h-2 bg-emerald-500 rounded-full"></div> 고정(Fixed)
@@ -1731,6 +1939,54 @@ const UtilityLedger: React.FC = () => {
                 </div>
             </div>
 
+            {!loading && (
+                overchargeTargets.length > 0 ? (
+                    <div
+                        role="alert"
+                        className="rounded-2xl border border-rose-200 bg-rose-50 p-4 shadow-sm"
+                    >
+                        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                            <div className="flex items-start gap-3">
+                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+                                    <FontAwesomeIcon icon={faExclamationTriangle} />
+                                </div>
+                                <div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <h3 className="text-sm font-extrabold text-rose-800">
+                                            과청구 대상 {overchargeTargets.length}건
+                                        </h3>
+                                        <span className="rounded-full border border-rose-200 bg-white px-2 py-0.5 text-[10px] font-bold text-rose-600">
+                                            월세 제외 공과금 합계
+                                        </span>
+                                    </div>
+                                    <p className="mt-1 text-xs font-medium text-rose-700">
+                                        숙소 등록·수정에서 설정한 기준금액 이상인 숙소입니다. 초과액은 각 행의 초과액 열에서 확인할 수 있습니다.
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex max-h-28 flex-wrap gap-2 overflow-y-auto xl:max-w-[58%] xl:justify-end">
+                                {overchargeTargets.map(({ record, summary }) => (
+                                    <span
+                                        key={record.id}
+                                        className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 shadow-sm"
+                                        title={`${summary.typeLabel} 공과금 ${summary.utilityTotal.toLocaleString('ko-KR')}원 / 기준 ${summary.threshold.toLocaleString('ko-KR')}원`}
+                                    >
+                                        <span className="max-w-[180px] truncate">{record.accommodationName}</span>
+                                        <span className="text-rose-600">
+                                            초과 {summary.exceededAmount.toLocaleString('ko-KR')}원
+                                        </span>
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-700">
+                        과청구 대상 없음 · 숙소별 설정 기준 이내입니다. (기본: 투룸 20만 원 / 쓰리룸 30만 원)
+                    </div>
+                )
+            )}
+
             {/* Grid */}
             <div className="bg-white border border-indigo-100 shadow-xl shadow-indigo-50/50 rounded-2xl overflow-hidden flex-1 flex flex-col">
                 <div className={`custom-scrollbar ${isStickyHeader ? 'overflow-auto h-[calc(100vh-400px)] min-h-[400px] border-b border-indigo-100' : 'overflow-auto h-[calc(100vh-420px)] min-h-[460px]'}`}>
@@ -1740,24 +1996,24 @@ const UtilityLedger: React.FC = () => {
                             <p>데이터를 불러오는 중입니다...</p>
                         </div>
                     ) : (
-                        <table className="support-compact-table support-compact-ledger w-full table-fixed text-[11px] lg:text-xs">
+                        <table className="support-compact-table support-compact-ledger w-full min-w-[1500px] table-fixed text-[11px] lg:text-xs">
                             <colgroup>
                                 <col style={{ width: '8%' }} />
                                 <col style={{ width: '6%' }} />
                                 <col style={{ width: '8%' }} />
-                                <col style={{ width: '8.5%' }} />
-                                <col style={{ width: '4.1%' }} />
-                                <col style={{ width: '4.1%' }} />
-                                <col style={{ width: '4.1%' }} />
-                                <col style={{ width: '4.1%' }} />
-                                <col style={{ width: '4.1%' }} />
-                                <col style={{ width: '4.1%' }} />
-                                <col style={{ width: '4.1%' }} />
-                                <col style={{ width: '5.3%' }} />
-                                <col style={{ width: '6%' }} />
-                                <col style={{ width: '7%' }} />
-                                <col style={{ width: '8%' }} />
-                                <col style={{ width: '8.5%' }} />
+                                <col style={{ width: '17%' }} />
+                                <col style={{ width: '3.7%' }} />
+                                <col style={{ width: '3.7%' }} />
+                                <col style={{ width: '3.7%' }} />
+                                <col style={{ width: '3.7%' }} />
+                                <col style={{ width: '3.7%' }} />
+                                <col style={{ width: '3.7%' }} />
+                                <col style={{ width: '3.7%' }} />
+                                <col style={{ width: '5.1%' }} />
+                                <col style={{ width: '5%' }} />
+                                <col style={{ width: '4.5%' }} />
+                                <col style={{ width: '4.5%' }} />
+                                <col style={{ width: '10%' }} />
                             </colgroup>
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
@@ -1775,7 +2031,7 @@ const UtilityLedger: React.FC = () => {
                                     <th className="px-2 py-4 text-center w-32 border-l border-indigo-400 bg-indigo-500">합계</th>
                                     <th className="px-2 py-4 text-center w-28 border-l border-indigo-500">청구상태</th>
                                     <th className="px-2 py-4 text-center w-44 border-l border-indigo-500">청구작업</th>
-                                    <th className="px-2 py-4 text-center w-28 border-l border-indigo-500">상태</th>
+                                    <th className="px-2 py-4 text-center border-l border-indigo-500">초과액</th>
                                     <th className="px-4 py-4 text-left border-l border-indigo-500">메모</th>
                                 </tr>
                             </thead>
@@ -1787,9 +2043,17 @@ const UtilityLedger: React.FC = () => {
                                     const visibleAssignedWorkers = assignedWorkers.slice(0, 3);
                                     const billingBadge = getBillingStatusBadge(billingState.status);
                                     const isProcessing = billingProcessingId === rec.id || bulkBillingAction !== '';
+                                    const overchargeSummary = overchargeByRecordId.get(rec.id);
 
                                     return (
-                                        <tr key={`${rec.accommodationId}-${idx}`} className="group hover:bg-blue-50/40 transition-colors">
+                                        <tr
+                                            key={`${rec.accommodationId}-${idx}`}
+                                            className={`group transition-colors ${
+                                                overchargeSummary
+                                                    ? 'bg-rose-50/40 hover:bg-rose-50/70'
+                                                    : 'hover:bg-blue-50/40'
+                                            }`}
+                                        >
 
                                             {/* Assigned Team */}
                                             <td className="px-4 py-3 border-r border-indigo-50 bg-white"
@@ -1889,17 +2153,45 @@ const UtilityLedger: React.FC = () => {
                                             </td>
 
                                             <td className="px-4 py-3 border-r border-indigo-50 font-bold text-slate-700 bg-white group-hover:bg-blue-50/40">
-                                                <div className='flex items-center'>
-                                                    <span>{rec.accommodationName}</span>
+                                                <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+                                                    <span
+                                                        className="min-w-0 flex-1 truncate whitespace-nowrap"
+                                                        title={rec.accommodationName}
+                                                    >
+                                                        {rec.accommodationName}
+                                                    </span>
                                                     {matchedAccommodation?.contract?.isAutoTransfer && (
-                                                        <span className="ml-2 px-1.5 py-0.5 rounded bg-indigo-100/80 text-indigo-700 text-[10px] font-extrabold border border-indigo-200 select-none cursor-help"
+                                                        <span className="shrink-0 whitespace-nowrap px-1.5 py-0.5 rounded bg-indigo-100/80 text-indigo-700 text-[10px] font-extrabold border border-indigo-200 select-none cursor-help"
                                                             title="이 숙소는 공과금이 자동이체로 설정되어 있습니다.">
                                                             자동이체
                                                         </span>
                                                     )}
-                                                    <div className="flex-1"></div>
-                                                    {rec.paymentStatus === 'paid' && <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-sm" title="완납"></span>}
-                                                    {rec.paymentStatus === 'unpaid' && <span className="w-2 h-2 rounded-full bg-rose-500 shadow-sm animate-pulse" title="미납"></span>}
+                                                    {rec.electricityBillImport && (
+                                                        <span
+                                                            className="shrink-0 whitespace-nowrap rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-extrabold text-sky-700"
+                                                            title={`${rec.electricityBillImport.sourceFileName} · 고객번호 ${rec.electricityBillImport.customerNumber || '-'} · ${rec.electricityBillImport.usageKwh || 0}kWh`}
+                                                        >
+                                                            AI 전기
+                                                        </span>
+                                                    )}
+                                                    {rec.gasBillImport && (
+                                                        <span
+                                                            className="shrink-0 whitespace-nowrap rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-800"
+                                                            title={`${rec.gasBillImport.sourceFileName} · 납부자번호 ${rec.gasBillImport.payerNumber || '-'} · ${rec.gasBillImport.usageCubicMeters || 0}m³`}
+                                                        >
+                                                            AI 가스
+                                                        </span>
+                                                    )}
+                                                    {rec.waterBillImport && (
+                                                        <span
+                                                            className="shrink-0 whitespace-nowrap rounded border border-cyan-200 bg-cyan-50 px-1.5 py-0.5 text-[10px] font-extrabold text-cyan-700"
+                                                            title={`${rec.waterBillImport.sourceFileName} · 수용가번호 ${rec.waterBillImport.consumerNumber || '-'} · ${rec.waterBillImport.usageCubicMeters || 0}m³`}
+                                                        >
+                                                            AI 수도
+                                                        </span>
+                                                    )}
+                                                    {rec.paymentStatus === 'paid' && <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 shadow-sm" title="완납"></span>}
+                                                    {rec.paymentStatus === 'unpaid' && <span className="h-2 w-2 shrink-0 rounded-full bg-rose-500 shadow-sm animate-pulse" title="미납"></span>}
                                                 </div>
                                             </td>
 
@@ -1928,7 +2220,11 @@ const UtilityLedger: React.FC = () => {
                                             />
 
                                             {/* Total */}
-                                            <td className="px-4 py-3 border-r border-indigo-50 bg-indigo-50/30 group-hover:bg-indigo-50/60 text-right font-extrabold text-indigo-700 font-mono text-base">
+                                            <td className={`px-4 py-3 border-r border-indigo-50 text-right font-extrabold font-mono text-base ${
+                                                overchargeSummary
+                                                    ? 'bg-rose-100/70 text-rose-700'
+                                                    : 'bg-indigo-50/30 text-indigo-700 group-hover:bg-indigo-50/60'
+                                            }`}>
                                                 {rec.costs.total.toLocaleString()}
                                             </td>
 
@@ -1981,25 +2277,20 @@ const UtilityLedger: React.FC = () => {
                                                 </div>
                                             </td>
 
-                                            {/* Status */}
-                                            <td className="p-1 border-r border-indigo-50 text-center">
-                                                <select
-                                                    value={rec.paymentStatus}
-                                                    onChange={(e) => {
-                                                        const v = e.target.value;
-                                                        if (v === 'paid' || v === 'unpaid' || v === 'pending') {
-                                                            handleStatusChange(idx, v);
-                                                        }
-                                                    }}
-                                                    className={`text-xs font-bold rounded-lg px-2 py-1.5 border-0 cursor-pointer focus:ring-2 focus:ring-indigo-500 outline-none transition-colors w-full text-center
-                                                    ${rec.paymentStatus === 'paid' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' :
-                                                            rec.paymentStatus === 'pending' ? 'bg-orange-100 text-orange-700 hover:bg-orange-200' : 'bg-rose-100 text-rose-700 hover:bg-rose-200'}
-                                                `}
-                                                >
-                                                    <option value="unpaid">미납</option>
-                                                    <option value="pending">보류</option>
-                                                    <option value="paid">완납</option>
-                                                </select>
+                                            {/* Overcharge */}
+                                            <td className={`px-2 py-3 border-r border-indigo-50 text-center ${
+                                                overchargeSummary ? 'bg-rose-50/70' : 'bg-white'
+                                            }`}>
+                                                {overchargeSummary ? (
+                                                    <div
+                                                        className="rounded bg-rose-100 px-1.5 py-1 text-[10px] font-extrabold text-rose-700"
+                                                        title={`공과금 ${overchargeSummary.utilityTotal.toLocaleString('ko-KR')}원 / 기준 ${overchargeSummary.threshold.toLocaleString('ko-KR')}원`}
+                                                    >
+                                                        {overchargeSummary.exceededAmount.toLocaleString('ko-KR')}원
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-slate-300">-</span>
+                                                )}
                                             </td>
 
                                             {/* Memo */}
@@ -2007,13 +2298,14 @@ const UtilityLedger: React.FC = () => {
                                                 <input
                                                     type="text"
                                                     value={rec.memo || ''}
+                                                    title={rec.memo || undefined}
                                                     onChange={(e) => {
                                                         const newRecords = [...records];
                                                         newRecords[idx] = { ...newRecords[idx], memo: e.target.value };
                                                         setRecords(newRecords);
                                                         setIsDirty(true);
                                                     }}
-                                                    className={`w-full p-2 focus:outline-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-200 rounded-lg text-xs bg-transparent ${rec.memo ? 'text-red-600 font-extrabold' : 'text-slate-600'}`}
+                                                    className="w-full p-2 focus:outline-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-200 rounded-lg text-xs font-medium text-slate-700 bg-transparent"
                                                     placeholder=""
                                                 />
                                             </td>
@@ -2057,6 +2349,7 @@ const UtilityLedger: React.FC = () => {
                 <div>
                     <h4 className="font-bold text-amber-800 text-sm mb-1">입력 가이드</h4>
                     <p className="text-xs text-amber-700 leading-relaxed">
+                        * 월세를 제외한 공과금 합계가 <strong className="text-rose-600">숙소별 설정 기준금액 이상</strong>이면 상단 과청구 대상과 각 행의 초과액 열에 표시됩니다. (기본: 투룸 20만 원 / 쓰리룸 30만 원)<br />
                         * 10만 원을 초과하는 공과금은 <strong className="text-rose-600">빨간색 굵은 글씨</strong>로 표시됩니다.<br />
                         * <strong>고정(Fixed)</strong> 항목은 자동으로 입력되지만, 필요 시 수정할 수 있습니다.<br />
                         * 숙소 청구는 선택한 청구대상에게 매월 1일부터 말일까지 월 전체 기준으로 청구합니다.<br />
@@ -2096,6 +2389,19 @@ const UtilityLedger: React.FC = () => {
                     onSave={(lineItems, memo) => handleSaveBillingEditor(lineItems, memo)}
                     onConfirm={(lineItems, memo) => handleSaveBillingEditor(lineItems, memo, 'confirmed')}
                     onCancelConfirm={handleCancelBillingConfirmation}
+                />
+            )}
+
+            {utilityBillImport && (
+                <AccommodationUtilityBillImportModal
+                    utilityType={utilityBillImport.utilityType}
+                    yearMonth={yearMonth}
+                    files={utilityBillImport.files}
+                    accommodations={accommodations}
+                    records={records}
+                    blockedAccommodationIds={blockedAccommodationIdsForElectricityImport}
+                    onClose={() => setUtilityBillImport(null)}
+                    onApply={handleApplyUtilityBills}
                 />
             )}
         </div>

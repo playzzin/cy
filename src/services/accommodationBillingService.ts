@@ -5,6 +5,7 @@ import {
     updateAccommodationBillingDocument,
     deleteAccommodationBillingDocument,
     createAccommodationBillingLineItem,
+    updateAccommodationBillingLineItem,
     deleteAccommodationBillingLineItem,
     listAllAdvancePayments,
     createAdvancePayment,
@@ -12,6 +13,8 @@ import {
     listAllTeams,
     listAllWorkers
 } from './firestoreCrudCompat';
+import { recordSupportWriteOperationSafely } from './supportWriteOperationLogService';
+import { getErrorMessage, reportSupportWriteError, SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../utils/supportWriteErrorReporting';
 import { Timestamp } from '../types/timestamp';
 import {
     AccommodationBillingDocument,
@@ -22,6 +25,14 @@ import {
 const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const OFFICE_BILLING_TEAM_ID = '__office__';
 const OFFICE_BILLING_TEAM_NAME = '사무실';
+
+const isConfirmedBilling = (billing?: Pick<AccommodationBillingDocument, 'status'> | null): boolean => (
+    String(billing?.status ?? '').trim().toLowerCase() === 'confirmed'
+);
+
+const isActiveLineItemRow = (row: any): boolean => (
+    String(row?.status ?? 'active').trim().toLowerCase() !== 'cancelled' && !row?.cancelledAt
+);
 
 const normalizeBillingTargetText = (value: unknown): string => (
     String(value ?? '').trim().toLowerCase().replace(/\s+/g, '')
@@ -289,6 +300,91 @@ const getLineItemBillingDocumentId = (row: any): string => {
     return '';
 };
 
+const normalizeLineItemPayload = (
+    billingDocumentId: string,
+    lineItem: AccommodationBillingLineItem
+): Record<string, unknown> => ({
+    id: String(lineItem.id),
+    billingDocumentId,
+    label: lineItem.label ?? null,
+    amount: Number.isFinite(lineItem.amount) ? lineItem.amount : 0,
+    targetField: lineItem.targetField ?? null,
+    sourceType: lineItem.sourceType ?? null,
+    sourceAccommodationId: lineItem.sourceAccommodationId ?? null,
+    sourceUtilityRecordId: lineItem.sourceUtilityRecordId ?? null,
+    status: 'active',
+    cancelledAt: null,
+    updatedAt: new Date().toISOString()
+});
+
+const normalizeLineItemComparable = (lineItem: Partial<AccommodationBillingLineItem> | any): string => (
+    JSON.stringify({
+        label: String(lineItem?.label ?? ''),
+        amount: Number.isFinite(Number(lineItem?.amount)) ? Number(lineItem.amount) : 0,
+        targetField: String(lineItem?.targetField ?? ''),
+        sourceType: String(lineItem?.sourceType ?? ''),
+        sourceAccommodationId: String(lineItem?.sourceAccommodationId ?? ''),
+        sourceUtilityRecordId: String(lineItem?.sourceUtilityRecordId ?? '')
+    })
+);
+
+const syncAccommodationBillingLineItems = async (
+    billingDocumentId: string,
+    nextLineItems: AccommodationBillingLineItem[]
+): Promise<void> => {
+    const listItemsRes = await listAllAccommodationBillingLineItems();
+    const existingRows = ((listItemsRes as any)?.data?.accommodationBillingLineItems ?? [])
+        .filter((li: any) => getLineItemBillingDocumentId(li) === String(billingDocumentId));
+    const existingById = new Map<string, any>();
+    existingRows.forEach((row: any) => {
+        const id = row?.id ? String(row.id) : '';
+        if (id) existingById.set(id, row);
+    });
+
+    const nextById = new Map<string, AccommodationBillingLineItem>();
+    nextLineItems.forEach((item) => {
+        const id = String(item.id ?? '').trim();
+        if (!id) throw new Error('accommodation-billing-line-item-id-required');
+        nextById.set(id, item);
+    });
+
+    const createTasks: Promise<unknown>[] = [];
+    const updateTasks: Promise<unknown>[] = [];
+
+    nextById.forEach((item, id) => {
+        const payload = normalizeLineItemPayload(billingDocumentId, item);
+        const existing = existingById.get(id);
+        if (!existing) {
+            createTasks.push(createAccommodationBillingLineItem(payload as any));
+            return;
+        }
+
+        const wasCancelled = !isActiveLineItemRow(existing);
+        const changed = normalizeLineItemComparable(existing) !== normalizeLineItemComparable(item);
+        if (wasCancelled || changed) {
+            updateTasks.push(updateAccommodationBillingLineItem(payload as any));
+        }
+    });
+
+    await Promise.all([...createTasks, ...updateTasks]);
+
+    const now = new Date().toISOString();
+    const cancelTasks = existingRows
+        .filter((row: any) => isActiveLineItemRow(row))
+        .filter((row: any) => {
+            const id = row?.id ? String(row.id) : '';
+            return Boolean(id) && !nextById.has(id);
+        })
+        .map((row: any) => updateAccommodationBillingLineItem({
+            id: String(row.id),
+            status: 'cancelled',
+            cancelledAt: now,
+            updatedAt: now
+        } as any));
+
+    await Promise.all(cancelTasks);
+};
+
 const mapAccommodationBillingDocument = (
     row: any,
     items: any[]
@@ -310,6 +406,7 @@ const mapAccommodationBillingDocument = (
         memo: row?.memo ? String(row.memo) : undefined,
         lineItems: items
             .filter((li: any) => getLineItemBillingDocumentId(li) === String(row?.id ?? ''))
+            .filter(isActiveLineItemRow)
             .map((li: any) => ({
                 id: String(li?.id ?? ''),
                 label: li?.label ? String(li.label) : '',
@@ -395,6 +492,7 @@ export const accommodationBillingService = {
 
             const lineItems = items
                 .filter((li: any) => getLineItemBillingDocumentId(li) === String(d?.id ?? ''))
+                .filter(isActiveLineItemRow)
                 .map((li: any) => {
                     return {
                         id: String(li?.id ?? ''),
@@ -428,7 +526,17 @@ export const accommodationBillingService = {
         });
     },
 
-    async upsertBillingDocument(docData: Omit<AccommodationBillingDocument, 'createdAt' | 'updatedAt'>): Promise<string> {
+    async upsertBillingDocument(
+        docData: Omit<AccommodationBillingDocument, 'createdAt' | 'updatedAt'>,
+        options: { operationId?: string } = {}
+    ): Promise<string> {
+        const operationId = String(options.operationId ?? '').trim() || `accommodation-billing:${docData.yearMonth}:${docData.id}`;
+        const affectedDocumentIds = [
+            docData.id,
+            ...(docData.lineItems ?? []).map((item) => item.id)
+        ].filter(Boolean);
+
+        try {
         const isOfficeTeam = isOfficeBillingTeam(docData.teamId, docData.teamName);
         const teamUuid = isOfficeTeam ? null : await resolveTeamUuid(docData.teamId);
         const issuedToTypeRaw = docData.issuedToType ? String(docData.issuedToType) : 'worker';
@@ -439,6 +547,10 @@ export const accommodationBillingService = {
         if (shouldRequireWorker && !workerUuid) throw new Error('?묒뾽?먮? 李얠쓣 ???놁뒿?덈떎.');
 
         const beforeBilling = await findAccommodationBillingDocumentById(docData.id).catch(() => null);
+        if (isConfirmedBilling(beforeBilling)) {
+            throw new Error('accommodation-billing-confirmed-modification-blocked');
+        }
+
         const storedTeamId = teamUuid ?? null;
         const storedTeamName = isOfficeTeam ? OFFICE_BILLING_TEAM_NAME : (docData.teamName ?? null);
         const issuedToWorkerName = issuedToType === 'team'
@@ -476,32 +588,7 @@ export const accommodationBillingService = {
             } as any);
         }
 
-        const listItemsRes = await listAllAccommodationBillingLineItems();
-        const existingItems = (listItemsRes as any)?.data?.accommodationBillingLineItems ?? [];
-        const toDelete = existingItems.filter((li: any) => getLineItemBillingDocumentId(li) === String(docData.id));
-        await Promise.all(
-            toDelete.map(async (li: any) => {
-                const liId = li?.id ? String(li.id) : '';
-                if (!liId) return;
-                await deleteAccommodationBillingLineItem({ id: liId } as any);
-            })
-        );
-
-        await Promise.all(
-            (docData.lineItems ?? []).map(async (li) => {
-                const id = String(li.id);
-                await createAccommodationBillingLineItem({
-                    id,
-                    billingDocumentId: docData.id,
-                    label: li.label ?? null,
-                    amount: Number.isFinite(li.amount) ? li.amount : 0,
-                    targetField: li.targetField ?? null,
-                    sourceType: li.sourceType ?? null,
-                    sourceAccommodationId: li.sourceAccommodationId ?? null,
-                    sourceUtilityRecordId: li.sourceUtilityRecordId ?? null
-                } as any);
-            })
-        );
+        await syncAccommodationBillingLineItems(docData.id, docData.lineItems ?? []);
 
         const savedBilling = {
             ...docData,
@@ -527,11 +614,46 @@ export const accommodationBillingService = {
             console.warn('[accommodationBillingService] accommodation billing log failed:', logError);
         }
 
+        await recordSupportWriteOperationSafely({
+            domain: 'accommodation',
+            yearMonth: docData.yearMonth,
+            operationId,
+            status: 'success',
+            affectedDocumentIds,
+            metadata: {
+                billingDocumentId: docData.id,
+                lineItemCount: docData.lineItems?.length ?? 0,
+                status: docData.status
+            }
+        });
+
         return docData.id;
+        } catch (error) {
+            const failedContext = {
+                domain: 'accommodation' as const,
+                yearMonth: docData.yearMonth,
+                operationId,
+                affectedDocumentIds,
+                errorMessage: getErrorMessage(error),
+                userMessage: SUPPORT_WRITE_RETRY_USER_MESSAGE
+            };
+            await recordSupportWriteOperationSafely({
+                ...failedContext,
+                status: 'failed'
+            });
+            reportSupportWriteError(error, {
+                ...failedContext,
+                status: 'failed'
+            });
+            throw error;
+        }
     },
 
     async deleteBillingDocument(id: string): Promise<void> {
         const beforeBilling = await findAccommodationBillingDocumentById(id).catch(() => null);
+        if (isConfirmedBilling(beforeBilling)) {
+            throw new Error('accommodation-billing-confirmed-delete-blocked');
+        }
         if (beforeBilling) {
             try {
                 await resetPostedAdvancePayment(beforeBilling);
@@ -657,6 +779,7 @@ export const accommodationBillingService = {
             memo: row?.memo ? String(row.memo) : undefined,
             lineItems: items
                 .filter((li: any) => getLineItemBillingDocumentId(li) === String(billingId))
+                .filter(isActiveLineItemRow)
                 .map((li: any) => {
                     return {
                         id: String(li?.id ?? ''),
@@ -771,12 +894,24 @@ export const accommodationBillingService = {
         }
 
         const confirmedAt = new Date().toISOString();
-        await updateAccommodationBillingDocument({
-            id: billingId,
-            status: 'confirmed',
-            confirmedAt,
-            postedAdvancePaymentId: advanceId
-        } as any);
+        try {
+            await updateAccommodationBillingDocument({
+                id: billingId,
+                status: 'confirmed',
+                confirmedAt,
+                postedAdvancePaymentId: advanceId
+            } as any);
+        } catch (billingUpdateError) {
+            try {
+                await resetPostedAdvancePayment({
+                    ...billing,
+                    postedAdvancePaymentId: advanceId
+                });
+            } catch (rollbackError) {
+                console.warn('[accommodationBillingService] advance payment rollback failed after confirm failure:', rollbackError);
+            }
+            throw billingUpdateError;
+        }
         if (beforeBilling) {
             try {
                 const { accommodationBillingLogService } = await import('./accommodationBillingLogService');

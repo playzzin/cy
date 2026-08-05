@@ -176,6 +176,38 @@ export const vehicleFirestoreService = {
         await batch.commit();
     },
 
+    applyVehicleExpenseChanges: async (params: {
+        upserts?: Array<Partial<VehicleExpenseRecord> & { id: string }>;
+        cancelIds?: string[];
+        operationId?: string;
+    }): Promise<void> => {
+        const batch = writeBatch(db);
+        const now = serverTimestamp();
+
+        (params.upserts ?? []).forEach((expense) => {
+            if (!expense.id) return;
+            batch.set(doc(db, EXPENSE_COLLECTION, expense.id), stripUndefinedFields({
+                ...expense,
+                status: expense.status ?? 'ACTIVE',
+                cancelledAt: null,
+                lastOperationId: params.operationId,
+                updatedAt: now
+            }), { merge: true });
+        });
+
+        (params.cancelIds ?? []).forEach((id) => {
+            if (!id) return;
+            batch.set(doc(db, EXPENSE_COLLECTION, id), stripUndefinedFields({
+                status: 'CANCELLED',
+                cancelledAt: now,
+                lastOperationId: params.operationId,
+                updatedAt: now
+            }), { merge: true });
+        });
+
+        await batch.commit();
+    },
+
     /**
      * 차량 비용 기록 조회
      */
@@ -193,6 +225,7 @@ export const vehicleFirestoreService = {
         const snapshot = await getDocs(q);
         return snapshot.docs
             .map(doc => doc.data() as VehicleExpenseRecord)
+            .filter((expense) => expense.status !== 'CANCELLED' && !expense.cancelledAt)
             .filter((expense) => !yearMonth || String(expense.date ?? '').startsWith(yearMonth))
             .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')));
     },

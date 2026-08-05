@@ -5,6 +5,7 @@ export type CardStatus = 'ASSIGNED' | 'SUSPENDED' | 'CLOSED' | 'AVAILABLE';
 export type CardAssigneeType = 'WORKER' | 'TEAM';
 export type CardBillingTargetType = CardAssigneeType | 'OFFICE' | 'OFFICE_STAFF';
 export type CardTransactionCategory = 'FUEL' | 'TOLL' | 'MEAL' | 'MATERIAL' | 'OTHER';
+export type CardTransactionStatus = 'ACTIVE' | 'CANCELLED';
 
 export interface Card {
     id: string;
@@ -15,12 +16,14 @@ export interface Card {
     maskedNumber: string;
     expiry?: string;
     status: CardStatus;
-    currentAssigneeId?: string;
-    currentAssigneeType?: CardAssigneeType;
-    currentAssigneeName?: string;
+    currentAssigneeId?: string | null;
+    currentAssigneeType?: CardAssigneeType | null;
+    currentAssigneeName?: string | null;
     billingTargetId?: string | null;
     billingTargetType?: CardBillingTargetType | null;
     billingTargetName?: string | null;
+    billingTargetStartDate?: string | null;
+    billingTargetEndDate?: string | null;
     memo?: string;
     legacyId?: string;
     createdAt?: Timestamp | null;
@@ -69,5 +72,10 @@ export interface CardTransaction {
     memo?: string;
     evidenceUrl?: string;
     legacyId?: string;
+    status?: CardTransactionStatus;
+    operationId?: string;
+    lastOperationId?: string;
     createdAt?: Timestamp;
+    updatedAt?: Timestamp;
+    cancelledAt?: Timestamp;
 }

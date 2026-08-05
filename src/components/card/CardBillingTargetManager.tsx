@@ -392,11 +392,11 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
     const saveButtonLabel = saving
         ? '처리 중...'
         : billingMode === 'same'
-            ? (selectedCard?.currentAssigneeName ? '기본 청구 저장' : '별도청구 해제')
+            ? (selectedCard?.currentAssigneeName ? '배정자에게 청구 저장' : '별도청구 해제')
                 : editingTargetRecordId
                     ? '청구기간 수정'
                 : billingMode === 'split' && selectedTargetRecords.length > 0
-                    ? '기간 나눠 저장'
+                    ? '월중 변경 저장'
                     : '청구대상 저장';
 
     const clearCardBillingTargetSnapshot = async (cardId: string) => {
@@ -759,10 +759,10 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                             <span className="bg-emerald-600 text-white w-9 h-9 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-200">
                                 <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-sm" />
                             </span>
-                            카드 전체 청구
+                            카드 청구 방식
                         </h2>
                         <p className="text-slate-500 mt-2 font-medium ml-12 text-sm">
-                            청연이엔지 소속팀, 작업자, 사무실, 사무실직원 중 하나를 청구대상으로 지정합니다.
+                            카드 사용자에게 청구할지, 다른 팀/사람에게 청구할지만 먼저 선택합니다.
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -795,7 +795,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                             className="px-5 py-2.5 rounded-xl font-bold text-sm bg-rose-50 text-rose-700 border border-rose-100 hover:bg-rose-100 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-100 disabled:cursor-not-allowed transition-all flex items-center gap-2"
                         >
                             <FontAwesomeIcon icon={faBan} />
-                            {selectedCard?.currentAssigneeName ? '기본 청구' : '별도청구 해제'}
+                            {selectedCard?.currentAssigneeName ? '배정자에게 청구' : '별도청구 해제'}
                         </button>
                     </div>
                 </div>
@@ -803,24 +803,26 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                 <div className="mt-6 grid grid-cols-1 xl:grid-cols-12 gap-4">
                     <div className="xl:col-span-12 space-y-3">
                         <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-600 mb-1">카드 선택</label>
-                                <select
-                                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
-                                    value={selectedCardId}
-                                    onChange={(event) => pickCardById(event.target.value)}
-                                >
-                                    <option value="">카드를 선택하세요</option>
-                                    {cards
-                                        .slice()
-                                        .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko-KR'))
-                                        .map((card) => (
-                                            <option key={card.id} value={card.id}>
-                                                {card.name} ({card.last4}) · {getCardTargetLabel(card)}
-                                            </option>
-                                    ))}
-                                </select>
-                            </div>
+                            {!initialCardId && (
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-1">카드 선택</label>
+                                    <select
+                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
+                                        value={selectedCardId}
+                                        onChange={(event) => pickCardById(event.target.value)}
+                                    >
+                                        <option value="">카드를 선택하세요</option>
+                                        {cards
+                                            .slice()
+                                            .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko-KR'))
+                                            .map((card) => (
+                                                <option key={card.id} value={card.id}>
+                                                    {card.name} ({card.last4}) · {getCardTargetLabel(card)}
+                                                </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
 
                             {selectedCard && (
                                 <BillingStatusSummary
@@ -847,9 +849,10 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                             <BillingModeSelector
                                 value={billingMode}
                                 onChange={handleBillingModeChange}
-                                sameLabel={selectedCard?.currentAssigneeName ? '기본 청구' : '별도청구 해제'}
-                                sameDescription={selectedCard?.currentAssigneeName ? '카드 사용자가 비용도 부담' : '26-01-01 이후 별도청구 해제'}
-                                customDescription="사용자와 다른 팀/사람에게 청구"
+                                sameLabel={selectedCard?.currentAssigneeName ? '배정자에게 청구' : '별도청구 해제'}
+                                sameDescription={selectedCard?.currentAssigneeName ? '카드 사용자와 같은 대상에게 비용 청구' : '26-01-01 이후 별도청구 해제'}
+                                customLabel="다른 대상에게 청구"
+                                customDescription="사용자와 다른 팀/사람에게 비용 청구"
                                 disabled={!selectedCard}
                                 sameDisabled={!canUseSameMode}
                             />
@@ -907,67 +910,81 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                                 </div>
                             )}
 
-                            {showTargetSelector && !editingTargetRecordId && (
-                                <button
-                                    type="button"
-                                    onClick={() => handleBillingModeChange(billingMode === 'split' ? 'custom' : 'split')}
-                                    disabled={!selectedCard}
-                                    className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors ${
-                                        billingMode === 'split'
-                                            ? 'border-amber-200 bg-amber-50 text-amber-800'
-                                            : 'border-slate-200 bg-white text-slate-600 hover:border-amber-200 hover:bg-amber-50/60'
-                                    } ${!selectedCard ? 'cursor-not-allowed opacity-50' : ''}`}
+                            {showTargetSelector && (
+                                <details
+                                    open={billingMode === 'split' || Boolean(editingTargetRecordId)}
+                                    className="rounded-xl border border-slate-200 bg-white"
                                 >
-                                    <span className="min-w-0">
-                                        <span className="block text-sm font-extrabold">기간 지정</span>
-                                        <span className="mt-0.5 block text-xs font-semibold text-slate-500">
-                                            월 중간에 청구대상이 바뀔 때만 켭니다.
+                                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5">
+                                        <span className="min-w-0">
+                                            <span className="block text-sm font-extrabold text-slate-700">고급 설정</span>
+                                            <span className="mt-0.5 block text-xs font-semibold text-slate-400">월중 변경이나 특정 기간 청구가 필요할 때만 사용합니다.</span>
                                         </span>
-                                    </span>
-                                    <span className={`ml-3 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-extrabold ${
-                                        billingMode === 'split' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-500'
-                                    }`}>
-                                        {billingMode === 'split' ? '분할청구' : '일반청구'}
-                                    </span>
-                                </button>
-                            )}
+                                        <span className={`ml-3 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-extrabold ${
+                                            billingMode === 'split' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-500'
+                                        }`}>
+                                            {billingMode === 'split' ? '월중 변경' : '일반'}
+                                        </span>
+                                    </summary>
+                                    <div className="space-y-3 border-t border-slate-100 p-3">
+                                        {!editingTargetRecordId && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleBillingModeChange(billingMode === 'split' ? 'custom' : 'split')}
+                                                disabled={!selectedCard}
+                                                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                                                    billingMode === 'split'
+                                                        ? 'border-amber-200 bg-amber-50 text-amber-800'
+                                                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-amber-200 hover:bg-amber-50/60'
+                                                } ${!selectedCard ? 'cursor-not-allowed opacity-50' : ''}`}
+                                            >
+                                                <span>
+                                                    <span className="block text-sm font-extrabold">월중 변경/분할 청구</span>
+                                                    <span className="mt-0.5 block text-xs font-semibold text-slate-500">한 달 안에 청구대상이 바뀌는 경우만 켭니다.</span>
+                                                </span>
+                                                <span className="text-xs font-extrabold">{billingMode === 'split' ? '사용 중' : '꺼짐'}</span>
+                                            </button>
+                                        )}
 
-                            {showTargetDateFields && (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-600 mb-1">
-                                            {billingMode === 'split' ? '기간 시작일' : '청구 시작일'}
-                                        </label>
-                                        <input
-                                            type="text"
-                                            inputMode="numeric"
-                                            maxLength={10}
-                                            placeholder="YY-MM-DD"
-                                            value={targetStartDate}
-                                            onChange={(event) => handleTargetStartDateChange(event.target.value)}
-                                            onBlur={normalizeTargetStartDate}
-                                            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
-                                        />
+                                        {showTargetDateFields && (
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-xs font-bold text-slate-600 mb-1">
+                                                        {billingMode === 'split' ? '기간 시작일' : '청구 시작일'}
+                                                    </label>
+                                                    <input
+                                                        type="text"
+                                                        inputMode="numeric"
+                                                        maxLength={10}
+                                                        placeholder="YY-MM-DD"
+                                                        value={targetStartDate}
+                                                        onChange={(event) => handleTargetStartDateChange(event.target.value)}
+                                                        onBlur={normalizeTargetStartDate}
+                                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-bold text-slate-600 mb-1">
+                                                        {billingMode === 'split' ? '기간 종료일' : '청구 종료일'}
+                                                    </label>
+                                                    <input
+                                                        type="text"
+                                                        inputMode="numeric"
+                                                        maxLength={10}
+                                                        placeholder="선택"
+                                                        value={targetEndDate}
+                                                        onChange={(event) => handleTargetEndDateChange(event.target.value)}
+                                                        onBlur={normalizeTargetEndDate}
+                                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
+                                                    />
+                                                </div>
+                                                <div className="sm:col-span-2 text-[11px] font-semibold text-slate-400">
+                                                    기본 청구 시작일은 26-01-01입니다. 월중 변경은 필요한 달만 거래일 기준으로 나눕니다.
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-600 mb-1">
-                                            {billingMode === 'split' ? '기간 종료일' : '청구 종료일'}
-                                        </label>
-                                        <input
-                                            type="text"
-                                            inputMode="numeric"
-                                            maxLength={10}
-                                            placeholder="선택"
-                                            value={targetEndDate}
-                                            onChange={(event) => handleTargetEndDateChange(event.target.value)}
-                                            onBlur={normalizeTargetEndDate}
-                                            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
-                                        />
-                                    </div>
-                                    <div className="sm:col-span-2 text-[11px] font-semibold text-slate-400">
-                                        기본 청구 시작일은 26-01-01입니다. 기간 지정은 월 중간 변경분을 나눌 때만 사용합니다.
-                                    </div>
-                                </div>
+                                </details>
                             )}
                         </div>
 

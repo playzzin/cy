@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPaste, faSave, faCheckCircle, faExclamationTriangle, faSpinner, faArrowRight } from '@fortawesome/free-solid-svg-icons';
-import { manpowerService, Worker } from '../../services/manpowerService';
+import { manpowerService } from '../../services/manpowerService';
 import Swal from 'sweetalert2';
 import { teamService } from '../../services/teamService';
 
@@ -136,7 +136,7 @@ const SmartWorkerRegistrationPage: React.FC = () => {
         setMappedFields(newMapping);
 
         // Parse data rows
-        const dataRows = rows.slice(1).map((row, index) => {
+        const dataRows = rows.slice(1).map((row, _index) => {
             const rowData: any = { _valid: true, _errors: [] };
 
             // Map values to fields

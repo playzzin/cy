@@ -149,6 +149,22 @@ const createRentalItem = (
     } as Partial<EstimateItem>);
 };
 
+const createRentalAdjustmentItem = (
+    amount: number,
+    issueDate: string
+): EstimateItem => createItem({
+    category: '금액 조정',
+    section: '임대 금액 조정',
+    label: '임대 금액 조정',
+    unit: '식',
+    quantity: 1,
+    finalUnitPrice: Math.max(0, Math.round(amount)),
+    rentalUnitPrice: 0,
+    period: 1,
+    itemDate: issueDate,
+    note: '목표 공급가 맞춤',
+} as Partial<EstimateItem>);
+
 export const calculateRentalTargetSupply = (
     targetAmount: number,
     amountBasis: RentalAmountBasis,
@@ -209,6 +225,10 @@ const tuneRentalQuantitiesToTarget = (
                 const quantityDelta = direction * steps;
                 const nextDifference = difference - (quantityDelta * unitAmount);
                 if (Math.abs(nextDifference) >= Math.abs(difference)) continue;
+                // Keep the generated material amount under the target.  Any
+                // remaining won-level difference is added as a transparent
+                // adjustment row below, so the target can always be exact.
+                if ((difference > 0 && nextDifference < 0) || (difference < 0 && nextDifference > 0)) continue;
 
                 if (!best || Math.abs(nextDifference) < Math.abs(best.nextDifference)) {
                     best = { item, quantityDelta, nextDifference };
@@ -262,14 +282,13 @@ export const generateRentalTransactionItems = (
     };
 
     rows.slice(0, -1).forEach((rate, idx) => {
-        const reserveRows = rows.length - idx - 1;
-        if (remaining <= reserveRows) return;
+        if (remaining <= 0) return;
 
         const unitAmount = getLineUnitAmount(rate, options.usageDays);
         const naturalFutureMinimum = rows
             .slice(idx + 1, -1)
-            .reduce((sum, futureRate) => sum + getLineUnitAmount(futureRate, options.usageDays), 0) + 1;
-        const maxNaturalSpend = remaining - naturalFutureMinimum;
+            .reduce((sum, futureRate) => sum + getLineUnitAmount(futureRate, options.usageDays), 0);
+        const maxNaturalSpend = Math.max(0, remaining - naturalFutureMinimum);
 
         if (maxNaturalSpend >= unitAmount) {
             const averageBudget = remaining / (rows.length - idx);
@@ -284,23 +303,34 @@ export const generateRentalTransactionItems = (
             return;
         }
 
-        pushRentalItem(rate, 1);
-        remaining -= unitAmount;
+        // This rate cannot fit without exceeding the target.  Leave the
+        // amount for the exact adjustment row instead of creating an overrun.
     });
 
     if (remaining > 0) {
         const finalRate = rows[rows.length - 1];
         const preferredUnitAmount = getLineUnitAmount(finalRate, options.usageDays);
-        const quantity = Math.max(1, Math.min(
+        const maxQuantity = Math.min(
             getMaxQuantity(finalRate),
-            Math.round(remaining / preferredUnitAmount)
-        ));
-        pushRentalItem(finalRate, quantity);
+            Math.floor(remaining / preferredUnitAmount)
+        );
+        if (maxQuantity > 0) {
+            const quantity = Math.max(1, Math.min(
+                maxQuantity,
+                Math.round(remaining / preferredUnitAmount)
+            ));
+            pushRentalItem(finalRate, quantity);
+        }
     }
 
     tuneRentalQuantitiesToTarget(items, targetSupply, itemMaxQuantities);
 
-    const subtotal = items.reduce((sum, item) => sum + calculateRentalLineAmount(item), 0);
+    let subtotal = items.reduce((sum, item) => sum + calculateRentalLineAmount(item), 0);
+    const remainingAdjustment = targetSupply - subtotal;
+    if (remainingAdjustment > 0) {
+        items.push(createRentalAdjustmentItem(remainingAdjustment, options.issueDate));
+        subtotal += remainingAdjustment;
+    }
     const tax = options.includeVat ? Math.round(subtotal * (Math.max(0, options.vatRate || 0) / 100)) : 0;
     const total = subtotal + tax;
 

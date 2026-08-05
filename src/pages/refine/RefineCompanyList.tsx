@@ -3,9 +3,7 @@ import { AgGridReact } from "ag-grid-react";
 import {
     ColDef,
     ICellRendererParams,
-    ValueFormatterParams,
-    GridReadyEvent
-} from "ag-grid-community";
+    ValueFormatterParams} from "ag-grid-community";
 // import "ag-grid-community/styles/ag-grid.css"; // Removed for AG Grid v33+ Theming API compatibility
 import "ag-grid-community/styles/ag-theme-quartz.css";
 import { resolveIcon } from "../../constants/iconMap";
@@ -14,7 +12,6 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
     faSearch, faInfoCircle, faBuilding, faBriefcase
 } from "@fortawesome/free-solid-svg-icons";
-import * as Fas from "@fortawesome/free-solid-svg-icons";
 import styled from "styled-components";
 
 // --- Styled Components ---

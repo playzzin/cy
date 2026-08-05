@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     CheckCircle2,
@@ -43,6 +43,19 @@ const statusOptions = [
     { value: 'cancelled', label: '반려/취소' },
 ];
 
+const getTypeFilterFromSearchParams = (params: URLSearchParams): TypeFilter => {
+    const value = params.get('type') as TypeFilter | null;
+    return value && typeOptions.some((option) => option.value === value) ? value : 'all';
+};
+
+const getStatusFilterFromSearchParams = (params: URLSearchParams): string => {
+    const value = params.get('status') || 'all';
+    return statusOptions.some((option) => option.value === value) ? value : 'all';
+};
+
+const getSearchFromSearchParams = (params: URLSearchParams): string =>
+    (params.get('q') || params.get('search') || '').trim();
+
 const statusClassName = (status: string) => {
     if (status === 'requested' || status === 'draft') return 'border-amber-200 bg-amber-50 text-amber-700';
     if (status === 'approved' || status === 'assigned' || status === 'confirmed') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
@@ -61,15 +74,12 @@ const getRequestMemo = (item: OfficeRequestItem): string => {
 
 export default function OfficeRequestCenterPage() {
     const navigate = useNavigate();
-    const [searchParams] = useSearchParams();
+    const [searchParams, setSearchParams] = useSearchParams();
     const { currentUser } = useAuth();
     const [items, setItems] = useState<OfficeRequestItem[]>([]);
-    const [typeFilter, setTypeFilter] = useState<TypeFilter>(() => {
-        const value = searchParams.get('type') as TypeFilter | null;
-        return value && typeOptions.some((option) => option.value === value) ? value : 'all';
-    });
-    const [statusFilter, setStatusFilter] = useState(() => searchParams.get('status') || 'all');
-    const [search, setSearch] = useState('');
+    const [typeFilter, setTypeFilter] = useState<TypeFilter>(() => getTypeFilterFromSearchParams(searchParams));
+    const [statusFilter, setStatusFilter] = useState(() => getStatusFilterFromSearchParams(searchParams));
+    const [search, setSearch] = useState(() => getSearchFromSearchParams(searchParams));
     const [loading, setLoading] = useState(true);
     const [actionId, setActionId] = useState('');
     const [message, setMessage] = useState('');
@@ -78,6 +88,44 @@ export default function OfficeRequestCenterPage() {
         uid: currentUser?.uid,
         name: currentUser?.displayName || currentUser?.email || '사무실',
     }), [currentUser?.displayName, currentUser?.email, currentUser?.uid]);
+
+    useEffect(() => {
+        const nextType = getTypeFilterFromSearchParams(searchParams);
+        const nextStatus = getStatusFilterFromSearchParams(searchParams);
+        const nextSearch = getSearchFromSearchParams(searchParams);
+
+        setTypeFilter((prev) => (prev === nextType ? prev : nextType));
+        setStatusFilter((prev) => (prev === nextStatus ? prev : nextStatus));
+        setSearch((prev) => (prev === nextSearch ? prev : nextSearch));
+    }, [searchParams]);
+
+    useEffect(() => {
+        const next = new URLSearchParams(searchParams);
+
+        if (typeFilter === 'all') {
+            next.delete('type');
+        } else {
+            next.set('type', typeFilter);
+        }
+
+        if (statusFilter === 'all') {
+            next.delete('status');
+        } else {
+            next.set('status', statusFilter);
+        }
+
+        const trimmedSearch = search.trim();
+        if (trimmedSearch) {
+            next.set('q', trimmedSearch);
+        } else {
+            next.delete('q');
+        }
+        next.delete('search');
+
+        if (next.toString() !== searchParams.toString()) {
+            setSearchParams(next, { replace: true });
+        }
+    }, [search, searchParams, setSearchParams, statusFilter, typeFilter]);
 
     const loadRequests = useCallback(async () => {
         setLoading(true);
@@ -210,6 +258,8 @@ export default function OfficeRequestCenterPage() {
                     <button
                         type="button"
                         onClick={loadRequests}
+                        disabled={loading}
+                        aria-label="신청 승인센터 새로고침"
                         className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-100"
                     >
                         <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -236,8 +286,10 @@ export default function OfficeRequestCenterPage() {
                     <div className="relative flex-1">
                         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                         <input
+                            type="search"
                             value={search}
                             onChange={(event) => setSearch(event.target.value)}
+                            aria-label="신청 검색"
                             placeholder="요청자, 팀, 제목, 상태 검색"
                             className="h-10 w-full rounded-md border border-slate-200 pl-9 pr-3 text-sm outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
                         />
@@ -245,6 +297,7 @@ export default function OfficeRequestCenterPage() {
                     <select
                         value={typeFilter}
                         onChange={(event) => setTypeFilter(event.target.value as TypeFilter)}
+                        aria-label="요청 분류 필터"
                         className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none focus:border-cyan-500"
                     >
                         {typeOptions.map((option) => (
@@ -254,6 +307,7 @@ export default function OfficeRequestCenterPage() {
                     <select
                         value={statusFilter}
                         onChange={(event) => setStatusFilter(event.target.value)}
+                        aria-label="요청 상태 필터"
                         className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none focus:border-cyan-500"
                     >
                         {statusOptions.map((option) => (

@@ -8,9 +8,10 @@ export const CardBillingTargetTypeSchema = z.enum(['TEAM', 'WORKER', 'OFFICE', '
 
 // --- Card Transaction Enum ---
 export const CardTransactionCategorySchema = z.enum(['FUEL', 'TOLL', 'MEAL', 'MATERIAL', 'OTHER']);
+export const CardTransactionStatusSchema = z.enum(['ACTIVE', 'CANCELLED']);
 
 // --- Card Billing Enum ---
-export const CardBillingStatusSchema = z.enum(['DRAFT', 'CONFIRMED', 'PAID', 'OVERDUE']);
+export const CardBillingStatusSchema = z.enum(['DRAFT', 'CONFIRMED', 'PAID', 'OVERDUE', 'CANCELLED']);
 export const CardBillingIssuedToTypeSchema = z.enum(['team', 'worker']);
 
 // --- Core Schemas ---
@@ -29,6 +30,8 @@ export const CardSchema = z.object({
     billingTargetId: z.string().nullable().optional(),
     billingTargetType: CardBillingTargetTypeSchema.nullable().optional(),
     billingTargetName: z.string().nullable().optional(),
+    billingTargetStartDate: z.string().nullable().optional(),
+    billingTargetEndDate: z.string().nullable().optional(),
     memo: z.string().nullable().optional(),
     legacyId: z.string().optional(),
 });
@@ -68,6 +71,11 @@ export const CardTransactionSchema = z.object({
     memo: z.string().nullable().optional(),
     evidenceUrl: z.string().nullable().optional(),
     legacyId: z.string().optional(),
+    status: CardTransactionStatusSchema.optional(),
+    operationId: z.string().optional(),
+    lastOperationId: z.string().optional(),
+    updatedAt: z.any().optional(),
+    cancelledAt: z.any().nullable().optional(),
 });
 
 export const CardBillingCostItemSchema = z.object({
@@ -100,6 +108,10 @@ export const CardBillingDocumentSchema = z.object({
     lineItems: z.array(CardBillingCostItemSchema),
     statementAttachmentPaths: z.array(z.string()).default([]),
     memo: z.string().nullable().optional(),
+    confirmationCancelReason: z.string().nullable().optional(),
+    confirmationCancelledAt: z.any().optional(),
+    confirmationCancelledById: z.string().nullable().optional(),
+    confirmationCancelledByName: z.string().nullable().optional(),
     confirmedAt: z.any().optional(), // Firestore Timestamp 등의 유연한 처리를 위해 any 허용하거나 추가 로직 필요
     legacyId: z.string().optional(),
 });

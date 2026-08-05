@@ -23,6 +23,7 @@ import { DEFAULT_HEADER_ACTIONS } from '../../constants/headerActions';
 import { manpowerService } from '../../services/manpowerService';
 import { userService, type UserData } from '../../services/userService';
 import { userMenuPositionService } from '../../services/userMenuPositionService';
+import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 import MessageIndicator from '../messages/MessageIndicator';
 import PositionPanel from './PositionPanel';
 import { PositionItem, SiteDataType, MenuItem } from '../../types/menu';
@@ -282,6 +283,13 @@ const Header: React.FC<HeaderProps> = ({
         };
 
         loadLinkedWorkerRole();
+
+        if (isDevAdminSessionEnabled()) {
+            loadUserProfileFallback();
+            return () => {
+                cancelled = true;
+            };
+        }
 
         const unsubscribe = onSnapshot(
             doc(db, 'users', uid),

@@ -23,6 +23,29 @@ export interface WorkerAccessScope {
     teamWorkerNameKeys: string[];
 }
 
+/**
+ * Common reference shape used by schedule, dispatch, and daily-report menus.
+ * Keep the scope decision in one place so a newly added menu cannot accidentally
+ * treat a team-scoped account as an all-data account.
+ */
+export interface WorkerAccessScheduleRef {
+    teamId?: unknown;
+    teamName?: unknown;
+    responsibleTeamId?: unknown;
+    responsibleTeamName?: unknown;
+    workerTeamIds?: unknown[];
+    workerTeamNames?: unknown[];
+    workerIds?: unknown[];
+    workerNames?: unknown[];
+}
+
+export interface WorkerAccessSiteRef {
+    teamId?: unknown;
+    teamName?: unknown;
+    responsibleTeamId?: unknown;
+    responsibleTeamName?: unknown;
+}
+
 const uniqueTexts = (values: unknown[]) =>
     Array.from(new Set(values.map(value => String(value ?? '').trim()).filter(Boolean)));
 
@@ -82,6 +105,12 @@ const isTeamLeadLikeRole = (value?: unknown) => {
     const role = normalizeAccessText(value);
     if (!role) return false;
     return role.includes('팀장') || role.includes('반장') || role.includes('teamleader') || role.includes('foreman');
+};
+
+const isWorkerLikeRole = (value?: unknown) => {
+    const role = normalizeAccessText(value);
+    if (!role) return false;
+    return role.includes('worker') || role.includes('작업자');
 };
 
 const getWorkerAssignedTeam = (worker: Worker | null | undefined, teams: Team[]) => {
@@ -224,7 +253,17 @@ export const useWorkerAccessScope = (workers: Worker[], teams: Team[] = []): Wor
 
         const viewerWorker = findViewerWorker(currentUser.uid, currentUser.email, workers, profile);
         const linkedWorkerIds = parseAccessLinkedIds(profile?.linkedWorkerIds);
-        const isWorkerAccount = normalizeAccessText(profile?.accountType) === 'worker' || linkedWorkerIds.length > 0;
+        const profileRoleSources = [
+            profile?.position,
+            profile?.role,
+            ...(Array.isArray(profile?.additionalPositions) ? profile?.additionalPositions ?? [] : []),
+        ];
+        const isTeamLeadAccount = profileRoleSources.some(isTeamLeadLikeRole);
+        const isWorkerAccount =
+            normalizeAccessText(profile?.accountType) === 'worker' ||
+            linkedWorkerIds.length > 0 ||
+            isTeamLeadAccount ||
+            profileRoleSources.some(isWorkerLikeRole);
 
         if (!viewerWorker) {
             if (!isWorkerAccount) return buildAllScope(profile);
@@ -236,12 +275,7 @@ export const useWorkerAccessScope = (workers: Worker[], teams: Team[] = []): Wor
             };
         }
 
-        const teamRoleSources = [
-            viewerWorker.role,
-            profile?.position,
-            profile?.role,
-            ...(Array.isArray(profile?.additionalPositions) ? profile?.additionalPositions ?? [] : []),
-        ];
+        const teamRoleSources = [viewerWorker.role, ...profileRoleSources];
         const wantsTeamScope = teamRoleSources.some(isTeamLeadLikeRole);
         const provisionalTeamScope = buildWorkerScope('team', profile, viewerWorker, teams);
 
@@ -335,5 +369,41 @@ export const workerAccessMatchesReportRow = (
         workerAccessMatchesTeamRef(scope, row.responsibleTeamId, row.responsibleTeamName) ||
         hasExactMatch(scope.teamWorkerIds, row.workerId) ||
         hasNormalizedMatch(scope.teamWorkerNameKeys, row.workerName)
+    );
+};
+
+export const workerAccessMatchesSite = (scope: WorkerAccessScope, site: WorkerAccessSiteRef) => {
+    if (scope.mode === 'all') return true;
+    // A site master record does not identify one individual worker. Workers get
+    // their site list from their own schedule/report rows instead of every site
+    // belonging to their team.
+    if (scope.mode === 'self') return false;
+
+    return (
+        workerAccessMatchesTeamRef(scope, site.responsibleTeamId, site.responsibleTeamName) ||
+        workerAccessMatchesTeamRef(scope, site.teamId, site.teamName)
+    );
+};
+
+export const workerAccessMatchesSchedule = (scope: WorkerAccessScope, schedule: WorkerAccessScheduleRef) => {
+    if (scope.mode === 'all') return true;
+
+    const workerIds = schedule.workerIds ?? [];
+    const workerNames = schedule.workerNames ?? [];
+    const workerTeamIds = schedule.workerTeamIds ?? [];
+    const workerTeamNames = schedule.workerTeamNames ?? [];
+
+    if (scope.mode === 'self') {
+        return workerIds.some((workerId) => workerAccessMatchesWorkerRef(scope, workerId)) ||
+            workerNames.some((workerName) => workerAccessMatchesWorkerRef(scope, undefined, workerName));
+    }
+
+    return (
+        workerAccessMatchesTeamRef(scope, schedule.responsibleTeamId, schedule.responsibleTeamName) ||
+        workerAccessMatchesTeamRef(scope, schedule.teamId, schedule.teamName) ||
+        workerTeamIds.some((teamId) => workerAccessMatchesTeamRef(scope, teamId)) ||
+        workerTeamNames.some((teamName) => workerAccessMatchesTeamRef(scope, undefined, teamName)) ||
+        workerIds.some((workerId) => hasExactMatch(scope.teamWorkerIds, workerId)) ||
+        workerNames.some((workerName) => hasNormalizedMatch(scope.teamWorkerNameKeys, workerName))
     );
 };

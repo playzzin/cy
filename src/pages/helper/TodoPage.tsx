@@ -4,7 +4,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faSearch, faPlus, faTrash, faCheck, faClock,
     faSpinner, faMagnifyingGlass, faRotateRight, faArrowUp,
-    faArrowDown, faCircle, faBell, faBars,
+    faCircle, faBell, faBars,
     faUsers, faComment, faX, faImage, faUpload, faPaperPlane, faInbox,
     faGaugeHigh, faCircleCheck, faRotate, faRotateLeft, faArrowRight,
     faTerminal, faClipboard
@@ -16,6 +16,7 @@ import { userService, UserData } from '../../services/userService';
 import { UserRole } from '../../types/roles';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from '../../utils/swal';
+import { TaskSlaBoard } from '../../components/tasks/TaskSlaBoard';
 
 // Helper: D-Day 계산
 const getDDay = (dateString: string) => {
@@ -46,21 +47,20 @@ const PRIORITY_ICON_MAP: Record<string, IconProp> = {
 const getStatusIcon = (iconName?: string) => STATUS_ICON_MAP[iconName || ''] || faClock;
 const getPriorityIcon = (iconName?: string) => PRIORITY_ICON_MAP[iconName || ''] || faCircle;
 const CODEX_BRIDGE_COMMAND = 'npm run todo:codex-bridge';
+const CODEX_AUTOMATION_COMMAND = 'npm run todo:codex-automation';
 const CODEX_BRIDGE_URL = process.env.REACT_APP_TODO_CODEX_BRIDGE_URL || 'http://127.0.0.1:8787';
 
-const createCodexComment = (text: string, offset = 0): TaskComment => ({
-    id: Date.now() + offset,
-    user: 'Codex 자동화',
-    text,
-    time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
-    isSystem: true
-});
+type CodexBridgeHealth = {
+    connection: 'checking' | 'online' | 'offline';
+    watcherRunning: boolean;
+};
 
 const isCodexRunnableTask = (task: Task) => (
     task.status === '요청'
     || task.status === '재요청'
-    || (task.automation?.source === 'codex_cli' && task.automation.status === 'completed')
 );
+
+const REQUEST_STATUS_FILTERS = ['전체', '요청', '재요청', '진행', '완료', '검토'] as const;
 
 const TodoPage: React.FC = () => {
     const { currentUser } = useAuth();
@@ -86,13 +86,19 @@ const TodoPage: React.FC = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [previewImage, setPreviewImage] = useState<string | null>(null);
     const [codexRunningTaskIds, setCodexRunningTaskIds] = useState<Set<string>>(() => new Set());
+    const [codexBridgeHealth, setCodexBridgeHealth] = useState<CodexBridgeHealth>({
+        connection: 'checking',
+        watcherRunning: false
+    });
 
     // Form States
     const [newTask, setNewTask] = useState({
         title: '',
+        description: '',
         assignee: '',
         priority: '보통' as '긴급' | '보통',
         dueDate: '',
+        autoRun: true,
         image: undefined as string | undefined | null,
         images: [] as string[]
     });
@@ -143,6 +149,33 @@ const TodoPage: React.FC = () => {
         return () => unsubscribe();
     }, []);
 
+    useEffect(() => {
+        let mounted = true;
+
+        const refreshBridgeHealth = async () => {
+            try {
+                const response = await fetch(`${CODEX_BRIDGE_URL}/health`);
+                const result = await response.json().catch(() => null);
+                if (!response.ok || result?.ok !== true) throw new Error('Codex 브릿지를 확인할 수 없습니다.');
+                if (mounted) {
+                    setCodexBridgeHealth({
+                        connection: 'online',
+                        watcherRunning: result?.watcher?.running === true
+                    });
+                }
+            } catch {
+                if (mounted) setCodexBridgeHealth({ connection: 'offline', watcherRunning: false });
+            }
+        };
+
+        void refreshBridgeHealth();
+        const intervalId = window.setInterval(() => void refreshBridgeHealth(), 15_000);
+        return () => {
+            mounted = false;
+            window.clearInterval(intervalId);
+        };
+    }, []);
+
     // 필터링 및 정렬
     const filteredTasks = useMemo(() => {
         let filtered = tasks.filter(task => {
@@ -160,7 +193,14 @@ const TodoPage: React.FC = () => {
             }
 
             const statusMatch = activeStatusFilter === '전체' || task.status === activeStatusFilter;
-            const searchMatch = task.title.toLowerCase().includes(searchQuery.toLowerCase());
+            const query = searchQuery.trim().toLocaleLowerCase();
+            const searchMatch = !query || [
+                task.title,
+                task.description,
+                task.assignee,
+                task.createdBy,
+                ...task.comments.map(comment => comment.text)
+            ].filter(Boolean).join(' ').toLocaleLowerCase().includes(query);
             return userMatch && statusMatch && searchMatch;
         });
 
@@ -173,20 +213,27 @@ const TodoPage: React.FC = () => {
         return filtered;
     }, [tasks, activeUser, activeStatusFilter, searchQuery, sortBy]);
 
-    // 통계
-    const stats = useMemo(() => ({
-        total: tasks.length,
-        done: tasks.filter(t => t.status === '검토').length, // 최종 완료(검토됨)
-        reviewing: tasks.filter(t => t.status === '완료').length, // 검토 대기(완료됨)
-        urgent: tasks.filter(t => t.priority === '긴급' && t.status !== '검토').length
-    }), [tasks]);
+    const workflowStats = useMemo(() => ({
+        total: filteredTasks.length,
+        needsAction: filteredTasks.filter(t => t.status === '요청' || t.status === '재요청').length,
+        inProgress: filteredTasks.filter(t => t.status === '진행').length,
+        awaitingReview: filteredTasks.filter(t => t.status === '완료').length,
+        reviewed: filteredTasks.filter(t => t.status === '검토').length,
+        overdue: filteredTasks.filter(t => {
+            if (t.status === '검토' || !t.dueDate) return false;
+            const dueDate = new Date(t.dueDate);
+            dueDate.setHours(23, 59, 59, 999);
+            return !Number.isNaN(dueDate.getTime()) && dueDate.getTime() < Date.now();
+        }).length
+    }), [filteredTasks]);
 
     const codexWorkerStats = useMemo(
         () => ({
-            pending: tasks.filter(t => t.status === '요청').length,
+            pending: tasks.filter(t => t.status === '요청' || t.status === '재요청').length,
             running: tasks.filter(t => t.automation?.source === 'codex_cli' && t.automation.status === 'in_progress').length,
             completed: tasks.filter(t => t.automation?.source === 'codex_cli' && t.automation.status === 'completed').length,
-            failed: tasks.filter(t => t.automation?.source === 'codex_cli' && t.automation.status === 'failed').length
+            failed: tasks.filter(t => t.automation?.source === 'codex_cli' && t.automation.status === 'failed').length,
+            optedIn: tasks.filter(t => t.automation?.autoRun === true).length
         }),
         [tasks]
     );
@@ -234,7 +281,7 @@ const TodoPage: React.FC = () => {
 
                 // 시스템 메시지 추가 로직 (필요 시)
                 let systemMsg = '';
-                if (newStatus === '진행' && task.status === '요청') systemMsg = '업무가 [진행] 상태로 변경되었습니다.';
+                if (newStatus === '진행' && (task.status === '요청' || task.status === '재요청')) systemMsg = '업무가 [진행] 상태로 변경되었습니다.';
                 else if (newStatus === '완료' && task.status === '진행') systemMsg = '작업자가 업무를 [완료]했습니다. 검토를 기다립니다.';
                 else if (newStatus === '검토' && task.status === '완료') systemMsg = '업무가 [최종 검토] 상태입니다.';
 
@@ -325,6 +372,7 @@ const TodoPage: React.FC = () => {
 
             const taskData: Omit<Task, 'id'> = {
                 title: newTask.title,
+                description: newTask.description.trim() || undefined,
                 assignee: newTask.assignee || defaultAssignee,
                 createdBy: currentUser?.displayName || currentUser?.email?.split('@')[0] || '익명',
                 priority: newTask.priority,
@@ -333,13 +381,19 @@ const TodoPage: React.FC = () => {
                 createdAt: new Date().toISOString().split('T')[0],
                 image: newTask.images.length > 0 ? newTask.images[0] : null,
                 images: newTask.images,
-                comments: []
+                comments: [],
+                automation: {
+                    mode: newTask.autoRun ? 'auto' : 'manual',
+                    autoRun: newTask.autoRun,
+                }
             };
 
             await taskService.addTask(taskData);
             setIsNewTaskModalOpen(false);
-            setNewTask({ title: '', assignee: '', priority: '보통', dueDate: '', image: null, images: [] });
-            showToast(`${taskData.assignee}님에게 업무를 요청했습니다.`);
+            setNewTask({ title: '', description: '', assignee: '', priority: '보통', dueDate: '', autoRun: true, image: null, images: [] });
+            showToast(newTask.autoRun
+                ? 'Codex 자동 처리 요청으로 등록했습니다. 워커가 실행 중이면 바로 처리합니다.'
+                : `${taskData.assignee}님에게 업무를 요청했습니다.`);
         } catch (error) {
             console.error('업무 등록 실패:', error);
             showToast('업무 등록에 실패했습니다.', 'warning');
@@ -445,20 +499,33 @@ const TodoPage: React.FC = () => {
         }
     };
 
+    const handleEnableCodexAutoRun = async (task: Task) => {
+        if (!isCodexRunnableTask(task) || isSubmitting || task.automation?.autoRun === true) return;
+        if (!window.confirm('이 요청을 Codex 자동 처리 대상으로 설정할까요? 자동 감시 워커가 실행 중이면 코드 수정과 검증이 시작됩니다.')) return;
+
+        setIsSubmitting(true);
+        try {
+            await taskService.updateTask(task.id, {
+                automation: {
+                    ...(task.automation || {}),
+                    mode: 'auto',
+                    autoRun: true
+                }
+            });
+            showToast('Codex 자동 처리를 켰습니다. 자동 감시가 실행 중이면 이 요청을 처리합니다.');
+        } catch (error) {
+            console.error('Codex 자동 처리 설정 실패:', error);
+            showToast('Codex 자동 처리 설정에 실패했습니다.', 'warning');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     const handleRunCodexTask = async (task: Task) => {
         const canRunCodex = isCodexRunnableTask(task);
         const isAlreadyRunning = codexRunningTaskIds.has(task.id) || task.automation?.status === 'in_progress';
 
         if (!canRunCodex || isAlreadyRunning) return;
-
-        const startedAt = new Date().toISOString();
-        const originalTitle = task.automation?.originalTitle || task.title;
-        const isReImprovement = task.automation?.source === 'codex_cli' && task.automation.status === 'completed';
-        const startComment = createCodexComment(
-            isReImprovement
-                ? 'Codex가 원 요청 내용을 기준으로 다시 개선을 시작해 상태를 [진행]으로 변경했습니다.'
-                : 'Codex가 요청 내용 개선을 시작해 상태를 [진행]으로 변경했습니다.'
-        );
 
         setCodexRunningTaskIds(prev => {
             const next = new Set(prev);
@@ -467,32 +534,10 @@ const TodoPage: React.FC = () => {
         });
 
         try {
-            await taskService.updateTask(task.id, {
-                status: '진행',
-                comments: [...(task.comments || []), startComment],
-                automation: {
-                    status: 'in_progress',
-                    source: 'codex_cli',
-                    startedAt,
-                    originalTitle
-                }
-            });
-
-            const response = await fetch(`${CODEX_BRIDGE_URL}/todo-codex/improve`, {
+            const response = await fetch(`${CODEX_BRIDGE_URL}/todo-codex/run`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    task: {
-                        id: task.id,
-                        title: originalTitle,
-                        description: task.description,
-                        createdBy: task.createdBy,
-                        assignee: task.assignee,
-                        priority: task.priority,
-                        dueDate: task.dueDate,
-                        comments: task.comments || []
-                    }
-                })
+                body: JSON.stringify({ taskId: task.id })
             });
             const result = await response.json().catch(() => null);
 
@@ -500,63 +545,10 @@ const TodoPage: React.FC = () => {
                 throw new Error(result?.error || 'Codex 브릿지 실행 요청에 실패했습니다.');
             }
 
-            const improvement = result?.improvement;
-            const improvedTitle = String(improvement?.improvedTitle || '').trim();
-
-            if (!improvedTitle) {
-                throw new Error('Codex 개선 결과가 비어 있습니다.');
-            }
-
-            const latestTask = await taskService.getTask(task.id);
-            const latestComments = latestTask?.comments || [...(task.comments || []), startComment];
-            const summaryText = Array.isArray(improvement.summary) && improvement.summary.length > 0
-                ? `\n\n개선 요약:\n${improvement.summary.map((item: string) => `- ${item}`).join('\n')}`
-                : '';
-            const feedback = `Codex가 요청 내용을 개선했습니다.\n\n${improvement.feedback || '요청사항을 더 명확한 작업 지시문으로 정리했습니다.'}${summaryText}`;
-            const completionComment = createCodexComment(feedback, 1);
-            const updateData: Partial<Task> = {
-                title: improvedTitle,
-                status: '완료',
-                comments: [...latestComments, completionComment],
-                automation: {
-                    status: 'completed',
-                    source: 'codex_cli',
-                    startedAt,
-                    completedAt: new Date().toISOString(),
-                    originalTitle,
-                    updatedTitle: improvedTitle,
-                    feedback
-                }
-            };
-
-            if (task.createdBy && task.assignee !== task.createdBy) {
-                updateData.assignee = task.createdBy;
-            }
-
-            await taskService.updateTask(task.id, updateData);
-            showToast('Codex가 요청 내용을 개선하고 [완료]로 변경했습니다.');
+            showToast('Codex가 실제 수정과 검증을 시작했습니다. 결과는 피드백에 자동으로 남습니다.');
         } catch (error) {
             console.error('Codex 수정 실행 실패:', error);
-            const latestTask = await taskService.getTask(task.id).catch(() => null);
-            const latestComments = latestTask?.comments || [...(task.comments || []), startComment];
-            const errorMessage = error instanceof Error ? error.message : 'Codex 요청 내용 개선에 실패했습니다.';
-            const failureComment = createCodexComment(`Codex 요청 내용 개선이 실패해 상태를 [재요청]으로 변경했습니다.\n\n${errorMessage}`, 2);
-
-            await taskService.updateTask(task.id, {
-                status: '재요청',
-                comments: [...latestComments, failureComment],
-                automation: {
-                    status: 'failed',
-                    source: 'codex_cli',
-                    startedAt,
-                    completedAt: new Date().toISOString(),
-                    originalTitle,
-                    error: errorMessage
-                }
-            }).catch(updateError => {
-                console.error('Codex 실패 상태 저장 실패:', updateError);
-            });
-
+            const errorMessage = error instanceof Error ? error.message : 'Codex 실행 요청에 실패했습니다.';
             if (errorMessage.includes('Failed to fetch')) {
                 try {
                     await navigator.clipboard.writeText(CODEX_BRIDGE_COMMAND);
@@ -654,7 +646,7 @@ const TodoPage: React.FC = () => {
                             <FontAwesomeIcon icon={faSearch} className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                             <input
                                 type="text"
-                                placeholder="업무 검색..."
+                                placeholder="제목·상세·담당자 검색"
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 className="pl-10 pr-4 py-2 bg-slate-700/50 border border-slate-600 rounded-xl text-sm w-64 focus:ring-2 focus:ring-indigo-500 focus:bg-slate-700 transition-all outline-none text-white placeholder-slate-400"
@@ -676,43 +668,54 @@ const TodoPage: React.FC = () => {
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-32">
                     {/* Stats */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6">
                         <div className="bg-slate-800/50 backdrop-blur-xl p-5 rounded-2xl border border-slate-700/50 flex flex-col justify-between h-28">
                             <div className="flex items-center justify-between text-slate-400">
-                                <span className="text-xs font-bold uppercase">전체 업무</span>
+                                <span className="text-xs font-bold uppercase">표시 중인 업무</span>
                                 <FontAwesomeIcon icon={faGaugeHigh} className="w-4 h-4 opacity-50" />
                             </div>
-                            <p className="text-3xl font-bold text-white">{stats.total}</p>
+                            <p className="text-3xl font-bold text-white">{workflowStats.total}</p>
                         </div>
                         <div className="bg-slate-800/50 backdrop-blur-xl p-5 rounded-2xl border border-slate-700/50 flex flex-col justify-between h-28">
-                            <div className="flex items-center justify-between text-violet-400">
-                                <span className="text-xs font-bold uppercase">최종 검토중</span>
-                                <FontAwesomeIcon icon={faMagnifyingGlass} className="w-4 h-4 opacity-50" />
+                            <div className="flex items-center justify-between text-amber-300">
+                                <span className="text-xs font-bold uppercase">처리 필요</span>
+                                <FontAwesomeIcon icon={faClock} className="w-4 h-4 opacity-50" />
                             </div>
-                            <p className="text-3xl font-bold text-violet-400">{filteredTasks.filter(t => t.status === '검토').length}</p>
+                            <p className="text-3xl font-bold text-amber-300">{workflowStats.needsAction}</p>
                         </div>
                         <div className="bg-slate-800/50 backdrop-blur-xl p-5 rounded-2xl border border-slate-700/50 flex flex-col justify-between h-28">
-                            <div className="flex items-center justify-between text-rose-400">
-                                <span className="text-xs font-bold uppercase">긴급 업무</span>
-                                <FontAwesomeIcon icon={faCircle} className="w-4 h-4 opacity-50" />
+                            <div className="flex items-center justify-between text-blue-300">
+                                <span className="text-xs font-bold uppercase">진행 중</span>
+                                <FontAwesomeIcon icon={faSpinner} className="w-4 h-4 opacity-50" />
                             </div>
-                            <p className="text-3xl font-bold text-rose-400">{filteredTasks.filter(t => t.priority === '긴급' && t.status !== '검토').length}</p>
+                            <p className="text-3xl font-bold text-blue-300">{workflowStats.inProgress}</p>
                         </div>
                         <div className="bg-slate-800/50 backdrop-blur-xl p-5 rounded-2xl border border-slate-700/50 flex flex-col justify-between h-28">
                             <div className="flex items-center justify-between text-violet-400">
                                 <span className="text-xs font-bold uppercase">검토 대기</span>
                                 <FontAwesomeIcon icon={faMagnifyingGlass} className="w-4 h-4 opacity-50" />
                             </div>
-                            <p className="text-3xl font-bold text-violet-400">{filteredTasks.filter(t => t.status === '완료').length}</p>
+                            <p className="text-3xl font-bold text-violet-400">{workflowStats.awaitingReview}</p>
                         </div>
                         <div className="bg-slate-800/50 backdrop-blur-xl p-5 rounded-2xl border border-slate-700/50 flex flex-col justify-between h-28">
                             <div className="flex items-center justify-between text-emerald-400">
-                                <span className="text-xs font-bold uppercase">최종 완료</span>
+                                <span className="text-xs font-bold uppercase">검토 완료</span>
                                 <FontAwesomeIcon icon={faCircleCheck} className="w-4 h-4 opacity-50" />
                             </div>
-                            <p className="text-3xl font-bold text-emerald-400">{filteredTasks.filter(t => t.status === '검토').length}</p>
+                            <p className="text-3xl font-bold text-emerald-400">{workflowStats.reviewed}</p>
                         </div>
                     </div>
+
+                    {(workflowStats.overdue > 0 || workflowStats.needsAction > 0) && (
+                        <div className="mb-6 flex flex-wrap items-center gap-2 rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-100">
+                            <FontAwesomeIcon icon={faBell} className="text-amber-300" />
+                            <span className="font-bold">지금 확인할 업무</span>
+                            {workflowStats.needsAction > 0 && <span>처리 필요 {workflowStats.needsAction}건</span>}
+                            {workflowStats.overdue > 0 && <span className="rounded-full bg-rose-500/15 px-2 py-1 font-bold text-rose-300">마감 지남 {workflowStats.overdue}건</span>}
+                        </div>
+                    )}
+
+                    <TaskSlaBoard tasks={filteredTasks} onSelectTask={setExpandedTaskId} />
 
                     <div className="mb-6 rounded-2xl border border-indigo-500/20 bg-slate-800/50 px-4 py-3 shadow-xl shadow-slate-950/20">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -722,9 +725,12 @@ const TodoPage: React.FC = () => {
                                 </div>
                                 <div className="min-w-0">
                                     <div className="flex flex-wrap items-center gap-2">
-                                        <span className="text-sm font-black text-white">Codex 내용 개선</span>
+                                        <span className="text-sm font-black text-white">Codex 자동 처리</span>
                                         <span className="rounded-full border border-slate-600 bg-slate-900/60 px-2 py-0.5 text-[11px] font-bold text-slate-300">
-                                            요청 {codexWorkerStats.pending}건
+                                            처리 가능 {codexWorkerStats.pending}건
+                                        </span>
+                                        <span className="rounded-full border border-indigo-400/20 bg-indigo-500/10 px-2 py-0.5 text-[11px] font-bold text-indigo-200">
+                                            자동 처리 선택 {codexWorkerStats.optedIn}건
                                         </span>
                                         <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold text-blue-300">
                                             진행 {codexWorkerStats.running}건
@@ -732,6 +738,28 @@ const TodoPage: React.FC = () => {
                                         <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold text-emerald-300">
                                             완료 {codexWorkerStats.completed}건
                                         </span>
+                                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                                            codexBridgeHealth.connection === 'online'
+                                                ? 'bg-emerald-500/15 text-emerald-300'
+                                                : codexBridgeHealth.connection === 'checking'
+                                                    ? 'bg-amber-500/15 text-amber-300'
+                                                    : 'bg-rose-500/15 text-rose-300'
+                                        }`}>
+                                            {codexBridgeHealth.connection === 'online'
+                                                ? '브릿지 연결됨'
+                                                : codexBridgeHealth.connection === 'checking'
+                                                    ? '브릿지 확인 중'
+                                                    : '브릿지 꺼짐'}
+                                        </span>
+                                        {codexBridgeHealth.connection === 'online' && (
+                                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                                                codexBridgeHealth.watcherRunning
+                                                    ? 'bg-indigo-500/15 text-indigo-200'
+                                                    : 'bg-slate-700 text-slate-300'
+                                            }`}>
+                                                {codexBridgeHealth.watcherRunning ? '자동 감시 실행 중' : '자동 감시 꺼짐'}
+                                            </span>
+                                        )}
                                         {codexWorkerStats.failed > 0 && (
                                             <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[11px] font-bold text-rose-300">
                                                 실패 {codexWorkerStats.failed}건
@@ -739,11 +767,19 @@ const TodoPage: React.FC = () => {
                                         )}
                                     </div>
                                     <div className="mt-1 truncate text-xs font-medium text-slate-400">
-                                        <code className="rounded bg-slate-950/60 px-1.5 py-0.5 text-indigo-200">{CODEX_BRIDGE_COMMAND}</code>
+                                        <code className="rounded bg-slate-950/60 px-1.5 py-0.5 text-indigo-200">{CODEX_AUTOMATION_COMMAND}</code>
+                                        <span className="ml-2">자동 처리용 통합 실행 명령</span>
                                     </div>
                                 </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    onClick={() => handleCopyWorkerCommand(CODEX_AUTOMATION_COMMAND)}
+                                    className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-black text-white transition-all hover:bg-indigo-500 active:scale-95"
+                                >
+                                    <FontAwesomeIcon icon={faClipboard} className="w-3.5 h-3.5" />
+                                    자동화 명령 복사
+                                </button>
                                 <button
                                     onClick={() => handleCopyWorkerCommand(CODEX_BRIDGE_COMMAND)}
                                     className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-4 py-2 text-xs font-black text-slate-200 transition-all hover:bg-slate-600 active:scale-95"
@@ -756,9 +792,20 @@ const TodoPage: React.FC = () => {
                     </div>
 
                     {/* Filters */}
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-                        <div className="flex items-center gap-2 overflow-x-auto pb-2 sm:pb-0 w-full sm:w-auto">
-                            {['전체', '요청', '진행', '완료', '검토'].map(s => (
+                    <div className="mb-6 space-y-3">
+                        <div className="relative sm:hidden">
+                            <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 w-4 -translate-y-1/2 text-slate-400" />
+                            <input
+                                type="search"
+                                placeholder="제목, 상세 내용, 담당자, 피드백 검색"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="w-full rounded-xl border border-slate-600 bg-slate-800 px-10 py-3 text-sm text-white outline-none transition-all placeholder:text-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
+                            />
+                        </div>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto">
+                                {REQUEST_STATUS_FILTERS.map(s => (
                                 <button
                                     key={s}
                                     onClick={() => setActiveStatusFilter(s)}
@@ -767,17 +814,33 @@ const TodoPage: React.FC = () => {
                                     {s}
                                 </button>
                             ))}
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-slate-400 font-medium">정렬:</span>
-                            <select
-                                value={sortBy}
-                                onChange={(e) => setSortBy(e.target.value as 'newest' | 'dueDate')}
-                                className="text-sm bg-transparent border-none font-semibold text-white focus:ring-0 cursor-pointer outline-none"
-                            >
-                                <option value="newest">최신순</option>
-                                <option value="dueDate">마감임박순</option>
-                            </select>
+                            </div>
+                            <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
+                                {(activeUser !== '전체' || activeStatusFilter !== '전체' || searchQuery || sortBy !== 'newest') && (
+                                    <button
+                                        onClick={() => {
+                                            setActiveUser('전체');
+                                            setActiveStatusFilter('전체');
+                                            setSearchQuery('');
+                                            setSortBy('newest');
+                                        }}
+                                        className="rounded-lg px-2 py-1.5 text-xs font-bold text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
+                                    >
+                                        필터 초기화
+                                    </button>
+                                )}
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs text-slate-400 font-medium">정렬:</span>
+                                    <select
+                                        value={sortBy}
+                                        onChange={(e) => setSortBy(e.target.value as 'newest' | 'dueDate')}
+                                        className="text-sm bg-transparent border-none font-semibold text-white focus:ring-0 cursor-pointer outline-none"
+                                    >
+                                        <option value="newest">최신순</option>
+                                        <option value="dueDate">마감임박순</option>
+                                    </select>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -785,7 +848,7 @@ const TodoPage: React.FC = () => {
                     {/* Task Table */}
                     <div className="bg-slate-800/40 backdrop-blur-xl rounded-2xl border border-slate-700/50 overflow-hidden shadow-2xl">
                         <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
+                            <table className="min-w-[880px] w-full text-left border-collapse">
                                 <thead>
                                     <tr className="bg-slate-800/80 border-b border-slate-700/50 text-slate-400 text-[11px] font-bold uppercase tracking-wider">
                                         <th className="px-6 py-4 text-center w-32">상태</th>
@@ -816,7 +879,8 @@ const TodoPage: React.FC = () => {
                                             const isDropdownOpen = openStatusDropdownId === task.id;
                                             const isCodexRunnable = isCodexRunnableTask(task);
                                             const isCodexRunning = codexRunningTaskIds.has(task.id) || task.automation?.status === 'in_progress';
-                                            const codexButtonLabel = task.automation?.source === 'codex_cli' && task.automation.status === 'completed' ? '재개선' : 'Codex';
+                                            const isAutoCodexTask = task.automation?.autoRun === true;
+                                            const codexButtonLabel = isAutoCodexTask ? 'Codex 자동' : 'Codex';
 
                                             return (
                                                 <React.Fragment key={task.id}>
@@ -876,9 +940,14 @@ const TodoPage: React.FC = () => {
                                                                             요청자: {task.createdBy}
                                                                         </span>
                                                                     )}
+                                                                    {task.automation?.autoRun === true && (
+                                                                        <span className="text-[10px] text-indigo-200 font-bold bg-indigo-500/15 px-1.5 py-0.5 rounded-md border border-indigo-400/20">
+                                                                            Codex 자동 처리
+                                                                        </span>
+                                                                    )}
                                                                     {task.automation?.source === 'codex_cli' && task.automation.status === 'completed' && (
                                                                         <span className="text-[10px] text-emerald-300 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded-md border border-emerald-500/20">
-                                                                            Codex 개선
+                                                                            {task.automation.reviewRequired ? 'Codex 검토' : 'Codex 완료'}
                                                                         </span>
                                                                     )}
                                                                     {((task.images && task.images.length > 0) || task.image) && (
@@ -910,11 +979,22 @@ const TodoPage: React.FC = () => {
                                                         </td>
                                                         <td className="px-6 py-4">
                                                             <div className="flex items-center justify-center gap-1.5" onClick={e => e.stopPropagation()}>
+                                                                {isCodexRunnable && !isAutoCodexTask && (
+                                                                    <button
+                                                                        onClick={() => handleEnableCodexAutoRun(task)}
+                                                                        disabled={isSubmitting}
+                                                                        className="inline-flex items-center gap-1 rounded-xl border border-indigo-400/30 bg-indigo-500/10 px-2 py-2 text-[10px] font-black text-indigo-200 transition-all hover:bg-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                        title="이 요청을 자동 감시 워커의 처리 대상으로 설정"
+                                                                    >
+                                                                        <FontAwesomeIcon icon={faCheck} className="w-3 h-3" />
+                                                                        자동 켜기
+                                                                    </button>
+                                                                )}
                                                                 <button
                                                                     onClick={() => handleRunCodexTask(task)}
                                                                     disabled={!isCodexRunnable || isCodexRunning}
                                                                     className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600/90 px-2.5 py-2 text-[10px] font-black text-white shadow-lg shadow-indigo-600/15 transition-all hover:bg-indigo-500 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500 disabled:shadow-none"
-                                                                    title={isCodexRunnable ? 'Codex로 요청 내용을 개선' : '요청 또는 재요청 상태에서 실행할 수 있습니다'}
+                                                                    title={isCodexRunnable ? 'Codex로 코드 수정 및 검증 실행' : '요청 또는 재요청 상태에서 실행할 수 있습니다'}
                                                                 >
                                                                     <FontAwesomeIcon icon={isCodexRunning ? faSpinner : faTerminal} className={`w-3.5 h-3.5 ${isCodexRunning ? 'animate-spin' : ''}`} />
                                                                     {codexButtonLabel}
@@ -954,6 +1034,16 @@ const TodoPage: React.FC = () => {
                                                         <tr className="bg-slate-900/30">
                                                             <td colSpan={6} className="px-10 py-8 border-l-2 border-indigo-500/50">
                                                                 <div className="max-w-4xl space-y-8">
+                                                                    {task.description && (
+                                                                        <div className="space-y-3 rounded-2xl border border-slate-700/70 bg-slate-800/40 p-5">
+                                                                            <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                                                                <FontAwesomeIcon icon={faComment} className="text-indigo-400" />
+                                                                                요청 상세
+                                                                            </h4>
+                                                                            <p className="whitespace-pre-wrap text-sm leading-6 text-slate-200">{task.description}</p>
+                                                                        </div>
+                                                                    )}
+
                                                                     {/* Images Section */}
                                                                     {((task.images && task.images.length > 0) || task.image) && (
                                                                         <div className="space-y-4">
@@ -988,14 +1078,14 @@ const TodoPage: React.FC = () => {
                                                                             <FontAwesomeIcon icon={faPaperPlane} className="text-indigo-500" />
                                                                             진행 가이드 액션
                                                                         </h4>
-                                                                        {task.status === '요청' && (
+                                                                        {isCodexRunnableTask(task) && (
                                                                             <div className="flex items-center gap-4 bg-indigo-500/5 border border-indigo-500/20 rounded-2xl p-5 shadow-inner">
                                                                                 <div className="bg-indigo-500/20 w-12 h-12 rounded-xl flex items-center justify-center text-indigo-400">
                                                                                     <FontAwesomeIcon icon={faClock} className="w-6 h-6" />
                                                                                 </div>
                                                                                 <div className="flex flex-col gap-0.5">
-                                                                                    <span className="text-sm font-bold text-indigo-100">업무 할당을 확인하셨나요?</span>
-                                                                                    <span className="text-xs text-indigo-400/60 font-medium">진행 중 상태로 변경하여 구성원에게 알리세요.</span>
+                                                                                    <span className="text-sm font-bold text-indigo-100">{task.status === '재요청' ? '수정 요청을 확인하셨나요?' : '업무 할당을 확인하셨나요?'}</span>
+                                                                                    <span className="text-xs text-indigo-400/60 font-medium">진행 중으로 변경하면 요청자에게 처리 시작이 표시됩니다.</span>
                                                                                 </div>
                                                                                 <button
                                                                                     onClick={() => handleStatusChange(task.id, '진행')}
@@ -1171,7 +1261,7 @@ const TodoPage: React.FC = () => {
             {
                 isNewTaskModalOpen && (
                     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setIsNewTaskModalOpen(false)}>
-                        <div className="bg-slate-800 rounded-2xl w-full max-w-lg shadow-2xl p-6 md:p-8 border border-slate-700" onClick={e => e.stopPropagation()}>
+                        <div className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-700 bg-slate-800 p-6 shadow-2xl md:p-8" onClick={e => e.stopPropagation()}>
                             <div className="flex justify-between items-center mb-6">
                                 <h3 className="text-xl font-bold text-white">새 업무 등록</h3>
                                 <button onClick={() => setIsNewTaskModalOpen(false)} className="text-slate-400 hover:text-white">
@@ -1180,13 +1270,22 @@ const TodoPage: React.FC = () => {
                             </div>
                             <div className="space-y-6">
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-300 mb-2">업무 내용</label>
-                                    <textarea
+                                    <label className="block text-sm font-bold text-slate-300 mb-2">업무 제목</label>
+                                    <input
                                         value={newTask.title}
                                         onChange={(e) => setNewTask(prev => ({ ...prev, title: e.target.value }))}
-                                        placeholder="요청할 업무 내용을 상세히 입력하세요"
+                                        placeholder="예: 7월 차량 청구 내역 수정"
+                                        className="w-full rounded-xl border border-slate-600 bg-slate-700/50 px-4 py-3 text-white outline-none transition-all placeholder-slate-500 focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-300 mb-2">상세 요청 <span className="font-medium text-slate-500">(권장)</span></label>
+                                    <textarea
+                                        value={newTask.description}
+                                        onChange={(e) => setNewTask(prev => ({ ...prev, description: e.target.value }))}
+                                        placeholder="현재 문제, 원하는 결과, 확인 방법을 적어주세요. Codex 자동 처리에도 함께 전달됩니다."
                                         rows={4}
-                                        className="w-full px-4 py-3 rounded-xl border border-slate-600 bg-slate-700/50 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all placeholder-slate-500 resize-none min-h-[120px]"
+                                        className="w-full min-h-[120px] resize-none rounded-xl border border-slate-600 bg-slate-700/50 px-4 py-3 text-white outline-none transition-all placeholder-slate-500 focus:ring-2 focus:ring-indigo-500"
                                     />
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
@@ -1280,6 +1379,22 @@ const TodoPage: React.FC = () => {
                                         )}
                                     </div>
                                 </div>
+                                <div className="rounded-xl border border-indigo-500/25 bg-indigo-500/10 p-4">
+                                    <label className="flex cursor-pointer items-start gap-3">
+                                        <input
+                                            type="checkbox"
+                                            checked={newTask.autoRun}
+                                            onChange={(e) => setNewTask(prev => ({ ...prev, autoRun: e.target.checked }))}
+                                            className="mt-1 h-4 w-4 rounded border-slate-500 bg-slate-700 text-indigo-500 focus:ring-indigo-500"
+                                        />
+                                        <span>
+                                            <span className="block text-sm font-bold text-indigo-100">Codex 자동 처리</span>
+                                            <span className="mt-1 block text-xs leading-5 text-indigo-200/70">
+                                                자동 워커가 켜져 있으면 코드 수정과 검증을 수행한 후 수정 내역을 피드백으로 남깁니다. 위험하거나 불명확한 요청은 검토로 전환됩니다.
+                                            </span>
+                                        </span>
+                                    </label>
+                                </div>
                                 <div className="pt-2 flex gap-3">
                                     <button
                                         onClick={() => setIsNewTaskModalOpen(false)}
@@ -1304,7 +1419,7 @@ const TodoPage: React.FC = () => {
             {
                 isEditModalOpen && editingTask && (
                     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setIsEditModalOpen(false)}>
-                        <div className="bg-slate-800 rounded-2xl w-full max-w-lg shadow-2xl p-6 md:p-8 border border-slate-700" onClick={e => e.stopPropagation()}>
+                        <div className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-700 bg-slate-800 p-6 shadow-2xl md:p-8" onClick={e => e.stopPropagation()}>
                             <div className="flex justify-between items-center mb-6">
                                 <h3 className="text-xl font-bold text-white flex items-center gap-2">
                                     <FontAwesomeIcon icon={faRotate} className="text-amber-400" />
@@ -1316,13 +1431,23 @@ const TodoPage: React.FC = () => {
                             </div>
                             <div className="space-y-6">
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-300 mb-2">업무 내용</label>
+                                    <label className="block text-sm font-bold text-slate-300 mb-2">업무 제목</label>
                                     <textarea
                                         value={editingTask.title}
                                         onChange={(e) => setEditingTask(prev => prev ? ({ ...prev, title: e.target.value }) : null)}
-                                        placeholder="요청할 업무 내용을 상세히 입력하세요"
+                                        placeholder="업무 제목을 입력하세요"
+                                        rows={2}
+                                        className="w-full min-h-[80px] resize-none rounded-xl border border-slate-600 bg-slate-700/50 px-4 py-3 text-white outline-none transition-all placeholder-slate-500 focus:ring-2 focus:ring-amber-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-300 mb-2">상세 요청</label>
+                                    <textarea
+                                        value={editingTask.description || ''}
+                                        onChange={(e) => setEditingTask(prev => prev ? ({ ...prev, description: e.target.value }) : null)}
+                                        placeholder="문제 상황, 원하는 결과, 확인 방법을 적어주세요"
                                         rows={4}
-                                        className="w-full px-4 py-3 rounded-xl border border-slate-600 bg-slate-700/50 text-white focus:ring-2 focus:ring-amber-500 outline-none transition-all placeholder-slate-500 resize-none min-h-[120px]"
+                                        className="w-full min-h-[120px] resize-none rounded-xl border border-slate-600 bg-slate-700/50 px-4 py-3 text-white outline-none transition-all placeholder-slate-500 focus:ring-2 focus:ring-amber-500"
                                     />
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
@@ -1359,6 +1484,29 @@ const TodoPage: React.FC = () => {
                                         onChange={(e) => setEditingTask(prev => prev ? ({ ...prev, dueDate: e.target.value }) : null)}
                                         className="w-full px-4 py-3 rounded-xl border border-slate-600 bg-slate-700/50 text-white focus:ring-2 focus:ring-amber-500 outline-none"
                                     />
+                                </div>
+                                <div className="rounded-xl border border-indigo-500/25 bg-indigo-500/10 p-4">
+                                    <label className="flex cursor-pointer items-start gap-3">
+                                        <input
+                                            type="checkbox"
+                                            checked={editingTask.automation?.autoRun === true}
+                                            onChange={(e) => setEditingTask(prev => prev ? ({
+                                                ...prev,
+                                                automation: {
+                                                    ...(prev.automation || {}),
+                                                    mode: e.target.checked ? 'auto' : 'manual',
+                                                    autoRun: e.target.checked
+                                                }
+                                            }) : null)}
+                                            className="mt-1 h-4 w-4 rounded border-slate-500 bg-slate-700 text-indigo-500 focus:ring-indigo-500"
+                                        />
+                                        <span>
+                                            <span className="block text-sm font-bold text-indigo-100">Codex 자동 처리</span>
+                                            <span className="mt-1 block text-xs leading-5 text-indigo-200/70">
+                                                요청 또는 재요청 상태에서만 자동 감시 워커가 처리합니다. 이미 진행 중인 작업은 중단되지 않습니다.
+                                            </span>
+                                        </span>
+                                    </label>
                                 </div>
 
                                 <div className="pt-2 flex gap-3">

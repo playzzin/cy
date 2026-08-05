@@ -35,6 +35,8 @@ import {
   type WorkbookTransactionType
 } from '../../services/workbookLedgerService';
 import type { TaxInvoiceIssue } from '../../types/taxInvoiceList';
+import { calculateWorkbookTotalAmount, calculateWorkbookVatAmount } from '../../utils/workbookLedgerAmounts';
+import { normalizeWorkbookNumber } from '../../utils/workbookLedgerParsing';
 import { toast } from '../../utils/swal';
 import {
   buildDefaultYearMonth,
@@ -300,9 +302,7 @@ const monthEndDate = (yearMonth: string) => {
 };
 
 const parseAmount = (value: unknown) => {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-  const parsed = Number(String(value ?? '').replace(/,/g, '').trim());
-  return Number.isFinite(parsed) ? parsed : 0;
+  return normalizeWorkbookNumber(value, 0);
 };
 
 const fingerprint = (entry: Pick<WorkbookLedgerEntry, 'transactionType' | 'date' | 'partnerName' | 'siteName' | 'totalAmount' | 'teamName'>) => [
@@ -345,10 +345,6 @@ const getEntryAppliedParts = (entry: WorkbookLedgerEntry) => {
   };
 };
 
-const getEntryYearMonth = (entry: Pick<WorkbookLedgerEntry, 'date' | 'sourceMonth'>) => {
-  const dateMonth = normalizeText(entry.date).match(/^\d{4}-\d{2}/)?.[0];
-  return dateMonth || normalizeText(entry.sourceMonth).slice(0, 7);
-};
 
 const isSettlementViewMode = (viewMode: ViewMode) => viewMode === 'receivable' || viewMode === 'payable';
 
@@ -1508,8 +1504,8 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
       const sourceId = normalizeText(issue.id) || `${issue.yearMonth || salesImportMonth}-${issue.no}`;
       const sourceMonth = normalizeText(issue.yearMonth) || salesImportMonth;
       const supplyAmount = parseAmount(issue.supplyAmount);
-      const taxAmount = Math.round(supplyAmount * 0.1);
-      const totalAmount = supplyAmount + taxAmount;
+      const taxAmount = calculateWorkbookVatAmount(supplyAmount);
+      const totalAmount = calculateWorkbookTotalAmount(supplyAmount);
       const date = normalizeText(issue.issueDate) || monthEndDate(sourceMonth);
       const siteName = normalizeText(issue.note) || normalizeText(issue.siteName) || normalizeText(issue.item);
       const candidate: ImportCandidate = {
@@ -1754,7 +1750,7 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
   const saveManualEntry = async () => {
     const supplyAmount = parseAmount(manualDraft.supplyAmount);
     const explicitTax = normalizeText(manualDraft.taxAmount);
-    const taxAmount = explicitTax ? parseAmount(explicitTax) : manualDraft.transactionType === '매출' ? Math.round(supplyAmount * 0.1) : 0;
+    const taxAmount = explicitTax ? parseAmount(explicitTax) : manualDraft.transactionType === '매출' ? calculateWorkbookVatAmount(supplyAmount) : 0;
     const explicitTotal = normalizeText(manualDraft.totalAmount);
     const totalAmount = explicitTotal ? parseAmount(explicitTotal) : supplyAmount + taxAmount;
 

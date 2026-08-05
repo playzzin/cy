@@ -11,14 +11,16 @@ import {
   faSpinner,
   faTable,
   faUsers,
-  faArrowRight,
-  faCheckCircle,
 } from '@fortawesome/free-solid-svg-icons';
 import { dailyReportService } from '../../services/dailyReportService';
 import {
   dailyAdvanceWorkbookProfileService,
   type DailyAdvanceWorkbookProfile,
 } from '../../services/dailyAdvanceWorkbookProfileService';
+import {
+  dailyAdvanceStatementRecruiterFeeService,
+  type DailyAdvanceStatementRecruiterFee,
+} from '../../services/dailyAdvanceStatementRecruiterFeeService';
 import { manpowerService, type Worker } from '../../services/manpowerService';
 import { teamService, type Team } from '../../services/teamService';
 import { storageService } from '../../services/storageService';
@@ -117,6 +119,19 @@ const COLORS = {
   wine: '#953735',
 };
 
+const DATE_HEADER_CELL_STYLE: React.CSSProperties = {
+  backgroundColor: COLORS.paleYellow,
+  color: COLORS.darkBrown,
+};
+
+const DAILY_ADVANCE_DAY_COLUMN_WIDTH = 48;
+const DAILY_ADVANCE_DAY_COLUMN_STYLE: React.CSSProperties = {
+  width: DAILY_ADVANCE_DAY_COLUMN_WIDTH,
+  minWidth: DAILY_ADVANCE_DAY_COLUMN_WIDTH,
+  maxWidth: DAILY_ADVANCE_DAY_COLUMN_WIDTH,
+};
+const DAILY_ADVANCE_DAY_EXCEL_WIDTH = 6;
+
 const TAB_OPTIONS: Array<{ key: WorkbookTabKey; label: string }> = [
   { key: 'workers', label: '인원DB' },
   { key: 'team-summary', label: '팀별출력' },
@@ -139,6 +154,19 @@ const normalizeTeamName = (value: unknown): string =>
     .trim();
 
 const displayText = (value: unknown): string => String(value ?? '').trim();
+
+const compareEntriesByTeam = (left: WorkbookEntry, right: WorkbookEntry): number => {
+  const teamCompare = left.teamName.localeCompare(right.teamName, 'ko');
+  if (teamCompare !== 0) return teamCompare;
+
+  const workerCompare = left.workerName.localeCompare(right.workerName, 'ko');
+  if (workerCompare !== 0) return workerCompare;
+
+  const siteCompare = left.siteName.localeCompare(right.siteName, 'ko');
+  if (siteCompare !== 0) return siteCompare;
+
+  return left.key.localeCompare(right.key, 'ko');
+};
 
 const isStrictDailyWageLabel = (value: unknown): boolean => {
   const normalized = normalizeText(value);
@@ -370,6 +398,16 @@ const getActualUnitPrice = (claimUnitPrice: number): number => {
   return Math.max(0, claimUnitPrice - DAILY_WAGE_DEDUCTION_AMOUNT);
 };
 
+const getReportAmountForEntry = (entry: WorkbookEntry, manDay: number): number => {
+  const reportUnitPrice = entry.reportUnitPrice > 0
+    ? entry.reportUnitPrice
+    : entry.manDay > 0
+      ? entry.workerAmount / entry.manDay
+      : entry.claimUnitPrice;
+
+  return manDay * Math.max(0, reportUnitPrice || 0);
+};
+
 const getSalaryTypeLabel = (...values: Array<unknown>): string => {
   const labels = values.map((value) => displayText(value)).filter(Boolean);
   const matched = labels.find((label) => isStrictDailyWageLabel(label) || isStrictServiceTeamLabel(label));
@@ -425,6 +463,52 @@ const GOYUNJUNG_SAFE_POSITIONS: Array<{
 const buildStatementRecruiterFeeKey = (month: string, teamKey: string, workerId: string): string =>
   `${month}__${teamKey}__${workerId}`;
 
+const parseStatementRecruiterFeeKey = (key: string): { month: string; teamKey: string; workerId: string } | null => {
+  const firstSeparator = key.indexOf('__');
+  const lastSeparator = key.lastIndexOf('__');
+  if (firstSeparator <= 0 || lastSeparator <= firstSeparator) return null;
+
+  const month = key.slice(0, firstSeparator);
+  const teamKey = key.slice(firstSeparator + 2, lastSeparator);
+  const workerId = key.slice(lastSeparator + 2);
+  if (!month || !teamKey || !workerId) return null;
+
+  return { month, teamKey, workerId };
+};
+
+const readLegacyStatementRecruiterFeeValues = (): Record<string, number> => {
+  if (typeof window === 'undefined') return {};
+
+  try {
+    const raw = window.localStorage.getItem(DAILY_ADVANCE_STATEMENT_RECRUITER_FEE_STORAGE_KEY);
+    if (!raw) return {};
+
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return Object.entries(parsed).reduce<Record<string, number>>((accumulator, [key, value]) => {
+      const amount = toNumber(value);
+      if (amount > 0) {
+        accumulator[key] = amount;
+      }
+      return accumulator;
+    }, {});
+  } catch (error) {
+    console.warn('Failed to load legacy statement recruiter fees:', error);
+    return {};
+  }
+};
+
+const buildStatementRecruiterFeeValueMap = (
+  fees: DailyAdvanceStatementRecruiterFee[]
+): Record<string, number> =>
+  fees.reduce<Record<string, number>>((accumulator, fee) => {
+    const key = fee.key || buildStatementRecruiterFeeKey(fee.month, fee.teamKey, fee.workerId);
+    const amount = Math.max(0, toNumber(fee.amount));
+    if (key) {
+      accumulator[key] = amount;
+    }
+    return accumulator;
+  }, {});
+
 const isServiceTeamNode = (team: Team | null): boolean => {
   if (!team) return false;
   const target = normalizeText(`${team.type || ''} ${team.name || ''} ${team.defaultSalaryModel || ''} ${team.companyName || ''}`);
@@ -438,6 +522,21 @@ const isServiceTeamNode = (team: Team | null): boolean => {
     // 특정 팀 명칭 예외 허용 (사용자 데이터 기반)
     target.includes('덕기') 
   );
+};
+
+const buildTeamOptionsFromEntries = (sourceEntries: WorkbookEntry[], teams: Team[]): TeamOption[] => {
+  const optionMap = new Map<string, TeamOption>();
+  sourceEntries.forEach((entry) => {
+    if (!entry.teamKey || optionMap.has(entry.teamKey)) return;
+    const team = teams.find((candidate) => String(candidate.id ?? '').trim() === entry.teamId) || null;
+    optionMap.set(entry.teamKey, {
+      key: entry.teamKey,
+      name: entry.teamName,
+      team,
+      isServiceTeam: isServiceTeamNode(team),
+    });
+  });
+  return Array.from(optionMap.values()).sort((left, right) => left.name.localeCompare(right.name, 'ko'));
 };
 
 const DailyAdvanceWorkbookPage: React.FC = () => {
@@ -456,6 +555,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   const [profiles, setProfiles] = useState<Record<string, DailyAdvanceWorkbookProfile>>({});
   const [profileDrafts, setProfileDrafts] = useState<Record<string, WorkerProfileDraft>>({});
   const [loading, setLoading] = useState(false);
+  const [loadErrorMessage, setLoadErrorMessage] = useState('');
+  const [loadWarningMessage, setLoadWarningMessage] = useState('');
   const [savingProfiles, setSavingProfiles] = useState(false);
   const [savingStatementRecruiterFees, setSavingStatementRecruiterFees] = useState(false);
   const [isGoyunjungMode, setIsGoyunjungMode] = useState<boolean>(() => {
@@ -634,15 +735,62 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setLoadErrorMessage('');
+    setLoadWarningMessage('');
 
     try {
       const period = monthToPeriod(month);
-      const [reportRows, workerRows, teamRows, profileRows] = await Promise.all([
+      if (!period.startDate || !period.endDate) {
+        setEntries([]);
+        setLoadErrorMessage('조회월 형식이 올바르지 않습니다. 조회월을 다시 선택해주세요.');
+        return;
+      }
+
+      const warnings: string[] = [];
+      const profileRowsPromise = dailyAdvanceWorkbookProfileService.getProfiles().catch((error) => {
+        console.warn('Failed to load daily advance workbook profiles:', error);
+        warnings.push('인원DB 저장 단가/비고를 불러오지 못해 일보 단가 기준으로 표시했습니다.');
+        return [] as DailyAdvanceWorkbookProfile[];
+      });
+      const statementRecruiterFeeRowsPromise = dailyAdvanceStatementRecruiterFeeService
+        .getFeesByMonth(month)
+        .catch((error) => {
+          console.warn('Failed to load statement recruiter fees:', error);
+          warnings.push('청구서 인력소개비 저장값을 불러오지 못해 이 브라우저의 기존 저장값만 표시했습니다.');
+          return [] as DailyAdvanceStatementRecruiterFee[];
+        });
+
+      const [reportRows, workerRows, teamRows, profileRows, statementRecruiterFeeRows] = await Promise.all([
         dailyReportService.getWorkerRows({ startDate: period.startDate, endDate: period.endDate }),
         manpowerService.getWorkers(),
         teamService.getTeams(),
-        dailyAdvanceWorkbookProfileService.getProfiles(),
+        profileRowsPromise,
+        statementRecruiterFeeRowsPromise,
       ]);
+
+      const nextStatementRecruiterFeeValues =
+        buildStatementRecruiterFeeValueMap(statementRecruiterFeeRows);
+      const legacyStatementRecruiterFeeValues = readLegacyStatementRecruiterFeeValues();
+      const legacyFeesToMigrate: DailyAdvanceStatementRecruiterFee[] = [];
+      Object.entries(legacyStatementRecruiterFeeValues).forEach(([key, amount]) => {
+        if (!key.startsWith(`${month}__`) || amount <= 0 || nextStatementRecruiterFeeValues[key] !== undefined) return;
+
+        const parsedKey = parseStatementRecruiterFeeKey(key);
+        if (!parsedKey) return;
+
+        nextStatementRecruiterFeeValues[key] = amount;
+        legacyFeesToMigrate.push({
+          key,
+          ...parsedKey,
+          amount,
+        });
+      });
+
+      if (legacyFeesToMigrate.length > 0) {
+        dailyAdvanceStatementRecruiterFeeService.saveFees(legacyFeesToMigrate).catch((error) => {
+          console.warn('Failed to migrate legacy statement recruiter fees:', error);
+        });
+      }
 
       const workerByAnyId = new Map<string, Worker>();
       const workerByName = new Map<string, Worker>();
@@ -680,34 +828,50 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         );
       };
 
-      const activeWorkerStableIds = new Set(reportRows.map(r => getStableIdForRow(r)).filter(Boolean));
-      
-      // 2. 전체 히스토리를 가져옴 (조회 월 말일까지)
-      // startDate를 넣지 않으면 서비스가 endDate 하루만 조회하므로 누적 근무일 계산이 깨진다.
-      const rawHistoryRows = await dailyReportService.getWorkerRows({
-        startDate: '1900-01-01',
-        endDate: period.endDate
-      });
-
-      // 3. 작업자별로 날짜순 정렬하여 누적 번호 매기기
       const workerDateMap = new Map<string, string[]>(); // stableId -> [serviceDates]
-      rawHistoryRows.forEach(row => {
-        const stableId = getStableIdForRow(row);
-        if (!stableId || !activeWorkerStableIds.has(stableId)) return;
+      const serviceWorkerStableIds = new Set<string>();
+
+      reportRows.forEach((row) => {
         const worker = getWorkerForRow(row);
         const salaryType = getRowSalaryType(row, worker);
         if (salaryType !== '용역팀') return;
-        
-        const date = String(row.date || '').trim();
-        if (!workerDateMap.has(stableId)) workerDateMap.set(stableId, []);
-        const dates = workerDateMap.get(stableId)!;
-        if (!dates.includes(date)) dates.push(date);
+        const stableId = getStableIdForRow(row);
+        if (stableId) serviceWorkerStableIds.add(stableId);
       });
 
-      // 각 작업자별 날짜 정렬
-      workerDateMap.forEach((dates, sid) => {
-        workerDateMap.set(sid, dates.sort());
-      });
+      if (serviceWorkerStableIds.size > 0) {
+        try {
+          // 2. 전체 히스토리를 가져옴 (조회 월 말일까지)
+          // startDate를 넣지 않으면 서비스가 endDate 하루만 조회하므로 누적 근무일 계산이 깨진다.
+          const rawHistoryRows = await dailyReportService.getWorkerRows({
+            startDate: '1900-01-01',
+            endDate: period.endDate
+          });
+
+          // 3. 작업자별로 날짜순 정렬하여 누적 번호 매기기
+          rawHistoryRows.forEach(row => {
+            const stableId = getStableIdForRow(row);
+            if (!stableId || !serviceWorkerStableIds.has(stableId)) return;
+            const worker = getWorkerForRow(row);
+            const salaryType = getRowSalaryType(row, worker);
+            if (salaryType !== '용역팀') return;
+
+            const date = String(row.date || '').trim();
+            if (!date) return;
+            if (!workerDateMap.has(stableId)) workerDateMap.set(stableId, []);
+            const dates = workerDateMap.get(stableId)!;
+            if (!dates.includes(date)) dates.push(date);
+          });
+
+          // 각 작업자별 날짜 정렬
+          workerDateMap.forEach((dates, sid) => {
+            workerDateMap.set(sid, dates.sort());
+          });
+        } catch (error) {
+          console.warn('Failed to load service worker history for daily advance workbook:', error);
+          warnings.push('용역팀 누적 근무일을 불러오지 못해 소개비 자동계산만 제외하고 데이터를 표시했습니다.');
+        }
+      }
 
       const getCumulativeIndex = (sid: string, date: string): number => {
         const dates = workerDateMap.get(sid);
@@ -758,15 +922,14 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           const teamId = String(team?.id ?? row.workerTeamId ?? row.teamId ?? worker?.teamId ?? '').trim();
           const teamKey = teamId || `unresolved:${normalizeTeamName(teamName || workerName || 'unknown')}`;
 
-          const claimUnitPrice = toNumber(
-            getDefaultClaimUnitPrice(toNumber(row.unitPrice || worker?.unitPrice || 0))
-          );
-          const actualUnitPrice = getActualUnitPrice(claimUnitPrice);
           const reportUnitPrice = toNumber(row.unitPrice || worker?.unitPrice || 0);
+          const profile = nextProfiles[workerId];
+          const claimUnitPrice = getDefaultClaimUnitPrice(reportUnitPrice);
+          const actualUnitPrice = getActualUnitPrice(reportUnitPrice);
           const manDay = toNumber(row.manDay);
           const date = displayText(row.date);
           const day = getDayNumber(date);
-          const note = displayText(row.workContent || nextProfiles[workerId]?.memo || '');
+          const note = displayText(row.workContent || profile?.memo || '');
           
           // 누적 순번 계산
           const cumulativeCount = getCumulativeIndex(workerId, date);
@@ -823,9 +986,12 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       setWorkers(workerRows);
       setTeams(teamRows);
       setProfiles(nextProfiles);
+      setStatementRecruiterFeeValues(nextStatementRecruiterFeeValues);
+      setLoadWarningMessage(warnings.join(' '));
     } catch (error) {
       console.error('Failed to load daily advance workbook data:', error);
-      window.alert('대납출력부 데이터를 불러오는 중 오류가 발생했습니다.');
+      const message = error instanceof Error ? error.message : String(error ?? '');
+      setLoadErrorMessage(`대납출력부 데이터를 불러오는 중 오류가 발생했습니다.${message ? ` (${message})` : ''}`);
     } finally {
       setLoading(false);
     }
@@ -842,6 +1008,21 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const unsubscribe = dailyAdvanceStatementRecruiterFeeService.subscribeFeesByMonth(
+      month,
+      (feeRows) => {
+        const nextValues = buildStatementRecruiterFeeValueMap(feeRows);
+        setStatementRecruiterFeeValues(nextValues);
+      },
+      (error) => {
+        console.warn('Failed to subscribe statement recruiter fees:', error);
+      }
+    );
+
+    return unsubscribe;
+  }, [month]);
 
   const dailyWageWorkers = useMemo(() => {
     const workerIdSet = new Set(entries.map((entry) => entry.workerId));
@@ -866,52 +1047,59 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       });
   }, [entries, workers]);
 
-  const teamOptions = useMemo<TeamOption[]>(() => {
-    const optionMap = new Map<string, TeamOption>();
-    entries.forEach((entry) => {
-      if (!entry.teamKey || optionMap.has(entry.teamKey)) return;
-      const team = teams.find((candidate) => String(candidate.id ?? '').trim() === entry.teamId) || null;
-      const isServiceTeam = isServiceTeamNode(team);
-      
-      optionMap.set(entry.teamKey, {
-        key: entry.teamKey,
-        name: entry.teamName,
-        team,
-        isServiceTeam,
-      });
-    });
-    return Array.from(optionMap.values()).sort((left, right) => left.name.localeCompare(right.name, 'ko'));
-  }, [entries, teams]);
+  const dailyWageEntries = useMemo(
+    () => entries.filter((entry) => isStrictDailyWageLabel(entry.salaryType)),
+    [entries]
+  );
+
+  const serviceTeamEntries = useMemo(
+    () => entries.filter((entry) => entry.salaryType === '용역팀'),
+    [entries]
+  );
+
+  const activeBaseEntries = activeTab === 'service-team' ? serviceTeamEntries : dailyWageEntries;
+
+  const teamOptions = useMemo<TeamOption[]>(
+    () => buildTeamOptionsFromEntries(activeBaseEntries, teams),
+    [activeBaseEntries, teams]
+  );
+
+  const statementTeamOptions = useMemo<TeamOption[]>(
+    () => buildTeamOptionsFromEntries(dailyWageEntries, teams),
+    [dailyWageEntries, teams]
+  );
 
   useEffect(() => {
     if (selectedTeamKey !== 'ALL' && !teamOptions.some((option) => option.key === selectedTeamKey)) {
       setSelectedTeamKey('ALL');
     }
 
-    if (!teamOptions.length) {
+    if (!statementTeamOptions.length) {
       setStatementTeamKey('');
       return;
     }
 
-    if (!statementTeamKey || !teamOptions.some((option) => option.key === statementTeamKey)) {
-      setStatementTeamKey(teamOptions[0].key);
+    if (!statementTeamKey || !statementTeamOptions.some((option) => option.key === statementTeamKey)) {
+      setStatementTeamKey(statementTeamOptions[0].key);
     }
-  }, [selectedTeamKey, statementTeamKey, teamOptions]);
+  }, [selectedTeamKey, statementTeamKey, statementTeamOptions, teamOptions]);
 
   const filteredEntries = useMemo(() => {
-    let result = entries;
-    if (activeTab === 'service-team') {
-      // 급여 구분이 '용역팀'인 경우만 필터링
-      result = entries.filter(e => e.salaryType === '용역팀');
-    } else {
-      result = entries.filter(e => isStrictDailyWageLabel(e.salaryType));
-    }
+    let result = activeBaseEntries;
 
     if (selectedTeamKey !== 'ALL') {
       result = result.filter((entry) => entry.teamKey === selectedTeamKey);
     }
     return result;
-  }, [entries, activeTab, selectedTeamKey, teamOptions, workers]);
+  }, [activeBaseEntries, selectedTeamKey]);
+
+  const getEntryManDay = useCallback(
+    (entry: WorkbookEntry): number => {
+      const draftValue = manDayDrafts[entry.key];
+      return draftValue === undefined ? entry.manDay : toNumber(draftValue);
+    },
+    [manDayDrafts]
+  );
 
   const allWorkerMasterRows = useMemo<WorkerMasterRow[]>(() => {
     const workerIds = new Set(filteredEntries.map(e => e.workerId));
@@ -923,12 +1111,9 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         const workerEntries = filteredEntries.filter((entry) => entry.workerId === workerId);
         const profile = profiles[workerId];
         const latestWorkerEntry = workerEntries[workerEntries.length - 1];
-        const claimUnitPrice = toNumber(
-          getDefaultClaimUnitPrice(
-            toNumber(latestWorkerEntry?.claimUnitPrice || latestWorkerEntry?.reportUnitPrice || worker.unitPrice || 0)
-          )
+        const claimUnitPrice = getDefaultClaimUnitPrice(
+          toNumber(latestWorkerEntry?.reportUnitPrice || worker.unitPrice || 0)
         );
-        const actualUnitPrice = getActualUnitPrice(claimUnitPrice);
         const memo = displayText(profile?.memo || '');
         const teamName = displayText(worker.teamName || workerEntries[0]?.teamName || '미지정팀');
         const teamKey =
@@ -955,10 +1140,13 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
           return sum + nextManDay * entry.actualUnitPrice;
         }, 0);
+        const actualUnitPrice = totalManDay > 0
+          ? Math.round(actualTotal / totalManDay)
+          : getActualUnitPrice(toNumber(latestWorkerEntry?.reportUnitPrice || worker.unitPrice || 0));
         const claimTotal = workerEntries.reduce((sum, entry) => {
           const draftValue = manDayDrafts[entry.key];
           const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-          return sum + nextManDay * entry.reportUnitPrice;
+          return sum + getReportAmountForEntry(entry, nextManDay);
         }, 0);
 
         return {
@@ -989,6 +1177,24 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   const workerMasterRows = allWorkerMasterRows;
 
   useEffect(() => {
+    setProfileDrafts({});
+  }, [month]);
+
+  useEffect(() => {
+    setProfileDrafts((prev) => {
+      const nextDrafts: Record<string, WorkerProfileDraft> = { ...prev };
+      allWorkerMasterRows.forEach((row) => {
+        if (nextDrafts[row.workerId]) return;
+        nextDrafts[row.workerId] = {
+          claimUnitPrice: row.claimUnitPrice ? String(row.claimUnitPrice) : '',
+          memo: row.memo || '',
+        };
+      });
+      return nextDrafts;
+    });
+  }, [allWorkerMasterRows]);
+
+  const profileBaselineDrafts = useMemo(() => {
     const nextDrafts: Record<string, WorkerProfileDraft> = {};
     allWorkerMasterRows.forEach((row) => {
       nextDrafts[row.workerId] = {
@@ -996,11 +1202,13 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         memo: row.memo || '',
       };
     });
-    setProfileDrafts(nextDrafts);
+    return nextDrafts;
   }, [allWorkerMasterRows]);
 
   const selectedDateEntries = useMemo(() => {
-    return filteredEntries.filter((entry) => entry.date === selectedDate);
+    return filteredEntries
+      .filter((entry) => entry.date === selectedDate)
+      .sort(compareEntriesByTeam);
   }, [filteredEntries, selectedDate]);
 
   const workbookStats = useMemo(() => {
@@ -1017,7 +1225,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     const totalClaimAmount = filteredEntries.reduce((sum, entry) => {
       const draftValue = manDayDrafts[entry.key];
       const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-      return sum + nextManDay * entry.reportUnitPrice;
+      return sum + getReportAmountForEntry(entry, nextManDay);
     }, 0);
     const workerCount = new Set(filteredEntries.map((entry) => entry.workerId)).size;
     const teamCount = new Set(filteredEntries.map((entry) => entry.teamKey)).size;
@@ -1032,23 +1240,23 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   }, [filteredEntries, manDayDrafts]);
 
   const statementTeamOption = useMemo(
-    () => teamOptions.find((option) => option.key === statementTeamKey) || null,
-    [statementTeamKey, teamOptions]
+    () => statementTeamOptions.find((option) => option.key === statementTeamKey) || null,
+    [statementTeamKey, statementTeamOptions]
   );
 
   const getStatementAmount = useCallback(
     (entry: WorkbookEntry): number => {
       const draftValue = manDayDrafts[entry.key];
       const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-      return nextManDay * entry.claimUnitPrice;
+      return getReportAmountForEntry(entry, nextManDay);
     },
     [manDayDrafts]
   );
 
   const statementEntries = useMemo(() => {
     if (!statementTeamKey) return [];
-    return filteredEntries.filter((entry) => entry.teamKey === statementTeamKey);
-  }, [filteredEntries, statementTeamKey]);
+    return dailyWageEntries.filter((entry) => entry.teamKey === statementTeamKey);
+  }, [dailyWageEntries, statementTeamKey]);
 
   const statementLastDay = useMemo(() => monthToPeriod(month).lastDay, [month]);
   const statementDayNumbers = useMemo(
@@ -1128,9 +1336,12 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       entriesByDay: Record<number, WorkbookEntry>;
       totalManDay: number;
       totalRecruiterFee: number;
+      totalClaimAmount: number;
     }>();
 
     filteredEntries.forEach((entry) => {
+      const nextManDay = getEntryManDay(entry);
+      const nextRecruiterFee = nextManDay > 0 ? entry.recruiterFee : 0;
       const rowKey = `${entry.teamKey}__${entry.workerId || normalizeText(entry.workerName)}`;
       if (!groupedRows.has(rowKey)) {
         groupedRows.set(rowKey, {
@@ -1142,6 +1353,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           entriesByDay: {},
           totalManDay: 0,
           totalRecruiterFee: 0,
+          totalClaimAmount: 0,
         });
       }
 
@@ -1150,17 +1362,22 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       if (existingDayEntry) {
         workerRow.entriesByDay[entry.day] = {
           ...existingDayEntry,
-          manDay: existingDayEntry.manDay + entry.manDay,
-          recruiterFee: existingDayEntry.recruiterFee + entry.recruiterFee,
+          manDay: existingDayEntry.manDay + nextManDay,
+          recruiterFee: existingDayEntry.recruiterFee + nextRecruiterFee,
           cumulativeCount: existingDayEntry.recruiterFee > 0
             ? existingDayEntry.cumulativeCount
             : entry.cumulativeCount,
         };
       } else {
-        workerRow.entriesByDay[entry.day] = entry;
+        workerRow.entriesByDay[entry.day] = {
+          ...entry,
+          manDay: nextManDay,
+          recruiterFee: nextRecruiterFee,
+        };
       }
-      workerRow.totalManDay += entry.manDay;
-      workerRow.totalRecruiterFee += entry.recruiterFee;
+      workerRow.totalManDay += nextManDay;
+      workerRow.totalRecruiterFee += nextRecruiterFee;
+      workerRow.totalClaimAmount += getReportAmountForEntry(entry, nextManDay);
     });
 
     return Array.from(groupedRows.values()).sort((left, right) => {
@@ -1168,7 +1385,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       if (teamCompare !== 0) return teamCompare;
       return left.workerName.localeCompare(right.workerName, 'ko');
     });
-  }, [filteredEntries]);
+  }, [filteredEntries, getEntryManDay]);
 
   const handleDownloadStatementExcel = useCallback(() => {
     if (statementRows.length === 0) {
@@ -1253,7 +1470,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       `${month}_${statementTeamOption?.name || '청구서'}_청구서_${getTodayStamp()}`,
       '청구서',
       rows,
-      [8, 16, ...statementDayNumbers.map(() => 5), 9, 12, 14],
+      [8, 16, ...statementDayNumbers.map(() => DAILY_ADVANCE_DAY_EXCEL_WIDTH), 9, 12, 14],
       {
         titleRowIndex: 0,
         headerRowIndex: 1,
@@ -1304,10 +1521,11 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     const dayStartColumn = 2;
     const totalManDayColumn = dayStartColumn + statementDayNumbers.length;
     const recruiterFeeColumn = totalManDayColumn + 1;
+    const invoiceAmountColumn = recruiterFeeColumn + 1;
     const dayColumns = statementDayNumbers.map((_, index) => dayStartColumn + index);
     const highlightedCells = new Set<string>();
     const rows: Array<Array<ExcelCellValue>> = [
-      ['팀명', '이름', ...dayHeaders, '총공수', '인력소개비', '비고'],
+      ['팀명', '이름', ...dayHeaders, '총공수', '인력소개비', '청구금액', '비고'],
       ...serviceRows.map((row, rowIndex) => [
         row.teamName,
         row.workerName,
@@ -1321,6 +1539,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         }),
         Number(row.totalManDay.toFixed(1)),
         Math.round(row.totalRecruiterFee),
+        Math.round(row.totalClaimAmount + row.totalRecruiterFee),
         row.totalRecruiterFee > 0 ? `소개비 ${Math.round(row.totalRecruiterFee / SERVICE_RECRUITER_FEE_PER_DAY)}일분 포함` : '-',
       ]),
     ];
@@ -1329,11 +1548,12 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       `${month}_용역팀_정산_${getTodayStamp()}`,
       '용역팀',
       rows,
-      [16, 16, ...statementDayNumbers.map(() => 7), 10, 14, 22],
+      [16, 16, ...statementDayNumbers.map(() => DAILY_ADVANCE_DAY_EXCEL_WIDTH), 10, 14, 14, 22],
       {
         headerFill: COLORS.blue,
         specialHeaderFills: {
           [recruiterFeeColumn]: COLORS.orange,
+          [invoiceAmountColumn]: COLORS.wine,
         },
         specialColumnFills: {
           0: '#FAF8EF',
@@ -1342,8 +1562,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         highlightedCells,
         highlightedCellFill: '#DBEAFE',
         centerColumns: new Set(dayColumns),
-        rightColumns: new Set([totalManDayColumn, recruiterFeeColumn]),
-        moneyColumns: new Set([recruiterFeeColumn]),
+        rightColumns: new Set([totalManDayColumn, recruiterFeeColumn, invoiceAmountColumn]),
+        moneyColumns: new Set([recruiterFeeColumn, invoiceAmountColumn]),
         manDayColumns: new Set([...dayColumns, totalManDayColumn]),
         rowHeight: 30,
       }
@@ -1421,40 +1641,76 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     }));
   }, []);
 
-  const handleSaveStatementRecruiterFees = useCallback(() => {
-    if (typeof window === 'undefined' || !statementTeamKey) return;
+  const handleSaveStatementRecruiterFees = useCallback(async () => {
+    if (!statementTeamKey) return;
 
     setSavingStatementRecruiterFees(true);
     try {
       const nextValues = { ...statementRecruiterFeeValues };
+      const feesToSave: DailyAdvanceStatementRecruiterFee[] = [];
+      const dirtyKeySet = new Set(statementRecruiterFeeDirtyKeys);
 
       statementRows.forEach((row) => {
         const storageKey = buildStatementRecruiterFeeKey(month, statementTeamKey, row.workerId);
+        if (!dirtyKeySet.has(storageKey)) return;
+
         const draftValue = statementRecruiterFeeDrafts[storageKey];
         const nextValue = draftValue === undefined
           ? (statementRecruiterFeeValues[storageKey] || 0)
           : parseMoneyInput(draftValue);
 
-        if (nextValue > 0) {
-          nextValues[storageKey] = nextValue;
-        } else {
-          delete nextValues[storageKey];
-        }
+        nextValues[storageKey] = Math.max(0, nextValue);
+
+        feesToSave.push({
+          key: storageKey,
+          month,
+          teamKey: statementTeamKey,
+          workerId: row.workerId,
+          amount: nextValue,
+        });
       });
 
-      window.localStorage.setItem(
-        DAILY_ADVANCE_STATEMENT_RECRUITER_FEE_STORAGE_KEY,
-        JSON.stringify(nextValues)
-      );
+      if (!feesToSave.length) {
+        window.alert('변경된 청구서 인력소개비가 없습니다.');
+        return;
+      }
+
+      await dailyAdvanceStatementRecruiterFeeService.saveFees(feesToSave);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(
+          DAILY_ADVANCE_STATEMENT_RECRUITER_FEE_STORAGE_KEY,
+          JSON.stringify(nextValues)
+        );
+      }
       setStatementRecruiterFeeValues(nextValues);
+      setStatementRecruiterFeeDrafts((prev) => {
+        const nextDrafts = { ...prev };
+        feesToSave.forEach((fee) => {
+          if (fee.key) delete nextDrafts[fee.key];
+        });
+        return nextDrafts;
+      });
       window.alert('청구서 인력소개비를 저장했습니다.');
     } catch (error) {
       console.error('Failed to save statement recruiter fees:', error);
-      window.alert('청구서 인력소개비 저장 중 오류가 발생했습니다.');
+      const errorCode =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: unknown }).code || '')
+          : '';
+      const errorMessage = error instanceof Error ? error.message : String(error || '');
+      const detail = errorCode || errorMessage;
+      window.alert(`청구서 인력소개비 저장 중 오류가 발생했습니다.${detail ? ` (${detail})` : ''}`);
     } finally {
       setSavingStatementRecruiterFees(false);
     }
-  }, [month, statementRecruiterFeeDrafts, statementRecruiterFeeValues, statementRows, statementTeamKey]);
+  }, [
+    month,
+    statementRecruiterFeeDirtyKeys,
+    statementRecruiterFeeDrafts,
+    statementRecruiterFeeValues,
+    statementRows,
+    statementTeamKey,
+  ]);
 
   const handleProfileDraftChange = useCallback(
     (workerId: string, field: keyof WorkerProfileDraft, value: string) => {
@@ -1477,9 +1733,10 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     try {
       await dailyAdvanceWorkbookProfileService.saveProfiles(
         dirtyRows.map((row) => {
-          const draft = profileDrafts[row.workerId] || buildEmptyDraft();
+          const draft = profileDrafts[row.workerId] || profileBaselineDrafts[row.workerId] || buildEmptyDraft();
           return {
             workerId: row.workerId,
+            claimUnitPrice: row.claimUnitPrice,
             memo: String(draft.memo || '').trim(),
           };
         })
@@ -1493,7 +1750,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     } finally {
       setSavingProfiles(false);
     }
-  }, [allWorkerMasterRows, loadData, profileDirtyWorkerIds, profileDrafts]);
+  }, [allWorkerMasterRows, loadData, profileBaselineDrafts, profileDirtyWorkerIds, profileDrafts]);
 
   const renderSheetTabs = () => (
     <div className="flex flex-wrap gap-2 border-b border-[#d8cfb1] pb-3">
@@ -1517,84 +1774,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     </div>
   );
 
-  const renderDatabaseTab = () => (
-    <div className="overflow-hidden rounded-xl border border-[#d5ccb0] bg-white shadow-sm">
-      <div className="grid gap-px bg-[#d5ccb0] sm:grid-cols-4">
-        {[
-          ['총공수', formatNumber(workbookStats.totalManDay)],
-          ['총 실지급금', formatCurrency(workbookStats.totalActualAmount)],
-          ['총 청구금', formatCurrency(workbookStats.totalClaimAmount)],
-          ['작업자 수', `${workbookStats.workerCount}명`],
-        ].map(([label, value]) => (
-          <div key={label} className="bg-[#faf8ef] px-4 py-3">
-            <div className="text-xs font-bold text-slate-500">{label}</div>
-            <div className="mt-1 text-lg font-black text-[#4A452A]">{value}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="min-w-[900px] border-collapse text-sm">
-          <thead>
-            <tr style={{ backgroundColor: COLORS.olive }} className="text-white">
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">팀</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">이름</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">일자</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">공수</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">일당</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">실지급액</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold" style={{ backgroundColor: COLORS.aqua, color: COLORS.blackBrown }}>청구금액</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">비고</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredEntries.length === 0
-              ? (
-                <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-500">
-                    조회 조건에 맞는 데이터가 없습니다.
-                  </td>
-                </tr>
-              )
-              : filteredEntries.map((entry) => {
-                  const draftValue = manDayDrafts[entry.key];
-                  const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-                  const actualAmount = nextManDay * entry.actualUnitPrice;
-                  const claimAmount = nextManDay * entry.reportUnitPrice;
-
-                  return (
-                    <tr key={entry.key} className="odd:bg-white even:bg-[#faf8ef]">
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center">{entry.teamName}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center">{entry.workerName}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center">{entry.date}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.5"
-                          value={draftValue ?? String(entry.manDay)}
-                          onChange={(event) => handleManDayDraftChange(entry.key, event.target.value)}
-                          className="w-20 rounded border border-[#d7cfb5] px-2 py-1 text-right text-xs outline-none focus:border-[#948A54]"
-                        />
-                      </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center font-bold text-[#4A452A]">
-                        {formatCurrency(entry.actualUnitPrice)}
-                      </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center font-black text-[#4A452A]">
-                        {formatCurrency(actualAmount)}
-                      </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center font-semibold text-sky-700">
-                        {formatCurrency(claimAmount)}
-                      </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center">{entry.note || '-'}</td>
-                    </tr>
-                  );
-                })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
 
   const renderWorkersTab = () => (
     <div className="overflow-hidden rounded-xl border border-[#d5ccb0] bg-white shadow-sm">
@@ -1602,7 +1781,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         <div>
           <div className="text-sm font-black text-[#4A452A]">인원DB</div>
           <div className="text-xs text-slate-500">
-            청구단가는 인원DB에 저장된 DB 청구단가를 사용하고, 일당은 청구단가에서 15,000원을 차감해 계산합니다. 청구금액은 일보 작업자금액 기준으로 계산합니다.
+            일당은 일보 작업자 단가에서 15,000원을 차감해 계산합니다. 청구금액은 일보 작업자금액 기준으로 계산합니다.
           </div>
         </div>
         <button
@@ -1670,7 +1849,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                     <td className="border border-[#e3dcc4] px-2 py-2">
                       <input
                         type="text"
-                        value={draft.claimUnitPrice}
+                        value={row.claimUnitPrice ? String(row.claimUnitPrice) : ''}
                         readOnly
                         className="w-full cursor-not-allowed rounded border border-slate-200 bg-slate-50 px-2 py-1 text-right text-slate-600 outline-none"
                       />
@@ -1731,12 +1910,26 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="min-w-[1200px] border-collapse text-sm">
+        <table
+          className="table-fixed border-collapse text-sm"
+          style={{ minWidth: 180 + statementDayNumbers.length * DAILY_ADVANCE_DAY_COLUMN_WIDTH + 92 }}
+        >
+          <colgroup>
+            <col style={{ width: 180, minWidth: 180 }} />
+            {statementDayNumbers.map((day) => (
+              <col key={`team-summary-col-${day}`} style={DAILY_ADVANCE_DAY_COLUMN_STYLE} />
+            ))}
+            <col style={{ width: 92, minWidth: 92 }} />
+          </colgroup>
           <thead>
             <tr style={{ backgroundColor: COLORS.goldBrown }} className="text-white">
               <th className="border border-[#d5ccb0] px-3 py-2 font-bold">팀명</th>
               {statementDayNumbers.map((day) => (
-                <th key={day} className="border border-[#d5ccb0] px-2 py-2 font-bold">
+                <th
+                  key={day}
+                  className="date-header-cell border border-[#d5ccb0] px-0 py-2 text-center font-bold tabular-nums whitespace-nowrap"
+                  style={{ ...DATE_HEADER_CELL_STYLE, ...DAILY_ADVANCE_DAY_COLUMN_STYLE }}
+                >
                   {day}
                 </th>
               ))}
@@ -1758,7 +1951,11 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                 <tr key={row.teamKey} className="odd:bg-white even:bg-[#faf8ef]">
                   <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{row.name}</td>
                   {row.days.map((value, index) => (
-                    <td key={`${row.teamKey}-${index}`} className="border border-[#e3dcc4] px-2 py-2 text-center">
+                    <td
+                      key={`${row.teamKey}-${index}`}
+                      className="border border-[#e3dcc4] px-0 py-2 text-center tabular-nums whitespace-nowrap"
+                      style={DAILY_ADVANCE_DAY_COLUMN_STYLE}
+                    >
                       {value ? formatNumber(value) : '-'}
                     </td>
                   ))}
@@ -1772,7 +1969,11 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               <tr style={{ backgroundColor: COLORS.pink }}>
                 <td className="border border-[#d5ccb0] px-3 py-2 font-black">일자별 합계</td>
                 {teamSummaryTotals.map((value, index) => (
-                  <td key={`team-summary-total-${index}`} className="border border-[#d5ccb0] px-2 py-2 text-center font-black">
+                  <td
+                    key={`team-summary-total-${index}`}
+                    className="border border-[#d5ccb0] px-0 py-2 text-center font-black tabular-nums whitespace-nowrap"
+                    style={DAILY_ADVANCE_DAY_COLUMN_STYLE}
+                  >
                     {value ? formatNumber(value) : '-'}
                   </td>
                 ))}
@@ -1796,7 +1997,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               {`${getMonthTitle(month)} ${statementTeamOption?.name || ''} 청구서`.trim()}
             </div>
             <div className="mt-1 text-xs text-slate-500">
-              청구단가 기준으로 노무금액을 계산하며, 인력소개비는 이 청구서 화면에서 입력 후 저장합니다.
+              일보 작업자 단가 기준으로 노무금액을 계산하며, 인력소개비는 이 청구서 화면에서 입력 후 저장합니다.
             </div>
           </div>
 
@@ -1841,13 +2042,30 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="min-w-[1280px] border-collapse text-sm">
+        <table
+          className="table-fixed border-collapse text-sm"
+          style={{ minWidth: 64 + 132 + statementDayNumbers.length * DAILY_ADVANCE_DAY_COLUMN_WIDTH + 92 + 132 + 148 }}
+        >
+          <colgroup>
+            <col style={{ width: 64, minWidth: 64 }} />
+            <col style={{ width: 132, minWidth: 132 }} />
+            {statementDayNumbers.map((day) => (
+              <col key={`statement-col-${day}`} style={DAILY_ADVANCE_DAY_COLUMN_STYLE} />
+            ))}
+            <col style={{ width: 92, minWidth: 92 }} />
+            <col style={{ width: 132, minWidth: 132 }} />
+            <col style={{ width: 148, minWidth: 148 }} />
+          </colgroup>
           <thead>
             <tr style={{ backgroundColor: COLORS.darkBrown }} className="text-white">
               <th className="border border-[#d5ccb0] px-3 py-2 font-bold">번호</th>
               <th className="border border-[#d5ccb0] px-3 py-2 font-bold">이름</th>
               {statementDayNumbers.map((day) => (
-                <th key={day} className="border border-[#d5ccb0] px-2 py-2 font-bold">
+                <th
+                  key={day}
+                  className="date-header-cell border border-[#d5ccb0] px-0 py-2 text-center font-bold tabular-nums whitespace-nowrap"
+                  style={{ ...DATE_HEADER_CELL_STYLE, ...DAILY_ADVANCE_DAY_COLUMN_STYLE }}
+                >
                   {day}
                 </th>
               ))}
@@ -1886,7 +2104,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                     {row.days.map((value, dayIndex) => (
                       <td
                         key={`${row.workerId}-${dayIndex}`}
-                        className="border border-[#e3dcc4] px-2 py-2 text-center align-middle"
+                        className="border border-[#e3dcc4] px-0 py-2 text-center align-middle tabular-nums whitespace-nowrap"
+                        style={DAILY_ADVANCE_DAY_COLUMN_STYLE}
                       >
                         {value ? formatNumber(value) : '-'}
                       </td>
@@ -1916,7 +2135,11 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                   일자별 공수합계
                 </td>
                 {statementDailyTotals.map((value, index) => (
-                  <td key={`statement-total-${index}`} className="border border-[#d5ccb0] px-2 py-2 text-center font-black">
+                  <td
+                    key={`statement-total-${index}`}
+                    className="border border-[#d5ccb0] px-0 py-2 text-center font-black tabular-nums whitespace-nowrap"
+                    style={DAILY_ADVANCE_DAY_COLUMN_STYLE}
+                  >
                     {value ? formatNumber(value) : '-'}
                   </td>
                 ))}
@@ -1987,7 +2210,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                     (sum, entry) => {
                       const draftValue = manDayDrafts[entry.key];
                       const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-                      return sum + nextManDay * getActualUnitPrice(entry.claimUnitPrice);
+                      return sum + nextManDay * entry.actualUnitPrice;
                     },
                     0
                   )
@@ -2001,7 +2224,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                   selectedDateEntries.reduce((sum, entry) => {
                     const draftValue = manDayDrafts[entry.key];
                     const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-                    return sum + nextManDay * entry.reportUnitPrice;
+                    return sum + getReportAmountForEntry(entry, nextManDay);
                   }, 0)
                 )}
               </div>
@@ -2013,7 +2236,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="min-w-[1200px] border-collapse text-sm">
               <thead>
-                <tr style={{ backgroundColor: COLORS.blackBrown }} className="text-white">
+                <tr style={{ backgroundColor: COLORS.olive }} className="day-lookup-header-row text-white">
                   {['팀', '이름', '현장', '공수'].map((header) => (
                     <th key={header} className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">{header}</th>
                   ))}
@@ -2039,8 +2262,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                   selectedDateEntries.map((entry) => {
                     const draftValue = manDayDrafts[entry.key];
                     const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-                    const actualAmount = nextManDay * getActualUnitPrice(entry.claimUnitPrice);
-                    const claimAmount = nextManDay * entry.reportUnitPrice;
+                    const actualAmount = nextManDay * entry.actualUnitPrice;
+                    const claimAmount = getReportAmountForEntry(entry, nextManDay);
                     return (
                       <tr key={entry.key} className="odd:bg-white even:bg-[#faf8ef]">
                         <td className="border border-[#e3dcc4] px-3 py-2">{entry.teamName}</td>
@@ -2189,7 +2412,21 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-[1800px] border-collapse text-sm">
+          <table
+            className="table-fixed border-collapse text-sm"
+            style={{ minWidth: 120 + 120 + statementDayNumbers.length * DAILY_ADVANCE_DAY_COLUMN_WIDTH + 92 + 132 + 148 + 180 }}
+          >
+            <colgroup>
+              <col style={{ width: 120, minWidth: 120 }} />
+              <col style={{ width: 120, minWidth: 120 }} />
+              {statementDayNumbers.map((day) => (
+                <col key={`service-col-${day}`} style={DAILY_ADVANCE_DAY_COLUMN_STYLE} />
+              ))}
+              <col style={{ width: 92, minWidth: 92 }} />
+              <col style={{ width: 132, minWidth: 132 }} />
+              <col style={{ width: 148, minWidth: 148 }} />
+              <col style={{ width: 180, minWidth: 180 }} />
+            </colgroup>
             <thead>
               <tr style={{ backgroundColor: COLORS.blue }} className="text-white">
                 <th
@@ -2205,17 +2442,24 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                   이름
                 </th>
                 {statementDayNumbers.map((day) => (
-                  <th key={day} className="h-12 border border-white/20 px-2 py-2 font-bold align-middle">{day}</th>
+                  <th
+                    key={day}
+                    className="date-header-cell h-12 border border-white/20 px-0 py-2 text-center font-bold align-middle tabular-nums whitespace-nowrap"
+                    style={{ ...DATE_HEADER_CELL_STYLE, ...DAILY_ADVANCE_DAY_COLUMN_STYLE }}
+                  >
+                    {day}
+                  </th>
                 ))}
                 <th className="h-12 border border-white/20 px-3 py-2 font-bold text-center align-middle">총공수</th>
                 <th className="h-12 border border-white/20 px-3 py-2 font-bold text-center align-middle" style={{ backgroundColor: COLORS.orange }}>인력소개비</th>
+                <th className="h-12 border border-white/20 px-3 py-2 font-bold text-center align-middle" style={{ backgroundColor: COLORS.wine }}>청구금액</th>
                 <th className="h-12 border border-white/20 px-3 py-2 font-bold text-center align-middle">비고</th>
               </tr>
             </thead>
             <tbody>
               {serviceRows.length === 0 ? (
                 <tr>
-                  <td colSpan={statementDayNumbers.length + 5} className="px-4 py-10 text-center text-sm text-slate-500">
+                  <td colSpan={statementDayNumbers.length + 6} className="px-4 py-10 text-center text-sm text-slate-500">
                     용역팀 데이터가 없습니다. (팀 유형을 '용역'으로 설정해주세요)
                   </td>
                 </tr>
@@ -2240,7 +2484,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                       return (
                         <td
                           key={day}
-                          className={`h-12 border border-[#e3dcc4] px-2 py-2 text-center align-middle ${isIntroFeeDay ? 'bg-blue-100 font-bold text-blue-700' : ''}`}
+                          className={`h-12 border border-[#e3dcc4] px-0 py-2 text-center align-middle tabular-nums whitespace-nowrap ${isIntroFeeDay ? 'bg-blue-100 font-bold text-blue-700' : ''}`}
+                          style={DAILY_ADVANCE_DAY_COLUMN_STYLE}
                           title={isIntroFeeDay ? `누적 ${entry?.cumulativeCount}일차` : ''}
                         >
                           {entry ? formatNumber(entry.manDay) : '-'}
@@ -2250,6 +2495,9 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                     <td className="h-12 border border-[#e3dcc4] px-3 py-2 text-right font-black align-middle">{formatNumber(row.totalManDay)}</td>
                     <td className="h-12 border border-[#e3dcc4] px-3 py-2 text-right font-black text-orange-600 bg-orange-50 align-middle">
                       {formatCurrency(row.totalRecruiterFee)}
+                    </td>
+                    <td className="h-12 border border-[#e3dcc4] px-3 py-2 text-right font-black text-[#7a2c2c] align-middle">
+                      {formatCurrency(row.totalClaimAmount + row.totalRecruiterFee)}
                     </td>
                     <td className="h-12 border border-[#e3dcc4] px-3 py-2 text-xs text-slate-400 italic align-middle">
                       {row.totalRecruiterFee > 0 ? `소개비 ${Math.round(row.totalRecruiterFee / SERVICE_RECRUITER_FEE_PER_DAY)}일분 포함` : '-'}
@@ -2296,9 +2544,34 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     : 'space-y-4 rounded-xl border border-[#d9cfb2] bg-[#fbf8ee] p-5 shadow-sm';
 
   return (
-    <div className={`relative min-h-screen overflow-hidden ${isGoyunjungMode ? 'goyunjung-mode' : ''}`}>
+    <div className={`daily-advance-workbook relative min-h-screen overflow-x-hidden ${isGoyunjungMode ? 'goyunjung-mode' : ''}`}>
       <style>
         {`
+          .daily-advance-workbook input,
+          .daily-advance-workbook select,
+          .daily-advance-workbook textarea {
+            background-color: #FFFFFF !important;
+            color: #1E1C11 !important;
+            color-scheme: light;
+          }
+
+          .daily-advance-workbook input::placeholder,
+          .daily-advance-workbook textarea::placeholder {
+            color: #64748B !important;
+          }
+
+          .daily-advance-workbook input:disabled,
+          .daily-advance-workbook select:disabled,
+          .daily-advance-workbook textarea:disabled {
+            background-color: #F1F5F9 !important;
+            color: #64748B !important;
+          }
+
+          .daily-advance-workbook input[type="date"]::-webkit-calendar-picker-indicator,
+          .daily-advance-workbook input[type="month"]::-webkit-calendar-picker-indicator {
+            opacity: 0.72;
+          }
+
           .goyunjung-mode table {
             background-color: transparent !important;
           }
@@ -2312,6 +2585,16 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           .goyunjung-mode table thead tr,
           .goyunjung-mode table thead th {
             background-color: rgba(74, 69, 42, 0.64) !important;
+          }
+
+          .goyunjung-mode table thead th.date-header-cell {
+            background-color: rgba(255, 255, 204, 0.82) !important;
+            color: #4A452A !important;
+          }
+
+          .goyunjung-mode table thead tr.day-lookup-header-row,
+          .goyunjung-mode table thead tr.day-lookup-header-row th {
+            background-color: rgba(79, 98, 40, 0.78) !important;
           }
 
           .goyunjung-mode table tbody tr,
@@ -2460,7 +2743,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
 
       <div className="relative space-y-6">
         <div className={summaryPanelClassName}>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-start 2xl:justify-between">
             <div>
               <div className="text-2xl font-black text-[#4A452A]">대납출력부</div>
               <div className="mt-2 text-sm leading-6 text-slate-600">
@@ -2505,7 +2788,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               )}
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid w-full gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:w-auto">
               {[
                 {
                   label: '조회월',
@@ -2551,7 +2834,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         </div>
 
         <div className={filterPanelClassName}>
-          <div className="grid gap-4 xl:grid-cols-[180px_180px_220px_220px_1fr_auto]">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[160px_160px_minmax(180px,1fr)_minmax(180px,1fr)_auto]">
             <label className="space-y-2 text-sm">
               <div className="font-bold text-[#4A452A]">조회월</div>
               <input
@@ -2597,10 +2880,10 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                 onChange={(event) => setStatementTeamKey(event.target.value)}
                 className="w-full rounded-md border border-[#d7cfb5] px-3 py-2 outline-none focus:border-[#948A54]"
               >
-                {teamOptions.length === 0 ? (
+                {statementTeamOptions.length === 0 ? (
                   <option value="">팀 없음</option>
                 ) : (
-                  teamOptions.map((option) => (
+                  statementTeamOptions.map((option) => (
                     <option key={option.key} value={option.key}>
                       {option.name}
                     </option>
@@ -2608,19 +2891,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                 )}
               </select>
             </label>
-
-            <div className="flex items-end">
-              <div className="rounded-lg border border-[#d7cfb5] px-4 py-3 text-sm text-slate-600">
-                실지급금은 일당 기준, 노무청구금은 일보 작업자금액(작업자 단가) 기준으로 계산합니다.
-              </div>
-            </div>
-
-            <div className="flex items-end">
-              <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-                <div className="font-bold">급여구분</div>
-                <div className="mt-1">일급제만 지급 대상으로 집계합니다.</div>
-              </div>
-            </div>
 
             <div className="flex items-end justify-end">
               <button
@@ -2634,6 +2904,29 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               </button>
             </div>
           </div>
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            <div className="rounded-lg border border-[#d7cfb5] px-4 py-3 text-sm text-slate-600">
+              실지급금은 일당 기준, 노무청구금은 일보 작업자금액(작업자 단가) 기준으로 계산합니다.
+            </div>
+
+            <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+              <div className="font-bold">급여구분</div>
+              <div className="mt-1">일급제만 지급 대상으로 집계합니다.</div>
+            </div>
+          </div>
+
+          {loadErrorMessage && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700" role="alert">
+              {loadErrorMessage}
+            </div>
+          )}
+
+          {loadWarningMessage && !loadErrorMessage && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800" role="status">
+              {loadWarningMessage}
+            </div>
+          )}
         </div>
 
         <div className={tabPanelClassName}>

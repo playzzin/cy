@@ -36,6 +36,8 @@ export const MaterialPhotoBatchSchema = z.object({
     transactionType: z.enum(['inbound', 'outbound']),
     transactionDate: z.string(),
     siteId: z.string(),
+    rentalCompanyId: z.string().optional(),
+    rentalCompanyName: z.string().optional(),
     photoCount: z.number(),
     photos: z.array(MaterialPhotoFileSchema),
     createdBy: z.string().optional(),
@@ -63,6 +65,8 @@ export const MaterialInboundSchema = z.object({
     transactionDate: z.string(), // YYYY-MM-DD
     vehicleNumber: z.string().optional(),
     supplier: z.string().optional(),
+    rentalCompanyId: z.string().optional(),
+    rentalCompanyName: z.string().optional(),
     invoiceNumber: z.string().optional(),
     notes: z.string().optional(),
     photoUrls: z.array(z.string()).optional(),

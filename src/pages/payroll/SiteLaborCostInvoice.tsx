@@ -4,35 +4,11 @@ import { siteService } from '../../services/siteService';
 import { manpowerService } from '../../services/manpowerService';
 import { payrollService, PayrollData } from '../../services/payrollService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faFileExcel, faSpinner, faSearch, faPrint, faChevronDown, faCheck } from '@fortawesome/free-solid-svg-icons';
+import { faFileExcel, faSpinner, faSearch, faChevronDown, faCheck } from '@fortawesome/free-solid-svg-icons';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 
-interface WorkerData {
-    id: string;
-    name: string;
-    juminId: string;
-    address: string;
-    category: string;
-    bankName: string;
-    accountNumber: string;
-    phone: string;
-}
 
-interface InvoiceItem {
-    workerId: string;
-    workerName: string;
-    juminId: string;
-    address: string;
-    category: string;
-    days: number[]; // 1-31
-    totalDays: number;
-    unitPrice: number;
-    totalAmount: number;
-    bankName: string;
-    accountNumber: string;
-    phone: string;
-}
 
 interface Props {
     hideHeader?: boolean;
@@ -504,7 +480,7 @@ const SiteLaborCostInvoice: React.FC<Props> = ({ hideHeader }) => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {invoiceData.map((item, idx) => {
+                                    {invoiceData.map((item, _idx) => {
                                         const days = dailyDetails[item.id] || [];
                                         return (
                                             <React.Fragment key={item.id}>

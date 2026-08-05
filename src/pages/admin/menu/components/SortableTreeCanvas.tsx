@@ -1,10 +1,10 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { MenuItem } from '../../../../services/menuServiceV11';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faFolder, faLink, faGripVertical, faChevronDown, faChevronRight, faEye, faEyeSlash, faArrowRight, faArrowLeft, faChartPie, faTrash } from '@fortawesome/free-solid-svg-icons';
+import { faFolder, faLink, faGripVertical, faEye, faEyeSlash, faArrowRight, faArrowLeft, faChartPie, faTrash } from '@fortawesome/free-solid-svg-icons';
 import { resolveIcon } from '../../../../constants/iconMap';
 
 // --- Recursive Sortable Item ---
@@ -94,7 +94,7 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                     <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={(e) => onSelect(item.id || '', true)}
+                        onChange={(_e) => onSelect(item.id || '', true)}
                         className="w-4 h-4 rounded border-gray-600 text-blue-500 focus:ring-blue-500 bg-gray-700 cursor-pointer"
                     />
                 </div>
@@ -272,12 +272,12 @@ const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, title, 
             className={`flex-1 overflow-y-auto p-8 custom-scrollbar h-full transition-colors ${isOver ? 'bg-blue-500/10' : ''}`}
         >
             <div className="max-w-3xl mx-auto space-y-4 pb-20 min-h-[500px]">
-                <div className="flex items-center justify-between mb-6 py-4 border-b border-gray-800">
-                    <h2 className="text-lg font-bold text-gray-100 flex items-center gap-3">
+                <div className="mb-6 flex flex-col items-start gap-3 border-b border-gray-800 py-4">
+                    <h2 className="flex items-center gap-3 whitespace-nowrap text-lg font-bold text-gray-100">
                         <span className="w-1.5 h-6 bg-blue-500 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)]"></span>
                         {title || '메뉴 구조'} <span className="text-gray-500 text-sm font-normal ml-2">({siteId === 'cheongyeon' ? '청연 본사' : siteId})</span>
                     </h2>
-                    {headerActions && <div className="flex shrink-0 items-center gap-2">{headerActions}</div>}
+                    {headerActions && <div className="flex w-full flex-wrap items-center gap-2">{headerActions}</div>}
                 </div>
 
                 <SortableContext items={topLevelIds} strategy={verticalListSortingStrategy}>

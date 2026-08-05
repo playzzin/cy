@@ -7,6 +7,7 @@ import { MasterDataProvider } from '../contexts/MasterDataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkerTeamIdMigration } from '../hooks/useWorkerTeamIdMigration';
 import { userService, type UserData } from '../services/userService';
+import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 
 const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { status, result } = useWorkerTeamIdMigration();
@@ -93,6 +94,10 @@ const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({ childr
       alive = false;
     };
   }, [currentUser?.uid, refreshKey]);
+
+  if (isDevAdminSessionEnabled()) {
+    return <>{children}</>;
+  }
 
   if (loading) {
     return <AppIntroScreen message="계정 정보를 확인하는 중" />;

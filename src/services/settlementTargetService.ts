@@ -1,6 +1,5 @@
 import {
     collection,
-    deleteDoc,
     doc,
     getDoc,
     getDocs,
@@ -29,14 +28,26 @@ export type {
 const COLLECTION_NAME = 'settlement_targets';
 const CACHE_TTL = 300000;
 const settlementTargetConverter = createConverter(SettlementTargetSchema);
+export const DEFAULT_SETTLEMENT_TARGET_AFTER_TAX_RATE = 0.75;
 
 let cachedTargets: SettlementTarget[] | null = null;
 let lastFetchTime = 0;
 
-const normalizeTarget = (target: SettlementTarget): SettlementTarget => ({
+export const normalizeSettlementTargetAfterTaxRate = (value: unknown): number => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return DEFAULT_SETTLEMENT_TARGET_AFTER_TAX_RATE;
+    const numeric = typeof value === 'number' ? value : Number(raw);
+    if (!Number.isFinite(numeric)) return DEFAULT_SETTLEMENT_TARGET_AFTER_TAX_RATE;
+    if (numeric > 1 && numeric <= 100) return numeric / 100;
+    return Math.min(1, Math.max(0, numeric));
+};
+
+export const normalizeSettlementTarget = (target: SettlementTarget): SettlementTarget => ({
     ...target,
     targetType: target.targetType || 'other',
     defaultProcessType: target.defaultProcessType || 'payable',
+    defaultAfterTaxRate: normalizeSettlementTargetAfterTaxRate(target.defaultAfterTaxRate),
+    buybackEnabled: Boolean(target.buybackEnabled),
     status: target.status || 'active',
     evidenceRequired: Boolean(target.evidenceRequired),
 });
@@ -54,14 +65,14 @@ export const settlementTargetService = {
 
         const q = query(this.getCollection(), orderBy('name', 'asc'));
         const snap = await getDocs(q);
-        cachedTargets = snap.docs.map((item) => normalizeTarget(item.data()));
+        cachedTargets = snap.docs.map((item) => normalizeSettlementTarget(item.data()));
         lastFetchTime = now;
         return cachedTargets;
     },
 
     async getTarget(id: string): Promise<SettlementTarget | null> {
         const snap = await getDoc(doc(db, COLLECTION_NAME, id).withConverter(settlementTargetConverter));
-        return snap.exists() ? normalizeTarget(snap.data()) : null;
+        return snap.exists() ? normalizeSettlementTarget(snap.data()) : null;
     },
 
     async addTarget(target: Partial<SettlementTarget>): Promise<string> {
@@ -69,6 +80,8 @@ export const settlementTargetService = {
             ...target,
             targetType: target.targetType || 'other',
             defaultProcessType: target.defaultProcessType || 'payable',
+            defaultAfterTaxRate: normalizeSettlementTargetAfterTaxRate(target.defaultAfterTaxRate),
+            buybackEnabled: Boolean(target.buybackEnabled),
             status: target.status || 'active',
             evidenceRequired: Boolean(target.evidenceRequired),
             createdAt: serverTimestamp(),
@@ -82,7 +95,13 @@ export const settlementTargetService = {
     },
 
     async updateTarget(id: string, updates: Partial<SettlementTarget>): Promise<void> {
-        const data = stripUndefinedFields(updates as Record<string, unknown>);
+        const normalizedUpdates = {
+            ...updates,
+            ...(Object.prototype.hasOwnProperty.call(updates, 'defaultAfterTaxRate')
+                ? { defaultAfterTaxRate: normalizeSettlementTargetAfterTaxRate(updates.defaultAfterTaxRate) }
+                : {}),
+        };
+        const data = stripUndefinedFields(normalizedUpdates as Record<string, unknown>);
         await updateDoc(doc(db, COLLECTION_NAME, id).withConverter(settlementTargetConverter), {
             ...data,
             updatedAt: serverTimestamp(),
@@ -91,9 +110,12 @@ export const settlementTargetService = {
         toast.updated('정산 대상자');
     },
 
-    async deleteTarget(id: string): Promise<void> {
-        await deleteDoc(doc(db, COLLECTION_NAME, id));
+    async deactivateTarget(id: string): Promise<void> {
+        await updateDoc(doc(db, COLLECTION_NAME, id).withConverter(settlementTargetConverter), {
+            status: 'inactive',
+            updatedAt: serverTimestamp(),
+        });
         cachedTargets = null;
-        toast.deleted('정산 대상자', 1);
+        toast.success('정산 대상자를 사용 중지했습니다. 기존 정산 내역은 유지됩니다.');
     },
 };

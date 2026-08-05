@@ -4,7 +4,7 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService } from '../../services/companyService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCopy, faSearch, faCheckSquare, faSquare, faFilter, faIdCard, faImage, faDownload, faPaperPlane } from '@fortawesome/free-solid-svg-icons';
+import { faCopy, faSearch, faCheckSquare, faFilter, faImage, faDownload, faPaperPlane } from '@fortawesome/free-solid-svg-icons';
 import { toast } from '../../utils/swal';
 import Swal from 'sweetalert2';
 import { storage } from '../../config/firebase';
@@ -321,19 +321,6 @@ const SelectAllBar = styled.div`
 `;
 
 // Helper to copy HTML to clipboard
-const copyHtmlToClipboard = async (html: string) => {
-    try {
-        const item = new ClipboardItem({
-            'text/html': new Blob([html], { type: 'text/html' }),
-            'text/plain': new Blob([html], { type: 'text/plain' }), // Fallback (though plain html source isn't great)
-        });
-        await navigator.clipboard.write([item]);
-        return true;
-    } catch (err) {
-        console.error('Failed to copy HTML:', err);
-        return false;
-    }
-};
 
 const normalizeText = (value?: string | null) => String(value ?? '').trim().toLowerCase();
 const DEFAULT_TEAM_COLOR = '#94a3b8';
@@ -926,7 +913,7 @@ const WorkerSummaryPage: React.FC = () => {
                                             <tr key={w.id} className="hover:bg-slate-50 transition-colors">
                                                 <td className="px-4 py-3 text-slate-500 text-center align-middle">{index + 1}</td>
                                                 <td className="px-4 py-3 font-medium text-slate-900 text-center align-middle">{w.name.replace(/[0-9]/g, '')}</td>
-                                                <td className="px-2 py-3 text-slate-600 font-mono tracking-tight text-center text-sm align-middle">
+                                                <td className="px-2 py-3 text-slate-600 text-center text-sm align-middle">
                                                     {w.idNumber ? w.idNumber : '-'}
                                                 </td>
                                                 <td className="px-2 py-3 text-slate-600 text-center text-sm align-middle">{w.contact || '-'}</td>

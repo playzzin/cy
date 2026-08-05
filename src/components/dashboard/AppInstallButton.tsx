@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCheckCircle, faMobileScreenButton, faSpinner } from '@fortawesome/free-solid-svg-icons';
+import { faCheckCircle, faDownload, faMobileScreenButton, faSpinner } from '@fortawesome/free-solid-svg-icons';
 import {
   getInstallPrompt,
   isAppInstalled,
@@ -30,6 +30,32 @@ const InstallButton = styled.button<{ $ready: boolean }>`
     &:disabled {
         cursor: default;
         opacity: 0.75;
+    }
+`;
+
+const InstallControls = styled.div`
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+`;
+
+const ApkDownloadButton = styled.a`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: rgba(34, 197, 94, 0.18);
+    border: 1px solid rgba(134, 239, 172, 0.45);
+    border-radius: 9999px;
+    color: white;
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.2s;
+
+    &:hover {
+        background: rgba(34, 197, 94, 0.3);
     }
 `;
 
@@ -100,17 +126,39 @@ export const AppInstallButton: React.FC = () => {
 
   if (installed) {
     return (
+      <InstallControls>
       <InstallButton type="button" $ready={false} disabled>
         <FontAwesomeIcon icon={faCheckCircle} />
         앱 설치됨
       </InstallButton>
+      <ApkDownloadButton
+        href="/downloads/kb-sms-bridge.apk"
+        download="kb-sms-bridge.apk"
+        aria-label="국민은행 SMS 브리지 APK 다운로드"
+        title="새 휴대폰에 설치할 국민은행 SMS 브리지 APK를 다운로드합니다"
+      >
+        <FontAwesomeIcon icon={faDownload} />
+        SMS 브리지 APK
+      </ApkDownloadButton>
+      </InstallControls>
     );
   }
 
   return (
+    <InstallControls>
     <InstallButton type="button" $ready={canInstall && !isPreparing} onClick={handleInstall} disabled={isPreparing}>
       <FontAwesomeIcon icon={isPreparing ? faSpinner : faMobileScreenButton} spin={isPreparing} />
       {isPreparing ? '준비 중...' : '앱 설치'}
     </InstallButton>
+    <ApkDownloadButton
+      href="/downloads/kb-sms-bridge.apk"
+      download="kb-sms-bridge.apk"
+      aria-label="국민은행 SMS 브리지 APK 다운로드"
+      title="새 휴대폰에 설치할 국민은행 SMS 브리지 APK를 다운로드합니다"
+    >
+      <FontAwesomeIcon icon={faDownload} />
+      SMS 브리지 APK
+    </ApkDownloadButton>
+    </InstallControls>
   );
 };

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSearch, faEraser, faChartBar, faBuilding } from '@fortawesome/free-solid-svg-icons';
-import { dailyReportService, DailyReport } from '../../services/dailyReportService';
+import { faSearch, faEraser, faChartBar } from '@fortawesome/free-solid-svg-icons';
+import { dailyReportService } from '../../services/dailyReportService';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
 

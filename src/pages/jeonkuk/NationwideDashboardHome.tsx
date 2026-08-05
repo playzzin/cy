@@ -3,8 +3,8 @@ import { motion } from 'framer-motion';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
     faGlobe, faArrowLeft,
-    faCogs, faNetworkWired, faShieldHalved,
-    faRocket, faCode
+    faNetworkWired, faShieldHalved,
+    faCode
 } from '@fortawesome/free-solid-svg-icons';
 import { useNavigate } from 'react-router-dom';
 

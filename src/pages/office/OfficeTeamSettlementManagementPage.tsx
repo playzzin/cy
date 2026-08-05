@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Banknote,
@@ -184,7 +184,17 @@ const normalizeConfigIdPart = (value: unknown): string =>
 const buildReservePolicyId = (params: { yearMonth: string; teamId: string }): string =>
   `${RESERVE_POLICY_CONFIG_PREFIX}${normalizeConfigIdPart(params.yearMonth)}__${normalizeConfigIdPart(params.teamId)}`;
 
-const isYearMonth = (value: unknown): value is string => /^\d{4}-\d{2}$/.test(String(value ?? '').trim());
+const isYearMonth = (value: unknown): value is string => {
+  const matched = /^(\d{4})-(\d{2})$/.exec(String(value ?? '').trim());
+  if (!matched) return false;
+  const month = Number(matched[2]);
+  return Number.isFinite(month) && month >= 1 && month <= 12;
+};
+
+const getYearMonthFromSearchParams = (params: URLSearchParams): string | null => {
+  const value = params.get('yearMonth') || params.get('month');
+  return isYearMonth(value) ? value : null;
+};
 
 const compareYearMonth = (left: string, right: string): number => left.localeCompare(right);
 
@@ -500,7 +510,8 @@ const getStatusBadge = (row: TeamSettlementRow) => {
 };
 
 const OfficeTeamSettlementManagementPage: React.FC = () => {
-  const [yearMonth, setYearMonth] = useState(getCurrentYearMonth);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [yearMonth, setYearMonth] = useState(() => getYearMonthFromSearchParams(searchParams) ?? getCurrentYearMonth());
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamSettlementDocs, setTeamSettlementDocs] = useState<Array<TeamSettlementDocument | null>>([]);
   const [savedSettlementDocs, setSavedSettlementDocs] = useState<TeamSettlementDocument[]>([]);
@@ -509,6 +520,28 @@ const OfficeTeamSettlementManagementPage: React.FC = () => {
   const [transactions, setTransactions] = useState<OfficeTransaction[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const nextYearMonth = getYearMonthFromSearchParams(searchParams) ?? getCurrentYearMonth();
+    setYearMonth((prev) => (prev === nextYearMonth ? prev : nextYearMonth));
+  }, [searchParams]);
+
+  useEffect(() => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      const shouldKeepYearMonth =
+        yearMonth !== getCurrentYearMonth() || prev.has('yearMonth') || prev.has('month');
+
+      if (shouldKeepYearMonth) {
+        next.set('yearMonth', yearMonth);
+      } else {
+        next.delete('yearMonth');
+      }
+      next.delete('month');
+
+      return next.toString() === prev.toString() ? prev : next;
+    }, { replace: true });
+  }, [setSearchParams, yearMonth]);
 
   const loadData = useCallback(async () => {
     setLoading(true);

@@ -10,18 +10,71 @@ import {
   where
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { recordSupportWriteOperationSafely } from './supportWriteOperationLogService';
+import { getErrorMessage, reportSupportWriteError, SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../utils/supportWriteErrorReporting';
 import type {
   TeamExpenseClaim,
   TeamExpenseClaimAttachment,
-  TeamExpenseClaimInput
+  TeamExpenseClaimInput,
+  TeamExpenseClaimStatus
 } from '../types/teamExpenseLedger';
 
-const COLLECTION_NAME = 'team_expense_claims';
+export const TEAM_EXPENSE_CLAIMS_COLLECTION = 'team_expense_claims';
+export const LEGACY_TEAM_EXPENSE_LEDGERS_COLLECTION = 'team_expense_ledgers';
 
-const buildId = () => {
-  const c: Crypto | undefined = typeof crypto !== 'undefined' ? crypto : undefined;
-  if (c && typeof c.randomUUID === 'function') return c.randomUUID();
-  return `team-expense-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+export interface TeamExpenseClaimSaveOptions {
+  operationId?: string;
+}
+
+const normalizeIdSegment = (value: unknown, fallback = 'none'): string => {
+  const normalized = String(value ?? '')
+    .trim()
+    .replace(/[\\/#?%*:|"<>[\]]/g, '_')
+    .replace(/\s+/g, '_')
+    .slice(0, 120);
+  return normalized || fallback;
+};
+
+const hashStableText = (value: string): string => {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) + hash) ^ value.charCodeAt(index);
+  }
+  return (hash >>> 0).toString(36);
+};
+
+const buildDeterministicClaimId = (
+  input: TeamExpenseClaimInput,
+  operationId?: string
+): string => {
+  if (operationId) {
+    return `team-expense-claim__op__${normalizeIdSegment(operationId)}`;
+  }
+
+  if (input.sourceType && input.sourceFixedExpenseId && input.generatedForYearMonth) {
+    return [
+      'team-expense-claim__source',
+      normalizeIdSegment(input.sourceType),
+      normalizeIdSegment(input.sourceFixedExpenseId),
+      normalizeIdSegment(input.generatedForYearMonth)
+    ].join('__');
+  }
+
+  const fingerprint = [
+    input.yearMonth,
+    input.date,
+    input.claimType ?? 'otherExpense',
+    input.payerTeamId,
+    input.chargeToTeamId ?? '',
+    input.siteId ?? '',
+    input.cardLabel ?? '',
+    input.category,
+    input.description,
+    normalizeAmount(input.amount),
+    input.memo ?? ''
+  ].map((item) => String(item ?? '').trim()).join('|');
+
+  return `team-expense-claim__auto__${hashStableText(fingerprint)}`;
 };
 
 const toTimestamp = (value: unknown) => {
@@ -93,6 +146,121 @@ const normalizeAttachments = (value: unknown): TeamExpenseClaimAttachment[] => {
     .filter((item): item is TeamExpenseClaimAttachment => Boolean(item));
 };
 
+const normalizeStatus = (value: unknown): TeamExpenseClaimStatus => {
+  const raw = String(value ?? '').trim();
+  if (raw === 'charged' || raw === 'settled') return raw;
+  return 'draft';
+};
+
+export const isPostedTeamExpenseClaimStatus = (status: unknown): boolean => {
+  const normalized = normalizeStatus(status);
+  return normalized === 'charged' || normalized === 'settled';
+};
+
+export const isLockedTeamExpenseClaimStatus = (status: unknown): boolean => {
+  return normalizeStatus(status) === 'settled';
+};
+
+const validateClaimInput = (input: TeamExpenseClaimInput): void => {
+  const errors: string[] = [];
+  if (!/^\d{4}-\d{2}$/.test(String(input.yearMonth ?? ''))) errors.push('yearMonth');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(input.date ?? ''))) errors.push('date');
+  if (!String(input.payerTeamId ?? '').trim()) errors.push('payerTeamId');
+  if (!String(input.payerTeamName ?? '').trim()) errors.push('payerTeamName');
+  if (!String(input.category ?? '').trim()) errors.push('category');
+  if (!String(input.description ?? '').trim()) errors.push('description');
+  if (!Number.isFinite(normalizeAmount(input.amount)) || normalizeAmount(input.amount) < 0) errors.push('amount');
+
+  const claimType = normalizeClaimType(input.claimType, input as unknown as Record<string, unknown>);
+  if (claimType === 'teamCharge' && !String(input.chargeToTeamId ?? '').trim()) {
+    errors.push('chargeToTeamId');
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`team-expense-claim-invalid: ${errors.join(', ')}`);
+  }
+};
+
+const comparableAttachment = (attachment: TeamExpenseClaimAttachment) => ({
+  id: String(attachment.id ?? ''),
+  name: String(attachment.name ?? ''),
+  fullPath: String(attachment.fullPath ?? ''),
+  url: String(attachment.url ?? ''),
+  size: normalizeAmount(attachment.size),
+  contentType: String(attachment.contentType ?? '')
+});
+
+const comparableClaimFields = (
+  claim: Partial<TeamExpenseClaimInput & TeamExpenseClaim>
+): Record<string, unknown> => {
+  const data = claim as Record<string, unknown>;
+  return {
+    yearMonth: String(claim.yearMonth ?? '').trim(),
+    date: String(claim.date ?? '').trim(),
+    claimType: normalizeClaimType(claim.claimType, data),
+    payerTeamId: String(claim.payerTeamId ?? '').trim(),
+    payerTeamName: String(claim.payerTeamName ?? '').trim(),
+    chargeToTeamId: String(claim.chargeToTeamId ?? '').trim(),
+    chargeToTeamName: String(claim.chargeToTeamName ?? '').trim(),
+    siteId: String(claim.siteId ?? '').trim(),
+    siteName: String(claim.siteName ?? '').trim(),
+    cardLabel: String(claim.cardLabel ?? '').trim(),
+    category: normalizeCategory(claim.category),
+    description: String(claim.description ?? '').trim(),
+    amount: normalizeAmount(claim.amount),
+    memo: String(claim.memo ?? '').trim(),
+    attachments: normalizeAttachments(claim.attachments).map(comparableAttachment),
+    sourceType: String(claim.sourceType ?? '').trim(),
+    sourceFixedExpenseId: String(claim.sourceFixedExpenseId ?? '').trim(),
+    sourceFixedExpenseName: String(claim.sourceFixedExpenseName ?? '').trim(),
+    generatedForYearMonth: String(claim.generatedForYearMonth ?? '').trim()
+  };
+};
+
+const isSameComparableClaim = (
+  left: Partial<TeamExpenseClaimInput & TeamExpenseClaim>,
+  right: Partial<TeamExpenseClaimInput & TeamExpenseClaim>
+): boolean => JSON.stringify(comparableClaimFields(left)) === JSON.stringify(comparableClaimFields(right));
+
+const canTransitionStatus = (
+  currentStatus: TeamExpenseClaimStatus,
+  nextStatus: TeamExpenseClaimStatus
+): boolean => {
+  const order: Record<TeamExpenseClaimStatus, number> = {
+    draft: 0,
+    charged: 1,
+    settled: 2
+  };
+  return order[nextStatus] >= order[currentStatus];
+};
+
+const assertCanSaveClaim = (
+  existing: TeamExpenseClaim | undefined,
+  input: TeamExpenseClaimInput
+): TeamExpenseClaimStatus => {
+  const existingStatus = existing?.status ? normalizeStatus(existing.status) : undefined;
+  const nextStatus = normalizeStatus(input.status ?? existingStatus ?? 'draft');
+
+  if (!existing) return nextStatus;
+
+  if (!isLockedTeamExpenseClaimStatus(existingStatus)) {
+    if (!canTransitionStatus(existingStatus ?? 'draft', nextStatus)) {
+      throw new Error('team-expense-claim-status-transition-blocked');
+    }
+    return nextStatus;
+  }
+
+  if (nextStatus !== existingStatus) {
+    throw new Error('team-expense-claim-posted-status-change-blocked');
+  }
+
+  if (!isSameComparableClaim(existing, input)) {
+    throw new Error('team-expense-claim-posted-modification-blocked');
+  }
+
+  return existingStatus;
+};
+
 const mapClaim = (id: string, data: Record<string, unknown>): TeamExpenseClaim => ({
   id,
   yearMonth: String(data.yearMonth ?? ''),
@@ -115,13 +283,20 @@ const mapClaim = (id: string, data: Record<string, unknown>): TeamExpenseClaim =
   sourceFixedExpenseId: data.sourceFixedExpenseId ? String(data.sourceFixedExpenseId) : undefined,
   sourceFixedExpenseName: data.sourceFixedExpenseName ? String(data.sourceFixedExpenseName) : undefined,
   generatedForYearMonth: data.generatedForYearMonth ? String(data.generatedForYearMonth) : undefined,
+  operationId: data.operationId ? String(data.operationId) : undefined,
+  lastOperationId: data.lastOperationId ? String(data.lastOperationId) : undefined,
+  lastOperationAt: toTimestamp(data.lastOperationAt),
+  handledById: data.handledById ? String(data.handledById) : undefined,
+  handledByName: data.handledByName ? String(data.handledByName) : undefined,
+  handleMemo: data.handleMemo ? String(data.handleMemo) : undefined,
+  handledAt: toTimestamp(data.handledAt),
   createdAt: toTimestamp(data.createdAt),
   updatedAt: toTimestamp(data.updatedAt)
 });
 
 export const teamExpenseLedgerService = {
   async listAllClaims(): Promise<TeamExpenseClaim[]> {
-    const snap = await getDocs(collection(db, COLLECTION_NAME));
+    const snap = await getDocs(collection(db, TEAM_EXPENSE_CLAIMS_COLLECTION));
     return snap.docs
       .map((row) => mapClaim(row.id, row.data() as Record<string, unknown>))
       .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
@@ -129,7 +304,7 @@ export const teamExpenseLedgerService = {
 
   async getClaimsByMonth(yearMonth: string): Promise<TeamExpenseClaim[]> {
     const q = query(
-      collection(db, COLLECTION_NAME),
+      collection(db, TEAM_EXPENSE_CLAIMS_COLLECTION),
       where('yearMonth', '==', yearMonth)
     );
     const snap = await getDocs(q);
@@ -138,27 +313,85 @@ export const teamExpenseLedgerService = {
       .sort((a, b) => String(a.date).localeCompare(String(b.date), 'ko-KR'));
   },
 
-  async saveClaim(input: TeamExpenseClaimInput & { id?: string }): Promise<string> {
-    const id = input.id || buildId();
-    const now = Timestamp.now();
-    const ref = doc(db, COLLECTION_NAME, id);
-    const existing = await getDoc(ref);
-    await setDoc(
-      ref,
-      stripUndefined({
-        ...input,
-        status: input.status ?? 'draft',
-        amount: normalizeAmount(input.amount),
-        updatedAt: now,
-        createdAt: existing.exists() ? existing.data().createdAt ?? now : now
-      }),
-      { merge: true }
-    );
-    return id;
+  async saveClaim(
+    input: TeamExpenseClaimInput & { id?: string },
+    options: TeamExpenseClaimSaveOptions = {}
+  ): Promise<string> {
+    const explicitOperationId = String(input.operationId ?? options.operationId ?? '').trim();
+    const id = input.id || buildDeterministicClaimId(input, explicitOperationId);
+    const operationId = explicitOperationId || `team-expense-claim:${id}`;
+
+    try {
+      validateClaimInput(input);
+      const now = Timestamp.now();
+      const ref = doc(db, TEAM_EXPENSE_CLAIMS_COLLECTION, id);
+      const existing = await getDoc(ref);
+      const existingClaim = existing.exists()
+        ? mapClaim(id, existing.data() as Record<string, unknown>)
+        : undefined;
+      const nextStatus = assertCanSaveClaim(existingClaim, input);
+
+      await setDoc(
+        ref,
+        stripUndefined({
+          ...input,
+          id,
+          status: nextStatus,
+          amount: normalizeAmount(input.amount),
+          operationId,
+          lastOperationId: operationId,
+          lastOperationAt: now,
+          updatedAt: now,
+          createdAt: existing.exists() ? existing.data().createdAt ?? now : now
+        }),
+        { merge: true }
+      );
+
+      await recordSupportWriteOperationSafely({
+        domain: 'teamExpense',
+        yearMonth: input.yearMonth,
+        operationId,
+        status: 'success',
+        affectedDocumentIds: [id],
+        metadata: {
+          claimType: input.claimType,
+          status: nextStatus,
+          amount: normalizeAmount(input.amount)
+        }
+      });
+
+      return id;
+    } catch (error) {
+      const failedContext = {
+        domain: 'teamExpense' as const,
+        yearMonth: input.yearMonth,
+        operationId,
+        affectedDocumentIds: [id],
+        errorMessage: getErrorMessage(error),
+        userMessage: SUPPORT_WRITE_RETRY_USER_MESSAGE
+      };
+      await recordSupportWriteOperationSafely({
+        ...failedContext,
+        status: 'failed'
+      });
+      reportSupportWriteError(error, {
+        ...failedContext,
+        status: 'failed'
+      });
+      throw error;
+    }
   },
 
   async deleteClaim(id: string): Promise<void> {
-    await deleteDoc(doc(db, COLLECTION_NAME, id));
+    const ref = doc(db, TEAM_EXPENSE_CLAIMS_COLLECTION, id);
+    const existing = await getDoc(ref);
+    if (existing.exists()) {
+      const existingClaim = mapClaim(id, existing.data() as Record<string, unknown>);
+      if (isLockedTeamExpenseClaimStatus(existingClaim.status)) {
+        throw new Error('team-expense-claim-posted-delete-blocked');
+      }
+    }
+    await deleteDoc(ref);
   },
 
   async updateClaimStatus(
@@ -167,10 +400,23 @@ export const teamExpenseLedgerService = {
     audit: { actorId?: string; actorName?: string; memo?: string } = {}
   ): Promise<void> {
     const now = Timestamp.now();
+    const ref = doc(db, TEAM_EXPENSE_CLAIMS_COLLECTION, id);
+    const existing = await getDoc(ref);
+    if (!existing.exists()) {
+      throw new Error('team-expense-claim-not-found');
+    }
+
+    const existingClaim = mapClaim(id, existing.data() as Record<string, unknown>);
+    const currentStatus = normalizeStatus(existingClaim.status);
+    const nextStatus = normalizeStatus(status);
+    if (!canTransitionStatus(currentStatus, nextStatus)) {
+      throw new Error('team-expense-claim-status-transition-blocked');
+    }
+
     await setDoc(
-      doc(db, COLLECTION_NAME, id),
+      ref,
       stripUndefined({
-        status,
+        status: nextStatus,
         handledById: audit.actorId,
         handledByName: audit.actorName,
         handleMemo: audit.memo,

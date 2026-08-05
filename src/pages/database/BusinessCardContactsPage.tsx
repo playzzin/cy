@@ -7,7 +7,6 @@ import {
     faBell,
     faBuilding,
     faCalendarCheck,
-    faCheck,
     faCircleNotch,
     faClockRotateLeft,
     faEnvelope,
@@ -29,6 +28,8 @@ import type {
     ContactHistoryType,
 } from '../../types/partnerRecognition';
 import PartnerMenuTopNav from '../../components/common/PartnerMenuTopNav';
+import PartnerSearchSelect, { type PartnerSearchSelectOption } from './PartnerSearchSelect';
+import './partnerSuite.css';
 
 const HISTORY_TYPES: Array<{ value: ContactHistoryType; label: string }> = [
     { value: 'call', label: '통화' },
@@ -139,7 +140,9 @@ const BusinessCardContactsPage: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
     const [saving, setSaving] = useState(false);
+    const [draftingContact, setDraftingContact] = useState(false);
     const [form, setForm] = useState<ContactFormState>(emptyContactForm);
     const [histories, setHistories] = useState<BusinessContactHistory[]>([]);
     const [followUps, setFollowUps] = useState<BusinessContactFollowUp[]>([]);
@@ -160,13 +163,25 @@ const BusinessCardContactsPage: React.FC = () => {
         const unsubscribe = partnerRecognitionService.subscribeContacts((nextContacts) => {
             setContacts(nextContacts);
             setLoading(false);
-            setSelectedContactId((prev) => prev || nextContacts[0]?.id || '');
+            setLoadError('');
+            setSelectedContactId((prev) => {
+                if (draftingContact) return prev;
+                if (prev && nextContacts.some((contact) => contact.id === prev)) return prev;
+                return nextContacts[0]?.id || '';
+            });
+        }, 500, (error) => {
+            setLoading(false);
+            setLoadError(error instanceof Error ? error.message : '명함 담당자 목록을 불러오지 못했습니다.');
         });
         return unsubscribe;
-    }, []);
+    }, [draftingContact]);
 
     useEffect(() => {
-        const unsubscribe = partnerRecognitionService.subscribeCardImages(setAllCards);
+        const unsubscribe = partnerRecognitionService.subscribeCardImages((nextCards) => {
+            setAllCards(nextCards);
+        }, 1000, (error) => {
+            setLoadError(error instanceof Error ? error.message : '명함 이미지를 불러오지 못했습니다.');
+        });
         return unsubscribe;
     }, []);
 
@@ -187,6 +202,30 @@ const BusinessCardContactsPage: React.FC = () => {
     );
 
     const selectedCards = selectedContact?.id ? cardsByContactId.get(selectedContact.id) || [] : [];
+
+    const companyOptions = useMemo<PartnerSearchSelectOption[]>(() =>
+        companies
+            .flatMap((company: any): PartnerSearchSelectOption[] => {
+                const value = company.id || '';
+                if (!value) return [];
+                const description = [company.type, company.businessNumber, company.phone]
+                    .filter(Boolean)
+                    .join(' · ');
+                return [{
+                    value,
+                    label: company.name || '(회사명 없음)',
+                    description,
+                    keywords: [
+                        company.name,
+                        company.type,
+                        company.businessNumber,
+                        company.phone,
+                        company.address,
+                    ].filter(Boolean).join(' '),
+                }];
+            }),
+        [companies]
+    );
 
     useEffect(() => {
         setForm(toContactForm(selectedContact));
@@ -297,6 +336,7 @@ const BusinessCardContactsPage: React.FC = () => {
     };
 
     const handleNewContact = () => {
+        setDraftingContact(true);
         setSelectedContactId('');
         setForm(emptyContactForm);
         setHistories([]);
@@ -324,6 +364,7 @@ const BusinessCardContactsPage: React.FC = () => {
                 tags: form.tagsText.split(',').map((tag) => tag.trim()).filter(Boolean),
                 source: selectedContact?.source || 'manual',
             });
+            setDraftingContact(false);
             setSelectedContactId(id);
             alert('담당자 정보가 저장되었습니다.');
         } catch (error) {
@@ -406,57 +447,64 @@ const BusinessCardContactsPage: React.FC = () => {
     };
 
     return (
-        <div className="min-h-screen bg-[#f4f6fa] p-4 text-slate-900 sm:p-6">
-            <div className="mx-auto flex w-full max-w-none flex-col gap-4">
-                <PartnerMenuTopNav className="rounded-lg" />
+        <div className="partner-suite">
+            <div className="partner-suite-shell">
+                <PartnerMenuTopNav />
 
-                <header className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-                    <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
-                        <div className="p-5">
-                            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                                <div>
-                                    <div className="inline-flex items-center gap-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-extrabold text-blue-700">
-                                        <FontAwesomeIcon icon={faAddressCard} />
-                                        Business Card Directory
+                <motion.header
+                    initial={{ opacity: 0, y: 14 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.28 }}
+                    className="partner-hero"
+                >
+                    <div className="partner-hero-grid">
+                        <div className="partner-hero-main">
+                            <div className="partner-hero-content">
+                                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                    <div className="min-w-0">
+                                        <div className="partner-eyebrow">
+                                            <FontAwesomeIcon icon={faAddressCard} />
+                                            Business Card Directory
+                                        </div>
+                                        <h1 className="partner-title">명함/담당자 관리</h1>
+                                        <p className="partner-subtitle">
+                                            명함 이미지, 담당자 정보, 연락 이력, 후속일정을 한 화면에서 검토하고 보강합니다.
+                                        </p>
                                     </div>
-                                    <h1 className="mt-3 text-2xl font-black text-slate-950">명함 목록</h1>
-                                    <p className="mt-1 max-w-3xl text-sm font-semibold leading-6 text-slate-500">
-                                        명함 사진과 담당자 요약을 한 줄에서 비교하고, 연락처 보강·히스토리·후속일정을 바로 관리합니다.
-                                    </p>
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                    <Link
-                                        to="/database/partner-photo-registration"
-                                        className="inline-flex items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-extrabold text-blue-700 transition hover:bg-blue-100"
-                                    >
-                                        <FontAwesomeIcon icon={faPlus} />
-                                        명함 등록
-                                    </Link>
-                                    <button
-                                        type="button"
-                                        onClick={handleNewContact}
-                                        className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-950 px-4 py-2 text-sm font-extrabold text-white transition hover:bg-slate-800"
-                                    >
-                                        <FontAwesomeIcon icon={faUser} />
-                                        담당자 직접 추가
-                                    </button>
+                                    <div className="partner-hero-actions">
+                                        <Link
+                                            to="/database/partner-photo-registration"
+                                            className="partner-btn partner-btn-secondary"
+                                        >
+                                            <FontAwesomeIcon icon={faPlus} />
+                                            명함 등록
+                                        </Link>
+                                        <button
+                                            type="button"
+                                            onClick={handleNewContact}
+                                            className="partner-btn partner-btn-primary"
+                                        >
+                                            <FontAwesomeIcon icon={faUser} />
+                                            담당자 직접 추가
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                        <div className="border-t border-slate-200 bg-slate-950 p-5 text-white lg:border-l lg:border-t-0">
-                            <div className="text-xs font-extrabold uppercase text-blue-200">오늘의 관리 포인트</div>
-                            <div className="mt-3 grid grid-cols-2 gap-2">
+                        <div className="partner-hero-aside">
+                            <div className="text-xs font-black uppercase text-slate-500">오늘의 관리 포인트</div>
+                            <div className="partner-metric-grid mt-3">
                                 {metrics.map((metric) => (
                                     <MetricTile key={metric.label} label={metric.label} value={metric.value} tone={metric.tone} />
                                 ))}
                             </div>
                         </div>
                     </div>
-                </header>
+                </motion.header>
 
                 <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_430px]">
-                    <main className="min-w-0 rounded-lg border border-slate-200 bg-white shadow-sm">
-                        <div className="border-b border-slate-200 p-4">
+                    <main className="partner-panel min-w-0 partner-animate-in">
+                        <div className="partner-panel-header">
                             <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_260px]">
                                 <div className="relative">
                                     <FontAwesomeIcon icon={faMagnifyingGlass} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -467,16 +515,13 @@ const BusinessCardContactsPage: React.FC = () => {
                                         className="h-11 w-full rounded-md border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm font-semibold outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                                     />
                                 </div>
-                                <select
+                                <PartnerSearchSelect
                                     value={selectedCompanyId}
-                                    onChange={(event) => setSelectedCompanyId(event.target.value)}
-                                    className="h-11 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                                >
-                                    <option value="">전체 회사</option>
-                                    {companies.map((company) => (
-                                        <option key={company.id || company.name} value={company.id || ''}>{company.name}</option>
-                                    ))}
-                                </select>
+                                    options={companyOptions}
+                                    placeholder="회사명, 전화, 사업자번호 검색"
+                                    emptyLabel="전체 회사"
+                                    onChange={setSelectedCompanyId}
+                                />
                             </div>
                             <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                                 {quickFilters.map((filter) => (
@@ -497,8 +542,14 @@ const BusinessCardContactsPage: React.FC = () => {
                                     <FontAwesomeIcon icon={faCircleNotch} spin />
                                     명함 목록을 불러오는 중
                                 </div>
+                            ) : loadError ? (
+                                <div className="partner-empty-state flex min-h-[420px] flex-col items-center justify-center p-6 text-center">
+                                    <FontAwesomeIcon icon={faTriangleExclamation} className="text-4xl text-rose-300" />
+                                    <div className="mt-4 text-base font-extrabold text-slate-700">명함 데이터를 불러오지 못했습니다.</div>
+                                    <div className="mt-1 max-w-xl text-sm font-semibold text-slate-500">{loadError}</div>
+                                </div>
                             ) : filteredContacts.length === 0 ? (
-                                <div className="flex min-h-[420px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-center">
+                                <div className="partner-empty-state flex min-h-[420px] flex-col items-center justify-center text-center">
                                     <FontAwesomeIcon icon={faMagnifyingGlass} className="text-4xl text-slate-300" />
                                     <div className="mt-4 text-base font-extrabold text-slate-700">조건에 맞는 명함이 없습니다.</div>
                                     <div className="mt-1 text-sm font-semibold text-slate-500">검색어 또는 필터를 조정해 주세요.</div>
@@ -522,7 +573,10 @@ const BusinessCardContactsPage: React.FC = () => {
                                                     selected={contactId === selectedContactId}
                                                     duplicate={duplicateContactIds.has(contactId)}
                                                     needsInfo={hasMissingContactInfo(contact)}
-                                                    onSelect={() => setSelectedContactId(contactId)}
+                                                    onSelect={() => {
+                                                        setDraftingContact(false);
+                                                        setSelectedContactId(contactId);
+                                                    }}
                                                     onCopy={handleCopy}
                                                 />
                                             );
@@ -542,12 +596,12 @@ const BusinessCardContactsPage: React.FC = () => {
                                     animate={{ opacity: 1, x: 0 }}
                                     exit={{ opacity: 0, x: 18 }}
                                     transition={{ duration: 0.18 }}
-                                    className="rounded-lg border border-slate-200 bg-white shadow-sm"
+                                    className="partner-panel"
                                 >
-                                    <div className="border-b border-slate-200 p-4">
+                                    <div className="partner-panel-header">
                                         <div className="flex items-start justify-between gap-3">
                                             <div className="min-w-0">
-                                                <div className="text-xs font-extrabold text-blue-600">선택 담당자</div>
+                                                <div className="text-xs font-extrabold text-teal-700">선택 담당자</div>
                                                 <h2 className="mt-1 truncate text-xl font-black text-slate-950">
                                                     {selectedContact?.name || form.name || '신규 담당자'}
                                                 </h2>
@@ -559,7 +613,7 @@ const BusinessCardContactsPage: React.FC = () => {
                                                 type="button"
                                                 onClick={handleSaveContact}
                                                 disabled={saving}
-                                                className="inline-flex shrink-0 items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-extrabold text-white transition hover:bg-blue-700 disabled:opacity-50"
+                                                className="partner-btn partner-btn-primary shrink-0"
                                             >
                                                 {saving ? <FontAwesomeIcon icon={faCircleNotch} spin /> : <FontAwesomeIcon icon={faSave} />}
                                                 저장
@@ -569,18 +623,16 @@ const BusinessCardContactsPage: React.FC = () => {
 
                                     <div className="p-4">
                                         <div className="grid grid-cols-1 gap-3">
-                                            <Field label="통합DB 회사">
-                                                <select
+                                            <div className="flex flex-col gap-1 text-sm font-bold text-slate-700">
+                                                <span>통합DB 회사</span>
+                                                <PartnerSearchSelect
                                                     value={form.companyId}
-                                                    onChange={(event) => handleCompanyChange(event.target.value)}
-                                                    className="form-field"
-                                                >
-                                                    <option value="">회사 선택</option>
-                                                    {companies.map((company) => (
-                                                        <option key={company.id || company.name} value={company.id || ''}>{company.name}</option>
-                                                    ))}
-                                                </select>
-                                            </Field>
+                                                    options={companyOptions}
+                                                    placeholder="회사명, 전화, 사업자번호 검색"
+                                                    emptyLabel="회사 선택 해제"
+                                                    onChange={handleCompanyChange}
+                                                />
+                                            </div>
                                             <div className="grid grid-cols-2 gap-3">
                                                 <Field label="이름">
                                                     <input className="form-field" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
@@ -614,9 +666,9 @@ const BusinessCardContactsPage: React.FC = () => {
                                 </motion.section>
                             </AnimatePresence>
 
-                            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                                <h2 className="mb-3 flex items-center gap-2 text-base font-extrabold text-slate-900">
-                                    <FontAwesomeIcon icon={faAddressCard} className="text-blue-600" />
+                            <section className="partner-panel partner-panel-pad partner-animate-in">
+                                <h2 className="partner-section-title mb-3 flex items-center gap-2">
+                                    <FontAwesomeIcon icon={faAddressCard} className="text-teal-700" />
                                     명함 이미지 ({selectedCards.length})
                                 </h2>
                                 {selectedCards.length === 0 ? (
@@ -645,8 +697,8 @@ const BusinessCardContactsPage: React.FC = () => {
                                 )}
                             </section>
 
-                            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                                <h2 className="mb-3 flex items-center gap-2 text-base font-extrabold text-slate-900">
+                            <section className="partner-panel partner-panel-pad partner-animate-in" data-delay="1">
+                                <h2 className="partner-section-title mb-3 flex items-center gap-2">
                                     <FontAwesomeIcon icon={faClockRotateLeft} className="text-slate-500" />
                                     연락/미팅 히스토리
                                 </h2>
@@ -661,7 +713,7 @@ const BusinessCardContactsPage: React.FC = () => {
                                             </div>
                                             <input className="form-field" value={historyForm.title} onChange={(event) => setHistoryForm({ ...historyForm, title: event.target.value })} placeholder="제목" />
                                             <textarea className="form-field min-h-[70px]" value={historyForm.content} onChange={(event) => setHistoryForm({ ...historyForm, content: event.target.value })} placeholder="내용" />
-                                            <button type="button" onClick={handleAddHistory} className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-sm font-bold text-white transition hover:bg-slate-800">
+                                            <button type="button" onClick={handleAddHistory} className="partner-btn partner-btn-primary">
                                                 <FontAwesomeIcon icon={faPlus} />
                                                 히스토리 추가
                                             </button>
@@ -688,8 +740,8 @@ const BusinessCardContactsPage: React.FC = () => {
                                 )}
                             </section>
 
-                            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                                <h2 className="mb-3 flex items-center gap-2 text-base font-extrabold text-slate-900">
+                            <section className="partner-panel partner-panel-pad partner-animate-in" data-delay="1">
+                                <h2 className="partner-section-title mb-3 flex items-center gap-2">
                                     <FontAwesomeIcon icon={faBell} className="text-amber-500" />
                                     후속일정 ({openFollowUps.length})
                                 </h2>
@@ -699,7 +751,7 @@ const BusinessCardContactsPage: React.FC = () => {
                                             <input className="form-field" value={followUpForm.title} onChange={(event) => setFollowUpForm({ ...followUpForm, title: event.target.value })} placeholder="예: 견적서 재송부" />
                                             <input type="date" className="form-field" value={followUpForm.dueDate} onChange={(event) => setFollowUpForm({ ...followUpForm, dueDate: event.target.value })} />
                                             <textarea className="form-field" value={followUpForm.memo} onChange={(event) => setFollowUpForm({ ...followUpForm, memo: event.target.value })} placeholder="메모" />
-                                            <button type="button" onClick={handleAddFollowUp} className="inline-flex items-center justify-center gap-2 rounded-md bg-amber-500 px-3 py-2 text-sm font-bold text-white transition hover:bg-amber-600">
+                                            <button type="button" onClick={handleAddFollowUp} className="partner-btn partner-btn-warning">
                                                 <FontAwesomeIcon icon={faCalendarCheck} />
                                                 일정 추가
                                             </button>
@@ -728,8 +780,8 @@ const BusinessCardContactsPage: React.FC = () => {
                                 )}
                             </section>
 
-                            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                                <h2 className="mb-3 flex items-center gap-2 text-base font-extrabold text-slate-900">
+                            <section className="partner-panel partner-panel-pad partner-animate-in" data-delay="2">
+                                <h2 className="partner-section-title mb-3 flex items-center gap-2">
                                     <FontAwesomeIcon icon={faTriangleExclamation} className="text-amber-500" />
                                     중복 병합
                                 </h2>
@@ -752,7 +804,7 @@ const BusinessCardContactsPage: React.FC = () => {
                                                         type="button"
                                                         onClick={() => contact.id && handleMergeDuplicate(contact.id)}
                                                         disabled={saving}
-                                                        className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-extrabold text-blue-700 transition hover:bg-blue-100 disabled:opacity-50"
+                                                        className="partner-btn partner-btn-soft mt-2 w-full text-xs"
                                                     >
                                                         <FontAwesomeIcon icon={faLink} />
                                                         현재 담당자로 병합
@@ -766,38 +818,6 @@ const BusinessCardContactsPage: React.FC = () => {
                     </aside>
                 </section>
             </div>
-            <style>{`
-                .form-field {
-                    width: 100%;
-                    border-radius: 0.375rem;
-                    border: 1px solid rgb(203 213 225);
-                    background: white;
-                    padding: 0.5rem 0.75rem;
-                    font-size: 0.875rem;
-                    font-weight: 600;
-                    outline: none;
-                    transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
-                }
-                .form-field:focus {
-                    border-color: rgb(59 130 246);
-                    box-shadow: 0 0 0 2px rgb(219 234 254);
-                }
-                .business-card-sheen {
-                    position: relative;
-                    overflow: hidden;
-                }
-                .business-card-sheen:after {
-                    content: '';
-                    position: absolute;
-                    inset: 0;
-                    transform: translateX(-120%);
-                    background: linear-gradient(105deg, transparent 20%, rgba(255,255,255,0.45) 45%, transparent 70%);
-                    transition: transform 650ms ease;
-                }
-                .business-card-row:hover .business-card-sheen:after {
-                    transform: translateX(120%);
-                }
-            `}</style>
         </div>
     );
 };
@@ -820,8 +840,8 @@ const BusinessCardListItem: React.FC<{
             layout
             variants={itemVariants}
             exit={{ opacity: 0, y: -8, transition: { duration: 0.12 } }}
-            whileHover={{ y: -2 }}
-            className={`business-card-row rounded-lg border bg-white shadow-sm transition hover:border-blue-200 hover:shadow-md ${selected ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'}`}
+            whileHover={{ y: -3 }}
+            className={`business-card-row partner-business-card ${selected ? 'is-selected' : ''}`}
         >
             <button type="button" onClick={onSelect} className="grid w-full grid-cols-1 gap-0 text-left lg:grid-cols-[320px_minmax(0,1fr)]">
                 <div className="border-b border-slate-100 p-3 lg:border-b-0 lg:border-r">
@@ -861,7 +881,7 @@ const BusinessCardListItem: React.FC<{
                                 {duplicate && <StatusPill tone="amber" label="중복 의심" />}
                                 {needsInfo && <StatusPill tone="rose" label="연락처 보강" />}
                             </div>
-                            <div className="mt-1 flex min-w-0 items-center gap-2 text-sm font-extrabold text-blue-700">
+                            <div className="mt-1 flex min-w-0 items-center gap-2 text-sm font-extrabold text-teal-700">
                                 <FontAwesomeIcon icon={faBuilding} className="shrink-0" />
                                 <span className="truncate">{contact.companyName || '회사 없음'}</span>
                             </div>
@@ -884,7 +904,7 @@ const BusinessCardListItem: React.FC<{
                                 {tags.length === 0 ? (
                                     <span className="rounded-md bg-slate-50 px-2 py-1 text-xs font-bold text-slate-400">태그 없음</span>
                                 ) : tags.slice(0, 5).map((tag) => (
-                                    <span key={tag} className="rounded-md bg-blue-50 px-2 py-1 text-xs font-extrabold text-blue-700">
+                                    <span key={tag} className="rounded-md bg-teal-50 px-2 py-1 text-xs font-extrabold text-teal-700">
                                         #{tag}
                                     </span>
                                 ))}
@@ -908,16 +928,16 @@ const BusinessCardListItem: React.FC<{
 
 const MetricTile: React.FC<{ label: string; value: number; tone: string }> = ({ label, value, tone }) => {
     const toneClass = tone === 'blue'
-        ? 'bg-blue-500/15 text-blue-100'
+        ? 'border-blue-100'
         : tone === 'amber'
-            ? 'bg-amber-500/15 text-amber-100'
+            ? 'border-amber-100'
             : tone === 'rose'
-                ? 'bg-rose-500/15 text-rose-100'
-                : 'bg-white/10 text-slate-100';
+                ? 'border-rose-100'
+                : 'border-slate-100';
     return (
-        <div className={`rounded-md px-3 py-2 ${toneClass}`}>
-            <div className="text-xl font-black">{value.toLocaleString()}</div>
-            <div className="mt-0.5 text-[11px] font-extrabold opacity-80">{label}</div>
+        <div className={`partner-metric-tile ${toneClass}`}>
+            <div className="partner-metric-value">{value.toLocaleString()}</div>
+            <div className="partner-metric-label">{label}</div>
         </div>
     );
 };
@@ -931,7 +951,7 @@ const QuickFilterButton: React.FC<{
     <button
         type="button"
         onClick={onClick}
-        className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-md border px-3 text-sm font-extrabold transition ${active ? 'border-blue-600 bg-blue-600 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700'}`}
+        className={`partner-btn shrink-0 ${active ? 'partner-btn-primary' : 'partner-btn-secondary'}`}
     >
         <span>{label}</span>
         <span className={`rounded px-1.5 py-0.5 text-[11px] ${active ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
@@ -963,7 +983,7 @@ const ContactAction: React.FC<{
                 event.stopPropagation();
                 onCopy();
             }}
-            className="max-w-[150px] truncate border-l border-slate-200 px-2 py-1.5 text-blue-700 hover:bg-blue-50"
+            className="max-w-[150px] truncate border-l border-slate-200 px-2 py-1.5 text-teal-700 transition hover:bg-teal-50"
             title={`${value} 복사`}
         >
             {value}

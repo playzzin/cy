@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faGoogleDrive
 } from '@fortawesome/free-brands-svg-icons';
 import {
     faFolder, faFile, faFileImage, faFilePdf, faFileWord, faFileExcel,
-    faCloudUploadAlt, faTrash, faDownload, faSpinner, faSignOutAlt,
+    faCloudUploadAlt, faTrash, faSpinner, faSignOutAlt,
     faChevronRight, faHome, faExclamationTriangle, faSync, faFolderOpen
 } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';

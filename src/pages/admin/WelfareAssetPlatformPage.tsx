@@ -1,11 +1,17 @@
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  ArrowDownUp,
+  ChevronLeft,
+  ChevronRight,
   CheckCircle2,
   CircleDollarSign,
   Coins,
   Dice5,
+  Download,
+  Eye,
   FileSpreadsheet,
+  FilterX,
   GitFork,
   History,
   LockKeyhole,
@@ -45,6 +51,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { dailyReportService } from '../../services/dailyReportService';
 import { manpowerService, type Worker } from '../../services/manpowerService';
 import { userService, type UserData } from '../../services/userService';
+import { showConfirmAlert, toast } from '../../utils/swal';
 import {
   validateWelfareDoubleEntry,
   welfareAssetService,
@@ -68,7 +75,8 @@ import type {
   WelfareGameConfig,
   WelfareGamePlay,
   WelfareLedgerPosting,
-  WelfareLedgerTransaction
+  WelfareLedgerTransaction,
+  WelfareTransactionSource
 } from '../../types/welfareAssets';
 import './WelfareAssetPlatformPage.css';
 
@@ -77,6 +85,13 @@ type GamePage = 'roulette' | 'ocean_reel' | 'ladder_odd_even';
 type GamePanelMode = 'play' | 'settings';
 type AdjustmentDirection = 'credit' | 'debit';
 type LadderSide = 'odd' | 'even';
+type SortDirection = 'asc' | 'desc';
+type EmployeeSortKey = 'name' | 'team' | 'cash' | 'point' | 'dailyGamePlays';
+type EmployeeAssetStatus = 'available' | 'using' | 'maintenance' | 'inactive';
+type EmployeeAssetStatusFilter = EmployeeAssetStatus | 'all';
+type LedgerSortKey = 'transactionAt' | 'title' | 'categoryName' | 'cash' | 'point' | 'status';
+type LedgerStatusFilter = WelfareLedgerTransaction['status'] | 'invalid' | 'all';
+type BulkStatusFilter = WelfareBulkActionRow['validationStatus'] | 'all';
 type CSSVariableProperties = React.CSSProperties & { [key: `--${string}`]: string | number };
 
 interface AdjustmentDraft {
@@ -150,6 +165,41 @@ const formatWon = (value: number) => `${formatNumber(value)}원`;
 const formatPoint = (value: number) => `${formatNumber(value)}P`;
 const formatMultiplier = (value: number) => `${Number.isFinite(value) ? Number(value.toFixed(2)) : 0}배`;
 const toText = (value: unknown) => String(value ?? '').trim();
+
+const pageSizeOptions = [10, 20, 50];
+
+const transactionSources: WelfareTransactionSource[] = [
+  'manual_adjustment',
+  'bulk_action',
+  'payroll_sync',
+  'game_play',
+  'store_purchase',
+  'point_expiry',
+  'refund'
+];
+
+const statusToneClass = {
+  available: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:ring-emerald-900',
+  using: 'bg-blue-50 text-blue-700 ring-1 ring-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:ring-blue-900',
+  maintenance: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:ring-amber-900',
+  inactive: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700'
+} satisfies Record<EmployeeAssetStatus, string>;
+
+const employeeStatusLabels: Record<EmployeeAssetStatusFilter, string> = {
+  all: '전체 상태',
+  available: '사용 가능',
+  using: '사용 중',
+  maintenance: '연동 점검',
+  inactive: '비활성'
+};
+
+const ledgerStatusLabels: Record<LedgerStatusFilter, string> = {
+  all: '전체 상태',
+  posted: '반영 완료',
+  pending_review: '검토 대기',
+  voided: '취소',
+  invalid: '검증 오류'
+};
 
 const buildBusinessDate = (date = new Date()) => {
   const koreanTime = new Date(date.getTime() + 9 * 60 * 60 * 1000);
@@ -246,6 +296,89 @@ const getParticipantNames = (transaction: WelfareLedgerTransaction): string => {
     .map((posting) => posting.userName || posting.accountName)
     .filter(Boolean);
   return Array.from(new Set(names)).join(', ');
+};
+
+const normalizeSearchValue = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, '');
+
+const compareText = (left: unknown, right: unknown) => (
+  String(left ?? '').localeCompare(String(right ?? ''), 'ko-KR', { numeric: true, sensitivity: 'base' })
+);
+
+const compareValues = (left: unknown, right: unknown, direction: SortDirection): number => {
+  const leftNumber = typeof left === 'number' ? left : Number(left);
+  const rightNumber = typeof right === 'number' ? right : Number(right);
+  const result = Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
+    ? leftNumber - rightNumber
+    : compareText(left, right);
+  return direction === 'asc' ? result : -result;
+};
+
+const getEmployeeAssetStatus = (employee: EmployeeAssetRow): {
+  value: EmployeeAssetStatus;
+  label: string;
+  description: string;
+} => {
+  const hasLinkedWorker = (employee.linkedWorkers || []).length > 0;
+  const hasBalance = employee.cash > 0 || employee.point > 0;
+
+  if (!hasLinkedWorker) {
+    return {
+      value: 'maintenance',
+      label: employeeStatusLabels.maintenance,
+      description: '작업자 연동 확인 필요'
+    };
+  }
+  if (employee.dailyGamePlays > 0) {
+    return {
+      value: 'using',
+      label: employeeStatusLabels.using,
+      description: '오늘 포인트 게임 이용 기록 있음'
+    };
+  }
+  if (!hasBalance) {
+    return {
+      value: 'inactive',
+      label: employeeStatusLabels.inactive,
+      description: '현재 보유 자산 없음'
+    };
+  }
+  return {
+    value: 'available',
+    label: employeeStatusLabels.available,
+    description: '정상 운영 가능'
+  };
+};
+
+const getLedgerStatusLabel = (transaction: WelfareLedgerTransaction, valid: boolean): string => {
+  if (!valid) return ledgerStatusLabels.invalid;
+  return ledgerStatusLabels[transaction.status] || transaction.status;
+};
+
+const formatSignedWon = (value: number): string => {
+  if (value === 0) return '-';
+  return `${value > 0 ? '+' : '-'}${formatWon(Math.abs(value))}`;
+};
+
+const formatSignedPoint = (value: number): string => {
+  if (value === 0) return '-';
+  return `${value > 0 ? '+' : '-'}${formatPoint(Math.abs(value))}`;
+};
+
+const downloadCsv = (fileName: string, rows: Array<Record<string, string | number>>) => {
+  if (rows.length === 0) return;
+  const headers = Object.keys(rows[0]);
+  const escapeCsvCell = (value: string | number) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const csv = [
+    headers.map(escapeCsvCell).join(','),
+    ...rows.map((row) => headers.map((header) => escapeCsvCell(row[header])).join(','))
+  ].join('\n');
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
 };
 
 const sampleEmployees: EmployeeAssetRow[] = [
@@ -1107,7 +1240,24 @@ const WelfareAssetPlatformPage: React.FC = () => {
   const [auditLogs, setAuditLogs] = useState<WelfareAuditLog[]>([]);
   const [gamePlays, setGamePlays] = useState<WelfareGamePlay[]>([]);
   const [search, setSearch] = useState('');
+  const [employeeSearch, setEmployeeSearch] = useState('');
+  const [employeeStatusFilter, setEmployeeStatusFilter] = useState<EmployeeAssetStatusFilter>('all');
+  const [employeeSort, setEmployeeSort] = useState<{ key: EmployeeSortKey; direction: SortDirection }>({
+    key: 'point',
+    direction: 'desc'
+  });
+  const [employeePage, setEmployeePage] = useState(1);
+  const [employeePageSize, setEmployeePageSize] = useState(10);
+  const [selectedEmployeeDetail, setSelectedEmployeeDetail] = useState<EmployeeAssetRow | null>(null);
   const [assetFilter, setAssetFilter] = useState<WelfareAssetKind | 'all'>('all');
+  const [ledgerStatusFilter, setLedgerStatusFilter] = useState<LedgerStatusFilter>('all');
+  const [ledgerSourceFilter, setLedgerSourceFilter] = useState<WelfareTransactionSource | 'all'>('all');
+  const [ledgerSort, setLedgerSort] = useState<{ key: LedgerSortKey; direction: SortDirection }>({
+    key: 'transactionAt',
+    direction: 'desc'
+  });
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerPageSize, setLedgerPageSize] = useState(20);
   const [gamePage, setGamePage] = useState<GamePage>('roulette');
   const [gamePanelMode, setGamePanelMode] = useState<GamePanelMode>('play');
   const [gameRuleSettings, setGameRuleSettings] = useState<Record<string, GameRuleSettingDraft>>(() => createDefaultGameRuleSettings());
@@ -1131,6 +1281,9 @@ const WelfareAssetPlatformPage: React.FC = () => {
   const [bulkFileName, setBulkFileName] = useState('사용자 DB 기본 지급안');
   const [bulkFileUploaded, setBulkFileUploaded] = useState(false);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkSearch, setBulkSearch] = useState('');
+  const [bulkStatusFilter, setBulkStatusFilter] = useState<BulkStatusFilter>('all');
+  const [selectedBulkRowIds, setSelectedBulkRowIds] = useState<string[]>([]);
   const [adjustmentDraft, setAdjustmentDraft] = useState<AdjustmentDraft>({
     employeeId: '',
     assetKind: 'point',
@@ -1357,6 +1510,63 @@ const WelfareAssetPlatformPage: React.FC = () => {
   const displayedEmployees = employeeRows;
   const displayedTransactions = ledgerTransactions;
   const todayBusinessDate = buildBusinessDate();
+
+  const filteredEmployeeRows = useMemo(() => {
+    const normalized = normalizeSearchValue(employeeSearch);
+    return [...displayedEmployees]
+      .filter((employee) => {
+        const status = getEmployeeAssetStatus(employee);
+        const matchesStatus = employeeStatusFilter === 'all' || status.value === employeeStatusFilter;
+        const matchesText = !normalized || [
+          employee.name,
+          employee.team,
+          employee.role,
+          employee.id,
+          ...(employee.linkedWorkers || []).flatMap((worker) => [worker.id, worker.legacyId, worker.name, worker.teamName])
+        ].some((value) => normalizeSearchValue(value).includes(normalized));
+        return matchesStatus && matchesText;
+      })
+      .sort((left, right) => {
+        const leftValue = employeeSort.key === 'name'
+          ? left.name
+          : employeeSort.key === 'team'
+            ? left.team
+            : left[employeeSort.key];
+        const rightValue = employeeSort.key === 'name'
+          ? right.name
+          : employeeSort.key === 'team'
+            ? right.team
+            : right[employeeSort.key];
+        return compareValues(leftValue, rightValue, employeeSort.direction);
+      });
+  }, [displayedEmployees, employeeSearch, employeeSort.direction, employeeSort.key, employeeStatusFilter]);
+
+  const employeePageCount = Math.max(1, Math.ceil(filteredEmployeeRows.length / employeePageSize));
+  const pagedEmployeeRows = useMemo(() => (
+    filteredEmployeeRows.slice((employeePage - 1) * employeePageSize, employeePage * employeePageSize)
+  ), [employeePage, employeePageSize, filteredEmployeeRows]);
+
+  useEffect(() => {
+    setEmployeePage(1);
+  }, [employeePageSize, employeeSearch, employeeSort.direction, employeeSort.key, employeeStatusFilter]);
+
+  useEffect(() => {
+    setEmployeePage((prev) => Math.min(prev, employeePageCount));
+  }, [employeePageCount]);
+
+  useEffect(() => {
+    if (!selectedEmployeeDetail) return;
+    const nextEmployee = employeeById.get(selectedEmployeeDetail.id);
+    if (nextEmployee) setSelectedEmployeeDetail(nextEmployee);
+  }, [employeeById, selectedEmployeeDetail]);
+
+  const toggleEmployeeSort = (key: EmployeeSortKey) => {
+    setEmployeeSort((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc'
+    }));
+  };
+
   const resolveBulkEmployee = useCallback((row: WelfareBulkActionRow) => (
     employeeById.get(row.employeeId)
     || employeeLookup.get(normalizeComparable(row.employeeId))
@@ -1444,17 +1654,75 @@ const WelfareAssetPlatformPage: React.FC = () => {
   }, [displayedEmployees, displayedTransactions, todayBusinessDate]);
 
   const filteredTransactions = useMemo(() => {
-    const normalized = search.trim().toLowerCase();
-    return displayedTransactions.filter((transaction) => {
+    const normalized = normalizeSearchValue(search);
+    return [...displayedTransactions].filter((transaction) => {
+      const validation = validateWelfareDoubleEntry(transaction.postings);
       const matchesText = !normalized
-        || transaction.title.toLowerCase().includes(normalized)
-        || transaction.categoryName.toLowerCase().includes(normalized)
-        || getParticipantNames(transaction).toLowerCase().includes(normalized);
+        || [
+          transaction.title,
+          transaction.categoryName,
+          getParticipantNames(transaction),
+          transaction.createdByName,
+          transaction.id
+        ].some((value) => normalizeSearchValue(value).includes(normalized));
       const matchesAsset = assetFilter === 'all'
         || transaction.postings.some((posting) => posting.assetKind === assetFilter);
-      return matchesText && matchesAsset;
+      const matchesStatus = ledgerStatusFilter === 'all'
+        || (ledgerStatusFilter === 'invalid' ? !validation.valid : validation.valid && transaction.status === ledgerStatusFilter);
+      const matchesSource = ledgerSourceFilter === 'all' || transaction.source === ledgerSourceFilter;
+      return matchesText && matchesAsset && matchesStatus && matchesSource;
+    }).sort((left, right) => {
+      const leftCash = getUserPostingAmount(left, 'cash');
+      const rightCash = getUserPostingAmount(right, 'cash');
+      const leftPoint = getUserPostingAmount(left, 'point');
+      const rightPoint = getUserPostingAmount(right, 'point');
+      const leftValidation = validateWelfareDoubleEntry(left.postings);
+      const rightValidation = validateWelfareDoubleEntry(right.postings);
+      const leftValue = ledgerSort.key === 'transactionAt'
+        ? getTimestampMillis(left.transactionAt || left.businessDate)
+        : ledgerSort.key === 'cash'
+          ? leftCash
+          : ledgerSort.key === 'point'
+            ? leftPoint
+            : ledgerSort.key === 'status'
+              ? getLedgerStatusLabel(left, leftValidation.valid)
+              : ledgerSort.key === 'title'
+                ? left.title
+                : left.categoryName;
+      const rightValue = ledgerSort.key === 'transactionAt'
+        ? getTimestampMillis(right.transactionAt || right.businessDate)
+        : ledgerSort.key === 'cash'
+          ? rightCash
+          : ledgerSort.key === 'point'
+            ? rightPoint
+            : ledgerSort.key === 'status'
+              ? getLedgerStatusLabel(right, rightValidation.valid)
+              : ledgerSort.key === 'title'
+                ? right.title
+                : right.categoryName;
+      return compareValues(leftValue, rightValue, ledgerSort.direction);
     });
-  }, [assetFilter, displayedTransactions, search]);
+  }, [assetFilter, displayedTransactions, ledgerSort.direction, ledgerSort.key, ledgerSourceFilter, ledgerStatusFilter, search]);
+
+  const ledgerPageCount = Math.max(1, Math.ceil(filteredTransactions.length / ledgerPageSize));
+  const pagedTransactions = useMemo(() => (
+    filteredTransactions.slice((ledgerPage - 1) * ledgerPageSize, ledgerPage * ledgerPageSize)
+  ), [filteredTransactions, ledgerPage, ledgerPageSize]);
+
+  useEffect(() => {
+    setLedgerPage(1);
+  }, [assetFilter, ledgerPageSize, ledgerSort.direction, ledgerSort.key, ledgerSourceFilter, ledgerStatusFilter, search]);
+
+  useEffect(() => {
+    setLedgerPage((prev) => Math.min(prev, ledgerPageCount));
+  }, [ledgerPageCount]);
+
+  const toggleLedgerSort = (key: LedgerSortKey) => {
+    setLedgerSort((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc'
+    }));
+  };
 
   const assetMix = useMemo(() => [
     { name: '캐시', value: totals.cash, color: '#2563eb' },
@@ -1723,6 +1991,48 @@ const WelfareAssetPlatformPage: React.FC = () => {
     && manDayPointSelectedRows.length > 0
     && manDayPointSummary.totalPoint > 0;
   const canSubmitBulk = currentAdminAccess.bulk;
+  const selectedEmployeeTransactions = useMemo(() => (
+    selectedEmployeeDetail
+      ? displayedTransactions
+        .filter((transaction) => transaction.postings.some((posting) => posting.userId === selectedEmployeeDetail.id))
+        .slice(0, 8)
+      : []
+  ), [displayedTransactions, selectedEmployeeDetail]);
+
+  const filteredBulkRows = useMemo(() => {
+    const normalized = normalizeSearchValue(bulkSearch);
+    return bulkRows.filter((row) => {
+      const matchesText = !normalized || [
+        row.employeeName,
+        row.employeeId,
+        row.categoryName,
+        row.memo,
+        row.validationMessage
+      ].some((value) => normalizeSearchValue(value).includes(normalized));
+      const matchesStatus = bulkStatusFilter === 'all' || row.validationStatus === bulkStatusFilter;
+      return matchesText && matchesStatus;
+    });
+  }, [bulkRows, bulkSearch, bulkStatusFilter]);
+
+  const selectedBulkRowSet = useMemo(() => new Set(selectedBulkRowIds), [selectedBulkRowIds]);
+  const selectedBulkRows = useMemo(
+    () => bulkRows.filter((row) => selectedBulkRowSet.has(row.id)),
+    [bulkRows, selectedBulkRowSet]
+  );
+  const visibleBulkRowsSelected = filteredBulkRows.length > 0
+    && filteredBulkRows.every((row) => selectedBulkRowSet.has(row.id));
+  const bulkSummary = useMemo(() => ({
+    ready: bulkRows.filter((row) => row.validationStatus === 'ready').length,
+    warning: bulkRows.filter((row) => row.validationStatus === 'warning').length,
+    error: bulkRows.filter((row) => row.validationStatus === 'error').length,
+    selected: selectedBulkRows.length,
+    selectedReady: selectedBulkRows.filter((row) => row.validationStatus === 'ready').length,
+    totalAmount: bulkRows.reduce((sum, row) => sum + parseAmount(row.amount), 0)
+  }), [bulkRows, selectedBulkRows]);
+
+  useEffect(() => {
+    setSelectedBulkRowIds((prev) => prev.filter((rowId) => bulkRows.some((row) => row.id === rowId)));
+  }, [bulkRows]);
 
   useEffect(() => {
     const countRecordedPlays = (gameId: string) => gamePlays.filter((play) => (
@@ -1894,6 +2204,94 @@ const WelfareAssetPlatformPage: React.FC = () => {
     ))));
   };
 
+  const toggleBulkRowSelection = (rowId: string, checked: boolean) => {
+    setSelectedBulkRowIds((prev) => (
+      checked
+        ? Array.from(new Set([...prev, rowId]))
+        : prev.filter((id) => id !== rowId)
+    ));
+  };
+
+  const toggleVisibleBulkRowsSelection = (checked: boolean) => {
+    const visibleIds = filteredBulkRows.map((row) => row.id);
+    setSelectedBulkRowIds((prev) => {
+      if (checked) return Array.from(new Set([...prev, ...visibleIds]));
+      const visibleSet = new Set(visibleIds);
+      return prev.filter((id) => !visibleSet.has(id));
+    });
+  };
+
+  const updateSelectedBulkRows = (updates: Partial<WelfareBulkActionRow>) => {
+    if (selectedBulkRowIds.length === 0) return;
+    const selectedIds = new Set(selectedBulkRowIds);
+    setBulkRows((prev) => validateBulkRows(prev.map((row) => (
+      selectedIds.has(row.id) ? { ...row, ...updates } : row
+    ))));
+  };
+
+  const deleteSelectedBulkRows = async () => {
+    if (selectedBulkRowIds.length === 0) return;
+    const result = await showConfirmAlert(
+      '선택 행 삭제',
+      `선택한 ${selectedBulkRowIds.length}개 일괄 처리 행을 목록에서 제거할까요? Firestore에는 아직 반영되지 않은 편집 목록입니다.`,
+      '삭제'
+    );
+    if (!result.isConfirmed) return;
+    const selectedIds = new Set(selectedBulkRowIds);
+    setBulkRows((prev) => prev.filter((row) => !selectedIds.has(row.id)));
+    setSelectedBulkRowIds([]);
+    toast.deleted('일괄 처리 행', selectedIds.size);
+  };
+
+  const clearEmployeeFilters = () => {
+    setEmployeeSearch('');
+    setEmployeeStatusFilter('all');
+    setEmployeeSort({ key: 'point', direction: 'desc' });
+  };
+
+  const clearLedgerFilters = () => {
+    setSearch('');
+    setAssetFilter('all');
+    setLedgerStatusFilter('all');
+    setLedgerSourceFilter('all');
+    setLedgerSort({ key: 'transactionAt', direction: 'desc' });
+  };
+
+  const exportEmployeesCsv = () => {
+    downloadCsv(`welfare-employees-${buildBusinessDate()}.csv`, filteredEmployeeRows.map((employee) => {
+      const status = getEmployeeAssetStatus(employee);
+      return {
+        이름: employee.name,
+        팀: employee.team,
+        직무: employee.role,
+        상태: status.label,
+        캐시: employee.cash,
+        포인트: employee.point,
+        만료일: employee.pointExpiresAt,
+        게임횟수: employee.dailyGamePlays,
+        연결작업자: (employee.linkedWorkers || []).map((worker) => worker.name).join('|')
+      };
+    }));
+  };
+
+  const exportLedgerCsv = () => {
+    downloadCsv(`welfare-ledger-${buildBusinessDate()}.csv`, filteredTransactions.map((transaction) => {
+      const validation = validateWelfareDoubleEntry(transaction.postings);
+      return {
+        일시: formatTransactionTime(transaction.transactionAt),
+        제목: transaction.title,
+        사용자: getParticipantNames(transaction),
+        항목: transaction.categoryName,
+        소스: getSourceLabel(transaction.source),
+        상태: getLedgerStatusLabel(transaction, validation.valid),
+        캐시: getUserPostingAmount(transaction, 'cash'),
+        포인트: getUserPostingAmount(transaction, 'point'),
+        작성자: transaction.createdByName || '',
+        ID: transaction.id
+      };
+    }));
+  };
+
   const submitAdjustment = async () => {
     if (adjustmentSubmitKeyRef.current) return;
     if (!selectedAdjustmentEmployee || !selectedAdjustmentCategory || signedAdjustmentAmount === 0) return;
@@ -1901,6 +2299,13 @@ const WelfareAssetPlatformPage: React.FC = () => {
       setActionMessage({ tone: 'error', text: '해당 자산을 지급/회수할 권한이 없습니다.' });
       return;
     }
+
+    const confirmResult = await showConfirmAlert(
+      '수동 조정 반영',
+      `${selectedAdjustmentEmployee.name}님에게 ${getAssetLabel(adjustmentDraft.assetKind)} ${adjustmentDraft.direction === 'credit' ? '지급' : '회수'} ${adjustmentDraft.assetKind === 'cash' ? formatWon(Math.abs(signedAdjustmentAmount)) : formatPoint(Math.abs(signedAdjustmentAmount))}를 반영할까요?`,
+      '반영'
+    );
+    if (!confirmResult.isConfirmed) return;
 
     const requestKey = createClientRequestId('manual-adjustment');
     adjustmentSubmitKeyRef.current = requestKey;
@@ -1932,10 +2337,13 @@ const WelfareAssetPlatformPage: React.FC = () => {
 
       setAdjustmentDraft((prev) => ({ ...prev, amount: '', memo: '' }));
       setActionMessage({ tone: 'success', text: '지급/회수 거래를 원장에 반영했습니다.' });
+      toast.success('복지 자산 조정이 반영되었습니다.');
       await loadUserAssetData();
     } catch (error) {
       console.error('[WelfareAssetPlatformPage] failed to submit adjustment', error);
-      setActionMessage({ tone: 'error', text: formatWelfareActionError(error) });
+      const message = formatWelfareActionError(error);
+      setActionMessage({ tone: 'error', text: message });
+      toast.error(message);
     } finally {
       adjustmentSubmitKeyRef.current = null;
       setAdjustmentSubmitting(false);
@@ -2038,6 +2446,13 @@ const WelfareAssetPlatformPage: React.FC = () => {
       return;
     }
 
+    const confirmResult = await showConfirmAlert(
+      '공수 포인트 지급',
+      `${manDayPointSelectedRows.length}명에게 총 ${formatPoint(manDayPointSummary.totalPoint)}를 지급할까요? 기간 ${manDayPointGrantDraft.startDate} ~ ${manDayPointGrantDraft.endDate}`,
+      '지급'
+    );
+    if (!confirmResult.isConfirmed) return;
+
     const requestKey = createClientRequestId('man-day-point-grant');
     manDayPointSubmitKeyRef.current = requestKey;
     setManDayPointSubmitting(true);
@@ -2093,10 +2508,13 @@ const WelfareAssetPlatformPage: React.FC = () => {
         paidEmployeeIds.has(row.employeeId) ? { ...row, included: false } : row
       )));
       setActionMessage({ tone: 'success', text: `${manDayPointSelectedRows.length}명에게 ${formatPoint(manDayPointSummary.totalPoint)}를 지급했습니다.` });
+      toast.success('공수 포인트 지급이 완료되었습니다.');
       await loadUserAssetData();
     } catch (error) {
       console.error('[WelfareAssetPlatformPage] failed to submit man-day point grant', error);
-      setActionMessage({ tone: 'error', text: formatWelfareActionError(error) });
+      const message = formatWelfareActionError(error);
+      setActionMessage({ tone: 'error', text: message });
+      toast.error(message);
     } finally {
       manDayPointSubmitKeyRef.current = null;
       setManDayPointSubmitting(false);
@@ -2112,11 +2530,23 @@ const WelfareAssetPlatformPage: React.FC = () => {
 
     const validated = validateBulkRows(bulkRows);
     setBulkRows(validated);
-    const readyRows = validated.filter((row) => row.validationStatus === 'ready');
+    const selectedIds = new Set(selectedBulkRowIds);
+    const targetRows = selectedIds.size > 0
+      ? validated.filter((row) => selectedIds.has(row.id))
+      : validated;
+    const readyRows = targetRows.filter((row) => row.validationStatus === 'ready');
     if (readyRows.length === 0) {
-      setActionMessage({ tone: 'error', text: '처리 가능한 일괄 지급/회수 행이 없습니다.' });
+      setActionMessage({ tone: 'error', text: selectedIds.size > 0 ? '선택한 행 중 처리 가능한 행이 없습니다.' : '처리 가능한 일괄 지급/회수 행이 없습니다.' });
       return;
     }
+
+    const readyTotalAmount = readyRows.reduce((sum, row) => sum + parseAmount(row.amount), 0);
+    const confirmResult = await showConfirmAlert(
+      '일괄 원장 반영',
+      `${selectedIds.size > 0 ? '선택한 행 중 ' : ''}${readyRows.length}건을 원장에 반영할까요? 합계 ${readyTotalAmount >= 0 ? '+' : '-'}${formatNumber(Math.abs(readyTotalAmount))}`,
+      '반영'
+    );
+    if (!confirmResult.isConfirmed) return;
 
     const postings = readyRows.flatMap((row) => {
       const employee = resolveBulkEmployee(row);
@@ -2164,15 +2594,20 @@ const WelfareAssetPlatformPage: React.FC = () => {
       });
 
       setActionMessage({ tone: 'success', text: `${readyRows.length}건을 원장에 반영했습니다.` });
+      toast.success(`일괄 처리 ${readyRows.length}건이 반영되었습니다.`);
+      const processedRowIds = new Set(readyRows.map((row) => row.id));
       setBulkRows((prev) => prev.map((row) => (
-        row.validationStatus === 'ready'
+        processedRowIds.has(row.id)
           ? { ...row, amount: 0, validationStatus: 'warning', validationMessage: '처리 완료, 다음 금액 입력 가능' }
           : row
       )));
+      setSelectedBulkRowIds([]);
       await loadUserAssetData();
     } catch (error) {
       console.error('[WelfareAssetPlatformPage] failed to submit bulk rows', error);
-      setActionMessage({ tone: 'error', text: formatWelfareActionError(error) });
+      const message = formatWelfareActionError(error);
+      setActionMessage({ tone: 'error', text: message });
+      toast.error(message);
     } finally {
       bulkSubmitKeyRef.current = null;
       setBulkSubmitting(false);
@@ -2185,16 +2620,26 @@ const WelfareAssetPlatformPage: React.FC = () => {
       return;
     }
 
+    const confirmResult = await showConfirmAlert(
+      '항목 비활성화',
+      `${category.name} 항목을 비활성화할까요? 기존 원장 기록은 유지됩니다.`,
+      '비활성화'
+    );
+    if (!confirmResult.isConfirmed) return;
+
     setCategorySaving(true);
     setActionMessage(null);
     try {
       await welfareAssetService.deleteCategory(category.id);
       setCategories((prev) => prev.filter((item) => item.id !== category.id));
       setActionMessage({ tone: 'success', text: '항목을 비활성화했습니다.' });
+      toast.success('복지 자산 항목을 비활성화했습니다.');
       void loadUserAssetData();
     } catch (error) {
       console.error('[WelfareAssetPlatformPage] failed to delete category', error);
-      setActionMessage({ tone: 'error', text: error instanceof Error ? error.message : '항목 삭제에 실패했습니다.' });
+      const message = error instanceof Error ? error.message : '항목 삭제에 실패했습니다.';
+      setActionMessage({ tone: 'error', text: message });
+      toast.error(message);
     } finally {
       setCategorySaving(false);
     }
@@ -2684,6 +3129,69 @@ const WelfareAssetPlatformPage: React.FC = () => {
     </div>
   );
 
+  const renderSortButton = (
+    label: string,
+    active: boolean,
+    direction: SortDirection,
+    onClick: () => void
+  ) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cx(
+        'inline-flex items-center gap-1 font-black transition-colors hover:text-slate-900 dark:hover:text-white',
+        active ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400'
+      )}
+    >
+      {label}
+      <ArrowDownUp size={12} className={cx(active && direction === 'asc' && 'rotate-180')} />
+    </button>
+  );
+
+  const renderPagination = (
+    page: number,
+    pageCount: number,
+    pageSize: number,
+    total: number,
+    onPageChange: (nextPage: number) => void,
+    onPageSizeChange: (nextSize: number) => void
+  ) => (
+    <div className="flex flex-col gap-2 border-t border-slate-100 px-4 py-3 text-xs font-bold text-slate-500 dark:border-slate-800 dark:text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        총 {formatNumber(total)}건 · {formatNumber(page)} / {formatNumber(pageCount)}페이지
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={pageSize}
+          onChange={(event) => onPageSizeChange(Number(event.target.value))}
+          className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+        >
+          {pageSizeOptions.map((size) => (
+            <option key={size} value={size}>{size}개</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={page <= 1}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+          aria-label="이전 페이지"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.min(pageCount, page + 1))}
+          disabled={page >= pageCount}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+          aria-label="다음 페이지"
+        >
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className={cx(darkMode && 'dark')}>
       <main className="min-h-screen bg-slate-100 text-slate-950 dark:bg-slate-950 dark:text-slate-100">
@@ -2833,43 +3341,130 @@ const WelfareAssetPlatformPage: React.FC = () => {
 
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.8fr)]">
                 <div className="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-                    <h2 className="text-base font-black text-slate-950 dark:text-white">구성원 자산 현황</h2>
-                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400">{displayedEmployees.length}명</span>
+                  <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <h2 className="text-base font-black text-slate-950 dark:text-white">구성원 자산 현황</h2>
+                        <p className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">
+                          전체 {formatNumber(displayedEmployees.length)}명 · 조회 {formatNumber(filteredEmployeeRows.length)}명
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="relative min-w-[220px] flex-1 sm:flex-none">
+                          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                          <input
+                            value={employeeSearch}
+                            onChange={(event) => setEmployeeSearch(event.target.value)}
+                            className="h-9 w-full rounded-md border border-slate-200 bg-white pl-9 pr-3 text-sm font-bold text-slate-900 outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                            placeholder="이름, 팀, 작업자 검색"
+                          />
+                        </label>
+                        <select
+                          value={employeeStatusFilter}
+                          onChange={(event) => setEmployeeStatusFilter(event.target.value as EmployeeAssetStatusFilter)}
+                          className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                        >
+                          {Object.entries(employeeStatusLabels).map(([value, label]) => (
+                            <option key={value} value={value}>{label}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={clearEmployeeFilters}
+                          className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
+                        >
+                          <FilterX size={14} />
+                          초기화
+                        </button>
+                        <button
+                          type="button"
+                          onClick={exportEmployeesCsv}
+                          disabled={filteredEmployeeRows.length === 0}
+                          className="inline-flex h-9 items-center gap-2 rounded-md bg-slate-900 px-3 text-xs font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
+                        >
+                          <Download size={14} />
+                          CSV
+                        </button>
+                      </div>
+                    </div>
                   </div>
                   <div className="overflow-auto">
-                    <table className="w-full min-w-[760px] text-sm">
+                    <table className="w-full min-w-[980px] text-sm">
                       <thead className="bg-slate-50 text-xs text-slate-500 dark:bg-slate-950 dark:text-slate-400">
                         <tr>
-                          <th className="px-4 py-3 text-left">구성원</th>
-                          <th className="px-4 py-3 text-left">팀</th>
-                          <th className="px-4 py-3 text-right">캐시</th>
-                          <th className="px-4 py-3 text-right">포인트</th>
+                          <th className="px-4 py-3 text-left">{renderSortButton('구성원', employeeSort.key === 'name', employeeSort.direction, () => toggleEmployeeSort('name'))}</th>
+                          <th className="px-4 py-3 text-left">{renderSortButton('팀', employeeSort.key === 'team', employeeSort.direction, () => toggleEmployeeSort('team'))}</th>
+                          <th className="px-4 py-3 text-left">상태</th>
+                          <th className="px-4 py-3 text-right">{renderSortButton('캐시', employeeSort.key === 'cash', employeeSort.direction, () => toggleEmployeeSort('cash'))}</th>
+                          <th className="px-4 py-3 text-right">{renderSortButton('포인트', employeeSort.key === 'point', employeeSort.direction, () => toggleEmployeeSort('point'))}</th>
                           <th className="px-4 py-3 text-left">만료일</th>
-                          <th className="px-4 py-3 text-right">게임</th>
+                          <th className="px-4 py-3 text-right">{renderSortButton('게임', employeeSort.key === 'dailyGamePlays', employeeSort.direction, () => toggleEmployeeSort('dailyGamePlays'))}</th>
+                          <th className="px-4 py-3 text-right">관리</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                        {displayedEmployees.map((employee) => (
-                          <tr key={employee.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/60">
-                            <td className="px-4 py-3 font-black text-slate-900 dark:text-white">{employee.name}</td>
-                            <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{employee.team}</td>
-                            <td className="px-4 py-3 text-right font-bold tabular-nums">{formatWon(employee.cash)}</td>
-                            <td className="px-4 py-3 text-right font-bold tabular-nums">{formatPoint(employee.point)}</td>
-                            <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{employee.pointExpiresAt}</td>
-                            <td className="px-4 py-3 text-right font-bold tabular-nums">{employee.dailyGamePlays}/3</td>
-                          </tr>
-                        ))}
-                        {displayedEmployees.length === 0 && (
+                        {pagedEmployeeRows.map((employee) => {
+                          const status = getEmployeeAssetStatus(employee);
+                          return (
+                            <tr key={employee.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/60">
+                              <td className="px-4 py-3">
+                                <div className="font-black text-slate-900 dark:text-white">{employee.name}</div>
+                                <div className="text-xs font-bold text-slate-500">{employee.role || employee.id}</div>
+                              </td>
+                              <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{employee.team}</td>
+                              <td className="px-4 py-3">
+                                <span title={status.description} className={cx('inline-flex items-center rounded-md px-2 py-1 text-xs font-black', statusToneClass[status.value])}>
+                                  {status.label}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-right font-bold tabular-nums">{formatWon(employee.cash)}</td>
+                              <td className="px-4 py-3 text-right font-bold tabular-nums">{formatPoint(employee.point)}</td>
+                              <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{employee.pointExpiresAt}</td>
+                              <td className="px-4 py-3 text-right font-bold tabular-nums">{employee.dailyGamePlays}/3</td>
+                              <td className="px-4 py-3 text-right">
+                                <div className="inline-flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedEmployeeDetail(employee)}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-white"
+                                    aria-label={`${employee.name} 상세 보기`}
+                                  >
+                                    <Eye size={15} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setAdjustmentDraft((prev) => ({ ...prev, employeeId: employee.id }));
+                                      setActiveTab('ledger');
+                                    }}
+                                    className="inline-flex h-8 items-center gap-1 rounded-md border border-blue-200 px-2 text-xs font-black text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950"
+                                  >
+                                    <Plus size={14} />
+                                    조정
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {filteredEmployeeRows.length === 0 && (
                           <tr>
-                            <td colSpan={6} className="px-4 py-10 text-center text-sm font-bold text-slate-500 dark:text-slate-400">
-                              사용자 DB에 표시할 구성원이 없습니다.
+                            <td colSpan={8} className="px-4 py-10 text-center text-sm font-bold text-slate-500 dark:text-slate-400">
+                              조건에 맞는 구성원이 없습니다. 필터를 초기화하거나 사용자 DB/작업자 연동 상태를 확인해 주세요.
                             </td>
                           </tr>
                         )}
                       </tbody>
                     </table>
                   </div>
+                  {renderPagination(
+                    employeePage,
+                    employeePageCount,
+                    employeePageSize,
+                    filteredEmployeeRows.length,
+                    setEmployeePage,
+                    setEmployeePageSize
+                  )}
                 </div>
 
                 <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -2909,8 +3504,43 @@ const WelfareAssetPlatformPage: React.FC = () => {
 
           {activeTab === 'ledger' && (
             <section className="space-y-4">
-              <div className="flex flex-col gap-3 rounded-md border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-1 flex-col gap-2 sm:flex-row">
+              <div className="flex flex-col gap-3 rounded-md border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                  <div>
+                    <h2 className="text-base font-black text-slate-950 dark:text-white">자산 원장 조회</h2>
+                    <p className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">
+                      조회 {formatNumber(filteredTransactions.length)}건 · 전체 {formatNumber(displayedTransactions.length)}건
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={clearLedgerFilters}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      <FilterX size={16} />
+                      필터 초기화
+                    </button>
+                    <button
+                      type="button"
+                      onClick={exportLedgerCsv}
+                      disabled={filteredTransactions.length === 0}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      <Download size={16} />
+                      CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('ledger')}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-black text-white hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
+                    >
+                      <Plus size={16} />
+                      수동 조정
+                    </button>
+                  </div>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_150px_150px_170px]">
                   <label className="relative min-w-[260px] flex-1">
                     <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input
@@ -2929,15 +3559,26 @@ const WelfareAssetPlatformPage: React.FC = () => {
                     <option value="cash">캐시</option>
                     <option value="point">포인트</option>
                   </select>
+                  <select
+                    value={ledgerStatusFilter}
+                    onChange={(event) => setLedgerStatusFilter(event.target.value as LedgerStatusFilter)}
+                    className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                  >
+                    {Object.entries(ledgerStatusLabels).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={ledgerSourceFilter}
+                    onChange={(event) => setLedgerSourceFilter(event.target.value as WelfareTransactionSource | 'all')}
+                    className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                  >
+                    <option value="all">전체 소스</option>
+                    {transactionSources.map((source) => (
+                      <option key={source} value={source}>{getSourceLabel(source)}</option>
+                    ))}
+                  </select>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('ledger')}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-black text-white hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
-                >
-                  <Plus size={16} />
-                  수동 조정
-                </button>
               </div>
 
               <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -3199,21 +3840,22 @@ const WelfareAssetPlatformPage: React.FC = () => {
                   <table className="w-full min-w-[1120px] text-sm">
                     <thead className="bg-slate-50 text-xs text-slate-500 dark:bg-slate-950 dark:text-slate-400">
                       <tr>
-                        <th className="px-4 py-3 text-left">일시</th>
-                        <th className="px-4 py-3 text-left">원장</th>
+                        <th className="px-4 py-3 text-left">{renderSortButton('일시', ledgerSort.key === 'transactionAt', ledgerSort.direction, () => toggleLedgerSort('transactionAt'))}</th>
+                        <th className="px-4 py-3 text-left">{renderSortButton('원장', ledgerSort.key === 'title', ledgerSort.direction, () => toggleLedgerSort('title'))}</th>
                         <th className="px-4 py-3 text-left">사용자</th>
-                        <th className="px-4 py-3 text-left">항목</th>
-                        <th className="px-4 py-3 text-right">캐시</th>
-                        <th className="px-4 py-3 text-right">포인트</th>
+                        <th className="px-4 py-3 text-left">{renderSortButton('항목', ledgerSort.key === 'categoryName', ledgerSort.direction, () => toggleLedgerSort('categoryName'))}</th>
+                        <th className="px-4 py-3 text-right">{renderSortButton('캐시', ledgerSort.key === 'cash', ledgerSort.direction, () => toggleLedgerSort('cash'))}</th>
+                        <th className="px-4 py-3 text-right">{renderSortButton('포인트', ledgerSort.key === 'point', ledgerSort.direction, () => toggleLedgerSort('point'))}</th>
                         <th className="px-4 py-3 text-left">작성자</th>
-                        <th className="px-4 py-3 text-left">검증</th>
+                        <th className="px-4 py-3 text-left">{renderSortButton('상태', ledgerSort.key === 'status', ledgerSort.direction, () => toggleLedgerSort('status'))}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {filteredTransactions.map((transaction) => {
+                      {pagedTransactions.map((transaction) => {
                         const cashAmount = getUserPostingAmount(transaction, 'cash');
                         const pointAmount = getUserPostingAmount(transaction, 'point');
                         const validation = validateWelfareDoubleEntry(transaction.postings);
+                        const ledgerStatusLabel = getLedgerStatusLabel(transaction, validation.valid);
                         return (
                           <tr key={transaction.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/60">
                             <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{formatTransactionTime(transaction.transactionAt)}</td>
@@ -3228,10 +3870,10 @@ const WelfareAssetPlatformPage: React.FC = () => {
                               </span>
                             </td>
                             <td className={cx('px-4 py-3 text-right font-black tabular-nums', cashAmount >= 0 ? 'text-blue-600' : 'text-rose-600')}>
-                              {cashAmount === 0 ? '-' : formatWon(cashAmount)}
+                              {formatSignedWon(cashAmount)}
                             </td>
                             <td className={cx('px-4 py-3 text-right font-black tabular-nums', pointAmount >= 0 ? 'text-emerald-600' : 'text-rose-600')}>
-                              {pointAmount === 0 ? '-' : formatPoint(pointAmount)}
+                              {formatSignedPoint(pointAmount)}
                             </td>
                             <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{transaction.createdByName}</td>
                             <td className="px-4 py-3">
@@ -3240,7 +3882,7 @@ const WelfareAssetPlatformPage: React.FC = () => {
                                 validation.valid ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
                               )}>
                                 {validation.valid ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
-                                {validation.valid ? 'posted' : 'blocked'}
+                                {ledgerStatusLabel}
                               </span>
                             </td>
                           </tr>
@@ -3256,6 +3898,14 @@ const WelfareAssetPlatformPage: React.FC = () => {
                     </tbody>
                   </table>
                 </div>
+                {renderPagination(
+                  ledgerPage,
+                  ledgerPageCount,
+                  ledgerPageSize,
+                  filteredTransactions.length,
+                  setLedgerPage,
+                  setLedgerPageSize
+                )}
               </div>
             </section>
           )}
@@ -4481,7 +5131,9 @@ const WelfareAssetPlatformPage: React.FC = () => {
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                       <h2 className="text-base font-black text-slate-950 dark:text-white">일괄 지급/회수</h2>
-                      <div className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">{bulkFileName} · {bulkRows.length}행</div>
+                      <div className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">
+                        {bulkFileName} · 전체 {formatNumber(bulkRows.length)}행 · 조회 {formatNumber(filteredBulkRows.length)}행
+                      </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800">
@@ -4496,7 +5148,73 @@ const WelfareAssetPlatformPage: React.FC = () => {
                         className="inline-flex h-10 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-black text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
                       >
                         <ShieldCheck size={16} className={bulkSubmitting ? 'animate-spin' : ''} />
-                        원장 반영
+                        {selectedBulkRowIds.length > 0 ? '선택 반영' : '원장 반영'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid gap-2 text-xs font-black text-slate-600 dark:text-slate-300 sm:grid-cols-2 xl:grid-cols-5">
+                    <span className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">준비 {formatNumber(bulkSummary.ready)}건</span>
+                    <span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">주의 {formatNumber(bulkSummary.warning)}건</span>
+                    <span className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300">오류 {formatNumber(bulkSummary.error)}건</span>
+                    <span className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300">선택 {formatNumber(bulkSummary.selected)}건</span>
+                    <span className="rounded-md border border-slate-200 px-3 py-2 dark:border-slate-700">합계 {bulkSummary.totalAmount >= 0 ? '+' : '-'}{formatNumber(Math.abs(bulkSummary.totalAmount))}</span>
+                  </div>
+                  <div className="mt-4 grid gap-2 md:grid-cols-[minmax(220px,1fr)_160px_auto]">
+                    <label className="relative">
+                      <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        value={bulkSearch}
+                        onChange={(event) => setBulkSearch(event.target.value)}
+                        className="h-10 w-full rounded-md border border-slate-200 bg-white pl-9 pr-3 text-sm font-bold text-slate-900 outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                        placeholder="직원, 항목, 메모 검색"
+                      />
+                    </label>
+                    <select
+                      value={bulkStatusFilter}
+                      onChange={(event) => setBulkStatusFilter(event.target.value as BulkStatusFilter)}
+                      className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                    >
+                      <option value="all">전체 상태</option>
+                      <option value="ready">준비</option>
+                      <option value="warning">주의</option>
+                      <option value="error">오류</option>
+                    </select>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBulkSearch('');
+                          setBulkStatusFilter('all');
+                        }}
+                        className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
+                      >
+                        <FilterX size={14} />
+                        초기화
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateSelectedBulkRows({ assetKind: 'point' })}
+                        disabled={selectedBulkRowIds.length === 0}
+                        className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
+                      >
+                        포인트 전환
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateSelectedBulkRows({ assetKind: 'cash' })}
+                        disabled={selectedBulkRowIds.length === 0}
+                        className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
+                      >
+                        캐시 전환
+                      </button>
+                      <button
+                        type="button"
+                        onClick={deleteSelectedBulkRows}
+                        disabled={selectedBulkRowIds.length === 0}
+                        className="inline-flex h-10 items-center gap-2 rounded-md border border-rose-200 bg-white px-3 text-xs font-black text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-rose-900 dark:bg-slate-950 dark:text-rose-300 dark:hover:bg-rose-950"
+                      >
+                        <Trash2 size={14} />
+                        선택 삭제
                       </button>
                     </div>
                   </div>
@@ -4504,9 +5222,18 @@ const WelfareAssetPlatformPage: React.FC = () => {
 
                 <div className="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <div className="overflow-auto">
-                    <table className="w-full min-w-[860px] text-sm">
+                    <table className="w-full min-w-[940px] text-sm">
                       <thead className="bg-slate-50 text-xs text-slate-500 dark:bg-slate-950 dark:text-slate-400">
                         <tr>
+                          <th className="w-12 px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={visibleBulkRowsSelected}
+                              onChange={(event) => toggleVisibleBulkRowsSelection(event.target.checked)}
+                              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                              aria-label="현재 조회 행 전체 선택"
+                            />
+                          </th>
                           <th className="px-4 py-3 text-left">직원</th>
                           <th className="px-4 py-3 text-left">자산</th>
                           <th className="px-4 py-3 text-right">금액</th>
@@ -4516,8 +5243,17 @@ const WelfareAssetPlatformPage: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                        {bulkRows.map((row) => (
+                        {filteredBulkRows.map((row) => (
                           <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/60">
+                            <td className="px-4 py-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={selectedBulkRowSet.has(row.id)}
+                                onChange={(event) => toggleBulkRowSelection(row.id, event.target.checked)}
+                                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                aria-label={`${row.employeeName} 행 선택`}
+                              />
+                            </td>
                             <td className="px-4 py-3">
                               <div className="font-black text-slate-900 dark:text-white">{row.employeeName}</div>
                               <div className="text-xs font-bold text-slate-500">{row.employeeId}</div>
@@ -4579,6 +5315,13 @@ const WelfareAssetPlatformPage: React.FC = () => {
                             </td>
                           </tr>
                         ))}
+                        {filteredBulkRows.length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="px-4 py-10 text-center text-sm font-bold text-slate-500 dark:text-slate-400">
+                              조건에 맞는 일괄 처리 행이 없습니다. 파일을 다시 선택하거나 필터를 초기화해 주세요.
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -4830,6 +5573,114 @@ const WelfareAssetPlatformPage: React.FC = () => {
               </div>
             </section>
           )}
+
+          {selectedEmployeeDetail && (() => {
+            const status = getEmployeeAssetStatus(selectedEmployeeDetail);
+            return (
+              <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/35 p-3 backdrop-blur-sm sm:items-center" role="dialog" aria-modal="true" aria-label={`${selectedEmployeeDetail.name} 자산 상세`}>
+                <div className="max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-md border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="text-lg font-black text-slate-950 dark:text-white">{selectedEmployeeDetail.name}</h2>
+                        <span className={cx('inline-flex items-center rounded-md px-2 py-1 text-xs font-black', statusToneClass[status.value])}>
+                          {status.label}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">
+                        {selectedEmployeeDetail.team} · {selectedEmployeeDetail.role || selectedEmployeeDetail.id}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedEmployeeDetail(null)}
+                      className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 px-3 text-sm font-black text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    >
+                      닫기
+                    </button>
+                  </div>
+                  <div className="max-h-[calc(92vh-72px)] overflow-auto p-5">
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+                        <div className="text-xs font-black text-slate-500 dark:text-slate-400">캐시/크레딧</div>
+                        <div className="mt-2 text-xl font-black tabular-nums text-slate-950 dark:text-white">{formatWon(selectedEmployeeDetail.cash)}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+                        <div className="text-xs font-black text-slate-500 dark:text-slate-400">포인트</div>
+                        <div className="mt-2 text-xl font-black tabular-nums text-emerald-600 dark:text-emerald-300">{formatPoint(selectedEmployeeDetail.point)}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+                        <div className="text-xs font-black text-slate-500 dark:text-slate-400">오늘 게임</div>
+                        <div className="mt-2 text-xl font-black tabular-nums text-slate-950 dark:text-white">{selectedEmployeeDetail.dailyGamePlays}/3</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                      <div className="rounded-md border border-slate-200 p-4 dark:border-slate-800">
+                        <h3 className="text-sm font-black text-slate-950 dark:text-white">연결 작업자</h3>
+                        <div className="mt-3 space-y-2">
+                          {(selectedEmployeeDetail.linkedWorkers || []).map((worker) => (
+                            <div key={worker.id} className="rounded-md bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 dark:bg-slate-950 dark:text-slate-200">
+                              <div>{worker.name}</div>
+                              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{worker.teamName} · {worker.role || worker.id}</div>
+                            </div>
+                          ))}
+                          {(selectedEmployeeDetail.linkedWorkers || []).length === 0 && (
+                            <div className="rounded-md border border-dashed border-amber-300 px-3 py-6 text-center text-sm font-bold text-amber-700 dark:border-amber-900 dark:text-amber-300">
+                              연결된 작업자가 없습니다. 공수 기반 포인트 지급 전에 사용자-작업자 연결을 확인해 주세요.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="rounded-md border border-slate-200 p-4 dark:border-slate-800">
+                        <h3 className="text-sm font-black text-slate-950 dark:text-white">최근 원장</h3>
+                        <div className="mt-3 space-y-2">
+                          {selectedEmployeeTransactions.map((transaction) => {
+                            const cashAmount = getUserPostingAmount(transaction, 'cash');
+                            const pointAmount = getUserPostingAmount(transaction, 'point');
+                            return (
+                              <div key={transaction.id} className="rounded-md bg-slate-50 px-3 py-2 dark:bg-slate-950">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="truncate text-sm font-black text-slate-900 dark:text-white">{transaction.title}</span>
+                                  <span className="shrink-0 text-xs font-bold text-slate-500">{formatTransactionTime(transaction.transactionAt)}</span>
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-2 text-xs font-black">
+                                  <span className={cashAmount >= 0 ? 'text-blue-600' : 'text-rose-600'}>{formatSignedWon(cashAmount)}</span>
+                                  <span className={pointAmount >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{formatSignedPoint(pointAmount)}</span>
+                                  <span className="text-slate-500">{transaction.categoryName}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {selectedEmployeeTransactions.length === 0 && (
+                            <div className="rounded-md border border-dashed border-slate-300 px-3 py-6 text-center text-sm font-bold text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                              최근 원장 기록이 없습니다.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAdjustmentDraft((prev) => ({ ...prev, employeeId: selectedEmployeeDetail.id }));
+                          setSelectedEmployeeDetail(null);
+                          setActiveTab('ledger');
+                        }}
+                        className="inline-flex h-10 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-black text-white hover:bg-blue-700"
+                      >
+                        <Plus size={16} />
+                        수동 조정
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </main>
     </div>

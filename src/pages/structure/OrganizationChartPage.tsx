@@ -1,14 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';
 import { companyService, Company } from '../../services/companyService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faBuilding, faUsers, faUser, faHardHat, faMapMarkerAlt,
-    faChevronDown, faChevronRight, faSearch, faSitemap, faExclamationTriangle, faProjectDiagram, faArrowDown, faCheck, faTimes, faRobot, faIdCard, faCommentDots, faDatabase, faDiagramProject, faCrown,
-    faCalculator, faUserShield, faBullhorn, faCode, faBriefcase, faLaptopCode, faHandshake, faFileInvoice, faShieldHalved,
-    faHelmetSafety, faFileSignature, faTruckLoading, faScaleBalanced, faLayerGroup
+    faUser, faHardHat,
+    faChevronDown, faChevronRight, faSearch, faSitemap, faProjectDiagram,
+    faCalculator, faUserShield, faBullhorn, faCode, faBriefcase,
 } from '@fortawesome/free-solid-svg-icons';
 import { motion, AnimatePresence } from 'framer-motion';
 import InteractiveOrgChart from '../../components/structure/InteractiveOrgChart';

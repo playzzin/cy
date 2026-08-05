@@ -1,4 +1,9 @@
 import { FieldValue, Timestamp } from './timestamp';
+import {
+    UtilityElectricityBillImportMeta,
+    UtilityGasBillImportMeta,
+    UtilityWaterBillImportMeta,
+} from './accommodationElectricityBillImport';
 
 export interface CostProfile {
     electricity: 'variable' | 'fixed' | 'included';
@@ -39,7 +44,8 @@ export interface Accommodation {
     id: string;
     name: string; // e.g., "사동 502호"
     address: string;
-    type: 'OneRoom' | 'TwoRoom' | 'Apartment';
+    type: 'OneRoom' | 'TwoRoom' | 'ThreeRoom' | 'Apartment';
+    utilityOverchargeThreshold?: number;
     status: 'active' | 'inactive';
     ownership: 'Cheongyeon' | 'Dawon' | 'Individual';
 
@@ -78,6 +84,9 @@ export interface UtilityRecord {
     paymentStatus: 'unpaid' | 'paid' | 'pending';
 
     memo?: string;
+    electricityBillImport?: UtilityElectricityBillImportMeta;
+    gasBillImport?: UtilityGasBillImportMeta;
+    waterBillImport?: UtilityWaterBillImportMeta;
     isAnomaly?: boolean; // If true, flagged as suspicious
     createdAt?: Timestamp | FieldValue | null;
     updatedAt?: Timestamp | FieldValue | null;

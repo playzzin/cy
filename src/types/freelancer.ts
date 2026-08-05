@@ -27,6 +27,7 @@ export interface FreelancerPayment {
     dailyRate?: number;
     manDays?: number;
     amount?: number;
+    isManualTaxOverride?: boolean;
     performanceBonus?: number;
     reportingBalance?: number;
     reportableAmount?: number;

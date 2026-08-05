@@ -65,9 +65,6 @@ const toYearMonth = (value: string): string => {
   return m ? m[1] : '';
 };
 
-const getThisYearMonth = (): string => {
-  return new Date().toISOString().slice(0, 7);
-};
 
 const MIN_ROW_COUNT = 20;
 const PRIMARY_DAY_COUNT = 16;
@@ -669,34 +666,6 @@ const DailyWageStatementPage: React.FC = () => {
     );
   };
 
-  const loadWorkerToNextEmptyRow = async () => {
-    const selected = reportWorkers.find((w) => w.key === selectedWorkerId) ?? null;
-    if (!selected) return;
-
-    let target = rows.find((r) => r.workerName.trim().length === 0) ?? null;
-    if (!target) {
-      const nextId = rows.length > 0 ? Math.max(...rows.map((r) => r.id)) + 1 : 1;
-      setRows((prev) => [...prev, createEmptyRow(nextId)]);
-      target = { ...createEmptyRow(nextId), id: nextId };
-    }
-
-    const masterWorker = selected.workerId
-      ? (workerById.get(selected.workerId) ?? null)
-      : (workerByName.get(selected.name) ?? null);
-
-    fillRowWithWorker(target.id, masterWorker, selected.key);
-    updateRow(target.id, {
-      workerName: selected.name
-    });
-
-    const key = buildAttendanceKey();
-    const cacheReady = attendanceLoadedKey === key;
-    const map = cacheReady ? attendanceMap : await loadAttendance();
-    const workerKey = selected.key;
-    if (workerKey && map[workerKey]) {
-      applyAttendanceToRow(target.id, workerKey, map);
-    }
-  };
 
   const loadAllByFilter = async () => {
     const targetCount = Math.max(MIN_ROW_COUNT, reportWorkers.length);

@@ -9,12 +9,10 @@ import {
     DragOverlay,
     defaultDropAnimationSideEffects,
     DragStartEvent,
-    DragOverEvent,
     DragEndEvent,
     useDroppable,
 } from '@dnd-kit/core';
 import {
-    arrayMove,
     SortableContext,
     sortableKeyboardCoordinates,
     verticalListSortingStrategy,
@@ -22,7 +20,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBuilding, faMapMarkerAlt, faArrowLeft, faHardHat, faBriefcase, faPhone, faUserTie } from '@fortawesome/free-solid-svg-icons';
+import { faBuilding, faHardHat, faBriefcase, faPhone, faUserTie } from '@fortawesome/free-solid-svg-icons';
 import { companyService, Company } from '../../services/companyService';
 
 // --- Types ---

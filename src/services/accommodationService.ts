@@ -13,13 +13,6 @@ const makeId = (prefix: string): string => {
     return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 };
 
-const formatYmdDate = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-};
-
 const getMonthPaymentDate = (yearMonth: string, rawDay?: number): string | undefined => {
     const matched = /^(\d{4})-(\d{2})$/.exec(String(yearMonth ?? '').trim());
     const paymentDay = Number(rawDay ?? 0);
@@ -32,16 +25,9 @@ const getMonthPaymentDate = (yearMonth: string, rawDay?: number): string | undef
     return `${matched[1]}-${matched[2]}-${String(day).padStart(2, '0')}`;
 };
 
-const getPostpaidPeriodMemo = (yearMonth: string, rawDay?: number): string | undefined => {
-    const paymentDateText = getMonthPaymentDate(yearMonth, rawDay);
-    if (!paymentDateText) return undefined;
-
-    const [year, month, day] = paymentDateText.split('-').map(Number);
-    const startMonth = new Date(year, month - 2, 1);
-    const startLastDay = new Date(startMonth.getFullYear(), startMonth.getMonth() + 1, 0).getDate();
-    const startDay = Math.min(day, startLastDay);
-    const start = new Date(startMonth.getFullYear(), startMonth.getMonth(), startDay);
-    return `후불 청구기간 ${formatYmdDate(start)}~${paymentDateText}`;
+const normalizeUtilityMemo = (value: unknown): string => {
+    if (typeof value !== 'string') return '';
+    return value.trim() ? value : '';
 };
 
 const buildUtilityRecord = (
@@ -66,7 +52,6 @@ const buildUtilityRecord = (
     const total = rent + electricity + gas + water + internet + maintenance + other;
     const paymentDay = accommodation.contract?.rentPayDate ?? accommodation.contract?.paymentDay;
     const defaultPaymentDate = getMonthPaymentDate(yearMonth, paymentDay);
-    const defaultMemo = getPostpaidPeriodMemo(yearMonth, paymentDay);
 
     return {
         id: String(existing?.id ?? makeId('utility_record')),
@@ -85,7 +70,10 @@ const buildUtilityRecord = (
         },
         paymentDate: existing?.paymentDate || defaultPaymentDate,
         paymentStatus: existing?.paymentStatus ?? 'unpaid',
-        memo: existing?.memo || defaultMemo,
+        memo: normalizeUtilityMemo(existing?.memo),
+        electricityBillImport: existing?.electricityBillImport,
+        gasBillImport: existing?.gasBillImport,
+        waterBillImport: existing?.waterBillImport,
         isAnomaly: existing?.isAnomaly,
         createdAt: existing?.createdAt,
         updatedAt: existing?.updatedAt
@@ -98,36 +86,14 @@ const getYearMonthStartDateText = (yearMonth: string): string => {
     return `${match[1]}-${match[2]}-01`;
 };
 
-const getYearMonthEndDateText = (yearMonth: string): string => {
-    const match = /^(\d{4})-(\d{2})$/.exec(String(yearMonth ?? '').trim());
-    if (!match) return '';
-
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return '';
-
-    const end = new Date(year, month, 0);
-    return `${match[1]}-${match[2]}-${String(end.getDate()).padStart(2, '0')}`;
-};
-
-const getTodayDateText = (): string => {
-    const date = new Date();
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-};
-
 const isAccommodationBillableForMonth = (accommodation: Accommodation, yearMonth: string): boolean => {
     if (accommodation.status && accommodation.status !== 'active') return false;
 
     const monthStart = getYearMonthStartDateText(yearMonth);
-    const monthEnd = getYearMonthEndDateText(yearMonth);
-    const today = getTodayDateText();
-    const currentYearMonth = today.slice(0, 7);
     const contractEndDate = normalizeDateText(accommodation.contract?.endDate);
-    const endCutoffDate = yearMonth === currentYearMonth ? today : monthEnd;
-    if (monthStart && contractEndDate && endCutoffDate && contractEndDate < endCutoffDate) return false;
+    // A contract that ends during this month still needs its final utility
+    // settlement. Exclude it only from months that start after the contract.
+    if (monthStart && contractEndDate && contractEndDate < monthStart) return false;
 
     return true;
 };

@@ -395,7 +395,9 @@ export const dailyReportService = {
             startDate?: string;
             endDate?: string;
             teamId?: string;
+            teamIds?: string[];
             siteId?: string;
+            companyIds?: string[];
         } | string = {},
         legacyTeamId?: string,
         legacySiteId?: string
@@ -408,11 +410,52 @@ export const dailyReportService = {
             startDate: normalizeLooseDateText(params.startDate ?? params.endDate ?? ''),
             endDate: normalizeLooseDateText(params.endDate ?? params.startDate ?? ''),
             teamId: params.teamId,
+            teamIds: Array.from(new Set((params.teamIds || []).map((value) => String(value ?? '').trim()).filter(Boolean))),
             siteId: params.siteId,
+            companyIds: Array.from(new Set((params.companyIds || []).map((value) => String(value ?? '').trim()).filter(Boolean))),
         };
+
+        if (normalized.companyIds.length > 0) {
+            const reportsByCompany = await Promise.all(
+                normalized.companyIds.map((companyId) => dailyReportFirestoreService.getReportsByClientCompany(companyId))
+            );
+            const uniqueReports = new Map<string, DailyReport>();
+            reportsByCompany.flat().forEach((report) => {
+                const id = String(report.id || '').trim();
+                if (id) uniqueReports.set(id, report as DailyReport);
+            });
+            return filterReportsByParams(Array.from(uniqueReports.values()), normalized);
+        }
+
+        if (normalized.teamIds.length > 0) {
+            const hasDateRange = !!normalized.startDate && !!normalized.endDate;
+            const reportsByTeam = await Promise.all(normalized.teamIds.map((teamId) => {
+                if (hasDateRange) {
+                    return dailyReportFirestoreService.getReportsByRange({
+                        startDate: normalized.startDate,
+                        endDate: normalized.endDate,
+                        teamId,
+                        siteId: normalized.siteId,
+                    });
+                }
+                return dailyReportFirestoreService.getReportsByTeam(teamId);
+            }));
+            const uniqueReports = new Map<string, DailyReport>();
+            reportsByTeam.flat().forEach((report) => {
+                const id = String(report.id || '').trim();
+                if (id) uniqueReports.set(id, report as DailyReport);
+            });
+            return filterReportsByParams(Array.from(uniqueReports.values()), normalized)
+                .filter((report) => normalized.teamIds.includes(String(report.teamId ?? '').trim()));
+        }
 
         const hasDateRange = !!normalized.startDate && !!normalized.endDate;
         if (hasDateRange) {
+            if (normalized.startDate === normalized.endDate) {
+                const daily = await dailyReportFirestoreService.getReportsByDate(normalized.startDate);
+                return filterReportsByParams(daily as DailyReport[], normalized);
+            }
+
             const ranged = await dailyReportFirestoreService.getReportsByRange({
                 startDate: normalized.startDate,
                 endDate: normalized.endDate,
@@ -557,7 +600,9 @@ export const dailyReportService = {
         startDate?: string;
         endDate?: string;
         teamId?: string;
+        teamIds?: string[];
         siteId?: string;
+        companyIds?: string[];
     } = {}): Promise<DailyReportWorkerRow[]> => {
         const reports = await dailyReportService.getReports(params);
         const rows: DailyReportWorkerRow[] = [];
@@ -649,7 +694,7 @@ export const dailyReportService = {
         return rows;
     },
 
-    getReportWorkerRowsByRange: async (params: { startDate: string; endDate: string; teamId?: string; siteId?: string }) => {
+    getReportWorkerRowsByRange: async (params: { startDate: string; endDate: string; teamId?: string; teamIds?: string[]; siteId?: string }) => {
         return dailyReportService.getWorkerRows(params);
     },
 

@@ -18,7 +18,21 @@ import { companyService } from '../../services/companyService';
 import { useSiteMode } from '../../contexts/SiteModeContext';
 import logoConstruction from '../../assets/logo_construction.jpg';
 import ceoPortrait from '../../assets/ceo_portrait.png';
-import ceoCharacter from '../../assets/ceo_character.png';
+
+const dashboard2HeroImageUrl =
+    'https://firebasestorage.googleapis.com/v0/b/cyee-9c1e4.firebasestorage.app/o/gallery%2Fai-images%2Flogo%2Flogo_1779750129138.png?alt=media&token=579fa7a2-e3f4-4817-b516-12905bb4b391';
+const dashboard2HeroVideoId = 'itZAJ91VXLM';
+const dashboard2HeroVideoThumbnailUrl = `https://i.ytimg.com/vi/${dashboard2HeroVideoId}/hqdefault.jpg`;
+
+const getDashboard2HeroVideoUrl = () => {
+    const baseUrl = `https://www.youtube.com/embed/${dashboard2HeroVideoId}?autoplay=1&mute=1&loop=1&playlist=${dashboard2HeroVideoId}&playsinline=1&rel=0&controls=0&disablekb=1&fs=0&iv_load_policy=3&modestbranding=1`;
+
+    if (typeof window === 'undefined') return baseUrl;
+
+    const origin = encodeURIComponent(window.location.origin);
+    const pageUrl = encodeURIComponent(window.location.href);
+    return `${baseUrl}&origin=${origin}&widget_referrer=${pageUrl}`;
+};
 
 type DailyStatRow = {
     totalWorkers: number;
@@ -640,6 +654,8 @@ const CheongyeonHome: React.FC = () => {
     const [chartWidth, setChartWidth] = useState(0);
     const [chartAnimationKey, setChartAnimationKey] = useState(0);
     const [chartVisibleDays, setChartVisibleDays] = useState(0);
+    const dashboard2HeroVideoUrl = useMemo(getDashboard2HeroVideoUrl, []);
+    const [isDashboard2HeroVideoVisible, setIsDashboard2HeroVideoVisible] = useState(false);
 
     const revealVariant = useMemo(() => ({
         hidden: { opacity: shouldReduceMotion ? 1 : 0, y: shouldReduceMotion ? 0 : 34 },
@@ -665,6 +681,14 @@ const CheongyeonHome: React.FC = () => {
     useEffect(() => {
         document.body.classList.add('dashboard2-codeit-theme');
         return () => document.body.classList.remove('dashboard2-codeit-theme');
+    }, []);
+
+    useEffect(() => {
+        const revealTimer = window.setTimeout(() => {
+            setIsDashboard2HeroVideoVisible(true);
+        }, 5000);
+
+        return () => window.clearTimeout(revealTimer);
     }, []);
 
     useEffect(() => {
@@ -926,37 +950,55 @@ const CheongyeonHome: React.FC = () => {
                         }}
                     />
                     <div className="absolute inset-y-0 left-0 w-[48%] bg-gradient-to-r from-[#dff8f2] via-[#eef6ff] to-transparent" />
-                    <div className="relative mx-auto grid max-w-[1180px] grid-cols-1 gap-10 lg:grid-cols-5 lg:items-center">
-                        <motion.div
-                            initial={shouldReduceMotion ? false : { opacity: 0, x: -40, scale: 0.96 }}
-                            animate={{ opacity: 1, x: 0, scale: 1 }}
-                            transition={{ duration: shouldReduceMotion ? 0 : 0.8, delay: 0.1 }}
-                            className="flex justify-center lg:col-span-2 lg:justify-start"
-                        >
-                            <div className="relative w-full max-w-[360px] md:max-w-[420px]">
-                                <div className="absolute -inset-5 rounded-[8px] bg-gradient-to-br from-[#00b894]/18 via-[#4f7cff]/14 to-transparent blur-3xl" />
+                    <div className="relative mx-auto max-w-[1180px]">
+                        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(300px,0.85fr)_minmax(0,1.55fr)] lg:items-center">
+                            <motion.div
+                                initial={shouldReduceMotion ? false : { opacity: 0, x: -40, scale: 0.96 }}
+                                animate={{ opacity: 1, x: 0, scale: 1 }}
+                                transition={{ duration: shouldReduceMotion ? 0 : 0.8, delay: 0.1 }}
+                                className="flex justify-center lg:justify-start"
+                            >
+                                <div className="relative w-full max-w-[360px] md:max-w-[420px]">
+                                    <div className="absolute -inset-5 rounded-[8px] bg-gradient-to-br from-[#00b894]/18 via-[#4f7cff]/14 to-transparent blur-3xl" />
+                                    <img
+                                        src={dashboard2HeroImageUrl}
+                                        alt="청연이엔지 대표 캐릭터"
+                                        className="relative aspect-square w-full rounded-[8px] border border-[#e2e8f0] bg-white object-contain shadow-[0_32px_90px_rgba(15,23,42,0.18)]"
+                                    />
+                                </div>
+                            </motion.div>
+
+                            <motion.div
+                                initial={shouldReduceMotion ? false : { opacity: 0, x: 40, scale: 0.98 }}
+                                animate={{ opacity: 1, x: 0, scale: 1 }}
+                                transition={{ duration: shouldReduceMotion ? 0 : 0.8, delay: 0.18 }}
+                                className="relative aspect-video w-full overflow-hidden rounded-[8px] bg-[#080c16]"
+                            >
                                 <img
-                                    src={ceoCharacter}
-                                    alt="청연이엔지 대표 캐릭터"
-                                    className="relative aspect-square w-full rounded-[8px] border border-[#e2e8f0] bg-white object-contain shadow-[0_32px_90px_rgba(15,23,42,0.18)]"
+                                    src={dashboard2HeroVideoThumbnailUrl}
+                                    alt=""
+                                    aria-hidden="true"
+                                    className="absolute inset-0 h-full w-full object-cover"
                                 />
-                                <motion.div
-                                    initial={shouldReduceMotion ? false : { opacity: 0, y: 18 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ duration: shouldReduceMotion ? 0 : 0.55, delay: 0.7 }}
-                                    className="absolute bottom-4 left-1/2 min-w-[128px] -translate-x-1/2 rounded-[8px] border border-[#d1fae5] bg-white/95 px-5 py-3 text-center shadow-xl backdrop-blur-sm"
-                                >
-                                    <div className="text-xs font-bold tracking-wider text-[#047857]">CEO</div>
-                                    <div className="mt-1 text-xl font-black tracking-[0.2em] text-[#111827]">이재욱</div>
-                                </motion.div>
-                            </div>
-                        </motion.div>
+                                <iframe
+                                    src={dashboard2HeroVideoUrl}
+                                    title=""
+                                    className={`pointer-events-none absolute left-1/2 top-1/2 h-[130%] w-[130%] max-w-none -translate-x-1/2 -translate-y-1/2 border-0 transition-opacity duration-500 ${
+                                        isDashboard2HeroVideoVisible ? 'opacity-100' : 'opacity-0'
+                                    }`}
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                    referrerPolicy="strict-origin-when-cross-origin"
+                                    tabIndex={-1}
+                                    aria-hidden="true"
+                                />
+                            </motion.div>
+                        </div>
 
                         <motion.div
                             initial={shouldReduceMotion ? false : 'hidden'}
                             animate="visible"
                             variants={staggerVariant}
-                            className="lg:col-span-3"
+                            className="mt-12"
                         >
                             <motion.div variants={revealVariant} className="inline-flex items-center gap-2 rounded-[8px] border border-[#a7f3d0] bg-[#dcfce7] px-4 py-2 text-sm font-bold text-[#047857]">
                                 <span className="h-2 w-2 rounded-[8px] bg-[#10b981]" />
@@ -1073,7 +1115,11 @@ const CheongyeonHome: React.FC = () => {
                                                 <div className="text-xs font-bold text-[#9bbcff]">0 → 100</div>
                                             </div>
                                             <div className="h-[340px] min-w-0">
-                                                <ResponsiveContainer width="100%" height="100%">
+                                                <ResponsiveContainer
+                                                    width="100%"
+                                                    height="100%"
+                                                    initialDimension={{ width: 640, height: 340 }}
+                                                >
                                                     <BarChart
                                                         key={`operating-bar-${selectedOperatingMetric.key}-${operatingBarChartAnimationKey}`}
                                                         data={animatedOperatingBarData}
@@ -1113,7 +1159,11 @@ const CheongyeonHome: React.FC = () => {
                                             <div className="mb-4 text-sm font-black text-white">원그래프</div>
                                             <div className="grid min-w-0 grid-cols-1 items-center gap-4 md:grid-cols-[1.05fr_0.95fr]">
                                                 <div className="h-[330px] min-w-0">
-                                                    <ResponsiveContainer width="100%" height="100%">
+                                                    <ResponsiveContainer
+                                                        width="100%"
+                                                        height="100%"
+                                                        initialDimension={{ width: 520, height: 330 }}
+                                                    >
                                                         <PieChart>
                                                             <Pie
                                                                 data={selectedOperatingMetric.pieData}

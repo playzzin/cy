@@ -278,6 +278,34 @@ const buildManualInputFromAdvanceRecord = (record?: AdvancePayment): LedgerManua
     return acc;
   }, {});
 
+  // The advance-management page has three legacy standard fields that do not
+  // have dedicated cells in the integrated-payroll ledger.  Previously they
+  // were simply omitted here, so values such as a deposit were visible in
+  // advance management but disappeared from the ledger.  Keep their amount in
+  // the ledger's "other" deduction bucket instead of relying on a display name
+  // match.  This uses the stable stored field keys and also supports old rows
+  // that still have a legacy field inside `items`.
+  const getStandardDeductionAmount = (key: 'privateRoom' | 'gloves' | 'deposit'): number => {
+    const directAmount = toNumber(record[key]);
+    return directAmount > 0 ? directAmount : toNumber(record.items?.[key]);
+  };
+  const legacyOtherDeduction =
+    getStandardDeductionAmount('privateRoom')
+    + getStandardDeductionAmount('gloves')
+    + getStandardDeductionAmount('deposit');
+
+  // Preserve the source item's classification when all merged legacy fields
+  // share one.  Otherwise the existing row-level classification remains the
+  // fallback, matching the ledger's current behavior.
+  if (!normalizedItemAssignments.other) {
+    const mergedAssignments = ['privateRoom', 'gloves', 'deposit']
+      .map((key) => record.itemAssignments?.[key])
+      .filter((value): value is 'corporate' | 'labor' => value === 'corporate' || value === 'labor');
+    if (mergedAssignments.length > 0 && mergedAssignments.every((value) => value === mergedAssignments[0])) {
+      normalizedItemAssignments.other = mergedAssignments[0];
+    }
+  }
+
   return {
     invoice: {
       ...createEmptyLedgerSideInput(),
@@ -299,7 +327,7 @@ const buildManualInputFromAdvanceRecord = (record?: AdvancePayment): LedgerManua
       internet: toNumber(record.internet),
       management: toNumber(record.items?.management ?? record.items?.maintenance),
       fine: toNumber(record.fines),
-      other: toNumber(record.items?.other),
+      other: toNumber(record.items?.other) + legacyOtherDeduction,
     },
     personalMemo: String(record.memo ?? ''),
     assignmentType: (record.assignmentType === 'corporate' ? 'corporate' : 'labor'),

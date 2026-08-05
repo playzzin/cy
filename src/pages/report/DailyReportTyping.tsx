@@ -6,7 +6,7 @@ import { dailyReportService } from '../../services/dailyReportService';
 import { geminiService } from '../../services/geminiService';
 import { useAuth } from '../../contexts/AuthContext';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faSave, faCalendarAlt, faComment, faMinus, faFileExcel, faFileImport, faFileExport } from '@fortawesome/free-solid-svg-icons';
+import { faPlus, faSave, faCalendarAlt, faComment, faMinus, faFileImport, faFileExport } from '@fortawesome/free-solid-svg-icons';
 import * as XLSX from 'xlsx';
 import TypingTable, { TypingTableData, TypingRow } from './TypingTable';
 import { confirm } from '../../utils/swal';
@@ -296,138 +296,6 @@ const DailyReportTyping: React.FC<DailyReportTypingProps> = ({ sites, teams }) =
         processKakaoImage(file);
     };
     /* Legacy inline logic removed in favor of common function */
-    const _legacy_handleKakaoUpload_logic_removed = async (file: File) => {
-        try {
-            /* Logic moved to processKakaoImage */
-            const analyzedReports = await geminiService.analyzeKakaoImage(file);
-
-            // Helper to find best match for site
-            const findSiteId = (siteName: string): string => {
-                if (!siteName) return '';
-                // 1. Exact match
-                const exact = sites.find(s => s.name === siteName);
-                if (exact) return exact.id || '';
-                // 2. Contains match
-                const contains = sites.find(s => s.name.includes(siteName) || siteName.includes(s.name));
-                if (contains) return contains.id || '';
-                return '';
-            };
-
-            // Helper to find best match for worker
-            const findWorker = (workerName: string): Worker | undefined => {
-                if (!workerName) return undefined;
-                return allWorkers.find(w => w.name === workerName); // Currently exact match, can be improved
-            };
-
-            const newTables: TypingTableData[] = [];
-            let currentMaxTableId = tables.length > 0 ? Math.max(...tables.map(t => t.id)) : 0;
-            let currentMaxRowId = tables.reduce((max, t) => {
-                const tableMax = t.rows.length > 0 ? Math.max(...t.rows.map(r => r.id)) : 0;
-                return Math.max(max, tableMax);
-            }, 0);
-
-            for (const report of analyzedReports) {
-                // Handle single object or array return from AI (just in case)
-                const reportData = report as any;
-
-                const siteId = findSiteId(reportData.siteName);
-                const currentSite = sites.find(s => s.id === siteId);
-                const initialSiteTeamName = currentSite?.responsibleTeamName || '';
-
-                currentMaxTableId++;
-
-                const newRows: TypingRow[] = [];
-                if (reportData.workers && Array.isArray(reportData.workers)) {
-                    for (const w of reportData.workers) {
-                        currentMaxRowId++;
-                        const matchedWorker = findWorker(w.name);
-
-                        let teamName = '';
-                        let teamId = '';
-                        let unitPrice = 0;
-                        let role = '작업자';
-                        let workerId = '';
-
-                        if (matchedWorker) {
-                            const team = teams.find(t => t.id === matchedWorker.teamId);
-                            teamName = team?.name || '';
-                            teamId = matchedWorker.teamId || '';
-                            unitPrice = matchedWorker.unitPrice || 0;
-                            role = matchedWorker.role || '작업자';
-                            workerId = matchedWorker.id || '';
-                        }
-
-                        newRows.push({
-                            id: currentMaxRowId,
-                            name: w.name,
-                            manDay: typeof w.manDay === 'number' ? w.manDay : parseFloat(w.manDay) || 1.0,
-                            teamId: teamId,
-                            teamName: teamName,
-                            siteTeamName: initialSiteTeamName,
-                            unitPrice: unitPrice,
-                            role: role,
-                            workerId: workerId
-                        });
-                    }
-                }
-
-                // Fill remaining rows to reach 10 if less
-                const remaining = 10 - newRows.length;
-                if (remaining > 0) {
-                    for (let i = 0; i < remaining; i++) {
-                        currentMaxRowId++;
-                        newRows.push({
-                            id: currentMaxRowId,
-                            name: '',
-                            manDay: 1.0,
-                            teamId: '',
-                            teamName: '',
-                            siteTeamName: initialSiteTeamName,
-                        });
-                    }
-                }
-
-                newTables.push({
-                    id: currentMaxTableId,
-                    siteId: siteId,
-                    rows: newRows
-                });
-            }
-
-            if (newTables.length > 0) {
-                setTables(prev => {
-                    const updated = [...prev];
-                    let newTableIdx = 0;
-
-                    // Iterate through existing tables to find empty ones
-                    for (let i = 0; i < updated.length && newTableIdx < newTables.length; i++) {
-                        const isEmpty = updated[i].rows.every(r => !r.name || r.name.trim() === '');
-                        if (isEmpty) {
-                            // Replace empty table with new table
-                            updated[i] = newTables[newTableIdx];
-                            newTableIdx++;
-                        }
-                    }
-
-                    // Append remaining new tables
-                    if (newTableIdx < newTables.length) {
-                        updated.push(...newTables.slice(newTableIdx));
-                    }
-
-                    return updated;
-                });
-                alert(`${newTables.length}개의 장부가 입력되었습니다.`);
-            } else {
-                alert('이미지에서 유효한 일보 데이터를 찾지 못했습니다.');
-            }
-
-        } catch (error) {
-            console.error("AI Analysis Failed", error);
-            alert("이미지 분석에 실패했습니다. 다시 시도해주세요.");
-        } finally {
-            setIsSaving(false);
-        }
-    };
 
     // --- Drag & Drop Handlers ---
     const handleDragOver = (e: React.DragEvent) => {

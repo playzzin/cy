@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faSearch, faPenToSquare, faPlus, faTable, faTrash,
+    faSearch, faPlus, faTable, faTrash,
     faChevronDown, faChevronRight, faHardHat, faBuilding, faUsers, faTimes,
     faUserGear, faUserShield, faUser
 } from '@fortawesome/free-solid-svg-icons';
@@ -38,39 +38,6 @@ const TEAM_TYPE_OPTIONS = ['시공팀', '지원팀', '용역팀'] as const;
 const EXTERNAL_TEAM_COMPANY_NAME = '외부팀';
 const EXTERNAL_TEAM_COMPANY_VALUE = '__EXTERNAL_TEAM__';
 
-const TeamColorPicker: React.FC<{
-    value?: string | null;
-    onChange: (color: string) => void;
-}> = ({ value, onChange }) => {
-    const selectedColor = value || DEFAULT_TEAM_COLOR;
-
-    return (
-        <details className="relative flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-            <summary
-                className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded border border-slate-300"
-                style={{ backgroundColor: selectedColor }}
-                title="팀 색상 선택"
-            />
-            <div className="absolute left-0 top-10 z-30 grid w-max grid-cols-10 gap-1.5 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
-                {([] as string[]).map((color) => (
-                    <button
-                        key={color}
-                        type="button"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onChange(color);
-                            e.currentTarget.closest('details')?.removeAttribute('open');
-                        }}
-                        className={`h-6 w-6 rounded-md border transition-transform hover:scale-110 ${selectedColor === color ? 'border-slate-900 ring-2 ring-slate-300' : 'border-white'}`}
-                        style={{ backgroundColor: color }}
-                        title={color}
-                        aria-label={`팀 색상 ${color}`}
-                    />
-                ))}
-            </div>
-        </details>
-    );
-};
 
 const getTeamTypeBadgeClass = (type?: string) => {
     switch (type) {

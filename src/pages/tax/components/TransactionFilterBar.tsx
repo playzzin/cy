@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCalendarAlt, faSearch, faUndo } from '@fortawesome/free-solid-svg-icons';
+import { faSearch, faUndo } from '@fortawesome/free-solid-svg-icons';
 import { format, startOfMonth, endOfMonth, subMonths, startOfQuarter, subQuarters, addDays } from 'date-fns';
 
 type FilterProps = {

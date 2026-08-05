@@ -46,6 +46,13 @@ export interface TeamExpenseClaim {
   sourceFixedExpenseId?: string;
   sourceFixedExpenseName?: string;
   generatedForYearMonth?: string;
+  operationId?: string;
+  lastOperationId?: string;
+  lastOperationAt?: unknown;
+  handledById?: string;
+  handledByName?: string;
+  handleMemo?: string;
+  handledAt?: unknown;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -71,4 +78,5 @@ export interface TeamExpenseClaimInput {
   sourceFixedExpenseId?: string;
   sourceFixedExpenseName?: string;
   generatedForYearMonth?: string;
+  operationId?: string;
 }

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faDatabase, faTable, faKey, faLink, faCode, faList, faInfoCircle, faCheck, faCopy, faSitemap } from '@fortawesome/free-solid-svg-icons';
+import { faTable, faKey, faLink, faCode, faInfoCircle, faCheck, faCopy, faSitemap } from '@fortawesome/free-solid-svg-icons';
 
 interface FieldDef {
     name: string;

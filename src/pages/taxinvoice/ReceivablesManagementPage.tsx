@@ -20,9 +20,12 @@ import {
     ReceivableFilters,
     ReceivableStatus
 } from '../../types/receivable';
+import { useAuth } from '../../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 
 const ReceivablesManagementPage: React.FC = () => {
+    const { currentUser } = useAuth();
+
     // State
     const [receivables, setReceivables] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -108,9 +111,9 @@ const ReceivablesManagementPage: React.FC = () => {
                 paymentDate,
                 amount: parseFloat(paymentAmount),
                 method: paymentMethod as any,
-                // note: paymentNote,
-                // createdBy: 'current-user', // TODO: 실제 사용자 정보
-                // createdAt: Timestamp.now()
+                memo: paymentNote.trim() || undefined,
+                createdBy: currentUser?.uid || undefined,
+                createdByName: currentUser?.displayName || currentUser?.email || currentUser?.uid || undefined
             });
 
             alert('입금이 등록되었습니다.');

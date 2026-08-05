@@ -396,7 +396,7 @@ const KakaoMessageCenterPage: React.FC = () => {
 
         const picked = await Swal.fire({
             title: '발행 템플릿 초안',
-            text: '바로빌 템플릿 관리에 등록할 문구 초안입니다. 템플릿 변수(#{...})는 등록 시 동일하게 맞춰주세요.',
+            text: '알림톡 템플릿 관리에 등록할 문구 초안입니다. 템플릿 변수(#{...})는 등록 시 동일하게 맞춰주세요.',
             icon: 'info',
             input: 'select',
             inputOptions: options,
@@ -431,7 +431,7 @@ const KakaoMessageCenterPage: React.FC = () => {
         try {
             if (navigator?.clipboard?.writeText) {
                 await navigator.clipboard.writeText(text);
-                Swal.fire('복사 완료', '클립보드에 복사했습니다. 바로빌 템플릿 관리에 붙여넣기 하세요.', 'success');
+                Swal.fire('복사 완료', '클립보드에 복사했습니다. 알림톡 템플릿 관리에 붙여넣기 하세요.', 'success');
                 return;
             }
         } catch {
@@ -560,7 +560,7 @@ const KakaoMessageCenterPage: React.FC = () => {
             if (!picked.isConfirmed || !selectedCode) {
                 const result = await Swal.fire({
                     title: '발행 템플릿 없음',
-                    text: `${cat?.label ?? '발행 템플릿'}에 해당하는 승인 템플릿을 찾지 못했습니다. 바로빌 템플릿 관리에서 등록/승인 후 다시 불러오기(새로고침) 해주세요.`,
+                    text: `${cat?.label ?? '발행 템플릿'}에 해당하는 승인 템플릿을 찾지 못했습니다. 알림톡 템플릿 관리에서 등록/승인 후 다시 불러오기(새로고침) 해주세요.`,
                     icon: 'warning',
                     showCancelButton: true,
                     confirmButtonText: '템플릿 관리 열기',

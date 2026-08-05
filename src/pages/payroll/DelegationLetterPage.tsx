@@ -3,8 +3,8 @@ import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faSpinner, faFileAlt, faBuilding, faUsers, faCalendarAlt,
-    faCheckSquare, faSquare, faUserTie, faCopy, faEdit, faCog,
-    faEye, faEyeSlash, faListAlt, faPrint
+    faCheckSquare, faSquare, faUserTie, faCopy, faEdit,
+    faListAlt, faPrint
 } from '@fortawesome/free-solid-svg-icons';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
@@ -121,7 +121,9 @@ const DelegationLetterPage: React.FC = () => {
     // --- 3. Derived Logic: Active Sites ---
     const activeSites = useMemo(() => {
         const siteIdsInReports = new Set(allReports.map(r => r.siteId));
-        return sites.filter(s => siteIdsInReports.has(s.id!));
+        return sites
+            .filter(s => siteIdsInReports.has(s.id!))
+            .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko-KR', { numeric: true, sensitivity: 'base' }));
     }, [allReports, sites]);
 
     // --- 4. Derived Logic: Active Teams (Dependent on Site) ---
@@ -1236,7 +1238,7 @@ const DelegationLetterPage: React.FC = () => {
                                         {pageWorkers.map((worker, rowIndex) => (
                                             <tr key={worker.workerId}>
                                                 <td className="border border-black px-1 py-1.5 text-center">{startIndex + rowIndex + 1}</td>
-                                                <td className="border border-black px-2 py-1.5 text-center font-medium">{worker.workerName}</td>
+                                                <td className="border border-black px-2 py-1.5 text-center font-normal">{worker.workerName}</td>
                                                 <td className="border border-black px-1 py-1.5 text-center tracking-tight">{worker.idNumber}</td>
                                                 <td className="border border-black px-2 py-1.5 text-left tracking-tight truncate max-w-[150px]">{worker.address}</td>
                                                 {showManDays && (
@@ -1370,7 +1372,7 @@ const DelegationLetterPage: React.FC = () => {
                                 {finalDelegators.map((worker, rowIndex) => (
                                     <tr key={`measure_${worker.workerId}`} data-measure-row="worker">
                                         <td className="border border-black px-1 py-1.5 text-center">{rowIndex + 1}</td>
-                                        <td className="border border-black px-2 py-1.5 text-center font-medium">{worker.workerName}</td>
+                                        <td className="border border-black px-2 py-1.5 text-center font-normal">{worker.workerName}</td>
                                         <td className="border border-black px-1 py-1.5 text-center tracking-tight">{worker.idNumber}</td>
                                         <td className="border border-black px-2 py-1.5 text-left tracking-tight truncate max-w-[150px]">{worker.address}</td>
                                         {showManDays && (

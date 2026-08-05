@@ -39,9 +39,18 @@ import type { DailyReportWorkerRow } from '../../services/dailyReportService';
 import { estimateService, type Estimate } from '../../services/estimateService';
 import { manpowerService, type Worker } from '../../services/manpowerService';
 import { progressClaimService } from '../../services/progressClaimService';
+import { fileTransferAuditService } from '../../services/fileTransferAuditService';
 import { settlementTargetService, SettlementTarget } from '../../services/settlementTargetService';
 import type { Company } from '../../services/companyService';
 import type { Site } from '../../services/siteService';
+import FieldBuybackWorkbookPage from './FieldBuybackWorkbookPage';
+import {
+    type ProgressBuybackWorkbookRow,
+} from './components/ProgressBuybackWorkbookLedger';
+import {
+    buildProgressBuybackSiteRows,
+    type ProgressBuybackSiteSource,
+} from './components/ProgressBuybackSiteBoard';
 import {
     SupportClientLaborStatementPanel,
     SupportClientTransactionStatementPanel,
@@ -73,6 +82,7 @@ import {
     buildProgressSiteSnapshot,
 } from '../../types/progressClaim';
 import {
+    calculateAllocations,
     calculateProgressClaimSummary,
     formatProgressMoney,
     formatProgressQuantity,
@@ -85,6 +95,11 @@ import {
     summarizeDailyRowsForProgress,
     toProgressNumber,
 } from '../../utils/progressClaimCalculations';
+import {
+    DEFAULT_BUYBACK_AFTER_TAX_RATE,
+    calculateBuybackSettlement,
+    normalizeBuybackAfterTaxRate,
+} from '../../utils/buybackSettlement';
 import { getWorkerMasterLaborStatementPayType } from '../../utils/payrollLaborStatementDefaults';
 import { LOGO_FALLBACK } from '../../utils/estimateUtils';
 import { toast } from '../../utils/swal';
@@ -181,6 +196,8 @@ const TAB_ITEMS: Array<{ key: TabKey; label: string }> = [
     { key: 'invoice', label: '기성청구서' },
 ];
 
+const VISIBLE_TAB_ITEMS = TAB_ITEMS.filter((tab) => tab.key !== 'buyback');
+
 const LEGACY_TAB_ALIASES: Record<string, TabKey> = {
     contract: 'entry',
     progress: 'entry',
@@ -193,14 +210,14 @@ const LEGACY_TAB_ALIASES: Record<string, TabKey> = {
 };
 
 const isTabKey = (value: string | null): value is TabKey =>
-    !!value && TAB_ITEMS.some((tab) => tab.key === value);
+    !!value && VISIBLE_TAB_ITEMS.some((tab) => tab.key === value);
 
 const normalizeTabKey = (value: string | null): TabKey | null => {
     const normalized = String(value ?? '').trim().toLowerCase();
     if (isTabKey(normalized)) return normalized;
     if (LEGACY_TAB_ALIASES[normalized]) return LEGACY_TAB_ALIASES[normalized];
 
-    const embeddedTabs = TAB_ITEMS
+    const embeddedTabs = VISIBLE_TAB_ITEMS
         .map((tab) => ({ key: tab.key, index: normalized.indexOf(tab.key) }))
         .filter((tab) => tab.index >= 0)
         .sort((a, b) => a.index - b.index);
@@ -211,8 +228,14 @@ const normalizeTabKey = (value: string | null): TabKey | null => {
 
 const normalizeProgressYearMonthParam = (value: string | null): string | null => {
     const text = String(value ?? '').trim();
-    return /^\d{4}-\d{2}$/.test(text) ? text : null;
+    if (!/^\d{4}-\d{2}$/.test(text)) return null;
+    const month = Number(text.slice(5, 7));
+    return month >= 1 && month <= 12 ? text : null;
 };
+
+const getProgressYearMonthFromSearchParams = (params: URLSearchParams): string | null =>
+    normalizeProgressYearMonthParam(params.get('month')) ||
+    normalizeProgressYearMonthParam(params.get('yearMonth'));
 
 const STATUS_CLASS: Record<ProgressClaimStatus, string> = {
     draft: 'bg-slate-100 text-slate-700 border-slate-200',
@@ -268,6 +291,21 @@ const getStatusLabel = (status?: ProgressClaimStatus): string =>
 
 const getTeamPositionModeLabel = (mode?: ProgressTeamPositionMode): string =>
     mode === 'manual' ? '설정금액' : '금회기성 전체';
+
+const getBuybackPaymentStatusLabel = (status?: ProgressAllocation['paymentStatus']): string => ({
+    pending: '미입금',
+    needs_review: '정리 필요',
+    calculating: '계산 중',
+    retention: '보존 대기',
+    scheduled: '입금 예정',
+    in_progress: '입금 중',
+    partial: '부분입금',
+    paid: '입금 완료',
+    hold: '보류',
+    overpaid: '과입금',
+    no_buyback: '바이백 없음',
+    cancelled: '취소',
+}[status || 'pending']);
 
 const getProgressDisplayText = (...values: unknown[]): string => {
     for (const value of values) {
@@ -570,8 +608,6 @@ const makeSiteFromProgressClaim = (claim: ProgressClaim): Site => {
     };
 };
 
-const isExtraProgressLine = (line: Pick<ProgressClaimLine, 'itemId' | 'source'> | undefined): boolean =>
-    line?.source === 'extra' || String(line?.itemId || '').startsWith('extra_');
 
 const numberInputClass = 'w-full min-w-[88px] rounded border border-slate-200 px-2 py-1 text-right text-sm outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100';
 const textInputClass = 'w-full rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100';
@@ -674,6 +710,7 @@ const serializeClaimDraft = (claim: ProgressClaim | undefined | null): string =>
             memo: line.memo || '',
         })),
     allocations: (claim?.allocations || []).map((allocation) => ({
+        settlementTargetId: allocation.settlementTargetId || '',
         targetId: allocation.targetId || '',
         targetName: allocation.targetName || '',
         targetType: allocation.targetType || '',
@@ -684,6 +721,16 @@ const serializeClaimDraft = (claim: ProgressClaim | undefined | null): string =>
         amountPerManDay: toProgressNumber(allocation.amountPerManDay),
         manualAmount: toProgressNumber(allocation.manualAmount),
         memo: allocation.memo || '',
+        settlementMode: allocation.settlementMode || 'rate',
+        afterTaxRate: allocation.afterTaxRate === undefined ? null : toProgressNumber(allocation.afterTaxRate),
+        manualAfterTaxAmount: allocation.manualAfterTaxAmount === undefined ? null : toProgressNumber(allocation.manualAfterTaxAmount),
+        paymentStatus: allocation.paymentStatus || 'pending',
+        paidAmount: allocation.paidAmount === undefined ? null : toProgressNumber(allocation.paidAmount),
+        paymentDueDate: allocation.paymentDueDate || '',
+        paidAt: allocation.paidAt || '',
+        evidenceRequired: Boolean(allocation.evidenceRequired),
+        evidenceStatus: allocation.evidenceStatus || 'not_required',
+        paymentMemo: allocation.paymentMemo || '',
     })),
     claimAttachments: (claim?.claimAttachments || []).map((item) => ({
         name: item.name,
@@ -701,6 +748,32 @@ const serializeClaimDraft = (claim: ProgressClaim | undefined | null): string =>
     buybackMemo: claim?.buybackMemo || '',
     memo: claim?.memo || '',
 });
+
+const getEditableProgressAllocations = (claim: ProgressClaim): ProgressAllocation[] => {
+    const isFinanciallyFinal = claim.status === 'confirmed' || claim.status === 'billed' || claim.status === 'paid';
+    const snapshotAllocations = claim.confirmedSnapshot?.allocations;
+    if (!isFinanciallyFinal || !Array.isArray(snapshotAllocations)) return [...claim.allocations];
+
+    const liveById = new Map(claim.allocations.map((allocation) => [allocation.id, allocation]));
+    return snapshotAllocations.map((snapshotAllocation) => {
+        const liveAllocation = liveById.get(snapshotAllocation.id);
+        if (!liveAllocation) return { ...snapshotAllocation };
+        return {
+            ...snapshotAllocation,
+            settlementTargetId: liveAllocation.settlementTargetId,
+            targetId: liveAllocation.targetId,
+            targetName: liveAllocation.targetName,
+            targetType: liveAllocation.targetType,
+            companyName: liveAllocation.companyName,
+            paymentStatus: liveAllocation.paymentStatus,
+            paidAmount: liveAllocation.paidAmount,
+            paymentDueDate: liveAllocation.paymentDueDate,
+            paidAt: liveAllocation.paidAt,
+            evidenceStatus: liveAllocation.evidenceStatus,
+            paymentMemo: liveAllocation.paymentMemo,
+        };
+    });
+};
 
 const getContractItemLabel = (item: Partial<ProgressContractItem>, index?: number): string =>
     String(item.workName || item.category || (index !== undefined ? `계약 항목 ${index + 1}` : '계약 항목')).trim();
@@ -1008,7 +1081,7 @@ const writeProgressExcelPartyBox = (
     title: string,
     party: ProgressInvoiceParty,
     tone: ProgressExcelTone,
-    claimStatus: ProgressClaimStatus,
+    _claimStatus: ProgressClaimStatus,
     yearMonth: string
 ) => {
     const headerRange = `${range.labelCol}${startRow}:${range.subValueEndCol}${startRow}`;
@@ -1394,8 +1467,8 @@ const buildProgressInvoiceWorkbook = async ({
     if (claim.showAllocationsOnInvoice) {
         styleProgressExcelSectionTitle(worksheet, sectionRow, '관계자 배분');
         const headerRow = sectionRow + 1;
-        const headers = ['관계자', '방식', '금액', '메모'];
-        const widths = [['A', 'D'], ['E', 'F'], ['G', 'I'], ['J', 'O']];
+        const headers = ['관계자', '방식', '세전', '세후', '세금', '입금', '비고'];
+        const widths = [['A', 'C'], ['D', 'E'], ['F', 'G'], ['H', 'I'], ['J', 'K'], ['L', 'M'], ['N', 'O']];
         headers.forEach((label, index) => {
             const [start, end] = widths[index];
             worksheet.mergeCells(`${start}${headerRow}:${end}${headerRow}`);
@@ -1415,17 +1488,38 @@ const buildProgressInvoiceWorkbook = async ({
         } else {
             allocationRows.forEach((row, index) => {
                 const rowNumber = headerRow + index + 1;
-                worksheet.mergeCells(`A${rowNumber}:D${rowNumber}`);
-                worksheet.mergeCells(`E${rowNumber}:F${rowNumber}`);
-                worksheet.mergeCells(`G${rowNumber}:I${rowNumber}`);
-                worksheet.mergeCells(`J${rowNumber}:O${rowNumber}`);
+                const settlement = calculateBuybackSettlement(row.amount, row.allocation);
+                worksheet.mergeCells(`A${rowNumber}:C${rowNumber}`);
+                worksheet.mergeCells(`D${rowNumber}:E${rowNumber}`);
+                worksheet.mergeCells(`F${rowNumber}:G${rowNumber}`);
+                worksheet.mergeCells(`H${rowNumber}:I${rowNumber}`);
+                worksheet.mergeCells(`J${rowNumber}:K${rowNumber}`);
+                worksheet.mergeCells(`L${rowNumber}:M${rowNumber}`);
+                worksheet.mergeCells(`N${rowNumber}:O${rowNumber}`);
                 setProgressExcelText(worksheet.getCell(`A${rowNumber}`), row.allocation.targetName, { border: progressExcelBorder('thin', 'FFE2E8F0') });
-                setProgressExcelText(worksheet.getCell(`E${rowNumber}`), PROGRESS_ALLOCATION_METHOD_LABELS[row.allocation.method], {
+                setProgressExcelText(worksheet.getCell(`D${rowNumber}`), PROGRESS_ALLOCATION_METHOD_LABELS[row.allocation.method], {
                     alignment: { horizontal: 'center' },
                     border: progressExcelBorder('thin', 'FFE2E8F0'),
                 });
-                setProgressExcelNumber(worksheet.getCell(`G${rowNumber}`), row.amount, '#,##0', { border: progressExcelBorder('thin', 'FFE2E8F0') });
-                setProgressExcelText(worksheet.getCell(`J${rowNumber}`), row.allocation.memo || '', { border: progressExcelBorder('thin', 'FFE2E8F0') });
+                setProgressExcelNumber(worksheet.getCell(`F${rowNumber}`), settlement.grossAmount, '#,##0', { border: progressExcelBorder('thin', 'FFE2E8F0') });
+                setProgressExcelNumber(worksheet.getCell(`H${rowNumber}`), settlement.afterTaxAmount, '#,##0', { border: progressExcelBorder('thin', 'FFE2E8F0') });
+                setProgressExcelNumber(worksheet.getCell(`J${rowNumber}`), settlement.taxAmount, '#,##0', { border: progressExcelBorder('thin', 'FFE2E8F0') });
+                const storedPaidAmount = Math.max(0, toProgressNumber(row.allocation.paidAmount));
+                const paidAmount = row.allocation.paymentStatus === 'paid'
+                    ? (row.allocation.paidAmount === undefined ? settlement.afterTaxAmount : storedPaidAmount)
+                    : row.allocation.paymentStatus === 'partial' || row.allocation.paymentStatus === 'overpaid'
+                        ? storedPaidAmount
+                        : 0;
+                const remainingAmount = Math.max(0, settlement.afterTaxAmount - paidAmount);
+                setProgressExcelText(worksheet.getCell(`L${rowNumber}`), [
+                    getBuybackPaymentStatusLabel(row.allocation.paymentStatus),
+                    `입금 ${formatProgressMoney(paidAmount)}`,
+                    `잔액 ${formatProgressMoney(remainingAmount)}`,
+                ].join(' / '), {
+                    alignment: { horizontal: 'center' },
+                    border: progressExcelBorder('thin', 'FFE2E8F0'),
+                });
+                setProgressExcelText(worksheet.getCell(`N${rowNumber}`), [row.allocation.memo, row.allocation.paymentMemo].filter(Boolean).join(' / '), { border: progressExcelBorder('thin', 'FFE2E8F0') });
             });
             sectionRow = headerRow + allocationRows.length + 2;
         }
@@ -1489,7 +1583,7 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
         return normalizeTabKey(tab) || 'overview';
     });
     const [yearMonth, setYearMonth] = useState(() =>
-        normalizeProgressYearMonthParam(searchParams.get('month') || searchParams.get('yearMonth')) || getCurrentYearMonth()
+        getProgressYearMonthFromSearchParams(searchParams) || getCurrentYearMonth()
     );
     const [contracts, setContracts] = useState<ProgressContract[]>([]);
     const [claims, setClaims] = useState<ProgressClaim[]>([]);
@@ -1506,6 +1600,7 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
     const [contractDraft, setContractDraft] = useState<ProgressContract | null>(null);
     const [claimDraft, setClaimDraft] = useState<ProgressClaim | null>(null);
     const [loading, setLoading] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
@@ -1515,8 +1610,10 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
 
     const tabParam = searchParams.get('tab');
     const normalizedTabParam = isInvoiceOnlyPage ? 'invoice' : normalizeTabKey(tabParam);
-    const queryYearMonth = normalizeProgressYearMonthParam(searchParams.get('month') || searchParams.get('yearMonth'));
+    const queryYearMonth = getProgressYearMonthFromSearchParams(searchParams);
     const querySiteId = normalizeSiteId(searchParams.get('siteId') || searchParams.get('site') || '');
+    const rawMonthParam = searchParams.get('month');
+    const rawYearMonthParam = searchParams.get('yearMonth');
 
     useEffect(() => {
         if (isInvoiceOnlyPage) {
@@ -1535,14 +1632,27 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
     }, [activeTab, isInvoiceOnlyPage, normalizedTabParam, setSearchParams, tabParam]);
 
     useEffect(() => {
-        if (!isInvoiceOnlyPage || !queryYearMonth || queryYearMonth === yearMonth) return;
+        if (!queryYearMonth || queryYearMonth === yearMonth) return;
         setYearMonth(queryYearMonth);
-    }, [isInvoiceOnlyPage, queryYearMonth, yearMonth]);
+    }, [queryYearMonth, yearMonth]);
 
     useEffect(() => {
-        if (!isInvoiceOnlyPage || !querySiteId || querySiteId === selectedSiteId) return;
+        const hasInvalidMonth = Boolean(rawMonthParam && !normalizeProgressYearMonthParam(rawMonthParam));
+        const hasInvalidYearMonth = Boolean(rawYearMonthParam && !normalizeProgressYearMonthParam(rawYearMonthParam));
+        if (!hasInvalidMonth && !hasInvalidYearMonth) return;
+
+        const next = new URLSearchParams(searchParams);
+        if (hasInvalidMonth) next.delete('month');
+        if (hasInvalidYearMonth) next.delete('yearMonth');
+        if (next.toString() !== searchParams.toString()) {
+            setSearchParams(next, { replace: true });
+        }
+    }, [rawMonthParam, rawYearMonthParam, searchParams, setSearchParams]);
+
+    useEffect(() => {
+        if (!querySiteId || querySiteId === selectedSiteId) return;
         setSelectedSiteId(querySiteId);
-    }, [isInvoiceOnlyPage, querySiteId, selectedSiteId]);
+    }, [querySiteId, selectedSiteId]);
 
     const setActiveTab = useCallback((tab: TabKey) => {
         setLaborStatementPanel(null);
@@ -1553,8 +1663,7 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
         setSearchParams(next, { replace: true });
     }, [searchParams, setSearchParams]);
 
-    const setInvoicePageSearchParam = useCallback((key: 'month' | 'siteId', value: string) => {
-        if (!isInvoiceOnlyPage) return;
+    const setProgressPageSearchParam = useCallback((key: 'month' | 'siteId', value: string) => {
         const next = new URLSearchParams(searchParams);
         if (value) {
             next.set(key, value);
@@ -1564,7 +1673,7 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
         if (next.toString() !== searchParams.toString()) {
             setSearchParams(next, { replace: true });
         }
-    }, [isInvoiceOnlyPage, searchParams, setSearchParams]);
+    }, [searchParams, setSearchParams]);
 
     const scrollToProgressSection = (sectionId: string) => {
         document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1572,6 +1681,7 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
 
     const loadData = async () => {
         setLoading(true);
+        setLoadError(null);
         try {
             const range = getMonthDateRange(yearMonth);
             const [contractRows, claimRows, targetRows, outputRows, workerRows, estimateRows] = await Promise.all([
@@ -1590,7 +1700,9 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
             setTransactionStatements(estimateRows.filter((statement) => statement.documentType === 'transaction'));
         } catch (error) {
             console.error('[ProgressClaimPage] load failed:', error);
-            toast.error('기성관리 데이터를 불러오지 못했습니다.');
+            const message = '기성관리 데이터를 불러오지 못했습니다. 네트워크와 권한을 확인한 뒤 다시 시도하세요.';
+            setLoadError(message);
+            toast.error(message);
         } finally {
             setLoading(false);
         }
@@ -1742,8 +1854,14 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
     );
 
     useEffect(() => {
-        if (!selectedSiteId && progressScopeSiteRows[0]?.id) setSelectedSiteId(String(progressScopeSiteRows[0].id));
-    }, [progressScopeSiteRows, selectedSiteId]);
+        const fallbackSiteId = normalizeSiteId(progressScopeSiteRows[0]?.id);
+        if (!fallbackSiteId) return;
+        const selectedSiteExists = progressScopeSiteRows.some((site) => normalizeSiteId(site.id) === selectedSiteId);
+        if (!selectedSiteId || !selectedSiteExists) {
+            setSelectedSiteId(fallbackSiteId);
+            setProgressPageSearchParam('siteId', fallbackSiteId);
+        }
+    }, [progressScopeSiteRows, selectedSiteId, setProgressPageSearchParam]);
 
     const selectedClientGroup = useMemo(() => {
         const selectedClientKey = selectedSite ? getProgressClientKey(selectedSite) : '';
@@ -1753,7 +1871,12 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
     const selectedClientSites = selectedClientGroup?.sites || progressScopeSiteRows;
 
     const activeAllocationTargets = useMemo(
-        () => targets.filter((target) => target.status !== 'inactive'),
+        () => targets
+            .filter((target) => target.status !== 'inactive' && target.targetType !== 'office_income')
+            .sort((a, b) => {
+                const rank = (target: SettlementTarget) => target.targetType === 'salesperson' ? 0 : target.targetType === 'client_contact' ? 1 : 2;
+                return rank(a) - rank(b) || String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+            }),
         [targets]
     );
 
@@ -1773,7 +1896,7 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
             ? {
                 ...claim,
                 progressLines: [...claim.progressLines],
-                allocations: [...claim.allocations],
+                allocations: getEditableProgressAllocations(claim),
                 claimAttachments: [...(claim.claimAttachments || [])],
             }
             : makeDefaultClaim(selectedSite, yearMonth));
@@ -1781,6 +1904,7 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
 
     const selectedContract = contractDraft || (selectedSite ? makeDefaultContract(selectedSite) : undefined);
     const selectedClaim = claimDraft || (selectedSite ? makeDefaultClaim(selectedSite, yearMonth) : undefined);
+    const buybackFinancialsLocked = selectedClaim?.status === 'confirmed' || selectedClaim?.status === 'billed' || selectedClaim?.status === 'paid';
     const selectedDailySummary = selectedSite?.id ? dailySummaryBySiteId.get(String(selectedSite.id)) : undefined;
 
     const dashboardClaims = useMemo(() => {
@@ -1812,6 +1936,135 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
             yearMonth
         );
     }, [claims, selectedClaim, selectedContract, selectedDailySummary, yearMonth]);
+
+    const selectedBuybackSummary = useMemo<ProgressClaimSummary | null>(() => {
+        const summary = selectedComputed?.summary;
+        const snapshot = selectedClaim?.confirmedSnapshot;
+        if (!summary || !buybackFinancialsLocked || !snapshot) return summary || null;
+        return {
+            ...summary,
+            siteId: snapshot.site.siteId || summary.siteId,
+            siteName: snapshot.site.siteName || summary.siteName,
+            contractAmount: snapshot.contractAmount,
+            previousAmount: snapshot.previousAmount,
+            currentAmount: snapshot.currentAmount,
+            cumulativeAmount: snapshot.cumulativeAmount,
+            remainingAmount: snapshot.remainingAmount,
+            totalManDay: snapshot.totalManDay,
+            dailyAmount: snapshot.dailyAmount ?? summary.dailyAmount,
+            dailyRowCount: snapshot.dailyRowCount ?? summary.dailyRowCount,
+            sukumiUnitPrice: snapshot.sukumiUnitPrice,
+            teamPositionMode: snapshot.teamPositionMode ?? summary.teamPositionMode,
+            teamPositionManualAmount: snapshot.teamPositionManualAmount ?? summary.teamPositionManualAmount,
+            buybackUnit: snapshot.buybackUnit ?? summary.buybackUnit,
+            buybackTotalAmount: snapshot.buybackTotalAmount ?? summary.buybackTotalAmount,
+            teamPositionUnit: snapshot.teamPositionUnit ?? summary.teamPositionUnit,
+            teamPositionAmount: snapshot.teamPositionAmount ?? summary.teamPositionAmount,
+            buybackPoolAmount: snapshot.buybackPoolAmount ?? summary.buybackPoolAmount,
+            allocationBaseAmount: snapshot.allocationBaseAmount ?? summary.allocationBaseAmount,
+            allocationAmount: snapshot.allocationAmount,
+            allocationRemainAmount: snapshot.allocationRemainAmount ?? summary.allocationRemainAmount,
+            supplyAmount: snapshot.supplyAmount,
+            vatAmount: snapshot.vatAmount,
+            billingAmount: snapshot.billingAmount,
+        };
+    }, [buybackFinancialsLocked, selectedClaim, selectedComputed]);
+
+    const selectedBuybackAllocationRows = useMemo(() => {
+        if (!selectedClaim) return [];
+        if (!buybackFinancialsLocked || !selectedClaim.confirmedSnapshot) {
+            return selectedComputed?.allocationRows || [];
+        }
+        const snapshot = selectedClaim.confirmedSnapshot;
+        return calculateAllocations(
+            getEditableProgressAllocations(selectedClaim),
+            snapshot.allocationBaseAmount ?? selectedBuybackSummary?.allocationBaseAmount ?? 0,
+            snapshot.totalManDay
+        );
+    }, [buybackFinancialsLocked, selectedBuybackSummary?.allocationBaseAmount, selectedClaim, selectedComputed]);
+
+    const selectedBuybackSettlementTotals = useMemo(() => {
+        const rows = selectedBuybackAllocationRows;
+        return rows.reduce((totals, row) => {
+            if (row.allocation.targetType === 'office_income') return totals;
+            const target = targets.find((item) => item.id === (row.allocation.settlementTargetId || row.allocation.targetId));
+            const settlement = calculateBuybackSettlement(row.amount, {
+                settlementMode: row.allocation.settlementMode,
+                afterTaxRate: row.allocation.afterTaxRate ?? (buybackFinancialsLocked ? DEFAULT_BUYBACK_AFTER_TAX_RATE : target?.defaultAfterTaxRate),
+                manualAfterTaxAmount: row.allocation.manualAfterTaxAmount,
+            });
+            return {
+                afterTax: totals.afterTax + settlement.afterTaxAmount,
+                tax: totals.tax + settlement.taxAmount,
+            };
+        }, { afterTax: 0, tax: 0 });
+    }, [buybackFinancialsLocked, selectedBuybackAllocationRows, targets]);
+
+    const buybackSiteSources = useMemo<ProgressBuybackSiteSource[]>(() => {
+        const currentSiteId = normalizeSiteId(selectedSite?.id || selectedSiteId);
+
+        return selectedClientSites.map((site) => {
+            const siteId = normalizeSiteId(site.id);
+            const persistedClaim = claimBySiteMonth.get(`${siteId}__${yearMonth}`);
+            const isSelectedSite = siteId === currentSiteId;
+            const claim = isSelectedSite && selectedClaim
+                ? selectedClaim
+                : persistedClaim || makeDefaultClaim(site, yearMonth);
+            const contract = contractBySiteId.get(siteId) || makeDefaultContract(site);
+            const computed = isSelectedSite && selectedComputed
+                ? selectedComputed
+                : calculateProgressClaimSummary(
+                    contract,
+                    claims,
+                    claim,
+                    dailySummaryBySiteId.get(siteId),
+                    yearMonth
+                );
+            const financialsLocked = claim.status === 'confirmed' || claim.status === 'billed' || claim.status === 'paid';
+            const snapshot = financialsLocked ? claim.confirmedSnapshot : undefined;
+            const totalManDay = snapshot?.totalManDay ?? computed.summary.totalManDay;
+            const allocationBaseAmount = snapshot?.allocationBaseAmount ?? computed.summary.allocationBaseAmount;
+            const allocationRows = calculateAllocations(
+                getEditableProgressAllocations(claim),
+                allocationBaseAmount,
+                totalManDay
+            );
+
+            return {
+                siteId,
+                siteName: String(site.name || claim.siteName || '현장 미지정'),
+                clientName: getProgressClientName(site),
+                yearMonth,
+                hasClaim: Boolean(persistedClaim),
+                claimStatus: claim.status,
+                financialsLocked,
+                totalManDay,
+                currentAmount: snapshot?.currentAmount ?? computed.summary.currentAmount,
+                teamPositionAmount: snapshot?.teamPositionAmount ?? computed.summary.teamPositionAmount,
+                buybackPoolAmount: snapshot?.buybackPoolAmount ?? computed.summary.buybackPoolAmount,
+                allocationBaseAmount,
+                allocationAmount: snapshot?.allocationAmount ?? computed.summary.allocationAmount,
+                allocationRemainAmount: snapshot?.allocationRemainAmount ?? computed.summary.allocationRemainAmount,
+                allocationRows,
+            };
+        });
+    }, [
+        claimBySiteMonth,
+        claims,
+        contractBySiteId,
+        dailySummaryBySiteId,
+        selectedClaim,
+        selectedClientSites,
+        selectedComputed,
+        selectedSite,
+        selectedSiteId,
+        yearMonth,
+    ]);
+
+    const buybackSiteRows = useMemo(
+        () => buildProgressBuybackSiteRows(buybackSiteSources, targets),
+        [buybackSiteSources, targets]
+    );
 
     const workerById = useMemo(() => {
         const map = new Map<string, Worker>();
@@ -2048,7 +2301,11 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
     const hasUnsavedClaimChanges = useMemo(() => {
         if (!claimDraft || !persistedClaimForSelected) return false;
         if (claimDraft.siteId !== persistedClaimForSelected.siteId || claimDraft.yearMonth !== persistedClaimForSelected.yearMonth) return false;
-        return serializeClaimDraft(claimDraft) !== serializeClaimDraft(persistedClaimForSelected);
+        const comparablePersistedClaim = {
+            ...persistedClaimForSelected,
+            allocations: getEditableProgressAllocations(persistedClaimForSelected),
+        };
+        return serializeClaimDraft(claimDraft) !== serializeClaimDraft(comparablePersistedClaim);
     }, [claimDraft, persistedClaimForSelected]);
 
     const hasUnsavedChanges = hasUnsavedContractChanges || hasUnsavedClaimChanges;
@@ -2072,9 +2329,9 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
         if (nextSiteId === selectedSiteId) return true;
         if (!confirmDiscardDraft()) return false;
         setSelectedSiteId(nextSiteId);
-        setInvoicePageSearchParam('siteId', nextSiteId);
+        setProgressPageSearchParam('siteId', nextSiteId);
         return true;
-    }, [confirmDiscardDraft, selectedSiteId, setInvoicePageSearchParam]);
+    }, [confirmDiscardDraft, selectedSiteId, setProgressPageSearchParam]);
 
     const requestClientChange = useCallback((nextClientKey: string): boolean => {
         const group = siteClientGroups.find((item) => item.key === nextClientKey);
@@ -2082,17 +2339,42 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
         if (!nextSiteId || nextSiteId === selectedSiteId) return true;
         if (!confirmDiscardDraft()) return false;
         setSelectedSiteId(nextSiteId);
-        setInvoicePageSearchParam('siteId', nextSiteId);
+        setProgressPageSearchParam('siteId', nextSiteId);
         return true;
-    }, [confirmDiscardDraft, selectedSiteId, setInvoicePageSearchParam, siteClientGroups]);
+    }, [confirmDiscardDraft, selectedSiteId, setProgressPageSearchParam, siteClientGroups]);
 
     const requestYearMonthChange = useCallback((nextYearMonth: string): boolean => {
-        if (!nextYearMonth || nextYearMonth === yearMonth) return true;
+        const normalizedYearMonth = normalizeProgressYearMonthParam(nextYearMonth);
+        if (!normalizedYearMonth || normalizedYearMonth === yearMonth) return true;
         if (!confirmDiscardDraft()) return false;
-        setYearMonth(nextYearMonth);
-        setInvoicePageSearchParam('month', nextYearMonth);
+        setYearMonth(normalizedYearMonth);
+        setProgressPageSearchParam('month', normalizedYearMonth);
         return true;
-    }, [confirmDiscardDraft, setInvoicePageSearchParam, yearMonth]);
+    }, [confirmDiscardDraft, setProgressPageSearchParam, yearMonth]);
+
+    const openBuybackWorkbookRow = useCallback((row: ProgressBuybackWorkbookRow) => {
+        const nextSiteId = normalizeSiteId(row.siteId);
+        const nextYearMonth = normalizeProgressYearMonthParam(row.yearMonth);
+        if (!nextSiteId || !nextYearMonth) {
+            toast.error('연결된 현장 또는 귀속월을 확인할 수 없습니다.');
+            return;
+        }
+        if (!confirmDiscardDraft()) return;
+
+        setSelectedSiteId(nextSiteId);
+        setYearMonth(nextYearMonth);
+        const next = new URLSearchParams(searchParams);
+        next.set('tab', 'buyback');
+        next.set('siteId', nextSiteId);
+        next.set('month', nextYearMonth);
+        setSearchParams(next, { replace: true });
+
+        window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => {
+                document.getElementById('progress-allocation-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        });
+    }, [confirmDiscardDraft, searchParams, setSearchParams]);
 
     const reloadData = useCallback(() => {
         if (!confirmDiscardDraft()) return;
@@ -2675,8 +2957,136 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
         }
     };
 
+    const materializeBuybackAllocations = (allocations: ProgressAllocation[]): ProgressAllocation[] =>
+        allocations.map((allocation) => {
+            const isOfficeIncome = allocation.targetType === 'office_income' || allocation.targetId === OFFICE_INCOME_TARGET_ID;
+            const target = isOfficeIncome
+                ? undefined
+                : targets.find((item) => item.id === (allocation.settlementTargetId || allocation.targetId));
+            return {
+                ...allocation,
+                ...(target ? {
+                    settlementTargetId: target.id,
+                    targetId: target.id,
+                    targetName: target.name,
+                    targetType: target.targetType,
+                    companyName: target.companyName || allocation.companyName,
+                } : {}),
+                settlementMode: allocation.settlementMode || 'rate',
+                afterTaxRate: normalizeBuybackAfterTaxRate(
+                    allocation.afterTaxRate ?? (isOfficeIncome
+                        ? 1
+                        : buybackFinancialsLocked
+                            ? DEFAULT_BUYBACK_AFTER_TAX_RATE
+                            : target?.defaultAfterTaxRate)
+                ),
+                paymentStatus: allocation.paymentStatus || 'pending',
+                evidenceRequired: allocation.evidenceRequired ?? (buybackFinancialsLocked ? false : Boolean(target?.evidenceRequired)),
+                evidenceStatus: (allocation.evidenceRequired || (!buybackFinancialsLocked && target?.evidenceRequired)) && allocation.evidenceStatus === 'not_required'
+                    ? 'pending'
+                    : allocation.evidenceStatus || (buybackFinancialsLocked
+                        ? 'not_required'
+                        : target?.evidenceRequired ? 'pending' : 'not_required'),
+            };
+        });
+
+    const validateBuybackIntegrity = (): boolean => {
+        const allocations = claimDraft?.allocations || [];
+        const directoryTargetIds = new Set(
+            targets.map((target) => target.id).filter((id): id is string => Boolean(id))
+        );
+        const unlinked = allocations.filter((allocation) => {
+            const isOfficeIncome = allocation.targetType === 'office_income' || allocation.targetId === OFFICE_INCOME_TARGET_ID;
+            if (isOfficeIncome) return false;
+            const targetId = allocation.settlementTargetId || allocation.targetId;
+            return !targetId || !directoryTargetIds.has(targetId);
+        });
+        const financialRows = buybackFinancialsLocked ? [] : selectedComputed?.allocationRows || [];
+        const negative = financialRows.filter((row) => row.amount < 0);
+        const invalidManualAfterTax = financialRows.filter((row) => {
+            if ((row.allocation.settlementMode || 'rate') !== 'manual') return false;
+            const manualAmount = toProgressNumber(row.allocation.manualAfterTaxAmount);
+            return manualAmount < 0 || manualAmount > row.amount;
+        });
+        const remainAmount = buybackFinancialsLocked ? 0 : selectedComputed?.summary.allocationRemainAmount || 0;
+        const missingOverrideReason = buybackFinancialsLocked ? [] : allocations.filter((allocation) => {
+            const isOfficeIncome = allocation.targetType === 'office_income' || allocation.targetId === OFFICE_INCOME_TARGET_ID;
+            if (isOfficeIncome) return false;
+            const target = targets.find((item) => item.id === (allocation.settlementTargetId || allocation.targetId));
+            const defaultRate = target?.defaultAfterTaxRate ?? DEFAULT_BUYBACK_AFTER_TAX_RATE;
+            const effectiveMode = allocation.settlementMode || 'rate';
+            const isOverride = effectiveMode !== 'rate' || Math.abs((allocation.afterTaxRate ?? defaultRate) - defaultRate) > 0.000001;
+            return isOverride && !String(allocation.memo || '').trim();
+        });
+        const missingRequiredEvidence = allocations.filter((allocation) => {
+            const target = targets.find((item) => item.id === (allocation.settlementTargetId || allocation.targetId));
+            const evidenceRequired = allocation.evidenceRequired ?? (buybackFinancialsLocked ? false : Boolean(target?.evidenceRequired));
+            const hasRecordedPayment = allocation.paymentStatus === 'partial' || allocation.paymentStatus === 'paid' || allocation.paymentStatus === 'overpaid';
+            return evidenceRequired && hasRecordedPayment && allocation.evidenceStatus !== 'received';
+        });
+        const invalidPaymentAmounts = selectedBuybackAllocationRows.filter((row) => {
+            if (row.allocation.targetType === 'office_income' || row.allocation.targetId === OFFICE_INCOME_TARGET_ID) return false;
+            const target = targets.find((item) => item.id === (row.allocation.settlementTargetId || row.allocation.targetId));
+            const settlement = calculateBuybackSettlement(row.amount, {
+                settlementMode: row.allocation.settlementMode,
+                afterTaxRate: row.allocation.afterTaxRate ?? (buybackFinancialsLocked ? DEFAULT_BUYBACK_AFTER_TAX_RATE : target?.defaultAfterTaxRate),
+                manualAfterTaxAmount: row.allocation.manualAfterTaxAmount,
+            });
+            const paidAmount = row.allocation.paidAmount ?? (row.allocation.paymentStatus === 'paid' ? settlement.afterTaxAmount : 0);
+            if (row.allocation.paymentStatus === 'partial') {
+                return paidAmount <= 0 || paidAmount >= settlement.afterTaxAmount;
+            }
+            if (row.allocation.paymentStatus === 'overpaid') {
+                return paidAmount <= settlement.afterTaxAmount;
+            }
+            if (row.allocation.paymentStatus === 'paid') {
+                return paidAmount !== settlement.afterTaxAmount;
+            }
+            return paidAmount !== 0;
+        });
+
+        if (unlinked.length > 0) {
+            toast.error(`정산대상자 원본과 연결되지 않은 배분 ${unlinked.length}건을 확인해 주세요.`);
+            return false;
+        }
+        if (negative.length > 0) {
+            toast.error('바이백 배분금액은 음수로 저장할 수 없습니다. 조정·이관 내역은 별도 조정 원장으로 등록해 주세요.');
+            return false;
+        }
+        if (invalidManualAfterTax.length > 0) {
+            toast.error(`세후 직접입력 금액이 세전 범위를 벗어난 배분 ${invalidManualAfterTax.length}건을 확인해 주세요.`);
+            return false;
+        }
+        if (remainAmount < 0) {
+            toast.error(`배분합계가 기준금액을 ${formatProgressMoney(Math.abs(remainAmount))}원 초과했습니다.`);
+            return false;
+        }
+        if (missingOverrideReason.length > 0) {
+            toast.error(`기본 세후율과 다른 정산 ${missingOverrideReason.length}건은 비고/수기공식에 변경 사유를 입력해 주세요.`);
+            return false;
+        }
+        if (missingRequiredEvidence.length > 0) {
+            toast.error(`증빙 필수 대상 중 입금 처리 전에 증빙 확인이 필요한 배분 ${missingRequiredEvidence.length}건이 있습니다.`);
+            return false;
+        }
+        if (invalidPaymentAmounts.length > 0) {
+            toast.error(`부분입금·입금완료·과입금 상태와 실입금액이 맞지 않는 배분 ${invalidPaymentAmounts.length}건을 확인해 주세요.`);
+            return false;
+        }
+        return true;
+    };
+
     const saveClaim = async (patch?: Partial<ProgressClaim>, silent = false): Promise<ProgressClaim | null> => {
         if (!claimDraft || !selectedSite) return null;
+        const nextStatus = patch?.status ?? claimDraft.status;
+        const nextSnapshot = patch?.confirmedSnapshot ?? claimDraft.confirmedSnapshot;
+        if ((nextStatus === 'billed' || nextStatus === 'paid') && !nextSnapshot) {
+            toast.error('발행후·입금완료 상태로 변경하려면 먼저 기성청구서를 확정해 주세요.');
+            return null;
+        }
+        if ((nextStatus === 'confirmed' || nextStatus === 'billed' || nextStatus === 'paid') && !validateBuybackIntegrity()) {
+            return null;
+        }
         setSaving(true);
         try {
             const payload: ProgressClaim = {
@@ -2709,9 +3119,15 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
     };
 
     const saveEntryDrafts = async () => {
+        if (!hasUnsavedContractChanges && !hasUnsavedClaimChanges) {
+            toast.info('저장할 변경사항이 없습니다.');
+            return;
+        }
         const savedContract = hasUnsavedContractChanges ? await saveContract(true) : selectedContract || null;
+        if (hasUnsavedContractChanges && !savedContract) return;
         const savedClaim = hasUnsavedClaimChanges ? await saveClaim(undefined, true) : selectedClaim || null;
-        if (savedContract || savedClaim) toast.success('계약/기성 입력값을 저장했습니다.');
+        if (hasUnsavedClaimChanges && !savedClaim) return;
+        toast.success('계약/기성 입력값을 저장했습니다.');
     };
 
     const resetEntryDrafts = () => {
@@ -2727,51 +3143,72 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
             setClaimDraft({
                 ...persistedClaimForSelected,
                 progressLines: [...persistedClaimForSelected.progressLines],
-                allocations: [...persistedClaimForSelected.allocations],
+                allocations: getEditableProgressAllocations(persistedClaimForSelected),
                 claimAttachments: [...(persistedClaimForSelected.claimAttachments || [])],
             });
         }
     };
 
     const confirmClaim = async () => {
+        if (buybackFinancialsLocked) {
+            toast.info('이미 확정된 기성입니다. 확정 금액을 변경하려면 별도 정정 절차가 필요합니다.');
+            return;
+        }
+        if (!validateBuybackIntegrity()) return;
         const savedContract = await saveContract(true);
         if (!selectedClaim || !selectedSite || !selectedComputed) return;
         if (!savedContract && (selectedContract?.items.length || 0) > 0) {
             toast.error('계약내역 저장을 먼저 완료해야 확정할 수 있습니다.');
             return;
         }
+        const contractForSnapshot = savedContract || selectedContract;
+        const computedForSnapshot = calculateProgressClaimSummary(
+            contractForSnapshot,
+            claims,
+            selectedClaim,
+            selectedDailySummary,
+            yearMonth
+        );
 
+        const materializedAllocations = materializeBuybackAllocations(selectedClaim.allocations);
         const snapshot = {
             site: buildProgressSiteSnapshot(selectedSite, selectedClaim.siteSnapshot),
-            contractItems: savedContract?.items || selectedContract?.items || [],
+            contractItems: contractForSnapshot?.items || [],
             progressLines: selectedClaim.progressLines,
-            totalManDay: selectedComputed.summary.totalManDay,
-            contractAmount: selectedComputed.summary.contractAmount,
-            previousAmount: selectedComputed.summary.previousAmount,
-            currentAmount: selectedComputed.summary.currentAmount,
-            cumulativeAmount: selectedComputed.summary.cumulativeAmount,
-            remainingAmount: selectedComputed.summary.remainingAmount,
-            sukumiUnitPrice: selectedComputed.summary.sukumiUnitPrice,
-            teamPositionMode: selectedComputed.summary.teamPositionMode,
-            teamPositionManualAmount: selectedComputed.summary.teamPositionManualAmount,
-            buybackUnit: selectedComputed.summary.buybackUnit,
-            buybackTotalAmount: selectedComputed.summary.buybackTotalAmount,
-            teamPositionUnit: selectedComputed.summary.teamPositionUnit,
-            teamPositionAmount: selectedComputed.summary.teamPositionAmount,
-            buybackPoolAmount: selectedComputed.summary.buybackPoolAmount,
-            allocationBaseAmount: selectedComputed.summary.allocationBaseAmount,
-            allocationRemainAmount: selectedComputed.summary.allocationRemainAmount,
-            supplyAmount: selectedComputed.summary.supplyAmount,
-            vatAmount: selectedComputed.summary.vatAmount,
-            billingAmount: selectedComputed.summary.billingAmount,
-            allocationAmount: selectedComputed.summary.allocationAmount,
+            allocations: materializedAllocations.map((allocation) => ({ ...allocation })),
+            totalManDay: computedForSnapshot.summary.totalManDay,
+            dailyAmount: computedForSnapshot.summary.dailyAmount,
+            dailyRowCount: computedForSnapshot.summary.dailyRowCount,
+            contractAmount: computedForSnapshot.summary.contractAmount,
+            previousAmount: computedForSnapshot.summary.previousAmount,
+            currentAmount: computedForSnapshot.summary.currentAmount,
+            cumulativeAmount: computedForSnapshot.summary.cumulativeAmount,
+            remainingAmount: computedForSnapshot.summary.remainingAmount,
+            sukumiUnitPrice: computedForSnapshot.summary.sukumiUnitPrice,
+            teamPositionMode: computedForSnapshot.summary.teamPositionMode,
+            teamPositionManualAmount: computedForSnapshot.summary.teamPositionManualAmount,
+            buybackUnit: computedForSnapshot.summary.buybackUnit,
+            buybackTotalAmount: computedForSnapshot.summary.buybackTotalAmount,
+            teamPositionUnit: computedForSnapshot.summary.teamPositionUnit,
+            teamPositionAmount: computedForSnapshot.summary.teamPositionAmount,
+            buybackPoolAmount: computedForSnapshot.summary.buybackPoolAmount,
+            allocationBaseAmount: computedForSnapshot.summary.allocationBaseAmount,
+            allocationRemainAmount: computedForSnapshot.summary.allocationRemainAmount,
+            supplyAmount: computedForSnapshot.summary.supplyAmount,
+            vatAmount: computedForSnapshot.summary.vatAmount,
+            billingAmount: computedForSnapshot.summary.billingAmount,
+            allocationAmount: computedForSnapshot.summary.allocationAmount,
             vatMode: selectedClaim.vatMode,
             vatRate: selectedClaim.vatRate,
             confirmedAt: new Date().toISOString(),
         };
 
-        await saveClaim({ status: 'confirmed', confirmedSnapshot: snapshot }, true);
-        toast.success('기성청구서를 확정했습니다.');
+        const savedClaim = await saveClaim({
+            allocations: materializedAllocations,
+            status: 'confirmed',
+            confirmedSnapshot: snapshot,
+        }, true);
+        if (savedClaim) toast.success('기성청구서를 확정했습니다.');
     };
 
     const changeClaimStatus = async (status: ProgressClaimStatus) => {
@@ -2789,21 +3226,48 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
     };
 
     const updateAllocationTarget = (id: string, targetId: string) => {
+        if (buybackFinancialsLocked) {
+            if (targetId === OFFICE_INCOME_TARGET_ID) return;
+            const target = targets.find((item) => item.id === targetId);
+            if (!target || target.targetType === 'office_income') return;
+            updateAllocation(id, {
+                settlementTargetId: target.id,
+                targetId: target.id,
+                targetName: target.name,
+                targetType: target.targetType,
+                companyName: target.companyName,
+            });
+            return;
+        }
         if (targetId === OFFICE_INCOME_TARGET_ID) {
             updateAllocation(id, {
+                settlementTargetId: undefined,
                 targetId: OFFICE_INCOME_TARGET_ID,
                 targetName: OFFICE_INCOME_TARGET_NAME,
                 targetType: 'office_income',
                 companyName: '',
+                settlementMode: 'rate',
+                afterTaxRate: 1,
+                paymentStatus: 'pending',
+                paidAmount: 0,
+                evidenceRequired: false,
+                evidenceStatus: 'not_required',
             });
             return;
         }
         const target = targets.find((item) => item.id === targetId);
         updateAllocation(id, {
+            settlementTargetId: target?.id,
             targetId: target?.id,
             targetName: target?.name || '',
             targetType: target?.targetType,
             companyName: target?.companyName,
+            settlementMode: 'rate',
+            afterTaxRate: target?.defaultAfterTaxRate ?? DEFAULT_BUYBACK_AFTER_TAX_RATE,
+            paymentStatus: 'pending',
+            paidAmount: 0,
+            evidenceRequired: Boolean(target?.evidenceRequired),
+            evidenceStatus: target?.evidenceRequired ? 'pending' : 'not_required',
         });
     };
 
@@ -2822,6 +3286,13 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
                 amountPerManDay: 0,
                 manualAmount: 0,
                 memo: '',
+                settlementMode: 'rate',
+                afterTaxRate: 1,
+                paymentStatus: 'pending',
+                paidAmount: 0,
+                evidenceRequired: false,
+                evidenceStatus: 'not_required',
+                paymentMemo: '',
             };
             return { ...current, allocations: [...current.allocations, next] };
         });
@@ -2831,13 +3302,19 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
         setClaimDraft((current) => current ? { ...current, allocations: current.allocations.filter((item) => item.id !== id) } : current);
     };
 
-    const handleAttachmentUpload = async (scope: ProgressAttachmentScope, fileList: FileList | null) => {
-        if (!selectedSite || !fileList || fileList.length === 0) return;
+    const saveBuybackDraft = async () => {
+        if (!validateBuybackIntegrity()) return;
+        await saveClaim();
+    };
+
+    const handleAttachmentUpload = async (scope: ProgressAttachmentScope, fileList: File[] | FileList | null) => {
+        const files = fileList ? Array.from(fileList) : [];
+        if (!selectedSite || files.length === 0) return;
         setUploading(true);
         setUploadProgress(0);
         try {
             const uploaded: ProgressAttachment[] = [];
-            for (const file of Array.from(fileList)) {
+            for (const file of files) {
                 const attachment = await progressClaimService.uploadAttachment({
                     file,
                     scope,
@@ -2885,30 +3362,40 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
 
     const removeAttachment = async (scope: ProgressAttachmentScope, id: string) => {
         if (!window.confirm('첨부파일 연결을 삭제하시겠습니까? 저장소 파일은 유지됩니다.')) return;
-        if (scope === 'site') {
-            const next = contractDraft
-                ? { ...contractDraft, commonAttachments: (contractDraft.commonAttachments || []).filter((item) => item.id !== id) }
+        setSaving(true);
+        try {
+            if (scope === 'site') {
+                const next = contractDraft
+                    ? { ...contractDraft, commonAttachments: (contractDraft.commonAttachments || []).filter((item) => item.id !== id) }
+                    : null;
+                if (next) {
+                    const savedId = await progressClaimService.saveContract(next);
+                    const saved = { ...next, id: savedId };
+                    setContractDraft(saved);
+                    setContracts((current) => {
+                        const exists = current.some((item) => item.id === savedId || item.siteId === saved.siteId);
+                        return exists
+                            ? current.map((item) => (item.id === savedId || item.siteId === saved.siteId ? saved : item))
+                            : [...current, saved];
+                    });
+                    toast.success('첨부파일 연결을 삭제했습니다.');
+                }
+                return;
+            }
+
+            const next = claimDraft
+                ? { ...claimDraft, claimAttachments: (claimDraft.claimAttachments || []).filter((item) => item.id !== id) }
                 : null;
             if (next) {
-                const savedId = await progressClaimService.saveContract(next);
-                const saved = { ...next, id: savedId };
-                setContractDraft(saved);
-                setContracts((current) => {
-                    const exists = current.some((item) => item.id === savedId || item.siteId === saved.siteId);
-                    return exists
-                        ? current.map((item) => (item.id === savedId || item.siteId === saved.siteId ? saved : item))
-                        : [...current, saved];
-                });
+                setClaimDraft(next);
+                const savedClaim = await saveClaim(next, true);
+                if (savedClaim) toast.success('첨부파일 연결을 삭제했습니다.');
             }
-            return;
-        }
-
-        const next = claimDraft
-            ? { ...claimDraft, claimAttachments: (claimDraft.claimAttachments || []).filter((item) => item.id !== id) }
-            : null;
-        if (next) {
-            setClaimDraft(next);
-            await saveClaim(next, true);
+        } catch (error) {
+            console.error('[ProgressClaimPage] attachment remove failed:', error);
+            toast.error('첨부파일 연결 삭제 중 오류가 발생했습니다.');
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -2997,9 +3484,29 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
             const pdfBlob = makeProgressInvoicePdfBlob(canvas, pageBreaks);
             const filename = `${sanitizeProgressFilenamePart(selectedSite.name || selectedClaim.siteName)}_${yearMonth}_기성청구서.pdf`;
             downloadProgressBlob(pdfBlob, filename);
+            void fileTransferAuditService.log({
+                kind: 'pdf',
+                direction: 'download',
+                status: 'success',
+                source: '기성청구 관리',
+                operation: 'invoice_download',
+                fileName: filename,
+                fileSize: pdfBlob.size,
+                recordCount: 1,
+                details: { siteId: selectedSite.id, claimId: selectedClaim.id, yearMonth },
+            });
             toast.success('기성청구서 PDF를 다운로드했습니다.');
         } catch (error) {
             console.error('[ProgressClaimPage] invoice PDF download failed:', error);
+            void fileTransferAuditService.log({
+                kind: 'pdf',
+                direction: 'download',
+                status: 'failure',
+                source: '기성청구 관리',
+                operation: 'invoice_download',
+                error,
+                details: { siteId: selectedSite.id, claimId: selectedClaim.id, yearMonth },
+            });
             toast.error('기성청구서 PDF 다운로드 중 오류가 발생했습니다.');
         } finally {
             invoiceElement.classList.remove('progress-invoice--pdf');
@@ -3030,10 +3537,31 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
             });
             const buffer = await workbook.xlsx.writeBuffer();
             const fileName = `${sanitizeProgressFilenamePart(selectedSite.name || selectedClaim.siteName)}_${yearMonth}_기성청구서.xlsx`;
-            saveAs(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), fileName);
+            const workbookBlob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            saveAs(workbookBlob, fileName);
+            void fileTransferAuditService.log({
+                kind: 'excel',
+                direction: 'download',
+                status: 'success',
+                source: 'Progress claim invoice',
+                operation: 'invoice_download',
+                fileName,
+                fileSize: workbookBlob.size,
+                recordCount: 1,
+                details: { siteId: selectedSite.id, claimId: selectedClaim.id, yearMonth },
+            });
             toast.success('기성청구서 엑셀을 다운로드했습니다.');
         } catch (error) {
             console.error('[ProgressClaimPage] invoice Excel download failed:', error);
+            void fileTransferAuditService.log({
+                kind: 'excel',
+                direction: 'download',
+                status: 'failure',
+                source: 'Progress claim invoice',
+                operation: 'invoice_download',
+                error,
+                details: { siteId: selectedSite.id, claimId: selectedClaim.id, yearMonth },
+            });
             toast.error('기성청구서 엑셀 다운로드 중 오류가 발생했습니다.');
         }
     };
@@ -3422,7 +3950,8 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
                 <button
                     type="button"
                     onClick={reloadData}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                    disabled={loading}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                     {loading ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faCalculator} />}
                     다시 계산
@@ -4266,226 +4795,7 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
         );
     };
 
-    const renderSukumi = (includeSiteSelector = true) => (
-        <div className="space-y-4">
-            {includeSiteSelector && renderSiteSelector()}
-            <section id="progress-buyback-section" className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-6">
-                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-4">
-                        <div className="text-xs font-bold text-slate-500">출력일보 공수</div>
-                        <div className="mt-2 text-2xl font-black">{formatProgressQuantity(selectedComputed?.summary.totalManDay || 0)}</div>
-                    </div>
-                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-4">
-                        <div className="text-xs font-bold text-slate-500">출력일보 금액</div>
-                        <div className="mt-2 text-2xl font-black">{formatProgressMoney(selectedComputed?.summary.dailyAmount || 0)}</div>
-                    </div>
-                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-4">
-                        <div className="text-xs font-bold text-slate-500">금회기성</div>
-                        <div className="mt-2 text-2xl font-black">{formatProgressMoney(selectedComputed?.summary.currentAmount || 0)}</div>
-                    </div>
-                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-4">
-                        <div className="text-xs font-bold text-slate-500">스꾸미 단가</div>
-                        <div className="mt-2 text-2xl font-black text-indigo-700">{formatProgressMoney(selectedComputed?.summary.sukumiUnitPrice || 0)}</div>
-                    </div>
-                    <label className="rounded-lg border border-slate-100 bg-slate-50 p-4">
-                        <span className="text-xs font-bold text-slate-500">팀포지션 기준</span>
-                        <select
-                            aria-label="팀포지션 기준"
-                            value={claimDraft?.teamPositionMode || 'currentAmount'}
-                            onChange={(event) => setClaimDraft((current) => current ? { ...current, teamPositionMode: event.target.value as ProgressTeamPositionMode } : current)}
-                            className={`${selectInputClass} mt-2 bg-white`}
-                        >
-                            <option value="currentAmount">금회기성 전체</option>
-                            <option value="manual">설정금액</option>
-                        </select>
-                    </label>
-                    <label className="rounded-lg border border-slate-100 bg-slate-50 p-4">
-                        <span className="text-xs font-bold text-slate-500">팀포지션 설정금액</span>
-                        <input
-                            aria-label="팀포지션 설정금액"
-                            type="text"
-                            inputMode="numeric"
-                            value={formatProgressMoney(claimDraft?.teamPositionMode === 'manual'
-                                ? claimDraft?.teamPositionManualAmount || 0
-                                : selectedComputed?.summary.currentAmount || 0)}
-                            onChange={(event) => setClaimDraft((current) => current ? { ...current, teamPositionManualAmount: toProgressNumber(event.target.value) } : current)}
-                            disabled={claimDraft?.teamPositionMode !== 'manual'}
-                            className={`${numberInputClass} mt-2 bg-white disabled:bg-slate-100 disabled:text-slate-500`}
-                        />
-                    </label>
-                </div>
 
-                <div className="mt-4 grid gap-3 md:grid-cols-4 xl:grid-cols-6">
-                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-4">
-                        <div className="text-xs font-bold text-slate-500">팀포지션 금액</div>
-                        <div className="mt-2 text-2xl font-black">{formatProgressMoney(selectedComputed?.summary.teamPositionAmount || 0)}</div>
-                    </div>
-                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-4">
-                        <div className="text-xs font-bold text-slate-500">바이백 가능금액</div>
-                        <div className="mt-2 text-2xl font-black text-indigo-900">{formatProgressMoney(selectedComputed?.summary.buybackPoolAmount || 0)}</div>
-                    </div>
-                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-4">
-                        <div className="text-xs font-bold text-slate-500">바이백 단가</div>
-                        <div className="mt-2 text-2xl font-black">{formatProgressMoney(selectedComputed?.summary.buybackUnit || 0)}</div>
-                    </div>
-                    <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-4">
-                        <div className="text-xs font-bold text-indigo-600">관계자 배분기준</div>
-                        <div className="mt-2 text-2xl font-black text-indigo-900">{formatProgressMoney(selectedComputed?.summary.allocationBaseAmount || 0)}</div>
-                    </div>
-                </div>
-
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
-                    <div className="text-sm font-semibold text-slate-600">
-                        계산식: 스꾸미 단가 = 팀포지션 금액 ÷ 출력일보 공수, 바이백 가능금액 = 금회기성 - 팀포지션 금액
-                    </div>
-                    <button
-                        type="button"
-                        onClick={() => setClaimDraft((current) => current ? { ...current, distributionBaseAmount: selectedComputed?.summary.buybackPoolAmount || 0 } : current)}
-                        className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm font-black text-indigo-700 hover:bg-indigo-50"
-                    >
-                        배분기준에 적용
-                    </button>
-                </div>
-
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    <label className="block">
-                        <span className="text-xs font-black text-slate-500">스꾸미 메모</span>
-                        <textarea
-                            aria-label="스꾸미 메모"
-                            value={claimDraft?.sukumiMemo || ''}
-                            onChange={(event) => setClaimDraft((current) => current ? { ...current, sukumiMemo: event.target.value } : current)}
-                            className={`${textInputClass} mt-1 min-h-[90px]`}
-                        />
-                    </label>
-                    <label className="block">
-                        <span className="text-xs font-black text-slate-500">바이백/팀포지션 메모</span>
-                        <textarea
-                            aria-label="바이백/팀포지션 메모"
-                            value={claimDraft?.buybackMemo || ''}
-                            onChange={(event) => setClaimDraft((current) => current ? { ...current, buybackMemo: event.target.value } : current)}
-                            className={`${textInputClass} mt-1 min-h-[90px]`}
-                        />
-                    </label>
-                </div>
-                <div className="mt-4 flex justify-end">
-                    <button type="button" disabled={saving} onClick={() => void saveClaim()} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60">
-                        <FontAwesomeIcon icon={saving ? faSpinner : faSave} spin={saving} />
-                        바이백 저장
-                    </button>
-                </div>
-            </section>
-        </div>
-    );
-
-    const renderAllocations = (includeSiteSelector = true) => (
-        <div className="space-y-4">
-            {includeSiteSelector && renderSiteSelector()}
-            <section id="progress-allocation-section" className="rounded-lg border border-slate-200 bg-white shadow-sm">
-                <div className="flex items-center justify-between border-b border-slate-100 p-4">
-                    <div>
-                        <h2 className="text-lg font-black text-slate-900">관계자 배분</h2>
-                        <p className="mt-1 text-sm text-slate-500">정산 대상자 목록에서 관계자를 선택하고 고정금액, 비율, 공수당, 직접입력으로 배분합니다.</p>
-                    </div>
-                    <div className="flex gap-2">
-                        <button type="button" onClick={addAllocation} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">
-                            <FontAwesomeIcon icon={faPlus} />
-                            관계자 추가
-                        </button>
-                        <button type="button" disabled={saving} onClick={() => void saveClaim()} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60">
-                            <FontAwesomeIcon icon={saving ? faSpinner : faSave} spin={saving} />
-                            배분 저장
-                        </button>
-                    </div>
-                </div>
-                <div className="grid gap-3 border-b border-slate-100 p-4 md:grid-cols-5">
-                    <label>
-                        <span className="text-xs font-black text-slate-500">배분 기준금액</span>
-                        <input
-                            aria-label="배분 기준금액"
-                            type="text"
-                            inputMode="numeric"
-                            value={formatProgressMoney(claimDraft?.distributionBaseAmount ?? selectedComputed?.summary.allocationBaseAmount ?? 0)}
-                            onChange={(event) => setClaimDraft((current) => current ? { ...current, distributionBaseAmount: toProgressNumber(event.target.value) } : current)}
-                            className={`${numberInputClass} mt-1`}
-                        />
-                    </label>
-                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                        <div className="text-xs font-bold text-slate-500">바이백 가능금액</div>
-                        <div className="mt-1 text-lg font-black text-slate-900">{formatProgressMoney(selectedComputed?.summary.buybackPoolAmount || 0)}</div>
-                    </div>
-                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                        <div className="text-xs font-bold text-slate-500">배분합계</div>
-                        <div className="mt-1 text-lg font-black">{formatProgressMoney(selectedComputed?.summary.allocationAmount || 0)}</div>
-                    </div>
-                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                        <div className="text-xs font-bold text-slate-500">배분잔액</div>
-                        <div className={`mt-1 text-lg font-black ${(selectedComputed?.summary.allocationRemainAmount || 0) < 0 ? 'text-rose-600' : 'text-slate-900'}`}>{formatProgressMoney(selectedComputed?.summary.allocationRemainAmount || 0)}</div>
-                    </div>
-                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                        <div className="text-xs font-bold text-slate-500">적용공수</div>
-                        <div className="mt-1 text-lg font-black">{formatProgressQuantity(selectedComputed?.summary.totalManDay || 0)}</div>
-                    </div>
-                </div>
-                <div className="progress-table-scroll overflow-x-auto">
-                    <table className="progress-table min-w-[1180px] w-full text-sm">
-                        <thead className="bg-slate-50 text-xs font-black text-slate-500">
-                            <tr>
-                                <th className="progress-head-meta px-3 py-2 text-left">관계자</th>
-                                <th className="progress-head-meta px-3 py-2 text-left">방식</th>
-                                <th className="progress-head-buyback px-3 py-2 text-right">고정금액</th>
-                                <th className="progress-head-buyback px-3 py-2 text-right">비율(%)</th>
-                                <th className="progress-head-manday px-3 py-2 text-right">공수당</th>
-                                <th className="progress-head-current px-3 py-2 text-right">직접입력</th>
-                                <th className="progress-head-current px-3 py-2 text-right">계산금액</th>
-                                <th className="progress-head-action px-3 py-2 text-left">배분근거/수기공식</th>
-                                <th className="progress-head-danger px-3 py-2 text-center">삭제</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {claimDraft?.allocations.map((allocation, index) => {
-                                const calculated = selectedComputed?.allocationRows.find((row) => row.allocation.id === allocation.id)?.amount || 0;
-                                const allocationLabel = getAllocationLabel(allocation, index);
-                                return (
-                                    <tr key={allocation.id}>
-                                        <td className="progress-cell-meta px-3 py-2">
-                                            <select aria-label={`${allocationLabel} 배분 대상`} value={allocation.targetType === 'office_income' ? OFFICE_INCOME_TARGET_ID : allocation.targetId || ''} onChange={(event) => updateAllocationTarget(allocation.id, event.target.value)} className={selectInputClass}>
-                                                <option value="">관계자 선택</option>
-                                                <option value={OFFICE_INCOME_TARGET_ID}>{OFFICE_INCOME_TARGET_NAME}</option>
-                                                {activeAllocationTargets.map((target) => (
-                                                    <option key={target.id || target.name} value={target.id || ''}>{target.name} {target.companyName ? `(${target.companyName})` : ''}</option>
-                                                ))}
-                                            </select>
-                                        </td>
-                                        <td className="progress-cell-meta px-3 py-2">
-                                            <select aria-label={`${allocationLabel} 배분 방식`} value={allocation.method} onChange={(event) => updateAllocation(allocation.id, { method: event.target.value as ProgressAllocation['method'] })} className={selectInputClass}>
-                                                {Object.entries(PROGRESS_ALLOCATION_METHOD_LABELS).map(([value, label]) => (
-                                                    <option key={value} value={value}>{label}</option>
-                                                ))}
-                                            </select>
-                                        </td>
-                                        <td className="progress-cell-buyback px-3 py-2"><input aria-label={`${allocationLabel} 고정금액`} type="text" inputMode="numeric" value={formatProgressMoney(allocation.fixedAmount || 0)} onChange={(event) => updateAllocation(allocation.id, { fixedAmount: toProgressNumber(event.target.value) })} className={numberInputClass} /></td>
-                                        <td className="progress-cell-buyback px-3 py-2"><input aria-label={`${allocationLabel} 배분 비율`} type="text" inputMode="decimal" value={formatProgressDecimalInput(allocation.percent || 0)} onChange={(event) => updateAllocation(allocation.id, { percent: toProgressNumber(event.target.value) })} className={numberInputClass} /></td>
-                                        <td className="progress-cell-manday px-3 py-2"><input aria-label={`${allocationLabel} 공수당`} type="text" inputMode="numeric" value={formatProgressMoney(allocation.amountPerManDay || 0)} onChange={(event) => updateAllocation(allocation.id, { amountPerManDay: toProgressNumber(event.target.value) })} className={numberInputClass} /></td>
-                                        <td className="progress-cell-current px-3 py-2"><input aria-label={`${allocationLabel} 직접입력 금액`} type="text" inputMode="numeric" value={formatProgressMoney(allocation.manualAmount || 0)} onChange={(event) => updateAllocation(allocation.id, { manualAmount: toProgressNumber(event.target.value) })} className={numberInputClass} /></td>
-                                        <td className="progress-cell-current px-3 py-2 text-right font-black text-indigo-700">{formatProgressMoney(calculated)}</td>
-                                        <td className="progress-cell-action px-3 py-2"><input aria-label={`${allocationLabel} 배분근거`} value={allocation.memo || ''} onChange={(event) => updateAllocation(allocation.id, { memo: event.target.value })} className={textInputClass} /></td>
-                                        <td className="progress-cell-danger px-3 py-2 text-center">
-                                            <button type="button" aria-label={`${allocationLabel} 배분 삭제`} onClick={() => removeAllocation(allocation.id)} className="inline-flex h-8 w-8 items-center justify-center rounded border border-rose-200 text-rose-600 hover:bg-rose-50">
-                                                <FontAwesomeIcon icon={faTrash} />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                            {(claimDraft?.allocations.length || 0) === 0 && (
-                                <tr><td colSpan={9} className="px-4 py-10 text-center font-bold text-slate-400">등록된 관계자 배분이 없습니다.</td></tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-        </div>
-    );
 
     const renderEntry = () => {
         const summary = selectedComputed?.summary;
@@ -4568,40 +4878,7 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
     };
 
     const renderBuyback = () => {
-        const summary = selectedComputed?.summary;
-        const allocationCount = claimDraft?.allocations.length || 0;
-        const allocationRemainAmount = summary?.allocationRemainAmount || 0;
-
-        return (
-            <div className="space-y-4">
-                {renderSiteSelector()}
-                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div>
-                            <h2 className="text-lg font-black text-slate-900">바이백</h2>
-                            <p className="mt-1 text-sm text-slate-500">출력일보 공수로 스꾸미와 바이백 가능금액을 확인하고, 바로 관계자 배분까지 입력합니다.</p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                            <button type="button" onClick={() => scrollToProgressSection('progress-buyback-section')} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-700 hover:bg-slate-50">
-                                바이백 산정
-                            </button>
-                            <button type="button" onClick={() => scrollToProgressSection('progress-allocation-section')} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-700 hover:bg-slate-50">
-                                관계자 배분
-                            </button>
-                        </div>
-                    </div>
-                    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                        {renderCompactMetric('출력일보 공수', formatProgressQuantity(summary?.totalManDay || 0))}
-                        {renderCompactMetric('스꾸미 단가', formatProgressMoney(summary?.sukumiUnitPrice || 0), 'accent')}
-                        {renderCompactMetric('바이백 가능금액', formatProgressMoney(summary?.buybackPoolAmount || 0))}
-                        {renderCompactMetric('관계자 배분', `${allocationCount}건`)}
-                        {renderCompactMetric('배분잔액', formatProgressMoney(allocationRemainAmount), allocationRemainAmount < 0 ? 'danger' : 'default')}
-                    </div>
-                </section>
-                {renderSukumi(false)}
-                {renderAllocations(false)}
-            </div>
-        );
+        return <FieldBuybackWorkbookPage />;
     };
 
     const renderLedger = () => {
@@ -4989,7 +5266,17 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
                         <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white hover:bg-indigo-700">
                             <FontAwesomeIcon icon={faPaperclip} />
                             업로드
-                            <input type="file" multiple className="hidden" onChange={(event) => void handleAttachmentUpload('site', event.target.files)} />
+                            <input
+                                type="file"
+                                multiple
+                                aria-label="현장 공통 첨부 업로드"
+                                className="hidden"
+                                onChange={(event) => {
+                                    const files = Array.from(event.currentTarget.files || []);
+                                    event.currentTarget.value = '';
+                                    void handleAttachmentUpload('site', files);
+                                }}
+                            />
                         </label>
                     )}
                 >
@@ -5002,7 +5289,17 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
                         <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white hover:bg-indigo-700">
                             <FontAwesomeIcon icon={faPaperclip} />
                             업로드
-                            <input type="file" multiple className="hidden" onChange={(event) => void handleAttachmentUpload('claim', event.target.files)} />
+                            <input
+                                type="file"
+                                multiple
+                                aria-label="월별 청구 첨부 업로드"
+                                className="hidden"
+                                onChange={(event) => {
+                                    const files = Array.from(event.currentTarget.files || []);
+                                    event.currentTarget.value = '';
+                                    void handleAttachmentUpload('claim', files);
+                                }}
+                            />
                         </label>
                     )}
                 >
@@ -5320,9 +5617,135 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
         : '계약내역 기준 기성청구서와 출력일보 공수 기반 관계자 배분을 함께 관리합니다.';
 
     return (
-        <div className="min-h-screen bg-slate-50 p-4 md:p-6">
+        <div className="min-h-screen bg-slate-50 p-4 md:p-6" aria-busy={loading || masterLoading}>
             <style>
                 {`
+                .progress-buyback-excel {
+                  font-family: "Malgun Gothic", "Apple SD Gothic Neo", Arial, sans-serif;
+                }
+                .progress-buyback-excel > section,
+                .progress-buyback-excel section {
+                  border-radius: 0 !important;
+                  box-shadow: none !important;
+                }
+                .progress-buyback-excel button,
+                .progress-buyback-excel input,
+                .progress-buyback-excel select,
+                .progress-buyback-excel textarea {
+                  border-radius: 0 !important;
+                }
+                .progress-buyback-excel #progress-buyback-section,
+                .progress-buyback-excel #progress-allocation-section {
+                  border-color: #475569 !important;
+                  border-width: 2px !important;
+                }
+                .progress-buyback-excel #progress-buyback-section > .grid,
+                .progress-buyback-excel #progress-allocation-section > .grid {
+                  gap: 0 !important;
+                  border-top: 1px solid #64748b;
+                  border-left: 1px solid #64748b;
+                }
+                .progress-buyback-excel #progress-buyback-section > .grid > *,
+                .progress-buyback-excel #progress-allocation-section > .grid > * {
+                  min-height: 74px;
+                  border-right: 1px solid #64748b !important;
+                  border-bottom: 1px solid #64748b !important;
+                  border-radius: 0 !important;
+                  background: #ffffff !important;
+                  box-shadow: none !important;
+                }
+                .progress-buyback-excel #progress-buyback-section > .grid > div > div:first-child,
+                .progress-buyback-excel #progress-allocation-section > .grid > div > div:first-child,
+                .progress-buyback-excel #progress-allocation-section > .grid > label > span {
+                  color: #334155;
+                  font-weight: 900;
+                }
+                .progress-buyback-excel #progress-buyback-section > .grid > div > div:last-child,
+                .progress-buyback-excel #progress-allocation-section > .grid > div > div:last-child {
+                  color: #111827;
+                  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                }
+                .progress-buyback-excel #progress-buyback-section > .grid > div:nth-child(2),
+                .progress-buyback-excel #progress-allocation-section > .grid > div:nth-child(2),
+                .progress-buyback-excel #progress-allocation-section > .grid > div:nth-child(3),
+                .progress-buyback-excel #progress-allocation-section > .grid > div:nth-child(4) {
+                  background: #fff200 !important;
+                }
+                .progress-buyback-excel #progress-buyback-section > .grid > div:nth-child(4) {
+                  background: #e2f0d9 !important;
+                }
+                .progress-buyback-excel #progress-buyback-section > .flex,
+                .progress-buyback-excel #progress-allocation-section > .flex {
+                  border-color: #64748b !important;
+                  background: #f2f2f2 !important;
+                }
+                .progress-buyback-excel .progress-table {
+                  border-collapse: collapse;
+                  border: 1px solid #475569;
+                  border-radius: 0;
+                }
+                .progress-buyback-excel .progress-table thead th {
+                  position: static;
+                  border: 1px solid #475569;
+                  background: #f2f2f2 !important;
+                  color: #111827 !important;
+                  box-shadow: none;
+                }
+                .progress-buyback-excel .progress-table th,
+                .progress-buyback-excel .progress-table td {
+                  border: 1px solid #94a3b8;
+                }
+                .progress-buyback-excel .progress-table tbody tr:nth-child(even) td,
+                .progress-buyback-excel .progress-table td.progress-cell-meta,
+                .progress-buyback-excel .progress-table td.progress-cell-contract,
+                .progress-buyback-excel .progress-table td.progress-cell-previous,
+                .progress-buyback-excel .progress-table td.progress-cell-current,
+                .progress-buyback-excel .progress-table td.progress-cell-cumulative,
+                .progress-buyback-excel .progress-table td.progress-cell-remaining,
+                .progress-buyback-excel .progress-table td.progress-cell-manday,
+                .progress-buyback-excel .progress-table td.progress-cell-buyback,
+                .progress-buyback-excel .progress-table td.progress-cell-success,
+                .progress-buyback-excel .progress-table td.progress-cell-action,
+                .progress-buyback-excel .progress-table td.progress-cell-danger {
+                  background: #ffffff;
+                  color: #111827;
+                }
+                .progress-buyback-excel .progress-table tbody tr:hover td {
+                  box-shadow: none;
+                  background: #d9eaf7;
+                }
+                .progress-buyback-excel .buyback-workbook-table {
+                  border: 1px solid #475569;
+                }
+                .progress-buyback-excel .buyback-workbook-table th {
+                  border: 1px solid #475569;
+                  background: #f2f2f2 !important;
+                  color: #111827 !important;
+                }
+                .progress-buyback-excel .buyback-workbook-table td {
+                  border: 1px solid #94a3b8;
+                  background: #ffffff;
+                  color: #111827;
+                }
+                .progress-buyback-excel .buyback-workbook-table tbody tr:nth-child(even) td {
+                  background: #ffffff;
+                }
+                .progress-buyback-excel .buyback-workbook-table tbody tr.bg-violet-50 td,
+                .progress-buyback-excel .buyback-workbook-table tbody tr:hover td {
+                  background: #d9eaf7 !important;
+                }
+                .progress-buyback-excel .buyback-workbook-table td.bg-violet-50\\/60,
+                .progress-buyback-excel .buyback-workbook-table td.bg-emerald-50\\/60,
+                .progress-buyback-excel .buyback-workbook-table td.bg-amber-50\\/60 {
+                  background: #ffffff !important;
+                }
+                .progress-buyback-excel .buyback-workbook-table td:nth-child(9) {
+                  background: #fff200 !important;
+                }
+                .progress-buyback-excel .buyback-workbook-table .rounded-full {
+                  border-radius: 0 !important;
+                  box-shadow: none;
+                }
                 .progress-table {
                   border-collapse: separate;
                   border-spacing: 0;
@@ -5482,12 +5905,14 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
                 }
                 .progress-invoice table {
                   border-color: #cbd5e1;
+                  table-layout: fixed;
                 }
                 .progress-invoice th,
                 .progress-invoice td {
                   border-color: #cbd5e1;
                   vertical-align: middle;
                   word-break: keep-all;
+                  overflow-wrap: anywhere;
                 }
                 .progress-invoice th {
                   background-color: #f8fafc;
@@ -5560,6 +5985,24 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
                 .progress-invoice-allocation-table td {
                   background-color: #ffffff;
                 }
+                @media (max-width: 640px) {
+                  .progress-invoice {
+                    padding: 16px !important;
+                  }
+                  .progress-invoice th,
+                  .progress-invoice td {
+                    padding-left: 6px !important;
+                    padding-right: 6px !important;
+                    font-size: 11px;
+                  }
+                  .progress-invoice-party-table th,
+                  .progress-invoice__site th {
+                    width: auto !important;
+                  }
+                  .progress-invoice-amount-panel {
+                    padding: 12px !important;
+                  }
+                }
                 @media print {
                   body { background: white !important; }
                   aside, header, nav, .no-print, .progress-tabs, .progress-page-header { display: none !important; }
@@ -5593,9 +6036,27 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
                 </div>
             </div>
 
+            {loadError && (
+                <div role="alert" className="mb-4 flex flex-col gap-3 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 shadow-sm md:flex-row md:items-center md:justify-between">
+                    <div>
+                        <div className="font-black">기성관리 데이터를 불러오지 못했습니다.</div>
+                        <p className="mt-1 text-rose-700">{loadError}</p>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={reloadData}
+                        disabled={loading}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-white px-4 py-2 font-black text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        <FontAwesomeIcon icon={loading ? faSpinner : faRotate} spin={loading} />
+                        다시 시도
+                    </button>
+                </div>
+            )}
+
             {!isInvoiceOnlyPage && <div className="mb-4 space-y-3">
                 <div className="progress-tabs flex flex-wrap items-center gap-2">
-                    {TAB_ITEMS.map((tab) => {
+                    {VISIBLE_TAB_ITEMS.map((tab) => {
                         const meta = PROGRESS_TAB_META[tab.key];
                         const active = !hasStatementPageOpen && activeTab === tab.key;
                         return (

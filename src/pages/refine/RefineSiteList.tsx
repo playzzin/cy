@@ -12,11 +12,10 @@ import { resolveIcon } from "../../constants/iconMap";
 import { useMasterData } from "../../contexts/MasterDataContext";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-    faPaste, faGraduationCap, faDatabase, faSearch,
-    faBuilding, faMapMarkerAlt, faInfoCircle, faClipboardCheck,
+    faDatabase, faSearch,
+    faBuilding, faInfoCircle,
     faLayerGroup, faBolt
 } from "@fortawesome/free-solid-svg-icons";
-import * as Fas from "@fortawesome/free-solid-svg-icons";
 import styled from "styled-components";
 import { Site } from "../../services/siteService";
 

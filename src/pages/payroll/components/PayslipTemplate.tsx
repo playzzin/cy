@@ -1,4 +1,4 @@
-import React, { forwardRef } from 'react';
+import { forwardRef } from 'react';
 import { formatPayrollPaymentDate } from '../utils/paymentDate';
 import {
     PAYSLIP_ISSUE_RULE_VERSION,
@@ -139,12 +139,13 @@ export interface PaymentData {
 interface Props {
     data: PaymentData;
     month: string;
+    contractorName?: string;
     applyUtilities?: boolean;
     insuranceTeamSiteOnly?: boolean;
     isTeamResponsibleSiteEntry?: (entry: WorkerWorkEntry, teamId?: string, teamName?: string) => boolean;
 }
 
-export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month, applyUtilities = false, insuranceTeamSiteOnly = false, isTeamResponsibleSiteEntry }, ref) => {
+export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month, contractorName, applyUtilities = false, insuranceTeamSiteOnly = false, isTeamResponsibleSiteEntry }, ref) => {
     const workEntries = data.workEntries ?? [];
     const deductionBreakdown = data.deductionBreakdown ?? {
         standardLines: [],
@@ -278,7 +279,7 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
     const maskedAccountNumber = maskAccountNumber(data.accountNumber);
 
     return (
-        <div ref={ref} className="bg-white border-2 border-slate-200 rounded-xl shadow-sm w-full max-w-none mx-auto text-slate-900 mb-8 page-break-inside-avoid">
+        <div ref={ref} className="payslip-template-card bg-white border-2 border-slate-200 rounded-xl shadow-sm w-full max-w-none mx-auto text-slate-900 mb-8 page-break-inside-avoid">
             {/* Header */}
             <div className="bg-gradient-to-r from-purple-600 to-purple-700 text-white text-center py-4 rounded-t-xl print:bg-purple-700 print:text-white">
                 <h2 className="text-xl font-bold">{month} 노임명세서</h2>
@@ -303,7 +304,7 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                     <div className="border-r border-b border-slate-200 p-2 text-center font-medium bg-slate-50">근로자 식별</div>
                     <div className="border-r border-b border-slate-200 p-2 text-center font-mono">{maskedWorkerIdentifier}</div>
                     <div className="border-r border-b border-slate-200 p-2 text-center font-medium bg-slate-50">시공사</div>
-                    <div className="border-b border-slate-200 p-2 text-center">{data.companyName || '-'}</div>
+                    <div className="border-b border-slate-200 p-2 text-center">{contractorName || data.companyName || '-'}</div>
                 </div>
                 <div className="grid grid-cols-4 text-sm">
                     <div className="border-r border-b border-slate-200 p-2 text-center font-medium bg-slate-50">지급월</div>
@@ -374,7 +375,7 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
 
             {/* Details */}
             <section className="p-4 border-t border-slate-200">
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div className="payslip-template-details-grid grid grid-cols-1 xl:grid-cols-2 gap-4">
                     {/* Work Entries */}
                     <div className="space-y-2 bg-slate-50 rounded-xl border border-slate-200 p-4">
                         <div className="flex items-center justify-between">

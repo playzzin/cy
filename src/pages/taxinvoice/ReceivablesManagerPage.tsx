@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import styled from 'styled-components';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faFileInvoiceDollar, faTimes, faHistory, faPencilAlt, faSyncAlt, faEdit, faTrash } from '@fortawesome/free-solid-svg-icons';
+import { faFileInvoiceDollar, faTimes, faPencilAlt, faSyncAlt, faEdit, faTrash } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { format, startOfMonth } from 'date-fns';
 
@@ -9,9 +9,9 @@ import { receivableService, ReceivableLedger, ReceivablePayment } from '../../se
 import { ReceivableSummaryCards } from '../tax/components/ReceivableSummaryCards';
 import { ReceivableFilterBar } from '../tax/components/ReceivableFilterBar';
 import { ReceivableTable } from '../tax/components/ReceivableTable';
-import { BankMatchModal } from './modals/BankMatchModal';
 import { ManualPaymentModal } from './modals/ManualPaymentModal';
 import { ReceivableEditModal } from './modals/ReceivableEditModal';
+import { useAuth } from '../../contexts/AuthContext';
 
 // --- Styled Components (Matching TaxInvoiceLedgerPage) ---
 const PageContainer = styled.div`
@@ -77,6 +77,8 @@ const DetailPanel = styled.div<{ $isOpen: boolean }>`
 
 // --- Main Component ---
 const ReceivablesManagerPage: React.FC = () => {
+    const { currentUser } = useAuth();
+
     // State
     const [receivables, setReceivables] = useState<ReceivableLedger[]>([]);
     const [loading, setLoading] = useState(false);
@@ -90,7 +92,6 @@ const ReceivablesManagerPage: React.FC = () => {
 
     // Selection & Modals
     const [selectedId, setSelectedId] = useState<string | null>(null);
-    const [isBankMatchModalOpen, setIsBankMatchModalOpen] = useState(false);
     const [isManualModalOpen, setIsManualModalOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
@@ -148,6 +149,11 @@ const ReceivablesManagerPage: React.FC = () => {
     const selectedReceivable = useMemo(() =>
         receivables.find(r => r.id === selectedId),
         [receivables, selectedId]);
+
+    const paymentActor = useMemo(() => ({
+        id: currentUser?.uid || '',
+        name: currentUser?.displayName || currentUser?.email || currentUser?.uid || ''
+    }), [currentUser]);
 
     // Handlers
     const handleRowClick = (record: ReceivableLedger) => {
@@ -267,16 +273,7 @@ const ReceivablesManagerPage: React.FC = () => {
                             </div>
 
                             {/* Actions */}
-                            <div className="p-4 grid grid-cols-2 gap-3 border-b border-gray-100">
-                                <button
-                                    onClick={() => setIsBankMatchModalOpen(true)}
-                                    className="p-3 bg-indigo-50 text-indigo-700 rounded-xl hover:bg-indigo-100 font-bold text-sm transition flex flex-col items-center gap-2 group"
-                                >
-                                    <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center group-hover:bg-white transition">
-                                        <FontAwesomeIcon icon={faHistory} />
-                                    </div>
-                                    계좌조회 매칭
-                                </button>
+                            <div className="p-4 grid grid-cols-1 gap-3 border-b border-gray-100">
                                 <button
                                     onClick={() => setIsManualModalOpen(true)}
                                     className="p-3 bg-orange-50 text-orange-700 rounded-xl hover:bg-orange-100 font-bold text-sm transition flex flex-col items-center gap-2 group"
@@ -301,23 +298,13 @@ const ReceivablesManagerPage: React.FC = () => {
             </ContentArea>
 
             {/* MODALS */}
-            {selectedReceivable && isBankMatchModalOpen && (
-                <BankMatchModal
-                    isOpen={isBankMatchModalOpen}
-                    onClose={() => setIsBankMatchModalOpen(false)}
-                    receivable={selectedReceivable}
-                    onSuccess={() => {
-                        setIsBankMatchModalOpen(false);
-                        fetchReceivables();
-                    }}
-                />
-            )}
-
             {selectedReceivable && isManualModalOpen && (
                 <ManualPaymentModal
                     isOpen={isManualModalOpen}
                     onClose={() => setIsManualModalOpen(false)}
                     receivable={selectedReceivable}
+                    actorId={paymentActor.id}
+                    actorName={paymentActor.name}
                     onSuccess={() => {
                         setIsManualModalOpen(false);
                         fetchReceivables();
@@ -431,6 +418,7 @@ const PaymentHistoryList: React.FC<{ receivableId: string }> = ({ receivableId }
                                     <div className="text-xs text-right text-gray-500 max-w-[120px] truncate">
                                         {p.bankSender && <div>{p.bankSender}</div>}
                                         {p.memo && <div>{p.memo}</div>}
+                                        {p.createdByName && <div>{p.createdByName}</div>}
                                     </div>
                                 </div>
                             </div>

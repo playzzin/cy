@@ -11,6 +11,7 @@ import {
     faClipboardList,
     faDownload,
     faFilter,
+    faImages,
     faRotate,
     faSearch,
     faTruck,
@@ -20,6 +21,11 @@ import * as XLSX from 'xlsx-js-style';
 import materialService from '../../services/materialService';
 import { siteService, Site } from '../../services/siteService';
 import { InboundTransaction, OutboundTransaction, TransactionFilters } from '../../types/materials';
+import { useCompanyDataScope } from '../../hooks/useCompanyDataScope';
+import {
+    companyDataScopeMatchesClientSite,
+    companyDataScopeMatchesMaterialTransaction,
+} from '../../utils/companyDataScope';
 import {
     createSiteIdSet,
     filterCheongyeonMaterialSites,
@@ -28,6 +34,11 @@ import {
     MaterialSiteStatusFilter,
 } from './materialSiteFilters';
 import { compareMaterialDisplayRows } from '../../utils/materialOrdering';
+import MaterialPhotoViewerModal, {
+    createMaterialPhotoUrlResolver,
+    getMaterialPhotoDisplayCount,
+    hasMaterialPhotoReference,
+} from './MaterialPhotoViewerModal';
 
 type TransactionTypeFilter = 'all' | 'inbound' | 'outbound';
 
@@ -76,6 +87,24 @@ type MutableRentalCompanyGroup = Omit<RentalCompanyGroup, 'siteGroups'> & {
 
 type ExcelCellValue = string | number;
 
+interface PhotoViewerState {
+    isOpen: boolean;
+    title: string;
+    expectedCount: number | null;
+    urls: string[];
+    loading: boolean;
+    error: string;
+}
+
+const CLOSED_PHOTO_VIEWER_STATE: PhotoViewerState = {
+    isOpen: false,
+    title: '',
+    expectedCount: null,
+    urls: [],
+    loading: false,
+    error: '',
+};
+
 const NUMBER_FORMATTER = new Intl.NumberFormat('ko-KR');
 const COLLATOR = new Intl.Collator('ko', { numeric: true, sensitivity: 'base' });
 const UNASSIGNED_RENTAL_COMPANY = '임대사 미지정';
@@ -117,7 +146,11 @@ const getCounterparty = (tx: MaterialTransaction): string =>
         : trimText((tx as OutboundTransaction).recipient);
 
 const getRentalCompanyName = (tx: MaterialTransaction): string =>
-    tx.type === 'outbound' ? trimText((tx as OutboundTransaction).rentalCompanyName) : '';
+    trimText(
+        tx.type === 'outbound'
+            ? (tx as OutboundTransaction).rentalCompanyName
+            : (tx as InboundTransaction).rentalCompanyName
+    );
 
 const getRentalGroupName = (tx: MaterialTransaction): string => {
     const rentalCompanyName = getRentalCompanyName(tx);
@@ -128,6 +161,21 @@ const getRentalGroupName = (tx: MaterialTransaction): string => {
     }
 
     return UNASSIGNED_RENTAL_COMPANY;
+};
+
+const buildRentalScopeSites = (transactions: MaterialTransaction[]): Site[] => {
+    const sitesById = new Map<string, Site>();
+    transactions.forEach((transaction) => {
+        const id = trimText(transaction.siteId);
+        if (!id || sitesById.has(id)) return;
+        sitesById.set(id, {
+            id,
+            code: id,
+            name: trimText(transaction.siteName) || '미지정 현장',
+            status: 'active',
+        } as Site);
+    });
+    return Array.from(sitesById.values());
 };
 
 const getRentalRowText = (tx: MaterialTransaction): string => {
@@ -161,18 +209,6 @@ const transactionCompare = (a: MaterialTransaction, b: MaterialTransaction): num
 
 const getDateGroupKey = (siteGroupKey: string, date: string): string =>
     `${siteGroupKey}::date::${date}`;
-
-const toggleSetValue = (
-    setter: React.Dispatch<React.SetStateAction<Set<string>>>,
-    key: string
-) => {
-    setter((current) => {
-        const next = new Set(current);
-        if (next.has(key)) next.delete(key);
-        else next.add(key);
-        return next;
-    });
-};
 
 const buildGroupedTransactions = (rows: MaterialTransaction[]): RentalCompanyGroup[] => {
     const rentalMap = new Map<string, MutableRentalCompanyGroup>();
@@ -302,6 +338,7 @@ const GroupSummary: React.FC<{
 
 const MaterialTransactionsBySiteDatePage: React.FC = () => {
     const navigate = useNavigate();
+    const companyAccessScope = useCompanyDataScope();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [sites, setSites] = useState<Site[]>([]);
@@ -316,14 +353,21 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
     const [transactionType, setTransactionType] = useState<TransactionTypeFilter>('all');
     const [materialKeyword, setMaterialKeyword] = useState('');
     const [vehicleNumber, setVehicleNumber] = useState('');
-    const [expandedRentalKeys, setExpandedRentalKeys] = useState<Set<string>>(new Set());
-    const [expandedSiteKeys, setExpandedSiteKeys] = useState<Set<string>>(new Set());
-    const [expandedDateKeys, setExpandedDateKeys] = useState<Set<string>>(new Set());
+    const [expandedRentalKey, setExpandedRentalKey] = useState<string | null>(null);
+    const [expandedSiteKey, setExpandedSiteKey] = useState<string | null>(null);
+    const [expandedDateKey, setExpandedDateKey] = useState<string | null>(null);
+    const [photoViewer, setPhotoViewer] = useState<PhotoViewerState>(CLOSED_PHOTO_VIEWER_STATE);
+    const photoRequestIdRef = React.useRef(0);
+    const photoUrlResolverRef = React.useRef(createMaterialPhotoUrlResolver(
+        (photoBatchId) => materialService.getMaterialPhotoDownloadUrls(photoBatchId)
+    ));
 
     useEffect(() => {
-        loadInitialData();
+        if (!companyAccessScope.loading) {
+            void loadInitialData();
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [companyAccessScope.loading, companyAccessScope.mode, companyAccessScope.companyIds.join('|')]);
 
     useEffect(() => {
         const mainContent = document.getElementById('main-content');
@@ -344,10 +388,26 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
     const loadInitialData = async () => {
         setLoading(true);
         try {
-            const siteRows = await siteService.getSites();
+            if (companyAccessScope.mode === 'blocked') {
+                setSites([]);
+                setTransactions([]);
+                setSiteId('');
+                return;
+            }
+            if (companyAccessScope.mode === 'rental-company') {
+                setSites([]);
+                await loadTransactions([]);
+                return;
+            }
+            const siteRows = companyAccessScope.mode === 'construction-company'
+                ? await siteService.getSitesByClientCompanyIds(companyAccessScope.companyIds)
+                : await siteService.getSites();
             const cheongyeonSites = filterCheongyeonMaterialSites(siteRows, 'all');
-            setSites(cheongyeonSites);
-            await loadTransactions(cheongyeonSites);
+            const scopedSites = companyAccessScope.mode === 'construction-company'
+                ? cheongyeonSites.filter((site) => companyDataScopeMatchesClientSite(companyAccessScope, site))
+                : cheongyeonSites;
+            setSites(scopedSites);
+            await loadTransactions(scopedSites);
         } catch (err) {
             console.error('Failed to load material rental-site-date transactions:', err);
             setError('현장 및 입출고 내역을 불러오지 못했습니다.');
@@ -365,10 +425,24 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
         setLoading(true);
         setError(null);
         try {
+            if (companyAccessScope.mode === 'blocked') {
+                setSites([]);
+                setTransactions([]);
+                setSiteId('');
+                return;
+            }
             const filters: TransactionFilters = {
                 startDate: startDate || undefined,
                 endDate: endDate || undefined,
                 siteId: siteId || undefined,
+                rentalCompanyIds: companyAccessScope.mode === 'rental-company'
+                    ? companyAccessScope.companyIds
+                    : undefined,
+                siteIds: companyAccessScope.mode === 'construction-company'
+                    ? siteRows
+                        .map((site) => site.id)
+                        .filter((siteId): siteId is string => Boolean(siteId))
+                    : undefined,
             };
 
             const [inboundRows, outboundRows] = await Promise.all([
@@ -376,14 +450,24 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                 materialService.getOutboundTransactions(filters),
             ]);
 
-            const allowedSites = filterSitesByMaterialStatus(siteRows, siteStatusFilter);
-            const allowedSiteIds = createSiteIdSet(allowedSites);
-            const siteById = new Map(siteRows.map((site) => [site.id, site]));
-
-            const nextRows = [
+            const scopedTransactions = [
                 ...inboundRows.map((row) => ({ ...row, type: 'inbound' as const })),
                 ...outboundRows.map((row) => ({ ...row, type: 'outbound' as const })),
-            ]
+            ].filter((tx) => companyDataScopeMatchesMaterialTransaction(companyAccessScope, tx));
+
+            const visibleScopeSites = companyAccessScope.mode === 'rental-company'
+                ? buildRentalScopeSites(scopedTransactions)
+                : siteRows;
+            if (companyAccessScope.mode === 'rental-company') {
+                setSites(visibleScopeSites);
+                if (siteId && !visibleScopeSites.some((site) => site.id === siteId)) setSiteId('');
+            }
+
+            const allowedSites = filterSitesByMaterialStatus(visibleScopeSites, siteStatusFilter);
+            const allowedSiteIds = createSiteIdSet(allowedSites);
+            const siteById = new Map(visibleScopeSites.map((site) => [site.id, site]));
+
+            const nextRows = scopedTransactions
                 .filter((tx) => allowedSiteIds.has(tx.siteId))
                 .map((tx) => {
                     const site = siteById.get(tx.siteId);
@@ -443,13 +527,15 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
     );
 
     useEffect(() => {
-        setExpandedRentalKeys(new Set(groupedTransactions.map((group) => group.key)));
-        setExpandedSiteKeys(new Set(groupedTransactions.flatMap((group) => group.siteGroups.map((siteGroup) => siteGroup.key))));
-        setExpandedDateKeys(new Set(
-            groupedTransactions.flatMap((group) =>
-                group.siteGroups.flatMap((siteGroup) => siteGroup.dateGroups.map((dateGroup) => dateGroup.key))
-            )
+        const rentalKeys = new Set(groupedTransactions.map((group) => group.key));
+        const siteKeys = new Set(groupedTransactions.flatMap((group) => group.siteGroups.map((siteGroup) => siteGroup.key)));
+        const dateKeys = new Set(groupedTransactions.flatMap((group) =>
+            group.siteGroups.flatMap((siteGroup) => siteGroup.dateGroups.map((dateGroup) => dateGroup.key))
         ));
+
+        setExpandedRentalKey((current) => current && rentalKeys.has(current) ? current : null);
+        setExpandedSiteKey((current) => current && siteKeys.has(current) ? current : null);
+        setExpandedDateKey((current) => current && dateKeys.has(current) ? current : null);
     }, [groupedTransactions]);
 
     const stats = useMemo(() => {
@@ -477,20 +563,65 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
         };
     }, [visibleTransactions]);
 
-    const expandAll = () => {
-        setExpandedRentalKeys(new Set(groupedTransactions.map((group) => group.key)));
-        setExpandedSiteKeys(new Set(groupedTransactions.flatMap((group) => group.siteGroups.map((siteGroup) => siteGroup.key))));
-        setExpandedDateKeys(new Set(
-            groupedTransactions.flatMap((group) =>
-                group.siteGroups.flatMap((siteGroup) => siteGroup.dateGroups.map((dateGroup) => dateGroup.key))
-            )
-        ));
+    const toggleRentalGroup = (key: string) => {
+        setExpandedRentalKey((current) => current === key ? null : key);
+        setExpandedSiteKey(null);
+        setExpandedDateKey(null);
+    };
+
+    const toggleSiteGroup = (key: string) => {
+        setExpandedSiteKey((current) => current === key ? null : key);
+        setExpandedDateKey(null);
+    };
+
+    const toggleDateGroup = (key: string) => {
+        setExpandedDateKey((current) => current === key ? null : key);
     };
 
     const collapseAll = () => {
-        setExpandedRentalKeys(new Set());
-        setExpandedSiteKeys(new Set());
-        setExpandedDateKeys(new Set());
+        setExpandedRentalKey(null);
+        setExpandedSiteKey(null);
+        setExpandedDateKey(null);
+    };
+
+    const closePhotoViewer = () => {
+        photoRequestIdRef.current += 1;
+        setPhotoViewer(CLOSED_PHOTO_VIEWER_STATE);
+    };
+
+    const openPhotoViewer = async (tx: MaterialTransaction) => {
+        const requestId = photoRequestIdRef.current + 1;
+        photoRequestIdRef.current = requestId;
+
+        setPhotoViewer({
+            isOpen: true,
+            title: `${tx.transactionDate} · ${tx.siteName || '미지정 현장'} · ${tx.itemName || '자재'}`,
+            expectedCount: getMaterialPhotoDisplayCount(tx),
+            urls: [],
+            loading: true,
+            error: '',
+        });
+
+        try {
+            const urls = await photoUrlResolverRef.current.resolve(tx);
+            if (photoRequestIdRef.current !== requestId) return;
+
+            setPhotoViewer((current) => ({ ...current, urls, loading: false }));
+        } catch (error) {
+            if (photoRequestIdRef.current !== requestId) return;
+
+            const errorCode = typeof error === 'object' && error && 'code' in error
+                ? String((error as { code?: unknown }).code || '')
+                : '';
+            const permissionDenied = /unauthorized|permission-denied/i.test(errorCode);
+            setPhotoViewer((current) => ({
+                ...current,
+                loading: false,
+                error: permissionDenied
+                    ? '첨부 사진을 볼 권한이 없습니다. 관리자에게 Firebase Storage 읽기 권한을 확인해 달라고 요청해 주세요.'
+                    : '사진을 불러오지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.',
+            }));
+        }
     };
 
     const handleDownloadExcel = () => {
@@ -580,10 +711,19 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                         임대사·현장·날짜별 입출고 내역
                     </h1>
                     <p className="mt-1 text-sm text-slate-500">
+                        {companyAccessScope.mode !== 'all' && (
+                            <span className={`mr-2 inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs font-bold ${companyAccessScope.mode === 'blocked'
+                                ? 'border-amber-200 bg-amber-50 text-amber-800'
+                                : 'border-indigo-200 bg-indigo-50 text-indigo-800'}`}>
+                                <FontAwesomeIcon icon={faFilter} />
+                                데이터 범위: {companyAccessScope.label}
+                            </span>
+                        )}
                         임대사별로 먼저 묶고, 현장과 거래일자 순서로 입고와 출고 흐름을 확인합니다.
                     </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                    {companyAccessScope.mode === 'all' && (
                     <button
                         type="button"
                         onClick={() => navigate('/materials/transactions')}
@@ -592,6 +732,7 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                         <FontAwesomeIcon icon={faClipboardList} />
                         전체 내역
                     </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => loadTransactions()}
@@ -688,6 +829,7 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                             type="text"
                             value={rentalKeyword}
                             onChange={(event) => setRentalKeyword(event.target.value)}
+                            disabled={companyAccessScope.mode === 'rental-company' || companyAccessScope.mode === 'blocked'}
                             placeholder="임대사"
                             className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                         />
@@ -756,13 +898,6 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                     <div className="flex items-center gap-2">
                         <button
                             type="button"
-                            onClick={expandAll}
-                            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
-                        >
-                            모두 펼치기
-                        </button>
-                        <button
-                            type="button"
                             onClick={collapseAll}
                             className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
                         >
@@ -792,13 +927,13 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                     <div className="flex-1 overflow-auto p-4 min-h-[760px] max-h-[calc(100vh-320px)]">
                         <div className="space-y-3">
                             {groupedTransactions.map((rentalGroup) => {
-                                const rentalExpanded = expandedRentalKeys.has(rentalGroup.key);
+                                const rentalExpanded = expandedRentalKey === rentalGroup.key;
                                 const dateCount = rentalGroup.siteGroups.reduce((sum, siteGroup) => sum + siteGroup.dateGroups.length, 0);
                                 return (
                                     <section key={rentalGroup.key} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                                         <button
                                             type="button"
-                                            onClick={() => toggleSetValue(setExpandedRentalKeys, rentalGroup.key)}
+                                            onClick={() => toggleRentalGroup(rentalGroup.key)}
                                             className="flex w-full items-center justify-between gap-4 bg-indigo-50 px-4 py-3 text-left hover:bg-indigo-100"
                                         >
                                             <div className="flex min-w-0 items-center gap-3">
@@ -823,12 +958,12 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                                         {rentalExpanded && (
                                             <div className="space-y-3 border-t border-indigo-100 p-3">
                                                 {rentalGroup.siteGroups.map((siteGroup) => {
-                                                    const siteExpanded = expandedSiteKeys.has(siteGroup.key);
+                                                    const siteExpanded = expandedSiteKey === siteGroup.key;
                                                     return (
                                                         <section key={siteGroup.key} className="overflow-hidden rounded-lg border border-slate-200">
                                                             <button
                                                                 type="button"
-                                                                onClick={() => toggleSetValue(setExpandedSiteKeys, siteGroup.key)}
+                                                                onClick={() => toggleSiteGroup(siteGroup.key)}
                                                                 className="flex w-full items-center justify-between gap-4 bg-slate-50 px-4 py-3 text-left hover:bg-slate-100"
                                                             >
                                                                 <div className="flex min-w-0 items-center gap-3">
@@ -858,12 +993,12 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                                                             {siteExpanded && (
                                                                 <div className="space-y-2 border-t border-slate-200 bg-white p-3">
                                                                     {siteGroup.dateGroups.map((dateGroup) => {
-                                                                        const dateExpanded = expandedDateKeys.has(dateGroup.key);
+                                                                        const dateExpanded = expandedDateKey === dateGroup.key;
                                                                         return (
                                                                             <section key={dateGroup.key} className="overflow-hidden rounded-lg border border-slate-100">
                                                                                 <button
                                                                                     type="button"
-                                                                                    onClick={() => toggleSetValue(setExpandedDateKeys, dateGroup.key)}
+                                                                                    onClick={() => toggleDateGroup(dateGroup.key)}
                                                                                     className="flex w-full items-center justify-between gap-4 bg-white px-4 py-2.5 text-left hover:bg-slate-50"
                                                                                 >
                                                                                     <div className="flex min-w-0 items-center gap-3">
@@ -882,7 +1017,7 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
 
                                                                                 {dateExpanded && (
                                                                                     <div className="overflow-auto border-t border-slate-100">
-                                                                                        <table className="w-full min-w-[1360px] text-sm">
+                                                                                        <table className="w-full min-w-[1480px] text-sm">
                                                                                             <thead className="bg-slate-50 text-xs font-black text-slate-500">
                                                                                                 <tr>
                                                                                                     <th className="px-4 py-3 text-center">구분</th>
@@ -894,6 +1029,7 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                                                                                                     <th className="px-4 py-3 text-left">차량번호</th>
                                                                                                     <th className="px-4 py-3 text-left">입고처/출고자</th>
                                                                                                     <th className="px-4 py-3 text-left">임대사</th>
+                                                                                                    <th className="px-4 py-3 text-center">사진</th>
                                                                                                     <th className="px-4 py-3 text-left">비고</th>
                                                                                                 </tr>
                                                                                             </thead>
@@ -931,6 +1067,23 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                                                                                                         </td>
                                                                                                         <td className="px-4 py-2.5 text-slate-600">{getCounterparty(tx) || '-'}</td>
                                                                                                         <td className="px-4 py-2.5 text-slate-600">{getRentalRowText(tx)}</td>
+                                                                                                        <td className="px-4 py-2.5 text-center">
+                                                                                                            {hasMaterialPhotoReference(tx) ? (
+                                                                                                                <button
+                                                                                                                    type="button"
+                                                                                                                    onClick={() => openPhotoViewer(tx)}
+                                                                                                                    className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-black text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1"
+                                                                                                                    title="첨부 사진 보기"
+                                                                                                                >
+                                                                                                                    <FontAwesomeIcon icon={faImages} />
+                                                                                                                    {getMaterialPhotoDisplayCount(tx) === null
+                                                                                                                        ? '사진 확인'
+                                                                                                                        : `사진 ${getMaterialPhotoDisplayCount(tx)}장`}
+                                                                                                                </button>
+                                                                                                            ) : (
+                                                                                                                <span className="text-slate-300">-</span>
+                                                                                                            )}
+                                                                                                        </td>
                                                                                                         <td className="max-w-md whitespace-pre-wrap break-words px-4 py-2.5 text-slate-500">
                                                                                                             {tx.notes || '-'}
                                                                                                         </td>
@@ -961,6 +1114,16 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                     Total {NUMBER_FORMATTER.format(visibleTransactions.length)} records
                 </div>
             </div>
+
+            <MaterialPhotoViewerModal
+                isOpen={photoViewer.isOpen}
+                title={photoViewer.title}
+                expectedCount={photoViewer.expectedCount}
+                urls={photoViewer.urls}
+                loading={photoViewer.loading}
+                error={photoViewer.error}
+                onClose={closePhotoViewer}
+            />
         </div>
     );
 };

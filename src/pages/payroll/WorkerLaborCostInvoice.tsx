@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { dailyReportService, DailyReport } from '../../services/dailyReportService';
+import { dailyReportService } from '../../services/dailyReportService';
 import { manpowerService } from '../../services/manpowerService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faFileExcel, faSpinner, faSearch, faPrint, faCopy } from '@fortawesome/free-solid-svg-icons';
+import { faFileExcel, faSpinner, faSearch, faCopy } from '@fortawesome/free-solid-svg-icons';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import html2canvas from 'html2canvas';

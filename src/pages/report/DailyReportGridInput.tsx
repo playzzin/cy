@@ -4,6 +4,7 @@ import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlus, faSave, faCalendarAlt, faTimes, faMinus, faComment, faExclamationTriangle, faSpinner, faEraser, faFloppyDisk, faUpload, faImage, faTrash } from '@fortawesome/free-solid-svg-icons';
+import { useSearchParams } from 'react-router-dom';
 import { siteService, Site } from '../../services/siteService';
 import SingleSelectPopover from '../../components/common/SingleSelectPopover';
 import { teamService, Team } from '../../services/teamService';
@@ -73,7 +74,27 @@ interface ReviewCandidate {
     createdAt: number;
 }
 
+interface DailyReportMasterData {
+    sites: Site[];
+    teams: Team[];
+    companies: Company[];
+    workers: Worker[];
+}
+
 const DAILY_REPORT_TEMP_STORAGE_KEY = 'daily_report_temp_data';
+const DATE_INPUT_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+const getLocalDateInputValue = (date = new Date()): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const normalizeDateInputParam = (value?: string | null): string | null => {
+    const trimmed = String(value ?? '').trim();
+    return DATE_INPUT_PATTERN.test(trimmed) ? trimmed : null;
+};
 
 interface DailyReportTempState {
     ledgers: Ledger[];
@@ -624,7 +645,7 @@ const DailyReportTable: React.FC<{
                         }
                     }}
                     imeFastEdit={true}
-                    cells={(row, col, prop) => {
+                    cells={(row, col, _prop) => {
                         const cellProperties: any = {};
                         if (col === 0) {
                             const hot = hotRef.current?.hotInstance;
@@ -691,6 +712,8 @@ const DailyReportTable: React.FC<{
 // --- Main Component ---
 const DailyReportGridInput: React.FC = () => {
     const { currentUser } = useAuth();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const urlDate = normalizeDateInputParam(searchParams.get('date'));
     const [ledgers, setLedgers] = useState<Ledger[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
@@ -698,14 +721,7 @@ const DailyReportGridInput: React.FC = () => {
     const [workers, setWorkers] = useState<Worker[]>([]);
     const reportInputSites = useMemo(() => getOpenSites(sites), [sites]);
 
-    useEffect(() => {
-        const unsubscribe = manpowerService.subscribeWorkers((newWorkers) => {
-            setWorkers(newWorkers);
-        });
-        return () => unsubscribe();
-    }, []);
-
-    const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+    const [date, setDate] = useState(() => urlDate ?? getLocalDateInputValue());
     const [weather, setWeather] = useState('맑음');
     const [loading, setLoading] = useState(false);
     const [fetching, setFetching] = useState(true);
@@ -717,6 +733,10 @@ const DailyReportGridInput: React.FC = () => {
     const [reviewCandidates, setReviewCandidates] = useState<ReviewCandidate[]>([]);
     const [scheduleSnapshot, setScheduleSnapshot] = useState<Ledger[]>([]);
     const [kakaoSnapshot, setKakaoSnapshot] = useState<Ledger[]>([]);
+    const [loadErrorMessage, setLoadErrorMessage] = useState('');
+    const masterDataRef = useRef<DailyReportMasterData>({ sites: [], teams: [], companies: [], workers: [] });
+    const reportLoadRequestIdRef = useRef(0);
+    const syncedUrlDateRef = useRef(urlDate);
     const kakaoFileInputRef = useRef<HTMLInputElement>(null);
 
     const normalizeSiteId = useCallback((value: unknown): string => String(value ?? '').trim(), []);
@@ -768,6 +788,44 @@ const DailyReportGridInput: React.FC = () => {
         return duplicates;
     }, [ledgers]);
 
+    useEffect(() => {
+        if (urlDate === syncedUrlDateRef.current) {
+            return;
+        }
+
+        syncedUrlDateRef.current = urlDate;
+        const nextDate = urlDate ?? getLocalDateInputValue();
+        if (nextDate !== date) {
+            setDate(nextDate);
+        }
+    }, [date, urlDate]);
+
+    useEffect(() => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.set('tab', 'input');
+            next.set('date', date);
+            return next.toString() === prev.toString() ? prev : next;
+        }, { replace: true });
+    }, [date, setSearchParams]);
+
+    const handleDateInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement> | React.FormEvent<HTMLInputElement>) => {
+        const nextDate = normalizeDateInputParam(event.currentTarget.value);
+        if (!nextDate) return;
+
+        setDate(nextDate);
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.set('tab', 'input');
+            next.set('date', nextDate);
+            return next.toString() === prev.toString() ? prev : next;
+        }, { replace: true });
+    }, [setSearchParams]);
+
+    useEffect(() => {
+        masterDataRef.current = { sites, teams, companies, workers };
+    }, [sites, teams, companies, workers]);
+
     const validationSummary = useMemo(() => {
         let missingSites = 0;
         let unknownWorkers = 0;
@@ -795,13 +853,19 @@ const DailyReportGridInput: React.FC = () => {
     const fetchMasterData = useCallback(
         async (options?: { rematchLedgers?: boolean }) => {
             try {
-                setFetching(true);
                 const [sitesData, teamsData, companiesData, workersData] = await Promise.all([
                     siteService.getSites(),
                     teamService.getTeams(),
                     companyService.getCompanies(),
                     manpowerService.getWorkers(true)
                 ]);
+                const masterData = {
+                    sites: sitesData,
+                    teams: teamsData,
+                    companies: companiesData,
+                    workers: workersData
+                };
+                masterDataRef.current = masterData;
                 setSites(sitesData);
                 setTeams(teamsData);
                 setCompanies(companiesData);
@@ -836,10 +900,10 @@ const DailyReportGridInput: React.FC = () => {
                         }))
                     );
                 }
+                return masterData;
             } catch (error) {
                 console.error('Failed to fetch master data', error);
-            } finally {
-                setFetching(false);
+                return null;
             }
         },
         [buildWorkerSearchMap]
@@ -927,9 +991,11 @@ const DailyReportGridInput: React.FC = () => {
         };
     }, [performSave]);
 
-    const fetchReportsForDate = useCallback(async (targetDate: string) => {
+    const fetchReportsForDate = useCallback(async (targetDate: string, masterData?: DailyReportMasterData) => {
+        const reportTeams = masterData?.teams ?? masterDataRef.current.teams;
+        const reportWorkers = masterData?.workers ?? masterDataRef.current.workers;
+
         try {
-            setFetching(true);
             const reports = await dailyReportService.getReports(targetDate);
             if (reports.length === 0) return null;
 
@@ -951,14 +1017,14 @@ const DailyReportGridInput: React.FC = () => {
                 const aggregatedRows: GridRow[] = [];
                 siteReports.forEach(report => {
                     const reportTeamId = report.teamId || '';
-                    const reportTeamName = report.teamName || (teams.find(t => t.id === reportTeamId)?.name) || '';
+                    const reportTeamName = report.teamName || (reportTeams.find(t => t.id === reportTeamId)?.name) || '';
                     report.workers.forEach(w => {
                         const wId = w.workerId || '';
                         const wName = w.name || (w as any).workerName || '';
-                        const workerBase = workers.find(wk => wk.id === wId) || workers.find(wk => wk.name === wName);
+                        const workerBase = reportWorkers.find(wk => wk.id === wId) || reportWorkers.find(wk => wk.name === wName);
                         const finalWorkerName = wName || workerBase?.name || '';
                         const finalTeamId = w.teamId || (w as any).workerTeamId || workerBase?.teamId || reportTeamId;
-                        const finalTeamName = (w as any).teamName || (teams.find(t => t.id === finalTeamId)?.name) || reportTeamName;
+                        const finalTeamName = (w as any).teamName || (reportTeams.find(t => t.id === finalTeamId)?.name) || reportTeamName;
 
                         aggregatedRows.push({
                             id: Math.random().toString(36).substr(2, 9),
@@ -993,36 +1059,64 @@ const DailyReportGridInput: React.FC = () => {
             return newLedgers;
         } catch (error) {
             console.error("Failed to fetch reports for date", error);
-            return null;
-        } finally {
-            setFetching(false);
+            throw error;
         }
-    }, [normalizeSiteId, sites, teams, workers]);
+    }, [normalizeSiteId]);
 
     useEffect(() => {
+        const requestId = reportLoadRequestIdRef.current + 1;
+        reportLoadRequestIdRef.current = requestId;
+        let cancelled = false;
+        const isCurrentRequest = () => !cancelled && reportLoadRequestIdRef.current === requestId;
+
         const run = async () => {
-            if (sites.length === 0 || teams.length === 0) await fetchMasterData();
             setFetching(true);
-            const serverLedgers = await fetchReportsForDate(date);
-            if (serverLedgers && serverLedgers.length > 0) {
-                setLedgers(serverLedgers);
-                setReviewCandidates([]);
-                setScheduleSnapshot([]);
-                setKakaoSnapshot([]);
-                setHasTempData(false);
-            } else {
-                const loaded = await loadTempData(date);
-                if (!loaded) {
-                    setLedgers([{ id: Date.now().toString(), siteId: '', rows: createEmptyRows(20), description: '' }]);
+            setLoadErrorMessage('');
+            try {
+                let masterData = masterDataRef.current;
+                if (masterData.sites.length === 0 || masterData.teams.length === 0 || masterData.workers.length === 0) {
+                    const loadedMasterData = await fetchMasterData();
+                    if (!isCurrentRequest()) return;
+                    if (!loadedMasterData) {
+                        throw new Error('Failed to load daily report master data');
+                    }
+                    masterData = loadedMasterData;
+                }
+
+                const serverLedgers = await fetchReportsForDate(date, masterData);
+                if (!isCurrentRequest()) return;
+
+                if (serverLedgers && serverLedgers.length > 0) {
+                    setLedgers(serverLedgers);
                     setReviewCandidates([]);
                     setScheduleSnapshot([]);
                     setKakaoSnapshot([]);
+                    setHasTempData(false);
+                } else {
+                    const loaded = await loadTempData(date);
+                    if (!isCurrentRequest()) return;
+                    if (!loaded) {
+                        setLedgers([{ id: Date.now().toString(), siteId: '', rows: createEmptyRows(20), description: '' }]);
+                        setReviewCandidates([]);
+                        setScheduleSnapshot([]);
+                        setKakaoSnapshot([]);
+                    }
+                }
+            } catch (error) {
+                if (!isCurrentRequest()) return;
+                console.error('[DailyReportGridInput] Failed to load daily report input data', error);
+                setLoadErrorMessage('일보 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
+            } finally {
+                if (isCurrentRequest()) {
+                    setFetching(false);
                 }
             }
-            setFetching(false);
         };
         run();
-    }, [date, fetchMasterData, fetchReportsForDate]);
+        return () => {
+            cancelled = true;
+        };
+    }, [date, fetchMasterData, fetchReportsForDate, loadTempData]);
 
     useEffect(() => {
         const onMasterDataChanged = (event: Event) => {
@@ -1985,6 +2079,7 @@ const DailyReportGridInput: React.FC = () => {
     }, []);
 
     const handleSaveAll = async () => {
+        if (loading) return;
         if (validationSummary.missingSites > 0) { Swal.fire('Warning', '현장이 선택되지 않은 장부가 있습니다.', 'warning'); return; }
         setLoading(true);
         try {
@@ -2496,12 +2591,26 @@ const DailyReportGridInput: React.FC = () => {
                 </div>
             )}
 
+            {loadErrorMessage && (
+                <div className="border-b border-red-200 bg-red-50 px-6 py-3 text-sm font-bold text-red-700">
+                    {loadErrorMessage}
+                </div>
+            )}
+
             <div className="sticky-toolbar-wrapper">
                 <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center shadow-sm sticky-toolbar z-[20]">
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-2 bg-slate-100 border border-slate-300 rounded-lg px-3 py-2">
                             <FontAwesomeIcon icon={faCalendarAlt} className="text-slate-500" />
-                            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="bg-transparent border-none text-sm font-bold text-slate-700 focus:ring-0 p-0 outline-none" />
+                            <input
+                                type="date"
+                                value={date}
+                                onChange={handleDateInputChange}
+                                onInput={handleDateInputChange}
+                                disabled={loading || fetching}
+                                aria-label="일보작성 기준 날짜"
+                                className="bg-transparent border-none text-sm font-bold text-slate-700 focus:ring-0 p-0 outline-none disabled:cursor-not-allowed disabled:text-slate-400"
+                            />
                         </div>
                         <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1">
                             <span className="text-[10px] font-bold text-slate-400">날씨</span>

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faTable, faPlus, faMinus, faSave, faCopy, faPaste, faUsers, faBuilding, faHardHat, faDatabase } from '@fortawesome/free-solid-svg-icons';
+import { faPlus, faMinus, faSave, faCopy, faPaste, faUsers, faBuilding, faHardHat, faDatabase } from '@fortawesome/free-solid-svg-icons';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';

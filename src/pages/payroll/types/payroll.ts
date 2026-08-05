@@ -178,6 +178,7 @@ export interface LedgerManualInput {
     labor: LedgerSideInput;
     personalMemo: string;
     assignmentType?: 'corporate' | 'labor';
+    allocationMode?: 'split' | 'corporate' | 'labor';
     itemAssignments?: Record<string, 'corporate' | 'labor'>;
 }
 

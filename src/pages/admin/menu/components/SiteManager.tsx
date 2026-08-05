@@ -26,6 +26,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { SiteDataType } from '../../../../types/menu';
+import { getIcon } from '../../../../utils/iconMapper';
 
 interface SiteManagerProps {
     isOpen: boolean;
@@ -81,8 +82,7 @@ const SortableSiteItem = ({
             </button>
 
             <div className={`w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center shadow-sm`}>
-                {/* @ts-ignore */}
-                <FontAwesomeIcon icon={['fas', getIconName(item.icon)]} className="text-white text-xs" />
+                <FontAwesomeIcon icon={getIcon(item.icon)} className="text-white text-xs" />
             </div>
 
             <div className="flex-1 grid grid-cols-12 gap-2">

@@ -21,6 +21,7 @@ import { teamService } from './teamService';
 import { vehicleBillingService } from './vehicleBillingService';
 import { vehicleService } from './vehicleService';
 import { isSupportBillingMonthEnabled } from '../utils/supportBillingPeriod';
+import { selectPreferredSettlementBillings } from '../utils/supportSettlementBilling';
 import {
   TeamSettlementDocumentSchema,
   type TeamSettlementAdditionItem,
@@ -307,23 +308,11 @@ const addDays = (date: Date, days: number): Date => {
   return next;
 };
 
-const normalizeBillingStatus = (value: unknown): string => {
-  const raw = String(value ?? '').trim().toLowerCase();
-  if (!raw) return '';
-  if (raw === '확정') return 'confirmed';
-  if (raw === 'draft') return 'draft';
-  return raw;
-};
-
-const isPostedBillingStatus = (status: unknown): boolean =>
-  ['confirmed', 'paid', 'overdue'].includes(normalizeBillingStatus(status));
-
 const selectPreferredTeamBillings = <T extends { status?: unknown }>(
   docs: T[],
   additionalPosted?: (doc: T) => boolean
 ): T[] => {
-  if (!Array.isArray(docs) || docs.length === 0) return [];
-  return docs.filter((doc) => isPostedBillingStatus(doc.status) || Boolean(additionalPosted?.(doc)));
+  return selectPreferredSettlementBillings(docs, additionalPosted);
 };
 
 const allowUnconfirmedLedgerFallback = false;
@@ -500,11 +489,14 @@ const mergeAutoAndDraft = (params: { autoDoc: TeamSettlementDocument; savedDoc: 
     if (!saved) return autoItem;
 
     const nextQuantity = typeof saved.quantity === 'number' && Number.isFinite(saved.quantity) ? saved.quantity : autoItem.quantity;
+    const hasAmountOverride = saved.amountOverridden === true;
     const nextMemo = typeof saved.memo === 'string' && saved.memo.trim() ? saved.memo : autoItem.memo;
 
     return {
       ...autoItem,
       quantity: nextQuantity,
+      amount: hasAmountOverride ? saved.amount : autoItem.amount,
+      amountOverridden: hasAmountOverride ? true : undefined,
       memo: nextMemo
     };
   });
@@ -808,7 +800,7 @@ export const teamSettlementService = {
             overrides: loadSupportRateOverrides(params.yearMonth),
             baseRate: baseSupportRate,
             contexts: [entry],
-            siteId: rateSiteId
+            siteId: rateSiteId || siteName
           });
 
           rows.push({
@@ -922,6 +914,24 @@ export const teamSettlementService = {
         await updateSystemConfig(updateVars);
       }
     }
+  },
+
+  async saveAndConfirmTeamSettlement(doc: TeamSettlementDocument): Promise<TeamSettlementDocument> {
+    const parsed = TeamSettlementDocumentSchema.parse(doc);
+    const now = new Date().toISOString();
+    const nextDoc: TeamSettlementDocument = {
+      ...parsed,
+      confirmedAt: now,
+      updatedAt: now
+    };
+
+    await this.saveTeamSettlement(nextDoc);
+    try {
+      await notifyTeamSettlementSystemMessage('teamSettlement.confirmed', nextDoc);
+    } catch (error) {
+      console.error('[teamSettlementService] confirmation notification failed:', error);
+    }
+    return nextDoc;
   },
 
   async confirmTeamSettlement(params: { yearMonth: string; teamId: string }): Promise<void> {
@@ -1397,7 +1407,7 @@ export const teamSettlementService = {
             overrides: supportRateOverrides,
             baseRate: baseSupportRate,
             contexts: [entry],
-            siteId: rateSiteId
+            siteId: rateSiteId || siteName
           });
 
           const targetMap = entry.direction === '외부지원간곳' || entry.direction === '내부지원간곳'
@@ -1457,8 +1467,8 @@ export const teamSettlementService = {
         counterTeamId: undefined,
         counterTeamName: undefined,
         manDay: roundManDay(value.manDay),
-        amount: usesSupportClientSettlement ? supportClientSettlementAmount : value.amount,
-        memo: usesSupportClientSettlement ? '지원정산 정산금액 기준' : undefined
+        amount: value.kind === '도급' ? 0 : (usesSupportClientSettlement ? supportClientSettlementAmount : value.amount),
+        memo: value.kind !== '도급' && usesSupportClientSettlement ? '지원정산 정산금액 기준' : undefined
       };
     });
 

@@ -31,6 +31,27 @@ describe('firebase security rules', () => {
     expect(firestoreRules).toContain('isSafeSelfUserUpdate');
   });
 
+  it('limits worker self-signing to the linked worker signature fields', () => {
+    expect(firestoreRules).toContain('function hasLinkedWorker(workerId)');
+    expect(firestoreRules).toContain('function canReadOwnWorker(workerId)');
+    expect(firestoreRules).toContain('function isValidOwnWorkerSignatureUpdate(workerId)');
+    expect(firestoreRules).toContain('match /workers/{workerId}');
+    expect(firestoreRules).toContain("request.resource.data.signatureSource == 'worker_direct'");
+    expect(firestoreRules).toContain("'signatureConsent'");
+  });
+
+  it('allows payroll, admin, and site managers to publish only the shared delegation template setting', () => {
+    expect(firestoreRules).toContain("settingsId == 'delegation_letter_v2_public'");
+    expect(firestoreRules).toContain('canWriteFinance() || hasAnyRole(siteRoles())');
+  });
+
+  it('uses menus_v12 as the only writable versioned menu document', () => {
+    expect(firestoreRules).toContain('function canWriteSettingsDocument(settingsId)');
+    expect(firestoreRules).toContain("settingsId.matches('^menus_v[0-9]+$')");
+    expect(firestoreRules).toContain("settingsId == 'menus_v12'");
+    expect(firestoreRules).not.toContain('keepsDevRecruitingMenuChildren');
+  });
+
   it('keeps all shared ERP policy collections represented in Firestore rules', () => {
     const policyCollections = [
       ...ERP_MASTER_DATA_COLLECTIONS,
@@ -46,6 +67,19 @@ describe('firebase security rules', () => {
     policyCollections.forEach((collectionId) => {
       expect(firestoreRules).toContain(`'${collectionId}'`);
     });
+  });
+
+  it('scopes client portal reads to the account-linked company records', () => {
+    expect(firestoreRules).toContain('function hasLinkedClientCompany(companyId)');
+    expect(firestoreRules).toContain('function canReadClientSite()');
+    expect(firestoreRules).toContain('function canReadClientDailyReport()');
+    expect(firestoreRules).toContain('function canReadClientProgressClaim()');
+  });
+
+  it('allows rental portal accounts to read only their linked company profile', () => {
+    expect(firestoreRules).toContain('function hasLinkedRentalCompany(companyId)');
+    expect(firestoreRules).toContain('function isRentalPortalAccount()');
+    expect(firestoreRules).toContain('function canReadRentalCompany(companyId)');
   });
 
   it('keeps bank ingestion and push tokens behind explicit least-privilege rules', () => {
@@ -97,5 +131,13 @@ describe('firebase security rules', () => {
     expect(firestoreRules).not.toContain('allow read, write: if isSignedIn();');
     expect(firestoreRules).toContain('allow read: if canReadFinance();');
     expect(firestoreRules).toContain('allow create, update, delete: if canWriteFinance();');
+  });
+
+  it('locks confirmed monthly payroll snapshots against ordinary finance writes', () => {
+    expect(firestoreRules).toContain('match /monthly_payroll_settlements/{settlementId}');
+    expect(firestoreRules).toContain('function isValidPayrollSettlementUpdate()');
+    expect(firestoreRules).toContain("beforeStatus == 'confirmed'");
+    expect(firestoreRules).toContain("afterStatus == 'paid'");
+    expect(firestoreRules).toContain("collectionId != 'monthly_payroll_settlements'");
   });
 });

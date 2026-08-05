@@ -13,8 +13,55 @@ import { vehicleService } from './vehicleService';
 import { Timestamp } from 'firebase/firestore';
 import { DEFAULT_SUPPORT_BILLING_START_DATE, isSupportBillingMonthEnabled, maxIsoDate, minIsoDate } from '../utils/supportBillingPeriod';
 import { normalizeVehicleExpenseType } from '../utils/vehicleExpenseType';
+import { calculateVehicleBillingProration } from '../utils/vehicleBillingProration';
 
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
+const POSTED_VEHICLE_BILLING_STATUSES = new Set(['CONFIRMED', 'PAID', 'OVERDUE']);
+
+export const isPostedVehicleBillingStatus = (status: unknown): boolean => (
+    POSTED_VEHICLE_BILLING_STATUSES.has(String(status ?? '').trim().toUpperCase())
+);
+
+const normalizeLineItemsForProtection = (lineItems: VehicleBillingCostItem[] | undefined): string => (
+    JSON.stringify((lineItems ?? [])
+        .map((item) => ({
+            id: normalizeKey(item.id),
+            label: normalizeKey(item.label),
+            amount: Number.isFinite(Number(item.amount)) ? Number(item.amount) : 0,
+            type: normalizeKey(item.type),
+            category: normalizeKey(item.category),
+            sourceType: normalizeKey(item.sourceType),
+            sourceLedgerRowId: normalizeKey(item.sourceLedgerRowId),
+            sourceSegmentId: normalizeKey(item.sourceSegmentId),
+            sourceStartDate: normalizeKey(item.sourceStartDate),
+            sourceEndDate: normalizeKey(item.sourceEndDate)
+        }))
+        .sort((a, b) => a.id.localeCompare(b.id) || a.label.localeCompare(b.label))
+    )
+);
+
+const hasPostedBillingProtectedChange = (
+    before: VehicleBillingDocument | null,
+    after: VehicleBillingDocument
+): boolean => {
+    if (!before || !isPostedVehicleBillingStatus(before.status)) return false;
+    if (String(before.status ?? '').trim().toUpperCase() !== String(after.status ?? '').trim().toUpperCase()) return true;
+
+    const moneyFields: Array<keyof Pick<VehicleBillingDocument, 'fixedCost' | 'variableCost' | 'totalAmount'>> = [
+        'fixedCost',
+        'variableCost',
+        'totalAmount'
+    ];
+    if (moneyFields.some((field) => Number(before[field] ?? 0) !== Number(after[field] ?? 0))) return true;
+
+    return normalizeLineItemsForProtection(before.lineItems) !== normalizeLineItemsForProtection(after.lineItems);
+};
+
+export interface VehicleBillingCancelConfirmationInput {
+    reason: string;
+    actorId?: string;
+    actorName?: string;
+}
 
 const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
@@ -294,6 +341,10 @@ const normalizeVehicleBillingDocument = (d: any): VehicleBillingDocument => {
         status: (d?.status ? String(d.status) : 'DRAFT') as any,
         lineItems: safeJsonParse<VehicleBillingCostItem[]>(d?.lineItems, []),
         memo: d?.memo ? String(d.memo) : undefined,
+        confirmationCancelReason: d?.confirmationCancelReason ? String(d.confirmationCancelReason) : undefined,
+        confirmationCancelledAt: toTimestamp(d?.confirmationCancelledAt),
+        confirmationCancelledById: d?.confirmationCancelledById ? String(d.confirmationCancelledById) : undefined,
+        confirmationCancelledByName: d?.confirmationCancelledByName ? String(d.confirmationCancelledByName) : undefined,
         createdAt: toTimestamp(d?.createdAt),
         updatedAt: toTimestamp(d?.updatedAt),
         confirmedAt: toTimestamp(d?.confirmedAt)
@@ -335,17 +386,27 @@ export const vehicleBillingService = {
         // Fixed Cost (if valid contract)
         let fixedCost = 0;
         if (vehicle.type !== 'OWNED' && vehicle.contract) {
-            // Check if contract covers this month? (Simplified Logic: if active, charge full)
-            // TODO: Pro-rating logic can be added here
-            fixedCost = vehicle.contract.monthlyFee;
-            lineItems.push({
-                id: 'fixed-rent',
-                label: `Monthly Fee (${vehicle.type})`,
-                amount: fixedCost,
-                type: 'FIXED',
-                category: 'RENT',
-                sourceType: 'vehicle_ledger'
+            const proration = calculateVehicleBillingProration({
+                yearMonth,
+                monthlyFee: vehicle.contract.monthlyFee,
+                startDate: vehicle.contract.startDate,
+                endDate: vehicle.contract.endDate
             });
+            fixedCost = proration.amount;
+            if (fixedCost > 0) {
+                lineItems.push({
+                    id: 'fixed-rent',
+                    label: proration.startDate && proration.endDate
+                        ? `Monthly Fee (${vehicle.type}) ${proration.startDate}~${proration.endDate}`
+                        : `Monthly Fee (${vehicle.type})`,
+                    amount: fixedCost,
+                    type: 'FIXED',
+                    category: 'RENT',
+                    sourceType: 'vehicle_ledger',
+                    sourceStartDate: proration.startDate,
+                    sourceEndDate: proration.endDate
+                });
+            }
         }
 
         // Variable Costs
@@ -756,6 +817,20 @@ export const vehicleBillingService = {
                     : billing.id;
 
             const beforeBilling = await findBillingDocumentById(canonicalId).catch(() => null);
+            const candidateBilling: VehicleBillingDocument = {
+                ...billing,
+                id: canonicalId,
+                vehicleId,
+                teamId: teamUuid ?? undefined,
+                issuedToType: issuedToType ? issuedToType as VehicleBillingIssuedToType : undefined,
+                issuedToWorkerId: issuedToWorkerUuid ?? undefined,
+                issuedToWorkerName: issuedToType === 'team' ? (billing.teamName ?? undefined) : billing.issuedToWorkerName,
+                lineItems: billing.lineItems ?? []
+            };
+
+            if (hasPostedBillingProtectedChange(beforeBilling, candidateBilling)) {
+                throw new Error('vehicle-billing-posted-modification-blocked');
+            }
 
             const payloadV2 = {
                 id: canonicalId,
@@ -873,6 +948,7 @@ export const vehicleBillingService = {
 
             return docs
                 .filter((d: any) => String(d?.yearMonth ?? '') === String(yearMonth))
+                .filter((d: any) => String(d?.status ?? '').toUpperCase() !== 'CANCELLED')
                 .map(normalizeVehicleBillingDocument);
         } catch (error) {
             console.error("Error fetching billings:", error);
@@ -891,6 +967,9 @@ export const vehicleBillingService = {
 
     deleteBilling: async (id: string): Promise<void> => {
         const beforeBilling = await findBillingDocumentById(id).catch(() => null);
+        if (isPostedVehicleBillingStatus(beforeBilling?.status)) {
+            throw new Error('vehicle-billing-posted-delete-blocked');
+        }
         await deleteVehicleBillingDocument({ id } as any);
         if (beforeBilling) {
             try {
@@ -904,6 +983,57 @@ export const vehicleBillingService = {
             } catch (logError) {
                 console.warn('[vehicleBillingService] vehicle billing delete log failed:', logError);
             }
+        }
+    },
+
+    cancelConfirmation: async (
+        id: string,
+        input: VehicleBillingCancelConfirmationInput
+    ): Promise<void> => {
+        const reason = String(input.reason ?? '').trim();
+        if (!reason) throw new Error('vehicle-billing-cancel-reason-required');
+
+        const beforeBilling = await findBillingDocumentById(id).catch(() => null);
+        if (!beforeBilling) throw new Error('vehicle-billing-not-found');
+        if (!isPostedVehicleBillingStatus(beforeBilling.status)) return;
+
+        const cancelledAt = Timestamp.now();
+        const afterBilling: VehicleBillingDocument = {
+            ...beforeBilling,
+            status: 'DRAFT',
+            confirmedAt: undefined,
+            confirmationCancelReason: reason,
+            confirmationCancelledAt: cancelledAt,
+            confirmationCancelledById: input.actorId,
+            confirmationCancelledByName: input.actorName,
+            updatedAt: cancelledAt,
+            memo: beforeBilling.memo
+                ? `${beforeBilling.memo}\n확정취소: ${reason}`
+                : `확정취소: ${reason}`
+        };
+
+        await updateVehicleBillingDocument({
+            id: beforeBilling.id,
+            status: 'DRAFT',
+            confirmedAt: null,
+            confirmationCancelReason: reason,
+            confirmationCancelledAt: cancelledAt.toDate().toISOString(),
+            confirmationCancelledById: input.actorId ?? null,
+            confirmationCancelledByName: input.actorName ?? null,
+            updatedAt: cancelledAt.toDate().toISOString(),
+            memo: afterBilling.memo ?? null
+        } as any);
+
+        try {
+            const { vehicleBillingLogService } = await import('./vehicleBillingLogService');
+            await vehicleBillingLogService.createLog({
+                action: 'updated',
+                before: beforeBilling,
+                after: afterBilling,
+                source: 'vehicleBillingService.cancelConfirmation'
+            });
+        } catch (logError) {
+            console.warn('[vehicleBillingService] vehicle billing cancel confirmation log failed:', logError);
         }
     },
 

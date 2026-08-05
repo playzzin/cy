@@ -18,7 +18,14 @@ import type {
 export const toProgressNumber = (value: unknown): number => {
     if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
     if (typeof value === 'string') {
-        const normalized = value.replace(/,/g, '').trim();
+        const trimmed = value.trim();
+        if (!trimmed) return 0;
+        const normalized = trimmed
+            .replace(/[,\s]/g, '')
+            .replace(/[−–—]/g, '-')
+            .replace(/[₩원%]/g, '')
+            .replace(/^\((.+)\)$/, '-$1');
+        if (!/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(normalized)) return 0;
         if (!normalized) return 0;
         const parsed = Number(normalized);
         return Number.isFinite(parsed) ? parsed : 0;
@@ -54,18 +61,20 @@ export const getCurrentYearMonth = (): string => {
 };
 
 export const getMonthDateRange = (yearMonth: string): { startDate: string; endDate: string } => {
-    const [yearText, monthText] = String(yearMonth || '').split('-');
+    const match = /^(\d{4})-(\d{1,2})$/.exec(String(yearMonth || '').trim());
+    const [, yearText = '', monthText = ''] = match || [];
     const year = Number(yearText);
     const month = Number(monthText);
-    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    if (!match || !Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
         const fallback = getCurrentYearMonth();
         return getMonthDateRange(fallback);
     }
 
+    const normalizedMonthText = String(month).padStart(2, '0');
     const lastDay = new Date(year, month, 0).getDate();
     return {
-        startDate: `${yearText}-${monthText}-01`,
-        endDate: `${yearText}-${monthText}-${String(lastDay).padStart(2, '0')}`,
+        startDate: `${yearText}-${normalizedMonthText}-01`,
+        endDate: `${yearText}-${normalizedMonthText}-${String(lastDay).padStart(2, '0')}`,
     };
 };
 

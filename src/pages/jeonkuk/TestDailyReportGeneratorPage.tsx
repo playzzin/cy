@@ -9,13 +9,12 @@ import {
     faBolt,
     faEye,
     faSave,
-    faTruckFast,
     faChartSimple
 } from '@fortawesome/free-solid-svg-icons';
 import { dailyReportService } from '../../services/dailyReportService';
-import { siteService, Site } from '../../services/siteService';
-import { teamService, Team } from '../../services/teamService';
-import { manpowerService, Worker } from '../../services/manpowerService';
+import { siteService } from '../../services/siteService';
+import { teamService } from '../../services/teamService';
+import { manpowerService } from '../../services/manpowerService';
 
 interface SimulationResult {
     totalReports: number;

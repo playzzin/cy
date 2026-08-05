@@ -29,7 +29,7 @@ const SmartExcelGrid: React.FC<SmartExcelGridProps> = ({ onChange }) => {
         { title: '구분 (월급제/일급제)', type: 'text', width: 100 },
     ];
 
-    const handleChange = (changes: any, source: string) => {
+    const handleChange = (_changes: any, _source: string) => {
         if (!hotRef.current) return;
 
         // Timeout to ensure data is updated

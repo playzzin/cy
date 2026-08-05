@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import mermaid from 'mermaid';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faFileExcel, faLink, faInfoCircle, faCopy, faCheck } from '@fortawesome/free-solid-svg-icons';
+import { faFileExcel, faLink, faCopy, faCheck } from '@fortawesome/free-solid-svg-icons';
 
 const ExcelDataGuideViewer: React.FC = () => {
     const mermaidRef = useRef<HTMLDivElement>(null);

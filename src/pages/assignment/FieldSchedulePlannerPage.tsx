@@ -36,6 +36,7 @@ import {
     UsersRound,
     X,
 } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { dispatchService, DispatchAssignment } from '../../services/dispatchService';
 import { fieldScheduleRequestService, FieldScheduleRequest, isOffDutyOnlyFieldScheduleRequest } from '../../services/fieldScheduleRequestService';
 import { scheduleConfirmationBoardService } from '../../services/scheduleConfirmationBoardService';
@@ -46,9 +47,15 @@ import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService, Company } from '../../services/companyService';
 import { vehicleService } from '../../services/vehicleService';
-import { userService } from '../../services/userService';
 import type { UserData } from '../../services/userService';
 import { useAuth } from '../../contexts/AuthContext';
+import {
+    useWorkerAccessScope,
+    workerAccessMatchesSchedule,
+    workerAccessMatchesSite,
+    workerAccessMatchesTeam,
+    workerAccessMatchesWorker,
+} from '../../hooks/useWorkerAccessScope';
 import { Vehicle } from '../../types/vehicle';
 import {
     applyDailyReportSiteSnapshotToReport,
@@ -219,6 +226,13 @@ const getTodayInputValue = () => {
     const now = new Date();
     const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
     return local.toISOString().slice(0, 10);
+};
+
+const DATE_INPUT_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+const normalizeDateInputParam = (value?: string | null): string | null => {
+    const trimmed = String(value ?? '').trim();
+    return DATE_INPUT_PATTERN.test(trimmed) ? trimmed : null;
 };
 
 const shiftDate = (date: string, amount: number) => {
@@ -858,60 +872,8 @@ const parseLinkedIds = (raw: unknown): string[] => {
     }
 };
 
-const userBypassesViewerTeamScope = (userData?: UserData | null) => {
-    const accountType = normalizeComparableText(userData?.accountType);
-    if (accountType === 'office') return true;
 
-    const role = normalizeComparableText(userData?.role);
-    return ['admin', 'administrator', '관리자', '본사', '사무'].some((keyword) =>
-        role.includes(normalizeComparableText(keyword))
-    );
-};
 
-const findViewerWorker = (uid: string, workerRows: Worker[], userData?: UserData | null) => {
-    const normalizedUid = toTrimmedText(uid);
-    if (!normalizedUid) return undefined;
-
-    const directWorker = workerRows.find((worker) => toTrimmedText(worker.uid) === normalizedUid);
-    if (directWorker) return directWorker;
-
-    const linkedWorkerIds = parseLinkedIds(userData?.linkedWorkerIds);
-    if (linkedWorkerIds.length === 0) return undefined;
-
-    return workerRows.find((worker) => {
-        const workerKeys = cleanIds([toTrimmedText(worker.id), toTrimmedText(worker.legacyId)]);
-        return linkedWorkerIds.some((linkedId) => workerKeys.includes(linkedId));
-    });
-};
-
-const buildViewerTeamScope = (
-    worker: Worker | undefined,
-    teamsById: Map<string, Team>,
-    teams: Team[]
-): ViewerTeamScope => {
-    if (!worker) return EMPTY_VIEWER_TEAM_SCOPE;
-
-    const team = getWorkerAssignedTeam(worker, teamsById, teams);
-    const teamIds = cleanIds([
-        toTrimmedText(worker.teamId),
-        toTrimmedText(team?.id),
-        toTrimmedText(team?.legacyId),
-    ]);
-    const teamNames = cleanIds([
-        toTrimmedText(worker.teamName),
-        toTrimmedText(team?.name),
-    ]);
-
-    if (teamIds.length === 0 && teamNames.length === 0) return EMPTY_VIEWER_TEAM_SCOPE;
-
-    return {
-        enabled: true,
-        teamIds,
-        teamNames,
-        teamNameKeys: cleanIds(teamNames.map((name) => normalizeComparableText(name))),
-        label: teamNames[0] || teamIds[0] || '내 팀',
-    };
-};
 
 const matchesViewerTeamScope = (scope: ViewerTeamScope, teamId?: unknown, teamName?: unknown) => {
     if (!scope.enabled) return false;
@@ -991,15 +953,6 @@ const getScheduleViewerScopePriority = (
     return 2;
 };
 
-const scheduleBelongsToViewerTeamScope = (
-    schedule: ScheduleItem,
-    scope: ViewerTeamScope,
-    sitesById: Map<string, Site>,
-    teamsById: Map<string, Team>,
-    teams: Team[]
-) => {
-    return getScheduleViewerScopePriority(schedule, scope, sitesById, teamsById, teams) < 2;
-};
 
 const getVehicleAssignedTeam = (
     vehicle: Vehicle | undefined,
@@ -2283,13 +2236,13 @@ const BoardViewScheduleCard: React.FC<{
                     color: getReadableTextColor(siteColor),
                 }}
             >
-                <h3 className="truncate text-lg font-black leading-tight" title={schedule.siteName || '현장 미지정'}>
+                <h3 data-capture-text-safe="true" className="truncate pb-px text-lg font-black leading-[1.35]" title={schedule.siteName || '현장 미지정'}>
                     {siteNameLabel}
                 </h3>
             </div>
 
             <div className="border-b border-slate-300 px-2 py-1.5 text-center">
-                <div className="truncate text-sm font-bold text-slate-900">{schedule.siteAddress || '주소 없음'}</div>
+                <div data-capture-text-safe="true" className="truncate pb-px text-sm font-bold leading-[1.4] text-slate-900">{schedule.siteAddress || '주소 없음'}</div>
             </div>
 
             {schedule.requestId || Number(schedule.requestedHeadcount || 0) > 0 ? (
@@ -2322,7 +2275,7 @@ const BoardViewScheduleCard: React.FC<{
                                         title={`${row.fullLabel} · ${row.teamName || '팀 미지정'} · ${style.label}`}
                                     >
                                         <div
-                                            className="min-w-0 border py-0.5 text-center font-black leading-tight shadow-sm"
+                                            className="min-w-0 border py-0.5 text-center font-black leading-[1.35] shadow-sm"
                                             style={{
                                                 background: style.background,
                                                 borderColor: teamBorderColor,
@@ -2334,7 +2287,7 @@ const BoardViewScheduleCard: React.FC<{
                                                 paddingRight: workerNamePaddingX,
                                             }}
                                         >
-                                            <span className="block truncate">{row.label}</span>
+                                            <span data-capture-text-safe="true" className="block truncate pb-px">{row.label}</span>
                                         </div>
                                     </div>
                                 );
@@ -2368,7 +2321,7 @@ const BoardViewScheduleCard: React.FC<{
                                             title={`${row.label} · ${style.label}`}
                                         >
                                             <div
-                                                className="min-w-0 border px-1.5 py-0.5 text-center text-[13px] font-black leading-tight shadow-sm"
+                                                className="min-w-0 border px-1.5 py-0.5 text-center text-[13px] font-black leading-[1.35] shadow-sm"
                                                 style={{
                                                     background: style.background,
                                                     borderColor: style.borderColor,
@@ -2376,7 +2329,7 @@ const BoardViewScheduleCard: React.FC<{
                                                     boxShadow: style.shadow,
                                                 }}
                                             >
-                                                <span className="block truncate">{row.label}</span>
+                                                <span data-capture-text-safe="true" className="block truncate pb-px">{row.label}</span>
                                             </div>
                                         </div>
                                     );
@@ -2412,7 +2365,7 @@ const BoardViewScheduleCard: React.FC<{
                                 }}
                             >
                                 <Truck size={14} style={{ color: vehicleTextColor }} />
-                                <span className="truncate">{vehicle?.licensePlate || schedule.vehicleLabels[index] || schedule.vehicleLabel}</span>
+                                <span data-capture-text-safe="true" className="min-w-0 truncate pb-px leading-[1.35]">{vehicle?.licensePlate || schedule.vehicleLabels[index] || schedule.vehicleLabel}</span>
                             </div>
                         );
                     })}
@@ -2428,11 +2381,14 @@ const BoardViewScheduleCard: React.FC<{
 
 export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSchedulePlannerPageProps = {}) {
     const { currentUser } = useAuth();
+    const [searchParams, setSearchParams] = useSearchParams();
     const isDailyReportInput = mode === 'daily-report';
     const isScheduleConfirmationInput = mode === 'schedule-confirmation';
     const isPersonnelInputMode = isPersonnelBoardMode(mode);
     const boardRef = useRef<HTMLDivElement | null>(null);
-    const [date, setDate] = useState(getTodayInputValue());
+    const urlDate = normalizeDateInputParam(searchParams.get('date'));
+    const syncedUrlDateRef = useRef(urlDate);
+    const [date, setDateState] = useState(() => urlDate ?? getTodayInputValue());
     const [copySourceDate, setCopySourceDate] = useState(() => shiftDate(getTodayInputValue(), -1));
     const [teams, setTeams] = useState<Team[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
@@ -2459,11 +2415,12 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     const [deletedSchedule, setDeletedSchedule] = useState<ScheduleItem | null>(null);
     const [hasTemporaryDraft, setHasTemporaryDraft] = useState(false);
     const [boardViewMode, setBoardViewMode] = useState(false);
+    // Kept only to preserve existing draft/UI state; scoped accounts can no
+    // longer use this value to reveal another team's schedule or sites.
+    const [showAllScheduleConfirmationSites, setShowAllScheduleConfirmationSites] = useState(false);
     const [isMobileBoardLayout, setIsMobileBoardLayout] = useState(() =>
         typeof window !== 'undefined' ? window.innerWidth < 1024 : false
     );
-    const [showAllScheduleConfirmationSites, setShowAllScheduleConfirmationSites] = useState(false);
-    const [viewerTeamScope, setViewerTeamScope] = useState<ViewerTeamScope>(EMPTY_VIEWER_TEAM_SCOPE);
     const [scheduleClipboard, setScheduleClipboard] = useState<ScheduleClipboard | null>(null);
     const [copyingSchedule, setCopyingSchedule] = useState(false);
     const [capturingBoard, setCapturingBoard] = useState(false);
@@ -2474,6 +2431,67 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     const [kakaoText, setKakaoText] = useState('');
     const [kakaoFile, setKakaoFile] = useState<File | null>(null);
     const kakaoFileInputRef = useRef<HTMLInputElement | null>(null);
+    const workerAccessScope = useWorkerAccessScope(workers, teams);
+    const viewerTeamScope = useMemo<ViewerTeamScope>(() => {
+        if (workerAccessScope.mode !== 'team') return EMPTY_VIEWER_TEAM_SCOPE;
+
+        return {
+            enabled: true,
+            teamIds: workerAccessScope.teamIds,
+            teamNames: workerAccessScope.teamNames,
+            teamNameKeys: workerAccessScope.teamNameKeys,
+            label: workerAccessScope.label,
+        };
+    }, [workerAccessScope]);
+
+    const setDate = useCallback((nextValue: React.SetStateAction<string>) => {
+        if (saving) {
+            setMessage('저장 중에는 날짜를 변경할 수 없습니다. 저장이 끝난 뒤 다시 시도해주세요.');
+            return;
+        }
+
+        setDateState((prev) => {
+            const resolved = typeof nextValue === 'function'
+                ? (nextValue as (prevState: string) => string)(prev)
+                : nextValue;
+            return normalizeDateInputParam(resolved) ?? prev;
+        });
+    }, [saving]);
+
+    useEffect(() => {
+        if (!isDailyReportInput) return;
+        if (urlDate === syncedUrlDateRef.current) return;
+
+        syncedUrlDateRef.current = urlDate;
+        const nextDate = urlDate ?? getTodayInputValue();
+        if (nextDate !== date && !saving) {
+            setDateState(nextDate);
+        }
+    }, [date, isDailyReportInput, saving, urlDate]);
+
+    useEffect(() => {
+        if (!isDailyReportInput) return;
+
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.set('tab', 'board-input');
+            next.set('date', date);
+            return next.toString() === prev.toString() ? prev : next;
+        }, { replace: true });
+    }, [date, isDailyReportInput, setSearchParams]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        if (!dirty && !saving) return;
+
+        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+            event.preventDefault();
+            event.returnValue = '';
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [dirty, saving]);
 
     useEffect(() => {
         if (isPersonnelInputMode && leftPanelTab === 'vehicles') {
@@ -2530,20 +2548,32 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
     const buildKakaoAnalyzeContext = useCallback((): KakaoAnalyzeContext => ({
         today: date,
-        sites: sites.map((site) => site.name).filter(Boolean),
-        teams: teams.map((team) => team.name).filter(Boolean),
-        workers: workers.map((worker) => worker.name).filter(Boolean),
-    }), [date, sites, teams, workers]);
+        sites: sites
+            .filter((site) => !workerAccessScope.loading && workerAccessMatchesSite(workerAccessScope, site))
+            .map((site) => site.name)
+            .filter(Boolean),
+        teams: teams
+            .filter((team) => !workerAccessScope.loading && workerAccessMatchesTeam(workerAccessScope, team))
+            .map((team) => team.name)
+            .filter(Boolean),
+        workers: workers
+            .filter((worker) => !workerAccessScope.loading && workerAccessMatchesWorker(workerAccessScope, worker))
+            .map((worker) => worker.name)
+            .filter(Boolean),
+    }), [date, sites, teams, workerAccessScope, workers]);
 
     const findWorkerByAnalyzedName = useCallback((workerName?: string | null) => {
         const normalized = normalizeComparableText(workerName);
         if (!normalized) return undefined;
-        return workers.find((worker) => normalizeComparableText(worker.name) === normalized) ||
+        const matched = workers.find((worker) => normalizeComparableText(worker.name) === normalized) ||
             workers.find((worker) => {
                 const candidate = normalizeComparableText(worker.name);
                 return Boolean(candidate) && (candidate.includes(normalized) || normalized.includes(candidate));
             });
-    }, [workers]);
+        return matched && !workerAccessScope.loading && workerAccessMatchesWorker(workerAccessScope, matched)
+            ? matched
+            : undefined;
+    }, [workerAccessScope, workers]);
 
     const buildSchedulesFromAnalyzedReports = useCallback((reports: AnalyzedDailyReport[], sourceLabel: string) => {
         const rows: ScheduleItem[] = [];
@@ -2674,9 +2704,14 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
     const rosters = useMemo<TeamRoster[]>(() => {
         const activeTeams = teams
-            .filter((team) => team.status !== 'closed')
+            .filter((team) => !workerAccessScope.loading && team.status !== 'closed' && workerAccessMatchesTeam(workerAccessScope, team))
             .sort((left, right) => compareKoreanName(left.name, right.name));
-        const activeWorkers = workers.filter((worker) => worker.id && !isInactiveWorker(worker));
+        const activeWorkers = workers.filter((worker) =>
+            !workerAccessScope.loading &&
+            worker.id &&
+            !isInactiveWorker(worker) &&
+            workerAccessMatchesWorker(workerAccessScope, worker)
+        );
         const rows: TeamRoster[] = activeTeams.map((team) => {
             const memberIds = new Set([...(team.assignedWorkers || []), ...(team.memberIds || [])]);
             const memberNames = new Set((team.memberNames || []).map((name) => normalizeComparableText(name)));
@@ -2705,7 +2740,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         rows.push(...groupUnassignedWorkers(unassignedRegularWorkers, 'unassigned', '미배정 작업자', UNASSIGNED_TEAM_ID));
 
         return rows;
-    }, [teams, workers]);
+    }, [teams, workerAccessScope, workers]);
 
     const assignedWorkerIdSet = useMemo(() => {
         const set = new Set<string>();
@@ -2740,20 +2775,48 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         return set;
     }, [schedules]);
 
-    const hasScheduleConfirmationTeamScope = isScheduleConfirmationInput && viewerTeamScope.enabled;
-    const shouldApplyScheduleConfirmationScope = hasScheduleConfirmationTeamScope && !showAllScheduleConfirmationSites;
+    const hasScopedPersonnelAccess = !workerAccessScope.loading && workerAccessScope.mode !== 'all';
+    const hasScheduleConfirmationTeamScope = isScheduleConfirmationInput && workerAccessScope.mode === 'team';
+    const shouldApplyScheduleConfirmationScope = hasScopedPersonnelAccess;
 
     const scheduleMatchesViewerScope = useCallback(
-        (schedule: ScheduleItem) => scheduleBelongsToViewerTeamScope(schedule, viewerTeamScope, sitesById, teamsById, teams),
-        [sitesById, teams, teamsById, viewerTeamScope]
+        (schedule: ScheduleItem) => workerAccessMatchesSchedule(workerAccessScope, {
+            teamId: schedule.teamId,
+            teamName: schedule.teamName,
+            responsibleTeamId: schedule.responsibleTeamId,
+            responsibleTeamName: schedule.responsibleTeamName,
+            workerIds: schedule.workerIds,
+            workerNames: schedule.workerIds.map((workerId) => workersById.get(workerId)?.name),
+            workerTeamIds: Object.values(schedule.workerTeamIds ?? {}),
+            workerTeamNames: Object.values(schedule.workerTeamNames ?? {}),
+        }),
+        [workerAccessScope, workersById]
     );
+
+    const viewerScheduleSiteKeys = useMemo(() => {
+        const keys = new Set<string>();
+        schedules.filter(scheduleMatchesViewerScope).forEach((schedule) => {
+            const siteId = toTrimmedText(schedule.siteId);
+            const siteName = normalizeComparableText(schedule.siteName);
+            if (siteId) keys.add(`id:${siteId}`);
+            if (siteName) keys.add(`name:${siteName}`);
+        });
+        return keys;
+    }, [scheduleMatchesViewerScope, schedules]);
 
     const siteMatchesViewerScope = useCallback(
         (site: Site) => {
             if (!shouldApplyScheduleConfirmationScope) return true;
-            return getSiteViewerScopePriority(site, viewerTeamScope, teamsById, teams) < 2;
+            if (workerAccessScope.mode === 'team') {
+                return workerAccessMatchesSite(workerAccessScope, site);
+            }
+
+            const siteId = toTrimmedText(site.id) || toTrimmedText(site.legacyId);
+            const siteName = normalizeComparableText(site.name);
+            return (siteId && viewerScheduleSiteKeys.has(`id:${siteId}`)) ||
+                (siteName && viewerScheduleSiteKeys.has(`name:${siteName}`));
         },
-        [shouldApplyScheduleConfirmationScope, teams, teamsById, viewerTeamScope]
+        [shouldApplyScheduleConfirmationScope, viewerScheduleSiteKeys, workerAccessScope]
     );
 
     const displaySchedules = useMemo(() => {
@@ -2761,7 +2824,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             ? schedules.filter(scheduleMatchesViewerScope)
             : schedules;
 
-        if (!shouldApplyScheduleConfirmationScope) return scopedSchedules;
+        if (!shouldApplyScheduleConfirmationScope || workerAccessScope.mode !== 'team') return scopedSchedules;
 
         return scopedSchedules
             .map((schedule, index) => ({ schedule, index }))
@@ -2783,6 +2846,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         teams,
         teamsById,
         viewerTeamScope,
+        workerAccessScope.mode,
     ]);
 
     const visibleScheduleCountLabel = shouldApplyScheduleConfirmationScope
@@ -2844,11 +2908,16 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         return vehicles
             .filter((vehicle) => {
                 if (assignedVehicleIdSet.has(vehicle.id)) return false;
+                if (hasScopedPersonnelAccess) {
+                    if (workerAccessScope.mode !== 'team') return false;
+                    const assignedTeam = getVehicleAssignedTeam(vehicle, teamsById, teams, workersById, workers);
+                    if (!assignedTeam || !workerAccessMatchesTeam(workerAccessScope, assignedTeam)) return false;
+                }
                 if (!term) return true;
                 return `${vehicle.licensePlate} ${vehicle.model || ''} ${vehicle.currentAssigneeName || ''}`.toLowerCase().includes(term);
             })
             .sort((left, right) => compareKoreanName(left.licensePlate || left.model, right.licensePlate || right.model));
-    }, [assignedVehicleIdSet, searchTerm, vehicles]);
+    }, [assignedVehicleIdSet, hasScopedPersonnelAccess, searchTerm, teams, teamsById, vehicles, workerAccessScope, workers, workersById]);
 
     const vehicleAssignedTeamColorById = useMemo(() => {
         const map = new Map<string, string>();
@@ -3359,24 +3428,6 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 if (site.legacyId) siteMap.set(String(site.legacyId), site);
             });
             const vehicleMap = new Map(vehicleRows.map((vehicle) => [vehicle.id, vehicle]));
-            let nextViewerTeamScope = EMPTY_VIEWER_TEAM_SCOPE;
-            if (isScheduleConfirmationInput && currentUser?.uid) {
-                let viewerUser: UserData | null = null;
-                try {
-                    viewerUser = await userService.getUser(currentUser.uid);
-                } catch (error) {
-                    console.warn('[FieldSchedulePlanner] Failed to load viewer user profile', error);
-                }
-
-                if (!userBypassesViewerTeamScope(viewerUser)) {
-                    nextViewerTeamScope = buildViewerTeamScope(
-                        findViewerWorker(currentUser.uid, workerRows, viewerUser),
-                        teamMap,
-                        teamRows
-                    );
-                }
-            }
-            setViewerTeamScope(nextViewerTeamScope);
             const getLoadedSiteColor = (site?: Site, fallbackColor = DEFAULT_RESOURCE_COLOR) => {
                 const responsibleTeam =
                     (site?.responsibleTeamId ? teamMap.get(site.responsibleTeamId) : undefined) ||
@@ -3560,7 +3611,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 ]));
             }
             setSchedules(mergeSchedulesBySite([...nextSchedules, ...requestSchedules]));
-            const defaultTeamId = nextViewerTeamScope.teamIds.find((teamId) => teamMap.has(teamId)) || teamRows[0]?.id || UNASSIGNED_TEAM_ID;
+            const defaultTeamId = teamRows[0]?.id || UNASSIGNED_TEAM_ID;
             setSelectedTeamId((prev) => prev || defaultTeamId);
             setSelectedSiteId((prev) => (prev && visibleSiteRows.some((site) => site.id === prev) ? prev : ''));
             setDirty(false);
@@ -4393,16 +4444,6 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         });
     };
 
-    const updateWorkerWorkContent = (scheduleId: string, workerId: string, workContent: string) => {
-        const target = schedules.find((schedule) => schedule.id === scheduleId);
-        if (!target) return;
-        patchSchedule(scheduleId, {
-            workerWorkContents: {
-                ...(target.workerWorkContents || {}),
-                [workerId]: workContent,
-            },
-        });
-    };
 
     const updateSupportTeamInSchedule = (scheduleId: string, teamKey: string, patch: Partial<ScheduleSupportTeam>) => {
         const target = schedules.find((schedule) => schedule.id === scheduleId);
@@ -4451,18 +4492,6 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         setDeletedSchedule(null);
     };
 
-    const duplicateSchedule = (schedule: ScheduleItem) => {
-        const next = {
-            ...schedule,
-            id: makeScheduleId(),
-            siteId: '',
-            siteName: '',
-            siteAddress: '',
-            siteColor: schedule.teamColor,
-            status: 'draft' as ScheduleStatus,
-        };
-        updateSchedules((prev) => [next, ...prev]);
-    };
 
     const handleDragStart = (event: DragStartEvent) => {
         setActivePayload(event.active.data.current as DragPayload);
@@ -4666,11 +4695,11 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                     status: 'draft' as ScheduleStatus,
                     supportTeams: [],
                 }));
-            const scopedSchedules = hasScheduleConfirmationTeamScope
+            const scopedSchedules = hasScopedPersonnelAccess
                 ? mappedSchedules.filter(scheduleMatchesViewerScope)
                 : mappedSchedules;
 
-            if (hasScheduleConfirmationTeamScope && scopedSchedules.length === 0) {
+            if (hasScopedPersonnelAccess && scopedSchedules.length === 0) {
                 setMessage(`${date} 일정 중 ${viewerTeamScope.label} 담당현장 또는 지원팀 현장이 없습니다.`);
                 return;
             }
@@ -4701,7 +4730,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         analyzingSchedule,
         appendAnalyzedSchedulesToBoard,
         date,
-        hasScheduleConfirmationTeamScope,
+        hasScopedPersonnelAccess,
         isPersonnelInputMode,
         loading,
         mapAssignmentToSchedule,
@@ -5116,7 +5145,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         : boardViewMode ? '편집보기' : '보드보기';
 
     return (
-        <div className={`${isPersonnelInputMode ? 'h-full min-h-0 overflow-hidden' : 'min-h-full'} bg-slate-100 text-slate-900`}>
+        <div className={`${isPersonnelInputMode ? 'min-h-full overflow-visible lg:h-full lg:min-h-0 lg:overflow-hidden' : 'min-h-full'} bg-slate-100 text-slate-900`}>
             <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
@@ -5125,7 +5154,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 onDragCancel={handleDragCancel}
             >
                 <div className={isPersonnelInputMode
-                    ? 'flex h-full min-h-0 flex-col overflow-hidden'
+                    ? 'flex min-h-full flex-col lg:h-full lg:min-h-0 lg:overflow-hidden'
                     : 'flex min-h-[calc(100vh-72px)] flex-col lg:h-[calc(100vh-72px)] lg:min-h-[760px]'}
                 >
                     <header className="shrink-0 border-b border-slate-200 bg-white px-4 py-4 sm:px-5">
@@ -5150,8 +5179,10 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                     <button
                                         type="button"
                                         onClick={() => setDate((prev) => shiftDate(prev, -1))}
+                                        disabled={loading || saving}
                                         className="flex h-9 w-9 items-center justify-center rounded-md text-slate-600 hover:bg-white"
                                         title="이전일"
+                                        aria-label="이전일"
                                     >
                                         <ChevronLeft size={17} />
                                     </button>
@@ -5159,13 +5190,17 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                         type="date"
                                         value={date}
                                         onChange={(event) => setDate(event.target.value)}
-                                        className="h-9 min-w-0 flex-1 rounded-md border-0 bg-transparent px-2 text-sm font-bold text-slate-800 outline-none sm:flex-none"
+                                        disabled={loading || saving}
+                                        aria-label="보드입력 기준 날짜"
+                                        className="h-9 min-w-0 flex-1 rounded-md border-0 bg-transparent px-2 text-sm font-bold text-slate-800 outline-none disabled:cursor-not-allowed disabled:text-slate-400 sm:flex-none"
                                     />
                                     <button
                                         type="button"
                                         onClick={() => setDate((prev) => shiftDate(prev, 1))}
+                                        disabled={loading || saving}
                                         className="flex h-9 w-9 items-center justify-center rounded-md text-slate-600 hover:bg-white"
                                         title="다음일"
+                                        aria-label="다음일"
                                     >
                                         <ChevronRight size={17} />
                                     </button>
@@ -5173,11 +5208,12 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                 <button
                                     type="button"
                                     onClick={() => setDate(getTodayInputValue())}
-                                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                                    disabled={loading || saving}
+                                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                                 >
                                     오늘
                                 </button>
-                                {hasScheduleConfirmationTeamScope ? (
+                                {false && hasScheduleConfirmationTeamScope ? (
                                     <button
                                         type="button"
                                         onClick={() => setShowAllScheduleConfirmationSites((prev) => !prev)}
@@ -5191,6 +5227,14 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                         <MapPin size={16} />
                                         {showAllScheduleConfirmationSites ? '내 팀 보기' : '전체보기'}
                                     </button>
+                                ) : null}
+                                {hasScopedPersonnelAccess ? (
+                                    <div className="flex h-10 flex-1 items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-bold text-blue-700 sm:flex-none">
+                                        <MapPin size={16} />
+                                        {workerAccessScope.mode === 'team'
+                                            ? `${workerAccessScope.label} 팀 정보`
+                                            : `${workerAccessScope.label} 본인 정보`}
+                                    </div>
                                 ) : null}
                                 {isPersonnelInputMode ? (
                                     <>
@@ -5296,9 +5340,9 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                         </div>
                     </header>
 
-                    <div className={`grid h-0 min-h-0 flex-1 overflow-hidden ${boardViewMode ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)]'}`}>
+                    <div className={`grid min-h-0 flex-none overflow-visible lg:h-0 lg:flex-1 lg:overflow-hidden ${boardViewMode ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)]'}`}>
                         {!boardViewMode ? (
-                        <aside className="relative flex h-full min-h-0 flex-col overflow-hidden border-b border-slate-200 bg-white lg:border-b-0 lg:border-r">
+                        <aside className="relative flex min-h-0 flex-col overflow-visible border-b border-slate-200 bg-white lg:h-full lg:overflow-hidden lg:border-b-0 lg:border-r">
                             <div className="shrink-0 border-b border-slate-200 p-4">
                                 <div className="relative">
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -5369,7 +5413,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                     ) : null}
                                 </div>
 
-                                {hasScheduleConfirmationTeamScope ? (
+                                {false && hasScheduleConfirmationTeamScope ? (
                                     <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800">
                                         <span className="min-w-0 flex-1 truncate">
                                             {showAllScheduleConfirmationSites
@@ -5564,7 +5608,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                 ) : null}
                             </div>
 
-                            <div className={`h-0 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 ${showOffDutyControls ? 'pb-96' : 'pb-24'}`} style={{ scrollbarGutter: 'stable' }}>
+                            <div className={`h-auto flex-none space-y-3 overflow-visible p-3 ${showOffDutyControls ? 'pb-96' : 'pb-24'} lg:h-0 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain`} style={{ scrollbarGutter: 'stable' }}>
                                 {loading ? (
                                     <div className="rounded-lg border border-dashed border-slate-200 p-5 text-center text-sm font-semibold text-slate-500">
                                         데이터를 불러오는 중입니다.
@@ -5672,7 +5716,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                         </aside>
                         ) : null}
 
-                        <main className={`${boardViewMode ? 'flex' : 'hidden lg:flex'} min-h-0 min-w-0 flex-col overflow-hidden bg-slate-100`}>
+                        <main className={`${boardViewMode ? 'flex' : 'hidden lg:flex'} min-w-0 flex-col overflow-visible bg-slate-100 lg:min-h-0 lg:overflow-hidden`}>
                             {!boardViewMode ? (
                             <div className="shrink-0 border-b border-slate-200 bg-white px-5 py-4">
                                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -5743,8 +5787,9 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                     boardRef.current = node;
                                 }}
                                 id="field-schedule-board"
+                                data-capture-full-content="true"
                                 data-capture-clean={capturingBoard ? 'true' : undefined}
-                                className={`min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-24 transition ${boardViewMode ? 'sm:px-6 sm:pt-6' : 'sm:px-5 sm:pt-5'} ${
+                                className={`flex-none overflow-visible px-4 pt-4 pb-24 transition lg:min-h-0 lg:flex-1 lg:overflow-y-auto ${boardViewMode ? 'sm:px-6 sm:pt-6' : 'sm:px-5 sm:pt-5'} ${
                                     isBoardOver ? 'bg-blue-50 ring-2 ring-inset ring-blue-100' : ''
                                 }`}
                                 style={

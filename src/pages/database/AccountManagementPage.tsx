@@ -3,8 +3,10 @@ import { useSearchParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faBuilding,
+    faCheck,
     faChevronDown,
     faChevronRight,
+    faCopy,
     faCreditCard,
     faDownload,
     faEye,
@@ -118,6 +120,57 @@ const CUSTOM_CATEGORY_META: Record<CustomCategory, { title: string; description:
 };
 
 const normalizeText = (value: unknown) => String(value ?? '').trim();
+
+const AccountNumberCopyButton: React.FC<{ value: unknown }> = ({ value }) => {
+    const [copied, setCopied] = useState(false);
+    const accountNumber = normalizeText(value);
+
+    const handleCopy = async () => {
+        if (!accountNumber) return;
+
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(accountNumber);
+            } else {
+                const textarea = document.createElement('textarea');
+                textarea.value = accountNumber;
+                textarea.setAttribute('readonly', '');
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                const copiedWithFallback = document.execCommand('copy');
+                textarea.remove();
+                if (!copiedWithFallback) throw new Error('Clipboard fallback failed');
+            }
+
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+        } catch (error) {
+            console.error('Failed to copy account number:', error);
+            alert('계좌번호를 복사하지 못했습니다.');
+        }
+    };
+
+    return (
+        <button
+            type="button"
+            onClick={handleCopy}
+            disabled={!accountNumber}
+            aria-label={copied ? '계좌번호 복사됨' : '계좌번호 복사'}
+            title={copied ? '계좌번호가 복사되었습니다.' : '계좌번호 복사'}
+            className={`inline-flex shrink-0 items-center justify-center gap-1 rounded-md border px-2.5 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                copied
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700'
+            }`}
+        >
+            <FontAwesomeIcon icon={copied ? faCheck : faCopy} />
+            {copied ? '복사됨' : '복사'}
+        </button>
+    );
+};
+
 const HIDDEN_ACCOUNT_STORAGE_KEY = 'cy_account_management_hidden_accounts_v1';
 const SHOW_HIDDEN_ACCOUNT_STORAGE_KEY = 'cy_account_management_show_hidden_accounts_v1';
 
@@ -841,14 +894,6 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         setWorkers((prev) => prev.map((worker) => (worker.id === workerId ? { ...worker, [field]: value } : worker)));
     };
 
-    const cancelWorkerEdit = (workerId: string) => {
-        const key = `worker:${workerId}`;
-        const snapshot = rowSnapshots[key] as Worker | undefined;
-        if (snapshot) {
-            setWorkers((prev) => prev.map((worker) => (worker.id === workerId ? snapshot : worker)));
-        }
-        clearRowControl(key);
-    };
 
     const saveWorkerAccount = async (workerId: string) => {
         const target = workers.find((worker) => worker.id === workerId);
@@ -900,14 +945,6 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         setTeams((prev) => prev.map((team) => (team.id === teamId ? { ...team, [field]: value } : team)));
     };
 
-    const cancelTeamEdit = (teamId: string) => {
-        const key = `team:${teamId}`;
-        const snapshot = rowSnapshots[key] as Team | undefined;
-        if (snapshot) {
-            setTeams((prev) => prev.map((team) => (team.id === teamId ? snapshot : team)));
-        }
-        clearRowControl(key);
-    };
 
     const saveTeamAccount = async (teamId: string) => {
         const target = teams.find((team) => team.id === teamId);
@@ -959,14 +996,6 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         setCompanies((prev) => prev.map((company) => (company.id === companyId ? { ...company, [field]: value } : company)));
     };
 
-    const cancelCompanyEdit = (companyId: string) => {
-        const key = `company:${companyId}`;
-        const snapshot = rowSnapshots[key] as Company | undefined;
-        if (snapshot) {
-            setCompanies((prev) => prev.map((company) => (company.id === companyId ? snapshot : company)));
-        }
-        clearRowControl(key);
-    };
 
     const saveCompanyAccount = async (companyId: string) => {
         const target = companies.find((company) => company.id === companyId);
@@ -1920,9 +1949,15 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const workerSheetInputClass =
         'h-11 w-full rounded-md border border-slate-200 bg-white px-3 text-[15px] text-slate-800 shadow-sm outline-none transition placeholder:text-slate-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100';
     const workerSheetNumberInputClass = `${workerSheetInputClass} font-semibold tracking-[0.08em]`;
-    const workerDigitsStyle: React.CSSProperties = {
-        fontVariantNumeric: 'tabular-nums slashed-zero',
-        fontFeatureSettings: '"tnum" 1, "zero" 1',
+    const accountNumberDigitsStyle: React.CSSProperties = {
+        fontFamily: "'Pretendard', 'Noto Sans KR', 'Malgun Gothic', sans-serif",
+        fontVariantNumeric: 'tabular-nums',
+        fontFeatureSettings: '"tnum" 1, "zero" 0',
+        fontSize: '12.5pt',
+    };
+    const workerSheetAccountNumberDigitsStyle: React.CSSProperties = {
+        ...accountNumberDigitsStyle,
+        fontSize: '13.25pt',
     };
     const rowActionButtonClass = 'inline-flex items-center justify-center gap-1 rounded-md border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50';
     const rowActionPrimaryClass = `${rowActionButtonClass} border-slate-900 bg-slate-900 text-white hover:bg-slate-800`;
@@ -2329,19 +2364,22 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                         )}
                                                                     </td>
                                                                     <td className="px-4 py-3 align-top">
-                                                                        {isEditing ? (
-                                                                            <input
-                                                                                value={worker.accountNumber || ''}
-                                                                                onChange={(event) => updateWorkerField(worker.id || '', 'accountNumber', event.target.value)}
-                                                                                placeholder="계좌번호"
-                                                                                className={workerSheetNumberInputClass}
-                                                                                style={workerDigitsStyle}
-                                                                            />
-                                                                        ) : (
-                                                                            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700" style={workerDigitsStyle}>
-                                                                                {worker.accountNumber || '-'}
-                                                                            </div>
-                                                                        )}
+                                                                        <div className="flex flex-wrap items-center gap-2">
+                                                                            {isEditing ? (
+                                                                                <input
+                                                                                    value={worker.accountNumber || ''}
+                                                                                    onChange={(event) => updateWorkerField(worker.id || '', 'accountNumber', event.target.value)}
+                                                                                    placeholder="계좌번호"
+                                                                                    className={`${workerSheetNumberInputClass} min-w-[13rem] flex-1`}
+                                                                                    style={workerSheetAccountNumberDigitsStyle}
+                                                                                />
+                                                                            ) : (
+                                                                                <div className="min-w-[13rem] flex-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700" style={accountNumberDigitsStyle}>
+                                                                                    {worker.accountNumber || '-'}
+                                                                                </div>
+                                                                            )}
+                                                                            <AccountNumberCopyButton value={worker.accountNumber} />
+                                                                        </div>
                                                                     </td>
                                                                     <td className="px-4 py-3 align-top">
                                                                         {isEditing ? (
@@ -2476,18 +2514,21 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                     )}
                                                                 </td>
                                                                 <td className="px-4 py-3">
-                                                                    {isEditing ? (
-                                                                        <input
-                                                                            value={team.accountNumber || ''}
-                                                                            onChange={(event) => updateTeamField(team.id || '', 'accountNumber', event.target.value)}
-                                                                            className="w-52 rounded-lg border border-slate-200 px-3 py-2 font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                                                                            style={workerDigitsStyle}
-                                                                        />
-                                                                    ) : (
-                                                                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold" style={workerDigitsStyle}>
-                                                                            {team.accountNumber || '-'}
-                                                                        </div>
-                                                                    )}
+                                                                    <div className="flex flex-wrap items-center gap-2">
+                                                                        {isEditing ? (
+                                                                            <input
+                                                                                value={team.accountNumber || ''}
+                                                                                onChange={(event) => updateTeamField(team.id || '', 'accountNumber', event.target.value)}
+                                                                                className="w-52 rounded-lg border border-slate-200 px-3 py-2 font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                                                                style={accountNumberDigitsStyle}
+                                                                            />
+                                                                        ) : (
+                                                                            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold" style={accountNumberDigitsStyle}>
+                                                                                {team.accountNumber || '-'}
+                                                                            </div>
+                                                                        )}
+                                                                        <AccountNumberCopyButton value={team.accountNumber} />
+                                                                    </div>
                                                                 </td>
                                                                 <td className="px-4 py-3">
                                                                     {isEditing ? (
@@ -2618,18 +2659,21 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                     )}
                                                                 </td>
                                                                 <td className="px-4 py-3">
-                                                                    {isEditing ? (
-                                                                        <input
-                                                                            value={company.accountNumber || ''}
-                                                                            onChange={(event) => updateCompanyField(company.id || '', 'accountNumber', event.target.value)}
-                                                                            className="w-52 rounded-lg border border-slate-200 px-3 py-2 font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                                                                            style={workerDigitsStyle}
-                                                                        />
-                                                                    ) : (
-                                                                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold" style={workerDigitsStyle}>
-                                                                            {company.accountNumber || '-'}
-                                                                        </div>
-                                                                    )}
+                                                                    <div className="flex flex-wrap items-center gap-2">
+                                                                        {isEditing ? (
+                                                                            <input
+                                                                                value={company.accountNumber || ''}
+                                                                                onChange={(event) => updateCompanyField(company.id || '', 'accountNumber', event.target.value)}
+                                                                                className="w-52 rounded-lg border border-slate-200 px-3 py-2 font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                                                                style={accountNumberDigitsStyle}
+                                                                            />
+                                                                        ) : (
+                                                                            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold" style={accountNumberDigitsStyle}>
+                                                                                {company.accountNumber || '-'}
+                                                                            </div>
+                                                                        )}
+                                                                        <AccountNumberCopyButton value={company.accountNumber} />
+                                                                    </div>
                                                                 </td>
                                                                 <td className="px-4 py-3">
                                                                     {isEditing ? (
@@ -2723,7 +2767,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.2fr_1fr_1.2fr_1fr_1.2fr_auto]">
                                                         <input value={draft.name} onChange={(event) => updateCustomDraft(category, 'name', event.target.value)} placeholder="계좌명" className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
                                                         <input value={draft.bankName || ''} onChange={(event) => updateCustomDraft(category, 'bankName', event.target.value)} placeholder="은행" className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
-                                                        <input value={draft.accountNumber || ''} onChange={(event) => updateCustomDraft(category, 'accountNumber', event.target.value)} placeholder="계좌번호" className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+                                                        <input value={draft.accountNumber || ''} onChange={(event) => updateCustomDraft(category, 'accountNumber', event.target.value)} placeholder="계좌번호" className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" style={accountNumberDigitsStyle} />
                                                         <input value={draft.accountHolder || ''} onChange={(event) => updateCustomDraft(category, 'accountHolder', event.target.value)} placeholder="예금주" className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
                                                         <input value={draft.note || ''} onChange={(event) => updateCustomDraft(category, 'note', event.target.value)} placeholder="메모" className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
                                                         <button type="button" disabled={!!savingKeys[savingKey]} onClick={() => addCustomEntry(category)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60">
@@ -2782,11 +2826,14 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                                 )}
                                                                             </td>
                                                                             <td className="px-4 py-3">
-                                                                                {isEditing ? (
-                                                                                    <input value={entry.accountNumber || ''} onChange={(event) => updateCustomField(entry.id || '', 'accountNumber', event.target.value)} className="w-52 rounded-lg border border-slate-200 px-3 py-2 font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" style={workerDigitsStyle} />
-                                                                                ) : (
-                                                                                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold" style={workerDigitsStyle}>{entry.accountNumber || '-'}</div>
-                                                                                )}
+                                                                                <div className="flex flex-wrap items-center gap-2">
+                                                                                    {isEditing ? (
+                                                                                        <input value={entry.accountNumber || ''} onChange={(event) => updateCustomField(entry.id || '', 'accountNumber', event.target.value)} className="w-52 rounded-lg border border-slate-200 px-3 py-2 font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" style={accountNumberDigitsStyle} />
+                                                                                    ) : (
+                                                                                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold" style={accountNumberDigitsStyle}>{entry.accountNumber || '-'}</div>
+                                                                                    )}
+                                                                                    <AccountNumberCopyButton value={entry.accountNumber} />
+                                                                                </div>
                                                                             </td>
                                                                             <td className="px-4 py-3">
                                                                                 {isEditing ? (

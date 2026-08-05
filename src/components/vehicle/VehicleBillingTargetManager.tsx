@@ -10,10 +10,10 @@ import { OfficeStaff, officeStaffService } from '../../services/officeStaffServi
 import { toast, showConfirmAlert } from '../../utils/swal';
 import { hexToRgba, normalizeHexColor } from '../../utils/color';
 import { formatTypedDateInput, normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
-import { BillingStatusSummary } from '../support/BillingModeSelector';
+import { BillingMode, BillingModeSelector, BillingStatusSummary } from '../support/BillingModeSelector';
 import BillingPeriodTimeline, { BillingPeriodTimelineItem } from '../support/BillingPeriodTimeline';
 
-type VehicleBillingMode = 'custom' | 'split';
+type VehicleBillingMode = BillingMode;
 
 interface BillingTargetSelection {
     type: VehicleBillingTargetType;
@@ -151,7 +151,7 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
     const [targetRecordsLoading, setTargetRecordsLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [editingTargetRecordId, setEditingTargetRecordId] = useState<string | null>(null);
-    const [billingMode, setBillingMode] = useState<VehicleBillingMode>(initialSplitMode ? 'split' : 'custom');
+    const [billingMode, setBillingMode] = useState<VehicleBillingMode>(initialSplitMode ? 'split' : 'same');
 
     const handleTargetStartDateChange = (value: string) => {
         setTargetStartDate(formatTypedDateInput(value, { yearDigits: 2 }));
@@ -356,15 +356,23 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
             })
     ), [selectedTargetRecords, targetOptionsByKey]);
     const selectedTargetColor = selectedTarget?.color ? normalizeHexColor(selectedTarget.color) : '#64748b';
-    const showTargetSelector = Boolean(selectedVehicle);
+    const showTargetSelector = billingMode !== 'same';
     const showTargetDateFields = Boolean(selectedVehicle && (billingMode === 'split' || editingTargetRecordId));
-    const canSaveBilling = Boolean(selectedVehicle && selectedTarget);
+    const canUseSameMode = Boolean(selectedVehicle && (
+        selectedVehicle.currentAssigneeName ||
+        selectedVehicleHasExplicitBillingTarget
+    ));
+    const canSaveBilling = Boolean(selectedVehicle) && (
+        billingMode === 'same' ? canUseSameMode : Boolean(selectedTarget)
+    );
     const saveButtonLabel = saving
         ? '처리 중...'
+        : billingMode === 'same'
+            ? (selectedVehicle?.currentAssigneeName ? '배정자에게 청구 저장' : '별도청구 해제')
         : editingTargetRecordId
             ? '청구기간 수정'
             : billingMode === 'split' && selectedTargetRecords.length > 0
-                ? '기간 나눠 저장'
+                ? '월중 변경 저장'
                 : '청구대상 저장';
 
     const clearVehicleBillingTargetSnapshot = async (vehicleId: string) => {
@@ -524,6 +532,27 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
             toast.error('차량을 선택해주세요.');
             return;
         }
+        if (billingMode === 'same') {
+            if (!canUseSameMode) {
+                toast.error('운전자 배정 또는 별도 청구대상이 있어야 배정자에게 청구로 변경할 수 있습니다.');
+                return;
+            }
+            const result = await showConfirmAlert(
+                '차량 청구',
+                selectedVehicle.currentAssigneeName
+                    ? `${selectedVehicle.licensePlate} 차량의 26-01-01 이후 별도 청구를 종료하고 배정자에게 청구할까요?`
+                    : `${selectedVehicle.licensePlate} 차량의 별도 청구대상 설정을 삭제할까요?`
+            );
+            if (!result.isConfirmed) return;
+
+            try {
+                await saveBillingTarget(selectedVehicle, null);
+            } catch (error) {
+                console.error(error);
+                toast.error('차량 청구 처리에 실패했습니다.');
+            }
+            return;
+        }
         if (!selectedTarget) {
             toast.error('청구대상을 선택해주세요.');
             return;
@@ -624,7 +653,8 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
     const pickVehicle = (vehicle: Vehicle) => {
         setSelectedVehicleId(vehicle.id);
         const latestRecord = getLatestTargetRecord(targetRecordsByVehicleId.get(normalizeKey(vehicle.id)) ?? []);
-        const nextBillingMode: VehicleBillingMode = initialSplitMode ? 'split' : 'custom';
+        const hasExplicitTarget = Boolean(latestRecord || (vehicle.billingTargetType && vehicle.billingTargetId));
+        const nextBillingMode: VehicleBillingMode = initialSplitMode ? 'split' : (hasExplicitTarget ? 'custom' : 'same');
         setBillingMode(nextBillingMode);
         setTargetStartDate(nextBillingMode === 'custom' && latestRecord ? (displayDate(latestRecord.startDate) || getDefaultBillingStartDate()) : getDefaultBillingStartDate());
         setTargetEndDate('');
@@ -712,10 +742,10 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
                             <span className="bg-emerald-600 text-white w-9 h-9 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-200">
                                 <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-sm" />
                             </span>
-                            차량 전체 청구
+                            차량 청구 방식
                         </h2>
                         <p className="text-slate-500 mt-2 font-medium ml-12 text-sm">
-                            청연이엔지 소속팀, 작업자, 사무실, 사무실직원 중 하나를 청구대상으로 지정합니다.
+                            차량 배정자에게 청구할지, 다른 팀/사람에게 청구할지만 먼저 선택합니다.
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -748,7 +778,7 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
                             className="px-5 py-2.5 rounded-xl font-bold text-sm bg-rose-50 text-rose-700 border border-rose-100 hover:bg-rose-100 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-100 disabled:cursor-not-allowed transition-all flex items-center gap-2"
                         >
                             <FontAwesomeIcon icon={faBan} />
-                            별도청구 해제
+                            배정자에게 청구
                         </button>
                     </div>
                 </div>
@@ -756,24 +786,26 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
                 <div className="mt-6 grid grid-cols-1 xl:grid-cols-12 gap-4">
                     <div className="xl:col-span-12 space-y-3">
                         <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-600 mb-1">차량 선택</label>
-                                <select
-                                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
-                                    value={selectedVehicleId}
-                                    onChange={(event) => pickVehicleById(event.target.value)}
-                                >
-                                    <option value="">차량을 선택하세요</option>
-                                    {vehicles
-                                        .slice()
-                                        .sort((a, b) => String(a.licensePlate).localeCompare(String(b.licensePlate), 'ko-KR'))
-                                        .map((vehicle) => (
-                                            <option key={vehicle.id} value={vehicle.id}>
-                                                {vehicle.licensePlate} · {vehicle.model} · {getVehicleTargetLabel(vehicle)}
-                                            </option>
-                                        ))}
-                                </select>
-                            </div>
+                            {!initialVehicleId && (
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-1">차량 선택</label>
+                                    <select
+                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
+                                        value={selectedVehicleId}
+                                        onChange={(event) => pickVehicleById(event.target.value)}
+                                    >
+                                        <option value="">차량을 선택하세요</option>
+                                        {vehicles
+                                            .slice()
+                                            .sort((a, b) => String(a.licensePlate).localeCompare(String(b.licensePlate), 'ko-KR'))
+                                            .map((vehicle) => (
+                                                <option key={vehicle.id} value={vehicle.id}>
+                                                    {vehicle.licensePlate} · {vehicle.model} · {getVehicleTargetLabel(vehicle)}
+                                                </option>
+                                            ))}
+                                    </select>
+                                </div>
+                            )}
 
                             {selectedVehicle && (
                                 <BillingStatusSummary
@@ -796,6 +828,17 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
                                     ]}
                                 />
                             )}
+
+                            <BillingModeSelector
+                                value={billingMode}
+                                onChange={handleBillingModeChange}
+                                sameLabel={selectedVehicle?.currentAssigneeName ? '배정자에게 청구' : '별도청구 해제'}
+                                sameDescription={selectedVehicle?.currentAssigneeName ? '현재 차량 배정자와 같은 대상에게 비용 청구' : '26-01-01 이후 별도청구 해제'}
+                                customLabel="다른 대상에게 청구"
+                                customDescription="운전자/팀과 다른 대상에게 비용 청구"
+                                disabled={!selectedVehicle}
+                                sameDisabled={!canUseSameMode}
+                            />
 
                             {showTargetSelector && (
                                 <div className="relative">
@@ -850,67 +893,81 @@ export const VehicleBillingTargetManager: React.FC<VehicleBillingTargetManagerPr
                                 </div>
                             )}
 
-                            {showTargetSelector && !editingTargetRecordId && (
-                                <button
-                                    type="button"
-                                    onClick={() => handleBillingModeChange(billingMode === 'split' ? 'custom' : 'split')}
-                                    disabled={!selectedVehicle}
-                                    className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors ${
-                                        billingMode === 'split'
-                                            ? 'border-amber-200 bg-amber-50 text-amber-800'
-                                            : 'border-slate-200 bg-white text-slate-600 hover:border-amber-200 hover:bg-amber-50/60'
-                                    } ${!selectedVehicle ? 'cursor-not-allowed opacity-50' : ''}`}
+                            {showTargetSelector && (
+                                <details
+                                    open={billingMode === 'split' || Boolean(editingTargetRecordId)}
+                                    className="rounded-xl border border-slate-200 bg-white"
                                 >
-                                    <span className="min-w-0">
-                                        <span className="block text-sm font-extrabold">기간 지정</span>
-                                        <span className="mt-0.5 block text-xs font-semibold text-slate-500">
-                                            월 중간에 청구대상이 바뀔 때만 켭니다.
+                                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5">
+                                        <span className="min-w-0">
+                                            <span className="block text-sm font-extrabold text-slate-700">고급 설정</span>
+                                            <span className="mt-0.5 block text-xs font-semibold text-slate-400">월중 변경이나 특정 기간 청구가 필요할 때만 사용합니다.</span>
                                         </span>
-                                    </span>
-                                    <span className={`ml-3 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-extrabold ${
-                                        billingMode === 'split' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-500'
-                                    }`}>
-                                        {billingMode === 'split' ? '분할청구' : '일반청구'}
-                                    </span>
-                                </button>
-                            )}
+                                        <span className={`ml-3 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-extrabold ${
+                                            billingMode === 'split' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-500'
+                                        }`}>
+                                            {billingMode === 'split' ? '월중 변경' : '일반'}
+                                        </span>
+                                    </summary>
+                                    <div className="space-y-3 border-t border-slate-100 p-3">
+                                        {!editingTargetRecordId && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleBillingModeChange(billingMode === 'split' ? 'custom' : 'split')}
+                                                disabled={!selectedVehicle}
+                                                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                                                    billingMode === 'split'
+                                                        ? 'border-amber-200 bg-amber-50 text-amber-800'
+                                                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-amber-200 hover:bg-amber-50/60'
+                                                } ${!selectedVehicle ? 'cursor-not-allowed opacity-50' : ''}`}
+                                            >
+                                                <span>
+                                                    <span className="block text-sm font-extrabold">월중 변경/분할 청구</span>
+                                                    <span className="mt-0.5 block text-xs font-semibold text-slate-500">한 달 안에 청구대상이 바뀌는 경우만 켭니다.</span>
+                                                </span>
+                                                <span className="text-xs font-extrabold">{billingMode === 'split' ? '사용 중' : '꺼짐'}</span>
+                                            </button>
+                                        )}
 
-                            {showTargetDateFields && (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-600 mb-1">
-                                            {billingMode === 'split' ? '기간 시작일' : '청구 시작일'}
-                                        </label>
-                                        <input
-                                            type="text"
-                                            inputMode="numeric"
-                                            maxLength={10}
-                                            placeholder="YY-MM-DD"
-                                            value={targetStartDate}
-                                            onChange={(event) => handleTargetStartDateChange(event.target.value)}
-                                            onBlur={normalizeTargetStartDate}
-                                            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
-                                        />
+                                        {showTargetDateFields && (
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-xs font-bold text-slate-600 mb-1">
+                                                        {billingMode === 'split' ? '기간 시작일' : '청구 시작일'}
+                                                    </label>
+                                                    <input
+                                                        type="text"
+                                                        inputMode="numeric"
+                                                        maxLength={10}
+                                                        placeholder="YY-MM-DD"
+                                                        value={targetStartDate}
+                                                        onChange={(event) => handleTargetStartDateChange(event.target.value)}
+                                                        onBlur={normalizeTargetStartDate}
+                                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-bold text-slate-600 mb-1">
+                                                        {billingMode === 'split' ? '기간 종료일' : '청구 종료일'}
+                                                    </label>
+                                                    <input
+                                                        type="text"
+                                                        inputMode="numeric"
+                                                        maxLength={10}
+                                                        placeholder="선택"
+                                                        value={targetEndDate}
+                                                        onChange={(event) => handleTargetEndDateChange(event.target.value)}
+                                                        onBlur={normalizeTargetEndDate}
+                                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
+                                                    />
+                                                </div>
+                                                <div className="sm:col-span-2 text-[11px] font-semibold text-slate-400">
+                                                    청구 시작일은 26-01-01입니다. 월중 변경은 필요한 달만 발생일 기준으로 나눕니다.
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-600 mb-1">
-                                            {billingMode === 'split' ? '기간 종료일' : '청구 종료일'}
-                                        </label>
-                                        <input
-                                            type="text"
-                                            inputMode="numeric"
-                                            maxLength={10}
-                                            placeholder="선택"
-                                            value={targetEndDate}
-                                            onChange={(event) => handleTargetEndDateChange(event.target.value)}
-                                            onBlur={normalizeTargetEndDate}
-                                            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
-                                        />
-                                    </div>
-                                    <div className="sm:col-span-2 text-[11px] font-semibold text-slate-400">
-                                        청구 시작일은 26-01-01입니다. 기간 지정은 월 중간 변경분을 나눌 때만 사용합니다.
-                                    </div>
-                                </div>
+                                </details>
                             )}
                         </div>
 

@@ -30,7 +30,7 @@ const RightPanel: React.FC<RightPanelProps> = ({ isOpen, togglePanel, siteData, 
         <aside id="right-panel" className={`panel ${isOpen ? 'open' : ''}`}>
             <div className="panel-header">
                 <span>사이트 모드</span>
-                <button onClick={() => togglePanel('right')} style={{ color: 'white' }}>
+                <button onClick={() => togglePanel('right')} style={{ color: 'white' }} aria-label="사이트 모드 패널 닫기" title="사이트 모드 패널 닫기">
                     <FontAwesomeIcon icon={faXmark} />
                 </button>
             </div>

@@ -56,7 +56,7 @@ const SmartSiteRegistrationPage: React.FC = () => {
         setMappedFields(newMapping);
 
         // Parse data rows
-        const dataRows = rows.slice(1).map((row, index) => {
+        const dataRows = rows.slice(1).map((row, _index) => {
             const rowData: any = { _valid: true, _errors: [] };
 
             // Map values to fields

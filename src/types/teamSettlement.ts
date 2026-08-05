@@ -60,6 +60,7 @@ export const TeamSettlementSalesItemSchema = z.object({
   manDay: NonNegativeNumberSchema,
   quantity: NonNegativeNumberSchema.optional(),
   amount: NonNegativeNumberSchema,
+  amountOverridden: z.boolean().optional(),
   memo: z.string().optional()
 });
 export type TeamSettlementSalesItem = z.infer<typeof TeamSettlementSalesItemSchema>;

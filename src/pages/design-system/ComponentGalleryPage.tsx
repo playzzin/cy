@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCube, faCode, faPalette, faCheck, faSave, faTrash, faPlus } from '@fortawesome/free-solid-svg-icons';
+import { faCube, faCode, faPalette, faCheck, faSave, faTrash } from '@fortawesome/free-solid-svg-icons';
 import Button from '../../components/ui/Button';
 
 const ComponentGalleryPage: React.FC = () => {

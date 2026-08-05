@@ -4,6 +4,7 @@ import { format } from 'date-fns';
 import { Company } from '../../services/companyService';
 import { Worker } from '../../services/manpowerService';
 import { storageService } from '../../services/storageService';
+import { CERTIFICATE_FONT_FAMILY } from './certificateTypography';
 
 interface TerminationCertificateTemplateProps {
   company: Company | null;
@@ -40,7 +41,7 @@ const PrintContainer = styled.div`
   padding: 20mm 16mm;
   margin: 0 auto;
   box-sizing: border-box;
-  font-family: 'Noto Sans KR', sans-serif;
+  font-family: ${CERTIFICATE_FONT_FAMILY};
   position: relative;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
   display: flex;
@@ -74,7 +75,7 @@ const PrintContainer = styled.div`
 `;
 
 const MainTitle = styled.h1`
-  font-family: 'Noto Serif KR', serif;
+  font-family: inherit;
   font-size: 3rem;
   font-weight: 700;
   text-align: center;
@@ -195,7 +196,7 @@ const OfficialSeal = styled.div`
   line-height: 1.2;
   text-align: center;
   pointer-events: none;
-  font-family: 'Noto Serif KR', serif;
+  font-family: inherit;
   margin-left: 12px;
 
   @media print {
@@ -266,7 +267,7 @@ const DateText = styled.div`
   font-weight: 500;
   letter-spacing: 0.3rem;
   margin-bottom: 1.8rem;
-  font-family: 'Noto Serif KR', serif;
+  font-family: inherit;
 
   @media print {
     font-size: 1rem;
@@ -289,15 +290,15 @@ const SignatureArea = styled.div`
 `;
 
 const CompanyNameObj = styled.div`
-  font-family: 'Noto Serif KR', serif;
-  font-size: 2.2rem;
+  font-family: inherit;
+  font-size: calc(2.2rem - 4pt);
   font-weight: 700;
   letter-spacing: 0.2rem;
   margin-bottom: 1rem;
   color: #1a1a1a;
 
   @media print {
-    font-size: 1.7rem;
+    font-size: calc(1.7rem - 4pt);
     margin-bottom: 0.65rem;
   }
 `;
@@ -309,7 +310,7 @@ const CeoText = styled.div`
   display: flex;
   align-items: center;
   gap: 10px;
-  font-family: 'Noto Serif KR', serif;
+  font-family: inherit;
 
   @media print {
     font-size: 1.08rem;

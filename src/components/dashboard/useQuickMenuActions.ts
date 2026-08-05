@@ -7,6 +7,7 @@ import { MENU_PATHS } from '../../constants/menuPaths';
 import { resolveIcon } from '../../constants/iconMap';
 import type { MenuItem } from '../../types/menu';
 import type { DashboardAction, DashboardModeConfig } from './roleDashboardConfig';
+import { filterDashboardActionsByAccess } from '../../utils/dashboardAccess';
 import {
     dashboardQuickMenuService,
     type DashboardQuickMenuPreferenceMap,
@@ -55,6 +56,7 @@ const inferIconName = (text: string, path?: string, explicitIcon?: string): stri
     if (icon) return icon;
 
     const normalizedPath = typeof path === 'string' ? path.split('?')[0] : '';
+    if (normalizedPath.startsWith('/settlement')) return 'fa-triangle-exclamation';
     if (normalizedPath.startsWith('/payroll/taxinvoice')) return 'fa-file-invoice-dollar';
     if (normalizedPath.startsWith('/payroll')) return 'fa-money-bill-wave';
     if (normalizedPath.startsWith('/reports') || normalizedPath.startsWith('/report')) return 'fa-clipboard-list';
@@ -78,6 +80,7 @@ const inferIconName = (text: string, path?: string, explicitIcon?: string): stri
 
 const inferColor = (path: string, index: number): string => {
     const normalizedPath = path.split('?')[0];
+    if (normalizedPath.startsWith('/settlement')) return 'rose';
     if (normalizedPath.startsWith('/reports') || normalizedPath.startsWith('/report')) return 'orange';
     if (normalizedPath.startsWith('/database')) return 'blue';
     if (normalizedPath.startsWith('/payroll')) return 'emerald';
@@ -183,7 +186,7 @@ export const buildQuickMenuActions = (
 
 export const useQuickMenuActionSettings = (modeConfig: DashboardModeConfig): QuickMenuActionSettings => {
     const { currentUser } = useAuth();
-    const { currentSiteData, currentPosition } = useSiteMode();
+    const { currentSiteData, currentPosition, currentPositionData } = useSiteMode();
     const [preferences, setPreferences] = useState<DashboardQuickMenuPreferenceMap>({});
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -204,8 +207,11 @@ export const useQuickMenuActionSettings = (modeConfig: DashboardModeConfig): Qui
     }, [currentUser?.uid]);
 
     const availableActions = useMemo(() => {
-        return buildQuickMenuActions(modeConfig, currentSiteData?.menu);
-    }, [currentSiteData?.menu, modeConfig]);
+        return filterDashboardActionsByAccess(
+            buildQuickMenuActions(modeConfig, currentSiteData?.menu),
+            [currentPosition, currentPositionData?.name, modeConfig.id, modeConfig.shortLabel]
+        );
+    }, [currentPosition, currentPositionData?.name, currentSiteData?.menu, modeConfig]);
 
     const actionByKey = useMemo(() => {
         return new Map(availableActions.map((action) => [action.key, action]));

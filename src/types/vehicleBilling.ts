@@ -1,6 +1,6 @@
 import { Timestamp } from 'firebase/firestore';
 
-export type VehicleBillingStatus = 'DRAFT' | 'CONFIRMED' | 'PAID' | 'OVERDUE';
+export type VehicleBillingStatus = 'DRAFT' | 'CONFIRMED' | 'PAID' | 'OVERDUE' | 'CANCELLED';
 export type VehicleBillingIssuedToType = 'team' | 'team_leader' | 'worker';
 
 export interface VehicleBillingCostItem {
@@ -41,6 +41,10 @@ export interface VehicleBillingDocument {
     lineItems: VehicleBillingCostItem[]; // Breakdown
 
     memo?: string;
+    confirmationCancelReason?: string;
+    confirmationCancelledAt?: Timestamp;
+    confirmationCancelledById?: string;
+    confirmationCancelledByName?: string;
 
     createdAt?: Timestamp;
     updatedAt?: Timestamp;

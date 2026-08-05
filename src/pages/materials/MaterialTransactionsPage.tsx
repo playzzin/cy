@@ -12,7 +12,8 @@ import {
     faEdit,
     faTrash,
     faTimes,
-    faSave
+    faSave,
+    faImages,
 } from '@fortawesome/free-solid-svg-icons';
 import materialService from '../../services/materialService';
 import { siteService, Site } from '../../services/siteService';
@@ -32,6 +33,11 @@ import {
     getMaterialRentalCompanyOptionId,
     MaterialRentalCompanyOption,
 } from './materialRentalCompanyOptions';
+import MaterialPhotoViewerModal, {
+    createMaterialPhotoUrlResolver,
+    getMaterialPhotoDisplayCount,
+    hasMaterialPhotoReference,
+} from './MaterialPhotoViewerModal';
 
 type Transaction = (InboundTransaction | OutboundTransaction) & {
     type: 'inbound' | 'outbound';
@@ -40,6 +46,24 @@ type Transaction = (InboundTransaction | OutboundTransaction) & {
 };
 
 type ExcelCellValue = string | number;
+
+interface PhotoViewerState {
+    isOpen: boolean;
+    title: string;
+    expectedCount: number | null;
+    urls: string[];
+    loading: boolean;
+    error: string;
+}
+
+const CLOSED_PHOTO_VIEWER_STATE: PhotoViewerState = {
+    isOpen: false,
+    title: '',
+    expectedCount: null,
+    urls: [],
+    loading: false,
+    error: '',
+};
 
 const RENTAL_UNASSIGNED_FILTER = '__rental_unassigned__';
 
@@ -85,6 +109,11 @@ const MaterialTransactionsPage: React.FC = () => {
     const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [selectedTransactionKeys, setSelectedTransactionKeys] = useState<Set<string>>(new Set());
+    const [photoViewer, setPhotoViewer] = useState<PhotoViewerState>(CLOSED_PHOTO_VIEWER_STATE);
+    const photoRequestIdRef = React.useRef(0);
+    const photoUrlResolverRef = React.useRef(createMaterialPhotoUrlResolver(
+        (photoBatchId) => materialService.getMaterialPhotoDownloadUrls(photoBatchId)
+    ));
 
     // Edit Form State
     const [editForm, setEditForm] = useState({
@@ -312,6 +341,53 @@ const MaterialTransactionsPage: React.FC = () => {
             notes: tx.notes || ''
         });
         setIsEditModalOpen(true);
+    };
+
+    const closePhotoViewer = () => {
+        photoRequestIdRef.current += 1;
+        setPhotoViewer(CLOSED_PHOTO_VIEWER_STATE);
+    };
+
+    const openPhotoViewer = async (tx: Transaction) => {
+        const requestId = photoRequestIdRef.current + 1;
+        photoRequestIdRef.current = requestId;
+        const expectedCount = getMaterialPhotoDisplayCount(tx);
+
+        setPhotoViewer({
+            isOpen: true,
+            title: `${tx.transactionDate} · ${tx.siteName || '현장 미지정'} · ${tx.itemName || '자재'}`,
+            expectedCount,
+            urls: [],
+            loading: true,
+            error: '',
+        });
+
+        try {
+            const urls = await photoUrlResolverRef.current.resolve(tx);
+            if (photoRequestIdRef.current !== requestId) return;
+
+            setPhotoViewer((current) => ({
+                ...current,
+                urls,
+                loading: false,
+                error: '',
+            }));
+        } catch (error) {
+            if (photoRequestIdRef.current !== requestId) return;
+
+            const errorCode = typeof error === 'object' && error && 'code' in error
+                ? String((error as { code?: unknown }).code || '')
+                : '';
+            const permissionDenied = /unauthorized|permission-denied/i.test(errorCode);
+            setPhotoViewer((current) => ({
+                ...current,
+                urls: [],
+                loading: false,
+                error: permissionDenied
+                    ? '저장된 사진을 볼 권한이 없습니다. 관리자에게 저장소 접근 권한을 확인해 주세요.'
+                    : '저장소 연결에 실패했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.',
+            }));
+        }
     };
 
     const handleEditRentalCompanyChange = (selectedCompanyId: string) => {
@@ -657,7 +733,7 @@ const MaterialTransactionsPage: React.FC = () => {
             {/* Data Table */}
             <div className="flex-1 min-h-0 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
                 <div className="flex-1 overflow-auto min-h-[780px] max-h-[calc(100vh-220px)]">
-                    <table className="w-full min-w-[1970px] text-sm">
+                    <table className="w-full text-sm" style={{ minWidth: 2110 }}>
                         <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
                             <tr>
                                 <th className="px-3 py-3 text-center font-bold text-slate-600 w-12 sticky left-0 z-30 bg-slate-50">
@@ -678,6 +754,7 @@ const MaterialTransactionsPage: React.FC = () => {
                                 <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[150px]">차량번호</th>
                                 <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[160px]">입고처/출고자</th>
                                 <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[160px]">임대사</th>
+                                <th className="px-4 py-3 text-center font-bold text-slate-600 min-w-[140px]">사진</th>
                                 <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[220px]">비고</th>
                                 <th className="px-4 py-3 text-center font-bold text-slate-600 w-24">관리</th>
                             </tr>
@@ -685,7 +762,7 @@ const MaterialTransactionsPage: React.FC = () => {
                         <tbody className="divide-y divide-slate-100">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={13} className="p-20 text-center text-slate-400">
+                                    <td colSpan={14} className="p-20 text-center text-slate-400">
                                         <div className="animate-spin inline-block w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full mb-4"></div>
                                         <p>데이터를 불러오는 중입니다...</p>
                                     </td>
@@ -694,6 +771,8 @@ const MaterialTransactionsPage: React.FC = () => {
                                 visibleTransactions.map((t, index) => {
                                     const isSelected = selectedTransactionKeys.has(getTransactionKey(t));
                                     const stickyBgClass = isSelected ? 'bg-indigo-50' : 'bg-white';
+                                    const hasPhotos = hasMaterialPhotoReference(t);
+                                    const photoCount = getMaterialPhotoDisplayCount(t);
                                     return (
                                     <tr key={`${getTransactionKey(t)}-${index}`} className={`hover:bg-slate-50 transition-colors ${isSelected ? 'bg-indigo-50' : ''}`}>
                                         <td className={`px-3 py-2.5 text-center sticky left-0 z-20 ${stickyBgClass}`}>
@@ -743,6 +822,21 @@ const MaterialTransactionsPage: React.FC = () => {
                                         <td className="px-4 py-2.5 text-slate-600 text-xs">
                                             {t.type === 'outbound' ? ((t as OutboundTransaction).rentalCompanyName || '-') : '-'}
                                         </td>
+                                        <td className="px-4 py-2.5 text-center">
+                                            {hasPhotos ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openPhotoViewer(t)}
+                                                    className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-black text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1"
+                                                    title="첨부사진 보기"
+                                                >
+                                                    <FontAwesomeIcon icon={faImages} />
+                                                    {photoCount === null ? '사진 확인' : `사진 ${photoCount}장`}
+                                                </button>
+                                            ) : (
+                                                <span className="text-slate-300">-</span>
+                                            )}
+                                        </td>
                                         <td className="px-4 py-2.5 text-slate-500 whitespace-pre-wrap break-words">{t.notes || '-'}</td>
                                         <td className="px-4 py-2.5 text-center">
                                             <div className="flex justify-center gap-2">
@@ -767,7 +861,7 @@ const MaterialTransactionsPage: React.FC = () => {
                                 })
                             ) : (
                                 <tr>
-                                    <td colSpan={13} className="p-24 text-center text-slate-400">
+                                    <td colSpan={14} className="p-24 text-center text-slate-400">
                                         <div className="bg-slate-50 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
                                             <FontAwesomeIcon icon={faFilter} className="text-3xl text-slate-300" />
                                         </div>
@@ -783,6 +877,16 @@ const MaterialTransactionsPage: React.FC = () => {
                     Total {visibleTransactions.length} records found
                 </div>
             </div>
+
+            <MaterialPhotoViewerModal
+                isOpen={photoViewer.isOpen}
+                title={photoViewer.title}
+                expectedCount={photoViewer.expectedCount}
+                urls={photoViewer.urls}
+                loading={photoViewer.loading}
+                error={photoViewer.error}
+                onClose={closePhotoViewer}
+            />
 
             {/* Edit Modal */}
             {isEditModalOpen && (

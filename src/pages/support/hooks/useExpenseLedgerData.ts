@@ -12,6 +12,10 @@ import { teamExpenseLedgerService } from '../../../services/teamExpenseLedgerSer
 import { teamService, type Team } from '../../../services/teamService';
 import { vehicleBillingService } from '../../../services/vehicleBillingService';
 import { isSupportBillingMonthEnabled } from '../../../utils/supportBillingPeriod';
+import {
+  isPostedSettlementBillingStatus,
+  normalizeSettlementBillingStatus
+} from '../../../utils/supportSettlementBilling';
 import { toast } from '../../../utils/swal';
 import {
   OFFICE_ASSIGNMENT_TEAM_ID,
@@ -247,6 +251,9 @@ const getBillingTargetTeamKeys = (
   return [];
 };
 
+const isOfficeBillingTarget = (
+  target: Pick<CardBillingTargetRecord, 'targetType'> | null | undefined
+) => target?.targetType === 'OFFICE' || target?.targetType === 'OFFICE_STAFF';
 
 export const normalizeColor = (value: unknown) => {
   const raw = String(value ?? '').trim();
@@ -342,16 +349,18 @@ export const getBillingStatusLabel = (status?: unknown) => {
 const isAccommodationLedgerClaim = (doc: AccommodationBillingDocument) =>
   (doc.lineItems ?? []).some((item) => item.sourceType === 'utility_ledger');
 const isPostedAccommodation = (doc: AccommodationBillingDocument) =>
-  doc.status === 'confirmed' || (doc.status === 'draft' && isAccommodationLedgerClaim(doc));
+  isPostedSettlementBillingStatus(doc.status) || (normalizeSettlementBillingStatus(doc.status) === 'draft' && isAccommodationLedgerClaim(doc));
+const isVehicleLedgerClaim = (doc: VehicleBillingDocument) =>
+  (doc.lineItems ?? []).some((item) => item.sourceType === 'vehicle_ledger');
 const isPostedVehicle = (doc: VehicleBillingDocument) => {
-  const status = String(doc.status ?? '').trim().toUpperCase();
-  return ['CONFIRMED', 'PAID', 'OVERDUE'].includes(status);
+  const status = normalizeSettlementBillingStatus(doc.status);
+  return isPostedSettlementBillingStatus(status) || (status === 'draft' && isVehicleLedgerClaim(doc));
 };
 const isCardLedgerClaim = (doc: CardBillingDocument) =>
   (doc.lineItems ?? []).some((item) => item.sourceType === 'card_ledger');
 const isPostedCard = (doc: CardBillingDocument) => {
-  const status = String(doc.status ?? '').trim().toUpperCase();
-  return ['CONFIRMED', 'PAID', 'OVERDUE'].includes(status) || (status === 'DRAFT' && isCardLedgerClaim(doc));
+  const status = normalizeSettlementBillingStatus(doc.status);
+  return isPostedSettlementBillingStatus(status) || (status === 'draft' && isCardLedgerClaim(doc));
 };
 const isPostedClaim = (claim: TeamExpenseClaim) => claim.status === 'charged' || claim.status === 'settled';
 const isTeamExpenseBillingDocument = (doc: { issuedToType?: unknown }) =>
@@ -930,7 +939,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
 
     const cardOptions = cards
       .filter((card) => card.status === 'ASSIGNED' && card.currentAssigneeType === 'TEAM')
-      .map((card) => {
+      .map((card): ExpensePaymentOption => {
         const label = buildCardLabel(card);
         const assigneeName = String(card.currentAssigneeName ?? '').trim();
         const assigneeId = String(card.currentAssigneeId ?? '').trim();
@@ -942,12 +951,19 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
         const snapshotBillingTarget = getCardSnapshotBillingTarget(card);
         const billingTarget = latestBillingTarget
           ?? (snapshotBillingTarget && isActiveDuringMonth(snapshotBillingTarget, yearMonth) ? snapshotBillingTarget : null);
-        const teamIds = uniqueTextValues([
-          assigneeId,
-          assigneeName,
-          ...getTeamIdCandidates(assignedTeam),
-          ...getBillingTargetTeamKeys(billingTarget, teams)
-        ]);
+
+        const billingTargetTeamIds = getBillingTargetTeamKeys(billingTarget, teams);
+        // 사무실로 청구하는 청연카드는 팀별 선택 목록에서 제외하고,
+        // 사무실을 선택했을 때만 보이도록 한다. 이전에는 이 카드를
+        // 아예 제거해 사무실에서도 결제수단으로 선택할 수 없었다.
+        const teamIds = isOfficeBillingTarget(billingTarget)
+          ? billingTargetTeamIds
+          : uniqueTextValues([
+              assigneeId,
+              assigneeName,
+              ...getTeamIdCandidates(assignedTeam),
+              ...billingTargetTeamIds
+            ]);
 
         return {
           value: label,

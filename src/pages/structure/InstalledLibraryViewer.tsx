@@ -1,6 +1,6 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBoxOpen, faCode, faCube, faExternalLinkAlt, faSearch } from '@fortawesome/free-solid-svg-icons';
+import { faBoxOpen, faCode, faCube, faExternalLinkAlt } from '@fortawesome/free-solid-svg-icons';
 import packageJson from '../../../package.json';
 
 const InstalledLibraryViewer: React.FC = () => {

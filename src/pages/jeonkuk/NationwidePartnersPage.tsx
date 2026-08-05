@@ -12,7 +12,6 @@ import {
     faWaveSquare
 } from '@fortawesome/free-solid-svg-icons';
 import SouthKorea from '@svg-maps/south-korea';
-import 'react-svg-map/lib/index.css';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import { dailyReportService, type DailyReport } from '../../services/dailyReportService';
 import './NationwidePartnersPage.css';

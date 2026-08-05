@@ -12,6 +12,7 @@ import {
     writeBatch
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { normalizeWorkbookNumber } from '../utils/workbookLedgerParsing';
 import { workbookLedgerLogService } from './workbookLedgerLogService';
 
 export type WorkbookTransactionType = '매출' | '매입';
@@ -20,7 +21,8 @@ export type WorkbookLedgerSourceType =
     | 'taxInvoiceIssue'
     | 'expenseLedger'
     | 'manual'
-    | 'manualSettlement';
+    | 'manualSettlement'
+    | 'advanceUsage';
 
 export interface WorkbookLedgerEntry {
     id?: string;
@@ -76,12 +78,7 @@ const resolveCollectionName = (tenantKey: WorkbookLedgerTenant | string): string
 };
 
 const normalizeNumber = (value: unknown): number => {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string') {
-        const parsed = Number(value.replace(/,/g, '').trim());
-        return Number.isFinite(parsed) ? parsed : 0;
-    }
-    return 0;
+    return normalizeWorkbookNumber(value, 0);
 };
 
 const normalizeInteger = (value: unknown): number | null => {
@@ -243,6 +240,7 @@ export interface WorkbookLedgerService {
 export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | string = 'cheongyeon'): WorkbookLedgerService => {
     const collectionName = resolveCollectionName(tenantKey);
     const cachedEntriesByQuery = new Map<string, WorkbookLedgerEntry[]>();
+    const pendingEntriesByQuery = new Map<string, Promise<WorkbookLedgerEntry[]>>();
 
     const setCachedEntries = (cacheKey: string, entries: WorkbookLedgerEntry[]) => {
         cachedEntriesByQuery.set(cacheKey, cloneEntries(entries).sort(sortEntries));
@@ -250,6 +248,7 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
 
     const clearCachedEntries = () => {
         cachedEntriesByQuery.clear();
+        pendingEntriesByQuery.clear();
     };
 
     const getEntriesCollectionQuery = (options: GetEntriesOptions = {}, omitTransactionType = false) => {
@@ -293,44 +292,61 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
     const service: WorkbookLedgerService = {
         async getEntries(options: GetEntriesOptions = {}): Promise<WorkbookLedgerEntry[]> {
             const cacheKey = buildCacheKey(options);
-            const cachedEntries = cachedEntriesByQuery.get(cacheKey);
-            if (!options.force && cachedEntries) {
-                return cloneEntries(cachedEntries);
-            }
-
             if (options.force) {
                 clearCachedEntries();
-            }
-
-            const transactionType = normalizeText(options.transactionType);
-            let snapshot;
-
-            try {
-                snapshot = await getDocs(getEntriesCollectionQuery(options));
-            } catch (error) {
-                if (!transactionType || !isMissingFirestoreIndexError(error)) {
-                    throw error;
+            } else {
+                const cachedEntries = cachedEntriesByQuery.get(cacheKey);
+                if (cachedEntries) {
+                    return cloneEntries(cachedEntries);
                 }
 
-                console.warn(
-                    `[workbookLedgerService] Missing Firestore index for ${collectionName} transactionType/date query. Falling back to client-side transactionType filtering.`
-                );
-                snapshot = await getDocs(getEntriesCollectionQuery(options, true));
+                const pendingEntries = pendingEntriesByQuery.get(cacheKey);
+                if (pendingEntries) {
+                    return cloneEntries(await pendingEntries);
+                }
             }
 
-            const entries = snapshot.docs.map((entryDoc) => {
-                const data = entryDoc.data() as Record<string, unknown>;
-                const deletedAt = normalizeText(data.deletedAt);
+            const loadEntries = (async () => {
+                const transactionType = normalizeText(options.transactionType);
+                let snapshot;
 
-                if (deletedAt) return null;
+                try {
+                    snapshot = await getDocs(getEntriesCollectionQuery(options));
+                } catch (error) {
+                    if (!transactionType || !isMissingFirestoreIndexError(error)) {
+                        throw error;
+                    }
 
-                return normalizeStoredEntry(entryDoc.id, data);
-            })
-                .filter((entry): entry is WorkbookLedgerEntry => entry !== null)
-                .filter((entry) => !transactionType || entry.transactionType === transactionType);
+                    console.warn(
+                        `[workbookLedgerService] Missing Firestore index for ${collectionName} transactionType/date query. Falling back to client-side transactionType filtering.`
+                    );
+                    snapshot = await getDocs(getEntriesCollectionQuery(options, true));
+                }
 
-            setCachedEntries(cacheKey, entries);
-            return cloneEntries(entries);
+                const entries = snapshot.docs.map((entryDoc) => {
+                    const data = entryDoc.data() as Record<string, unknown>;
+                    const deletedAt = normalizeText(data.deletedAt);
+
+                    if (deletedAt) return null;
+
+                    return normalizeStoredEntry(entryDoc.id, data);
+                })
+                    .filter((entry): entry is WorkbookLedgerEntry => entry !== null)
+                    .filter((entry) => !transactionType || entry.transactionType === transactionType);
+
+                setCachedEntries(cacheKey, entries);
+                return entries;
+            })();
+
+            pendingEntriesByQuery.set(cacheKey, loadEntries);
+
+            try {
+                return cloneEntries(await loadEntries);
+            } finally {
+                if (pendingEntriesByQuery.get(cacheKey) === loadEntries) {
+                    pendingEntriesByQuery.delete(cacheKey);
+                }
+            }
         },
 
         async addEntries(entries: WorkbookLedgerEntryInput[]): Promise<WorkbookLedgerEntry[]> {

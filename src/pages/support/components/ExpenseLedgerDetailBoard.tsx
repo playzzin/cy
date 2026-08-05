@@ -371,16 +371,16 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
   }, [officeClaims, otherClaims, payableClaims, receivableClaims]);
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto pb-4 pr-2">
-      <div className="overflow-hidden border border-slate-300 bg-white shadow-sm">
+    <div className="flex h-full min-w-0 flex-col gap-4 overflow-y-auto pb-4 pr-2">
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <div
-          className="border-b border-slate-300 px-4 py-2 text-center text-sm font-black text-slate-900"
+          className="border-b border-slate-200 px-4 py-2 text-center text-sm font-black text-slate-900"
           style={teamSectionHeaderStyle}
         >
           {teamName} 숙소 상세내역
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-xs">
+          <table className="w-full min-w-[1120px] border-collapse text-xs">
             <thead>
               <tr className="bg-slate-100 text-slate-600">
                 {showTeamColumn && <th className="border border-slate-200 px-2 py-1.5 text-center">팀</th>}
@@ -440,15 +440,15 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
         </div>
       </div>
 
-      <div className="overflow-hidden border border-slate-300 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <div
-          className="border-b border-slate-300 px-4 py-2 text-center text-sm font-black text-slate-900"
+          className="border-b border-slate-200 px-4 py-2 text-center text-sm font-black text-slate-900"
           style={teamSectionHeaderStyle}
         >
           차량 렌트 및 유지비 상세내역
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-xs">
+          <table className="w-full min-w-[1120px] border-collapse text-xs">
             <thead>
               <tr className="bg-slate-100 text-slate-600">
                 {showTeamColumn && <th className="border border-slate-200 px-2 py-1.5 text-center">팀</th>}
@@ -508,15 +508,15 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
         </div>
       </div>
 
-      <div className="overflow-hidden border border-slate-300 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <div
-          className="border-b border-slate-300 px-4 py-2 text-center text-sm font-black text-slate-900"
+          className="border-b border-slate-200 px-4 py-2 text-center text-sm font-black text-slate-900"
           style={teamSectionHeaderStyle}
         >
           카드 청구 상세내역
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-xs">
+          <table className="w-full min-w-[640px] border-collapse text-xs">
             <thead>
               <tr className="bg-slate-100 text-slate-600">
                 {showTeamColumn && <th className="border border-slate-200 px-2 py-1.5 text-center">팀</th>}
@@ -563,8 +563,8 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
         const footerLabelColSpan = isStandaloneSection ? 3 : 6;
 
         return (
-          <div key={section.key} className="overflow-hidden border border-slate-300 bg-white shadow-sm">
-            <div className={`border-b border-slate-300 px-4 py-2 ${section.colorClass}`}>
+          <div key={section.key} className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className={`border-b border-slate-200 px-4 py-2 ${section.colorClass}`}>
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-black">{teamName} {section.title}</div>

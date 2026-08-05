@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
+    faBan,
     faBuilding,
     faCheckCircle,
     faEdit,
@@ -8,13 +9,15 @@ import {
     faReceipt,
     faSearch,
     faSpinner,
-    faTrash,
     faUserTie,
+    faUsers,
     faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import { companyService, Company } from '../../services/companyService';
 import {
     settlementTargetService,
+    DEFAULT_SETTLEMENT_TARGET_AFTER_TAX_RATE,
+    normalizeSettlementTargetAfterTaxRate,
     SettlementTarget,
     SettlementTargetStatus,
     SettlementTargetType,
@@ -25,14 +28,17 @@ interface SettlementTargetDatabaseProps {
     highlightedId?: string | null;
 }
 
-type SettlementTargetFormState = {
+export type SettlementTargetFormState = {
     name: string;
     targetType: SettlementTargetType;
+    positionTitle: string;
+    defaultAfterTaxPercent: string;
     companyId: string;
     contact: string;
     bankName: string;
     accountNumber: string;
     accountHolder: string;
+    buybackEnabled: boolean;
     evidenceRequired: boolean;
     status: SettlementTargetStatus;
     memo: string;
@@ -41,18 +47,25 @@ type SettlementTargetFormState = {
 const EMPTY_FORM: SettlementTargetFormState = {
     name: '',
     targetType: 'client_contact',
+    positionTitle: '',
+    defaultAfterTaxPercent: String(DEFAULT_SETTLEMENT_TARGET_AFTER_TAX_RATE * 100),
     companyId: '',
     contact: '',
     bankName: '',
     accountNumber: '',
     accountHolder: '',
+    buybackEnabled: false,
     evidenceRequired: false,
     status: 'active',
     memo: '',
 };
 
-const TARGET_TYPE_OPTIONS: Array<{ value: SettlementTargetType; label: string }> = [
+export const TARGET_TYPE_OPTIONS: Array<{ value: SettlementTargetType; label: string }> = [
+    { value: 'salesperson', label: '영업사원' },
     { value: 'client_contact', label: '관계자' },
+    { value: 'client_company', label: '발주사' },
+    { value: 'rental_company', label: '임대사' },
+    { value: 'office_staff', label: '사무실 직원' },
     { value: 'other', label: '기타' },
 ];
 
@@ -73,24 +86,71 @@ const STATUS_OPTIONS: Array<{ value: SettlementTargetStatus; label: string }> = 
 
 const toText = (value: unknown): string => String(value ?? '').trim();
 
+const formatAfterTaxPercent = (value: unknown): string => {
+    const percent = normalizeSettlementTargetAfterTaxRate(value) * 100;
+    return String(Number(percent.toFixed(4)));
+};
+
+export const maskSettlementTargetAccountNumber = (value: unknown): string => {
+    const raw = toText(value);
+    if (!raw) return '';
+    const digits = raw.replace(/\D/g, '');
+    const compact = digits || raw.replace(/[\s-]/g, '');
+    const lastFour = compact.slice(-4);
+    return lastFour ? `•••• ${lastFour}` : '';
+};
+
 export const getSettlementTargetTypeLabel = (value?: SettlementTargetType | string | null): string =>
     TARGET_TYPE_LABELS[String(value || '')] || '기타';
 
 const getStatusLabel = (value?: SettlementTargetStatus | string | null): string =>
     STATUS_OPTIONS.find((option) => option.value === value)?.label || '사용';
 
-const buildFormState = (target?: Partial<SettlementTarget> | null): SettlementTargetFormState => ({
+export const buildSettlementTargetFormState = (target?: Partial<SettlementTarget> | null): SettlementTargetFormState => ({
     name: toText(target?.name),
-    targetType: (TARGET_TYPE_OPTIONS.some((option) => option.value === target?.targetType) ? target?.targetType : 'client_contact') as SettlementTargetType,
+    targetType: (target?.targetType || 'client_contact') as SettlementTargetType,
+    positionTitle: toText(target?.positionTitle),
+    defaultAfterTaxPercent: formatAfterTaxPercent(target?.defaultAfterTaxRate),
     companyId: toText(target?.companyId),
     contact: toText(target?.contact),
     bankName: toText(target?.bankName),
     accountNumber: toText(target?.accountNumber),
     accountHolder: toText(target?.accountHolder),
+    buybackEnabled: Boolean(target?.buybackEnabled),
     evidenceRequired: Boolean(target?.evidenceRequired),
     status: (target?.status || 'active') as SettlementTargetStatus,
     memo: toText(target?.memo),
 });
+
+export const buildSettlementTargetPayload = (
+    formData: SettlementTargetFormState,
+    companyOptions: Company[],
+    currentTarget?: SettlementTarget | null
+): Partial<SettlementTarget> => {
+    const company = companyOptions.find((item) => item.id === formData.companyId);
+    const keepsExistingCompany = Boolean(
+        currentTarget && toText(currentTarget.companyId) === formData.companyId
+    );
+    const payload: Partial<SettlementTarget> = {
+        name: formData.name.trim(),
+        targetType: formData.targetType,
+        positionTitle: formData.positionTitle.trim(),
+        defaultAfterTaxRate: normalizeSettlementTargetAfterTaxRate(Number(formData.defaultAfterTaxPercent) / 100),
+        companyId: formData.companyId || '',
+        companyName: company?.name || (keepsExistingCompany ? toText(currentTarget?.companyName) : ''),
+        contact: formData.contact.trim(),
+        bankName: formData.bankName.trim(),
+        accountNumber: formData.accountNumber.trim(),
+        accountHolder: formData.accountHolder.trim(),
+        buybackEnabled: formData.buybackEnabled,
+        evidenceRequired: formData.evidenceRequired,
+        status: formData.status,
+        memo: formData.memo.trim(),
+    };
+
+    if (!currentTarget) payload.defaultProcessType = 'payable';
+    return payload;
+};
 
 const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hideHeader = false, highlightedId }) => {
     const [targets, setTargets] = useState<SettlementTarget[]>([]);
@@ -98,6 +158,7 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [companyLoadWarning, setCompanyLoadWarning] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [typeFilter, setTypeFilter] = useState<'all' | SettlementTargetType>('all');
     const [statusFilter, setStatusFilter] = useState<'active' | 'all' | SettlementTargetStatus>('active');
@@ -108,13 +169,27 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
     const fetchData = async () => {
         setLoading(true);
         setError(null);
+        setCompanyLoadWarning(null);
         try {
-            const [targetRows, companyRows] = await Promise.all([
+            const [targetResult, companyResult] = await Promise.allSettled([
                 settlementTargetService.getTargets(true),
                 companyService.getCompanies(),
             ]);
-            setTargets(targetRows);
-            setCompanies(companyRows);
+
+            if (targetResult.status === 'fulfilled') {
+                setTargets(targetResult.value);
+            } else {
+                console.error('[SettlementTargetDatabase] target load failed:', targetResult.reason);
+                setTargets([]);
+                setError('정산 대상자 목록을 불러오지 못했습니다.');
+            }
+
+            if (companyResult.status === 'fulfilled') {
+                setCompanies(companyResult.value);
+            } else {
+                console.warn('[SettlementTargetDatabase] company load failed:', companyResult.reason);
+                setCompanyLoadWarning('회사 목록 권한이 없어 연결 회사 선택은 제한되지만 정산 대상자 조회와 수정은 계속할 수 있습니다.');
+            }
         } catch (err) {
             console.error('[SettlementTargetDatabase] load failed:', err);
             setError('정산 대상자 목록을 불러오지 못했습니다.');
@@ -143,6 +218,7 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
 
                 const text = [
                     target.name,
+                    target.positionTitle,
                     target.companyName,
                     target.contact,
                     target.bankName,
@@ -161,6 +237,7 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
     const summary = useMemo(() => ({
         total: targets.length,
         active: targets.filter((target) => target.status !== 'inactive').length,
+        salespeople: targets.filter((target) => target.targetType === 'salesperson').length,
         contacts: targets.filter((target) => target.targetType === 'client_contact').length,
         others: targets.filter((target) => target.targetType === 'other').length,
     }), [targets]);
@@ -178,29 +255,9 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
 
     const openEditModal = (target: SettlementTarget) => {
         setCurrentTarget(target);
-        setFormData(buildFormState(target));
+        setFormData(buildSettlementTargetFormState(target));
         setIsModalOpen(true);
         setError(null);
-    };
-
-    const formToPayload = (): Partial<SettlementTarget> => {
-        const company = companyOptions.find((item) => item.id === formData.companyId);
-        return {
-            name: formData.name.trim(),
-            targetType: formData.targetType,
-            defaultProcessType: 'payable',
-            companyId: formData.companyId || '',
-            companyName: company?.name || '',
-            officeStaffId: '',
-            officeStaffName: '',
-            contact: formData.contact.trim(),
-            bankName: formData.bankName.trim(),
-            accountNumber: formData.accountNumber.trim(),
-            accountHolder: formData.accountHolder.trim(),
-            evidenceRequired: formData.evidenceRequired,
-            status: formData.status,
-            memo: formData.memo.trim(),
-        };
     };
 
     const handleSave = async (event: React.FormEvent) => {
@@ -209,11 +266,16 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
             setError('대상자명은 필수입니다.');
             return;
         }
+        const afterTaxPercent = Number(formData.defaultAfterTaxPercent);
+        if (!formData.defaultAfterTaxPercent.trim() || !Number.isFinite(afterTaxPercent) || afterTaxPercent < 0 || afterTaxPercent > 100) {
+            setError('기본 세후율은 0% 이상 100% 이하로 입력해 주세요.');
+            return;
+        }
 
         setSaving(true);
         setError(null);
         try {
-            const payload = formToPayload();
+            const payload = buildSettlementTargetPayload(formData, companyOptions, currentTarget);
             if (currentTarget?.id) {
                 await settlementTargetService.updateTarget(currentTarget.id, payload);
             } else {
@@ -229,17 +291,18 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
         }
     };
 
-    const handleDelete = async (target: SettlementTarget) => {
+    const handleDeactivate = async (target: SettlementTarget) => {
         if (!target.id) return;
-        if (!window.confirm(`${target.name} 정산 대상자를 삭제하시겠습니까?`)) return;
+        if (target.status === 'inactive') return;
+        if (!window.confirm(`${target.name} 정산 대상자를 사용 중지하시겠습니까?\n기존 바이백·정산 내역은 삭제되지 않고 유지됩니다.`)) return;
         setSaving(true);
         setError(null);
         try {
-            await settlementTargetService.deleteTarget(target.id);
+            await settlementTargetService.deactivateTarget(target.id);
             await fetchData();
         } catch (err) {
-            console.error('[SettlementTargetDatabase] delete failed:', err);
-            setError('정산 대상자 삭제 중 오류가 발생했습니다.');
+            console.error('[SettlementTargetDatabase] deactivate failed:', err);
+            setError('정산 대상자 사용 중지 중 오류가 발생했습니다.');
         } finally {
             setSaving(false);
         }
@@ -277,11 +340,18 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
                     </div>
                 )}
 
-                <section className="grid gap-3 md:grid-cols-4">
+                {companyLoadWarning && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+                        {companyLoadWarning}
+                    </div>
+                )}
+
+                <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                     {[
                         { label: '전체', value: summary.total, icon: faReceipt, className: 'text-slate-900' },
                         { label: '사용중', value: summary.active, icon: faCheckCircle, className: 'text-emerald-700' },
-                        { label: '관계자', value: summary.contacts, icon: faUserTie, className: 'text-blue-700' },
+                        { label: '영업사원', value: summary.salespeople, icon: faUserTie, className: 'text-violet-700' },
+                        { label: '관계자', value: summary.contacts, icon: faUsers, className: 'text-blue-700' },
                         { label: '기타', value: summary.others, icon: faBuilding, className: 'text-indigo-700' },
                     ].map((card) => (
                         <div key={card.label} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
@@ -302,7 +372,7 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
                                 <input
                                     value={searchTerm}
                                     onChange={(event) => setSearchTerm(event.target.value)}
-                                    placeholder="대상자명, 회사, 계좌, 메모 검색"
+                                    placeholder="대상자명, 직책, 회사, 계좌, 메모 검색"
                                     className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                 />
                             </div>
@@ -371,10 +441,12 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
                                 ) : (
                                     filteredTargets.map((target) => {
                                         const isHighlighted = highlightedId && (target.id === highlightedId);
+                                        const maskedAccountNumber = maskSettlementTargetAccountNumber(target.accountNumber);
                                         return (
                                             <tr key={target.id || target.name} className={isHighlighted ? 'bg-amber-50' : 'hover:bg-slate-50'}>
                                                 <td className="px-4 py-3 align-middle">
                                                     <div className="font-black text-slate-900">{target.name}</div>
+                                                    {target.positionTitle && <div className="mt-1 text-xs font-bold text-violet-600">{target.positionTitle}</div>}
                                                     {target.memo && <div className="mt-1 max-w-[260px] truncate text-xs font-semibold text-slate-400">{target.memo}</div>}
                                                 </td>
                                                 <td className="px-4 py-3 align-middle">
@@ -385,8 +457,8 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
                                                 <td className="px-4 py-3 align-middle text-slate-600">{target.companyName || '-'}</td>
                                                 <td className="px-4 py-3 align-middle text-slate-600">{target.contact || '-'}</td>
                                                 <td className="px-4 py-3 align-middle text-slate-600">
-                                                    <div className="max-w-[220px] truncate" title={[target.bankName, target.accountNumber, target.accountHolder].map(toText).filter(Boolean).join(' ')}>
-                                                        {[target.bankName, target.accountNumber, target.accountHolder].map(toText).filter(Boolean).join(' / ') || '-'}
+                                                    <div className="max-w-[220px] truncate" title={[target.bankName, maskedAccountNumber, target.accountHolder].map(toText).filter(Boolean).join(' ')}>
+                                                        {[target.bankName, maskedAccountNumber, target.accountHolder].map(toText).filter(Boolean).join(' / ') || '-'}
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-3 text-center align-middle">
@@ -413,11 +485,12 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
                                                         </button>
                                                         <button
                                                             type="button"
-                                                            onClick={() => handleDelete(target)}
-                                                            className="inline-flex h-8 w-8 items-center justify-center rounded border border-rose-200 text-rose-600 hover:bg-rose-50"
-                                                            title="삭제"
+                                                            onClick={() => handleDeactivate(target)}
+                                                            disabled={target.status === 'inactive' || saving}
+                                                            className="inline-flex h-8 w-8 items-center justify-center rounded border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300 disabled:hover:bg-white"
+                                                            title={target.status === 'inactive' ? '이미 사용 중지됨' : '사용 중지'}
                                                         >
-                                                            <FontAwesomeIcon icon={faTrash} />
+                                                            <FontAwesomeIcon icon={faBan} />
                                                         </button>
                                                     </div>
                                                 </td>
@@ -437,7 +510,7 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
                         <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-6 py-4">
                             <div>
                                 <h2 className="text-lg font-bold text-slate-800">{currentTarget ? '정산 대상자 수정' : '정산 대상자 등록'}</h2>
-                                <p className="mt-1 text-xs text-slate-500">지원정산 차액 배분에서 선택할 관계자 또는 기타 대상자 정보를 입력합니다.</p>
+                                <p className="mt-1 text-xs text-slate-500">바이백과 지원정산에서 선택할 영업사원·관계자·회사·직원 정보를 입력합니다.</p>
                             </div>
                             <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                                 <FontAwesomeIcon icon={faXmark} />
@@ -463,10 +536,39 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
                                         onChange={(event) => handleInputChange('targetType', event.target.value as SettlementTargetType)}
                                         className={`${selectClassName} mt-1`}
                                     >
+                                        {!TARGET_TYPE_OPTIONS.some((option) => option.value === formData.targetType) && (
+                                            <option value={formData.targetType} disabled>
+                                                {getSettlementTargetTypeLabel(formData.targetType)} (기존 합성 대상)
+                                            </option>
+                                        )}
                                         {TARGET_TYPE_OPTIONS.map((option) => (
                                             <option key={option.value} value={option.value}>{option.label}</option>
                                         ))}
                                     </select>
+                                </label>
+                                <label className="block">
+                                    <span className="text-xs font-black text-slate-500">직책/직급</span>
+                                    <input
+                                        value={formData.positionTitle}
+                                        onChange={(event) => handleInputChange('positionTitle', event.target.value)}
+                                        className={`${inputClassName} mt-1`}
+                                        placeholder="예: 영업팀장, 과장"
+                                    />
+                                </label>
+                                <label className="block">
+                                    <span className="text-xs font-black text-slate-500">기본 세후율 (%)</span>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        step="0.01"
+                                        required
+                                        value={formData.defaultAfterTaxPercent}
+                                        onChange={(event) => handleInputChange('defaultAfterTaxPercent', event.target.value)}
+                                        className={`${inputClassName} mt-1`}
+                                        placeholder="75"
+                                    />
+                                    <span className="mt-1 block text-[11px] font-semibold text-slate-400">75 입력 시 0.75로 저장됩니다.</span>
                                 </label>
                                 <label className="block">
                                     <span className="text-xs font-black text-slate-500">상태</span>
@@ -488,6 +590,11 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
                                         className={`${selectClassName} mt-1`}
                                     >
                                         <option value="">회사 선택 없음</option>
+                                        {formData.companyId && !companyOptions.some((company) => company.id === formData.companyId) && (
+                                            <option value={formData.companyId}>
+                                                {currentTarget?.companyName || '기존 연결 회사'} (목록 조회 제한)
+                                            </option>
+                                        )}
                                         {companyOptions.map((company) => (
                                             <option key={company.id || company.name} value={company.id || ''}>
                                                 {company.name} {company.type ? `(${company.type})` : ''}
@@ -530,6 +637,15 @@ const SettlementTargetDatabase: React.FC<SettlementTargetDatabaseProps> = ({ hid
                                         className={`${inputClassName} mt-1`}
                                         placeholder="예금주"
                                     />
+                                </label>
+                                <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={formData.buybackEnabled}
+                                        onChange={(event) => handleInputChange('buybackEnabled', event.target.checked)}
+                                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    <span className="text-sm font-bold text-slate-700">바이백 관계자로 사용</span>
                                 </label>
                                 <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                                     <input

@@ -15,6 +15,7 @@ import {
     FileText,
     IdCard,
     Image as ImageIcon,
+    List,
     MapPin,
     PenLine,
     Phone,
@@ -23,8 +24,10 @@ import {
     Search,
     Send,
     ShieldCheck,
+    SlidersHorizontal,
     UserRound,
     Users,
+    X,
 } from 'lucide-react';
 import { getDownloadURL, ref } from 'firebase/storage';
 
@@ -48,6 +51,7 @@ import './TeamWorkerDetailPage.css';
 type StatusFilter = 'all' | 'active' | 'inactive';
 type DetailView = 'profile' | 'payslip' | 'dailyReport';
 type MobileView = 'list' | 'detail';
+type DailyReportDisplayMode = 'calendar' | 'list';
 
 const EMPTY_TEXT = '-';
 
@@ -70,6 +74,41 @@ const getMonthRange = (month: string) => {
         startDate: `${yearText}-${monthText}-01`,
         endDate: `${yearText}-${monthText}-${String(lastDay).padStart(2, '0')}`,
     };
+};
+
+const CALENDAR_WEEKDAY_LABELS = ['월', '화', '수', '목', '금', '토', '일'];
+
+const formatDateKey = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const getMonthlyCalendarWeeks = (month: string): Date[][] => {
+    const [yearText, monthText] = month.split('-');
+    const year = Number(yearText);
+    const monthIndex = Number(monthText) - 1;
+    if (!year || monthIndex < 0 || monthIndex > 11) return getMonthlyCalendarWeeks(getCurrentMonth());
+
+    const firstDay = new Date(year, monthIndex, 1);
+    const lastDay = new Date(year, monthIndex + 1, 0);
+    const start = new Date(firstDay);
+    start.setDate(firstDay.getDate() - ((firstDay.getDay() + 6) % 7));
+    const end = new Date(lastDay);
+    end.setDate(lastDay.getDate() + (6 - ((lastDay.getDay() + 6) % 7)));
+
+    const weeks: Date[][] = [];
+    const cursor = new Date(start);
+    while (cursor <= end) {
+        const week: Date[] = [];
+        for (let index = 0; index < 7; index += 1) {
+            week.push(new Date(cursor));
+            cursor.setDate(cursor.getDate() + 1);
+        }
+        weeks.push(week);
+    }
+    return weeks;
 };
 
 const normalizeText = (value?: string | null) =>
@@ -249,6 +288,22 @@ const getWorkerTeamColor = (worker: Worker, teamById: Map<string, Team>, fallbac
     return '#2563eb';
 };
 
+const getResponsibleTeamColor = (row: DailyReportWorkerRow, teamById: Map<string, Team>) => {
+    const teamKeys = [
+        row.responsibleTeamId,
+        row.responsibleTeamName,
+        row.teamId,
+        row.teamName,
+    ].map(value => String(value ?? '').trim()).filter(Boolean);
+
+    for (const key of teamKeys) {
+        const color = String(teamById.get(key)?.color ?? '').trim();
+        if (color) return color;
+    }
+
+    return '#64748b';
+};
+
 const isCheongyeonTeam = (team: Team, workers: Worker[]) => {
     if (isCheongyeonCompanyName(team.companyName)) return true;
     return workers.some(worker => workerMatchesTeam(worker, team) && isCheongyeonCompanyName(worker.companyName));
@@ -333,7 +388,9 @@ const TeamWorkerDetailPage: React.FC = () => {
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const [detailView, setDetailView] = useState<DetailView>('profile');
+    const [dailyReportDisplayMode, setDailyReportDisplayMode] = useState<DailyReportDisplayMode>('calendar');
     const [mobileView, setMobileView] = useState<MobileView>('list');
+    const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
     const [showSensitive, setShowSensitive] = useState(true);
     const [loadingMaster, setLoadingMaster] = useState(true);
     const [loadingOutput, setLoadingOutput] = useState(false);
@@ -539,6 +596,29 @@ const TeamWorkerDetailPage: React.FC = () => {
             .sort((left, right) => String(right.date ?? '').localeCompare(String(left.date ?? '')));
     }, [scopedOutputRows, selectedWorker]);
 
+    const workerOutputRowsByDate = useMemo(() => {
+        const rowsByDate = new Map<string, DailyReportWorkerRow[]>();
+        workerOutputRows.forEach(row => {
+            const date = String(row.date ?? '').slice(0, 10);
+            if (!date) return;
+            const rows = rowsByDate.get(date) ?? [];
+            rows.push(row);
+            rowsByDate.set(date, rows);
+        });
+
+        rowsByDate.forEach(rows => rows.sort((left, right) =>
+            String(left.siteName ?? '').localeCompare(String(right.siteName ?? ''), 'ko-KR')
+        ));
+        return rowsByDate;
+    }, [workerOutputRows]);
+
+    const workerCalendarWeeks = useMemo(
+        () => getMonthlyCalendarWeeks(selectedMonth),
+        [selectedMonth]
+    );
+
+    const workerOutputDayCount = workerOutputRowsByDate.size;
+
     const selectedRowsForExport = selectedWorker ? workerOutputRows : teamOutputRows;
 
     const teamStats = useMemo(() => {
@@ -557,6 +637,27 @@ const TeamWorkerDetailPage: React.FC = () => {
             signatureCount,
         };
     }, [allTeamWorkers, teamOutputRows]);
+
+    const teamFocusWorker = useMemo(() => {
+        const candidates = allTeamWorkers.filter(worker => {
+            if (statusFilter === 'active') return !isInactiveWorker(worker);
+            if (statusFilter === 'inactive') return isInactiveWorker(worker);
+            return true;
+        });
+
+        return candidates.reduce<{ worker: Worker; manDay: number } | null>((topWorker, worker) => {
+            const workerId = String(worker.id ?? '').trim();
+            const workerName = normalizeText(worker.name);
+            const manDay = teamOutputRows
+                .filter(row => (workerId && String(row.workerId ?? '').trim() === workerId) || (workerName && normalizeText(row.workerName) === workerName))
+                .reduce((sum, row) => sum + asNumber(row.manDay), 0);
+
+            if (!topWorker || manDay > topWorker.manDay) {
+                return { worker, manDay };
+            }
+            return topWorker;
+        }, null);
+    }, [allTeamWorkers, statusFilter, teamOutputRows]);
 
     const workerStats = useMemo(() => {
         const totalManDay = workerOutputRows.reduce((sum, row) => sum + asNumber(row.manDay), 0);
@@ -880,6 +981,7 @@ const TeamWorkerDetailPage: React.FC = () => {
     const handleTeamSelect = (teamId: string) => {
         setSelectedTeamId(teamId);
         setIsTeamPickerOpen(false);
+        setIsMobileFilterOpen(false);
         setMobileView('list');
     };
 
@@ -934,6 +1036,8 @@ const TeamWorkerDetailPage: React.FC = () => {
         );
     };
 
+    const selectedWorkerPhone = String(selectedWorker?.contact ?? '').replace(/[^0-9+]/g, '');
+
     return (
         <div className="tw-page">
             <header className="tw-page__header">
@@ -946,15 +1050,15 @@ const TeamWorkerDetailPage: React.FC = () => {
                 </div>
 
                 <div className="tw-header-actions">
-                    <button type="button" className="tw-icon-button" onClick={() => setShowSensitive(prev => !prev)} title={showSensitive ? '민감정보 숨기기' : '민감정보 표시'}>
+                    <button type="button" className="tw-icon-button" onClick={() => setShowSensitive(prev => !prev)} title={showSensitive ? '민감정보 숨기기' : '민감정보 표시'} aria-label={showSensitive ? '민감정보 숨기기' : '민감정보 표시'}>
                         {showSensitive ? <EyeOff size={18} /> : <Eye size={18} />}
                         <span>{showSensitive ? '숨김' : '표시'}</span>
                     </button>
-                    <button type="button" className="tw-icon-button" onClick={handleCsvDownload} title="CSV 내보내기">
+                    <button type="button" className="tw-icon-button" onClick={handleCsvDownload} title="CSV 내보내기" aria-label="CSV 내보내기">
                         <Download size={18} />
                         <span>CSV</span>
                     </button>
-                    <button type="button" className="tw-icon-button" onClick={() => window.print()} title="인쇄">
+                    <button type="button" className="tw-icon-button" onClick={() => window.print()} title="인쇄" aria-label="인쇄">
                         <Printer size={18} />
                         <span>인쇄</span>
                     </button>
@@ -965,8 +1069,36 @@ const TeamWorkerDetailPage: React.FC = () => {
                 </div>
             </header>
 
-            <section className="tw-toolbar">
-                <label className="tw-control">
+            <section className="tw-mobile-filter-bar" aria-label="작업자 빠른 검색">
+                <label className="tw-mobile-search">
+                    <Search size={19} />
+                    <input
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        placeholder="이름 · 연락처 · 팀으로 검색"
+                        aria-label="작업자 빠른 검색"
+                    />
+                    {searchQuery && (
+                        <button type="button" onClick={() => setSearchQuery('')} aria-label="검색어 지우기">
+                            <X size={17} />
+                        </button>
+                    )}
+                </label>
+                <button
+                    type="button"
+                    className={isMobileFilterOpen ? 'tw-mobile-filter-button tw-mobile-filter-button--active' : 'tw-mobile-filter-button'}
+                    onClick={() => setIsMobileFilterOpen(prev => !prev)}
+                    aria-expanded={isMobileFilterOpen}
+                    aria-controls="team-worker-filter-controls"
+                >
+                    <SlidersHorizontal size={18} />
+                    <span>필터</span>
+                    <small>{statusFilter === 'active' ? '재직' : statusFilter === 'inactive' ? '비활성' : '전체'}</small>
+                </button>
+            </section>
+
+            <section id="team-worker-filter-controls" className={isMobileFilterOpen ? 'tw-toolbar tw-toolbar--mobile-expanded' : 'tw-toolbar'}>
+                <label className="tw-control tw-control--month">
                     <span>조회월</span>
                     <input
                         type="month"
@@ -987,7 +1119,7 @@ const TeamWorkerDetailPage: React.FC = () => {
                     </div>
                 </label>
 
-                <label className="tw-control">
+                <label className="tw-control tw-control--status">
                     <span>상태</span>
                     <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
                         <option value="active">재직</option>
@@ -1054,27 +1186,36 @@ const TeamWorkerDetailPage: React.FC = () => {
                     type="button"
                     className={mobileView === 'list' ? 'tw-mobile-switch__button tw-mobile-switch__button--active' : 'tw-mobile-switch__button'}
                     onClick={() => setMobileView('list')}
+                    role="tab"
+                    aria-selected={mobileView === 'list'}
                 >
-                    목록
+                    <Users size={16} />
+                    작업자 목록
                 </button>
                 <button
                     type="button"
                     className={mobileView === 'detail' ? 'tw-mobile-switch__button tw-mobile-switch__button--active' : 'tw-mobile-switch__button'}
                     onClick={() => setMobileView('detail')}
                     disabled={!selectedWorker}
+                    role="tab"
+                    aria-selected={mobileView === 'detail'}
                 >
-                    상세
+                    <UserRound size={16} />
+                    {selectedWorker ? `${selectedWorker.name} 상세` : '상세 보기'}
                 </button>
             </div>
 
             <main className={`tw-workspace tw-workspace--${mobileView}`}>
                 <section className="tw-worker-panel">
                     <div className="tw-panel-heading">
-                        <div>
-                            <span>팀 / 작업자</span>
-                            <strong>{filteredWorkers.length.toLocaleString('ko-KR')}명</strong>
+                        <div className="tw-panel-heading__title">
+                            <span>선택한 팀</span>
+                            <strong>{selectedTeam?.name || '청연이엔지 소속팀'}</strong>
                         </div>
-                        <small>{selectedTeam?.name || '청연이엔지 소속팀'}</small>
+                        <div className="tw-panel-heading__count">
+                            <strong>{filteredWorkers.length.toLocaleString('ko-KR')}명</strong>
+                            <small>현재 목록</small>
+                        </div>
                     </div>
 
                     <div className="tw-worker-list">
@@ -1105,6 +1246,19 @@ const TeamWorkerDetailPage: React.FC = () => {
                             ) : isTeamPickerOpen && (
                                 <div className="tw-team-picker-menu">
                                     {visibleTeams.map(renderTeamItem)}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="tw-mobile-team-context" aria-label="선택한 팀의 이번 달 현황">
+                            <div>
+                                <span>이번 달 팀 실적</span>
+                                <strong>{formatManDay(teamStats.totalManDay)}공수 · {formatCurrency(teamStats.totalAmount)}</strong>
+                            </div>
+                            {teamFocusWorker && (
+                                <div>
+                                    <span>공수 상위 작업자</span>
+                                    <strong><UserRound size={14} />{teamFocusWorker.worker.name || EMPTY_TEXT} · {formatManDay(teamFocusWorker.manDay)}공수</strong>
                                 </div>
                             )}
                         </div>
@@ -1143,7 +1297,7 @@ const TeamWorkerDetailPage: React.FC = () => {
                                         <span className="tw-worker-item__badges">
                                             {worker.fileNameSaved ? <IdCard size={15} /> : <AlertCircle size={15} />}
                                             {worker.signatureUrl ? <PenLine size={15} /> : null}
-                                            <small>{formatManDay(periodManDay)}</small>
+                                            <small>{formatManDay(periodManDay)}공수</small>
                                         </span>
                                     </button>
                                 );
@@ -1183,15 +1337,28 @@ const TeamWorkerDetailPage: React.FC = () => {
                                         <span><CalendarDays size={15} />최근 {workerStats.latestDate || '-'}</span>
                                     </div>
                                 </div>
-                                <button
-                                    type="button"
-                                    className="tw-secondary-button"
-                                    onClick={() => setIsSignatureOpen(true)}
-                                    disabled={!selectedWorker.id}
-                                >
-                                    <PenLine size={17} />
-                                    {selectedWorker.signatureUrl ? '서명 수정' : '서명 등록'}
-                                </button>
+                                <div className="tw-worker-hero__actions">
+                                    <button
+                                        type="button"
+                                        className="tw-secondary-button tw-worker-hero__action"
+                                        onClick={() => {
+                                            if (selectedWorkerPhone) window.location.href = `tel:${selectedWorkerPhone}`;
+                                        }}
+                                        disabled={!selectedWorkerPhone}
+                                    >
+                                        <Phone size={17} />
+                                        전화
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="tw-secondary-button tw-worker-hero__action"
+                                        onClick={() => setIsSignatureOpen(true)}
+                                        disabled={!selectedWorker.id}
+                                    >
+                                        <PenLine size={17} />
+                                        {selectedWorker.signatureUrl ? '서명 수정' : '서명 등록'}
+                                    </button>
+                                </div>
                             </div>
 
                             <div className="tw-worker-stat-grid">
@@ -1359,10 +1526,160 @@ const TeamWorkerDetailPage: React.FC = () => {
                             {detailView === 'dailyReport' && (
                             <section className="tw-output-section">
                                 <div className="tw-output-section__header">
-                                    <h3><CalendarDays size={18} />출력일보 목록 v2</h3>
-                                    <span>{startDate} ~ {endDate}</span>
+                                    <h3>
+                                        {dailyReportDisplayMode === 'calendar' ? <CalendarDays size={18} /> : <List size={18} />}
+                                        출력일보 · {dailyReportDisplayMode === 'calendar' ? '달력보기' : '목록보기'}
+                                    </h3>
+                                    <div className="tw-output-section__summary" aria-label="출력일보 기간 및 합계">
+                                        <span className="tw-output-period">{startDate} ~ {endDate}</span>
+                                        <span className="tw-output-summary-item tw-output-summary-item--days">
+                                            <small>출력일수</small>
+                                            <strong>{workerOutputDayCount}일</strong>
+                                        </span>
+                                        <span className="tw-output-summary-item tw-output-summary-item--manday">
+                                            <small>공수</small>
+                                            <strong>{formatManDay(workerStats.totalManDay)}</strong>
+                                        </span>
+                                        <span className="tw-output-summary-item tw-output-summary-item--amount">
+                                            <small>금액</small>
+                                            <strong>{formatCurrency(workerStats.totalAmount)}</strong>
+                                        </span>
+                                    </div>
                                 </div>
 
+                                <div className="tw-output-view-toolbar">
+                                    <div className="tw-output-view-toggle" role="tablist" aria-label="출력일보 보기 방식">
+                                        <button
+                                            id="team-worker-output-calendar-tab"
+                                            type="button"
+                                            role="tab"
+                                            aria-selected={dailyReportDisplayMode === 'calendar'}
+                                            aria-controls="team-worker-output-view-panel"
+                                            className={dailyReportDisplayMode === 'calendar'
+                                                ? 'tw-output-view-button tw-output-view-button--active'
+                                                : 'tw-output-view-button'}
+                                            onClick={() => setDailyReportDisplayMode('calendar')}
+                                        >
+                                            <CalendarDays size={16} />
+                                            달력보기
+                                        </button>
+                                        <button
+                                            id="team-worker-output-list-tab"
+                                            type="button"
+                                            role="tab"
+                                            aria-selected={dailyReportDisplayMode === 'list'}
+                                            aria-controls="team-worker-output-view-panel"
+                                            className={dailyReportDisplayMode === 'list'
+                                                ? 'tw-output-view-button tw-output-view-button--active'
+                                                : 'tw-output-view-button'}
+                                            onClick={() => setDailyReportDisplayMode('list')}
+                                        >
+                                            <List size={16} />
+                                            목록보기
+                                        </button>
+                                    </div>
+                                    <span className="tw-output-view-helper">
+                                        {dailyReportDisplayMode === 'calendar'
+                                            ? '날짜별 현장과 공수를 달력에서 확인합니다.'
+                                            : '출력일보의 상세 항목을 행 단위로 확인합니다.'}
+                                    </span>
+                                </div>
+
+                                <div
+                                    id="team-worker-output-view-panel"
+                                    className="tw-output-view-panel"
+                                    role="tabpanel"
+                                    aria-labelledby={dailyReportDisplayMode === 'calendar'
+                                        ? 'team-worker-output-calendar-tab'
+                                        : 'team-worker-output-list-tab'}
+                                >
+                                {dailyReportDisplayMode === 'calendar' && (
+                                    loadingOutput ? (
+                                        <div className="tw-empty-state">출력 상세를 불러오는 중입니다.</div>
+                                    ) : outputError ? (
+                                        <div className="tw-empty-state tw-empty-state--error">{outputError}</div>
+                                    ) : workerOutputRows.length === 0 ? (
+                                        <div className="tw-empty-state">선택한 기간의 출력 내역이 없습니다.</div>
+                                    ) : (
+                                    <div className="tw-worker-calendar-wrap" aria-label={`${selectedWorker.name}의 ${selectedMonth} 출력일보 달력`}>
+                                        <table className="tw-worker-calendar-table">
+                                            <thead>
+                                                <tr>
+                                                    {CALENDAR_WEEKDAY_LABELS.map((weekday, index) => (
+                                                        <th
+                                                            key={weekday}
+                                                            className={index === 5 ? 'tw-worker-calendar-saturday' : index === 6 ? 'tw-worker-calendar-sunday' : undefined}
+                                                        >
+                                                            {weekday}
+                                                        </th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {workerCalendarWeeks.map((week, weekIndex) => (
+                                                    <tr key={`${selectedMonth}-week-${weekIndex}`}>
+                                                        {week.map((day) => {
+                                                            const dateKey = formatDateKey(day);
+                                                            const isCurrentMonth = day.getMonth() + 1 === Number(selectedMonth.slice(5, 7));
+                                                            const dayRows = isCurrentMonth ? (workerOutputRowsByDate.get(dateKey) ?? []) : [];
+                                                            const dayOfWeek = day.getDay();
+                                                            const dayClassName = [
+                                                                'tw-worker-calendar-day',
+                                                                isCurrentMonth ? '' : 'tw-worker-calendar-day--outside',
+                                                                dayOfWeek === 6 ? 'tw-worker-calendar-day--saturday' : '',
+                                                                dayOfWeek === 0 ? 'tw-worker-calendar-day--sunday' : '',
+                                                            ].filter(Boolean).join(' ');
+
+                                                            return (
+                                                                <td key={dateKey} className={dayClassName}>
+                                                                    <div className="tw-worker-calendar-day__number">{day.getDate()}일</div>
+                                                                    <div className="tw-worker-calendar-day__entries">
+                                                                        {dayRows.map((row, rowIndex) => {
+                                                                            const responsibleTeamLabel = getResponsibleTeamLabel(row);
+                                                                            const responsibleTeamColor = getResponsibleTeamColor(row, teamById);
+                                                                            const displayWorkerTeamName = row.workerTeamName
+                                                                                || (row.workerTeamId ? teamById.get(String(row.workerTeamId))?.name : '')
+                                                                                || getTeamLabel(selectedWorker, teamById);
+                                                                            return (
+                                                                                <article
+                                                                                    key={`${row.reportId}-${row.workerId}-${row.date}-${row.siteId}-${rowIndex}`}
+                                                                                    className="tw-worker-calendar-entry"
+                                                                                    style={{ borderLeftColor: responsibleTeamColor }}
+                                                                                    title={`${row.siteName || EMPTY_TEXT} · ${responsibleTeamLabel} · ${formatManDay(row.manDay)}공수 · 단가 ${formatCurrency(row.unitPrice)} · 금액 ${formatCurrency(getReportRowAmount(row))}`}
+                                                                                >
+                                                                                    <div>
+                                                                                        <strong>{row.siteName || EMPTY_TEXT}</strong>
+                                                                                        <span>{formatManDay(row.manDay)}공수</span>
+                                                                                    </div>
+                                                                                    <small style={{ color: responsibleTeamColor }}>{responsibleTeamLabel}</small>
+                                                                                    <div
+                                                                                        className="tw-worker-calendar-entry__worker"
+                                                                                        style={{ '--worker-team-color': selectedWorkerTeamColor } as React.CSSProperties}
+                                                                                    >
+                                                                                        <strong>{row.workerName || selectedWorker.name}</strong>
+                                                                                        <span>{displayWorkerTeamName || EMPTY_TEXT}</span>
+                                                                                    </div>
+                                                                                    <div className="tw-worker-calendar-entry__amounts">
+                                                                                        <span>단가 {formatCurrency(row.unitPrice)}</span>
+                                                                                        <span>금액 {formatCurrency(getReportRowAmount(row))}</span>
+                                                                                    </div>
+                                                                                </article>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </td>
+                                                            );
+                                                        })}
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    )
+                                )}
+
+                                {dailyReportDisplayMode === 'list' && (
+                                <>
                                 <div className="tw-output-card-list">
                                     {loadingOutput ? (
                                         <div className="tw-empty-state">출력 상세를 불러오는 중입니다.</div>
@@ -1467,6 +1784,9 @@ const TeamWorkerDetailPage: React.FC = () => {
                                             )}
                                         </tbody>
                                     </table>
+                                </div>
+                                </>
+                                )}
                                 </div>
                             </section>
                             )}

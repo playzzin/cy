@@ -554,8 +554,6 @@ const applySupportTransactionStatementOptions = (
     ...(options.notes !== undefined ? { notes: options.notes } : {}),
 });
 
-const getSettlementTargetTypeLabel = (value?: SettlementTargetType | string | null): string =>
-    SETTLEMENT_TARGET_TYPE_OPTIONS.find((option) => option.value === value)?.label || '기타';
 
 const normalizeAllocationTargetType = (value?: SettlementTargetType | string | null): SettlementTargetType =>
     SETTLEMENT_TARGET_TYPE_OPTIONS.some((option) => option.value === value) ? value as SettlementTargetType : 'other';
@@ -2423,201 +2421,6 @@ const loadCanvasImage = (src: string): Promise<HTMLImageElement> =>
         image.src = src;
     });
 
-const createSupportClientLaborStatementImageBlob = async (
-    preview: SupportClientLaborSitePreview,
-    target: SupportStatementTarget,
-    yearMonth: string,
-    logoUrl?: string | null
-): Promise<Blob> => {
-    await waitForDocumentFonts();
-
-    const month = parseInt(yearMonth.split('-')[1] ?? '0', 10);
-    const rows = preview.rows;
-    const dayTotals = Array.from({ length: MAX_DAY_COLUMNS }, () => 0);
-    rows.forEach(row => row.days.forEach((value, index) => {
-        dayTotals[index] += value;
-    }));
-
-    const totalManDay = rows.reduce((sum, row) => sum + row.totalManDay, 0);
-    const totalAmount = rows.reduce((sum, row) => sum + row.totalAmount, 0);
-    const avgPrice = totalManDay > 0 ? Math.round(totalAmount / totalManDay) : 0;
-
-    const margin = 48;
-    const tableTop = 250;
-    const headerRowHeight = 36;
-    const bodyRowHeight = 30;
-    const footerRowHeight = 36;
-    const workerBlockHeight = bodyRowHeight * 2;
-
-    const columns = {
-        no: 54,
-        name: 104,
-        id: 150,
-        address: 390,
-        day: 27,
-        total: 76,
-        amount: 132
-    };
-    const fixedInfoWidth = columns.no + columns.name + columns.id + columns.address;
-    const dayAreaWidth = Math.max(DAY_LABELS_SECOND.length, DAY_LABELS_FIRST.length + 1) * columns.day;
-    const tableWidth = fixedInfoWidth + dayAreaWidth + columns.total + columns.amount;
-    const width = tableWidth + margin * 2;
-    const tableHeight = headerRowHeight * 2 + rows.length * workerBlockHeight + footerRowHeight * 2;
-    const height = tableTop + tableHeight + 54;
-    const outputScale = Math.max(2, Math.min(window.devicePixelRatio || 1, 2));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.ceil(width * outputScale);
-    canvas.height = Math.ceil(height * outputScale);
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas context unavailable');
-    ctx.scale(outputScale, outputScale);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, width, height);
-
-    ctx.fillStyle = '#111827';
-    ctx.font = '900 40px "Malgun Gothic", "Pretendard", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`노 무 비 지 급 명 세 서 (${month}월분)`, width / 2, 92);
-    ctx.strokeStyle = '#f59e0b';
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.moveTo(width / 2 - 270, 122);
-    ctx.lineTo(width / 2 + 270, 122);
-    ctx.stroke();
-
-    ctx.font = '700 22px "Malgun Gothic", "Pretendard", sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#111827';
-    ctx.fillText(`현장명: ${preview.siteName}`, margin, 166);
-
-    const logoSize = 46;
-    const logoX = width - margin - 248;
-    const logoY = 154;
-    try {
-        const logoImage = await loadCanvasImage(resolveStatementLogoUrl(logoUrl));
-        ctx.drawImage(logoImage, logoX, logoY, logoSize, logoSize);
-    } catch (error) {
-        console.warn('[SupportClientSitePage] labor statement logo image failed:', error);
-        ctx.fillStyle = '#0f766e';
-        ctx.fillRect(logoX, logoY, logoSize, logoSize);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '900 18px "Malgun Gothic", "Pretendard", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('CY', logoX + logoSize / 2, logoY + logoSize / 2);
-    }
-    ctx.fillStyle = '#111827';
-    ctx.font = '900 24px "Malgun Gothic", "Pretendard", sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('(주) 청연이엔지', logoX + logoSize + 12, logoY + logoSize / 2);
-
-    let x = margin;
-    let y = tableTop;
-    const headerFill = '#f1f5f9';
-    const firstDayFill = '#e0f2fe';
-    const secondDayFill = '#fff1f2';
-    const bodyDayFill = '#f8fafc';
-    const billingFill = '#dcfce7';
-    const billingLightFill = '#f0fdf4';
-    const billingText = '#047857';
-    const billingStrongText = '#065f46';
-    const totalFill = '#e2e8f0';
-    const smallFont = '18px "Malgun Gothic", "Pretendard", sans-serif';
-    const bodyFont = '19px "Malgun Gothic", "Pretendard", sans-serif';
-    const boldFont = '700 19px "Malgun Gothic", "Pretendard", sans-serif';
-    const tinyFont = '16px "Malgun Gothic", "Pretendard", sans-serif';
-
-    drawCanvasCell(ctx, x, y, columns.no, headerRowHeight * 2, 'NO', { fill: headerFill, font: boldFont });
-    x += columns.no;
-    drawCanvasCell(ctx, x, y, columns.name, headerRowHeight * 2, '성명', { fill: headerFill, font: boldFont });
-    x += columns.name;
-    drawCanvasCell(ctx, x, y, columns.id, headerRowHeight, '주민번호', { fill: headerFill, font: smallFont });
-    drawCanvasCell(ctx, x, y + headerRowHeight, columns.id, headerRowHeight, '전화번호', { fill: headerFill, font: smallFont });
-    x += columns.id;
-    drawCanvasCell(ctx, x, y, columns.address, headerRowHeight * 2, '주소', { fill: headerFill, font: boldFont });
-    x += columns.address;
-
-    DAY_LABELS_FIRST.forEach(day => {
-        drawCanvasCell(ctx, x, y, columns.day, headerRowHeight, String(day).padStart(2, '0'), { fill: firstDayFill, color: '#0369a1', font: tinyFont });
-        x += columns.day;
-    });
-    drawCanvasCell(ctx, x, y, columns.day, headerRowHeight, 'X', { fill: headerFill, font: tinyFont });
-    x += columns.day;
-    drawCanvasCell(ctx, x, y, columns.total, headerRowHeight * 2, '출역', { fill: headerFill, font: boldFont });
-    x += columns.total;
-    drawCanvasCell(ctx, x, y, columns.amount, headerRowHeight, '청구단가', { fill: billingFill, color: billingStrongText, font: smallFont });
-    drawCanvasCell(ctx, x, y + headerRowHeight, columns.amount, headerRowHeight, '청구금액', { fill: billingFill, color: billingStrongText, font: smallFont });
-
-    x = margin + columns.no + columns.name + columns.id + columns.address;
-    DAY_LABELS_SECOND.forEach(day => {
-        drawCanvasCell(ctx, x, y + headerRowHeight, columns.day, headerRowHeight, String(day), { fill: secondDayFill, color: '#be123c', font: tinyFont });
-        x += columns.day;
-    });
-
-    y += headerRowHeight * 2;
-    rows.forEach((row, index) => {
-        x = margin;
-        drawCanvasCell(ctx, x, y, columns.no, workerBlockHeight, String(index + 1), { fill: '#f8fafc', font: bodyFont });
-        x += columns.no;
-        drawCanvasCell(ctx, x, y, columns.name, workerBlockHeight, row.workerName, { font: boldFont, wrap: true, maxLines: 2 });
-        x += columns.name;
-        drawCanvasCell(ctx, x, y, columns.id, bodyRowHeight, formatFullIdNumber(row.idNumber), { font: tinyFont });
-        drawCanvasCell(ctx, x, y + bodyRowHeight, columns.id, bodyRowHeight, row.contact || '-', { font: tinyFont, color: '#475569' });
-        x += columns.id;
-        drawCanvasCell(ctx, x, y, columns.address, workerBlockHeight, row.address || '-', { font: tinyFont, align: 'left', wrap: true, maxLines: 3 });
-        x += columns.address;
-
-        DAY_LABELS_FIRST.forEach(day => {
-            drawCanvasCell(ctx, x, y, columns.day, bodyRowHeight, formatStatementDayManDay(row.days[day - 1]), { fill: bodyDayFill, font: tinyFont });
-            x += columns.day;
-        });
-        drawCanvasCell(ctx, x, y, columns.day, bodyRowHeight, '', { fill: bodyDayFill });
-        x += columns.day;
-        drawCanvasCell(ctx, x, y, columns.total, workerBlockHeight, formatManDay(row.totalManDay), { fill: '#f8fafc', font: bodyFont });
-        x += columns.total;
-        drawCanvasCell(ctx, x, y, columns.amount, bodyRowHeight, formatNumber(row.unitPrice), { fill: billingLightFill, color: billingText, font: tinyFont, align: 'right' });
-        drawCanvasCell(ctx, x, y + bodyRowHeight, columns.amount, bodyRowHeight, formatNumber(row.totalAmount), { fill: billingFill, color: billingStrongText, font: '700 17px "Malgun Gothic", "Pretendard", sans-serif', align: 'right' });
-
-        x = margin + columns.no + columns.name + columns.id + columns.address;
-        DAY_LABELS_SECOND.forEach(day => {
-            drawCanvasCell(ctx, x, y + bodyRowHeight, columns.day, bodyRowHeight, formatStatementDayManDay(row.days[day - 1]), { fill: bodyDayFill, font: tinyFont });
-            x += columns.day;
-        });
-        y += workerBlockHeight;
-    });
-
-    x = margin;
-    drawCanvasCell(ctx, x, y, columns.no + columns.name + columns.id + columns.address, footerRowHeight, '합 계', { fill: totalFill, font: boldFont });
-    x += columns.no + columns.name + columns.id + columns.address;
-    DAY_LABELS_FIRST.forEach(day => {
-        drawCanvasCell(ctx, x, y, columns.day, footerRowHeight, formatStatementDayManDay(dayTotals[day - 1]), { fill: totalFill, font: tinyFont });
-        x += columns.day;
-    });
-    drawCanvasCell(ctx, x, y, columns.day, footerRowHeight, '', { fill: totalFill });
-    x += columns.day;
-    drawCanvasCell(ctx, x, y, columns.total, footerRowHeight * 2, formatManDay(totalManDay), { fill: totalFill, font: boldFont });
-    x += columns.total;
-    drawCanvasCell(ctx, x, y, columns.amount, footerRowHeight, formatNumber(avgPrice), { fill: billingFill, color: billingStrongText, font: boldFont, align: 'right' });
-
-    y += footerRowHeight;
-    x = margin;
-    drawCanvasCell(ctx, x, y, columns.no + columns.name + columns.id + columns.address, footerRowHeight, '청구금액', { fill: totalFill, font: boldFont });
-    x += columns.no + columns.name + columns.id + columns.address;
-    DAY_LABELS_SECOND.forEach(day => {
-        drawCanvasCell(ctx, x, y, columns.day, footerRowHeight, formatStatementDayManDay(dayTotals[day - 1]), { fill: totalFill, font: tinyFont });
-        x += columns.day;
-    });
-    x += columns.total;
-    drawCanvasCell(ctx, x, y, columns.amount, footerRowHeight, formatNumber(totalAmount), { fill: '#bbf7d0', color: billingStrongText, font: boldFont, align: 'right' });
-
-    const blob: Blob | null = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    if (!blob) throw new Error('PNG blob generation failed');
-    return blob;
-};
 
 const SupportClientStatementBrand: React.FC<{ logoUrl?: string | null }> = ({ logoUrl }) => {
     const resolvedLogoUrl = resolveStatementLogoUrl(logoUrl);
@@ -5033,10 +4836,18 @@ const SupportClientSitePage: React.FC = () => {
         month: getCurrentYearMonth(),
         allocations: {}
     }));
-    const issuedAmounts = issuedAmountState.amounts;
-    const settlementAmounts = settlementAmountState.amounts;
-    const rowNotes = rowNoteState.notes;
-    const progressStatuses = progressStatusState.statuses;
+    const issuedAmounts = issuedAmountState.month === selectedMonth
+        ? issuedAmountState.amounts
+        : loadIssuedAmounts(selectedMonth);
+    const settlementAmounts = settlementAmountState.month === selectedMonth
+        ? settlementAmountState.amounts
+        : loadSettlementAmounts(selectedMonth);
+    const rowNotes = rowNoteState.month === selectedMonth
+        ? rowNoteState.notes
+        : loadRowNotes(selectedMonth);
+    const progressStatuses = progressStatusState.month === selectedMonth
+        ? progressStatusState.statuses
+        : loadProgressStatuses(selectedMonth);
     const billingRates = billingRateState.month === selectedMonth ? billingRateState.rates : loadBillingRates(selectedMonth);
     const appliedBulkBillingRate = parseBillingRate(billingRates.bulkRate);
     const siteAllocations = allocationState.month === selectedMonth ? allocationState.allocations : {};

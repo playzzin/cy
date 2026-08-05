@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSave, faCalendarAlt, faUsers, faCheckSquare, faSquare, faUndo, faPaste, faArrowRight, faExclamationTriangle, faCheckCircle, faSpinner } from '@fortawesome/free-solid-svg-icons';
+import { faSave, faCalendarAlt, faUsers, faCheckSquare, faSquare, faUndo, faPaste, faExclamationTriangle, faCheckCircle, faSpinner } from '@fortawesome/free-solid-svg-icons';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';
 import { manpowerService, Worker } from '../../services/manpowerService';
@@ -351,7 +351,7 @@ const DailyReportDirectInput: React.FC = () => {
 
             const reportsToSave: Omit<DailyReport, 'id'>[] = [];
 
-            grouped.forEach((items, key) => {
+            grouped.forEach((items, _key) => {
                 const first = items[0];
                 const totalManDay = items.reduce((sum, i) => sum + i.manDay, 0);
 

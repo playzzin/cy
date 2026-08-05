@@ -1,4 +1,4 @@
-import { db } from '../config/firebase';
+import { auth, db } from '../config/firebase';
 import {
   Timestamp,
   arrayUnion,
@@ -7,6 +7,7 @@ import {
   getDocs,
   onSnapshot,
   query,
+  serverTimestamp,
   setDoc,
   updateDoc,
   where,
@@ -21,6 +22,7 @@ import type {
   ErpMessage,
   ErpMessageSummary
 } from '../types/erpMessage';
+import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 
 const COLLECTION_NAME = 'erp_messages';
 const DEFAULT_CATEGORY = '업무';
@@ -167,6 +169,10 @@ export const messageService = {
   buildSummary,
 
   createMessage: async (input: CreateErpMessageInput): Promise<string> => {
+    if (isDevAdminSessionEnabled()) {
+      return `dev-message-${Date.now()}`;
+    }
+
     const body = input.body.trim();
     const title = input.title?.trim() || deriveTitleFromBody(body);
     const recipientIds = uniqueStrings(input.recipientIds || []);
@@ -215,6 +221,11 @@ export const messageService = {
     onError?: (error: Error) => void,
     limitCount?: number
   ): Unsubscribe => {
+    if (isDevAdminSessionEnabled()) {
+      callback([]);
+      return () => undefined;
+    }
+
     const directQuery = query(
       collection(db, COLLECTION_NAME),
       where('recipientIds', 'array-contains', uid)
@@ -232,6 +243,11 @@ export const messageService = {
     callback: (messages: ErpMessage[]) => void,
     onError?: (error: Error) => void
   ): Unsubscribe => {
+    if (isDevAdminSessionEnabled()) {
+      callback([]);
+      return () => undefined;
+    }
+
     const sentQuery = query(collection(db, COLLECTION_NAME), where('senderId', '==', uid));
 
     return onSnapshot(
@@ -250,6 +266,11 @@ export const messageService = {
     callback: (messages: ErpMessage[]) => void,
     onError?: (error: Error) => void
   ): Unsubscribe => {
+    if (isDevAdminSessionEnabled()) {
+      callback([]);
+      return () => undefined;
+    }
+
     return onSnapshot(
       collection(db, COLLECTION_NAME),
       (snapshot) => {
@@ -263,35 +284,54 @@ export const messageService = {
   },
 
   getRecentMessages: async (limitCount = 50): Promise<ErpMessage[]> => {
-    const snapshot = await getDocs(collection(db, COLLECTION_NAME));
-    return sortMessages(snapshot.docs.map((docSnap) => normalizeMessage(docSnap.id, docSnap.data()))).slice(0, limitCount);
+    if (isDevAdminSessionEnabled()) {
+      return [];
+    }
+
+    const uid = auth.currentUser?.uid;
+    if (!uid) return [];
+
+    // Keep this one-shot dashboard read aligned with the least-privilege inbox
+    // queries. A collection-wide query would be rejected once a protected bank
+    // alert exists for another recipient.
+    const [directSnapshot, broadcastSnapshot] = await Promise.all([
+      getDocs(query(collection(db, COLLECTION_NAME), where('recipientIds', 'array-contains', uid))),
+      getDocs(query(collection(db, COLLECTION_NAME), where('recipientScope', '==', 'all'))),
+    ]);
+    const merged = new Map<string, ErpMessage>();
+    [...directSnapshot.docs, ...broadcastSnapshot.docs].forEach((docSnap) => {
+      const message = normalizeMessage(docSnap.id, docSnap.data());
+      if (isActiveMessage(message)) merged.set(message.id, message);
+    });
+    return sortMessages(Array.from(merged.values())).slice(0, limitCount);
   },
 
   markAsRead: async (messageId: string, uid: string): Promise<void> => {
+    if (isDevAdminSessionEnabled()) return;
+
     if (!messageId || !uid) return;
 
-    const now = Timestamp.now();
     await updateDoc(doc(db, COLLECTION_NAME, messageId), {
       readBy: arrayUnion(uid),
-      [`readAtBy.${safeReadAtKey(uid)}`]: now,
-      updatedAt: now
+      [`readAtBy.${safeReadAtKey(uid)}`]: serverTimestamp(),
+      updatedAt: serverTimestamp()
     });
   },
 
   markAllAsRead: async (messages: ErpMessage[], uid: string): Promise<void> => {
+    if (isDevAdminSessionEnabled()) return;
+
     if (!uid) return;
 
     const unreadMessages = messages.filter((message) => !message.readBy.includes(uid)).slice(0, 450);
     if (unreadMessages.length === 0) return;
 
     const batch = writeBatch(db);
-    const now = Timestamp.now();
-
     unreadMessages.forEach((message) => {
       batch.update(doc(db, COLLECTION_NAME, message.id), {
         readBy: arrayUnion(uid),
-        [`readAtBy.${safeReadAtKey(uid)}`]: now,
-        updatedAt: now
+        [`readAtBy.${safeReadAtKey(uid)}`]: serverTimestamp(),
+        updatedAt: serverTimestamp()
       });
     });
 
@@ -299,6 +339,8 @@ export const messageService = {
   },
 
   archiveMessage: async (messageId: string): Promise<void> => {
+    if (isDevAdminSessionEnabled()) return;
+
     await updateDoc(doc(db, COLLECTION_NAME, messageId), {
       status: 'archived',
       updatedAt: Timestamp.now()

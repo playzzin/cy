@@ -16,11 +16,19 @@ import AdminPanel from './AdminPanel';
 import AppIntroScreen from '../common/AppIntroScreen';
 import { menuServiceV11 } from '../../services/menuServiceV11';
 import { SiteData, SiteDataType, MenuItem, PositionItem } from '../../types/menu';
+import { findBusinessPartnerPositionDefinition } from '../../constants/businessPartnerPositions';
 import { MENU_PATHS } from '../../constants/menuPaths';
+import { matchesMenuPosition } from '../../utils/menuPosition';
 import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTriangleExclamation, faRotateRight } from '@fortawesome/free-solid-svg-icons';
 import { SiteModeProvider } from '../../contexts/SiteModeContext';
+import {
+    applyDocumentTheme,
+    getStoredDarkModePreference,
+    persistDarkModePreference,
+} from '../../utils/themeMode';
+import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 
 // Removed hardcoded siteData in favor of dynamic loading
 
@@ -63,13 +71,16 @@ const findMatchingPosition = (positions: PositionItem[], value: unknown): Positi
     const key = normalizePositionKey(value);
     if (!key) return undefined;
 
+    const partnerDefinition = findBusinessPartnerPositionDefinition(String(value || ''), String(value || ''));
+    if (partnerDefinition) {
+        const matchedPartnerPosition = positions.find(
+            (position) => normalizePositionKey(position.id) === normalizePositionKey(partnerDefinition.id)
+        );
+        if (matchedPartnerPosition) return matchedPartnerPosition;
+    }
+
     return positions.find((position) => {
-        const id = String(position.id || '').trim();
-        return [
-            id,
-            getPositionSiteKey(id),
-            position.name
-        ].some((candidate) => normalizePositionKey(candidate) === key);
+        return matchesMenuPosition(position.id, position.name, value);
     });
 };
 
@@ -123,13 +134,14 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const [userManuallyChangedSite, setUserManuallyChangedSite] = useState(() => {
         return localStorage.getItem('cy_site_manual') === 'true';
     });
+    const [userManuallyChangedPosition, setUserManuallyChangedPosition] = useState(() => {
+        return localStorage.getItem('cy_position_manual') === 'true';
+    });
     const [activeMenuItems, setActiveMenuItems] = useState<{ [key: string]: boolean }>({});
     const [activeNestedMenuItems, setActiveNestedMenuItems] = useState<{ [key: string]: boolean }>({});
     const [isAdmin, setIsAdmin] = useState(false);
     const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
-    const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-        return localStorage.getItem('cy-cheongyeon-theme') !== 'light';
-    });
+    const [isDarkMode, setIsDarkMode] = useState<boolean>(() => getStoredDarkModePreference(localStorage, true));
 
     // Dynamic Menu State
     const [siteData, setSiteData] = useState<SiteDataType | null>(null);
@@ -167,13 +179,17 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         };
     }, []);
 
-    // Update MessageManager context on route change or user change
+    // Update MessageManager context only when the routed page changes.
     useEffect(() => {
         MessageManager.setContext({
             uid: currentUser?.uid,
             page: location.pathname
         });
-    }, [currentUser, location]);
+    }, [currentUser?.uid, location.pathname]);
+
+    useEffect(() => {
+        applyDocumentTheme(isDarkMode);
+    }, [isDarkMode]);
 
     useEffect(() => {
         const handleResize = () => {
@@ -285,6 +301,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     }>({});
 
     useEffect(() => {
+        if (isDevAdminSessionEnabled()) return;
+
         const setupConfigListener = async () => {
             const { db } = await import('../../config/firebase');
             const { doc, onSnapshot } = await import('firebase/firestore');
@@ -418,7 +436,13 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     );
 
     useEffect(() => {
-        if (!currentUser?.uid || !siteData || positions.length === 0) return;
+        if (
+            !currentUser?.uid
+            || !siteData
+            || positions.length === 0
+            || userManuallyChangedSite
+            || userManuallyChangedPosition
+        ) return;
 
         let cancelled = false;
 
@@ -460,7 +484,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         return () => {
             cancelled = true;
         };
-    }, [currentUser?.uid, siteData, positions]);
+    }, [currentUser?.uid, siteData, positions, userManuallyChangedSite, userManuallyChangedPosition]);
 
     // Fallback if no config (shouldn't happen due to auto-migration, but safe fallback)
     // We don't need a hardcoded fallback here if we trust the service migration.
@@ -556,7 +580,13 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
     const changeSite = (siteKey: string) => {
         setCurrentSite(siteKey);
+        setCurrentPosition('full');
         setActiveMenuItems({});
+        // Site mode and position mode are mutually exclusive. A previously
+        // selected position must not override the selected site's sidebar.
+        localStorage.setItem('cy_current_position', 'full');
+        setUserManuallyChangedPosition(false);
+        localStorage.removeItem('cy_position_manual');
         // 사용자가 수동으로 사이트를 변경했음을 기록
         setUserManuallyChangedSite(true);
         localStorage.setItem('cy_current_site', siteKey);
@@ -577,6 +607,25 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         setCurrentPosition(positionId);
         setActiveMenuItems({});
         localStorage.setItem('cy_current_position', positionId);
+        setUserManuallyChangedPosition(true);
+        localStorage.setItem('cy_position_manual', 'true');
+
+        // A position chosen from the preview panel is an explicit user choice.
+        // Keep it ahead of the profile-based automatic position resolver.
+        setUserManuallyChangedSite(false);
+        localStorage.removeItem('cy_site_manual');
+
+        // Site mode and position mode are mutually exclusive. Position preview
+        // always reads the corresponding pos_* configuration under admin.
+        if (currentSite !== 'admin') {
+            setCurrentSite('admin');
+            localStorage.setItem('cy_current_site', 'admin');
+
+            if (location.pathname === '/dashboard2' || location.pathname === '/dashboard3') {
+                navigateSync('/dashboard');
+            }
+        }
+
         console.log('Position changed to:', positionId);
     };
 
@@ -585,7 +634,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const toggleDarkMode = () => {
         setIsDarkMode(prev => {
             const next = !prev;
-            localStorage.setItem('cy-cheongyeon-theme', next ? 'dark' : 'light');
+            persistDarkModePreference(next, localStorage);
             return next;
         });
     };
@@ -625,9 +674,13 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         toggleDarkMode
     };
     const isMemoFullBleedPage = location.pathname === '/memos';
+    const isWorkbookLedgerFullBleedPage = [
+        '/payroll/workbook-ledger',
+        '/payroll/workbook-ledger-dawon',
+    ].includes(location.pathname);
     const mainContentClassName = [
         location.pathname === siteModeDashboardPath ? 'cheongyeon-main' : '',
-        isMemoFullBleedPage ? 'page-full-bleed' : ''
+        isMemoFullBleedPage || isWorkbookLedgerFullBleedPage ? 'page-full-bleed' : ''
     ].filter(Boolean).join(' ');
 
     if (!siteData) {
@@ -719,7 +772,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                         <ErrorBoundary
                             FallbackComponent={ErrorFallback}
                             onReset={() => window.location.reload()}
-                            resetKeys={[location.pathname, location.search]}
+                            resetKeys={[location.pathname]}
                         >
                             {children}
                         </ErrorBoundary>
@@ -800,7 +853,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                     <ErrorBoundary
                         FallbackComponent={ErrorFallback}
                         onReset={() => window.location.reload()}
-                        resetKeys={[location.pathname, location.search]}
+                        resetKeys={[location.pathname]}
                     >
                         {children}
                     </ErrorBoundary>

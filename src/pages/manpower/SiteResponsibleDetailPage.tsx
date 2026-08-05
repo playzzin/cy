@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+    ArrowLeft,
     Banknote,
     BriefcaseBusiness,
     Building2,
@@ -13,7 +14,9 @@ import {
     RefreshCw,
     Search,
     ShieldCheck,
+    SlidersHorizontal,
     Users,
+    X,
 } from 'lucide-react';
 
 import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyReportService';
@@ -32,6 +35,7 @@ import './SiteResponsibleDetailPage.css';
 
 type SiteStatusFilter = 'all' | 'active' | 'completed' | 'planned';
 type DetailView = 'siteInfo' | 'payslip' | 'dailyReport';
+type MobileView = 'sites' | 'detail';
 
 interface ResponsibleGroup {
     key: string;
@@ -277,6 +281,8 @@ const SiteResponsibleDetailPage: React.FC = () => {
     const [statusFilter, setStatusFilter] = useState<SiteStatusFilter>('active');
     const [searchQuery, setSearchQuery] = useState('');
     const [detailView, setDetailView] = useState<DetailView>('siteInfo');
+    const [mobileView, setMobileView] = useState<MobileView>('sites');
+    const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
     const [isResponsiblePickerOpen, setIsResponsiblePickerOpen] = useState(false);
     const [loadingMaster, setLoadingMaster] = useState(true);
     const [loadingOutput, setLoadingOutput] = useState(false);
@@ -703,7 +709,13 @@ const SiteResponsibleDetailPage: React.FC = () => {
 
     const handleResponsibleSelect = (key: string) => {
         setSelectedResponsibleKey(key);
+        setMobileView('sites');
         setIsResponsiblePickerOpen(false);
+    };
+
+    const handleSiteSelect = (siteKey: string) => {
+        setSelectedSiteKey(siteKey);
+        setMobileView('detail');
     };
 
     const handleRefresh = async () => {
@@ -796,7 +808,35 @@ const SiteResponsibleDetailPage: React.FC = () => {
                 </div>
             </header>
 
-            <section className="tw-toolbar">
+            <section className="sr-mobile-filter-bar" aria-label="현장 빠른 검색">
+                <label className="sr-mobile-search">
+                    <Search size={19} />
+                    <input
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        placeholder="현장명, 주소, 담당, 업체 검색"
+                        aria-label="현장 빠른 검색"
+                    />
+                    {searchQuery && (
+                        <button type="button" onClick={() => setSearchQuery('')} aria-label="검색어 지우기">
+                            <X size={17} />
+                        </button>
+                    )}
+                </label>
+                <button
+                    type="button"
+                    className={isMobileFilterOpen ? 'sr-mobile-filter-button sr-mobile-filter-button--active' : 'sr-mobile-filter-button'}
+                    onClick={() => setIsMobileFilterOpen(prev => !prev)}
+                    aria-expanded={isMobileFilterOpen}
+                    aria-controls="site-responsible-filter-controls"
+                >
+                    <SlidersHorizontal size={18} />
+                    <span>필터</span>
+                    <small>{statusFilter === 'active' ? '진행' : statusFilter === 'planned' ? '예정' : statusFilter === 'completed' ? '완료' : '전체'}</small>
+                </button>
+            </section>
+
+            <section id="site-responsible-filter-controls" className={isMobileFilterOpen ? 'tw-toolbar sr-toolbar--mobile-expanded' : 'tw-toolbar'}>
                 <label className="tw-control">
                     <span>조회월</span>
                     <input
@@ -860,7 +900,29 @@ const SiteResponsibleDetailPage: React.FC = () => {
                 </div>
             </section>
 
-            <main className="tw-workspace">
+            <div className="sr-mobile-switch" role="tablist" aria-label="모바일 현장 선택 안내">
+                <button
+                    type="button"
+                    className={mobileView === 'sites' ? 'sr-mobile-switch__button sr-mobile-switch__button--active' : 'sr-mobile-switch__button'}
+                    onClick={() => setMobileView('sites')}
+                    role="tab"
+                    aria-selected={mobileView === 'sites'}
+                >
+                    현장 목록 ({selectedResponsibleSites.length.toLocaleString('ko-KR')})
+                </button>
+                <button
+                    type="button"
+                    className={mobileView === 'detail' ? 'sr-mobile-switch__button sr-mobile-switch__button--active' : 'sr-mobile-switch__button'}
+                    onClick={() => setMobileView('detail')}
+                    role="tab"
+                    aria-selected={mobileView === 'detail'}
+                    disabled={!selectedSite}
+                >
+                    {selectedSite ? `${selectedSite.name} 상세` : '현장 선택'}
+                </button>
+            </div>
+
+            <main className={`tw-workspace sr-workspace sr-workspace--${mobileView}`}>
                 <section className="tw-worker-panel">
                     <div className="tw-panel-heading">
                         <div>
@@ -917,7 +979,8 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                         key={siteKey || site.name}
                                         type="button"
                                         className={selected ? 'tw-worker-item tw-worker-item--active sr-site-item' : 'tw-worker-item sr-site-item'}
-                                        onClick={() => setSelectedSiteKey(siteKey)}
+                                        onClick={() => handleSiteSelect(siteKey)}
+                                        aria-pressed={selected}
                                     >
                                         <span className="tw-avatar" style={{ background: color }}>{String(site.name ?? '?').slice(0, 1)}</span>
                                         <span className="tw-worker-item__main">
@@ -925,6 +988,9 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                             <small>{site.responsibleTeamName || '담당 미지정'} · {asText(site.siteType)}</small>
                                         </span>
                                         <span className="tw-worker-item__badges">
+                                            <span className={`sr-site-status sr-site-status--${statusLabel(site)}`}>
+                                                {statusLabel(site)}
+                                            </span>
                                             <small>{formatManDay(stats.totalManDay)}</small>
                                             <small>{formatCurrency(stats.totalAmount)}</small>
                                         </span>
@@ -936,6 +1002,9 @@ const SiteResponsibleDetailPage: React.FC = () => {
                 </section>
 
                 <section className="tw-detail-panel">
+                    <button type="button" className="sr-mobile-back" onClick={() => setMobileView('sites')}>
+                        <ArrowLeft size={17} /> 현장 목록으로
+                    </button>
                     {!selectedSite ? (
                         <div className="tw-empty-detail">
                             <Building2 size={44} />

@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { useForm } from "@refinedev/react-hook-form";
 import { useList, useOne } from "@refinedev/core";
 import styled from "styled-components";

@@ -52,6 +52,8 @@ export interface ReceivablePayment {
 
     // Manual specific
     memo?: string;
+    createdBy?: string;
+    createdByName?: string;
 }
 
 const toMillis = (value: unknown): number => {
@@ -61,6 +63,11 @@ const toMillis = (value: unknown): number => {
         if (typeof seconds === 'number') return seconds * 1000;
     }
     return 0;
+};
+
+const normalizeOptionalText = (value: unknown): string | undefined => {
+    const text = String(value ?? '').trim();
+    return text || undefined;
 };
 
 export const receivableService = {
@@ -127,6 +134,11 @@ export const receivableService = {
      * Add a payment and update the ledger
      */
     async addPayment(receivableId: string, payment: Omit<ReceivablePayment, 'id' | 'createdAt'>) {
+        const paymentAmount = Number(payment.amount ?? 0);
+        if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+            throw new Error("Payment amount must be greater than zero");
+        }
+
         await runTransaction(db, async (transaction) => {
             const ledgerRef = doc(db, RECEIVABLE_COLLECTION, receivableId);
             const ledgerSnap = await transaction.get(ledgerRef);
@@ -136,8 +148,10 @@ export const receivableService = {
             }
 
             const ledger = ledgerSnap.data() as ReceivableLedger;
-            const newTotalPaid = ledger.totalPaidAmount + payment.amount;
-            const newOutstanding = ledger.invoiceData.totalAmount - newTotalPaid;
+            const totalPaidAmount = Number(ledger.totalPaidAmount ?? 0);
+            const totalAmount = Number(ledger.invoiceData?.totalAmount ?? 0);
+            const newTotalPaid = totalPaidAmount + paymentAmount;
+            const newOutstanding = totalAmount - newTotalPaid;
 
             let newStatus: ReceivableLedger['status'] = '미수';
             if (newOutstanding === 0) newStatus = '완납';
@@ -146,12 +160,25 @@ export const receivableService = {
 
             // Create Payment Doc
             const paymentRef = doc(collection(db, PAYMENT_COLLECTION));
-            transaction.set(paymentRef, {
+            const paymentPayload: Record<string, unknown> = {
                 ...payment,
+                amount: paymentAmount,
                 id: paymentRef.id,
                 receivableId,
                 createdAt: serverTimestamp()
+            };
+
+            const optionalTextFields = ['memo', 'bankTxId', 'bankSender', 'createdBy', 'createdByName'];
+            optionalTextFields.forEach((field) => {
+                const value = normalizeOptionalText(paymentPayload[field]);
+                if (value) {
+                    paymentPayload[field] = value;
+                } else {
+                    delete paymentPayload[field];
+                }
             });
+
+            transaction.set(paymentRef, paymentPayload);
 
             // Update Ledger
             transaction.update(ledgerRef, {

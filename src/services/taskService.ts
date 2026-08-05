@@ -1,32 +1,28 @@
 import { db } from '../config/firebase';
-import { collection, addDoc, updateDoc, deleteDoc, doc, getDocs, getDoc, query, where, orderBy, onSnapshot, Unsubscribe } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc, where, orderBy, limit as queryLimit, Unsubscribe } from 'firebase/firestore';
 import { Task, TaskComment } from '../types/task';
+import { createCollectionRepository } from './firestoreRepository';
 
 const COLLECTION_NAME = 'tasks';
+const taskRepository = createCollectionRepository<Task>({ collectionName: COLLECTION_NAME });
 
 export const taskService = {
     // Get single task
     async getTask(taskId: string): Promise<Task | null> {
-        const taskRef = doc(db, COLLECTION_NAME, taskId);
-        const taskSnap = await getDoc(taskRef);
-        return taskSnap.exists() ? ({ id: taskSnap.id, ...taskSnap.data() } as Task) : null;
+        return taskRepository.getById(taskId);
     },
 
     // Get all tasks
     async getTasks(): Promise<Task[]> {
-        const snapshot = await getDocs(collection(db, COLLECTION_NAME));
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
+        return taskRepository.list([], { cacheKey: 'all' });
     },
 
     // Get tasks by assignee
     async getTasksByAssignee(assignee: string): Promise<Task[]> {
-        const q = query(
-            collection(db, COLLECTION_NAME),
+        return taskRepository.list([
             where('assignee', '==', assignee),
             orderBy('createdAt', 'desc')
-        );
-        const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
+        ], { cacheKey: `assignee:${assignee}` });
     },
 
     // Add new task
@@ -35,6 +31,7 @@ export const taskService = {
             ...task,
             createdAt: task.createdAt || new Date().toISOString().split('T')[0]
         });
+        taskRepository.clearCache();
         return docRef.id;
     },
 
@@ -42,12 +39,14 @@ export const taskService = {
     async updateTask(taskId: string, updates: Partial<Task>): Promise<void> {
         const taskRef = doc(db, COLLECTION_NAME, taskId);
         await updateDoc(taskRef, updates);
+        taskRepository.clearCache();
     },
 
     // Delete task
     async deleteTask(taskId: string): Promise<void> {
         const taskRef = doc(db, COLLECTION_NAME, taskId);
         await deleteDoc(taskRef);
+        taskRepository.clearCache();
     },
 
     // Add comment to task
@@ -62,14 +61,19 @@ export const taskService = {
                 id: Date.now()
             });
             await updateDoc(taskRef, { comments });
+            taskRepository.clearCache();
         }
     },
 
     // Subscribe to real-time updates
     subscribe(callback: (tasks: Task[]) => void): Unsubscribe {
-        return onSnapshot(collection(db, COLLECTION_NAME), (snapshot) => {
-            const tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
-            callback(tasks);
-        });
+        return taskRepository.subscribe(callback);
+    },
+
+    subscribeRecent(callback: (tasks: Task[]) => void, limitCount = 5): Unsubscribe {
+        return taskRepository.subscribe(callback, [
+            orderBy('createdAt', 'desc'),
+            queryLimit(limitCount)
+        ]);
     }
 };

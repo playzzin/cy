@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faHistory, faFilter, faSearch, faSync, faChevronDown, faChevronRight, faUser, faTag, faInfoCircle } from '@fortawesome/free-solid-svg-icons';
+import { faHistory, faFilter, faSync, faChevronDown, faChevronRight, faInfoCircle } from '@fortawesome/free-solid-svg-icons';
 import { auditService, AuditLog } from '../../services/auditService';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';

@@ -11,7 +11,6 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faRobot,
     faPlus,
-    faTrash,
     faPlay,
     faStop,
     faSyncAlt,
@@ -32,7 +31,6 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import {
     AGENT_NAMES,
-    AGENT_CATEGORIES,
     type AgentId
 } from '../../services/agentExecutionService';
 import {

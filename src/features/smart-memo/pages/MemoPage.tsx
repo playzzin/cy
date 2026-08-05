@@ -12,11 +12,16 @@ import {
     writeBatch
 } from 'firebase/firestore';
 import {
+    ChevronDown as LucideChevronDown,
     Check as LucideCheck,
     CheckSquare as LucideCheckSquare,
     Clock3 as LucideClock3,
+    Copy as LucideCopy,
     FileText as LucideFileText,
     FolderPlus as LucideFolderPlus,
+    List as LucideList,
+    Maximize2 as LucideMaximize2,
+    Minimize2 as LucideMinimize2,
     MoveRight as LucideMoveRight,
     Pencil as LucidePencil,
     Plus as LucidePlus,
@@ -31,11 +36,28 @@ import { useAuth } from '../../../contexts/AuthContext';
 
 const MEMO_COLLECTION = 'smart_memos';
 const CATEGORY_COLLECTION = 'smart_memo_categories';
-const CATEGORY_COLORS = ['#dc2626', '#f97316', '#facc15', '#2563eb', '#1e3a8a', '#7c3aed'];
+const AUTO_SAVE_DELAY_MS = 650;
+const CATEGORY_COLORS = ['#dc2626', '#f97316', '#facc15', '#16a34a', '#2563eb', '#1e3a8a', '#7c3aed', '#64748b'];
+const LEGACY_CATEGORY_COLORS: Record<string, string> = {
+    red: '#dc2626',
+    orange: '#f97316',
+    yellow: '#facc15',
+    green: '#16a34a',
+    blue: '#2563eb',
+    navy: '#1e3a8a',
+    purple: '#7c3aed',
+    gray: '#64748b',
+    grey: '#64748b',
+    white: '#94a3b8'
+};
 const BATCH_WRITE_SIZE = 450;
+const LOCAL_MEMO_STORAGE_KEY = 'cy-smart-memo-dev-admin-memos';
+const LOCAL_CATEGORY_STORAGE_KEY = 'cy-smart-memo-dev-admin-categories';
 
 type MemoType = 'text' | 'checklist';
 type MemoViewMode = 'split' | 'sticky';
+type MobilePane = 'list' | 'editor';
+type AutoSaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
 type ChecklistCommentRecord = {
     id: string;
@@ -66,7 +88,7 @@ type CategoryRecord = {
     id: string;
     name: string;
     order: number;
-    color?: string;
+    color: string;
 };
 
 type TimestampLike = {
@@ -86,9 +108,14 @@ const iconOrFallback = (Icon: IconComponent | undefined): IconComponent => Icon 
 
 const Check = iconOrFallback(LucideCheck);
 const CheckSquare = iconOrFallback(LucideCheckSquare);
+const ChevronDown = iconOrFallback(LucideChevronDown);
 const Clock3 = iconOrFallback(LucideClock3);
+const Copy = iconOrFallback(LucideCopy);
 const FileText = iconOrFallback(LucideFileText);
 const FolderPlus = iconOrFallback(LucideFolderPlus);
+const List = iconOrFallback(LucideList);
+const Maximize2 = iconOrFallback(LucideMaximize2);
+const Minimize2 = iconOrFallback(LucideMinimize2);
 const MoveRight = iconOrFallback(LucideMoveRight);
 const Pencil = iconOrFallback(LucidePencil);
 const Plus = iconOrFallback(LucidePlus);
@@ -249,12 +276,34 @@ const normalizeMemo = (id: string, data: Record<string, unknown>): MemoRecord =>
     };
 };
 
-const normalizeCategory = (id: string, data: Record<string, unknown>, fallbackOrder: number): CategoryRecord => ({
-    id,
-    name: typeof data.name === 'string' && data.name.trim() ? data.name.trim() : '새 카테고리',
-    order: typeof data.order === 'number' ? data.order : fallbackOrder,
-    color: typeof data.color === 'string' ? data.color : CATEGORY_COLORS[fallbackOrder % CATEGORY_COLORS.length]
-});
+const normalizeCategoryColor = (value: unknown, fallback: string) => {
+    if (typeof value !== 'string') return fallback;
+
+    const normalized = value.trim().toLowerCase();
+    const legacyColor = LEGACY_CATEGORY_COLORS[normalized];
+    if (legacyColor) return legacyColor;
+
+    const shortHexMatch = /^#([0-9a-f]{3})$/i.exec(normalized);
+    if (shortHexMatch) {
+        return `#${shortHexMatch[1]
+            .split('')
+            .map(character => `${character}${character}`)
+            .join('')}`;
+    }
+
+    return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized : fallback;
+};
+
+const normalizeCategory = (id: string, data: Record<string, unknown>, fallbackOrder: number): CategoryRecord => {
+    const fallbackColor = CATEGORY_COLORS[fallbackOrder % CATEGORY_COLORS.length];
+
+    return {
+        id,
+        name: typeof data.name === 'string' && data.name.trim() ? data.name.trim() : '새 카테고리',
+        order: typeof data.order === 'number' ? data.order : fallbackOrder,
+        color: normalizeCategoryColor(data.color, fallbackColor)
+    };
+};
 
 const sortMemos = (items: MemoRecord[]) => {
     return [...items].sort((a, b) => {
@@ -270,6 +319,45 @@ const sortMemos = (items: MemoRecord[]) => {
 
 const composeMemoText = (title: string, content: string) => {
     return content ? `${title}\n${content}` : title;
+};
+
+const getMemoClipboardText = (memo: MemoRecord) => {
+    const content = memo.type === 'checklist'
+        ? checklistItemsToText(memo.checklistItems)
+        : memo.content;
+
+    return composeMemoText(memo.title, content).trim();
+};
+
+const writeTextToClipboard = async (text: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return;
+        } catch (error) {
+            console.warn('Clipboard API copy failed. Falling back to a legacy copy method.', error);
+        }
+    }
+
+    if (typeof document === 'undefined') {
+        throw new Error('Clipboard is unavailable.');
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    try {
+        if (!document.execCommand('copy')) {
+            throw new Error('Legacy clipboard copy failed.');
+        }
+    } finally {
+        document.body.removeChild(textarea);
+    }
 };
 
 const normalizeMemoTitle = (value: string) => value.trim() || '제목 없음';
@@ -304,8 +392,61 @@ const buildAccentTheme = (color: string) => ({
     strong: color
 });
 
+const readLocalArray = (key: string): unknown[] => {
+    if (typeof window === 'undefined') return [];
+
+    try {
+        const value = window.localStorage.getItem(key);
+        if (!value) return [];
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+        console.warn(`Failed to read local memo storage: ${key}`, error);
+        return [];
+    }
+};
+
+const writeLocalArray = (key: string, value: unknown[]) => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(key, JSON.stringify(value));
+};
+
+const readLocalMemos = () => {
+    const rows = readLocalArray(LOCAL_MEMO_STORAGE_KEY);
+
+    return sortMemos(rows.map((row, index) => {
+        const record = row && typeof row === 'object' ? row as Record<string, unknown> : {};
+        const id = typeof record.id === 'string' && record.id ? record.id : `local-memo-${index}-${generateChecklistItemId()}`;
+        return normalizeMemo(id, record);
+    }));
+};
+
+const writeLocalMemos = (items: MemoRecord[]) => {
+    writeLocalArray(LOCAL_MEMO_STORAGE_KEY, sortMemos(items));
+};
+
+const readLocalCategories = () => {
+    const rows = readLocalArray(LOCAL_CATEGORY_STORAGE_KEY);
+
+    return rows
+        .map((row, index) => {
+            const record = row && typeof row === 'object' ? row as Record<string, unknown> : {};
+            const id = typeof record.id === 'string' && record.id ? record.id : `local-category-${index}-${generateChecklistItemId()}`;
+            return normalizeCategory(id, record, index);
+        })
+        .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, 'ko-KR'));
+};
+
+const writeLocalCategories = (items: CategoryRecord[]) => {
+    writeLocalArray(
+        LOCAL_CATEGORY_STORAGE_KEY,
+        [...items].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, 'ko-KR'))
+    );
+};
+
 export function MemoPage() {
     const { currentUser } = useAuth();
+    const isLocalMemoMode = currentUser?.uid === 'dev-admin';
 
     const [memos, setMemos] = useState<MemoRecord[]>([]);
     const [categories, setCategories] = useState<CategoryRecord[]>([]);
@@ -314,6 +455,7 @@ export function MemoPage() {
     const [checkedMemoIds, setCheckedMemoIds] = useState<string[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [viewMode, setViewMode] = useState<MemoViewMode>('split');
+    const [mobilePane, setMobilePane] = useState<MobilePane>('list');
     const [moveTargetCategoryId, setMoveTargetCategoryId] = useState('uncategorized');
     const [draftText, setDraftText] = useState('');
     const [draftMemoType, setDraftMemoType] = useState<MemoType>('text');
@@ -327,11 +469,22 @@ export function MemoPage() {
     const [editingCategoryColor, setEditingCategoryColor] = useState(CATEGORY_COLORS[0]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
+    const [autoSaveState, setAutoSaveState] = useState<AutoSaveState>('idle');
+    const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
+    const [isCategoryComposerOpen, setIsCategoryComposerOpen] = useState(false);
+    const [expandedStickyMemoId, setExpandedStickyMemoId] = useState<string | null>(null);
+    const [stickyExpansionLevel, setStickyExpansionLevel] = useState<0 | 1 | 2>(0);
     const [statusMessage, setStatusMessage] = useState('');
     const [errorMessage, setErrorMessage] = useState('');
 
     const editorRef = useRef<HTMLElement | null>(null);
     const statusTimerRef = useRef<number | null>(null);
+    const autoSaveTimerRef = useRef<number | null>(null);
+    const savingUnlockTimerRef = useRef<number | null>(null);
+    const savingLockRef = useRef(false);
+    const draftSourceMemoIdRef = useRef<string | null>(null);
+    const hasDraftChangesRef = useRef(false);
+    const saveMemoRef = useRef<(mode?: 'manual' | 'auto') => Promise<boolean>>(async () => false);
 
     useEffect(() => {
         if (!currentUser?.uid) {
@@ -345,6 +498,13 @@ export function MemoPage() {
 
         setIsLoading(true);
         setErrorMessage('');
+
+        if (isLocalMemoMode) {
+            setCategories(readLocalCategories());
+            setMemos(readLocalMemos());
+            setIsLoading(false);
+            return;
+        }
 
         const categoryQuery = query(
             collection(db, CATEGORY_COLLECTION),
@@ -388,12 +548,18 @@ export function MemoPage() {
             unsubscribeCategories();
             unsubscribeMemos();
         };
-    }, [currentUser?.uid]);
+    }, [currentUser?.uid, isLocalMemoMode]);
 
     useEffect(() => {
         return () => {
             if (statusTimerRef.current !== null) {
                 window.clearTimeout(statusTimerRef.current);
+            }
+            if (autoSaveTimerRef.current !== null) {
+                window.clearTimeout(autoSaveTimerRef.current);
+            }
+            if (savingUnlockTimerRef.current !== null) {
+                window.clearTimeout(savingUnlockTimerRef.current);
             }
         };
     }, []);
@@ -414,18 +580,14 @@ export function MemoPage() {
 
     const categoryCounts = useMemo(() => {
         const counts = new Map<string, number>();
-        let uncategorized = 0;
 
         memos.forEach(memo => {
-            if (!memo.categoryId) {
-                uncategorized += 1;
-                return;
-            }
+            if (!memo.categoryId) return;
 
             counts.set(memo.categoryId, (counts.get(memo.categoryId) ?? 0) + 1);
         });
 
-        return { counts, uncategorized };
+        return counts;
     }, [memos]);
 
     const filteredMemos = useMemo(() => {
@@ -434,7 +596,6 @@ export function MemoPage() {
         return memos.filter(memo => {
             const matchesCategory =
                 selectedCategoryId === 'all' ||
-                (selectedCategoryId === 'uncategorized' && !memo.categoryId) ||
                 memo.categoryId === selectedCategoryId;
 
             if (!matchesCategory) return false;
@@ -462,10 +623,8 @@ export function MemoPage() {
 
     const selectedCategoryLabel =
         selectedCategoryId === 'all'
-            ? '전체 메모'
-            : selectedCategoryId === 'uncategorized'
-                ? '분류 없음'
-                : categoryNameById[selectedCategoryId] ?? '카테고리';
+            ? '전체보기'
+            : categoryNameById[selectedCategoryId] ?? '카테고리';
 
     useEffect(() => {
         const liveMemoIds = new Set(memos.map(memo => memo.id));
@@ -481,26 +640,16 @@ export function MemoPage() {
 
         setSelectedMemoId(previous => {
             if (previous && filteredIdSet.has(previous)) return previous;
+            if (
+                previous &&
+                draftSourceMemoIdRef.current === previous &&
+                hasDraftChangesRef.current
+            ) {
+                return previous;
+            }
             return filteredMemoIds[0] ?? null;
         });
-    }, [filteredMemoIds]);
-
-    useEffect(() => {
-        if (!selectedMemo) {
-            setDraftText('');
-            setDraftMemoType('text');
-            setDraftTitle('');
-            setDraftChecklistItems([]);
-            setDraftCategoryId('');
-            return;
-        }
-
-        setDraftText(composeMemoText(selectedMemo.title, selectedMemo.content));
-        setDraftMemoType(selectedMemo.type);
-        setDraftTitle(selectedMemo.title);
-        setDraftChecklistItems(selectedMemo.checklistItems);
-        setDraftCategoryId(selectedMemo.categoryId ?? '');
-    }, [selectedMemo]);
+    }, [autoSaveState, filteredMemoIds]);
 
     const parsedDraft = useMemo(() => parseMemoText(draftText), [draftText]);
     const draftTextParts = useMemo(() => {
@@ -512,15 +661,88 @@ export function MemoPage() {
         };
     }, [draftText]);
 
-    const hasDraftChanges = Boolean(
-        selectedMemo &&
-        (draftMemoType !== selectedMemo.type ||
-            draftCategoryId !== (selectedMemo.categoryId ?? '') ||
-            (draftMemoType === 'text'
-                ? parsedDraft.title !== selectedMemo.title || parsedDraft.content !== selectedMemo.content
-                : normalizeMemoTitle(draftTitle) !== selectedMemo.title ||
-                    !checklistItemsEqual(draftChecklistItems, selectedMemo.checklistItems)))
-    );
+    const draftMemoClipboardText = useMemo(() => {
+        const title = draftMemoType === 'checklist' ? draftTitle : draftTextParts.title;
+        const content = draftMemoType === 'checklist'
+            ? checklistItemsToText(draftChecklistItems)
+            : draftTextParts.content;
+
+        return composeMemoText(title, content).trim();
+    }, [draftChecklistItems, draftMemoType, draftTextParts.content, draftTextParts.title, draftTitle]);
+
+    const isDraftDirtyForMemo = useCallback((memo: MemoRecord) => (
+        draftMemoType !== memo.type ||
+        draftCategoryId !== (memo.categoryId ?? '') ||
+        (draftMemoType === 'text'
+            ? parsedDraft.title !== memo.title || parsedDraft.content !== memo.content
+            : normalizeMemoTitle(draftTitle) !== memo.title ||
+                !checklistItemsEqual(draftChecklistItems, memo.checklistItems))
+    ), [draftCategoryId, draftChecklistItems, draftMemoType, draftTitle, parsedDraft.content, parsedDraft.title]);
+
+    const hasDraftChanges = Boolean(selectedMemo && isDraftDirtyForMemo(selectedMemo));
+    hasDraftChangesRef.current = hasDraftChanges;
+
+
+    useEffect(() => {
+        if (!selectedMemo) {
+            draftSourceMemoIdRef.current = null;
+            setDraftText(previous => previous === '' ? previous : '');
+            setDraftMemoType(previous => previous === 'text' ? previous : 'text');
+            setDraftTitle(previous => previous === '' ? previous : '');
+            setDraftChecklistItems(previous => previous.length === 0 ? previous : []);
+            setDraftCategoryId(previous => previous === '' ? previous : '');
+            return;
+        }
+
+        const isSameMemo = draftSourceMemoIdRef.current === selectedMemo.id;
+        if (isSameMemo && isDraftDirtyForMemo(selectedMemo)) {
+            return;
+        }
+
+        draftSourceMemoIdRef.current = selectedMemo.id;
+        setDraftText(composeMemoText(selectedMemo.title, selectedMemo.content));
+        setDraftMemoType(selectedMemo.type);
+        setDraftTitle(selectedMemo.title);
+        setDraftChecklistItems(selectedMemo.checklistItems);
+        setDraftCategoryId(selectedMemo.categoryId ?? '');
+    }, [isDraftDirtyForMemo, selectedMemo]);
+
+    const beginSaving = useCallback(() => {
+        if (savingLockRef.current) return false;
+        savingLockRef.current = true;
+        if (savingUnlockTimerRef.current !== null) {
+            window.clearTimeout(savingUnlockTimerRef.current);
+            savingUnlockTimerRef.current = null;
+        }
+        setIsSaving(true);
+        return true;
+    }, []);
+
+    const finishSaving = useCallback(() => {
+        if (savingUnlockTimerRef.current !== null) {
+            window.clearTimeout(savingUnlockTimerRef.current);
+        }
+        savingUnlockTimerRef.current = window.setTimeout(() => {
+            savingLockRef.current = false;
+            savingUnlockTimerRef.current = null;
+            setIsSaving(false);
+        }, 180);
+    }, []);
+
+    const updateLocalMemos = useCallback((updater: (items: MemoRecord[]) => MemoRecord[]) => {
+        const nextMemos = sortMemos(updater(readLocalMemos()));
+        writeLocalMemos(nextMemos);
+        setMemos(nextMemos);
+        return nextMemos;
+    }, []);
+
+    const updateLocalCategories = useCallback((updater: (items: CategoryRecord[]) => CategoryRecord[]) => {
+        const nextCategories = updater(readLocalCategories())
+            .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, 'ko-KR'));
+        writeLocalCategories(nextCategories);
+        setCategories(nextCategories);
+        return nextCategories;
+    }, []);
 
     const showStatus = useCallback((message: string) => {
         setStatusMessage(message);
@@ -540,17 +762,31 @@ export function MemoPage() {
     };
 
     const getCategoryColor = (categoryId: string | null) => {
-        return categoryId ? categoryById[categoryId]?.color ?? '#64748b' : '#94a3b8';
+        return categoryId
+            ? normalizeCategoryColor(categoryById[categoryId]?.color, '#64748b')
+            : '#94a3b8';
     };
 
     const activeListCategoryColor =
-        selectedCategoryId !== 'all' && selectedCategoryId !== 'uncategorized'
+        selectedCategoryId !== 'all'
             ? getCategoryColor(selectedCategoryId)
             : selectedMemo
                 ? getCategoryColor(selectedMemo.categoryId)
                 : '#f97316';
     const listAccentTheme = buildAccentTheme(activeListCategoryColor);
     const draftAccentTheme = buildAccentTheme(getCategoryColor(draftCategoryId || null));
+    const autoSaveLabel = autoSaveState === 'saving'
+        ? '저장 중…'
+        : autoSaveState === 'pending'
+            ? '자동 저장 대기'
+            : autoSaveState === 'error'
+                ? '저장 실패'
+                : '저장됨';
+    const autoSaveTone = autoSaveState === 'error'
+        ? 'text-red-700'
+        : autoSaveState === 'pending' || autoSaveState === 'saving'
+            ? 'text-amber-700'
+            : 'text-emerald-700';
 
     const renderStickyMemoBody = (memo: MemoRecord) => {
         if (memo.type === 'checklist') {
@@ -589,22 +825,33 @@ export function MemoPage() {
 
     const deleteMemosByIds = async (memoIds: string[], successMessage: string) => {
         if (memoIds.length === 0) return;
+        if (!beginSaving()) return;
 
-        setIsSaving(true);
         setErrorMessage('');
 
         try {
-            for (let index = 0; index < memoIds.length; index += BATCH_WRITE_SIZE) {
-                const batch = writeBatch(db);
-                memoIds.slice(index, index + BATCH_WRITE_SIZE).forEach(memoId => {
-                    batch.delete(doc(db, MEMO_COLLECTION, memoId));
-                });
-                await batch.commit();
+            if (isLocalMemoMode) {
+                const memoIdSet = new Set(memoIds);
+                updateLocalMemos(items => items.filter(memo => !memoIdSet.has(memo.id)));
+            } else {
+                for (let index = 0; index < memoIds.length; index += BATCH_WRITE_SIZE) {
+                    const batch = writeBatch(db);
+                    memoIds.slice(index, index + BATCH_WRITE_SIZE).forEach(memoId => {
+                        batch.delete(doc(db, MEMO_COLLECTION, memoId));
+                    });
+                    await batch.commit();
+                }
             }
 
             setCheckedMemoIds(previous => previous.filter(id => !memoIds.includes(id)));
             if (selectedMemoId && memoIds.includes(selectedMemoId)) {
                 setSelectedMemoId(null);
+                setMobilePane('list');
+                setAutoSaveState('idle');
+            }
+            if (expandedStickyMemoId && memoIds.includes(expandedStickyMemoId)) {
+                setExpandedStickyMemoId(null);
+                setStickyExpansionLevel(0);
             }
 
             showStatus(successMessage);
@@ -612,26 +859,34 @@ export function MemoPage() {
             console.error('Failed to delete memos:', error);
             setErrorMessage('메모를 삭제하지 못했습니다.');
         } finally {
-            setIsSaving(false);
+            finishSaving();
         }
     };
 
     const moveMemosToCategory = async (memoIds: string[], targetCategoryId: string | null) => {
         if (!currentUser?.uid || memoIds.length === 0) return;
+        if (!beginSaving()) return;
 
-        setIsSaving(true);
         setErrorMessage('');
 
         try {
-            for (let index = 0; index < memoIds.length; index += BATCH_WRITE_SIZE) {
-                const batch = writeBatch(db);
-                memoIds.slice(index, index + BATCH_WRITE_SIZE).forEach(memoId => {
-                    batch.update(doc(db, MEMO_COLLECTION, memoId), {
-                        categoryId: targetCategoryId,
-                        updatedAt: serverTimestamp()
+            if (isLocalMemoMode) {
+                const memoIdSet = new Set(memoIds);
+                const updatedAt = Date.now();
+                updateLocalMemos(items => items.map(memo =>
+                    memoIdSet.has(memo.id) ? { ...memo, categoryId: targetCategoryId, updatedAt } : memo
+                ));
+            } else {
+                for (let index = 0; index < memoIds.length; index += BATCH_WRITE_SIZE) {
+                    const batch = writeBatch(db);
+                    memoIds.slice(index, index + BATCH_WRITE_SIZE).forEach(memoId => {
+                        batch.update(doc(db, MEMO_COLLECTION, memoId), {
+                            categoryId: targetCategoryId,
+                            updatedAt: serverTimestamp()
+                        });
                     });
-                });
-                await batch.commit();
+                    await batch.commit();
+                }
             }
 
             if (selectedMemoId && memoIds.includes(selectedMemoId)) {
@@ -644,60 +899,96 @@ export function MemoPage() {
             console.error('Failed to move memos:', error);
             setErrorMessage('메모 카테고리를 이동하지 못했습니다.');
         } finally {
-            setIsSaving(false);
+            finishSaving();
         }
     };
 
     const createMemo = async (type: MemoType = 'text') => {
         if (!currentUser?.uid) return;
+        setIsCreateMenuOpen(false);
 
-        setIsSaving(true);
+        if (hasDraftChangesRef.current) {
+            if (autoSaveTimerRef.current !== null) {
+                window.clearTimeout(autoSaveTimerRef.current);
+                autoSaveTimerRef.current = null;
+            }
+            const saved = await saveMemoRef.current('auto');
+            if (!saved) {
+                showStatus('작성 중인 메모를 저장한 뒤 다시 시도하세요.');
+                return;
+            }
+        }
+
+        if (!beginSaving()) return;
+
         setErrorMessage('');
 
         try {
             const categoryId =
-                selectedCategoryId !== 'all' && selectedCategoryId !== 'uncategorized'
+                selectedCategoryId !== 'all'
                     ? selectedCategoryId
                     : null;
             const title = type === 'checklist' ? '새 체크리스트' : '새 메모';
             const checklistItems = type === 'checklist' ? [createChecklistItem('')] : [];
+            let memoId = '';
 
-            const memoRef = await addDoc(collection(db, MEMO_COLLECTION), {
-                userId: currentUser.uid,
-                scope: 'private',
-                type,
-                title,
-                content: '',
-                checklistItems,
-                categoryId,
-                color: 'white',
-                isPinned: false,
-                order: Date.now(),
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
-            });
+            if (isLocalMemoMode) {
+                const now = Date.now();
+                const memo: MemoRecord = {
+                    id: `local-memo-${now}-${generateChecklistItemId()}`,
+                    type,
+                    title,
+                    content: '',
+                    checklistItems,
+                    categoryId,
+                    order: now,
+                    createdAt: now,
+                    updatedAt: now
+                };
+                memoId = memo.id;
+                updateLocalMemos(items => [memo, ...items]);
+            } else {
+                const memoRef = await addDoc(collection(db, MEMO_COLLECTION), {
+                    userId: currentUser.uid,
+                    scope: 'private',
+                    type,
+                    title,
+                    content: '',
+                    checklistItems,
+                    categoryId,
+                    color: 'white',
+                    isPinned: false,
+                    order: Date.now(),
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp()
+                });
+                memoId = memoRef.id;
+            }
 
-            setSelectedMemoId(memoRef.id);
+            setSelectedMemoId(memoId);
             setViewMode(current => current === 'sticky' ? 'sticky' : 'split');
+            setMobilePane('editor');
             setDraftText(title);
             setDraftMemoType(type);
             setDraftTitle(title);
             setDraftChecklistItems(checklistItems);
             setDraftCategoryId(categoryId ?? '');
+            setAutoSaveState('saved');
             showStatus(type === 'checklist' ? '새 체크리스트를 만들었습니다.' : '새 메모를 만들었습니다.');
         } catch (error) {
             console.error('Failed to create memo:', error);
             setErrorMessage('메모를 만들지 못했습니다.');
         } finally {
-            setIsSaving(false);
+            finishSaving();
         }
     };
 
-    const saveMemo = async () => {
-        if (!currentUser?.uid || !selectedMemo) return;
+    const saveMemo = async (mode: 'manual' | 'auto' = 'manual'): Promise<boolean> => {
+        if (!currentUser?.uid || !selectedMemo) return false;
+        if (!beginSaving()) return false;
 
-        setIsSaving(true);
         setErrorMessage('');
+        setAutoSaveState('saving');
 
         try {
             const checklistItems = prepareChecklistItemsForSave(draftChecklistItems);
@@ -706,26 +997,92 @@ export function MemoPage() {
                 : parsedDraft.title;
             const nextContent = draftMemoType === 'checklist' ? '' : parsedDraft.content;
 
-            await updateDoc(doc(db, MEMO_COLLECTION, selectedMemo.id), {
-                type: draftMemoType,
-                title: nextTitle,
-                content: nextContent,
-                checklistItems: draftMemoType === 'checklist' ? checklistItems : [],
-                categoryId: draftCategoryId || null,
-                updatedAt: serverTimestamp()
-            });
+            if (isLocalMemoMode) {
+                const updatedAt = Date.now();
+                updateLocalMemos(items => items.map(memo => memo.id === selectedMemo.id
+                    ? {
+                        ...memo,
+                        type: draftMemoType,
+                        title: nextTitle,
+                        content: nextContent,
+                        checklistItems: draftMemoType === 'checklist' ? checklistItems : [],
+                        categoryId: draftCategoryId || null,
+                        updatedAt
+                    }
+                    : memo
+                ));
+            } else {
+                await updateDoc(doc(db, MEMO_COLLECTION, selectedMemo.id), {
+                    type: draftMemoType,
+                    title: nextTitle,
+                    content: nextContent,
+                    checklistItems: draftMemoType === 'checklist' ? checklistItems : [],
+                    categoryId: draftCategoryId || null,
+                    updatedAt: serverTimestamp()
+                });
+            }
 
             setDraftText(composeMemoText(nextTitle, nextContent));
             setDraftTitle(nextTitle);
             setDraftChecklistItems(checklistItems);
-            showStatus('저장했습니다.');
+            setAutoSaveState('saved');
+            showStatus(mode === 'auto' ? '자동 저장됨' : '저장했습니다.');
+            return true;
         } catch (error) {
             console.error('Failed to save memo:', error);
+            setAutoSaveState('error');
             setErrorMessage('메모를 저장하지 못했습니다.');
+            return false;
         } finally {
-            setIsSaving(false);
+            finishSaving();
         }
     };
+
+    saveMemoRef.current = saveMemo;
+
+    useEffect(() => {
+        if (autoSaveTimerRef.current !== null) {
+            window.clearTimeout(autoSaveTimerRef.current);
+            autoSaveTimerRef.current = null;
+        }
+
+        if (!selectedMemo || !hasDraftChanges) {
+            return;
+        }
+
+        setAutoSaveState('pending');
+        autoSaveTimerRef.current = window.setTimeout(() => {
+            autoSaveTimerRef.current = null;
+            void saveMemo('auto');
+        }, AUTO_SAVE_DELAY_MS);
+
+        return () => {
+            if (autoSaveTimerRef.current !== null) {
+                window.clearTimeout(autoSaveTimerRef.current);
+                autoSaveTimerRef.current = null;
+            }
+        };
+    }, [
+        draftCategoryId,
+        draftChecklistItems,
+        draftMemoType,
+        draftText,
+        draftTitle,
+        hasDraftChanges,
+        selectedMemo?.id
+    ]);
+
+    useEffect(() => {
+        if (!hasDraftChanges) return;
+
+        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+            event.preventDefault();
+            event.returnValue = '';
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [hasDraftChanges]);
 
     const switchDraftType = (type: MemoType) => {
         if (draftMemoType === type) return;
@@ -781,15 +1138,39 @@ export function MemoPage() {
         }
     };
 
-    const focusMemoEditor = (memoId: string) => {
+    const saveDraftBeforeMemoChange = async () => {
+        if (!hasDraftChangesRef.current) return true;
+
+        if (autoSaveTimerRef.current !== null) {
+            window.clearTimeout(autoSaveTimerRef.current);
+            autoSaveTimerRef.current = null;
+        }
+
+        const saved = await saveMemo('auto');
+        if (!saved) {
+            showStatus('저장을 완료한 뒤 다른 메모를 선택하세요.');
+        }
+        return saved;
+    };
+
+    const focusMemoEditor = async (memoId: string) => {
+        if (memoId === selectedMemoId) {
+            setMobilePane('editor');
+            return;
+        }
+        if (!(await saveDraftBeforeMemoChange())) return;
+
         setViewMode('split');
         setSelectedMemoId(memoId);
+        setMobilePane('editor');
         window.requestAnimationFrame(() => {
             editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         });
     };
 
-    const selectStickyMemo = (memo: MemoRecord) => {
+    const selectStickyMemo = async (memo: MemoRecord) => {
+        if (memo.id !== selectedMemoId && !(await saveDraftBeforeMemoChange())) return;
+
         setSelectedMemoId(memo.id);
         setDraftText(composeMemoText(memo.title, memo.content));
         setDraftMemoType(memo.type);
@@ -811,6 +1192,23 @@ export function MemoPage() {
         await deleteMemosByIds([memo.id], '메모를 삭제했습니다.');
     };
 
+    const copyMemoToClipboard = async (memo: MemoRecord, text = getMemoClipboardText(memo)) => {
+        if (!text) {
+            showStatus('복사할 내용이 없습니다.');
+            return;
+        }
+
+        setErrorMessage('');
+
+        try {
+            await writeTextToClipboard(text);
+            showStatus('메모를 클립보드에 복사했습니다.');
+        } catch (error) {
+            console.error('Failed to copy memo to clipboard:', error);
+            setErrorMessage('메모를 클립보드에 복사하지 못했습니다.');
+        }
+    };
+
     const deleteMemo = async () => {
         if (!selectedMemo) return;
         await deleteMemoRecord(selectedMemo);
@@ -827,50 +1225,71 @@ export function MemoPage() {
 
         const name = newCategoryName.trim();
         if (!name) return;
+        if (!beginSaving()) return;
 
-        setIsSaving(true);
         setErrorMessage('');
 
         try {
-            await addDoc(collection(db, CATEGORY_COLLECTION), {
-                userId: currentUser.uid,
-                name,
-                order: Date.now(),
-                color: newCategoryColor,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
-            });
+            if (isLocalMemoMode) {
+                const now = Date.now();
+                updateLocalCategories(items => [
+                    ...items,
+                    {
+                        id: `local-category-${now}-${generateChecklistItemId()}`,
+                        name,
+                        order: now,
+                        color: newCategoryColor
+                    }
+                ]);
+            } else {
+                await addDoc(collection(db, CATEGORY_COLLECTION), {
+                    userId: currentUser.uid,
+                    name,
+                    order: Date.now(),
+                    color: newCategoryColor,
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp()
+                });
+            }
 
             setNewCategoryName('');
             setNewCategoryColor(CATEGORY_COLORS[(categories.length + 1) % CATEGORY_COLORS.length]);
+            setIsCategoryComposerOpen(false);
             showStatus('카테고리를 추가했습니다.');
         } catch (error) {
             console.error('Failed to create category:', error);
             setErrorMessage('카테고리를 추가하지 못했습니다.');
         } finally {
-            setIsSaving(false);
+            finishSaving();
         }
     };
 
     const startEditCategory = (category: CategoryRecord) => {
         setEditingCategoryId(category.id);
         setEditingCategoryName(category.name);
-        setEditingCategoryColor(category.color ?? CATEGORY_COLORS[0]);
+        setEditingCategoryColor(normalizeCategoryColor(category.color, CATEGORY_COLORS[0]));
     };
 
     const saveCategory = async (category: CategoryRecord) => {
         const name = editingCategoryName.trim();
         if (!name) return;
+        if (!beginSaving()) return;
 
-        setIsSaving(true);
         setErrorMessage('');
 
         try {
-            await updateDoc(doc(db, CATEGORY_COLLECTION, category.id), {
-                name,
-                color: editingCategoryColor,
-                updatedAt: serverTimestamp()
-            });
+            if (isLocalMemoMode) {
+                updateLocalCategories(items => items.map(item => item.id === category.id
+                    ? { ...item, name, color: editingCategoryColor }
+                    : item
+                ));
+            } else {
+                await updateDoc(doc(db, CATEGORY_COLLECTION, category.id), {
+                    name,
+                    color: editingCategoryColor,
+                    updatedAt: serverTimestamp()
+                });
+            }
 
             setEditingCategoryId(null);
             setEditingCategoryName('');
@@ -880,31 +1299,39 @@ export function MemoPage() {
             console.error('Failed to save category:', error);
             setErrorMessage('카테고리를 저장하지 못했습니다.');
         } finally {
-            setIsSaving(false);
+            finishSaving();
         }
     };
 
     const deleteCategory = async (category: CategoryRecord) => {
         if (!window.confirm(`"${category.name}" 카테고리를 삭제할까요? 메모는 분류 없음으로 이동합니다.`)) return;
+        if (!beginSaving()) return;
 
-        setIsSaving(true);
         setErrorMessage('');
 
         try {
-            const affectedMemos = memos.filter(memo => memo.categoryId === category.id);
+            if (isLocalMemoMode) {
+                const updatedAt = Date.now();
+                updateLocalMemos(items => items.map(memo =>
+                    memo.categoryId === category.id ? { ...memo, categoryId: null, updatedAt } : memo
+                ));
+                updateLocalCategories(items => items.filter(item => item.id !== category.id));
+            } else {
+                const affectedMemos = memos.filter(memo => memo.categoryId === category.id);
 
-            for (let index = 0; index < affectedMemos.length; index += BATCH_WRITE_SIZE) {
-                const batch = writeBatch(db);
-                affectedMemos.slice(index, index + BATCH_WRITE_SIZE).forEach(memo => {
-                    batch.update(doc(db, MEMO_COLLECTION, memo.id), {
-                        categoryId: null,
-                        updatedAt: serverTimestamp()
+                for (let index = 0; index < affectedMemos.length; index += BATCH_WRITE_SIZE) {
+                    const batch = writeBatch(db);
+                    affectedMemos.slice(index, index + BATCH_WRITE_SIZE).forEach(memo => {
+                        batch.update(doc(db, MEMO_COLLECTION, memo.id), {
+                            categoryId: null,
+                            updatedAt: serverTimestamp()
+                        });
                     });
-                });
-                await batch.commit();
-            }
+                    await batch.commit();
+                }
 
-            await deleteDoc(doc(db, CATEGORY_COLLECTION, category.id));
+                await deleteDoc(doc(db, CATEGORY_COLLECTION, category.id));
+            }
 
             if (selectedCategoryId === category.id) {
                 setSelectedCategoryId('all');
@@ -918,7 +1345,7 @@ export function MemoPage() {
             console.error('Failed to delete category:', error);
             setErrorMessage('카테고리를 삭제하지 못했습니다.');
         } finally {
-            setIsSaving(false);
+            finishSaving();
         }
     };
 
@@ -937,6 +1364,22 @@ export function MemoPage() {
 
             return Array.from(new Set([...previous, ...filteredMemoIds]));
         });
+    };
+
+    const cycleStickyMemoSize = (memoId: string) => {
+        if (expandedStickyMemoId !== memoId) {
+            setExpandedStickyMemoId(memoId);
+            setStickyExpansionLevel(1);
+            return;
+        }
+
+        if (stickyExpansionLevel === 1) {
+            setStickyExpansionLevel(2);
+            return;
+        }
+
+        setExpandedStickyMemoId(null);
+        setStickyExpansionLevel(0);
     };
 
     const handleMoveChecked = () => {
@@ -967,28 +1410,38 @@ export function MemoPage() {
     const renderColorOptions = (
         selectedColor: string,
         onSelect: (color: string) => void,
-        compact = false
-    ) => (
-        <div className="flex flex-wrap items-center gap-1.5" aria-label="카테고리 색상 선택">
-            {CATEGORY_COLORS.map(color => {
-                const isSelected = selectedColor === color;
+        compact = false,
+        ariaLabel = '카테고리 색상 선택'
+    ) => {
+        const normalizedSelectedColor = normalizeCategoryColor(selectedColor, CATEGORY_COLORS[0]);
 
-                return (
-                    <button
-                        key={color}
-                        type="button"
-                        onClick={() => onSelect(color)}
-                        className={`${compact ? 'h-6 w-6' : 'h-7 w-7'} rounded-full border-2 transition ${
-                            isSelected ? 'border-slate-950 ring-2 ring-slate-200' : 'border-white hover:border-slate-300'
-                        }`}
-                        style={{ backgroundColor: color }}
-                        title={`색상 ${color}`}
-                        aria-label={`카테고리 색상 ${color}`}
-                    />
-                );
-            })}
-        </div>
-    );
+        return (
+            <div className="flex flex-wrap items-center gap-1.5" aria-label={ariaLabel}>
+                {CATEGORY_COLORS.map(color => {
+                    const isSelected = normalizedSelectedColor === color;
+
+                    return (
+                        <button
+                            key={color}
+                            type="button"
+                            onClick={() => onSelect(color)}
+                            className={`${compact ? 'h-11 w-11 sm:h-8 sm:w-8' : 'h-11 w-11 sm:h-9 sm:w-9'} grid place-items-center rounded-full border-2 transition ${
+                                isSelected
+                                    ? 'border-slate-950 text-white shadow-sm ring-2 ring-slate-200'
+                                    : 'border-white text-transparent hover:border-slate-300'
+                            }`}
+                            style={{ backgroundColor: color }}
+                            title={`색상 ${color}`}
+                            aria-label={`카테고리 색상 ${color}`}
+                            aria-pressed={isSelected}
+                        >
+                            <Check className={`${compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} drop-shadow`} />
+                        </button>
+                    );
+                })}
+            </div>
+        );
+    };
 
     if (!currentUser) {
         return (
@@ -1060,7 +1513,7 @@ export function MemoPage() {
                         : 'border-blue-100 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-100/60'
                 }`}
             >
-                <span>전체</span>
+                <span>전체보기</span>
                 <span
                     className={`rounded-full px-2 py-0.5 text-xs ${
                         selectedCategoryId === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
@@ -1069,25 +1522,6 @@ export function MemoPage() {
                     {memos.length}
                 </span>
             </button>
-            <button
-                type="button"
-                onClick={() => setSelectedCategoryId('uncategorized')}
-                className={`flex h-10 w-full items-center justify-between gap-3 rounded-lg border px-3 text-sm font-semibold transition ${
-                    selectedCategoryId === 'uncategorized'
-                        ? 'border-blue-700 bg-blue-700 text-white shadow-sm'
-                        : 'border-blue-100 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-100/60'
-                }`}
-            >
-                <span>분류 없음</span>
-                <span
-                    className={`rounded-full px-2 py-0.5 text-xs ${
-                        selectedCategoryId === 'uncategorized' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
-                    }`}
-                >
-                    {categoryCounts.uncategorized}
-                </span>
-            </button>
-
             {categories.map(category => {
                 const isEditing = editingCategoryId === category.id;
                 const isSelected = selectedCategoryId === category.id;
@@ -1108,6 +1542,7 @@ export function MemoPage() {
                                     onClick={() => void saveCategory(category)}
                                     className="grid h-8 w-8 place-items-center rounded-md text-emerald-700 hover:bg-white"
                                     title="저장"
+                                    aria-label={`${category.name} 카테고리 저장`}
                                 >
                                     <Check className="h-4 w-4" />
                                 </button>
@@ -1120,13 +1555,19 @@ export function MemoPage() {
                                     }}
                                     className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-white"
                                     title="취소"
+                                    aria-label={`${category.name} 카테고리 편집 취소`}
                                 >
                                     <X className="h-4 w-4" />
                                 </button>
                             </div>
                             <div className="mt-2 flex items-center justify-between gap-2">
                                 <span className="text-[11px] font-bold text-emerald-800">색상</span>
-                                {renderColorOptions(editingCategoryColor, setEditingCategoryColor, true)}
+                                {renderColorOptions(
+                                    editingCategoryColor,
+                                    setEditingCategoryColor,
+                                    true,
+                                    `${category.name} 카테고리 색상 선택`
+                                )}
                             </div>
                         </div>
                     );
@@ -1155,7 +1596,7 @@ export function MemoPage() {
                                     isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
                                 }`}
                             >
-                                {categoryCounts.counts.get(category.id) ?? 0}
+                                {categoryCounts.get(category.id) ?? 0}
                             </span>
                         </button>
                         <div className="mr-1 flex items-center gap-0.5">
@@ -1164,6 +1605,7 @@ export function MemoPage() {
                                 onClick={() => startEditCategory(category)}
                                 className="grid h-7 w-7 place-items-center rounded-md hover:bg-white/20"
                                 title="카테고리 수정"
+                                aria-label={`${category.name} 카테고리 수정`}
                             >
                                 <Pencil className="h-3.5 w-3.5" />
                             </button>
@@ -1172,6 +1614,7 @@ export function MemoPage() {
                                 onClick={() => void deleteCategory(category)}
                                 className="grid h-7 w-7 place-items-center rounded-md hover:bg-white/20"
                                 title="카테고리 삭제"
+                                aria-label={`${category.name} 카테고리 삭제`}
                             >
                                 <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -1194,23 +1637,9 @@ export function MemoPage() {
                         : 'text-slate-600 hover:bg-slate-100'
                 }`}
             >
-                전체
+                전체보기
                 <span className={selectedCategoryId === 'all' ? 'text-white/80' : 'text-slate-400'}>
                     {memos.length.toLocaleString('ko-KR')}
-                </span>
-            </button>
-            <button
-                type="button"
-                onClick={() => setSelectedCategoryId('uncategorized')}
-                className={`inline-flex h-8 shrink-0 items-center gap-2 rounded-md px-3 text-xs font-bold transition ${
-                    selectedCategoryId === 'uncategorized'
-                        ? 'bg-slate-950 text-white'
-                        : 'text-slate-600 hover:bg-slate-100'
-                }`}
-            >
-                분류 없음
-                <span className={selectedCategoryId === 'uncategorized' ? 'text-white/80' : 'text-slate-400'}>
-                    {categoryCounts.uncategorized.toLocaleString('ko-KR')}
                 </span>
             </button>
             {categories.map(category => {
@@ -1229,7 +1658,7 @@ export function MemoPage() {
                         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: category.color }} />
                         <span className="truncate">{category.name}</span>
                         <span className={isSelected ? 'text-white/80' : 'text-slate-400'}>
-                            {(categoryCounts.counts.get(category.id) ?? 0).toLocaleString('ko-KR')}
+                            {(categoryCounts.get(category.id) ?? 0).toLocaleString('ko-KR')}
                         </span>
                     </button>
                 );
@@ -1262,29 +1691,10 @@ export function MemoPage() {
                     <div className="flex h-full min-h-[320px] flex-col items-center justify-center gap-3 text-center text-slate-500">
                         <FileText className="h-8 w-8 text-slate-300" />
                         <p className="text-sm font-bold text-slate-700">표시할 메모가 없습니다.</p>
-                        <div className="flex flex-wrap justify-center gap-2">
-                            <button
-                                type="button"
-                                onClick={() => void createMemo()}
-                                disabled={isSaving}
-                                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                                <Plus className="h-4 w-4" />
-                                새 메모
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => void createMemo('checklist')}
-                                disabled={isSaving}
-                                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                                <CheckSquare className="h-4 w-4" />
-                                체크리스트
-                            </button>
-                        </div>
+                        <p className="text-xs font-semibold text-slate-400">상단의 새 메모 메뉴에서 바로 시작할 수 있습니다.</p>
                     </div>
                 ) : (
-                    <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                    <div className="grid auto-rows-[360px] gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                         {filteredMemos.map(memo => {
                             const categoryColor = getCategoryColor(memo.categoryId);
                             const categoryTheme = buildAccentTheme(categoryColor);
@@ -1292,13 +1702,32 @@ export function MemoPage() {
                             const cardTheme = isSelected ? draftAccentTheme : categoryTheme;
                             const checklistTotal = memo.checklistItems.length;
                             const checklistDone = memo.checklistItems.filter(item => item.isChecked).length;
+                            const isExpanded = expandedStickyMemoId === memo.id;
+                            const expansionLevel = isExpanded ? stickyExpansionLevel : 0;
+                            const expansionActionLabel = expansionLevel === 0
+                                ? '세로로 크게 보기'
+                                : expansionLevel === 1
+                                    ? '가로까지 더 크게 보기'
+                                    : '원래 크기로';
+                            const expansionButtonText = expansionLevel === 0
+                                ? '크게 보기'
+                                : expansionLevel === 1
+                                    ? '더 크게'
+                                    : '원래 크기';
 
                             return (
                                 <article
                                     key={memo.id}
-                                    className={`flex h-[360px] min-w-0 flex-col rounded-lg border bg-white shadow-sm transition ${
+                                    className={`flex h-full min-w-0 flex-col rounded-lg border bg-white shadow-sm transition-all duration-200 ${
+                                        expansionLevel >= 1 ? 'row-span-2' : ''
+                                    } ${
+                                        expansionLevel === 2 ? 'sm:col-span-2' : ''
+                                    } ${
                                         isSelected ? 'ring-2 ring-slate-300' : 'hover:-translate-y-0.5 hover:shadow-md'
                                     }`}
+                                    aria-label={`${memo.title} 스티커 메모`}
+                                    aria-expanded={isExpanded}
+                                    data-expansion-level={expansionLevel}
                                     style={{
                                         borderColor: cardTheme.border,
                                         backgroundColor: cardTheme.surface
@@ -1338,6 +1767,15 @@ export function MemoPage() {
                                                     >
                                                         <Save className="h-3.5 w-3.5" />
                                                         저장
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void copyMemoToClipboard(memo, draftMemoClipboardText)}
+                                                        className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
+                                                        title="클립보드에 복사"
+                                                        aria-label="메모 복사"
+                                                    >
+                                                        <Copy className="h-4 w-4" />
                                                     </button>
                                                     <button
                                                         type="button"
@@ -1392,8 +1830,18 @@ export function MemoPage() {
                                                     <span className="inline-flex min-w-0 items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-500">
                                                         <Clock3 className="h-3 w-3 shrink-0" />
                                                         <span className="truncate">{formatDate(memo.updatedAt || memo.createdAt)}</span>
-                                                        {hasDraftChanges && <span className="shrink-0 text-amber-700">수정 중</span>}
+                                                        <span className={`shrink-0 font-bold ${autoSaveTone}`}>{autoSaveLabel}</span>
                                                     </span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => cycleStickyMemoSize(memo.id)}
+                                                        className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+                                                        aria-label={`${memo.title} ${expansionActionLabel}`}
+                                                        aria-pressed={expansionLevel > 0}
+                                                    >
+                                                        {expansionLevel === 2 ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                                                        {expansionButtonText}
+                                                    </button>
                                                 </div>
                                             </div>
                                             <div className="min-h-0 flex-1 p-3">
@@ -1404,6 +1852,7 @@ export function MemoPage() {
                                                         className="h-full min-h-[180px] w-full resize-none rounded-md border bg-white p-3 text-sm leading-6 text-slate-800 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-100"
                                                         style={{ borderColor: cardTheme.border }}
                                                         placeholder="본문을 입력하세요."
+                                                        aria-label="메모 본문"
                                                     />
                                                 ) : (
                                                     <div
@@ -1419,6 +1868,7 @@ export function MemoPage() {
                                                                         onChange={event => updateDraftChecklistItem(item.id, { isChecked: event.target.checked })}
                                                                         className="h-4 w-4 shrink-0 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600"
                                                                         title="완료"
+                                                                        aria-label={`${item.text || '빈 항목'} 완료 여부`}
                                                                     />
                                                                     <input
                                                                         value={item.text}
@@ -1434,6 +1884,7 @@ export function MemoPage() {
                                                                         onClick={() => deleteDraftChecklistItem(item.id)}
                                                                         className="grid h-7 w-7 shrink-0 place-items-center rounded text-slate-400 transition hover:bg-red-50 hover:text-red-600"
                                                                         title="항목 삭제"
+                                                                        aria-label={`${item.text || '빈 항목'} 삭제`}
                                                                     >
                                                                         <Trash2 className="h-3.5 w-3.5" />
                                                                     </button>
@@ -1460,7 +1911,7 @@ export function MemoPage() {
                                             >
                                                 <button
                                                     type="button"
-                                                    onClick={() => selectStickyMemo(memo)}
+                                                    onClick={() => void selectStickyMemo(memo)}
                                                     className="min-w-0 flex-1 text-left"
                                                 >
                                                     <div className="flex min-w-0 items-center gap-2">
@@ -1488,6 +1939,25 @@ export function MemoPage() {
                                                 </button>
                                                 <button
                                                     type="button"
+                                                    onClick={() => cycleStickyMemoSize(memo.id)}
+                                                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
+                                                    title={expansionButtonText}
+                                                    aria-label={`${memo.title} ${expansionActionLabel}`}
+                                                    aria-pressed={expansionLevel > 0}
+                                                >
+                                                    {expansionLevel === 2 ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void copyMemoToClipboard(memo)}
+                                                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
+                                                    title="클립보드에 복사"
+                                                    aria-label={`${memo.title} 메모 복사`}
+                                                >
+                                                    <Copy className="h-4 w-4" />
+                                                </button>
+                                                <button
+                                                    type="button"
                                                     onClick={() => void deleteMemoRecord(memo)}
                                                     disabled={isSaving}
                                                     className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-red-200 bg-white text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1499,7 +1969,7 @@ export function MemoPage() {
                                             </div>
                                             <button
                                                 type="button"
-                                                onClick={() => selectStickyMemo(memo)}
+                                                onClick={() => void selectStickyMemo(memo)}
                                                 className="min-h-0 flex-1 overflow-y-auto p-3 text-left"
                                             >
                                                 {renderStickyMemoBody(memo)}
@@ -1519,7 +1989,7 @@ export function MemoPage() {
         <main className="min-h-[calc(100vh-var(--header-height))] bg-[#eef2f7] text-slate-900 lg:h-[calc(100vh-var(--header-height))] lg:overflow-hidden">
             <div className="flex min-h-[calc(100vh-var(--header-height))] w-full flex-col gap-2 p-2 lg:h-full lg:min-h-0">
                 <header className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-3 shadow-sm shadow-slate-200/60">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                         <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                                 <h1 className="text-2xl font-bold tracking-normal text-slate-950">스마트 메모</h1>
@@ -1527,100 +1997,213 @@ export function MemoPage() {
                                     {selectedCategoryLabel}
                                 </span>
                             </div>
-                            <p className="mt-1 text-sm text-slate-500">
+                            <p className="mt-1 text-sm text-slate-500" aria-live="polite">
                                 전체 {memos.length.toLocaleString('ko-KR')}개 · 표시 {filteredMemos.length.toLocaleString('ko-KR')}개
                                 {statusMessage ? ` · ${statusMessage}` : ''}
                             </p>
                         </div>
 
-                        <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center xl:justify-end">
-                            <label className="relative block min-w-0 sm:w-80 xl:w-96">
+                        <div className="flex min-w-0 flex-1 flex-col gap-2 lg:flex-row lg:items-center lg:justify-end xl:max-w-[820px]">
+                            <label className="relative block min-w-0 flex-1 lg:max-w-80">
                                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                                 <input
                                     value={searchQuery}
                                     onChange={event => setSearchQuery(event.target.value)}
                                     className="h-11 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none transition focus:border-slate-500 focus:bg-white focus:ring-2 focus:ring-slate-200"
                                     placeholder="제목, 내용, 카테고리 검색"
+                                    aria-label="메모 검색"
                                 />
                             </label>
-                            <div className="inline-flex h-11 shrink-0 rounded-lg border border-slate-200 bg-slate-50 p-1 shadow-sm">
+                            <div className="flex min-w-0 items-center gap-2">
+                                <div className="inline-flex h-11 min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 p-1 shadow-sm sm:flex-none">
+                                    <button
+                                        type="button"
+                                        onClick={() => setViewMode('split')}
+                                        className={`inline-flex min-w-0 flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-md px-2 text-sm font-bold transition sm:flex-none sm:gap-1.5 sm:px-3 ${
+                                            viewMode === 'split'
+                                                ? 'bg-slate-950 text-white shadow-sm'
+                                                : 'text-slate-600 hover:bg-white'
+                                        }`}
+                                        aria-label="목록과 편집 보기"
+                                    >
+                                        <List className="h-4 w-4" />
+                                        목록
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setViewMode('sticky')}
+                                        className={`inline-flex min-w-0 flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-md px-2 text-sm font-bold transition sm:flex-none sm:gap-1.5 sm:px-3 ${
+                                            viewMode === 'sticky'
+                                                ? 'bg-slate-950 text-white shadow-sm'
+                                                : 'text-slate-600 hover:bg-white'
+                                        }`}
+                                        aria-label="스티커 보기"
+                                    >
+                                        <CheckSquare className="h-4 w-4" />
+                                        스티커
+                                    </button>
+                                </div>
                                 <button
                                     type="button"
-                                    onClick={() => setViewMode('split')}
-                                    className={`inline-flex items-center justify-center gap-1.5 rounded-md px-3 text-sm font-bold transition ${
-                                        viewMode === 'split'
-                                            ? 'bg-slate-950 text-white shadow-sm'
-                                            : 'text-slate-600 hover:bg-white'
-                                    }`}
-                                >
-                                    <FileText className="h-4 w-4" />
-                                    목록/편집
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setViewMode('sticky')}
-                                    className={`inline-flex items-center justify-center gap-1.5 rounded-md px-3 text-sm font-bold transition ${
-                                        viewMode === 'sticky'
-                                            ? 'bg-slate-950 text-white shadow-sm'
-                                            : 'text-slate-600 hover:bg-white'
-                                    }`}
-                                >
-                                    <CheckSquare className="h-4 w-4" />
-                                    스티커 보기
-                                </button>
-                            </div>
-                            <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 sm:flex-row sm:items-center">
-                                <input
-                                    value={newCategoryName}
-                                    onChange={event => setNewCategoryName(event.target.value)}
-                                    onKeyDown={handleCategoryKeyDown}
-                                    className="h-9 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-slate-500 focus:bg-white focus:ring-2 focus:ring-slate-200 sm:w-40"
-                                    placeholder="새 카테고리"
-                                />
-                                {renderColorOptions(newCategoryColor, setNewCategoryColor, true)}
-                                <button
-                                    type="button"
-                                    onClick={() => void createCategory()}
-                                    disabled={isSaving || !newCategoryName.trim()}
-                                    className="grid h-9 w-full shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-9"
-                                    title="카테고리 추가"
+                                    onClick={() => setIsCategoryComposerOpen(true)}
+                                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-0 text-sm font-bold text-slate-700 transition hover:bg-slate-50 sm:w-auto sm:px-3"
+                                    aria-label="카테고리 만들기"
                                 >
                                     <FolderPlus className="h-4 w-4" />
+                                    <span className="hidden sm:inline">카테고리</span>
                                 </button>
-                            </div>
-                            <div className="grid min-w-[300px] grid-cols-2 gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => void createMemo()}
-                                    disabled={isSaving}
-                                    className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    <Plus className="h-4 w-4" />
-                                    새 메모
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => void createMemo('checklist')}
-                                    disabled={isSaving}
-                                    className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    <CheckSquare className="h-4 w-4" />
-                                    체크리스트
-                                </button>
+                                <div className="relative shrink-0">
+                                    {isCreateMenuOpen && (
+                                        <button
+                                            type="button"
+                                            className="fixed inset-0 z-40 cursor-default"
+                                            onClick={() => setIsCreateMenuOpen(false)}
+                                            aria-label="새 메모 메뉴 닫기"
+                                        />
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsCreateMenuOpen(previous => !previous)}
+                                        disabled={isSaving}
+                                        className="relative z-50 inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-slate-950 px-3 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                        aria-haspopup="menu"
+                                        aria-expanded={isCreateMenuOpen}
+                                        aria-label="새 메모 메뉴 열기"
+                                    >
+                                        <Plus className="h-4 w-4" />
+                                        새 메모
+                                        <ChevronDown className="h-4 w-4" />
+                                    </button>
+                                    {isCreateMenuOpen && (
+                                        <div className="absolute right-0 z-50 mt-2 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl" role="menu">
+                                            <button
+                                                type="button"
+                                                role="menuitem"
+                                                onClick={() => void createMemo('text')}
+                                                className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold text-slate-800 transition hover:bg-slate-100"
+                                            >
+                                                <FileText className="h-4 w-4 text-blue-700" />
+                                                일반 메모
+                                            </button>
+                                            <button
+                                                type="button"
+                                                role="menuitem"
+                                                onClick={() => void createMemo('checklist')}
+                                                className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold text-slate-800 transition hover:bg-slate-100"
+                                            >
+                                                <CheckSquare className="h-4 w-4 text-emerald-700" />
+                                                체크리스트
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </div>
                 </header>
 
+                {isCategoryComposerOpen && (
+                    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4" role="presentation">
+                        <section
+                            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="new-category-title"
+                        >
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <h2 id="new-category-title" className="text-lg font-bold text-slate-950">새 카테고리</h2>
+                                    <p className="mt-1 text-sm text-slate-500">이름과 구분 색상을 선택하세요.</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsCategoryComposerOpen(false)}
+                                    className="grid h-11 w-11 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100"
+                                    aria-label="카테고리 창 닫기"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                            <label className="mt-5 block">
+                                <span className="mb-2 block text-sm font-bold text-slate-700">카테고리 이름</span>
+                                <input
+                                    value={newCategoryName}
+                                    onChange={event => setNewCategoryName(event.target.value)}
+                                    onKeyDown={handleCategoryKeyDown}
+                                    className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+                                    placeholder="예: 현장 업무"
+                                    autoFocus
+                                />
+                            </label>
+                            <div className="mt-4">
+                                <span className="mb-2 block text-sm font-bold text-slate-700">구분 색상</span>
+                                {renderColorOptions(
+                                    newCategoryColor,
+                                    setNewCategoryColor,
+                                    true,
+                                    '새 카테고리 색상 선택'
+                                )}
+                            </div>
+                            <div className="mt-6 flex justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsCategoryComposerOpen(false)}
+                                    className="h-11 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+                                >
+                                    취소
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => void createCategory()}
+                                    disabled={isSaving || !newCategoryName.trim()}
+                                    className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    <FolderPlus className="h-4 w-4" />
+                                    카테고리 추가
+                                </button>
+                            </div>
+                        </section>
+                    </div>
+                )}
+
                 {errorMessage && (
-                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700" role="alert">
                         {errorMessage}
+                    </div>
+                )}
+
+                {viewMode === 'split' && (
+                    <div className="grid grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm lg:hidden" role="tablist" aria-label="메모 모바일 화면">
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected={mobilePane === 'list'}
+                            onClick={() => setMobilePane('list')}
+                            className={`inline-flex h-11 items-center justify-center gap-2 rounded-lg text-sm font-bold transition ${
+                                mobilePane === 'list' ? 'bg-blue-700 text-white' : 'text-slate-600'
+                            }`}
+                        >
+                            <List className="h-4 w-4" />
+                            메모 목록
+                        </button>
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected={mobilePane === 'editor'}
+                            onClick={() => setMobilePane('editor')}
+                            className={`inline-flex h-11 items-center justify-center gap-2 rounded-lg text-sm font-bold transition ${
+                                mobilePane === 'editor' ? 'bg-emerald-700 text-white' : 'text-slate-600'
+                            }`}
+                        >
+                            <FileText className="h-4 w-4" />
+                            편집
+                        </button>
                     </div>
                 )}
 
                 {viewMode === 'sticky' ? stickyMemoBoard : (
                 <div className="grid min-h-0 flex-1 gap-2 lg:grid-cols-[420px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[480px_minmax(0,1fr)]">
-                    <aside className="flex min-h-[360px] min-w-0 flex-col overflow-hidden rounded-lg border border-blue-200 bg-blue-50 shadow-sm shadow-slate-200/70 lg:h-full lg:min-h-0">
+                    <aside className={`${mobilePane === 'list' ? 'flex' : 'hidden'} min-h-[360px] min-w-0 flex-col overflow-hidden rounded-lg border border-blue-200 bg-blue-50 shadow-sm shadow-slate-200/70 lg:flex lg:h-full lg:min-h-0`}>
                         <div className="space-y-3 border-b border-blue-200 bg-white p-2">
                             <div className="flex items-center justify-between gap-3">
                                 <div className="min-w-0">
@@ -1642,7 +2225,8 @@ export function MemoPage() {
 
                             {categoryList}
 
-                            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                            {checkedMemoIds.length > 0 && (
+                            <div className="grid gap-2 rounded-lg border border-blue-200 bg-blue-50 p-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
                                 <select
                                     value={moveTargetCategoryId}
                                     onChange={event => setMoveTargetCategoryId(event.target.value)}
@@ -1674,6 +2258,7 @@ export function MemoPage() {
                                     삭제
                                 </button>
                             </div>
+                            )}
                         </div>
 
                         <div className="min-h-0 flex-1 overflow-y-auto bg-amber-50">
@@ -1685,26 +2270,7 @@ export function MemoPage() {
                                 <div className="p-10 text-center">
                                     <FileText className="mx-auto h-8 w-8 text-slate-300" />
                                     <p className="mt-3 text-sm font-bold text-slate-700">표시할 메모가 없습니다.</p>
-                                    <div className="mt-4 flex flex-wrap justify-center gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => void createMemo()}
-                                            disabled={isSaving}
-                                            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                                        >
-                                            <Plus className="h-4 w-4" />
-                                            새 메모
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => void createMemo('checklist')}
-                                            disabled={isSaving}
-                                            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                                        >
-                                            <CheckSquare className="h-4 w-4" />
-                                            체크리스트
-                                        </button>
-                                    </div>
+                                    <p className="mt-1 text-xs font-semibold text-slate-400">검색 조건을 바꾸거나 상단에서 새 메모를 만드세요.</p>
                                 </div>
                             ) : (
                                 <div className="space-y-2 p-2">
@@ -1741,10 +2307,11 @@ export function MemoPage() {
                                                         onChange={() => toggleMemoChecked(memo.id)}
                                                         className="mt-1.5 h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600"
                                                         title="메모 선택"
+                                                        aria-label={`${memo.title} 선택`}
                                                     />
                                                     <button
                                                         type="button"
-                                                        onClick={() => focusMemoEditor(memo.id)}
+                                                        onClick={() => void focusMemoEditor(memo.id)}
                                                         className="min-w-0 flex-1 text-left"
                                                     >
                                                         <div
@@ -1773,6 +2340,15 @@ export function MemoPage() {
                                                     </button>
                                                     <button
                                                         type="button"
+                                                        onClick={() => void copyMemoToClipboard(memo)}
+                                                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 opacity-100 transition hover:bg-slate-50 hover:text-slate-950 lg:opacity-0 lg:group-hover:opacity-100"
+                                                        title="클립보드에 복사"
+                                                        aria-label={`${memo.title} 메모 복사`}
+                                                    >
+                                                        <Copy className="h-4 w-4" />
+                                                    </button>
+                                                    <button
+                                                        type="button"
                                                         onClick={() => void deleteMemoRecord(memo)}
                                                         disabled={isSaving}
                                                         className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-red-200 bg-white text-red-700 opacity-100 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 lg:opacity-0 lg:group-hover:opacity-100"
@@ -1792,7 +2368,7 @@ export function MemoPage() {
 
                     <section
                         ref={editorRef}
-                        className="flex min-h-[420px] min-w-0 flex-col overflow-hidden rounded-lg border border-emerald-200 bg-emerald-50 shadow-sm lg:h-full lg:min-h-0"
+                        className={`${mobilePane === 'editor' ? 'flex' : 'hidden'} min-h-[420px] min-w-0 flex-col overflow-hidden rounded-lg border border-emerald-200 bg-emerald-50 shadow-sm lg:flex lg:h-full lg:min-h-0`}
                         style={{
                             borderColor: draftAccentTheme.border,
                             backgroundColor: draftAccentTheme.surface
@@ -1825,7 +2401,7 @@ export function MemoPage() {
                                             <p className="mt-1 flex min-w-0 items-center gap-2 text-xs text-emerald-700">
                                                 <Clock3 className="h-3.5 w-3.5 shrink-0" />
                                                 <span className="truncate">{formatDate(selectedMemo.updatedAt || selectedMemo.createdAt)}</span>
-                                                {hasDraftChanges && <span className="shrink-0 font-bold text-amber-700">수정 중</span>}
+                                                <span className={`shrink-0 font-bold ${autoSaveTone}`}>{autoSaveLabel}</span>
                                             </p>
                                         </div>
                                         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
@@ -1867,10 +2443,20 @@ export function MemoPage() {
                                             </button>
                                             <button
                                                 type="button"
+                                                onClick={() => void copyMemoToClipboard(selectedMemo, draftMemoClipboardText)}
+                                                className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
+                                                title="클립보드에 복사"
+                                                aria-label="선택한 메모 복사"
+                                            >
+                                                <Copy className="h-4 w-4" />
+                                            </button>
+                                            <button
+                                                type="button"
                                                 onClick={() => void deleteMemo()}
                                                 disabled={isSaving}
                                                 className="grid h-9 w-9 place-items-center rounded-lg border border-red-200 bg-white text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                                                 title="삭제"
+                                                aria-label="선택한 메모 삭제"
                                             >
                                                 <Trash2 className="h-4 w-4" />
                                             </button>
@@ -1896,6 +2482,7 @@ export function MemoPage() {
                                                 className="min-h-[420px] flex-1 resize-none rounded-lg border border-emerald-200 bg-white p-4 text-base leading-7 text-slate-800 outline-none transition focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-100 lg:min-h-0"
                                                 style={{ borderColor: draftAccentTheme.border }}
                                                 placeholder={'제목을 첫 줄에 입력하세요.\n다음 줄부터 본문을 입력하세요.'}
+                                                aria-label="메모 제목과 본문"
                                             />
                                         </label>
                                     ) : (
@@ -1928,6 +2515,7 @@ export function MemoPage() {
                                                                 onChange={event => updateDraftChecklistItem(item.id, { isChecked: event.target.checked })}
                                                                 className="h-4 w-4 shrink-0 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600"
                                                                 title="완료"
+                                                                aria-label={`${item.text || '빈 항목'} 완료 여부`}
                                                             />
                                                             <input
                                                                 value={item.text}
@@ -1943,6 +2531,7 @@ export function MemoPage() {
                                                                 onClick={() => deleteDraftChecklistItem(item.id)}
                                                                 className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-600"
                                                                 title="항목 삭제"
+                                                                aria-label={`${item.text || '빈 항목'} 삭제`}
                                                             >
                                                                 <Trash2 className="h-3.5 w-3.5" />
                                                             </button>
@@ -1965,27 +2554,15 @@ export function MemoPage() {
                         ) : (
                             <div className="flex h-full min-h-[420px] flex-col items-center justify-center gap-3 p-6 text-center text-slate-500 lg:min-h-0">
                                 <FileText className="h-8 w-8" />
-                                <p className="text-sm font-semibold">좌측 목록에서 메모를 선택하세요.</p>
-                                <div className="flex flex-wrap justify-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => void createMemo()}
-                                        disabled={isSaving}
-                                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        <Plus className="h-4 w-4" />
-                                        새 메모
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => void createMemo('checklist')}
-                                        disabled={isSaving}
-                                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        <CheckSquare className="h-4 w-4" />
-                                        체크리스트
-                                    </button>
-                                </div>
+                                <p className="text-sm font-semibold">메모 목록에서 편집할 항목을 선택하세요.</p>
+                                <button
+                                    type="button"
+                                    onClick={() => setMobilePane('list')}
+                                    className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 lg:hidden"
+                                >
+                                    <List className="h-4 w-4" />
+                                    목록으로 이동
+                                </button>
                             </div>
                         )}
                     </section>

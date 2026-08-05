@@ -63,7 +63,11 @@ const SHEET_CONFIG: { [key in SheetType]: { name: string; icon: any; keywords: s
     'Team': { name: '팀', icon: faUsers, keywords: ['팀'] },
     'Site': { name: '현장', icon: faMapMarkerAlt, keywords: ['현장'] },
     'Worker': { name: '작업자', icon: faUser, keywords: ['작업자'] },
-    'DailyReport': { name: '출력일보', icon: faClipboard, keywords: ['출력일보', 'Report'] }
+    'DailyReport': {
+        name: '출력일보',
+        icon: faClipboard,
+        keywords: ['출력일보', '일보목록V2', '일보목록', '일보', 'DailyReport', 'Report']
+    }
 };
 
 const formatExcelDate = (val: any): string => {
@@ -142,18 +146,33 @@ const TEMPLATE_FIELDS: Record<TemplateSheetType, { sheetName: string; fields: Te
     DailyReport: {
         sheetName: '출력일보',
         fields: [
-            { label: '날짜', required: true, aliases: ['작업일'], example: '2024-01-15', description: '날짜. 코드상 "날짜" 또는 "작업일"을 읽음' },
-            { label: '현장명', required: true, aliases: ['현장'], example: '강남역 복합개발', description: '현장명. 코드상 "현장명" 또는 "현장"을 읽음' },
-            { label: '팀명', required: true, aliases: ['팀'], example: '1공구팀', description: '팀명. 코드상 "팀명" 또는 "팀"을 읽음' },
-            { label: '해당팀', aliases: ['현장담당'], example: '1공구팀', description: '현장 책임팀 (선택, 누락 현장 자동 생성 시 사용)' },
-            { label: '이름', required: true, aliases: ['성명', '작업자명'], example: '홍길동', description: '작업자명. 코드상 "이름"을 사용' },
-            { label: '공수', required: true, aliases: [], example: '1.0', description: '공수. 없으면 기본 1.0 처리' },
-            { label: '직종', aliases: ['역할'], example: '철근', description: '직종 (선택). 없으면 작업자 기본 직종 사용' },
-            { label: '단가', aliases: ['일당', '임금', '급여'], example: '180000', description: '단가 (선택). 없으면 작업자 기본 단가 사용' },
-            { label: '급여방식', aliases: ['구분', '급여구분', '급여형태'], example: '일급제', description: '급여 구분 (선택). 없으면 작업자 기본 구분 사용' },
-            { label: '현장구분', aliases: ['siteType'], example: '도급', description: '일보 레벨 현장구분 (선택)', allowedValues: ['도급', '직영', '지원'] },
-            { label: '결제구분', aliases: ['결제방식', 'paymentType'], example: '계산서', description: '일보 레벨 결제구분 (선택)', allowedValues: ['계산서', '노무'] },
-            { label: '작업내용', aliases: [], example: '철근 배근 작업', description: '작업 내용 (선택)' }
+            { label: '일보ID', aliases: ['reportId'], example: '', description: '기존 일보 식별자 (선택). 일보 DB 상세 내보내기 파일 재등록 시 사용' },
+            { label: '날짜', required: true, aliases: ['작업일', '일자', 'date'], example: '2024-01-15', description: '작업 날짜 (YYYY-MM-DD 권장, Excel 날짜 지원)' },
+            { label: '현장ID', aliases: ['siteId'], example: '', description: '현장 식별자 (선택). 이름이 같은 현장을 정확히 연결할 때 사용' },
+            { label: '현장명', required: true, aliases: ['현장', 'siteName'], example: '강남역 복합개발', description: '현장명. 일보목록V2의 "현장" 열도 자동 인식' },
+            { label: '현장주소', aliases: ['siteAddress'], example: '서울시 강남구 역삼동 123', description: '일보 현장 주소 스냅샷 (선택, 현장 DB 값 우선)' },
+            { label: '현장담당팀', required: true, aliases: ['현장소속팀', '담당팀', '팀명', '팀', '해당팀', '현장담당', 'responsibleTeamName', 'teamName'], example: '1공구팀', description: '일보를 묶는 현장 담당팀. 출력일보 목록의 현장소속팀과 동일' },
+            { label: '현장담당팀ID', aliases: ['담당팀ID', '팀ID', 'responsibleTeamId', 'teamId'], example: '', description: '현장 담당팀 식별자 (선택)' },
+            { label: '현장책임자', aliases: ['현장소장', 'siteManagerName'], example: '김현장', description: '현장 책임자 (선택, 현장 DB 값 우선)' },
+            { label: '현장책임자ID', aliases: ['siteManagerId'], example: '', description: '현장 책임자 작업자 ID (선택)' },
+            { label: '발주사', aliases: ['발주처', 'clientCompanyName', 'companyName'], example: '삼성엔지니어링', description: '발주사 스냅샷 (선택, 현장 DB 값 우선)' },
+            { label: '시공사', aliases: ['건설사', 'constructorCompanyName'], example: '(주)청연ENG', description: '시공사 스냅샷 (선택, 현장 DB 값 우선)' },
+            { label: '협력사', aliases: ['협력업체', 'partnerName'], example: '다원파트너스', description: '협력사 스냅샷 (선택, 현장 DB 값 우선)' },
+            { label: '작업자ID', aliases: ['workerId'], example: '', description: '작업자 식별자 (선택). 동명이인 정확한 연결에 사용' },
+            { label: '이름', required: true, aliases: ['성명', '작업자명', 'workerName'], example: '홍길동', description: '작업자명' },
+            { label: '소속팀', aliases: ['작업팀', 'workerTeamName'], example: '철근팀', description: '작업자 실제 소속팀. 현장담당팀과 별도로 저장' },
+            { label: '소속팀ID', aliases: ['작업팀ID', 'workerTeamId'], example: '', description: '작업자 소속팀 식별자 (선택)' },
+            { label: '직종', aliases: ['역할', 'role'], example: '철근', description: '직종 (선택). 없으면 작업자 DB 기본 직종 사용' },
+            { label: '급여방식', aliases: ['구분', '급여구분', '급여형태', '급여모델', 'payType', 'salaryModel'], example: '일급제', description: '급여 방식 (선택). 없으면 작업자 DB 값 사용' },
+            { label: '상태', aliases: ['출근상태', '근태', 'status'], example: '출근', description: '근태 상태', allowedValues: ['출근', '결근', '반차', 'attendance', 'absent', 'half'] },
+            { label: '공수', required: true, aliases: ['품', 'M/D', 'manDay'], example: '1.0', description: '공수 (0 이상 숫자)' },
+            { label: '단가', aliases: ['일당', '임금', '급여', 'unitPrice'], example: '180000', description: '단가 (선택). 없으면 작업자 DB 기본 단가 사용' },
+            { label: '금액', aliases: ['amount'], example: '180000', description: '검산용 열. 저장 금액은 공수 × 단가로 자동 계산' },
+            { label: '현장구분', aliases: ['siteType'], example: '도급', description: '일보/현장 구분 (선택)', allowedValues: ['도급', '직영', '지원'] },
+            { label: '결제구분', aliases: ['결제방식', 'paymentType', 'paymentMethod'], example: '계산서', description: '일보/현장 결제 구분 (선택)', allowedValues: ['계산서', '노무'] },
+            { label: '날씨', aliases: ['weather'], example: '맑음', description: '일보 공통 날씨 (선택)' },
+            { label: '작업내용', aliases: ['비고', '내용', 'workContent'], example: '철근 배근 작업', description: '작업자별 작업 내용. 일보목록V2의 "비고" 열도 자동 인식' },
+            { label: '일보작업내용', aliases: ['공통작업내용', '일보내용', 'reportWorkContent'], example: 'B구역 철근 배근', description: '일보 전체 공통 작업 내용 (선택)' }
         ]
     }
 };
@@ -238,29 +257,43 @@ const TEMPLATE_SAMPLE_ROWS: Record<TemplateSheetType, Array<Record<string, strin
         {
             날짜: '2024-01-15',
             현장명: '강남역 복합개발',
-            팀명: '1공구팀',
-            해당팀: '1공구팀',
+            현장담당팀: '1공구팀',
+            현장책임자: '김철수',
+            발주사: '삼성엔지니어링',
+            시공사: '(주)청연ENG',
+            협력사: '다원파트너스',
             이름: '김철수',
+            소속팀: '1공구팀',
             공수: '1.0',
             직종: '반장',
             단가: '180000',
             급여방식: '일급제',
+            상태: '출근',
+            금액: '180000',
             현장구분: '도급',
             결제구분: '계산서',
+            날씨: '맑음',
             작업내용: '철근 배근 작업'
         },
         {
             날짜: '2024-01-15',
             현장명: '판교 테크노밸리 2단계',
-            팀명: '형틀반',
-            해당팀: '형틀반',
+            현장담당팀: '형틀반',
+            현장책임자: '이영희',
+            발주사: '삼성엔지니어링',
+            시공사: '(주)청연ENG',
+            협력사: '다원파트너스',
             이름: '이영희',
+            소속팀: '형틀반',
             공수: '1.0',
             직종: '기공',
             단가: '220000',
             급여방식: '월급제',
+            상태: '출근',
+            금액: '220000',
             현장구분: '직영',
             결제구분: '노무',
+            날씨: '흐림',
             작업내용: '형틀 설치'
         }
     ]
@@ -457,18 +490,33 @@ const buildTemplateSampleRowsFromDb = async (): Promise<Partial<Record<TemplateS
         for (const worker of workersInReport) {
             if (dailyRows.length >= TEMPLATE_SAMPLE_LIMIT) break;
             dailyRows.push({
+                일보ID: getCellString(report.id),
                 날짜: getCellString(report.date),
+                현장ID: getCellString(report.siteId),
                 현장명: getCellString(report.siteName),
-                팀명: getCellString(report.teamName),
-                해당팀: getCellString(report.responsibleTeamName || report.teamName),
+                현장주소: getCellString((report as any).siteAddress),
+                현장담당팀: getCellString(report.responsibleTeamName || report.teamName),
+                현장담당팀ID: getCellString(report.responsibleTeamId || report.teamId),
+                현장책임자: getCellString((report as any).siteManagerName),
+                현장책임자ID: getCellString((report as any).siteManagerId),
+                발주사: getCellString(report.companyName),
+                시공사: getCellString(report.constructorCompanyName),
+                협력사: getCellString(report.partnerName),
+                작업자ID: getCellString(worker.workerId),
                 이름: getCellString(worker.name),
+                소속팀: getCellString(worker.workerTeamName),
+                소속팀ID: getCellString(worker.teamId),
                 공수: getCellString(worker.manDay),
                 직종: getCellString(worker.role),
                 단가: getCellString(worker.unitPrice),
                 급여방식: getCellString(worker.payType || worker.salaryModel),
+                상태: getCellString(worker.status === 'absent' ? '결근' : worker.status === 'half' ? '반차' : '출근'),
+                금액: getCellString((worker.manDay || 0) * (worker.unitPrice || 0)),
                 현장구분: getCellString(worker.siteType || report.siteType),
                 결제구분: getCellString(worker.paymentType || report.paymentType),
-                작업내용: getCellString(worker.workContent || report.workContent)
+                날씨: getCellString(report.weather),
+                작업내용: getCellString(worker.workContent),
+                일보작업내용: getCellString(report.workContent)
             });
         }
     }
@@ -621,6 +669,92 @@ const normalizeExcelRowKeys = (row: unknown): any => {
         if (prevEmpty && !nextEmpty) out[nk] = v;
     });
     return out;
+};
+
+const canonicalizeTemplateRowKeys = (type: TemplateSheetType, row: unknown): any => {
+    const normalizedRow = normalizeExcelRowKeys(row);
+    if (!normalizedRow || typeof normalizedRow !== 'object') return normalizedRow;
+
+    const aliasToCanonical = new Map<string, string>();
+    TEMPLATE_FIELDS[type].fields.forEach((field) => {
+        [field.label, ...field.aliases].forEach((candidate) => {
+            const normalizedCandidate = normalizeExcelHeaderKey(candidate);
+            if (normalizedCandidate && !aliasToCanonical.has(normalizedCandidate)) {
+                aliasToCanonical.set(normalizedCandidate, field.label);
+            }
+        });
+    });
+
+    const canonicalRow: Record<string, unknown> = {};
+    Object.entries(normalizedRow as Record<string, unknown>).forEach(([key, value]) => {
+        const targetKey = aliasToCanonical.get(normalizeExcelHeaderKey(key)) ?? key;
+        const previous = canonicalRow[targetKey];
+        const previousEmpty = previous === undefined || previous === null || previous === '';
+        const nextEmpty = value === undefined || value === null || value === '';
+        if (!(targetKey in canonicalRow) || (previousEmpty && !nextEmpty)) {
+            canonicalRow[targetKey] = value;
+        }
+    });
+
+    return canonicalRow;
+};
+
+const getDailyReportSiteName = (row: any): string => getCellString(row?.['현장명'] ?? row?.['현장']);
+
+const getDailyReportTeamName = (row: any): string => getCellString(
+    row?.['현장담당팀']
+    ?? row?.['현장소속팀']
+    ?? row?.['담당팀']
+    ?? row?.['팀명']
+    ?? row?.['팀']
+    ?? row?.['해당팀']
+    ?? row?.['현장담당']
+);
+
+const getDailyReportWorkerName = (row: any): string => getCellString(
+    row?.['이름'] ?? row?.['성명'] ?? row?.['작업자명']
+);
+
+const getDailyReportWorkerTeamName = (row: any): string => getCellString(
+    row?.['소속팀'] ?? row?.['작업팀'] ?? row?.['workerTeamName']
+);
+
+const getDailyReportWorkContent = (row: any): string => getCellString(
+    row?.['작업내용'] ?? row?.['비고'] ?? row?.['내용'] ?? row?.['workContent']
+);
+
+const parseDailyReportNumber = (value: unknown): number | undefined => {
+    const text = getCellString(value).replace(/,/g, '');
+    if (!text) return undefined;
+    const parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const normalizeDailyReportStatus = (value: unknown): DailyReportWorker['status'] | undefined => {
+    const raw = getCellString(value).replace(/\s+/g, '').toLowerCase();
+    if (!raw) return undefined;
+    if (['출근', '근무', '정상', 'attendance', 'present'].includes(raw)) return 'attendance';
+    if (['결근', '미출근', 'absent', 'absence'].includes(raw)) return 'absent';
+    if (['반차', '반일', '반공수', 'half', 'halfday'].includes(raw)) return 'half';
+    return undefined;
+};
+
+const getDailyReportWorkerIdentityFromRow = (row: any): string => {
+    const workerId = getCellString(row?.['작업자ID'] ?? row?.['workerId']);
+    if (workerId) return `id:${workerId}`;
+    const name = getDailyReportWorkerName(row).replace(/\s+/g, ' ');
+    const workerTeam = getCellString(
+        row?.['소속팀ID'] ?? row?.['workerTeamId'] ?? getDailyReportWorkerTeamName(row)
+    ).replace(/\s+/g, ' ');
+    return `name:${name}|team:${workerTeam}`;
+};
+
+const getDailyReportWorkerIdentity = (worker: Partial<DailyReportWorker>): string => {
+    const workerId = getCellString(worker?.workerId);
+    if (workerId && !workerId.startsWith('unknown')) return `id:${workerId}`;
+    const name = getCellString(worker?.name).replace(/\s+/g, ' ');
+    const workerTeam = getCellString(worker?.teamId ?? worker?.workerTeamName).replace(/\s+/g, ' ');
+    return `name:${name}|team:${workerTeam}`;
 };
 
 const getPayTypeFromRow = (row: any): string => {
@@ -913,14 +1047,21 @@ const analyzeSheetRows = (type: SheetType, rows: any[], ctx: PreviewAnalyzeConte
 
         // DailyReport
         const date = formatExcelDate(row?.['날짜'] ?? row?.['작업일']);
-        const siteName = getCellString(row?.['현장명'] ?? row?.['현장']);
-        const teamName = getCellString(row?.['팀명'] ?? row?.['팀'] ?? row?.['해당팀'] ?? row?.['현장담당']);
-        const workerName = getCellString(row?.['이름']);
+        const siteName = getDailyReportSiteName(row);
+        const teamName = getDailyReportTeamName(row);
+        const workerName = getDailyReportWorkerName(row);
+        const manDay = parseDailyReportNumber(row?.['공수']);
+        const rawStatus = getCellString(row?.['상태']);
 
         if (!date) reasons.push('날짜/작업일 누락');
         if (!siteName) reasons.push('현장명/현장 누락');
-        if (!teamName) reasons.push('팀명/팀 누락');
+        if (!teamName) reasons.push('현장담당팀/팀명 누락');
         if (!workerName) reasons.push('이름 누락');
+        if (manDay === undefined) reasons.push('공수 누락 또는 숫자 형식 오류');
+        if (manDay !== undefined && manDay < 0) reasons.push('공수는 0 이상이어야 함');
+        if (rawStatus && !normalizeDailyReportStatus(rawStatus)) {
+            reasons.push(`상태 값 오류: ${rawStatus} (허용: 출근/결근/반차)`);
+        }
         const dailySiteTypeRaw = getCellString(getSiteTypeRawFromDailyRow(row));
         const dailyPaymentMethodRaw = getCellString(getPaymentMethodRawFromDailyRow(row));
         if (dailySiteTypeRaw && !normalizeSiteTypeValue(dailySiteTypeRaw)) {
@@ -930,7 +1071,7 @@ const analyzeSheetRows = (type: SheetType, rows: any[], ctx: PreviewAnalyzeConte
             reasons.push(`결제구분 값 오류: ${dailyPaymentMethodRaw} (허용: 계산서/노무)`);
         }
 
-        const key = [date, siteName, teamName, workerName].join('|');
+        const key = [date, siteName, teamName, getDailyReportWorkerIdentityFromRow(row)].join('|');
         const hasRequired = !reasons.length;
         if (hasRequired) {
             const siteExists = (ctx.fileSiteNames.has(siteName) || ctx.existingSiteNames.has(siteName));
@@ -1491,11 +1632,42 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
         if (!payTypeByWorkerNameFromFile.has(name)) payTypeByWorkerNameFromFile.set(name, payType);
     });
 
+    const previewWorkersById = new Map<string, Worker>();
+    const previewWorkersByName = new Map<string, Worker[]>();
+    (existingWorkers ?? []).forEach((worker: Worker) => {
+        [worker?.id, worker?.legacyId].forEach((rawId) => {
+            const id = getCellString(rawId);
+            if (id) previewWorkersById.set(id, worker);
+        });
+        const name = normalizeNameKey(worker?.name);
+        if (!name) return;
+        const candidates = previewWorkersByName.get(name) ?? [];
+        candidates.push(worker);
+        previewWorkersByName.set(name, candidates);
+    });
+
+    const resolvePreviewWorker = (row: any): Worker | undefined => {
+        const workerId = getCellString(row?.['작업자ID']);
+        if (workerId && previewWorkersById.has(workerId)) return previewWorkersById.get(workerId);
+
+        const workerName = normalizeNameKey(getDailyReportWorkerName(row));
+        const candidates = previewWorkersByName.get(workerName) ?? [];
+        if (candidates.length <= 1) return candidates[0];
+
+        const workerTeamId = getCellString(row?.['소속팀ID']);
+        const workerTeamName = normalizeNameKey(getDailyReportWorkerTeamName(row));
+        const narrowed = candidates.filter((candidate) => {
+            if (workerTeamId && getCellString(candidate.teamId) === workerTeamId) return true;
+            return Boolean(workerTeamName && normalizeNameKey(candidate.teamName) === workerTeamName);
+        });
+        return narrowed.length === 1 ? narrowed[0] : undefined;
+    };
+
     const existingMap = new Map<DailyReportKey, any>(
         existingReports.map(r => {
             const d = getCellString(r?.date);
             const s = normalizeNameKey(r?.siteName);
-            const t = normalizeNameKey(r?.teamName);
+            const t = normalizeNameKey(r?.responsibleTeamName || r?.teamName);
             return [`${d}_${s}_${t}` as DailyReportKey, r] as const;
         })
     );
@@ -1503,8 +1675,8 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
     const grouped = new Map<DailyReportKey, any[]>();
     fileRows.forEach(row => {
         const date = getCellString(formatExcelDate(row['날짜'] || row['작업일']));
-        const siteName = normalizeNameKey(row['현장명'] || row['현장']);
-        const teamName = normalizeNameKey(row['팀명'] || row['팀'] || row['해당팀'] || row['현장담당']);
+        const siteName = normalizeNameKey(getDailyReportSiteName(row));
+        const teamName = normalizeNameKey(getDailyReportTeamName(row));
         if (!date || !siteName || !teamName) return;
         const key = `${date}_${siteName}_${teamName}` as DailyReportKey;
 
@@ -1518,8 +1690,8 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
     for (const [key, rows] of grouped.entries()) {
         const first = rows?.[0] ?? {};
         const date = getCellString(formatExcelDate(first?.['날짜'] || first?.['작업일']));
-        const siteName = normalizeNameKey(first?.['현장명'] || first?.['현장']);
-        const teamName = normalizeNameKey(first?.['팀명'] || first?.['팀'] || first?.['해당팀'] || first?.['현장담당']);
+        const siteName = normalizeNameKey(getDailyReportSiteName(first));
+        const teamName = normalizeNameKey(getDailyReportTeamName(first));
 
         const invalidSiteTypes = Array.from(new Set(
             rows
@@ -1531,6 +1703,14 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
                 .map((r) => getCellString(getPaymentMethodRawFromDailyRow(r)))
                 .filter((raw) => raw && !normalizePaymentMethodValue(raw))
         ));
+        const invalidStatuses = Array.from(new Set(
+            rows
+                .map((r) => getCellString(r?.['상태']))
+                .filter((raw) => raw && !normalizeDailyReportStatus(raw))
+        ));
+        const invalidManDays = rows
+            .map((r, index) => ({ line: index + 1, value: parseDailyReportNumber(r?.['공수']) }))
+            .filter((item) => item.value === undefined || item.value < 0);
 
         const groupedSiteType = getFirstNormalizedSiteTypeFromRows(rows);
         const groupedPaymentMethod = getFirstNormalizedPaymentMethodFromRows(rows);
@@ -1546,7 +1726,7 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
             paymentType: groupedPaymentMethod ?? ''
         });
 
-        if (invalidSiteTypes.length > 0 || invalidPaymentMethods.length > 0) {
+        if (invalidSiteTypes.length > 0 || invalidPaymentMethods.length > 0 || invalidStatuses.length > 0 || invalidManDays.length > 0) {
             const invalidMessages: string[] = [];
             if (invalidSiteTypes.length > 0) {
                 invalidMessages.push(`현장구분 값 오류: ${invalidSiteTypes.join(', ')} (허용: 도급/직영/지원)`);
@@ -1554,8 +1734,14 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
             if (invalidPaymentMethods.length > 0) {
                 invalidMessages.push(`결제구분 값 오류: ${invalidPaymentMethods.join(', ')} (허용: 계산서/노무)`);
             }
+            if (invalidStatuses.length > 0) {
+                invalidMessages.push(`상태 값 오류: ${invalidStatuses.join(', ')} (허용: 출근/결근/반차)`);
+            }
+            if (invalidManDays.length > 0) {
+                invalidMessages.push(`공수 값 오류 ${invalidManDays.length}건 (0 이상 숫자 필요)`);
+            }
             results.push({
-                row: buildSummaryRow(rows.map((r) => getCellString(r?.['이름'])).filter(Boolean).join(', '), rows.length),
+                row: buildSummaryRow(rows.map((r) => getDailyReportWorkerName(r)).filter(Boolean).join(', '), rows.length),
                 status: 'CONFLICT' as MappingStatus,
                 changes: invalidMessages,
                 action: 'SKIP' as ActionType,
@@ -1567,7 +1753,7 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
         const existing = existingMap.get(key);
         if (!existing) {
             results.push({
-                row: buildSummaryRow(rows.map((r) => getCellString(r?.['이름'])).filter(Boolean).join(', '), rows.length),
+                row: buildSummaryRow(rows.map((r) => getDailyReportWorkerName(r)).filter(Boolean).join(', '), rows.length),
                 status: 'NEW' as MappingStatus,
                 changes: [],
                 action: 'CREATE' as ActionType,
@@ -1577,28 +1763,21 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
         }
 
         const existingWorkersArray: any[] = Array.isArray(existing.workers) ? existing.workers : [];
-        const existingByName = new Map<string, any>();
+        const existingByWorkerKey = new Map<string, any>();
         existingWorkersArray.forEach((w) => {
-            const n = normalizeNameKey(w?.name);
-            if (!n) return;
-            existingByName.set(n, w);
+            const workerKey = getDailyReportWorkerIdentity(w);
+            if (!getCellString(w?.name)) return;
+            existingByWorkerKey.set(workerKey, w);
         });
 
-        const fileByName = new Map<string, any>();
+        const fileByWorkerKey = new Map<string, any>();
         rows.forEach((r) => {
-            const n = normalizeNameKey(r?.['이름']);
+            const n = normalizeNameKey(getDailyReportWorkerName(r));
             if (!n) return;
 
-            const manDayRaw = r?.['공수'];
-            const manDayCandidate = manDayRaw === undefined || manDayRaw === null || manDayRaw === ''
-                ? 1.0
-                : Number(manDayRaw);
-            const manDay = Number.isFinite(manDayCandidate) ? manDayCandidate : 1.0;
+            const manDay = parseDailyReportNumber(r?.['공수']) ?? 0;
 
-            const unitPriceRaw = r?.['단가'] ?? r?.['일당'] ?? r?.['임금'] ?? r?.['급여'];
-            const unitPriceText = getCellString(unitPriceRaw);
-            const parsedUnitPrice = unitPriceText !== '' ? Number(unitPriceText.replace(/[^0-9]/g, '')) : NaN;
-            const unitPrice = Number.isFinite(parsedUnitPrice) ? parsedUnitPrice : undefined;
+            const unitPrice = getUnitPriceFromRow(r);
 
             const role = getCellString(r?.['직종']);
             const payType = (
@@ -1606,11 +1785,30 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
                 || payTypeByWorkerNameFromFile.get(n)
                 || payTypeByWorkerNameFromDb.get(n)
             );
-            const workContent = getCellString(r?.['작업내용']);
+            const workContent = getDailyReportWorkContent(r);
             const siteType = normalizeSiteTypeValue(getCellString(r?.['현장구분']));
             const paymentType = normalizePaymentMethodValue(getCellString(r?.['결제구분']));
+            const status = normalizeDailyReportStatus(r?.['상태']) ?? 'attendance';
+            const resolvedWorker = resolvePreviewWorker(r);
+            const workerTeamId = getCellString(r?.['소속팀ID'] ?? resolvedWorker?.teamId);
+            const workerTeamName = getDailyReportWorkerTeamName(r) || getCellString(resolvedWorker?.teamName);
+            const workerKey = resolvedWorker?.id
+                ? `id:${String(resolvedWorker.id)}`
+                : getDailyReportWorkerIdentityFromRow(r);
 
-            fileByName.set(n, { name: n, manDay, unitPrice, role, payType, workContent, siteType, paymentType });
+            fileByWorkerKey.set(workerKey, {
+                name: n,
+                manDay,
+                unitPrice,
+                role,
+                payType,
+                workContent,
+                siteType,
+                paymentType,
+                status,
+                workerTeamId,
+                workerTeamName
+            });
         });
 
         const toAdd: string[] = [];
@@ -1618,10 +1816,10 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
         const toRemove: string[] = [];
         let payTypeDiffCount = 0;
 
-        for (const [name, fw] of fileByName.entries()) {
-            const ew = existingByName.get(name);
+        for (const [workerKey, fw] of fileByWorkerKey.entries()) {
+            const ew = existingByWorkerKey.get(workerKey);
             if (!ew) {
-                toAdd.push(name);
+                toAdd.push(fw.name);
                 continue;
             }
 
@@ -1632,6 +1830,9 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
             const oldWorkContent = getCellString(ew?.workContent);
             const oldSiteType = getCellString(ew?.siteType);
             const oldPaymentType = getCellString(ew?.paymentType);
+            const oldStatus = getCellString(ew?.status || 'attendance');
+            const oldWorkerTeamId = getCellString(ew?.teamId);
+            const oldWorkerTeamName = getCellString(ew?.workerTeamName);
 
             const hasManDayDiff = typeof fw?.manDay === 'number' && fw.manDay !== oldManDay;
             const hasUnitPriceDiff = typeof fw?.unitPrice === 'number' && fw.unitPrice !== (oldUnitPrice ?? 0);
@@ -1640,15 +1841,20 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
             const hasWorkContentDiff = fw?.workContent ? fw.workContent !== oldWorkContent : false;
             const hasSiteTypeDiff = fw?.siteType ? fw.siteType !== oldSiteType : false;
             const hasPaymentTypeDiff = fw?.paymentType ? fw.paymentType !== oldPaymentType : false;
+            const hasStatusDiff = fw?.status !== oldStatus;
+            const hasWorkerTeamDiff = Boolean(
+                (fw?.workerTeamId && fw.workerTeamId !== oldWorkerTeamId)
+                || (fw?.workerTeamName && fw.workerTeamName !== oldWorkerTeamName)
+            );
 
-            if (hasManDayDiff || hasUnitPriceDiff || hasRoleDiff || hasPayTypeDiff || hasWorkContentDiff || hasSiteTypeDiff || hasPaymentTypeDiff) {
-                toUpdate.push(name);
+            if (hasManDayDiff || hasUnitPriceDiff || hasRoleDiff || hasPayTypeDiff || hasWorkContentDiff || hasSiteTypeDiff || hasPaymentTypeDiff || hasStatusDiff || hasWorkerTeamDiff) {
+                toUpdate.push(fw.name);
                 if (hasPayTypeDiff) payTypeDiffCount += 1;
             }
         }
 
-        for (const name of existingByName.keys()) {
-            if (!fileByName.has(name)) toRemove.push(name);
+        for (const [workerKey, existingWorker] of existingByWorkerKey.entries()) {
+            if (!fileByWorkerKey.has(workerKey)) toRemove.push(getCellString(existingWorker?.name));
         }
 
         const changes: string[] = [];
@@ -1662,12 +1868,20 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
         if (groupedPaymentMethod && groupedPaymentMethod !== getCellString(existing?.paymentType)) {
             changes.push(`결제구분: ${getCellString(existing?.paymentType) || '-'} → ${groupedPaymentMethod}`);
         }
+        const nextWeather = getCellString(first?.['날씨']);
+        if (nextWeather && nextWeather !== getCellString(existing?.weather)) {
+            changes.push(`날씨: ${getCellString(existing?.weather) || '-'} → ${nextWeather}`);
+        }
+        const nextReportWorkContent = getCellString(first?.['일보작업내용']);
+        if (nextReportWorkContent && nextReportWorkContent !== getCellString(existing?.workContent)) {
+            changes.push('일보 공통 작업내용 변경');
+        }
 
-        const sampleWorkers = Array.from(fileByName.keys()).slice(0, 30).join(', ');
+        const sampleWorkers = Array.from(fileByWorkerKey.values()).map((worker) => worker.name).slice(0, 30).join(', ');
 
         if (changes.length > 0) {
             results.push({
-                row: buildSummaryRow(sampleWorkers, fileByName.size),
+                row: buildSummaryRow(sampleWorkers, fileByWorkerKey.size),
                 status: 'UPDATE' as MappingStatus,
                 existingData: existing,
                 changes,
@@ -1676,7 +1890,7 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
             });
         } else {
             results.push({
-                row: buildSummaryRow(sampleWorkers, fileByName.size),
+                row: buildSummaryRow(sampleWorkers, fileByWorkerKey.size),
                 status: 'UNCHANGED' as MappingStatus,
                 existingData: existing,
                 changes: [],
@@ -1770,7 +1984,7 @@ const IntegratedMassUploader: React.FC = () => {
                         const ws = wb.Sheets[sheetName];
                         // raw:false로 읽어 긴 숫자/선행 0이 포함된 계좌번호를 표시 문자열 기준으로 보존한다.
                         const rawData = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
-                        const normalizedData = rawData.map((row: any) => normalizeExcelRowKeys(row));
+                        const normalizedData = rawData.map((row: any) => canonicalizeTemplateRowKeys(type, row));
                         const headerMatrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as any[][];
                         const headers = (headerMatrix?.[0] ?? [])
                             .map((h) => normalizeExcelHeaderKey(getCellString(h)))
@@ -1945,6 +2159,106 @@ const IntegratedMassUploader: React.FC = () => {
                 workersByNormalizedName.set(normalizeNameKey(k), w);
             });
 
+            const teamsById = new Map<string, Team>();
+            const sitesById = new Map<string, Site>();
+            const workersById = new Map<string, Worker>();
+            const workerCandidatesByNormalizedName = new Map<string, Worker[]>();
+
+            allTeams.forEach((team) => {
+                [team?.id, team?.legacyId].forEach((rawId) => {
+                    const id = getCellString(rawId);
+                    if (id) teamsById.set(id, team);
+                });
+            });
+            allSites.forEach((site) => {
+                [site?.id, site?.legacyId].forEach((rawId) => {
+                    const id = getCellString(rawId);
+                    if (id) sitesById.set(id, site);
+                });
+            });
+            allWorkers.forEach((worker) => {
+                [worker?.id, worker?.legacyId].forEach((rawId) => {
+                    const id = getCellString(rawId);
+                    if (id) workersById.set(id, worker);
+                });
+                const name = normalizeNameKey(worker?.name);
+                if (!name) return;
+                const candidates = workerCandidatesByNormalizedName.get(name) ?? [];
+                candidates.push(worker);
+                workerCandidatesByNormalizedName.set(name, candidates);
+            });
+
+            const registerTeamLookup = (team: Team): void => {
+                const id = getCellString(team?.id);
+                if (id) teamsById.set(id, team);
+                const name = normalizeNameKey(team?.name);
+                if (name) {
+                    teamsByName.set(name, team);
+                    teamsByNormalizedName.set(name, team);
+                }
+            };
+
+            const registerSiteLookup = (site: Site): void => {
+                const id = getCellString(site?.id);
+                if (id) sitesById.set(id, site);
+                const name = normalizeNameKey(site?.name);
+                if (name) {
+                    sitesByName.set(name, site);
+                    sitesByNormalizedName.set(name, site);
+                }
+            };
+
+            const registerWorkerLookup = (worker: Worker): void => {
+                const id = getCellString(worker?.id);
+                if (id) workersById.set(id, worker);
+                const name = normalizeNameKey(worker?.name);
+                if (!name) return;
+                if (!workersByName.has(name)) workersByName.set(name, worker);
+                workersByNormalizedName.set(name, worker);
+                const previous = workerCandidatesByNormalizedName.get(name) ?? [];
+                const next = previous.filter((candidate) => getCellString(candidate?.id) !== id);
+                next.push(worker);
+                workerCandidatesByNormalizedName.set(name, next);
+            };
+
+            const resolveDailyReportTeam = (row: any): Team | undefined => {
+                const teamId = getCellString(row?.['현장담당팀ID']);
+                if (teamId && teamsById.has(teamId)) return teamsById.get(teamId);
+                const teamName = normalizeNameKey(getDailyReportTeamName(row));
+                return teamsByName.get(teamName) ?? teamsByNormalizedName.get(teamName);
+            };
+
+            const resolveDailyReportSite = (row: any): Site | undefined => {
+                const siteId = getCellString(row?.['현장ID']);
+                if (siteId && sitesById.has(siteId)) return sitesById.get(siteId);
+                const siteName = normalizeNameKey(getDailyReportSiteName(row));
+                return sitesByName.get(siteName) ?? sitesByNormalizedName.get(siteName);
+            };
+
+            const resolveDailyReportWorker = (row: any): Worker | undefined => {
+                const workerId = getCellString(row?.['작업자ID']);
+                if (workerId && workersById.has(workerId)) return workersById.get(workerId);
+
+                const workerName = normalizeNameKey(getDailyReportWorkerName(row));
+                const candidates = workerCandidatesByNormalizedName.get(workerName) ?? [];
+                if (candidates.length <= 1) return candidates[0];
+
+                const workerTeamId = getCellString(row?.['소속팀ID']);
+                const workerTeamName = normalizeNameKey(getDailyReportWorkerTeamName(row));
+                const narrowed = candidates.filter((candidate) => {
+                    if (workerTeamId && getCellString(candidate.teamId) === workerTeamId) return true;
+                    return Boolean(workerTeamName && normalizeNameKey(candidate.teamName) === workerTeamName);
+                });
+                return narrowed.length === 1 ? narrowed[0] : undefined;
+            };
+
+            const resolveDailyReportWorkerTeam = (row: any, worker?: Worker, fallbackTeam?: Team): Team | undefined => {
+                const workerTeamId = getCellString(row?.['소속팀ID'] ?? worker?.teamId);
+                if (workerTeamId && teamsById.has(workerTeamId)) return teamsById.get(workerTeamId);
+                const workerTeamName = normalizeNameKey(getDailyReportWorkerTeamName(row) || worker?.teamName);
+                return teamsByName.get(workerTeamName) ?? teamsByNormalizedName.get(workerTeamName) ?? fallbackTeam;
+            };
+
             const pendingTeamLeaderNames = new Map<string, string>();
 
             const processMapped = async (type: SheetType, items: MappedRow[], handler: (item: MappedRow) => Promise<void>) => {
@@ -2087,6 +2401,7 @@ const IntegratedMassUploader: React.FC = () => {
                     } as Team;
                     teamsByName.set(teamName, createdTeam);
                     teamsByNormalizedName.set(normalizeNameKey(teamName), createdTeam);
+                    registerTeamLookup(createdTeam);
                     return;
                 }
 
@@ -2252,6 +2567,7 @@ const IntegratedMassUploader: React.FC = () => {
                     } as Site;
                     sitesByName.set(siteName, createdSite);
                     sitesByNormalizedName.set(normalizeNameKey(siteName), createdSite);
+                    registerSiteLookup(createdSite);
                     return;
                 }
 
@@ -2367,6 +2683,7 @@ const IntegratedMassUploader: React.FC = () => {
                         accountHolder
                     } as Worker);
                     workersByNormalizedName.set(normalizeNameKey(name), workersByName.get(name)!);
+                    registerWorkerLookup(workersByName.get(name)!);
                     return;
                 }
 
@@ -2405,6 +2722,7 @@ const IntegratedMassUploader: React.FC = () => {
                 } as Worker;
                 workersByName.set(name, nextWorker);
                 workersByNormalizedName.set(normalizeNameKey(name), nextWorker);
+                registerWorkerLookup(nextWorker);
             });
 
             if (pendingTeamLeaderNames.size > 0) {
@@ -2446,15 +2764,17 @@ const IntegratedMassUploader: React.FC = () => {
                 updateLog('DailyReport', 'processing', `일보 데이터 처리 중...`);
 
                 const requiredSiteNames = new Set<string>();
+                const siteSeedRows = new Map<string, any>();
                 const siteToResponsibleTeamName = new Map<string, string>();
                 const siteToSiteType = new Map<string, Site['siteType']>();
                 const siteToPaymentMethod = new Map<string, Site['paymentMethod']>();
                 reportData.forEach((row: any) => {
-                    const siteName = normalizeNameKey(row?.['현장명'] || row?.['현장']);
+                    const siteName = normalizeNameKey(getDailyReportSiteName(row));
                     if (!siteName) return;
                     requiredSiteNames.add(siteName);
+                    if (!siteSeedRows.has(siteName)) siteSeedRows.set(siteName, row);
 
-                    const responsibleTeamName = getCellString(row?.['해당팀'] ?? row?.['현장담당']);
+                    const responsibleTeamName = getDailyReportTeamName(row);
                     if (responsibleTeamName && !siteToResponsibleTeamName.has(siteName)) {
                         siteToResponsibleTeamName.set(siteName, responsibleTeamName);
                     }
@@ -2474,7 +2794,7 @@ const IntegratedMassUploader: React.FC = () => {
                 });
 
                 const missingSiteNames = Array.from(requiredSiteNames.values()).filter((siteName) => {
-                    const existingSite = sitesByName.get(siteName) ?? sitesByNormalizedName.get(siteName);
+                    const existingSite = resolveDailyReportSite(siteSeedRows.get(siteName));
                     return !existingSite?.id;
                 });
 
@@ -2493,18 +2813,38 @@ const IntegratedMassUploader: React.FC = () => {
 
                     if (confirmMissingSites.isConfirmed) {
                         for (const siteName of missingSiteNames) {
+                            const seedRow = siteSeedRows.get(siteName) ?? {};
                             const responsibleTeamName = siteToResponsibleTeamName.get(siteName) ?? '';
-                            const team = responsibleTeamName
+                            const team = resolveDailyReportTeam(seedRow) ?? (responsibleTeamName
                                 ? (teamsByName.get(responsibleTeamName) ?? teamsByNormalizedName.get(normalizeNameKey(responsibleTeamName)))
-                                : undefined;
+                                : undefined);
+                            const siteManager = resolveDailyReportWorker({
+                                작업자ID: seedRow?.['현장책임자ID'],
+                                이름: seedRow?.['현장책임자']
+                            });
+                            const clientCompanyName = getCellString(seedRow?.['발주사']);
+                            const constructorCompanyName = getCellString(seedRow?.['시공사']);
+                            const partnerName = getCellString(seedRow?.['협력사']);
+                            const clientCompany = companiesByName.get(clientCompanyName) ?? companiesByNormalizedName.get(normalizeNameKey(clientCompanyName));
+                            const constructorCompany = companiesByName.get(constructorCompanyName) ?? companiesByNormalizedName.get(normalizeNameKey(constructorCompanyName));
+                            const partnerCompany = companiesByName.get(partnerName) ?? companiesByNormalizedName.get(normalizeNameKey(partnerName));
+                            const address = getCellString(seedRow?.['현장주소']);
 
                             const createdId = await siteService.addSite({
                                 name: siteName,
                                 code: '',
-                                address: '',
+                                address,
                                 status: 'active',
                                 responsibleTeamId: team?.id ? String(team.id) : undefined,
                                 responsibleTeamName: team?.name ? String(team.name) : (responsibleTeamName || undefined),
+                                siteManagerId: siteManager?.id ? String(siteManager.id) : undefined,
+                                siteManagerName: siteManager?.name || getCellString(seedRow?.['현장책임자']) || undefined,
+                                clientCompanyId: clientCompany?.id ? String(clientCompany.id) : undefined,
+                                clientCompanyName: clientCompany?.name || clientCompanyName || undefined,
+                                companyId: constructorCompany?.id ? String(constructorCompany.id) : undefined,
+                                companyName: constructorCompany?.name || constructorCompanyName || undefined,
+                                partnerId: partnerCompany?.id ? String(partnerCompany.id) : undefined,
+                                partnerName: partnerCompany?.name || partnerName || undefined,
                                 siteType: siteToSiteType.get(siteName),
                                 paymentMethod: siteToPaymentMethod.get(siteName)
                             });
@@ -2513,21 +2853,30 @@ const IntegratedMassUploader: React.FC = () => {
                                 id: createdId,
                                 name: siteName,
                                 code: '',
-                                address: '',
+                                address,
                                 status: 'active',
                                 responsibleTeamId: team?.id ? String(team.id) : undefined,
                                 responsibleTeamName: team?.name ? String(team.name) : (responsibleTeamName || undefined),
+                                siteManagerId: siteManager?.id ? String(siteManager.id) : undefined,
+                                siteManagerName: siteManager?.name || getCellString(seedRow?.['현장책임자']) || undefined,
+                                clientCompanyId: clientCompany?.id ? String(clientCompany.id) : undefined,
+                                clientCompanyName: clientCompany?.name || clientCompanyName || undefined,
+                                companyId: constructorCompany?.id ? String(constructorCompany.id) : undefined,
+                                companyName: constructorCompany?.name || constructorCompanyName || undefined,
+                                partnerId: partnerCompany?.id ? String(partnerCompany.id) : undefined,
+                                partnerName: partnerCompany?.name || partnerName || undefined,
                                 siteType: siteToSiteType.get(siteName),
                                 paymentMethod: siteToPaymentMethod.get(siteName)
                             } as Site;
                             sitesByName.set(siteName, createdSite);
                             sitesByNormalizedName.set(normalizeNameKey(siteName), createdSite);
+                            registerSiteLookup(createdSite);
                         }
                     }
                 }
 
                 for (const siteName of requiredSiteNames.values()) {
-                    const existingSite = sitesByName.get(siteName) ?? sitesByNormalizedName.get(siteName);
+                    const existingSite = resolveDailyReportSite(siteSeedRows.get(siteName));
                     if (!existingSite?.id) continue;
 
                     const nextSiteType = siteToSiteType.get(siteName);
@@ -2548,6 +2897,7 @@ const IntegratedMassUploader: React.FC = () => {
                         } as Site;
                         sitesByName.set(siteName, nextSite);
                         sitesByNormalizedName.set(normalizeNameKey(siteName), nextSite);
+                        registerSiteLookup(nextSite);
                     } catch (e) {
                         errors.push({
                             type: 'Site',
@@ -2559,11 +2909,15 @@ const IntegratedMassUploader: React.FC = () => {
 
                 const requiredTeamNames = new Set<string>();
                 const requiredWorkerNames = new Set<string>();
+                const workerSeedRows = new Map<string, any>();
                 reportData.forEach((row: any) => {
-                    const teamName = normalizeNameKey(row?.['팀명'] || row?.['팀'] || row?.['해당팀'] || row?.['현장담당']);
+                    const teamName = normalizeNameKey(getDailyReportTeamName(row));
                     if (teamName) requiredTeamNames.add(teamName);
-                    const workerName = normalizeNameKey(row?.['이름']);
-                    if (workerName) requiredWorkerNames.add(workerName);
+                    const workerName = normalizeNameKey(getDailyReportWorkerName(row));
+                    if (workerName) {
+                        requiredWorkerNames.add(workerName);
+                        if (!workerSeedRows.has(workerName)) workerSeedRows.set(workerName, row);
+                    }
                 });
 
                 const missingTeamNames = Array.from(requiredTeamNames.values()).filter((teamName) => {
@@ -2605,12 +2959,15 @@ const IntegratedMassUploader: React.FC = () => {
                             } as Team;
                             teamsByName.set(teamName, createdTeam);
                             teamsByNormalizedName.set(normalizeNameKey(teamName), createdTeam);
+                            registerTeamLookup(createdTeam);
                         }
                     }
                 }
 
                 const missingWorkerNames = Array.from(requiredWorkerNames.values()).filter((workerName) => {
-                    const w = workersByName.get(workerName) ?? workersByNormalizedName.get(workerName);
+                    const w = resolveDailyReportWorker(workerSeedRows.get(workerName))
+                        ?? workersByName.get(workerName)
+                        ?? workersByNormalizedName.get(workerName);
                     return !w?.id;
                 });
 
@@ -2628,18 +2985,23 @@ const IntegratedMassUploader: React.FC = () => {
                     if (confirmMissingWorkers.isDismissed) return;
                     if (confirmMissingWorkers.isConfirmed) {
                         for (const workerName of missingWorkerNames) {
+                            const seedRow = workerSeedRows.get(workerName) ?? {};
+                            const workerTeam = resolveDailyReportWorkerTeam(seedRow, undefined, resolveDailyReportTeam(seedRow));
+                            const unitPrice = getUnitPriceFromRow(seedRow) ?? 0;
+                            const payType = getPayTypeFromRow(seedRow) || '일급제';
+                            const role = getCellString(seedRow?.['직종']) || '작업자';
                             const createdId = await manpowerService.addWorker({
                                 name: workerName,
-                                teamId: '',
-                                teamName: '',
+                                teamId: workerTeam?.id ? String(workerTeam.id) : '',
+                                teamName: workerTeam?.name || getDailyReportWorkerTeamName(seedRow),
                                 companyId: '',
                                 companyName: '',
-                                role: '작업자',
+                                role,
                                 contact: '',
                                 idNumber: '',
                                 address: '',
-                                unitPrice: 0,
-                                payType: '일급제',
+                                unitPrice,
+                                payType,
                                 bankName: '',
                                 accountNumber: '',
                                 accountHolder: '',
@@ -2650,16 +3012,16 @@ const IntegratedMassUploader: React.FC = () => {
                             const createdWorker: Worker = {
                                 id: createdId,
                                 name: workerName,
-                                teamId: '',
-                                teamName: '',
+                                teamId: workerTeam?.id ? String(workerTeam.id) : '',
+                                teamName: workerTeam?.name || getDailyReportWorkerTeamName(seedRow),
                                 companyId: '',
                                 companyName: '',
-                                role: '작업자',
+                                role,
                                 contact: '',
                                 idNumber: '',
                                 address: '',
-                                unitPrice: 0,
-                                payType: '일급제',
+                                unitPrice,
+                                payType,
                                 bankName: '',
                                 accountNumber: '',
                                 accountHolder: '',
@@ -2668,6 +3030,7 @@ const IntegratedMassUploader: React.FC = () => {
                             } as Worker;
                             workersByName.set(workerName, createdWorker);
                             workersByNormalizedName.set(normalizeNameKey(workerName), createdWorker);
+                            registerWorkerLookup(createdWorker);
                         }
                     }
                 }
@@ -2676,8 +3039,8 @@ const IntegratedMassUploader: React.FC = () => {
                 const dailyKeyToRows = new Map<DailyReportKey, any[]>();
                 reportData.forEach((row: any) => {
                     const date = getCellString(formatExcelDate(row?.['날짜'] || row?.['작업일']));
-                    const siteName = normalizeNameKey(row?.['현장명'] || row?.['현장']);
-                    const teamName = normalizeNameKey(row?.['팀명'] || row?.['팀'] || row?.['해당팀'] || row?.['현장담당']);
+                    const siteName = normalizeNameKey(getDailyReportSiteName(row));
+                    const teamName = normalizeNameKey(getDailyReportTeamName(row));
                     if (!date || !siteName || !teamName) return;
                     const key = `${date}_${siteName}_${teamName}` as DailyReportKey;
                     const list = dailyKeyToRows.get(key) ?? [];
@@ -2717,15 +3080,16 @@ const IntegratedMassUploader: React.FC = () => {
                     const date = getCellString((item.row as any)?.date) || String(key).split('_')[0] || '';
                     const siteName = normalizeNameKey((item.row as any)?.siteName) || normalizeNameKey(String(key).split('_')[1] || '');
                     const teamName = normalizeNameKey((item.row as any)?.teamName) || normalizeNameKey(String(key).split('_')[2] || '');
+                    const firstRow = rows[0] ?? {};
 
-                    const site = sitesByName.get(siteName) ?? sitesByNormalizedName.get(siteName);
+                    const site = resolveDailyReportSite(firstRow) ?? sitesByName.get(siteName) ?? sitesByNormalizedName.get(siteName);
                     if (!site?.id) {
                         failed++;
                         errors.push({ type: 'DailyReport', key, message: `현장 미등록: ${siteName}` });
                         continue;
                     }
 
-                    const team = teamsByName.get(teamName) ?? teamsByNormalizedName.get(teamName);
+                    const team = resolveDailyReportTeam(firstRow) ?? teamsByName.get(teamName) ?? teamsByNormalizedName.get(teamName);
                     if (!team?.id) {
                         failed++;
                         errors.push({ type: 'DailyReport', key, message: `팀 미등록: ${teamName}` });
@@ -2735,48 +3099,42 @@ const IntegratedMassUploader: React.FC = () => {
                     const dailySiteType = getFirstNormalizedSiteTypeFromRows(rows) ?? normalizeSiteTypeValue(site.siteType);
                     const dailyPaymentMethod = getFirstNormalizedPaymentMethodFromRows(rows) ?? normalizePaymentMethodValue(site.paymentMethod);
 
-                    const mappedWorkersByName = new Map<string, DailyReportWorker>();
+                    const mappedWorkersByKey = new Map<string, DailyReportWorker>();
                     for (const r of rows) {
-                        const wName = normalizeNameKey(r?.['이름']);
+                        const wName = normalizeNameKey(getDailyReportWorkerName(r));
                         if (!wName) continue;
-                        const cached = workersByName.get(wName) ?? workersByNormalizedName.get(wName);
+                        const cached = resolveDailyReportWorker(r) ?? workersByName.get(wName) ?? workersByNormalizedName.get(wName);
+                        const workerTeam = resolveDailyReportWorkerTeam(r, cached, team);
 
-                        const manDayRaw = r?.['공수'];
-                        const manDayCandidate = manDayRaw === undefined || manDayRaw === null || manDayRaw === ''
-                            ? 1.0
-                            : Number(manDayRaw);
-                        const manDay = Number.isFinite(manDayCandidate) ? manDayCandidate : 1.0;
+                        const manDay = parseDailyReportNumber(r?.['공수']) ?? 0;
 
-                        const unitPriceRaw = r?.['단가'] ?? r?.['일당'] ?? r?.['임금'] ?? r?.['급여'];
-                        const unitPriceText = getCellString(unitPriceRaw);
-                        const unitPriceCandidate = unitPriceText !== ''
-                            ? Number(unitPriceText.replace(/[^0-9]/g, ''))
-                            : (cached?.unitPrice ?? 0);
-                        const unitPrice = Number.isFinite(unitPriceCandidate) ? unitPriceCandidate : 0;
+                        const unitPrice = getUnitPriceFromRow(r) ?? cached?.unitPrice ?? 0;
 
                         const role = getCellString(r?.['직종']) || getCellString(cached?.role) || '작업자';
                         // payType은 엑셀 파일 값을 우선적으로 사용, 없을 때 작업자 정보에서 가져옴
                         const payType = getPayTypeFromRow(r) || getCellString((cached as any)?.payType ?? (cached as any)?.salaryModel) || '일급제';
-                        const status: DailyReportWorker['status'] = 'attendance';
+                        const status = normalizeDailyReportStatus(r?.['상태']) ?? 'attendance';
+                        const rawWorkerId = getCellString(r?.['작업자ID']);
 
                         const mapped: DailyReportWorker = {
-                            workerId: cached?.id ? String(cached.id) : 'unknown',
+                            workerId: cached?.id ? String(cached.id) : (rawWorkerId || `unknown:${getDailyReportWorkerIdentityFromRow(r)}`),
                             name: wName,
                             role,
                             status,
                             manDay,
-                            workContent: getCellString(r?.['작업내용']),
-                            teamId: cached?.teamId ? String(cached.teamId) : (team.id ? String(team.id) : undefined),
+                            workContent: getDailyReportWorkContent(r),
+                            teamId: workerTeam?.id ? String(workerTeam.id) : (cached?.teamId ? String(cached.teamId) : undefined),
                             unitPrice,
                             payType,
                             salaryModel: payType,
                             siteType: dailySiteType,
-                            paymentType: dailyPaymentMethod
+                            paymentType: dailyPaymentMethod,
+                            workerTeamName: workerTeam?.name || getDailyReportWorkerTeamName(r) || getCellString(cached?.teamName) || teamName
                         };
-                        mappedWorkersByName.set(wName, mapped);
+                        mappedWorkersByKey.set(getDailyReportWorkerIdentity(mapped), mapped);
                     }
 
-                    const mappedWorkers = Array.from(mappedWorkersByName.values());
+                    const mappedWorkers = Array.from(mappedWorkersByKey.values());
 
                     if (mappedWorkers.length <= 0) {
                         failed++;
@@ -2784,19 +3142,35 @@ const IntegratedMassUploader: React.FC = () => {
                         continue;
                     }
 
+                    const totalManDay = mappedWorkers.reduce((sum, w) => sum + (typeof w.manDay === 'number' ? w.manDay : 0), 0);
+                    const totalAmount = mappedWorkers.reduce((sum, w) => sum + ((w.manDay || 0) * (w.unitPrice || 0)), 0);
+                    const reportWeather = rows.map((row) => getCellString(row?.['날씨'])).find(Boolean) || '';
+                    const reportWorkContent = rows.map((row) => getCellString(row?.['일보작업내용'])).find(Boolean) || '';
                     const base: Omit<DailyReport, 'id'> = {
                         date,
                         siteId: String(site.id),
-                        siteName,
+                        siteName: getCellString(site.name) || siteName,
+                        siteAddress: getCellString((site as any).address || firstRow?.['현장주소']) || undefined,
                         teamId: String(team.id),
-                        teamName,
+                        teamName: getCellString(team.name) || teamName,
                         workers: mappedWorkers,
-                        totalManDay: mappedWorkers.reduce((sum, w) => sum + (typeof w.manDay === 'number' ? w.manDay : 0), 0),
+                        totalManDay,
+                        totalAmount,
                         writerId: currentUser?.uid || 'system',
-                        companyName: site.companyName || '',
-                        responsibleTeamName: site.responsibleTeamName || '',
+                        companyId: getCellString(site.clientCompanyId) || undefined,
+                        companyName: getCellString(site.clientCompanyName || firstRow?.['발주사']) || undefined,
+                        constructorCompanyId: getCellString(site.companyId || site.constructorCompanyId) || undefined,
+                        constructorCompanyName: getCellString(site.companyName || site.constructorCompanyName || firstRow?.['시공사']) || undefined,
+                        partnerId: getCellString(site.partnerId) || undefined,
+                        partnerName: getCellString(site.partnerName || firstRow?.['협력사']) || undefined,
+                        responsibleTeamId: getCellString(site.responsibleTeamId || team.id) || undefined,
+                        responsibleTeamName: getCellString(site.responsibleTeamName || team.name || teamName) || undefined,
+                        siteManagerId: getCellString((site as any).siteManagerId || firstRow?.['현장책임자ID']) || undefined,
+                        siteManagerName: getCellString((site as any).siteManagerName || firstRow?.['현장책임자']) || undefined,
                         siteType: dailySiteType,
-                        paymentType: dailyPaymentMethod
+                        paymentType: dailyPaymentMethod,
+                        weather: reportWeather || undefined,
+                        workContent: reportWorkContent || undefined
                     };
 
                     try {
@@ -2810,32 +3184,32 @@ const IntegratedMassUploader: React.FC = () => {
 
                             const prevWorkers = Array.isArray(existingReport?.workers) ? existingReport!.workers : [];
 
-                            const prevByName = new Map<string, DailyReportWorker>();
+                            const prevByWorkerKey = new Map<string, DailyReportWorker>();
                             prevWorkers.forEach((w: DailyReportWorker) => {
-                                const n = normalizeNameKey(w?.name);
-                                if (!n) return;
-                                prevByName.set(n, w);
+                                if (!normalizeNameKey(w?.name)) return;
+                                prevByWorkerKey.set(getDailyReportWorkerIdentity(w), w);
                             });
 
-                            const mappedByName = new Map<string, DailyReportWorker>();
+                            const mappedByWorkerKey = new Map<string, DailyReportWorker>();
                             mappedWorkers.forEach((w) => {
-                                const n = normalizeNameKey(w?.name);
-                                if (!n) return;
+                                if (!normalizeNameKey(w?.name)) return;
 
-                                const prev = prevByName.get(n);
+                                const workerKey = getDailyReportWorkerIdentity(w);
+                                const prev = prevByWorkerKey.get(workerKey);
                                 const nextWorkerId = (getCellString(w?.workerId).startsWith('unknown') && prev?.workerId)
                                     ? String(prev.workerId)
                                     : String(w.workerId);
 
-                                mappedByName.set(n, { ...w, workerId: nextWorkerId });
+                                const nextWorker = { ...w, workerId: nextWorkerId };
+                                mappedByWorkerKey.set(getDailyReportWorkerIdentity(nextWorker), nextWorker);
                             });
 
                             const nextWorkers = dailyMode === 'overwrite'
-                                ? Array.from(mappedByName.values())
+                                ? Array.from(mappedByWorkerKey.values())
                                 : (() => {
                                     const next = new Map<string, DailyReportWorker>();
-                                    prevByName.forEach((w, k) => next.set(k, w));
-                                    mappedByName.forEach((w, k) => {
+                                    prevByWorkerKey.forEach((w, k) => next.set(k, w));
+                                    mappedByWorkerKey.forEach((w, k) => {
                                         const existing = next.get(k);
                                         if (existing) {
                                             // payType을 포함한 모든 필드를 업데이트
@@ -2856,7 +3230,8 @@ const IntegratedMassUploader: React.FC = () => {
                             await dailyReportService.updateReport(existingId, {
                                 ...base,
                                 workers: nextWorkers,
-                                totalManDay: nextWorkers.reduce((sum, w) => sum + (typeof w.manDay === 'number' ? w.manDay : 0), 0)
+                                totalManDay: nextWorkers.reduce((sum, w) => sum + (typeof w.manDay === 'number' ? w.manDay : 0), 0),
+                                totalAmount: nextWorkers.reduce((sum, w) => sum + ((w.manDay || 0) * (w.unitPrice || 0)), 0)
                             });
                             ok++;
                         }
@@ -3011,8 +3386,8 @@ const IntegratedMassUploader: React.FC = () => {
         const normalizeDailyReportKeyPart = (val: unknown): string => getCellString(val).replace(/\s+/g, ' ');
         const buildDailyReportKeyFromRow = (row: any): DailyReportKey | '' => {
             const date = getCellString(formatExcelDate(row?.['날짜'] ?? row?.['작업일']));
-            const siteName = normalizeDailyReportKeyPart(row?.['현장명'] ?? row?.['현장']);
-            const teamName = normalizeDailyReportKeyPart(row?.['팀명'] ?? row?.['팀'] ?? row?.['해당팀'] ?? row?.['현장담당']);
+            const siteName = normalizeDailyReportKeyPart(getDailyReportSiteName(row));
+            const teamName = normalizeDailyReportKeyPart(getDailyReportTeamName(row));
             if (!date || !siteName || !teamName) return '';
             return `${date}_${siteName}_${teamName}` as DailyReportKey;
         };
@@ -3027,7 +3402,13 @@ const IntegratedMassUploader: React.FC = () => {
             });
         });
 
-        const dailyPreferredHeaders = ['날짜', '현장명', '팀명', '해당팀', '이름', '직종', '공수', '급여방식', '단가', '현장구분', '결제구분', '작업내용'];
+        const dailyPreferredHeaders = [
+            '일보ID', '날짜', '현장ID', '현장명', '현장주소',
+            '발주사', '시공사', '협력사', '현장구분', '결제구분',
+            '현장담당팀', '현장담당팀ID', '현장책임자', '현장책임자ID',
+            '작업자ID', '이름', '소속팀', '소속팀ID', '직종', '급여방식',
+            '상태', '공수', '단가', '금액', '날씨', '작업내용', '일보작업내용'
+        ];
         const preferredHeaders = isDailyReportTab
             ? dailyPreferredHeaders
             : (TEMPLATE_FIELDS[activeTab as TemplateSheetType]?.fields ?? []).map((field) => field.label);
@@ -3040,7 +3421,9 @@ const IntegratedMassUploader: React.FC = () => {
 
         const combinedRows = rawRows.map((row, index) => {
             const annotation = annotations[index];
-            const derivedKey = annotation?.key || (isDailyReportTab ? buildDailyReportKeyFromRow(row) : '');
+            const derivedKey = isDailyReportTab
+                ? buildDailyReportKeyFromRow(row)
+                : (annotation?.key || '');
             const mappingItem = isDailyReportTab
                 ? (derivedKey ? mappingByKey.get(derivedKey) : undefined)
                 : mapping[index] ?? (derivedKey ? mappingByKey.get(derivedKey) : undefined);
@@ -3351,11 +3734,12 @@ const IntegratedMassUploader: React.FC = () => {
                     <div className="mt-8 max-w-5xl mx-auto text-left rounded-xl border border-slate-200 bg-slate-50 p-5">
                         <h3 className="text-base font-extrabold text-slate-800">정밀 업로드 가이드</h3>
                         <p className="text-sm text-slate-600 mt-1">
-                            현장/일보의 분류값은 아래 허용값으로 입력해야 정확히 등록됩니다.
+                            출력일보 목록에서 내려받은 `일보목록V2` 파일도 그대로 인식합니다. 현장/일보의 분류값은 아래 허용값으로 입력해주세요.
                         </p>
                         <div className="mt-3 flex flex-wrap gap-2">
                             <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700">현장구분: 도급 / 직영 / 지원</span>
                             <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">결제구분: 계산서 / 노무</span>
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-sky-100 text-sky-700">상태: 출근 / 결근 / 반차</span>
                         </div>
 
                         <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
@@ -3371,7 +3755,7 @@ const IntegratedMassUploader: React.FC = () => {
                                     {(Object.keys(TEMPLATE_FIELDS) as TemplateSheetType[]).map((sheetType) => {
                                         const section = TEMPLATE_FIELDS[sheetType];
                                         const required = section.fields.filter((f) => f.required).map((f) => f.label).join(', ') || '-';
-                                        const optional = section.fields.filter((f) => !f.required).map((f) => f.label).slice(0, 8).join(', ') || '-';
+                                        const optional = section.fields.filter((f) => !f.required).map((f) => f.label).join(', ') || '-';
                                         return (
                                             <tr key={sheetType} className="border-t border-slate-100">
                                                 <td className="px-3 py-2 font-bold text-slate-700 whitespace-nowrap">{section.sheetName}</td>

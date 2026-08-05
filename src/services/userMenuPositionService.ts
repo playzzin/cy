@@ -10,6 +10,14 @@
  */
 
 import { createSystemConfig, listSystemConfigs, listAllSystemConfigs, updateSystemConfig } from './firestoreCrudCompat';
+import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
+import {
+    addDevUserPosition,
+    getDevUserPositionMap,
+    removeDevUserPosition,
+    setDevUserPositions,
+    subscribeDevUserPositionMap,
+} from '../utils/devAdminFixtures';
 
 const DOC_ID = 'user_menu_positions';
 
@@ -27,6 +35,13 @@ class UserMenuPositionService {
     }
 
     private async load(): Promise<void> {
+        if (isDevAdminSessionEnabled()) {
+            this.data = getDevUserPositionMap();
+            this.loaded = true;
+            this.notifyListeners();
+            return;
+        }
+
         try {
             const findRow = (rows: any[]): any | null => {
                 if (!Array.isArray(rows)) return null;
@@ -97,16 +112,29 @@ class UserMenuPositionService {
 
     /** ?뱀젙 ?좎???異붽? 吏곸콉 紐⑸줉 議고쉶 */
     public getPositions(uid: string): string[] {
+        if (isDevAdminSessionEnabled()) {
+            return getDevUserPositionMap()[uid] || [];
+        }
+
         return this.data[uid] || [];
     }
 
     /** ?꾩껜 留ㅽ븨 議고쉶 */
     public getAll(): UserMenuPositionMap {
+        if (isDevAdminSessionEnabled()) {
+            return getDevUserPositionMap();
+        }
+
         return { ...this.data };
     }
 
     /** ?뱀젙 ?좎???異붽? 吏곸콉 ?ㅼ젙 */
     public async setPositions(uid: string, positions: string[]): Promise<void> {
+        if (isDevAdminSessionEnabled()) {
+            setDevUserPositions(uid, positions);
+            return;
+        }
+
         const filtered = positions.filter(Boolean);
         if (filtered.length === 0) {
             delete this.data[uid];
@@ -118,6 +146,11 @@ class UserMenuPositionService {
 
     /** ?뱀젙 ?좎???吏곸콉 1媛?異붽? */
     public async addPosition(uid: string, position: string): Promise<void> {
+        if (isDevAdminSessionEnabled()) {
+            addDevUserPosition(uid, position);
+            return;
+        }
+
         const current = this.data[uid] || [];
         if (current.includes(position)) return;
         this.data[uid] = [...current, position];
@@ -126,6 +159,11 @@ class UserMenuPositionService {
 
     /** ?뱀젙 ?좎??먯꽌 吏곸콉 1媛??쒓굅 */
     public async removePosition(uid: string, position: string): Promise<void> {
+        if (isDevAdminSessionEnabled()) {
+            removeDevUserPosition(uid, position);
+            return;
+        }
+
         const current = this.data[uid] || [];
         const next = current.filter(p => p !== position);
         if (next.length === 0) {
@@ -138,6 +176,10 @@ class UserMenuPositionService {
 
     /** 蹂寃?援щ룆 */
     public subscribe(listener: (data: UserMenuPositionMap) => void): () => void {
+        if (isDevAdminSessionEnabled()) {
+            return subscribeDevUserPositionMap(listener);
+        }
+
         this.listeners.push(listener);
         if (this.loaded) listener(this.data);
         return () => {
@@ -151,10 +193,18 @@ class UserMenuPositionService {
 
     /** 媛뺤젣 ?덈줈怨좎묠 */
     public async refresh(): Promise<void> {
+        if (isDevAdminSessionEnabled()) {
+            return;
+        }
+
         await this.load();
     }
 
     public isLoaded(): boolean {
+        if (isDevAdminSessionEnabled()) {
+            return true;
+        }
+
         return this.loaded;
     }
 }

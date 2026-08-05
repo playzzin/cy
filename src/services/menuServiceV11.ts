@@ -1,23 +1,27 @@
-import { doc, getDoc, getDocFromServer, setDoc, onSnapshot, Unsubscribe, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, Unsubscribe, updateDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { MenuItem, SiteDataType } from '../types/menu';
 import { DEFAULT_MENU_CONFIG } from '../constants/defaultMenu';
+import { BUSINESS_PARTNER_POSITIONS, getBusinessPartnerPositionSiteKey } from '../constants/businessPartnerPositions';
 import { DEFAULT_HEADER_ACTIONS } from '../constants/headerActions';
 import { MENU_PATHS } from '../constants/menuPaths';
 import { SiteDataTypeSchema } from '../types/menuSchema';
+import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
+import {
+    DEV_MENU_STORAGE_KEY,
+    getDevMenuConfig,
+    reloadDevMenuConfigFromStorage,
+    setDevMenuConfig
+} from '../utils/devAdminFixtures';
+import { isOperationManagementMenuPath, isOperationManagementMenuText } from '../utils/operationMenuAccess';
+import { permissionAuditService } from './permissionAuditService';
 
 export type { MenuItem, SiteDataType };
 
 const COLLECTION_NAME = 'settings';
-const DOC_ID_CANDIDATES = ['menus_v12', 'menus_v11', 'menus_v10'];
-let activeDocId = DOC_ID_CANDIDATES[0];
+export const MENU_DOCUMENT_ID = 'menus_v12';
 
-const isPermissionDenied = (err: any): boolean => {
-    const code = err?.code;
-    return code === 'permission-denied' || code === 'PERMISSION_DENIED';
-};
-
-const getMenuDocRef = (docId: string) => doc(db, COLLECTION_NAME, docId);
+const getMenuDocRef = () => doc(db, COLLECTION_NAME, MENU_DOCUMENT_ID);
 
 // Options no longer need mergeWithDefaults
 interface MenuSubscribeOptions { }
@@ -34,12 +38,128 @@ interface AllowedMenuMap {
 let currentConfig: SiteDataType | null = null;
 let currentRawConfig: SiteDataType | null = null;
 let unsubscribeSnapshot: Unsubscribe | null = null;
-let pendingSaveFingerprint: string | null = null;
-let pendingSavePromise: Promise<boolean> | null = null;
+let snapshotSetupPromise: Promise<void> | null = null;
+// Menu edits replace the whole Firestore document. Keep writes strictly ordered:
+// if two different saves run in parallel, a slower older write can otherwise
+// finish last and silently remove the user's newest menu edit.
+let saveWriteQueue: Promise<void> = Promise.resolve();
+let latestQueuedSaveFingerprint: string | null = null;
+let latestQueuedSavePromise: Promise<SiteDataType> | null = null;
 const listeners: Set<MenuListener> = new Set();
 
 const deepClone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const configsEqual = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+const MENU_ROLE_SURFACES = ['menu', 'headerActions', 'trash'] as const;
+
+export interface PositionReferenceRenameResult {
+    changed: boolean;
+    roleReferences: number;
+    positionConfigs: number;
+    siteLabels: number;
+}
+
+const normalizePositionName = (value: unknown): string => String(value || '').trim();
+
+const renameRoleListReferences = (
+    roles: string[] | undefined,
+    oldName: string,
+    newName: string
+): { roles?: string[]; changed: boolean; replacements: number } => {
+    if (!Array.isArray(roles)) return { changed: false, replacements: 0 };
+
+    let replacements = 0;
+    const nextRoles = roles
+        .map((role) => {
+            const normalizedRole = normalizePositionName(role);
+            if (normalizedRole === oldName) {
+                replacements += 1;
+                return newName;
+            }
+            return normalizedRole;
+        })
+        .filter(Boolean);
+    const dedupedRoles = Array.from(new Set(nextRoles));
+    const changed = !configsEqual(roles, dedupedRoles);
+
+    return {
+        roles: changed ? dedupedRoles : roles,
+        changed,
+        replacements
+    };
+};
+
+const renamePositionReferencesInItems = (
+    items: Array<MenuItem | string> | undefined,
+    oldName: string,
+    newName: string
+): { changed: boolean; replacements: number } => {
+    if (!Array.isArray(items)) return { changed: false, replacements: 0 };
+
+    let changed = false;
+    let replacements = 0;
+
+    items.forEach((item) => {
+        if (typeof item === 'string') return;
+
+        const roleListResult = renameRoleListReferences(item.roles, oldName, newName);
+        if (roleListResult.changed) {
+            item.roles = roleListResult.roles;
+            changed = true;
+        }
+        replacements += roleListResult.replacements;
+
+        const subResult = renamePositionReferencesInItems(item.sub, oldName, newName);
+        if (subResult.changed) changed = true;
+        replacements += subResult.replacements;
+    });
+
+    return { changed, replacements };
+};
+
+export const renamePositionReferencesInMenuConfig = (
+    config: SiteDataType,
+    oldNameInput: string,
+    newNameInput: string
+): PositionReferenceRenameResult => {
+    const oldName = normalizePositionName(oldNameInput);
+    const newName = normalizePositionName(newNameInput);
+    const result: PositionReferenceRenameResult = {
+        changed: false,
+        roleReferences: 0,
+        positionConfigs: 0,
+        siteLabels: 0
+    };
+
+    if (!oldName || !newName || oldName === newName || !config) return result;
+
+    Object.entries(config).forEach(([siteKey, site]: [string, any]) => {
+        if (!site || typeof site !== 'object') return;
+
+        if (siteKey.startsWith('pos_') && normalizePositionName(site.name) === oldName) {
+            site.name = newName;
+            result.siteLabels += 1;
+            result.changed = true;
+        }
+
+        if (Array.isArray(site.positionConfig)) {
+            site.positionConfig.forEach((position: any) => {
+                if (normalizePositionName(position?.name) !== oldName) return;
+                position.name = newName;
+                result.positionConfigs += 1;
+                result.changed = true;
+            });
+        }
+
+        MENU_ROLE_SURFACES.forEach((surface) => {
+            const itemsResult = renamePositionReferencesInItems(site[surface], oldName, newName);
+            if (itemsResult.changed) result.changed = true;
+            result.roleReferences += itemsResult.replacements;
+        });
+    });
+
+    return result;
+};
 const NATION_SITE_NAME = '전국시스템인력';
 
 const MENU_TEXT_ALIASES: Record<string, string> = {
@@ -57,6 +177,7 @@ const MENU_TEXT_ALIASES: Record<string, string> = {
 };
 
 const FORCE_MENU_PATH_TEXTS = new Set([
+    "\ubc14\uc774\ubc31",
     "\uacc4\uc88c\uc870\ud68c",
     "\uacc4\uc88c\ubc88\ud638\uad00\ub9ac",
     "\uc791\uc5c5\uc790 \uacc4\uc88c",
@@ -203,7 +324,20 @@ const LEGACY_OFFICE_MENU_TEXTS = new Set([
 
 const RECRUITING_MENU_PATH_PREFIX = '/recruiting';
 const RECRUITING_FOLDER_TEXTS = new Set(['\uc18c\uac1c\uc18c', '\uc18c\uac1c\uc18c \uba54\ub274']);
-const DEV_POSITION_NAMES = new Set(['dev', 'developer', '\uac1c\ubc1c', '\uac1c\ubc1c\uc790']);
+const RECRUITING_MENU_TEXTS = new Set([
+    '\uc18c\uac1c\uc18c \ud604\ud669\ud310',
+    '\uc6a9\uc5ed \ub4f1\ub85d',
+    '\uc6a9\uc5ed \ub4f1\ub85d/\uc218\uc815',
+    '\uc791\uc5c5\uc790 \uc774\ub825\uad00\ub9ac',
+    '\uc18c\uac1c\uc18c \uc6d4\ubcc4 \uc815\uc0b0',
+    '\uc18c\uac1c\uc18c \uc9c0\uae09\uad00\ub9ac',
+    '\uc18c\uac1c\uc18c \uc785\uae08\uad00\ub9ac',
+    '\uc18c\uac1c\uc18c \ubbf8\uc218\uae08\uad00\ub9ac',
+    '\uc18c\uac1c\uc18c \uc6d4\ubcc4 \ud1b5\uacc4',
+    '\uc18c\uac1c\uc790 \uad00\ub9ac',
+    '\uc218\uc775\ubaa8\ub378 \uad00\ub9ac',
+    '\uc18c\uac1c\uc18c \uc815\uc0b0 \ub85c\uadf8'
+]);
 
 const officeMenuContainsLegacyArtifacts = (items: (MenuItem | string)[] = []): boolean =>
     items.some((item) => {
@@ -402,6 +536,10 @@ const normalizeMenuItem = (item: any, parentIdPath: string): MenuItem => {
         delete (next as any).sub;
     }
 
+    if (isOperationManagementMenuPath(next.path) || isOperationManagementMenuText(next.text)) {
+        delete next.roles;
+    }
+
     return next;
 };
 
@@ -527,8 +665,6 @@ const ensureNoticeBoardMenu = (config: SiteDataType): boolean => {
     return changed;
 };
 
-const isPositionMenuSiteKey = (siteKey: string): boolean => siteKey.startsWith('pos_');
-
 const getMenuItemText = (item: MenuItem | string): string =>
     typeof item === 'string' ? item : item.text;
 
@@ -537,7 +673,52 @@ const getMenuItemPath = (item: MenuItem | string): string | undefined => {
     return typeof item === 'string' ? MENU_PATHS[text] : item.path || MENU_PATHS[text];
 };
 
+const LOG_MANAGEMENT_FOLDER_TEXT = '로그관리';
+const REQUIRED_LOG_MANAGEMENT_ITEMS: MenuItem[] = [
+    { text: '권한 변경 로그', icon: 'fa-shield-halved', path: '/admin/permission-change-logs' },
+    { text: '엑셀 업로드·다운로드 로그', icon: 'fa-file-excel', path: '/admin/excel-transfer-logs' },
+    { text: 'PDF 업로드·다운로드 로그', icon: 'fa-file-pdf', path: '/admin/pdf-transfer-logs' },
+    { text: '자동 메시지 발송 로그', icon: 'fa-paper-plane', path: '/messages/automation-logs' }
+];
+
+const isLogManagementFolder = (item: MenuItem): boolean =>
+    item.text.replace(/\s+/g, '') === LOG_MANAGEMENT_FOLDER_TEXT;
+
+const findLogManagementFolders = (items: Array<MenuItem | string>, result: MenuItem[] = []): MenuItem[] => {
+    items.forEach((item) => {
+        if (typeof item === 'string') return;
+        if (isLogManagementFolder(item)) result.push(item);
+        if (Array.isArray(item.sub)) findLogManagementFolders(item.sub, result);
+    });
+
+    return result;
+};
+
+const ensureRequiredLogManagementItems = (config: SiteDataType): boolean => {
+    let changed = false;
+
+    Object.values(config).forEach((site) => {
+        if (!site || !Array.isArray(site.menu)) return;
+
+        findLogManagementFolders(site.menu).forEach((folder) => {
+            const children = Array.isArray(folder.sub) ? folder.sub : [];
+            const missingItems = REQUIRED_LOG_MANAGEMENT_ITEMS.filter((requiredItem) => !children.some((child) => {
+                const childText = getMenuItemText(child);
+                const childPath = getMenuItemPath(child);
+                return childText === requiredItem.text || childPath === requiredItem.path;
+            }));
+
+            if (missingItems.length === 0) return;
+            folder.sub = [...children, ...missingItems.map((item) => ({ ...item }))];
+            changed = true;
+        });
+    });
+
+    return changed;
+};
+
 const isRecruitingMenuItem = (item: MenuItem | string): boolean => {
+    if (RECRUITING_MENU_TEXTS.has(getMenuItemText(item))) return true;
     const path = getMenuItemPath(item);
     if (typeof path === 'string' && path.startsWith(RECRUITING_MENU_PATH_PREFIX)) return true;
     if (typeof item !== 'string' && Array.isArray(item.sub)) {
@@ -560,7 +741,7 @@ const removeRecruitingMenuItems = (items: (MenuItem | string)[]): { items: (Menu
             return;
         }
 
-        if (RECRUITING_FOLDER_TEXTS.has(item.text) && isRecruitingMenuItem(item)) {
+        if (RECRUITING_FOLDER_TEXTS.has(item.text)) {
             removed = true;
             return;
         }
@@ -588,11 +769,10 @@ const removeRecruitingMenuItems = (items: (MenuItem | string)[]): { items: (Menu
     return { items: nextItems, removed };
 };
 
-const removeLegacyRecruitingMenusOutsidePositionMenus = (config: SiteDataType): boolean => {
+const removeRecruitingMenuItemsFromAllSites = (config: SiteDataType): boolean => {
     let changed = false;
 
-    Object.entries(config).forEach(([siteKey, site]) => {
-        if (isPositionMenuSiteKey(siteKey) || isDevPositionSite(siteKey, site)) return;
+    Object.values(config).forEach((site) => {
         if (!site || !Array.isArray(site.menu)) return;
 
         const result = removeRecruitingMenuItems(site.menu);
@@ -604,103 +784,76 @@ const removeLegacyRecruitingMenusOutsidePositionMenus = (config: SiteDataType): 
     return changed;
 };
 
-const isDevPositionSite = (siteKey: string, site: any): boolean => {
-    const normalizedKey = normalizePositionIdForCleanup(siteKey);
-    if (normalizedKey === 'posdev' || normalizedKey === 'dev') return true;
+const ensureBusinessPartnerPositionMenus = (config: SiteDataType): boolean => {
+    let changed = false;
+    const adminSite: any = config.admin;
 
-    const normalizedName = normalizePositionIdForCleanup(site?.name);
-    if (DEV_POSITION_NAMES.has(normalizedName)) {
-        return true;
+    if (adminSite) {
+        const currentPositionConfig = Array.isArray(adminSite.positionConfig)
+            ? adminSite.positionConfig
+            : [];
+
+        let nextPositionConfig = [...currentPositionConfig];
+        BUSINESS_PARTNER_POSITIONS.forEach((position) => {
+            const existingIndex = nextPositionConfig.findIndex(
+                (item: any) => normalizePositionIdForCleanup(item?.id) === normalizePositionIdForCleanup(position.id)
+            );
+            const positionConfig = {
+                id: position.id,
+                name: position.name,
+                icon: position.iconKey,
+                color: position.menuColor,
+                order: position.order,
+            };
+
+            if (existingIndex >= 0) {
+                const existing = nextPositionConfig[existingIndex] || {};
+                const next = {
+                    ...positionConfig,
+                    ...existing,
+                    id: position.id,
+                    name: existing.name || positionConfig.name,
+                    icon: existing.icon || positionConfig.icon,
+                    color: existing.color || positionConfig.color,
+                    order: typeof existing.order === 'number' ? existing.order : positionConfig.order,
+                };
+                if (!configsEqual(existing, next)) {
+                    nextPositionConfig[existingIndex] = next;
+                    changed = true;
+                }
+            } else {
+                nextPositionConfig.push(positionConfig);
+                changed = true;
+            }
+        });
+
+        nextPositionConfig = nextPositionConfig.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+        if (!configsEqual(currentPositionConfig, nextPositionConfig)) {
+            adminSite.positionConfig = nextPositionConfig;
+            changed = true;
+        }
     }
 
-    return false;
-};
+    BUSINESS_PARTNER_POSITIONS.forEach((position) => {
+        const siteKey = getBusinessPartnerPositionSiteKey(position.id);
+        const existingSite = config[siteKey];
+        const existingMenu = Array.isArray(existingSite?.menu) ? existingSite.menu : [];
+        const nextSite = {
+            ...(existingSite || {}),
+            name: existingSite?.name || position.name,
+            icon: existingSite?.icon || position.iconKey,
+            menu: existingMenu.length > 0 ? existingMenu : deepClone(position.menu),
+            headerActions: Array.isArray(existingSite?.headerActions) ? existingSite.headerActions : [],
+            deletedItems: Array.isArray(existingSite?.deletedItems) ? existingSite.deletedItems : [],
+        };
 
-const getPositionSiteKey = (positionId: unknown): string | undefined => {
-    if (typeof positionId !== 'string' || positionId.trim().length === 0) return undefined;
-    const id = positionId.trim();
-    return id.startsWith('pos_') ? id : `pos_${id}`;
-};
-
-const getDevPositionSiteKeys = (config: SiteDataType): Set<string> => {
-    const keys = new Set<string>();
-
-    Object.entries(config).forEach(([siteKey, site]) => {
-        if (isDevPositionSite(siteKey, site)) {
-            keys.add(siteKey);
+        if (!configsEqual(config[siteKey], nextSite)) {
+            config[siteKey] = nextSite;
+            changed = true;
         }
-    });
-
-    const positions = Array.isArray((config.admin as any)?.positionConfig)
-        ? (config.admin as any).positionConfig
-        : [];
-
-    positions.forEach((position: any) => {
-        const normalizedId = normalizePositionIdForCleanup(position?.id);
-        const normalizedName = normalizePositionIdForCleanup(position?.name);
-        if (normalizedId === 'dev' || DEV_POSITION_NAMES.has(normalizedName)) {
-            const siteKey = getPositionSiteKey(position?.id);
-            if (siteKey) keys.add(siteKey);
-        }
-    });
-
-    return keys;
-};
-
-const findTopLevelRecruitingFolder = (items: (MenuItem | string)[] = []): MenuItem | undefined =>
-    items.find((item): item is MenuItem =>
-        typeof item !== 'string' && RECRUITING_FOLDER_TEXTS.has(item.text)
-    );
-
-const preserveExistingDevRecruitingFolderChildren = (
-    nextConfig: SiteDataType,
-    existingConfig: SiteDataType
-): boolean => {
-    let changed = false;
-    const devSiteKeys = new Set([
-        ...Array.from(getDevPositionSiteKeys(nextConfig)),
-        ...Array.from(getDevPositionSiteKeys(existingConfig))
-    ]);
-
-    devSiteKeys.forEach((siteKey) => {
-        const nextMenu = nextConfig[siteKey]?.menu;
-        const existingMenu = existingConfig[siteKey]?.menu;
-        if (!Array.isArray(nextMenu) || !Array.isArray(existingMenu)) return;
-
-        const nextFolder = findTopLevelRecruitingFolder(nextMenu);
-        const existingFolder = findTopLevelRecruitingFolder(existingMenu);
-        const existingSub = Array.isArray(existingFolder?.sub) ? existingFolder.sub : [];
-        if (!nextFolder || existingSub.length === 0 || !existingSub.some(isRecruitingMenuItem)) return;
-
-        const nextSub = Array.isArray(nextFolder.sub) ? nextFolder.sub : [];
-        if (nextSub.length > 0) return;
-
-        nextFolder.sub = deepClone(existingSub);
-        changed = true;
     });
 
     return changed;
-};
-
-const preserveExistingMenuDataBeforeSave = async (
-    candidateDocId: string,
-    sanitizedData: SiteDataType
-): Promise<SiteDataType> => {
-    try {
-        const snapshot = await getDocFromServer(getMenuDocRef(candidateDocId));
-        if (!snapshot.exists()) return sanitizedData;
-
-        const existingConfig = processIncomingConfig(normalizeSiteDataType(snapshot.data() as SiteDataType));
-        const nextConfig = deepClone(sanitizedData);
-        const preserved = preserveExistingDevRecruitingFolderChildren(nextConfig, existingConfig);
-        if (!preserved) return sanitizedData;
-
-        const result = SiteDataTypeSchema.safeParse(nextConfig);
-        return result.success ? JSON.parse(JSON.stringify(result.data)) : sanitizedData;
-    } catch (error: any) {
-        if (isPermissionDenied(error)) return sanitizedData;
-        throw error;
-    }
 };
 
 const createNationSiteConfig = (sourceSite?: any) => {
@@ -883,8 +1036,11 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
     }
 
     removeDuplicatePositionMenuArtifacts(final);
+    ensureBusinessPartnerPositionMenus(final);
+    removeRecruitingMenuItemsFromAllSites(final);
     ensureOfficeMenuPages(final);
     removeRetiredHardcodedMenuSeeds(final);
+    ensureRequiredLogManagementItems(final);
 
     return final;
 };
@@ -899,64 +1055,73 @@ const notifyListeners = () => {
 };
 
 const setupSnapshotListener = () => {
-    if (unsubscribeSnapshot) {
-        return;
-    }
+    if (unsubscribeSnapshot || snapshotSetupPromise) return;
 
-    unsubscribeSnapshot = onSnapshot(
-        getMenuDocRef(activeDocId),
-        (snapshot) => {
-            if (!snapshot.exists()) {
-                console.warn('[MenuService] Configuration missing. Initializing with defaults...');
-                // Cold Init: Save DEFAULT_MENU_CONFIG to DB so it persists.
-                const initialConfig = deepClone(DEFAULT_MENU_CONFIG);
+    snapshotSetupPromise = Promise.resolve().then(() => {
+        if (listeners.size === 0) return;
+        if (unsubscribeSnapshot) return;
 
-                // We use the same processing logic to ensure it's valid before saving/using
-                const processedInitial = processIncomingConfig(initialConfig);
+        unsubscribeSnapshot = onSnapshot(
+            getMenuDocRef(),
+            (snapshot) => {
+                if (!snapshot.exists()) {
+                    console.warn('[MenuService] Configuration missing. Initializing with defaults...');
+                    const processedInitial = processIncomingConfig(deepClone(DEFAULT_MENU_CONFIG));
 
-                currentRawConfig = processedInitial;
-                currentConfig = processedInitial;
+                    currentRawConfig = processedInitial;
+                    currentConfig = processedInitial;
 
-                // Save async (don't block UI)
-                menuServiceV11.saveMenuConfig(processedInitial).catch(err => {
-                    console.error('[MenuService] Failed to auto-initialize menu config:', err);
-                });
+                    menuServiceV11.saveMenuConfig(processedInitial).catch(err => {
+                        console.error('[MenuService] Failed to auto-initialize menu config:', err);
+                    });
 
-                notifyListeners();
-                return;
-            }
-
-            const rawData = snapshot.data();
-            const normalizedIncoming = normalizeSiteDataType(rawData as SiteDataType);
-
-            const processedConfig = processIncomingConfig(normalizedIncoming);
-            currentRawConfig = deepClone(normalizedIncoming);
-            currentConfig = processedConfig;
-
-            notifyListeners();
-        },
-        (error) => {
-            console.error('[MenuService] Snapshot listener error:', error);
-            if (isPermissionDenied(error)) {
-                const currentIndex = DOC_ID_CANDIDATES.indexOf(activeDocId);
-                const nextDocId = DOC_ID_CANDIDATES[currentIndex + 1];
-                if (nextDocId) {
-                    activeDocId = nextDocId;
-                    if (unsubscribeSnapshot) {
-                        unsubscribeSnapshot();
-                        unsubscribeSnapshot = null;
-                    }
-                    setupSnapshotListener();
+                    notifyListeners();
+                    return;
                 }
+
+                const normalizedIncoming = normalizeSiteDataType(snapshot.data() as SiteDataType);
+                currentRawConfig = deepClone(normalizedIncoming);
+                currentConfig = processIncomingConfig(normalizedIncoming);
+                notifyListeners();
+            },
+            (error) => {
+                console.error('[MenuService] Snapshot listener error:', error);
             }
-        }
-    );
+        );
+    })
+        .catch((error) => {
+            console.error('[MenuService] Failed to subscribe to menus_v12:', error);
+        })
+        .finally(() => {
+            snapshotSetupPromise = null;
+        });
 };
 
 export const menuServiceV11 = {
     subscribe: (callback: (data: SiteDataType) => void, options: MenuSubscribeOptions = {}) => {
         const listener: MenuListener = { callback };
         listeners.add(listener);
+
+        if (isDevAdminSessionEnabled()) {
+            currentConfig = processIncomingConfig(getDevMenuConfig());
+            currentRawConfig = deepClone(currentConfig);
+            callback(deepClone(currentConfig));
+
+            const handleDevMenuStorageChange = (event: StorageEvent) => {
+                if (event.key !== DEV_MENU_STORAGE_KEY) return;
+
+                const refreshedConfig = processIncomingConfig(reloadDevMenuConfigFromStorage());
+                currentConfig = refreshedConfig;
+                currentRawConfig = deepClone(refreshedConfig);
+                callback(deepClone(refreshedConfig));
+            };
+
+            window.addEventListener('storage', handleDevMenuStorageChange);
+            return () => {
+                window.removeEventListener('storage', handleDevMenuStorageChange);
+                listeners.delete(listener);
+            };
+        }
 
         setupSnapshotListener();
 
@@ -975,35 +1140,17 @@ export const menuServiceV11 = {
     },
 
     getMenuConfig: async (options: MenuFetchOptions = {}): Promise<SiteDataType | null> => {
+        if (isDevAdminSessionEnabled()) {
+            return processIncomingConfig(getDevMenuConfig());
+        }
+
         try {
-            let firstReadableMissing: string | null = null;
-
-            for (const candidate of DOC_ID_CANDIDATES) {
-                try {
-                    const menuRef = getMenuDocRef(candidate);
-                    const docSnapshot = await getDoc(menuRef);
-
-                    if (docSnapshot.exists()) {
-                        activeDocId = candidate;
-                        const rawData = docSnapshot.data();
-                        const normalizedIncoming = normalizeSiteDataType(rawData as SiteDataType);
-                        const processedConfig = processIncomingConfig(normalizedIncoming);
-                        return processedConfig;
-                    }
-
-                    if (!firstReadableMissing) {
-                        firstReadableMissing = candidate;
-                    }
-                } catch (err: any) {
-                    if (isPermissionDenied(err)) {
-                        continue;
-                    }
-                    throw err;
-                }
-            }
-
-            if (firstReadableMissing) {
-                activeDocId = firstReadableMissing;
+            const snapshot = await getDoc(getMenuDocRef());
+            if (snapshot.exists()) {
+                const rawConfig = normalizeSiteDataType(snapshot.data() as SiteDataType);
+                currentRawConfig = deepClone(rawConfig);
+                currentConfig = processIncomingConfig(rawConfig);
+                return deepClone(currentConfig);
             }
 
             console.warn('[MenuService] Config missing on fetch. Returning defaults.');
@@ -1018,8 +1165,14 @@ export const menuServiceV11 = {
     },
 
     saveMenuConfig: async (newConfig: SiteDataType) => {
-        let localSaveFingerprint: string | null = null;
-        let localSavePromise: Promise<boolean> | null = null;
+        if (isDevAdminSessionEnabled()) {
+            setDevMenuConfig(processIncomingConfig(newConfig));
+            currentConfig = getDevMenuConfig();
+            currentRawConfig = getDevMenuConfig();
+            notifyListeners();
+            return deepClone(currentConfig);
+        }
+
         const normalizedConfig = processIncomingConfig(normalizeSiteDataType(newConfig));
         const prunedConfig = pruneLargeConfig(normalizedConfig);
         const result = SiteDataTypeSchema.safeParse(prunedConfig);
@@ -1031,43 +1184,47 @@ export const menuServiceV11 = {
             throw error;
         }
 
+        let ownedSaveFingerprint: string | null = null;
+        let ownedSavePromise: Promise<SiteDataType> | null = null;
+
         try {
             const sanitizedData = JSON.parse(JSON.stringify(result.data));
             const saveFingerprint = JSON.stringify(sanitizedData);
 
-            if (pendingSavePromise && pendingSaveFingerprint === saveFingerprint) {
-                return await pendingSavePromise;
+            if (latestQueuedSavePromise && latestQueuedSaveFingerprint === saveFingerprint) {
+                return await latestQueuedSavePromise;
             }
 
-            pendingSaveFingerprint = saveFingerprint;
-            const nextSavePromise = (async () => {
-                let lastError: any = null;
+            const nextSavePromise = saveWriteQueue
+                .catch(() => undefined)
+                .then(async () => {
+                    const previousConfig = currentRawConfig ? deepClone(currentRawConfig) : null;
 
-                const candidatesToTry = [activeDocId, ...DOC_ID_CANDIDATES.filter((d) => d !== activeDocId)];
-                for (const candidate of candidatesToTry) {
-                    const menuRef = getMenuDocRef(candidate);
+                    // Full replacement keeps Firestore in sync with the menu editor after deletions.
+                    await setDoc(getMenuDocRef(), sanitizedData);
+                    currentRawConfig = deepClone(sanitizedData as SiteDataType);
+                    currentConfig = processIncomingConfig(normalizeSiteDataType(sanitizedData as SiteDataType));
+
+                    // Do not wait for the Firestore snapshot to make the sidebar consistent.
+                    // The snapshot remains the cross-tab/server source of truth.
+                    notifyListeners();
+
                     try {
-                        const dataToSave = await preserveExistingMenuDataBeforeSave(candidate, sanitizedData);
-                        // Removing { merge: true } ensures that deleted keys are actually removed from Firestore
-                        await setDoc(menuRef, dataToSave);
-                        activeDocId = candidate;
-                        currentRawConfig = deepClone(dataToSave as SiteDataType);
-                        currentConfig = processIncomingConfig(normalizeSiteDataType(dataToSave as SiteDataType));
-                        return true;
-                    } catch (err: any) {
-                        lastError = err;
-                        if (isPermissionDenied(err)) {
-                            continue;
-                        }
-                        throw err;
+                        await permissionAuditService.logMenuAccessChanges(previousConfig, sanitizedData as SiteDataType);
+                    } catch (auditError) {
+                        // The menu write already succeeded. An audit failure must not make the
+                        // editor report that the menu itself was lost.
+                        console.error('Failed to audit menu configuration change:', auditError);
                     }
-                }
 
-                throw lastError || new Error('All save attempts failed');
-            })();
-            pendingSavePromise = nextSavePromise;
-            localSaveFingerprint = saveFingerprint;
-            localSavePromise = nextSavePromise;
+                    return deepClone(currentConfig);
+                });
+
+            saveWriteQueue = nextSavePromise.then(() => undefined, () => undefined);
+            latestQueuedSaveFingerprint = saveFingerprint;
+            latestQueuedSavePromise = nextSavePromise;
+            ownedSaveFingerprint = saveFingerprint;
+            ownedSavePromise = nextSavePromise;
 
             return await nextSavePromise;
         } catch (error) {
@@ -1075,12 +1232,12 @@ export const menuServiceV11 = {
             throw error;
         } finally {
             if (
-                localSavePromise &&
-                pendingSavePromise === localSavePromise &&
-                pendingSaveFingerprint === localSaveFingerprint
+                ownedSavePromise &&
+                latestQueuedSavePromise === ownedSavePromise &&
+                latestQueuedSaveFingerprint === ownedSaveFingerprint
             ) {
-                pendingSaveFingerprint = null;
-                pendingSavePromise = null;
+                latestQueuedSaveFingerprint = null;
+                latestQueuedSavePromise = null;
             }
         }
     },
@@ -1149,14 +1306,47 @@ export const menuServiceV11 = {
         currentRawConfig = null;
     },
 
-    syncWithPositions: async (positions: { id: string; name: string; rank: number; color: string; icon?: string; iconKey?: string; }[]) => {
+    renamePositionReferences: async (oldName: string, newName: string): Promise<PositionReferenceRenameResult> => {
+        const emptyResult: PositionReferenceRenameResult = {
+            changed: false,
+            roleReferences: 0,
+            positionConfigs: 0,
+            siteLabels: 0
+        };
+
+        try {
+            const config = await menuServiceV11.getMenuConfig();
+            if (!config) return emptyResult;
+
+            const result = renamePositionReferencesInMenuConfig(config, oldName, newName);
+            if (result.changed) {
+                await menuServiceV11.saveMenuConfig(config);
+                console.log('[MenuService] Renamed position references in menu config.', {
+                    oldName,
+                    newName,
+                    ...result
+                });
+            }
+
+            return result;
+        } catch (error) {
+            console.error('[MenuService] Position reference rename failed:', error);
+            throw error;
+        }
+    },
+
+    syncWithPositions: async (positions: { id: string; legacyId?: string; name: string; rank: number; color: string; icon?: string; iconKey?: string; }[]) => {
         try {
             const config = await menuServiceV11.getMenuConfig();
             if (!config || !config.admin) return;
 
             let modified = false;
 
-            const positionsById = new Map(positions.map((p) => [p.id, p]));
+            const positionsById = new Map<string, typeof positions[number]>();
+            positions.forEach((position) => {
+                if (position.id) positionsById.set(position.id, position);
+                if (position.legacyId) positionsById.set(position.legacyId, position);
+            });
             const currentPositionConfig = Array.isArray(config.admin.positionConfig)
                 ? config.admin.positionConfig
                 : [];
@@ -1288,16 +1478,16 @@ export const menuServiceV11 = {
 
     // === ?筌뤿굞???shim (??ル맪???袁⑤?獄?????嶺뚣볦굣?? ===
     refreshFromServer: async (): Promise<{ changed: boolean; activeDocId: string }> => {
-        await menuServiceV11.getMenuConfig({ allowFallback: true });
-        return { changed: false, activeDocId: activeDocId };
+        await menuServiceV11.getMenuConfig();
+        return { changed: false, activeDocId: MENU_DOCUMENT_ID };
     },
     announceMenuChange: (_source?: string): void => { /* no-op */ },
     checkMenusV12Exists: async (): Promise<boolean> => {
-        try { return !!(await menuServiceV11.getMenuConfig()); } catch { return false; }
+        try { return (await getDoc(getMenuDocRef())).exists(); } catch { return false; }
     },
-    getActiveDocId: (): string => activeDocId,
+    getActiveDocId: (): string => MENU_DOCUMENT_ID,
     initializeMenusV12: async (): Promise<void> => {
-        await menuServiceV11.getMenuConfig({ allowInitializeIfMissing: true });
+        await menuServiceV11.saveMenuConfig(DEFAULT_MENU_CONFIG);
     },
     parseMenuConfigJson: (raw: string): any => {
         try { return JSON.parse(raw); } catch { return null; }
@@ -1310,10 +1500,10 @@ export const menuServiceV11 = {
 
             const addedNationwidePage = ensureMenuChild(config, '현황관리', '전국페이지');
             const addedNoticeBoard = ensureNoticeBoardMenu(config);
-            const removedLegacyRecruitingMenus = removeLegacyRecruitingMenusOutsidePositionMenus(config);
+            const removedRecruitingMenus = removeRecruitingMenuItemsFromAllSites(config);
             const ensuredNationSite = ensureCanonicalNationSiteConfig(config);
             const normalizedSupportAssetMenu = normalizeSupportAssetMenu(config);
-            const changed = addedNationwidePage || addedNoticeBoard || removedLegacyRecruitingMenus || ensuredNationSite || normalizedSupportAssetMenu;
+            const changed = addedNationwidePage || addedNoticeBoard || removedRecruitingMenus || ensuredNationSite || normalizedSupportAssetMenu;
             if (changed) {
                 await menuServiceV11.saveMenuConfig(config);
             }

@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import { AlimTalkSchema, FriendTalkSchema, kakaoService, AlimTalkRequest, FriendTalkRequest } from '../../services/newKakaoService';
 import Swal from 'sweetalert2';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPaperPlane, faMobileAlt, faHistory, faCheckCircle, faExclamationCircle, faCommentDots } from '@fortawesome/free-solid-svg-icons';
+import { faPaperPlane, faCommentDots } from '@fortawesome/free-solid-svg-icons';
 // import { faKakao } from '@fortawesome/free-brands-svg-icons'; // Removed invalid import
 import { z } from 'zod';
 
@@ -295,7 +295,7 @@ const KakaoSenderPage = () => {
       <FormSection>
         <Header>
           <h1><FontAwesomeIcon icon={faCommentDots} /> 카카오톡 발송 테스트</h1>
-          <p>바로빌 연동 실시간 알림톡/친구톡 발송 시스템</p>
+          <p>실시간 알림톡/친구톡 발송 시스템</p>
         </Header>
 
         <Tabs>

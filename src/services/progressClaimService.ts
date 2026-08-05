@@ -15,15 +15,21 @@ import {
 import { db } from '../config/firebase';
 import { storageService } from './storageService';
 import type {
+    ProgressAllocation,
     ProgressAttachment,
     ProgressAttachmentScope,
     ProgressClaim,
+    ProgressClaimSnapshot,
     ProgressClaimStatus,
     ProgressContract,
     ProgressContractItem,
 } from '../types/progressClaim';
 import { DEFAULT_PROGRESS_VAT_RATE } from '../types/progressClaim';
 import { calculateAllocations, makeProgressId, toProgressNumber } from '../utils/progressClaimCalculations';
+import {
+    normalizeBuybackAfterTaxRate,
+    resolveProgressSettlementTargetId,
+} from '../utils/buybackSettlement';
 import { officeService } from './officeService';
 
 const CONTRACTS_COLLECTION = 'progress_contracts';
@@ -69,6 +75,124 @@ const normalizeRate = (value: unknown, fallback = 0): number => {
 const normalizeTeamPositionMode = (value: unknown): ProgressClaim['teamPositionMode'] =>
     value === 'manual' ? 'manual' : 'currentAmount';
 
+const toOptionalText = (value: unknown): string | undefined =>
+    typeof value === 'string' ? value.trim() || undefined : undefined;
+
+const toOptionalNumber = (value: unknown): number | undefined => {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+    if (typeof value !== 'string') return undefined;
+
+    const normalized = value
+        .trim()
+        .replace(/[,%\s]/g, '')
+        .replace(/[−–—]/g, '-');
+    if (!normalized || !/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(normalized)) return undefined;
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const normalizeSettlementMode = (value: unknown): ProgressAllocation['settlementMode'] =>
+    value === 'rate' || value === 'taxInvoice' || value === 'manual' ? value : undefined;
+
+const normalizePaymentStatus = (value: unknown): ProgressAllocation['paymentStatus'] =>
+    value === 'pending' ||
+    value === 'needs_review' ||
+    value === 'calculating' ||
+    value === 'retention' ||
+    value === 'scheduled' ||
+    value === 'in_progress' ||
+    value === 'partial' ||
+    value === 'paid' ||
+    value === 'hold' ||
+    value === 'overpaid' ||
+    value === 'no_buyback' ||
+    value === 'cancelled'
+        ? value
+        : undefined;
+
+const normalizeEvidenceStatus = (value: unknown): ProgressAllocation['evidenceStatus'] =>
+    value === 'not_required' || value === 'pending' || value === 'received' ? value : undefined;
+
+const normalizeDateOnly = (value: unknown): string | undefined => {
+    const text = toOptionalText(value);
+    if (!text || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return undefined;
+
+    const parsed = new Date(`${text}T00:00:00.000Z`);
+    if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== text) return undefined;
+    return text;
+};
+
+const normalizeDateTime = (value: unknown): string | undefined => {
+    const text = value instanceof Date ? value.toISOString() : toOptionalText(value);
+    if (!text) return undefined;
+
+    const parsed = new Date(text);
+    return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : undefined;
+};
+
+const normalizeProgressAllocation = (allocation: Partial<ProgressAllocation>): ProgressAllocation => {
+    const targetType = toText(allocation.targetType) || undefined;
+    const legacyTargetId = toText(allocation.targetId) || undefined;
+    const settlementTargetId = resolveProgressSettlementTargetId({
+        settlementTargetId: toOptionalText(allocation.settlementTargetId),
+        targetId: legacyTargetId,
+        targetType,
+    });
+    const parsedAfterTaxRate = toOptionalNumber(allocation.afterTaxRate);
+    const parsedManualAfterTaxAmount = toOptionalNumber(allocation.manualAfterTaxAmount);
+    const evidenceRequired = allocation.evidenceRequired === undefined ? undefined : Boolean(allocation.evidenceRequired);
+    const normalizedEvidenceStatus = normalizeEvidenceStatus(allocation.evidenceStatus);
+
+    return {
+        id: toText(allocation.id) || makeProgressId('alloc'),
+        settlementTargetId,
+        // Keep the legacy field populated so existing selects and documents remain compatible.
+        targetId: legacyTargetId || settlementTargetId,
+        targetName: toText(allocation.targetName),
+        targetType,
+        companyName: toText(allocation.companyName) || undefined,
+        method: allocation.method === 'percent' || allocation.method === 'perManDay' || allocation.method === 'manual'
+            ? allocation.method
+            : 'fixed',
+        fixedAmount: toProgressNumber(allocation.fixedAmount),
+        percent: toProgressNumber(allocation.percent),
+        amountPerManDay: toProgressNumber(allocation.amountPerManDay),
+        manualAmount: toProgressNumber(allocation.manualAmount),
+        memo: toText(allocation.memo),
+        settlementMode: normalizeSettlementMode(allocation.settlementMode),
+        afterTaxRate: parsedAfterTaxRate === undefined
+            ? undefined
+            : normalizeBuybackAfterTaxRate(parsedAfterTaxRate),
+        manualAfterTaxAmount: parsedManualAfterTaxAmount === undefined
+            ? undefined
+            : Math.max(0, Math.round(parsedManualAfterTaxAmount)),
+        paymentStatus: normalizePaymentStatus(allocation.paymentStatus),
+        paidAmount: allocation.paidAmount === undefined
+            ? undefined
+            : Math.max(0, Math.round(toOptionalNumber(allocation.paidAmount) ?? 0)),
+        paymentDueDate: normalizeDateOnly(allocation.paymentDueDate),
+        paidAt: normalizeDateTime(allocation.paidAt),
+        evidenceRequired,
+        evidenceStatus: evidenceRequired && normalizedEvidenceStatus === 'not_required'
+            ? 'pending'
+            : normalizedEvidenceStatus,
+        paymentMemo: toOptionalText(allocation.paymentMemo),
+    };
+};
+
+const normalizeClaimSnapshot = (
+    raw: ProgressClaimSnapshot | undefined,
+    fallbackAllocations: ProgressAllocation[]
+): ProgressClaimSnapshot | undefined => {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const sourceAllocations = Array.isArray(raw.allocations) ? raw.allocations : fallbackAllocations;
+    return {
+        ...raw,
+        allocations: sourceAllocations.map(normalizeProgressAllocation),
+    };
+};
+
 const normalizeContractItem = (item: Partial<ProgressContractItem>): ProgressContractItem => ({
     id: toText(item.id) || makeProgressId('item'),
     category: toText(item.category),
@@ -92,59 +216,53 @@ const normalizeContract = (raw: Partial<ProgressContract>): ProgressContract => 
     updatedAt: raw.updatedAt,
 });
 
-const normalizeClaim = (raw: Partial<ProgressClaim>): ProgressClaim => ({
-    id: toText(raw.id) || undefined,
-    siteId: toText(raw.siteId),
-    siteName: toText(raw.siteName),
-    yearMonth: toText(raw.yearMonth),
-    status: raw.status || 'draft',
-    siteSnapshot: raw.siteSnapshot,
-    progressLines: Array.isArray(raw.progressLines)
-        ? raw.progressLines.map((line) => ({
-            itemId: toText(line.itemId),
-            source: line.source === 'extra' ? 'extra' as const : 'contract' as const,
-            category: toText(line.category),
-            workName: toText(line.workName),
-            workType: toText(line.workType),
-            contractQuantity: line.contractQuantity === undefined ? undefined : toProgressNumber(line.contractQuantity),
-            unit: toText(line.unit),
-            unitPrice: line.unitPrice === undefined ? undefined : toProgressNumber(line.unitPrice),
-            currentQuantity: toProgressNumber(line.currentQuantity),
-            memo: toText(line.memo),
-        })).filter((line) => line.itemId)
-        : [],
-    allocations: Array.isArray(raw.allocations) ? raw.allocations.map((allocation) => ({
-        id: toText(allocation.id) || makeProgressId('alloc'),
-        targetId: toText(allocation.targetId) || undefined,
-        targetName: toText(allocation.targetName),
-        targetType: toText(allocation.targetType) || undefined,
-        companyName: toText(allocation.companyName) || undefined,
-        method: allocation.method || 'fixed',
-        fixedAmount: toProgressNumber(allocation.fixedAmount),
-        percent: toProgressNumber(allocation.percent),
-        amountPerManDay: toProgressNumber(allocation.amountPerManDay),
-        manualAmount: toProgressNumber(allocation.manualAmount),
-        memo: toText(allocation.memo),
-    })) : [],
-    claimAttachments: Array.isArray(raw.claimAttachments) ? raw.claimAttachments : [],
-    vatMode: raw.vatMode || 'none',
-    vatRate: normalizeRate(raw.vatRate, DEFAULT_PROGRESS_VAT_RATE),
-    showAllocationsOnInvoice: Boolean(raw.showAllocationsOnInvoice),
-    showAttachmentsOnInvoice: raw.showAttachmentsOnInvoice === undefined ? true : Boolean(raw.showAttachmentsOnInvoice),
-    distributionBaseAmount: raw.distributionBaseAmount === undefined ? undefined : toProgressNumber(raw.distributionBaseAmount),
-    sukumiAdjustmentAmount: raw.sukumiAdjustmentAmount === undefined ? undefined : toProgressNumber(raw.sukumiAdjustmentAmount),
-    sukumiMemo: toText(raw.sukumiMemo),
-    teamPositionMode: normalizeTeamPositionMode(raw.teamPositionMode),
-    teamPositionManualAmount: raw.teamPositionManualAmount === undefined ? undefined : toProgressNumber(raw.teamPositionManualAmount),
-    buybackBaseUnit: raw.buybackBaseUnit === undefined ? undefined : toProgressNumber(raw.buybackBaseUnit),
-    buybackAfterTaxRate: raw.buybackAfterTaxRate === undefined ? undefined : normalizeRate(raw.buybackAfterTaxRate),
-    teamPositionDeduct: raw.teamPositionDeduct === undefined ? undefined : toProgressNumber(raw.teamPositionDeduct),
-    buybackMemo: toText(raw.buybackMemo),
-    memo: toText(raw.memo),
-    confirmedSnapshot: raw.confirmedSnapshot,
-    createdAt: raw.createdAt,
-    updatedAt: raw.updatedAt,
-});
+const normalizeClaim = (raw: Partial<ProgressClaim>): ProgressClaim => {
+    const allocations = Array.isArray(raw.allocations)
+        ? raw.allocations.map(normalizeProgressAllocation)
+        : [];
+
+    return {
+        id: toText(raw.id) || undefined,
+        siteId: toText(raw.siteId),
+        siteName: toText(raw.siteName),
+        yearMonth: toText(raw.yearMonth),
+        status: raw.status || 'draft',
+        siteSnapshot: raw.siteSnapshot,
+        progressLines: Array.isArray(raw.progressLines)
+            ? raw.progressLines.map((line) => ({
+                itemId: toText(line.itemId),
+                source: line.source === 'extra' ? 'extra' as const : 'contract' as const,
+                category: toText(line.category),
+                workName: toText(line.workName),
+                workType: toText(line.workType),
+                contractQuantity: line.contractQuantity === undefined ? undefined : toProgressNumber(line.contractQuantity),
+                unit: toText(line.unit),
+                unitPrice: line.unitPrice === undefined ? undefined : toProgressNumber(line.unitPrice),
+                currentQuantity: toProgressNumber(line.currentQuantity),
+                memo: toText(line.memo),
+            })).filter((line) => line.itemId)
+            : [],
+        allocations,
+        claimAttachments: Array.isArray(raw.claimAttachments) ? raw.claimAttachments : [],
+        vatMode: raw.vatMode || 'none',
+        vatRate: normalizeRate(raw.vatRate, DEFAULT_PROGRESS_VAT_RATE),
+        showAllocationsOnInvoice: Boolean(raw.showAllocationsOnInvoice),
+        showAttachmentsOnInvoice: raw.showAttachmentsOnInvoice === undefined ? true : Boolean(raw.showAttachmentsOnInvoice),
+        distributionBaseAmount: raw.distributionBaseAmount === undefined ? undefined : toProgressNumber(raw.distributionBaseAmount),
+        sukumiAdjustmentAmount: raw.sukumiAdjustmentAmount === undefined ? undefined : toProgressNumber(raw.sukumiAdjustmentAmount),
+        sukumiMemo: toText(raw.sukumiMemo),
+        teamPositionMode: normalizeTeamPositionMode(raw.teamPositionMode),
+        teamPositionManualAmount: raw.teamPositionManualAmount === undefined ? undefined : toProgressNumber(raw.teamPositionManualAmount),
+        buybackBaseUnit: raw.buybackBaseUnit === undefined ? undefined : toProgressNumber(raw.buybackBaseUnit),
+        buybackAfterTaxRate: raw.buybackAfterTaxRate === undefined ? undefined : normalizeRate(raw.buybackAfterTaxRate),
+        teamPositionDeduct: raw.teamPositionDeduct === undefined ? undefined : toProgressNumber(raw.teamPositionDeduct),
+        buybackMemo: toText(raw.buybackMemo),
+        memo: toText(raw.memo),
+        confirmedSnapshot: normalizeClaimSnapshot(raw.confirmedSnapshot, allocations),
+        createdAt: raw.createdAt,
+        updatedAt: raw.updatedAt,
+    };
+};
 
 const getMonthEndDate = (yearMonth: string): string => {
     const [yearRaw, monthRaw] = String(yearMonth || '').split('-');

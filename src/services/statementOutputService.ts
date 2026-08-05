@@ -110,6 +110,7 @@ const normalizeOutput = (raw: Partial<StatementOutputRecord>): StatementOutputRe
         documentId: toText(raw.documentId) || undefined,
         documentNo: toText(raw.documentNo) || undefined,
         documentTitle: toText(raw.documentTitle) || undefined,
+        payrollRunId: toText(raw.payrollRunId) || undefined,
         amountSummary: normalizeAmountSummary(raw.amountSummary),
         optionPreset: normalizeStatus(raw.optionPreset ?? status),
         optionSnapshot: raw.optionSnapshot,

@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Calendar, Building2, User, CreditCard, Download,
-  RotateCcw, Save, Search, Settings, FileText,
-  ChevronLeft, ChevronRight, Calculator, Printer, Copy,
-  Users, Briefcase, MinusCircle, PlusCircle, Check,
-  MoreHorizontal, Filter, Table, AlertTriangle
+  Calendar, Building2, ChevronDown, Download, Search,
+  ChevronLeft, ChevronRight,
+  RotateCcw, Settings, FileText,
+
+  Users, Briefcase, PlusCircle, Check,
+  AlertTriangle
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
@@ -74,9 +75,16 @@ const toYearMonth = (value: string): string => {
   return m ? m[1] : '';
 };
 
-const getThisYearMonth = (): string => {
-  return new Date().toISOString().slice(0, 7);
+const shiftYearMonth = (yearMonth: string, monthOffset: number): string => {
+  const normalized = toYearMonth(yearMonth);
+  const [year, month] = normalized.split('-').map(Number);
+  const date = Number.isFinite(year) && Number.isFinite(month) && month >= 1 && month <= 12
+    ? new Date(year, month - 1 + monthOffset, 1)
+    : new Date();
+
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 };
+
 
 const getMonthLastDay = (month: string): number => {
   const [yearText, monthText] = String(month || '').split('-');
@@ -199,14 +207,6 @@ const formatAddressCell = (row: RowState, includeBankUnderAddress: boolean): str
   return parts.filter(Boolean).join('\n');
 };
 
-const getExcelDataRowHeight = (row: RowState, includeTeamUnderName: boolean, includeBankUnderAddress: boolean): number => {
-  const nameLines = formatWorkerNameCell(row, includeTeamUnderName).split('\n').filter(Boolean).length;
-  const addressLines = formatAddressCell(row, includeBankUnderAddress).split('\n').filter(Boolean).length;
-  const lineCount = Math.max(nameLines, addressLines, 1);
-  if (lineCount >= 3) return 48;
-  if (lineCount === 2) return 38;
-  return 24;
-};
 
 // --- UI Constants & Classes ---
 const W_INDEX = 'w-[45px]';
@@ -266,6 +266,8 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [selectedSiteId, setSelectedSiteId] = useState<'ALL' | string>('ALL');
+  const [siteSearchQuery, setSiteSearchQuery] = useState('');
+  const [isSitePickerOpen, setIsSitePickerOpen] = useState(false);
 
   // --- Statement Details ---
   const [siteNameInput, setSiteNameInput] = useState('');
@@ -415,6 +417,14 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
     return result.sort((a, b) => a.name.localeCompare(b.name));
   }, [reports, siteNameById, sites]);
+
+  const filteredReportSites = useMemo(() => {
+    const query = siteSearchQuery.trim().toLocaleLowerCase();
+    if (!query) return reportSites;
+
+    return reportSites.filter((site) => [site.name, site.legacyId, site.id]
+      .some((value) => String(value ?? '').toLocaleLowerCase().includes(query)));
+  }, [reportSites, siteSearchQuery]);
 
   const selectedSite = useMemo(() => {
     if (selectedSiteId === 'ALL') return null;
@@ -900,8 +910,25 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     const lastDay = getMonthLastDay(month);
     const showBankDetailsColumn = showBankColumn;
     const dayStartColumn = fixedInfoColumnCount + 1;
-    const manDayCellFormat = '@';
+    // 공수는 반드시 숫자로 내보내야 엑셀에서 드래그 합계가 셀 개수로
+    // 표시되지 않고 실제 공수 합계로 계산된다.
+    const manDayIntegerCellFormat = '#,##0';
+    const manDayDecimalCellFormat = '#,##0.###';
+    const getManDayCellFormat = (value: unknown) => {
+      const result = typeof value === 'object' && value !== null && 'result' in value
+        ? value.result
+        : value;
+      const numericValue = Number(result);
+      return Number.isFinite(numericValue) && !Number.isInteger(numericValue)
+        ? manDayDecimalCellFormat
+        : manDayIntegerCellFormat;
+    };
     const moneyNumberFormat = '#,##0';
+    const blackArgb = 'FF000000';
+    const sundayArgb = 'FFE60012';
+    const headerFillArgb = 'FFE8E6F0';
+    const totalFillArgb = 'FFDCEFF4';
+    const delegateFillArgb = 'FFFFF5A6';
     const trailingHeaders = showBankDetailsColumn
       ? ['은행', '예금주', '계좌번호', '지급구분']
       : ['지급구분'];
@@ -911,6 +938,22 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     const totalColumns = fixedInfoColumnCount + dayColCount + 3 + trailingHeaders.length;
     const summaryStartCol = fixedInfoColumnCount + dayColCount + 1;
     const paymentTypeColumn = summaryStartCol + (showBankDetailsColumn ? 6 : 3);
+    const toExcelColumnName = (columnNumber: number) => {
+      let current = columnNumber;
+      let name = '';
+      while (current > 0) {
+        const remainder = (current - 1) % 26;
+        name = String.fromCharCode(65 + remainder) + name;
+        current = Math.floor((current - 1) / 26);
+      }
+      return name;
+    };
+    const makeSumFormula = (references: string[]) => (
+      references.length > 0 ? `SUM(${references.join(',')})` : '0'
+    );
+
+    // 엑셀을 열거나 공수/단가를 수정했을 때 모든 수식이 다시 계산되도록 한다.
+    workbook.calcProperties.fullCalcOnLoad = true;
 
     ws.pageSetup = {
       orientation: 'landscape',
@@ -929,7 +972,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     // --- Title Row (Row 1) ---
     const titleRow = ws.addRow([statementTitle || '노무내역서']);
     ws.mergeCells(titleRow.number, 1, titleRow.number, totalColumns);
-    titleRow.getCell(1).font = { bold: true, size: 18, color: { argb: 'FF1E293B' } };
+    titleRow.getCell(1).font = { bold: true, size: 18, color: { argb: blackArgb } };
     titleRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
     titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
     titleRow.height = 40;
@@ -942,11 +985,12 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
     ws.getCell(2, 1).value = `기간: ${periodStr}`;
     ws.getCell(2, 5).value = `현장명: ${siteNameInput || '전체 통합'}`;
-    ws.getCell(2, Math.min(13, totalColumns)).value = `위임계좌번호: ${masterBank} ${masterAccount}`;
+    const delegationAccount = [masterBank.trim(), masterAccount.trim()].filter(Boolean).join(' ');
+    ws.getCell(2, Math.min(13, totalColumns)).value = `위임계좌번호: ${delegationAccount} / 예금주: ${masterOwner.trim()}`;
 
     for (let col = 1; col <= totalColumns; col++) {
       const cell = ws.getCell(2, col);
-      cell.font = { bold: true, size: 10, color: { argb: 'FF475569' } };
+      cell.font = { bold: true, size: 10, color: { argb: blackArgb } };
       cell.alignment = { vertical: 'middle', horizontal: col === 1 ? 'left' : 'center' };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
     }
@@ -957,16 +1001,15 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     ws.getRow(3).height = 10;
 
     // --- Header Style Helper ---
-    const applyHeaderStyle = (cell: ExcelJS.Cell, bgColor: string = 'FF000000') => {
-      const isBlackBg = bgColor === 'FF000000';
-      cell.font = { bold: true, size: 9, color: { argb: isBlackBg ? 'FFFFFFFF' : 'FFFFFFFF' } };
+    const applyHeaderStyle = (cell: ExcelJS.Cell, isSunday = false) => {
+      cell.font = { bold: true, size: 9, color: { argb: isSunday ? sundayArgb : blackArgb } };
       cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
-      cell.border = { 
-        top: { style: 'thin', color: { argb: 'FFFFFFFF' } }, 
-        bottom: { style: 'thin', color: { argb: 'FFFFFFFF' } }, 
-        left: { style: 'thin', color: { argb: 'FFFFFFFF' } }, 
-        right: { style: 'thin', color: { argb: 'FFFFFFFF' } } 
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerFillArgb } };
+      cell.border = {
+        top: { style: 'thin', color: { argb: blackArgb } },
+        bottom: { style: 'thin', color: { argb: blackArgb } },
+        left: { style: 'thin', color: { argb: blackArgb } },
+        right: { style: 'thin', color: { argb: blackArgb } }
       };
     };
 
@@ -1007,26 +1050,24 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       }
 
       hr1.eachCell((cell, colNum) => {
-        let bg = 'FF000000'; // Default black
+        let isSundayCell = false;
         if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
           const day = colNum - fixedInfoColumnCount;
           const weekend = isWeekend(day);
-          if (weekend === 'sat') bg = 'FF2563EB'; // Blue
-          else if (weekend === 'sun') bg = 'FFDC2626'; // Red
+          isSundayCell = weekend === 'sun';
         }
-        applyHeaderStyle(cell, bg);
+        applyHeaderStyle(cell, isSundayCell);
       });
       hr2.eachCell((cell, colNum) => {
-        let bg = 'FF000000';
+        let isSundayCell = false;
         if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
           const day = daySplitPoint + (colNum - fixedInfoColumnCount);
           if (day <= lastDay) {
             const weekend = isWeekend(day);
-            if (weekend === 'sat') bg = 'FF2563EB';
-            else if (weekend === 'sun') bg = 'FFDC2626';
+            isSundayCell = weekend === 'sun';
           }
         }
-        applyHeaderStyle(cell, bg);
+        applyHeaderStyle(cell, isSundayCell);
       });
       hr1.height = 32;
       hr2.height = 32;
@@ -1040,14 +1081,13 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       h.push('공수', '단가', '총액', ...trailingHeaders);
       const hr = ws.addRow(h);
       hr.eachCell((cell, colNum) => {
-        let bg = 'FF000000';
+        let isSundayCell = false;
         if (colNum >= dayStartColumn && colNum < dayStartColumn + lastDay) {
           const day = colNum - fixedInfoColumnCount;
           const weekend = isWeekend(day);
-          if (weekend === 'sat') bg = 'FF2563EB';
-          else if (weekend === 'sun') bg = 'FFDC2626';
+          isSundayCell = weekend === 'sun';
         }
-        applyHeaderStyle(cell, bg);
+        applyHeaderStyle(cell, isSundayCell);
       });
       hr.height = 40;
       ws.pageSetup.printTitlesRow = `1:${hr.number}`;
@@ -1075,6 +1115,8 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     let grandTotalDays = 0;
     let grandTotalAmount = 0;
     const dailyTotals = Array.from({ length: lastDay }, () => 0);
+    const primaryDataRows: number[] = [];
+    const secondaryDataRows: number[] = [];
 
     filledRows.forEach((r, idx) => {
       const totalDaysVal = sumDaysForMonth(r.days, lastDay);
@@ -1084,28 +1126,28 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       grandTotalAmount += totalAmountVal;
 
       const bankCells = showBankDetailsColumn ? [r.bankName, r.bankOwner, r.bankAccount, r.payType === 'delegate' ? '위임' : '직불'] : [r.payType === 'delegate' ? '위임' : '직불'];
-      const rowBgColor = idx % 2 === 0 ? 'FFFFFFFF' : 'FFF1F5F9'; // Distinct zebra striping
-
       if (isSplitView) {
         const d1: any[] = [idx + 1, formatWorkerNameCell(r, showTeamUnderName, false), r.workerSsn, formatAddressCell(r, showBankUnderAddress)];
         for (let d = 0; d < daySplitPoint; d++) {
           const val = parseFloat(r.days[d] || '');
           if (Number.isFinite(val)) dailyTotals[d] += val;
-          d1.push(Number.isFinite(val) ? formatManDay(val) : '');
+          d1.push(Number.isFinite(val) ? val : '');
         }
-        d1.push(formatManDay(totalDaysVal), unitPriceVal, totalAmountVal, ...bankCells);
+        d1.push(totalDaysVal, unitPriceVal, totalAmountVal, ...bankCells);
 
         const d2: any[] = ['', '', r.workerPhone, ''];
         for (let d = daySplitPoint; d < lastDay; d++) {
           const val = parseFloat(r.days[d] || '');
           if (Number.isFinite(val)) dailyTotals[d] += val;
-          d2.push(Number.isFinite(val) ? formatManDay(val) : '');
+          d2.push(Number.isFinite(val) ? val : '');
         }
         while (d2.length < fixedInfoColumnCount + dayColCount) d2.push('');
         d2.push('', '', '', ...bankCells.map(() => ''));
 
         const row1 = ws.addRow(d1);
         const row2 = ws.addRow(d2);
+        primaryDataRows.push(row1.number);
+        secondaryDataRows.push(row2.number);
 
         for (let col = 1; col <= fixedInfoColumnCount; col++) {
           if (col === 3) continue;
@@ -1115,41 +1157,42 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
           ws.mergeCells(row1.number, col, row2.number, col);
         }
 
+        const dayStartColumnName = toExcelColumnName(dayStartColumn);
+        const dayEndColumnName = toExcelColumnName(dayStartColumn + dayColCount - 1);
+        const totalManDayColumnName = toExcelColumnName(summaryStartCol);
+        const unitPriceColumnName = toExcelColumnName(summaryStartCol + 1);
+        row1.getCell(summaryStartCol).value = {
+          formula: `SUM(${dayStartColumnName}${row1.number}:${dayEndColumnName}${row1.number},${dayStartColumnName}${row2.number}:${dayEndColumnName}${row2.number})`,
+          result: totalDaysVal,
+        };
+        row1.getCell(summaryStartCol + 2).value = {
+          formula: `ROUND(${totalManDayColumnName}${row1.number}*${unitPriceColumnName}${row1.number},0)`,
+          result: totalAmountVal,
+        };
+
         [row1, row2].forEach(row => {
           row.eachCell((cell, colNum) => {
-            cell.border = { 
-              top: { style: 'thin', color: { argb: 'FF000000' } }, 
-              bottom: { style: 'thin', color: { argb: 'FF000000' } }, 
-              left: { style: 'thin', color: { argb: 'FF000000' } }, 
-              right: { style: 'thin', color: { argb: 'FF000000' } } 
+            cell.border = {
+              top: { style: 'thin', color: { argb: blackArgb } },
+              bottom: { style: 'thin', color: { argb: blackArgb } },
+              left: { style: 'thin', color: { argb: blackArgb } },
+              right: { style: 'thin', color: { argb: blackArgb } }
             };
-            cell.font = { size: 9, color: { argb: 'FF000000' } };
+            cell.font = { size: 9, color: { argb: blackArgb } };
             cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBgColor } };
-
-            // Weekend background highlight in data rows
-            if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
-              const dayOffset = row === row1 ? 0 : daySplitPoint;
-              const day = (colNum - fixedInfoColumnCount) + dayOffset;
-              if (day <= lastDay) {
-                const weekend = isWeekend(day);
-                if (weekend === 'sat') cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: idx % 2 === 0 ? 'FFEBF5FF' : 'FFDBEAFE' } };
-                else if (weekend === 'sun') cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: idx % 2 === 0 ? 'FFFFEBEB' : 'FFFEE2E2' } };
-              }
-            }
 
             if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
-              cell.numFmt = manDayCellFormat;
+              cell.numFmt = getManDayCellFormat(cell.value);
             }
 
             if (colNum >= summaryStartCol && colNum <= summaryStartCol + 2) {
-              cell.numFmt = colNum === summaryStartCol ? manDayCellFormat : moneyNumberFormat;
+              cell.numFmt = colNum === summaryStartCol ? getManDayCellFormat(cell.value) : moneyNumberFormat;
               cell.alignment = { horizontal: 'right', vertical: 'middle' };
-              cell.font = { size: 9, bold: colNum === summaryStartCol + 2, color: { argb: 'FF000000' } };
+              cell.font = { size: 9, bold: colNum === summaryStartCol + 2, color: { argb: blackArgb } };
             }
 
             if (r.payType === 'delegate' && colNum === paymentTypeColumn) {
-              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEB3B' } };
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: delegateFillArgb } };
             }
           });
         });
@@ -1158,39 +1201,45 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         for (let i = 0; i < lastDay; i++) {
           const val = parseFloat(r.days[i] || '');
           if (Number.isFinite(val)) dailyTotals[i] += val;
-          d.push(Number.isFinite(val) ? formatManDay(val) : '');
+          d.push(Number.isFinite(val) ? val : '');
         }
-        d.push(formatManDay(totalDaysVal), unitPriceVal, totalAmountVal, ...bankCells);
+        d.push(totalDaysVal, unitPriceVal, totalAmountVal, ...bankCells);
         const dr = ws.addRow(d);
+        primaryDataRows.push(dr.number);
+        const dayStartColumnName = toExcelColumnName(dayStartColumn);
+        const dayEndColumnName = toExcelColumnName(dayStartColumn + lastDay - 1);
+        const totalManDayColumnName = toExcelColumnName(summaryStartCol);
+        const unitPriceColumnName = toExcelColumnName(summaryStartCol + 1);
+        dr.getCell(summaryStartCol).value = {
+          formula: `SUM(${dayStartColumnName}${dr.number}:${dayEndColumnName}${dr.number})`,
+          result: totalDaysVal,
+        };
+        dr.getCell(summaryStartCol + 2).value = {
+          formula: `ROUND(${totalManDayColumnName}${dr.number}*${unitPriceColumnName}${dr.number},0)`,
+          result: totalAmountVal,
+        };
         dr.eachCell((cell, colNum) => {
-          cell.border = { 
-            top: { style: 'thin', color: { argb: 'FF000000' } }, 
-            bottom: { style: 'thin', color: { argb: 'FF000000' } }, 
-            left: { style: 'thin', color: { argb: 'FF000000' } }, 
-            right: { style: 'thin', color: { argb: 'FF000000' } } 
+          cell.border = {
+            top: { style: 'thin', color: { argb: blackArgb } },
+            bottom: { style: 'thin', color: { argb: blackArgb } },
+            left: { style: 'thin', color: { argb: blackArgb } },
+            right: { style: 'thin', color: { argb: blackArgb } }
           };
-          cell.font = { size: 9, color: { argb: 'FF000000' } };
+          cell.font = { size: 9, color: { argb: blackArgb } };
           cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBgColor } };
 
           if (colNum >= dayStartColumn && colNum < dayStartColumn + lastDay) {
-            const weekend = isWeekend(colNum - fixedInfoColumnCount);
-            if (weekend === 'sat') cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: idx % 2 === 0 ? 'FFEBF5FF' : 'FFDBEAFE' } };
-            else if (weekend === 'sun') cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: idx % 2 === 0 ? 'FFFFEBEB' : 'FFFEE2E2' } };
-          }
-
-          if (colNum >= dayStartColumn && colNum < dayStartColumn + lastDay) {
-            cell.numFmt = manDayCellFormat;
+            cell.numFmt = getManDayCellFormat(cell.value);
           }
 
           if (colNum >= fixedInfoColumnCount + lastDay + 1 && colNum <= fixedInfoColumnCount + lastDay + 3) {
-            cell.numFmt = colNum === fixedInfoColumnCount + lastDay + 1 ? manDayCellFormat : moneyNumberFormat;
+            cell.numFmt = colNum === fixedInfoColumnCount + lastDay + 1 ? getManDayCellFormat(cell.value) : moneyNumberFormat;
             cell.alignment = { horizontal: 'right', vertical: 'middle' };
-            cell.font = { size: 9, bold: colNum === fixedInfoColumnCount + lastDay + 3, color: { argb: 'FF000000' } };
+            cell.font = { size: 9, bold: colNum === fixedInfoColumnCount + lastDay + 3, color: { argb: blackArgb } };
           }
 
           if (r.payType === 'delegate' && colNum === paymentTypeColumn) {
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEB3B' } };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: delegateFillArgb } };
           }
         });
       }
@@ -1198,12 +1247,12 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
     // --- Footer Row ---
     const f1: any[] = ['날짜별 공수합계', ...Array.from({ length: fixedInfoColumnCount - 1 }, () => '')];
-    for (let d = 0; d < daySplitPoint; d++) f1.push(formatManDay(dailyTotals[d]));
-    f1.push(formatManDay(grandTotalDays), '', grandTotalAmount, ...trailingHeaders.map(() => ''));
+    for (let d = 0; d < daySplitPoint; d++) f1.push(dailyTotals[d]);
+    f1.push(grandTotalDays, '', grandTotalAmount, ...trailingHeaders.map(() => ''));
 
     if (isSplitView) {
       const f2: any[] = Array.from({ length: fixedInfoColumnCount }, () => '');
-      for (let d = daySplitPoint; d < lastDay; d++) f2.push(formatManDay(dailyTotals[d]));
+      for (let d = daySplitPoint; d < lastDay; d++) f2.push(dailyTotals[d]);
       while (f2.length < fixedInfoColumnCount + dayColCount) f2.push('');
       f2.push('', '', '', ...trailingHeaders.map(() => ''));
 
@@ -1213,22 +1262,49 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       for (let col = summaryStartCol; col <= totalColumns; col++) {
         ws.mergeCells(fr1.number, col, fr2.number, col);
       }
+      for (let dayOffset = 0; dayOffset < daySplitPoint; dayOffset++) {
+        const columnName = toExcelColumnName(dayStartColumn + dayOffset);
+        fr1.getCell(dayStartColumn + dayOffset).value = {
+          formula: makeSumFormula(primaryDataRows.map(rowNumber => `${columnName}${rowNumber}`)),
+          result: dailyTotals[dayOffset],
+        };
+      }
+      for (let dayOffset = daySplitPoint; dayOffset < lastDay; dayOffset++) {
+        const columnIndex = dayStartColumn + dayOffset - daySplitPoint;
+        const columnName = toExcelColumnName(columnIndex);
+        fr2.getCell(columnIndex).value = {
+          formula: makeSumFormula(secondaryDataRows.map(rowNumber => `${columnName}${rowNumber}`)),
+          result: dailyTotals[dayOffset],
+        };
+      }
+      const dayStartColumnName = toExcelColumnName(dayStartColumn);
+      const dayEndColumnName = toExcelColumnName(dayStartColumn + dayColCount - 1);
+      const totalManDayColumnName = toExcelColumnName(summaryStartCol);
+      const amountColumnName = toExcelColumnName(summaryStartCol + 2);
+      fr1.getCell(summaryStartCol).value = {
+        formula: `SUM(${dayStartColumnName}${fr1.number}:${dayEndColumnName}${fr1.number},${dayStartColumnName}${fr2.number}:${dayEndColumnName}${fr2.number})`,
+        result: grandTotalDays,
+      };
+      fr1.getCell(summaryStartCol + 2).value = {
+        formula: makeSumFormula(primaryDataRows.map(rowNumber => `${amountColumnName}${rowNumber}`)),
+        result: grandTotalAmount,
+      };
       [fr1, fr2].forEach(row => {
         row.eachCell((cell, colNum) => {
-          cell.font = { bold: true, size: 10, color: { argb: 'FF000000' } };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDE68A' } };
-          cell.border = { 
-            top: { style: 'medium', color: { argb: 'FF000000' } }, 
-            bottom: { style: 'medium', color: { argb: 'FF000000' } }, 
-            left: { style: 'thin', color: { argb: 'FF000000' } }, 
-            right: { style: 'thin', color: { argb: 'FF000000' } } 
+          cell.font = { bold: true, size: 10, color: { argb: blackArgb } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: totalFillArgb } };
+          cell.border = {
+            top: { style: 'thin', color: { argb: blackArgb } },
+            bottom: { style: 'thin', color: { argb: blackArgb } },
+            left: { style: 'thin', color: { argb: blackArgb } },
+            right: { style: 'thin', color: { argb: blackArgb } }
           };
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
           if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
-            cell.numFmt = manDayCellFormat;
+            cell.numFmt = getManDayCellFormat(cell.value);
           }
           if (colNum >= summaryStartCol && colNum <= summaryStartCol + 2) {
-            cell.numFmt = colNum === summaryStartCol ? manDayCellFormat : moneyNumberFormat;
+            cell.numFmt = colNum === summaryStartCol ? getManDayCellFormat(cell.value) : moneyNumberFormat;
             cell.alignment = { horizontal: 'right', vertical: 'middle' };
           }
         });
@@ -1238,21 +1314,40 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     } else {
       const fr = ws.addRow(f1);
       ws.mergeCells(fr.number, 1, fr.number, fixedInfoColumnCount);
+      for (let dayOffset = 0; dayOffset < lastDay; dayOffset++) {
+        const columnIndex = dayStartColumn + dayOffset;
+        const columnName = toExcelColumnName(columnIndex);
+        fr.getCell(columnIndex).value = {
+          formula: makeSumFormula(primaryDataRows.map(rowNumber => `${columnName}${rowNumber}`)),
+          result: dailyTotals[dayOffset],
+        };
+      }
+      const dayStartColumnName = toExcelColumnName(dayStartColumn);
+      const dayEndColumnName = toExcelColumnName(dayStartColumn + lastDay - 1);
+      const amountColumnName = toExcelColumnName(summaryStartCol + 2);
+      fr.getCell(summaryStartCol).value = {
+        formula: `SUM(${dayStartColumnName}${fr.number}:${dayEndColumnName}${fr.number})`,
+        result: grandTotalDays,
+      };
+      fr.getCell(summaryStartCol + 2).value = {
+        formula: makeSumFormula(primaryDataRows.map(rowNumber => `${amountColumnName}${rowNumber}`)),
+        result: grandTotalAmount,
+      };
       fr.eachCell((cell, colNum) => {
-        cell.font = { bold: true, size: 10, color: { argb: 'FF000000' } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDE68A' } };
-        cell.border = { 
-          top: { style: 'medium', color: { argb: 'FF000000' } }, 
-          bottom: { style: 'medium', color: { argb: 'FF000000' } }, 
-          left: { style: 'thin', color: { argb: 'FF000000' } }, 
-          right: { style: 'thin', color: { argb: 'FF000000' } } 
+        cell.font = { bold: true, size: 10, color: { argb: blackArgb } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: totalFillArgb } };
+        cell.border = {
+          top: { style: 'thin', color: { argb: blackArgb } },
+          bottom: { style: 'thin', color: { argb: blackArgb } },
+          left: { style: 'thin', color: { argb: blackArgb } },
+          right: { style: 'thin', color: { argb: blackArgb } }
         };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
         if (colNum >= dayStartColumn && colNum < dayStartColumn + lastDay) {
-          cell.numFmt = manDayCellFormat;
+          cell.numFmt = getManDayCellFormat(cell.value);
         }
         if (colNum >= fixedInfoColumnCount + lastDay + 1 && colNum <= fixedInfoColumnCount + lastDay + 3) {
-          cell.numFmt = colNum === fixedInfoColumnCount + lastDay + 1 ? manDayCellFormat : moneyNumberFormat;
+          cell.numFmt = colNum === fixedInfoColumnCount + lastDay + 1 ? getManDayCellFormat(cell.value) : moneyNumberFormat;
           cell.alignment = { horizontal: 'right', vertical: 'middle' };
         }
       });
@@ -1263,9 +1358,54 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       ws.getRow(rowNum).height = 18;
     }
 
+    const tableStartRow = 4;
+    const headerEndRow = isSplitView ? 5 : 4;
+    const tableEndRow = ws.rowCount;
+    const footerStartRow = isSplitView ? tableEndRow - 1 : tableEndRow;
+    const blackBorder = (style: ExcelJS.BorderStyle): Partial<ExcelJS.Border> => ({
+      style,
+      color: { argb: blackArgb }
+    });
+    const setBorderEdge = (
+      cell: ExcelJS.Cell,
+      edge: 'top' | 'bottom' | 'left' | 'right',
+      style: ExcelJS.BorderStyle
+    ) => {
+      cell.border = {
+        ...cell.border,
+        [edge]: blackBorder(style)
+      };
+    };
+
+    // 머리글 아래와 날짜별 공수합계 위는 이중선
+    for (let col = 1; col <= totalColumns; col++) {
+      setBorderEdge(ws.getCell(headerEndRow, col), 'bottom', 'double');
+      setBorderEdge(ws.getCell(footerStartRow, col), 'top', 'double');
+    }
+    if (isSplitView) {
+      // 세로 병합된 머리글/합계 셀은 좌상단 셀에도 경계를 지정해야 Excel에서 안정적으로 표시된다.
+      for (let col = 1; col <= fixedInfoColumnCount; col++) {
+        if (col !== 3) setBorderEdge(ws.getCell(tableStartRow, col), 'bottom', 'double');
+      }
+      for (let col = summaryStartCol; col <= totalColumns; col++) {
+        setBorderEdge(ws.getCell(tableStartRow, col), 'bottom', 'double');
+      }
+      setBorderEdge(ws.getCell(footerStartRow, 1), 'top', 'double');
+    }
+
+    // 표 전체 외곽 테두리를 굵게 표시
+    for (let col = 1; col <= totalColumns; col++) {
+      setBorderEdge(ws.getCell(tableStartRow, col), 'top', 'thick');
+      setBorderEdge(ws.getCell(tableEndRow, col), 'bottom', 'thick');
+    }
+    for (let row = tableStartRow; row <= tableEndRow; row++) {
+      setBorderEdge(ws.getCell(row, 1), 'left', 'thick');
+      setBorderEdge(ws.getCell(row, totalColumns), 'right', 'thick');
+    }
+
     const buffer = await workbook.xlsx.writeBuffer();
     saveAs(new Blob([buffer]), `노무내역서_${siteNameInput || '전체'}_${month}.xlsx`);
-  }, [rows, month, statementTitle, siteNameInput, showBankColumn, showBankUnderAddress, showTeamUnderName, isSplitView, masterBank, masterAccount]);
+  }, [rows, month, statementTitle, siteNameInput, showBankColumn, showBankUnderAddress, showTeamUnderName, isSplitView, masterBank, masterOwner, masterAccount]);
   const statementSummary = useMemo(() => {
     const visibleLastDay = getMonthLastDay(month);
     let totalDays = 0;
@@ -1380,6 +1520,25 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
   const printRootRef = useRef<HTMLDivElement>(null);
   const previewViewportRef = useRef<HTMLDivElement>(null);
+  const sitePickerRef = useRef<HTMLDivElement>(null);
+  const siteSearchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isSitePickerOpen) return;
+
+    const focusTimer = window.setTimeout(() => siteSearchInputRef.current?.focus(), 0);
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!sitePickerRef.current?.contains(event.target as Node)) {
+        setIsSitePickerOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+    };
+  }, [isSitePickerOpen]);
 
   return (
     <div className="labor-statement-page flex flex-col h-full bg-[#f8fafc] text-slate-800 font-sans">
@@ -1481,20 +1640,110 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
             </div>
             <div className="h-6 w-px bg-slate-200 mx-2"></div>
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 hover:border-indigo-300 transition-colors shadow-sm">
-                <Calendar className="w-4 h-4 text-slate-500" />
-                <input type="month" value={month} onChange={(e) => setMonth(e.target.value)}
-                  className="bg-transparent text-sm font-bold text-slate-800 outline-none w-[130px] cursor-pointer"
-                />
-              </div>
-              <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 min-w-[200px] hover:border-indigo-300 transition-colors shadow-sm">
-                <Building2 className="w-4 h-4 text-slate-500" />
-                <select value={selectedSiteId} onChange={(e) => setSelectedSiteId(e.target.value)}
-                  className="bg-transparent text-sm font-bold text-slate-800 outline-none w-full cursor-pointer"
+              <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 shadow-sm transition-colors hover:border-indigo-300">
+                <button
+                  type="button"
+                  onClick={() => setMonth((current) => shiftYearMonth(current, -1))}
+                  className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-white hover:text-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  aria-label="이전 달"
+                  title="이전 달"
                 >
-                  <option value="ALL">전체 통합</option>
-                  {reportSites.map(s => <option key={s.id} value={s.id}>{s.name} {s.legacyId ? `(${s.legacyId})` : ''}</option>)}
-                </select>
+                  <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                </button>
+                <div className="flex items-center gap-2 px-2 py-1">
+                  <Calendar className="w-4 h-4 text-slate-500" />
+                  <input type="month" value={month} onChange={(e) => setMonth(e.target.value)}
+                    className="bg-transparent text-sm font-bold text-slate-800 outline-none w-[130px] cursor-pointer"
+                    aria-label="선택 월"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMonth((current) => shiftYearMonth(current, 1))}
+                  className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-white hover:text-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  aria-label="다음 달"
+                  title="다음 달"
+                >
+                  <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+              <div ref={sitePickerRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSiteSearchQuery('');
+                    setIsSitePickerOpen((open) => !open);
+                  }}
+                  aria-haspopup="listbox"
+                  aria-expanded={isSitePickerOpen}
+                  className="flex min-w-[230px] items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-800 shadow-sm transition-colors hover:border-indigo-300"
+                >
+                  <Building2 className="h-4 w-4 shrink-0 text-slate-500" />
+                  <span className="min-w-0 flex-1 truncate text-left" title={selectedSite?.name ?? '전체 통합'}>
+                    {selectedSite?.name ?? '전체 통합'}
+                  </span>
+                  <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${isSitePickerOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {isSitePickerOpen && (
+                  <div className="absolute left-0 top-full z-50 mt-2 w-[330px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                    <div className="border-b border-slate-100 p-2">
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <input
+                          ref={siteSearchInputRef}
+                          type="search"
+                          value={siteSearchQuery}
+                          onChange={(e) => setSiteSearchQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') setIsSitePickerOpen(false);
+                          }}
+                          aria-label="현장 검색"
+                          placeholder="현장명 또는 현장 ID 검색"
+                          className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm font-semibold text-slate-700 outline-none focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                        />
+                      </div>
+                    </div>
+                    <div role="listbox" aria-label="현장 목록" className="max-h-64 overflow-y-auto p-1.5">
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={selectedSiteId === 'ALL'}
+                        onClick={() => {
+                          setSelectedSiteId('ALL');
+                          setSiteSearchQuery('');
+                          setIsSitePickerOpen(false);
+                        }}
+                        className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm font-bold transition-colors ${
+                          selectedSiteId === 'ALL' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        전체 통합
+                      </button>
+                      {filteredReportSites.map((site) => (
+                        <button
+                          key={site.id}
+                          type="button"
+                          role="option"
+                          aria-selected={selectedSiteId === site.id}
+                          onClick={() => {
+                            setSelectedSiteId(site.id);
+                            setSiteSearchQuery('');
+                            setIsSitePickerOpen(false);
+                          }}
+                          className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm font-semibold transition-colors ${
+                            selectedSiteId === site.id ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className="truncate">{site.name}</span>
+                          {site.legacyId && <span className="ml-2 shrink-0 text-xs font-medium text-slate-400">({site.legacyId})</span>}
+                        </button>
+                      ))}
+                      {siteSearchQuery.trim() && filteredReportSites.length === 0 && (
+                        <p className="px-3 py-6 text-center text-sm font-medium text-slate-400">검색 결과가 없습니다.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
               <button onClick={loadAllByFilter}
                 className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow-sm flex items-center gap-2 transition-colors active:scale-95 whitespace-nowrap"

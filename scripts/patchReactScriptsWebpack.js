@@ -3,6 +3,40 @@ const webpackDevServerConfigPath = require.resolve('react-scripts/config/webpack
 
 const REACT_DATEPICKER_WARNING = /Critical dependency: the request of a dependency is an expression/;
 const REACT_DATEPICKER_MODULE = /[\\/]react-datepicker[\\/]dist[\\/]index(?:\.es)?\.js$/;
+const FORK_TS_CHECKER_PLUGIN = 'ForkTsCheckerWebpackPlugin';
+const DEFAULT_TYPE_CHECKER_MEMORY_MB = 4096;
+
+function isTruthyEnvironmentValue(value) {
+  return /^(?:1|true|yes|on)$/i.test(String(value || '').trim());
+}
+
+function getTypeCheckerMemoryLimit() {
+  const configured = Number(process.env.FORK_TS_CHECKER_MEMORY_MB);
+  if (!Number.isFinite(configured) || configured < 1024) {
+    return DEFAULT_TYPE_CHECKER_MEMORY_MB;
+  }
+
+  return Math.floor(configured);
+}
+
+function configureTypeChecker(config) {
+  if (!Array.isArray(config.plugins)) return;
+
+  const isTypeChecker = (plugin) => (
+    plugin?.constructor?.name === FORK_TS_CHECKER_PLUGIN
+  );
+
+  if (isTruthyEnvironmentValue(process.env.DISABLE_FORK_TS_CHECKER)) {
+    config.plugins = config.plugins.filter((plugin) => !isTypeChecker(plugin));
+    return;
+  }
+
+  const memoryLimit = getTypeCheckerMemoryLimit();
+  config.plugins.forEach((plugin) => {
+    if (!isTypeChecker(plugin) || !plugin.options?.typescript) return;
+    plugin.options.typescript.memoryLimit = memoryLimit;
+  });
+}
 
 function getModuleResource(warning) {
   if (!warning || typeof warning !== 'object' || !warning.module) {
@@ -31,6 +65,7 @@ function patchReactScriptsWebpack() {
 
     ignoreWarnings.push((warning) => shouldIgnoreReactDatepickerWarning(warning));
     config.ignoreWarnings = ignoreWarnings;
+    configureTypeChecker(config);
 
     return config;
   };

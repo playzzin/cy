@@ -27,6 +27,7 @@ export const FreelancerPaymentSchema = z.object({
     dailyRate: z.number().optional().nullable(),
     manDays: z.number().optional().nullable(),
     amount: z.number().optional().nullable(),
+    isManualTaxOverride: z.boolean().optional(),
     performanceBonus: z.number().optional().nullable(),
     reportingBalance: z.number().optional().nullable(),
     reportableAmount: z.number().optional().nullable(),

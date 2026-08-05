@@ -1,7 +1,7 @@
 // src/types/cardBilling.ts
 import { Timestamp } from './timestamp';
 
-export type CardBillingStatus = 'DRAFT' | 'CONFIRMED' | 'PAID' | 'OVERDUE';
+export type CardBillingStatus = 'DRAFT' | 'CONFIRMED' | 'PAID' | 'OVERDUE' | 'CANCELLED';
 export type CardBillingIssuedToType = 'team' | 'worker';
 
 export interface CardBillingCostItem {
@@ -41,6 +41,10 @@ export interface CardBillingDocument {
     lineItems: CardBillingCostItem[];
     statementAttachmentPaths: string[];
     memo?: string;
+    confirmationCancelReason?: string;
+    confirmationCancelledAt?: Timestamp;
+    confirmationCancelledById?: string;
+    confirmationCancelledByName?: string;
     legacyId?: string;
     createdAt?: Timestamp;
     updatedAt?: Timestamp;

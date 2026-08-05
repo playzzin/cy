@@ -101,7 +101,28 @@ export const SupportCancellationModal: React.FC<SupportCancellationModalProps> =
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 px-4 py-6">
-      <form onSubmit={handleSubmit} className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <form onSubmit={handleSubmit} className="support-cancellation-modal w-full max-w-2xl overflow-hidden rounded-2xl bg-white text-slate-800 shadow-2xl">
+        <style>{`
+          .support-cancellation-modal input,
+          .support-cancellation-modal select,
+          .support-cancellation-modal textarea {
+            background-color: #ffffff;
+            color: #1f2937;
+            caret-color: #1f2937;
+          }
+          .support-cancellation-modal input::placeholder,
+          .support-cancellation-modal textarea::placeholder {
+            color: #94a3b8;
+          }
+          .support-cancellation-modal option {
+            background-color: #ffffff;
+            color: #1f2937;
+          }
+          .support-cancellation-modal input[type="checkbox"],
+          .support-cancellation-modal input[type="radio"] {
+            background-color: initial;
+          }
+        `}</style>
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-black text-slate-500">

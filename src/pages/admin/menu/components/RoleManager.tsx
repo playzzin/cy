@@ -26,6 +26,8 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { SiteDataType, PositionItem } from '../../../../types/menu';
+import { getIcon } from '../../../../utils/iconMapper';
+import { renamePositionReferencesInMenuConfig } from '../../../../services/menuServiceV11';
 
 interface RoleManagerProps {
     isOpen: boolean;
@@ -73,8 +75,7 @@ const SortablePositionItem = ({
             </button>
 
             <div className={`w-8 h-8 rounded-full bg-gradient-to-br ${item.color} flex items-center justify-center shadow-sm`}>
-                {/* @ts-ignore */}
-                <FontAwesomeIcon icon={['fas', getIconName(item.icon)]} className="text-white text-xs" />
+                <FontAwesomeIcon icon={getIcon(item.icon)} className="text-white text-xs" />
             </div>
 
             <div className="flex-1 grid grid-cols-12 gap-2">
@@ -292,11 +293,16 @@ const RoleManager: React.FC<RoleManagerProps> = ({
 
                     // 1. Check if name changed -> Sync with Workers
                     if (existing.name !== pos.name) {
+                        const renameResult = renamePositionReferencesInMenuConfig(newData, existing.name, pos.name);
+                        if (renameResult.changed) {
+                            console.log('[RoleManager] Sync: Renamed local menu role references', renameResult);
+                        }
+
                         try {
                             console.log(`[RoleManager] Sync: Renaming position ${existing.name} -> ${pos.name} and syncing workers`);
                             await positionService.updatePositionNameWithSync(existing.id, existing.name, pos.name);
                         } catch (err) {
-                            console.error('[RoleManager] Failed to sync worker roles:', err);
+                            console.error('[RoleManager] Failed to sync renamed position references:', err);
                         }
                     }
 

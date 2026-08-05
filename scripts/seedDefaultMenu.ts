@@ -13,11 +13,11 @@ const firebaseConfig = {
 
 async function seed() {
     try {
-        console.log(`Seeding menus_v11 to ${firebaseConfig.projectId}...`);
+        console.log(`Seeding menus_v12 to ${firebaseConfig.projectId}...`);
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         
-        await setDoc(doc(db, 'settings', 'menus_v11'), {
+        await setDoc(doc(db, 'settings', 'menus_v12'), {
             updatedAt: new Date().toISOString(),
             items: DEFAULT_MENU_CONFIG
         });

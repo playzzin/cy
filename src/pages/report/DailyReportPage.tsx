@@ -18,26 +18,52 @@ const DailyReportPage: React.FC = () => {
 
     useEffect(() => {
         if (!tab) {
-            const next = new URLSearchParams(searchParams);
-            next.set('tab', 'input');
-            setSearchParams(next, { replace: true });
+            setSearchParams(prev => {
+                const next = new URLSearchParams(prev);
+                next.set('tab', 'input');
+                return next;
+            }, { replace: true });
             return;
         }
 
         if (tab === 'list') {
-            const next = new URLSearchParams(searchParams);
-            next.set('tab', 'list-v2');
-            setSearchParams(next, { replace: true });
+            setSearchParams(prev => {
+                const next = new URLSearchParams(prev);
+                next.set('tab', 'list-v2');
+                return next;
+            }, { replace: true });
+            return;
         }
-    }, [searchParams, setSearchParams, tab]);
+
+        if (tab === 'calendar') {
+            const next = new URLSearchParams(searchParams);
+            next.delete('tab');
+            navigate({
+                pathname: '/reports/daily-worker-calendar',
+                search: next.toString() ? `?${next.toString()}` : '',
+            }, { replace: true });
+        }
+    }, [navigate, searchParams, setSearchParams, tab]);
 
     const handleTabChange = (nextTab: string) => {
-        const next = new URLSearchParams(searchParams);
-        next.set('tab', nextTab);
-        setSearchParams(next);
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.set('tab', nextTab);
+            return next;
+        });
     };
 
     const handleTopTabSelect = (nextTab: OutputManagementTabKey) => {
+        if (nextTab === 'calendar') {
+            navigate('/reports/daily-worker-calendar');
+            return;
+        }
+
+        if (nextTab === 'labor-check') {
+            navigate('/reports/labor-check');
+            return;
+        }
+
         if (nextTab === 'input' || nextTab === 'board-input' || nextTab === 'list-v2') {
             handleTabChange(nextTab);
             return;
@@ -75,6 +101,7 @@ const DailyReportPage: React.FC = () => {
                     <div className="h-full min-h-0 px-3 pt-3 pb-1 md:px-4 md:pt-4 md:pb-1">
                         <DailyReportListV2
                             initialDate={searchParams.get('date') || undefined}
+                            initialSiteId={searchParams.get('siteId') || undefined}
                             targetReportId={searchParams.get('reportId') || undefined}
                         />
                     </div>

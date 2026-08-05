@@ -4,8 +4,9 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faChartBar, faSearch, faBuilding, faUserGroup,
     faChevronDown, faChevronRight, faFileInvoice, faInfoCircle,
-    faCalculator, faUsers, faIndustry, faSort, faHardHat
+    faCalculator, faUsers, faSort, faHardHat
 } from '@fortawesome/free-solid-svg-icons';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { dailyReportService } from '../../services/dailyReportService';
 import { Site } from '../../services/siteService';
 import { Team } from '../../services/teamService';
@@ -76,6 +77,99 @@ type TeamSelectorOption = {
 
 const WHITEBOARD_STATUS_VIEW_KEY = 'output-management:whiteboard-status:v1';
 
+const parseYearParam = (value?: string | null): number | null => {
+    const year = Number(value);
+    return Number.isInteger(year) && year >= 2000 && year <= 2100 ? year : null;
+};
+
+const parseMonthParam = (value?: string | null): number | null => {
+    const month = Number(value);
+    return Number.isInteger(month) && month >= 1 && month <= 12 ? month : null;
+};
+
+const parseViewModeParam = (value?: string | null): 'site' | 'team' | null => {
+    return value === 'site' || value === 'team' ? value : null;
+};
+
+const parseSortParam = (value?: string | null): 'name-asc' | 'name-desc' | null => {
+    return value === 'name-asc' || value === 'name-desc' ? value : null;
+};
+
+const normalizeSortText = (value?: string | null): string => String(value ?? '').trim();
+
+const compareKoreanSortText = (left?: string | null, right?: string | null): number =>
+    normalizeSortText(left).localeCompare(normalizeSortText(right), 'ko-KR', {
+        numeric: true,
+        sensitivity: 'base',
+    });
+
+const compareKoreanSortTextEmptyLast = (left?: string | null, right?: string | null): number => {
+    const leftText = normalizeSortText(left);
+    const rightText = normalizeSortText(right);
+    if (leftText && !rightText) return -1;
+    if (!leftText && rightText) return 1;
+    return compareKoreanSortText(leftText, rightText);
+};
+
+const getCompanySortPriority = (company?: Pick<Company, 'name'>): number => {
+    const name = normalizeSortText(company?.name).replace(/\s+/g, '').toLowerCase();
+    if (name.includes('\uCCAD\uC5F0') || name.includes('cheongyeon') || name.includes('cyee')) return 0;
+    if (name.includes('\uB2E4\uC6D0')) return 1;
+    return 2;
+};
+
+const getCompanyByIdForSort = (
+    companyByIdMap: ReadonlyMap<string, Company>,
+    companyId?: string | null
+): Company | undefined => {
+    const normalizedId = String(companyId ?? '').trim();
+    return normalizedId ? companyByIdMap.get(normalizedId) : undefined;
+};
+
+const compareCompanyIdsByPriorityThenName = (
+    leftCompanyId: string | undefined,
+    rightCompanyId: string | undefined,
+    companyByIdMap: ReadonlyMap<string, Company>
+): number => {
+    const leftCompany = getCompanyByIdForSort(companyByIdMap, leftCompanyId);
+    const rightCompany = getCompanyByIdForSort(companyByIdMap, rightCompanyId);
+    const priorityDiff = getCompanySortPriority(leftCompany) - getCompanySortPriority(rightCompany);
+    if (priorityDiff !== 0) return priorityDiff;
+    return compareKoreanSortText(leftCompany?.name, rightCompany?.name);
+};
+
+const compareCompaniesByPriorityThenName = (left: Company, right: Company): number => {
+    const priorityDiff = getCompanySortPriority(left) - getCompanySortPriority(right);
+    if (priorityDiff !== 0) return priorityDiff;
+    return compareKoreanSortText(left.name, right.name);
+};
+
+const compareTeamOptionsByCompanyThenName = (
+    left: TeamSelectorOption,
+    right: TeamSelectorOption,
+    companyByIdMap: ReadonlyMap<string, Company>
+): number => {
+    const companyDiff = compareCompanyIdsByPriorityThenName(left.companyId, right.companyId, companyByIdMap);
+    if (companyDiff !== 0) return companyDiff;
+    return compareKoreanSortText(left.name, right.name);
+};
+
+const compareBoardItemsByCompanyTeamThenName = (
+    left: BoardItem,
+    right: BoardItem,
+    companyByIdMap: ReadonlyMap<string, Company>,
+    sortBy: 'name-asc' | 'name-desc'
+): number => {
+    const companyDiff = compareCompanyIdsByPriorityThenName(left.companyId, right.companyId, companyByIdMap);
+    if (companyDiff !== 0) return companyDiff;
+
+    const teamDiff = compareKoreanSortTextEmptyLast(left.responsibleTeamName, right.responsibleTeamName);
+    if (teamDiff !== 0) return teamDiff;
+
+    const nameDiff = compareKoreanSortText(left.name, right.name);
+    return sortBy === 'name-desc' ? -nameDiff : nameDiff;
+};
+
 const normalizeHexColor = (value: string | undefined): string | undefined => {
     if (!value) return undefined;
     const trimmed = value.trim();
@@ -101,9 +195,20 @@ const getReadableColorOnWhite = (color: string): string => (
 );
 
 const WhiteboardStatusBoard: React.FC = () => {
+    const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     // Context에서 마스터 데이터 가져오기 (Firebase 호출 없이 바로 사용!)
     const { companies, teams, sites, loading: masterDataLoading } = useMasterData();
     const today = React.useMemo(() => new Date(), []);
+    const urlYear = parseYearParam(searchParams.get('year'));
+    const urlMonth = parseMonthParam(searchParams.get('month'));
+    const urlViewMode = parseViewModeParam(searchParams.get('view'));
+    const urlSortBy = parseSortParam(searchParams.get('sort'));
+    const urlSelectedCompanyId = searchParams.has('companyId') ? (searchParams.get('companyId') ?? '') : null;
+    const urlSelectedTeamId = searchParams.has('teamId') ? (searchParams.get('teamId') ?? '') : null;
+    const urlSearchQuery = searchParams.has('q')
+        ? (searchParams.get('q') ?? '')
+        : (searchParams.has('search') ? (searchParams.get('search') ?? '') : null);
     const persistedViewState = React.useMemo(
         () => loadSessionState<WhiteboardStatusViewState>(WHITEBOARD_STATUS_VIEW_KEY, {
             viewMode: 'site',
@@ -118,19 +223,20 @@ const WhiteboardStatusBoard: React.FC = () => {
         [today]
     );
 
-    const [viewMode, setViewMode] = useState<'site' | 'team'>(persistedViewState.viewMode === 'team' ? 'team' : 'site');
-    const [year, setYear] = useState(persistedViewState.year);
-    const [month, setMonth] = useState(persistedViewState.month);
+    const [viewMode, setViewMode] = useState<'site' | 'team'>(urlViewMode ?? (persistedViewState.viewMode === 'team' ? 'team' : 'site'));
+    const [year, setYear] = useState(urlYear ?? persistedViewState.year);
+    const [month, setMonth] = useState(urlMonth ?? persistedViewState.month);
 
     // Filter State
-    const [selectedCompanyId, setSelectedCompanyId] = useState<string>(persistedViewState.selectedCompanyId);
-    const [searchQuery, setSearchQuery] = useState<string>(persistedViewState.searchQuery);
-    const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc'>(persistedViewState.sortBy === 'name-desc' ? 'name-desc' : 'name-asc');
-    const [selectedTeamId, setSelectedTeamId] = useState<string>(persistedViewState.selectedTeamId);
+    const [selectedCompanyId, setSelectedCompanyId] = useState<string>(urlSelectedCompanyId ?? persistedViewState.selectedCompanyId);
+    const [searchQuery, setSearchQuery] = useState<string>(urlSearchQuery ?? persistedViewState.searchQuery);
+    const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc'>(urlSortBy ?? (persistedViewState.sortBy === 'name-desc' ? 'name-desc' : 'name-asc'));
+    const [selectedTeamId, setSelectedTeamId] = useState<string>(urlSelectedTeamId ?? persistedViewState.selectedTeamId);
     const [mainCompanyId, setMainCompanyId] = useState<string>(persistedViewState.mainCompanyId);
 
     const [rawReports, setRawReports] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
+    const [errorMessage, setErrorMessage] = useState('');
 
     // Accordion State
     const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
@@ -139,14 +245,23 @@ const WhiteboardStatusBoard: React.FC = () => {
 
     const containerRef = useRef<HTMLDivElement>(null);
     const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+    const lastSyncedSearchRef = useRef(searchParams.toString());
 
     const normalizeName = React.useCallback((value: string | undefined | null) => String(value ?? '').replace(/\s+/g, '').trim(), []);
+    const companyByIdMap = React.useMemo(() => {
+        const map = new Map<string, Company>();
+        companies.forEach((company) => {
+            const id = String(company.id ?? '').trim();
+            if (id) map.set(id, company);
+        });
+        return map;
+    }, [companies]);
 
     const visibleCompanies = React.useMemo(
         () => companies.filter((company) => {
             const name = normalizeName(company.name);
             return name.includes('청연') || name.includes('다원');
-        }),
+        }).sort(compareCompaniesByPriorityThenName),
         [companies, normalizeName]
     );
 
@@ -369,8 +484,8 @@ const WhiteboardStatusBoard: React.FC = () => {
                 isSupport: false
             }))
             .filter((team) => Boolean(team.id))
-            .sort((a, b) => a.name.localeCompare(b.name, 'ko'))
-    ), [isSupportTeam, selectedCompanyId, teams, visibleCompanyIdSet]);
+            .sort((a, b) => compareTeamOptionsByCompanyThenName(a, b, companyByIdMap))
+    ), [companyByIdMap, isSupportTeam, selectedCompanyId, teams, visibleCompanyIdSet]);
 
     const teamModeTeamOptions = React.useMemo<TeamSelectorOption[]>(() => {
         const optionMap = new Map<string, TeamSelectorOption>();
@@ -413,8 +528,8 @@ const WhiteboardStatusBoard: React.FC = () => {
             });
         });
 
-        return Array.from(optionMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-    }, [isSupportTeam, rawReports, resolveDashboardSite, resolveDashboardTeam, selectedCompanyId, visibleCompanyIdSet]);
+        return Array.from(optionMap.values()).sort((a, b) => compareTeamOptionsByCompanyThenName(a, b, companyByIdMap));
+    }, [companyByIdMap, isSupportTeam, rawReports, resolveDashboardSite, resolveDashboardTeam, selectedCompanyId, visibleCompanyIdSet]);
 
     const dashboardTeamSelectorOptions = React.useMemo(() => {
         if (viewMode === 'site') {
@@ -482,6 +597,60 @@ const WhiteboardStatusBoard: React.FC = () => {
     }, [year, month]);
 
     useEffect(() => {
+        const currentSearch = searchParams.toString();
+        if (currentSearch === lastSyncedSearchRef.current) return;
+        lastSyncedSearchRef.current = currentSearch;
+
+        const nextYear = parseYearParam(searchParams.get('year'));
+        const nextMonth = parseMonthParam(searchParams.get('month'));
+        const nextViewMode = parseViewModeParam(searchParams.get('view'));
+        const nextSortBy = parseSortParam(searchParams.get('sort'));
+        const nextSelectedCompanyId = searchParams.has('companyId') ? (searchParams.get('companyId') ?? '') : null;
+        const nextSelectedTeamId = searchParams.has('teamId') ? (searchParams.get('teamId') ?? '') : null;
+        const nextSearchQuery = searchParams.has('q')
+            ? (searchParams.get('q') ?? '')
+            : (searchParams.has('search') ? (searchParams.get('search') ?? '') : null);
+
+        if (nextYear && nextYear !== year) setYear(nextYear);
+        if (nextMonth && nextMonth !== month) setMonth(nextMonth);
+        if (nextViewMode && nextViewMode !== viewMode) setViewMode(nextViewMode);
+        if (nextSortBy && nextSortBy !== sortBy) setSortBy(nextSortBy);
+        if (nextSelectedCompanyId !== null && nextSelectedCompanyId !== selectedCompanyId) setSelectedCompanyId(nextSelectedCompanyId);
+        if (nextSelectedTeamId !== null && nextSelectedTeamId !== selectedTeamId) setSelectedTeamId(nextSelectedTeamId);
+        if (nextSearchQuery !== null && nextSearchQuery !== searchQuery) setSearchQuery(nextSearchQuery);
+    }, [searchParams]);
+
+    useEffect(() => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.set('year', String(year));
+            next.set('month', String(month));
+            next.set('view', viewMode);
+            next.set('sort', sortBy);
+
+            if (selectedCompanyId) next.set('companyId', selectedCompanyId);
+            else next.delete('companyId');
+
+            if (selectedTeamId) next.set('teamId', selectedTeamId);
+            else next.delete('teamId');
+
+            const trimmedSearch = searchQuery.trim();
+            if (trimmedSearch) next.set('q', trimmedSearch);
+            else {
+                next.delete('q');
+                next.delete('search');
+            }
+
+            const nextSearch = next.toString();
+            if (nextSearch !== prev.toString()) {
+                lastSyncedSearchRef.current = nextSearch;
+                return next;
+            }
+            return prev;
+        }, { replace: true });
+    }, [month, searchQuery, selectedCompanyId, selectedTeamId, setSearchParams, sortBy, viewMode, year]);
+
+    useEffect(() => {
         saveSessionState(WHITEBOARD_STATUS_VIEW_KEY, {
             viewMode,
             year,
@@ -496,6 +665,7 @@ const WhiteboardStatusBoard: React.FC = () => {
 
     const fetchReports = async () => {
         setLoading(true);
+        setErrorMessage('');
         try {
             const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
             const lastDay = new Date(year, month, 0).getDate();
@@ -504,10 +674,33 @@ const WhiteboardStatusBoard: React.FC = () => {
             setRawReports(reports);
         } catch (error) {
             console.error("Error fetching reports:", error);
+            setRawReports([]);
+            setErrorMessage('현황 데이터를 불러오지 못했습니다. 네트워크 또는 권한 상태를 확인한 뒤 새로고침해주세요.');
         } finally {
             setLoading(false);
         }
     };
+
+    const openDailyReportList = React.useCallback((item: BoardItem, event: React.MouseEvent) => {
+        event.stopPropagation();
+
+        const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+        const lastDay = new Date(year, month, 0).getDate();
+        const endDate = `${year}-${String(month).padStart(2, '0')}-${lastDay}`;
+        const params = new URLSearchParams({
+            tab: 'list-v2',
+            startDate,
+            endDate
+        });
+
+        if (item.type === 'site') {
+            params.set('siteId', item.id);
+        } else {
+            params.set('teamId', item.id);
+        }
+
+        navigate(`/reports/daily?${params.toString()}`);
+    }, [month, navigate, year]);
 
     const dashboardItems = React.useMemo(() => {
         if (!sites.length && !teams.length) return [];
@@ -905,10 +1098,10 @@ const WhiteboardStatusBoard: React.FC = () => {
                 if (isAExpanded && !isBExpanded) return -1;
                 if (!isAExpanded && isBExpanded) return 1;
 
-                if (sortBy === 'name-desc') return b.name.localeCompare(a.name, 'ko');
-                return a.name.localeCompare(b.name, 'ko');
+                return compareBoardItemsByCompanyTeamThenName(a, b, companyByIdMap, sortBy);
             });
     }, [
+        companyByIdMap,
         expandedItems,
         matchesSelectedDashboardTeam,
         normalizeName,
@@ -1004,8 +1197,6 @@ const WhiteboardStatusBoard: React.FC = () => {
     // 정렬 - 확장된 아이템은 항상 첫 번째로, 시공사 먼저 → 협력사 나중에
     const sortedItems = React.useMemo(() => {
         // 회사 타입 조회용 맵
-        const companyTypeMap = new Map(companies.map(c => [c.id, c.type]));
-
         return [...searchFilteredItems].sort((a, b) => {
             // 1. 확장된 아이템은 항상 맨 위로
             const isAExpanded = expandedItems.has(a.id);
@@ -1013,35 +1204,10 @@ const WhiteboardStatusBoard: React.FC = () => {
             if (isAExpanded && !isBExpanded) return -1;
             if (!isAExpanded && isBExpanded) return 1;
 
-            // 2. 회사 타입별 정렬: 시공사 → 협력사 → 기타
-            const aCompanyType = a.companyId ? companyTypeMap.get(a.companyId) : undefined;
-            const bCompanyType = b.companyId ? companyTypeMap.get(b.companyId) : undefined;
+            return compareBoardItemsByCompanyTeamThenName(a, b, companyByIdMap, sortBy);
 
-            const getTypeOrder = (type: string | undefined) => {
-                if (type === '시공사') return 0;
-                if (type === '협력사') return 1;
-                return 2;
-            };
-
-            const aTypeOrder = getTypeOrder(aCompanyType);
-            const bTypeOrder = getTypeOrder(bCompanyType);
-
-            if (aTypeOrder !== bTypeOrder) {
-                return aTypeOrder - bTypeOrder;
-            }
-
-            // 3. 같은 회사 타입 내에서 선택된 정렬 기준 적용
-            switch (sortBy) {
-                case 'name-asc':
-                    return a.name.localeCompare(b.name, 'ko');
-                case 'name-desc':
-                    return b.name.localeCompare(a.name, 'ko');
-                default:
-                    // 기본: 같은 타입 내에서 가나다순
-                    return a.name.localeCompare(b.name, 'ko');
-            }
         });
-    }, [searchFilteredItems, sortBy, expandedItems, companies]);
+    }, [companyByIdMap, searchFilteredItems, sortBy, expandedItems]);
 
     // 업데이트된 통계 (sortedItems 기반)
     const grandTotalManDaysFiltered = sortedItems.reduce((sum, item) => sum + (item.manDay || 0), 0);
@@ -1166,6 +1332,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                             <select
                                 value={year}
                                 onChange={(e) => setYear(Number(e.target.value))}
+                                aria-label="통합현황판 연도"
                                 className="bg-transparent text-base font-bold text-slate-700 focus:outline-none cursor-pointer"
                             >
                                 {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map(y => (
@@ -1176,6 +1343,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                             <select
                                 value={month}
                                 onChange={(e) => setMonth(Number(e.target.value))}
+                                aria-label="통합현황판 월"
                                 className="bg-transparent text-base font-bold text-slate-700 focus:outline-none cursor-pointer"
                             >
                                 {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
@@ -1193,6 +1361,12 @@ const WhiteboardStatusBoard: React.FC = () => {
                         </button>
                     </div>
                 </div>
+
+                {errorMessage && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                        {errorMessage}
+                    </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     <div className="flex items-center justify-between bg-slate-900 text-slate-50 px-4 py-3 rounded-2xl shadow-sm">
@@ -1290,7 +1464,12 @@ const WhiteboardStatusBoard: React.FC = () => {
                     style={{ backgroundImage: 'radial-gradient(#4f46e5 1px, transparent 1px)', backgroundSize: '20px 20px' }}>
                 </div>
 
-                {dashboardItems.length > 0 ? (
+                {loading && rawReports.length === 0 ? (
+                    <div className="flex h-full flex-col items-center justify-center text-slate-500">
+                        <div className="mb-4 h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+                        <p className="font-semibold">현황 데이터를 불러오는 중입니다.</p>
+                    </div>
+                ) : dashboardItems.length > 0 ? (
                     <div className="flex flex-wrap gap-2 w-full px-2">
                         {sortedItems.map(item => {
                             // Check expansion state for dynamic sizing
@@ -1376,6 +1555,18 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                 )}
                                                 {item.name}
                                             </h3>
+                                            {isItemExpanded && (
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => openDailyReportList(item, event)}
+                                                    className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700 transition hover:bg-indigo-100"
+                                                    title="현재 월 조건으로 일보목록 열기"
+                                                    aria-label={`${item.name} 일보목록 열기`}
+                                                >
+                                                    <FontAwesomeIcon icon={faFileInvoice} />
+                                                    일보목록
+                                                </button>
+                                            )}
                                             {/* 현장인 경우: 회사명과 담당팀을 바로 아래에 표시 */}
                                             {item.type === 'site' && (
                                                 <div className="flex items-center gap-2 mt-0.5 mb-1.5 flex-wrap">

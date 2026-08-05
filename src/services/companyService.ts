@@ -10,6 +10,39 @@ const snapshotCompany = (id: string, data: Record<string, unknown>): Record<stri
     ...stripUndefinedFields(data),
 });
 
+const COMPANY_LIST_CACHE_TTL_MS = 60 * 1000;
+let companyListCache: { rows: Company[]; expiresAt: number } | null = null;
+let pendingCompanyList: Promise<Company[]> | null = null;
+
+const clearCompanyListCache = () => {
+    companyListCache = null;
+    pendingCompanyList = null;
+};
+
+const getCachedCompanies = async (): Promise<Company[]> => {
+    if (companyListCache && companyListCache.expiresAt > Date.now()) {
+        return companyListCache.rows;
+    }
+
+    if (pendingCompanyList) {
+        return pendingCompanyList;
+    }
+
+    pendingCompanyList = companyFirestoreService.getCompanies()
+        .then((rows) => {
+            companyListCache = {
+                rows,
+                expiresAt: Date.now() + COMPANY_LIST_CACHE_TTL_MS,
+            };
+            return rows;
+        })
+        .finally(() => {
+            pendingCompanyList = null;
+        });
+
+    return pendingCompanyList;
+};
+
 const logCompanyChange = async (
     action: 'created' | 'updated' | 'deleted',
     before: Record<string, unknown> | null,
@@ -29,6 +62,7 @@ export const companyService = {
     // 회사 추가
     addCompany: async (company: Omit<Company, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> => {
         const id = await companyFirestoreService.addCompany(company as any);
+        clearCompanyListCache();
         await logCompanyChange('created', null, snapshotCompany(id, company as Record<string, unknown>), 'companyService.addCompany');
         return id;
     },
@@ -39,6 +73,7 @@ export const companyService = {
         const nameChanged = company.name && existing && existing.name !== company.name;
         const cleanedUpdates = stripUndefinedFields(company as Record<string, unknown>);
         await companyFirestoreService.updateCompany(id, cleanedUpdates as Partial<Company>);
+        clearCompanyListCache();
         await logCompanyChange(
             'updated',
             existing ? snapshotCompany(id, existing as Record<string, unknown>) : null,
@@ -60,6 +95,7 @@ export const companyService = {
     deleteCompany: async (id: string): Promise<void> => {
         const existing = await companyFirestoreService.getCompany(id);
         await companyFirestoreService.deleteCompany(id);
+        clearCompanyListCache();
         await logCompanyChange(
             'deleted',
             existing ? snapshotCompany(id, existing as Record<string, unknown>) : null,
@@ -70,14 +106,14 @@ export const companyService = {
 
     // 전체 회사 목록 조회
     getCompanies: async (): Promise<Company[]> => {
-        return companyFirestoreService.getCompanies();
+        return getCachedCompanies();
     },
 
     getCompanyById: async (id: string): Promise<Company | null> => {
         let company = await companyFirestoreService.getCompany(id);
         if (!company) {
             // legacyId로 fallback 조회 (필요한 경우 companyFirestoreService에 추가해도 되지만 일단 여기서 구현)
-            const companies = await companyFirestoreService.getCompanies();
+            const companies = await getCachedCompanies();
             company = companies.find(c => c.legacyId === id) || null;
         }
         return company;
@@ -95,19 +131,19 @@ export const companyService = {
 
     // 활성 회사만 조회
     getActiveCompanies: async (): Promise<Company[]> => {
-        const companies = await companyFirestoreService.getCompanies();
+        const companies = await getCachedCompanies();
         return companies.filter(c => c.status === 'active' || !c.status);
     },
 
     // 회사 타입별 조회
     getCompaniesByType: async (type: Company['type']): Promise<Company[]> => {
-        const companies = await companyFirestoreService.getCompanies();
+        const companies = await getCachedCompanies();
         return companies.filter(c => c.type === type);
     },
 
     // 회사명 검색
     searchCompanies: async (searchTerm: string): Promise<Company[]> => {
-        const companies = await companyFirestoreService.getCompanies();
+        const companies = await getCachedCompanies();
         const term = searchTerm.toLowerCase();
         return companies.filter(company =>
             company.name.toLowerCase().includes(term) ||

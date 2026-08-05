@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { enableDevAdminSession, isDevAdminAllowed } from '../../utils/devAdminSession';
 
 type LoginLocationState = {
   from?: string | {
@@ -32,6 +33,7 @@ const Login: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { currentUser, loading: authLoading, login, loginWithGoogle } = useAuth();
+  const canUseDevAdmin = isDevAdminAllowed();
 
   useEffect(() => {
     if (!authLoading && currentUser) {
@@ -69,8 +71,13 @@ const Login: React.FC = () => {
     }
   };
 
+  const handleDevAdminLogin = () => {
+    enableDevAdminSession();
+    window.location.assign(returnPath);
+  };
+
   return (
-    <div className="relative min-h-screen overflow-hidden bg-slate-950 font-['Pretendard'] text-slate-100">
+    <main className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute -left-20 -top-24 h-72 w-72 rounded-full bg-cyan-500/15 blur-3xl" />
         <div className="absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-blue-500/15 blur-3xl" />
@@ -84,19 +91,19 @@ const Login: React.FC = () => {
           <div className="grid min-w-0 grid-cols-1 lg:grid-cols-2">
             <section className="hidden min-w-0 flex-col justify-between border-r border-slate-800 p-10 lg:flex">
               <div>
-                <p className="text-xs font-semibold tracking-[0.22em] text-cyan-300/80">CHEONGYEON ENG</p>
+                <p className="text-xs font-semibold tracking-[0.22em] text-cyan-200">CHEONGYEON ENG</p>
                 <h1 className="mt-4 text-4xl font-black leading-tight text-slate-100">
                   ERP
                   <br />
                   LOGIN
                 </h1>
-                <p className="mt-5 text-sm leading-relaxed text-slate-400">
+                <p className="mt-5 text-sm leading-relaxed text-slate-300">
                   청연ENG ERP 접속 화면입니다. 인력, 일보, 급여, 세금계산서 운영을 하나의 계정으로 관리합니다.
                 </p>
               </div>
 
               <div className="space-y-3">
-                <p className="text-xs text-slate-500">운영 핵심 모듈</p>
+                <p className="text-xs text-slate-400">운영 핵심 모듈</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-sm text-slate-300">일보/현황</div>
                   <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-sm text-slate-300">급여/정산</div>
@@ -108,12 +115,12 @@ const Login: React.FC = () => {
 
             <section className="min-w-0 p-6 sm:p-10">
               <div className="mb-7 lg:hidden">
-                <p className="text-xs font-semibold tracking-[0.2em] text-cyan-300/80">CHEONGYEON ENG ERP</p>
+                <p className="text-xs font-semibold tracking-[0.2em] text-cyan-200">CHEONGYEON ENG ERP</p>
                 <h1 className="mt-2 text-2xl font-black text-slate-100">로그인</h1>
               </div>
 
               <h2 className="mb-2 hidden text-2xl font-bold text-slate-100 lg:block">계정 로그인</h2>
-              <p className="mb-6 text-sm text-slate-400">이메일과 비밀번호를 입력해 시스템에 접속하세요.</p>
+              <p className="mb-6 text-sm text-slate-300">이메일과 비밀번호를 입력해 시스템에 접속하세요.</p>
 
               {error && (
                 <div className="mb-4 rounded-lg border border-rose-700/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-300">
@@ -133,7 +140,7 @@ const Login: React.FC = () => {
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="admin@example.com"
                     required
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-4 py-3 text-slate-100 placeholder:text-slate-500 transition-colors focus:border-cyan-500/60 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-4 py-3 text-slate-100 placeholder:text-slate-400 transition-colors focus:border-cyan-500/60 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
                   />
                 </div>
 
@@ -145,7 +152,7 @@ const Login: React.FC = () => {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="비밀번호를 입력하세요"
                     required
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-4 py-3 text-slate-100 placeholder:text-slate-500 transition-colors focus:border-cyan-500/60 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-4 py-3 text-slate-100 placeholder:text-slate-400 transition-colors focus:border-cyan-500/60 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
                   />
                 </div>
 
@@ -159,7 +166,7 @@ const Login: React.FC = () => {
 
                 <div className="flex items-center gap-3 py-1">
                   <div className="h-px flex-1 bg-slate-800" />
-                  <span className="text-xs text-slate-500">또는</span>
+                  <span className="text-xs text-slate-400">또는</span>
                   <div className="h-px flex-1 bg-slate-800" />
                 </div>
 
@@ -171,12 +178,23 @@ const Login: React.FC = () => {
                 >
                   Google로 로그인
                 </button>
+
+                {canUseDevAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleDevAdminLogin}
+                    disabled={loading}
+                    className="w-full rounded-lg border border-amber-500/40 bg-amber-400/10 py-3 font-semibold text-amber-100 transition-colors hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    개발자 관리자 모드로 열기
+                  </button>
+                )}
               </form>
             </section>
           </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 };
 

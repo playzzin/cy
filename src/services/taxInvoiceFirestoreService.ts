@@ -53,7 +53,7 @@ export interface TaxInvoiceRecord {
     totalAmount: number;             // ?⑷퀎湲덉븸
 
     // 異쒖쿂 ?뺣낫
-    source: 'barobill' | 'manual' | 'excel'; // 諛붾줈鍮똀PI / ?섍린?낅젰 / ?묒??낅줈??
+    source: 'external' | 'manual' | 'excel';
 
     // ?덈ぉ ?붿빟
     itemName?: string;               // ????덈ぉ紐?
@@ -65,10 +65,9 @@ export interface TaxInvoiceRecord {
     teamId?: string;                 // ? ID
     teamName?: string;               // ?紐?
 
-    // 諛붾줈鍮??곕룞 ?뺣낫
-    barobillSendKey?: string;        // 諛붾줈鍮??꾩넚??
-    barobillStatus?: string;         // 諛붾줈鍮??곹깭
-    barobillNtsResult?: string;      // 援?꽭泥??꾩넚 寃곌낵
+    providerSendKey?: string;
+    providerStatus?: string;
+    providerNtsResult?: string;
 
     // 硫뷀? ?뺣낫
     memo?: string;                   // 鍮꾧퀬
@@ -131,9 +130,9 @@ const mapTaxInvoiceRowToRecord = (row: any): TaxInvoiceRecord => {
         siteName: row?.siteName ?? (row?.site?.name ?? undefined),
         teamId,
         teamName: row?.teamName ?? (row?.team?.name ?? undefined),
-        barobillSendKey: row?.barobillSendKey ?? undefined,
-        barobillStatus: row?.barobillStatus ?? undefined,
-        barobillNtsResult: row?.barobillNtsResult ?? undefined,
+        providerSendKey: row?.providerSendKey ?? undefined,
+        providerStatus: row?.providerStatus ?? undefined,
+        providerNtsResult: row?.providerNtsResult ?? undefined,
         memo: row?.memo ?? undefined,
         createdAt: toTimestamp(row?.createdAt),
         updatedAt: toTimestamp(row?.updatedAt),
@@ -194,9 +193,9 @@ export const taxInvoiceFirestoreService = {
             teamId,
             teamName: record.teamName ?? null,
             teamLegacyId,
-            barobillSendKey: record.barobillSendKey ?? null,
-            barobillStatus: record.barobillStatus ?? null,
-            barobillNtsResult: record.barobillNtsResult ?? null,
+            providerSendKey: record.providerSendKey ?? null,
+            providerStatus: record.providerStatus ?? null,
+            providerNtsResult: record.providerNtsResult ?? null,
             memo: record.memo ?? null,
             createdBy: record.createdBy ?? null
         } as any);
@@ -234,9 +233,9 @@ export const taxInvoiceFirestoreService = {
         setIfDefined('itemCount', updates.itemCount ?? null);
         setIfDefined('siteName', updates.siteName ?? null);
         setIfDefined('teamName', updates.teamName ?? null);
-        setIfDefined('barobillSendKey', updates.barobillSendKey ?? null);
-        setIfDefined('barobillStatus', updates.barobillStatus ?? null);
-        setIfDefined('barobillNtsResult', updates.barobillNtsResult ?? null);
+        setIfDefined('providerSendKey', updates.providerSendKey ?? null);
+        setIfDefined('providerStatus', updates.providerStatus ?? null);
+        setIfDefined('providerNtsResult', updates.providerNtsResult ?? null);
         setIfDefined('memo', updates.memo ?? null);
         setIfDefined('createdBy', updates.createdBy ?? null);
 

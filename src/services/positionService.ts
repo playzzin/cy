@@ -4,6 +4,7 @@ import {
     doc,
     getDocs,
     addDoc,
+    setDoc,
     updateDoc,
     deleteDoc,
     writeBatch,
@@ -13,6 +14,16 @@ import {
 } from 'firebase/firestore';
 import { UserRole } from '../types/roles';
 import { Timestamp } from '../types/timestamp';
+import { BUSINESS_PARTNER_DEFAULT_POSITION_ROWS } from '../constants/businessPartnerPositions';
+import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
+import {
+    addDevPosition,
+    deleteDevPosition,
+    devPositions,
+    restoreDevPositions,
+    updateDevPosition,
+    updateDevPositionRanks,
+} from '../utils/devAdminFixtures';
 
 export interface Position {
     id?: string;
@@ -62,6 +73,7 @@ const DEFAULT_POSITIONS: Omit<Position, 'id'>[] = [
     { name: '팀장', rank: 3, color: 'blue', icon: 'faUserShield', iconKey: 'fa-user-shield', description: '시공 팀장', isDefault: true, systemRole: UserRole.GENERAL },
     { name: '반장', rank: 4, color: 'green', icon: 'faHardHat', iconKey: 'fa-hard-hat', description: '현장 반장', isDefault: true, systemRole: UserRole.GENERAL },
     { name: '일반', rank: 5, color: 'gray', icon: 'faUser', iconKey: 'fa-user', description: '일반 작업자', isDefault: true, systemRole: UserRole.GENERAL },
+    ...BUSINESS_PARTNER_DEFAULT_POSITION_ROWS,
     { name: '신규자', rank: 99, color: 'slate', icon: 'faUserPlus', iconKey: 'fa-user-plus', description: '신규 가입자', isDefault: true, systemRole: UserRole.GENERAL },
 ];
 
@@ -77,57 +89,170 @@ const normalizeIconKey = (value: unknown): string => {
     return `fa${kebab}`;
 };
 
+const normalizePositionIdentity = (value: unknown): string =>
+    String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+const getPositionIdentityKeys = (position: Pick<Position, 'name' | 'legacyId'>): string[] =>
+    [position.name, position.legacyId]
+        .map(normalizePositionIdentity)
+        .filter(Boolean);
+
+const getPositionPrimaryKey = (position: Pick<Position, 'name' | 'legacyId' | 'id'>): string =>
+    normalizePositionIdentity(position.name)
+    || normalizePositionIdentity(position.legacyId)
+    || normalizePositionIdentity(position.id);
+
+const getDefaultPositionDocId = (position: Pick<Position, 'name' | 'legacyId'>): string => {
+    const source = normalizePositionIdentity(position.legacyId) || normalizePositionIdentity(position.name);
+    let hash = 0;
+    for (let i = 0; i < source.length; i += 1) {
+        hash = ((hash << 5) - hash + source.charCodeAt(i)) | 0;
+    }
+    return `default_${Math.abs(hash).toString(36) || 'position'}`;
+};
+
+const getRank = (position: Pick<Position, 'rank'>): number =>
+    Number.isFinite(Number(position.rank)) ? Number(position.rank) : Number.MAX_SAFE_INTEGER;
+
+const preferPosition = (current: Position, candidate: Position): Position => {
+    const currentStable = String(current.id || '').startsWith('default_');
+    const candidateStable = String(candidate.id || '').startsWith('default_');
+    if (currentStable !== candidateStable) return candidateStable ? candidate : current;
+
+    if (Boolean(current.legacyId) !== Boolean(candidate.legacyId)) {
+        return candidate.legacyId ? candidate : current;
+    }
+
+    if (getRank(candidate) !== getRank(current)) {
+        return getRank(candidate) < getRank(current) ? candidate : current;
+    }
+
+    return current;
+};
+
+const dedupePositions = (positions: Position[]): Position[] => {
+    const byKey = new Map<string, Position>();
+
+    positions.forEach((position) => {
+        const key = getPositionPrimaryKey(position);
+        if (!key) return;
+
+        const existing = byKey.get(key);
+        byKey.set(key, existing ? preferPosition(existing, position) : position);
+    });
+
+    return Array.from(byKey.values()).sort((a, b) => getRank(a) - getRank(b));
+};
+
+const mapPositionDoc = (docSnap: any): Position => {
+    const data = docSnap.data();
+    return {
+        id: docSnap.id,
+        legacyId: data.legacyId,
+        name: data.name,
+        rank: data.rank,
+        color: data.color || 'gray',
+        icon: data.icon,
+        iconKey: data.iconKey,
+        description: data.description,
+        isDefault: data.isDefault || false,
+        systemRole: toSystemRole(data.systemRole),
+        createdAt: toTimestamp(data.createdAt),
+        updatedAt: toTimestamp(data.updatedAt)
+    };
+};
+
+const fetchRawPositions = async (): Promise<Position[]> => {
+    const q = query(collection(db, 'positions'), orderBy('rank', 'asc'));
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(mapPositionDoc).sort((a, b) => getRank(a) - getRank(b));
+};
+
+const writeDefaultPosition = async (position: Omit<Position, 'id'>): Promise<void> => {
+    const now = FirestoreTimestamp.now();
+    await setDoc(doc(db, 'positions', getDefaultPositionDocId(position)), {
+        ...position,
+        iconKey: normalizeIconKey(position.iconKey || position.icon),
+        createdAt: now,
+        updatedAt: now,
+    }, { merge: true });
+};
+
+const ensureDefaultPositionsPresent = async (positions: Position[]): Promise<boolean> => {
+    const existingKeys = new Set(positions.flatMap(getPositionIdentityKeys));
+    const missingDefaults = DEFAULT_POSITIONS.filter((position) =>
+        !getPositionIdentityKeys(position).some((key) => existingKeys.has(key))
+    );
+
+    if (missingDefaults.length === 0) return false;
+
+    try {
+        await Promise.all(missingDefaults.map(writeDefaultPosition));
+        cachedPositions = null;
+        return true;
+    } catch (error) {
+        console.error('Error ensuring default positions:', error);
+        return false;
+    }
+};
+
 export const positionService = {
     getPositions: async (forceRefresh: boolean = false): Promise<Position[]> => {
+        if (isDevAdminSessionEnabled()) {
+            return dedupePositions([...devPositions]);
+        }
+
         const now = Date.now();
         if (!forceRefresh && cachedPositions && (now - lastPositionFetchTime < POSITION_CACHE_TTL)) {
             return cachedPositions;
         }
 
         try {
-            const q = query(collection(db, 'positions'), orderBy('rank', 'asc'));
-            const querySnapshot = await getDocs(q);
+            const mapped = await fetchRawPositions();
 
-            if (querySnapshot.empty) {
+            if (mapped.length === 0) {
                 await positionService.initializeDefaults();
                 return await positionService.getPositions(true); // Retry after initialization
             }
 
-            const mapped: Position[] = querySnapshot.docs.map(docSnap => {
-                const data = docSnap.data();
-                return {
-                    id: docSnap.id,
-                    legacyId: data.legacyId,
-                    name: data.name,
-                    rank: data.rank,
-                    color: data.color || 'gray',
-                    icon: data.icon,
-                    iconKey: data.iconKey,
-                    description: data.description,
-                    isDefault: data.isDefault || false,
-                    systemRole: toSystemRole(data.systemRole),
-                    createdAt: toTimestamp(data.createdAt),
-                    updatedAt: toTimestamp(data.updatedAt)
-                };
-            });
+            const addedMissingDefaults = await ensureDefaultPositionsPresent(mapped);
+            if (addedMissingDefaults) {
+                return await positionService.getPositions(true);
+            }
 
-            mapped.sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
-            cachedPositions = mapped;
+            const uniquePositions = dedupePositions(mapped);
+            cachedPositions = uniquePositions;
             lastPositionFetchTime = now;
 
-            return mapped;
+            return uniquePositions;
         } catch (error) {
             console.error("Error fetching positions:", error);
             // Fallback to local default if offline or failed
-            return DEFAULT_POSITIONS as Position[];
+            return dedupePositions(DEFAULT_POSITIONS as Position[]);
         }
     },
 
     addPosition: async (position: Omit<Position, 'id'>): Promise<string> => {
+        if (isDevAdminSessionEnabled()) {
+            const normalizedPosition = { ...position };
+            const derivedIconKey = normalizeIconKey(normalizedPosition.iconKey) || normalizeIconKey(normalizedPosition.icon);
+            normalizedPosition.iconKey = derivedIconKey;
+            const nextName = normalizePositionIdentity(normalizedPosition.name);
+            if (devPositions.some((item) => normalizePositionIdentity(item.name) === nextName)) {
+                throw new Error(`Position already exists: ${normalizedPosition.name}`);
+            }
+            return addDevPosition(normalizedPosition);
+        }
+
         try {
             const normalizedPosition = { ...position };
             const derivedIconKey = normalizeIconKey(normalizedPosition.iconKey) || normalizeIconKey(normalizedPosition.icon);
             normalizedPosition.iconKey = derivedIconKey;
+            const nextName = normalizePositionIdentity(normalizedPosition.name);
+            const existingPositions = await fetchRawPositions();
+            if (existingPositions.some((item) => normalizePositionIdentity(item.name) === nextName)) {
+                throw new Error(`Position already exists: ${normalizedPosition.name}`);
+            }
 
             const docRef = await addDoc(collection(db, 'positions'), {
                 ...normalizedPosition,
@@ -144,6 +269,11 @@ export const positionService = {
     },
 
     updatePosition: async (id: string, updates: Partial<Position>): Promise<void> => {
+        if (isDevAdminSessionEnabled()) {
+            updateDevPosition(id, updates);
+            return;
+        }
+
         try {
             const normalizedUpdates = { ...updates };
 
@@ -172,6 +302,12 @@ export const positionService = {
         try {
             await positionService.updatePosition(id, { name: newName });
 
+            const { menuServiceV11 } = await import('./menuServiceV11');
+            const menuSync = await menuServiceV11.renamePositionReferences(oldName, newName);
+
+            const { rolePermissionService } = await import('./rolePermissionService');
+            const permissionSync = await rolePermissionService.renamePositionKey(oldName, newName);
+
             const { manpowerService } = await import('./manpowerService');
             const workers = await manpowerService.getWorkers();
             const targetIds = workers
@@ -186,7 +322,11 @@ export const positionService = {
                 synced += chunk.length;
             }
 
-            console.log(`Updated position name "${oldName}" -> "${newName}" and synced ${synced} workers.`);
+            console.log(
+                `Updated position name "${oldName}" -> "${newName}", synced ${synced} workers, ` +
+                `${menuSync.roleReferences} menu role references, ${menuSync.positionConfigs} menu position configs, ` +
+                `and ${permissionSync.renamed ? 1 : 0} legacy permission keys.`
+            );
 
         } catch (error) {
             console.error("Error updating position name with sync:", error);
@@ -204,6 +344,11 @@ export const positionService = {
     },
 
     updatePositionRanks: async (rankUpdates: Array<{ id: string; rank: number }>): Promise<void> => {
+        if (isDevAdminSessionEnabled()) {
+            updateDevPositionRanks(rankUpdates);
+            return;
+        }
+
         try {
             const batch = writeBatch(db);
             const updatedAt = FirestoreTimestamp.now();
@@ -224,6 +369,11 @@ export const positionService = {
     },
 
     deletePosition: async (id: string): Promise<void> => {
+        if (isDevAdminSessionEnabled()) {
+            deleteDevPosition(id);
+            return;
+        }
+
         try {
             await deleteDoc(doc(db, 'positions', id));
             cachedPositions = null;
@@ -234,24 +384,24 @@ export const positionService = {
     },
 
     initializeDefaults: async (): Promise<void> => {
+        if (isDevAdminSessionEnabled()) {
+            restoreDevPositions();
+            return;
+        }
+
         try {
             // Check existing first
             const q = query(collection(db, 'positions'));
             const snap = await getDocs(q);
             const existingNames = new Set(
-                snap.docs.map(doc => doc.data().name).filter(Boolean)
+                snap.docs.flatMap((docSnap) => getPositionIdentityKeys(docSnap.data() as Pick<Position, 'name' | 'legacyId'>))
             );
 
-            const toCreate = DEFAULT_POSITIONS.filter((pos) => !existingNames.has(pos.name));
-
-            const promises = toCreate.map(pos =>
-                addDoc(collection(db, 'positions'), {
-                    ...pos,
-                    iconKey: normalizeIconKey(pos.iconKey || pos.icon),
-                    createdAt: FirestoreTimestamp.now(),
-                    updatedAt: FirestoreTimestamp.now()
-                })
+            const toCreate = DEFAULT_POSITIONS.filter((pos) =>
+                !getPositionIdentityKeys(pos).some((key) => existingNames.has(key))
             );
+
+            const promises = toCreate.map(writeDefaultPosition);
 
             await Promise.all(promises);
             cachedPositions = null;
@@ -263,11 +413,14 @@ export const positionService = {
 
     removeDuplicates: async (): Promise<{ removed: number; kept: string[] }> => {
         try {
-            const positions = await positionService.getPositions(true);
+            const positions = isDevAdminSessionEnabled()
+                ? [...devPositions].sort((a, b) => getRank(a) - getRank(b))
+                : await fetchRawPositions();
 
             const grouped: Record<string, Position[]> = {};
             positions.forEach(pos => {
-                const key = pos.name;
+                const key = getPositionPrimaryKey(pos);
+                if (!key) return;
                 if (!grouped[key]) grouped[key] = [];
                 grouped[key].push(pos);
             });
@@ -275,16 +428,19 @@ export const positionService = {
             let removedCount = 0;
             const keptNames: string[] = [];
 
-            for (const [name, positionsGroup] of Object.entries(grouped)) {
-                keptNames.push(name);
+            for (const positionsGroup of Object.values(grouped)) {
                 if (positionsGroup.length > 1) {
-                    const toDelete = positionsGroup.slice(1);
+                    const keep = positionsGroup.reduce(preferPosition);
+                    keptNames.push(keep.name);
+                    const toDelete = positionsGroup.filter((pos) => pos.id && pos.id !== keep.id);
                     for (const pos of toDelete) {
                         if (pos.id) {
                             await positionService.deletePosition(pos.id);
                             removedCount++;
                         }
                     }
+                } else if (positionsGroup[0]?.name) {
+                    keptNames.push(positionsGroup[0].name);
                 }
             }
 

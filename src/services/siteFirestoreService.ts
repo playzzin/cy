@@ -46,6 +46,13 @@ export const siteFirestoreService = {
         return snap.docs.map(d => d.data());
     },
 
+    /** 발주사 포털에서 사용하는 발주사 ID 기준 현장 조회 */
+    async getSitesByClientCompany(companyId: string): Promise<SiteZod[]> {
+        const q = query(this.getCollection(), where('clientCompanyId', '==', companyId));
+        const snap = await getDocs(q);
+        return snap.docs.map(d => d.data());
+    },
+
     async addSite(data: Omit<SiteZod, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
         const docRef = doc(collection(db, COLLECTION_NAME)).withConverter(siteConverter);
         await setDoc(docRef, {

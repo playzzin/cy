@@ -77,6 +77,9 @@ const DAILY_PAY_TYPE_OPTIONS = ['일급제', '월급제', '용역팀', '지원�
 const DAILY_PAY_TYPE_SET = new Set(DAILY_PAY_TYPE_OPTIONS);
 const BOARD_WORKERS_PER_COLUMN = 8;
 const BOARD_VEHICLE_TWO_COLUMN_WORKER_THRESHOLD = 10;
+const BOARD_WORKER_NAME_MIN_WIDTH = 80;
+const BOARD_CARD_MIN_WIDTH = 276;
+const BOARD_VEHICLE_CELL_MIN_WIDTH = 112;
 
 interface ScheduleState {
     loading: boolean;
@@ -92,6 +95,11 @@ const WidgetContainer = styled.section`
     padding: 24px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
     border: 1px solid rgba(0, 0, 0, 0.05);
+
+    @media (max-width: 768px) {
+        padding: 16px;
+        border-radius: 14px;
+    }
 `;
 
 const Header = styled.div`
@@ -103,6 +111,8 @@ const Header = styled.div`
 
     @media (max-width: 768px) {
         flex-direction: column;
+        gap: 12px;
+        margin-bottom: 16px;
     }
 `;
 
@@ -139,6 +149,8 @@ const HeaderActions = styled.div`
 
     @media (max-width: 768px) {
         justify-content: flex-start;
+        width: 100%;
+        gap: 8px;
     }
 `;
 
@@ -410,9 +422,16 @@ const BoardSurface = styled.div`
         linear-gradient(#e2e8f0 1px, transparent 1px),
         linear-gradient(90deg, #e2e8f0 1px, transparent 1px);
     background-size: 33px 33px;
-    max-height: 640px;
+    max-height: 760px;
     overflow: auto;
-    padding: 22px;
+    padding: 24px;
+
+    @media (max-width: 768px) {
+        max-height: none;
+        overflow: visible;
+        padding: 10px;
+        background-size: 28px 28px;
+    }
 `;
 
 const BoardCards = styled.div`
@@ -421,6 +440,13 @@ const BoardCards = styled.div`
     align-items: flex-start;
     justify-content: flex-start;
     gap: 32px;
+
+    @media (max-width: 768px) {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 16px;
+        width: 100%;
+    }
 `;
 
 const BoardCard = styled.div`
@@ -434,6 +460,11 @@ const BoardCard = styled.div`
     height: max-content;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
     overflow: visible;
+
+    @media (max-width: 768px) {
+        width: 100% !important;
+        max-width: none;
+    }
 
     &:hover {
         transform: translateY(-2px);
@@ -561,6 +592,11 @@ const BoardWorkerPanel = styled.div`
     gap: 6px;
     border-bottom: 1px solid #cbd5e1;
     padding: 8px;
+
+    @media (max-width: 768px) {
+        grid-template-columns: repeat(2, minmax(${BOARD_WORKER_NAME_MIN_WIDTH}px, 1fr)) !important;
+        gap: 7px;
+    }
 `;
 
 const BoardNameOuter = styled.div`
@@ -627,6 +663,10 @@ const BoardVehicleGrid = styled.div`
     display: grid;
     gap: 1px;
     background: #cbd5e1;
+
+    @media (max-width: 768px) {
+        grid-template-columns: minmax(0, 1fr) !important;
+    }
 `;
 
 const BoardVehicleCell = styled.div`
@@ -640,10 +680,9 @@ const BoardVehicleCell = styled.div`
     text-align: center;
     font-size: 0.86rem;
     font-weight: 900;
+    line-height: 1.25;
 
     span {
-        overflow: hidden;
-        text-overflow: ellipsis;
         white-space: nowrap;
     }
 `;
@@ -1491,13 +1530,25 @@ export const TomorrowScheduleWidget: React.FC = () => {
                                 );
                                 const workerNameFontSize = maxWorkerLabelLength >= 5 || workerColumnCount >= 3 ? 11 : 12;
                                 const workerNamePaddingX = maxWorkerLabelLength >= 5 || workerColumnCount >= 3 ? 2 : 4;
-                                const workerNameMinWidth = maxWorkerLabelLength >= 5 ? 58 : 54;
-                                const boardCardWidth = Math.max(
-                                    216,
-                                    Math.min(640, workerColumnCount * 64 + Math.max(0, workerColumnCount - 1) * 6 + 16)
-                                );
+                                const workerNameMinWidth = BOARD_WORKER_NAME_MIN_WIDTH;
                                 const vehicleColumnCount =
                                     workerChips.length > BOARD_VEHICLE_TWO_COLUMN_WORKER_THRESHOLD && vehicleChips.length > 1 ? 2 : 1;
+                                const maxVehicleLabelLength = vehicleChips.reduce(
+                                    (max, row) => Math.max(max, Array.from(row.label).length),
+                                    0
+                                );
+                                const vehicleCellMinWidth = Math.max(
+                                    BOARD_VEHICLE_CELL_MIN_WIDTH,
+                                    Math.min(156, maxVehicleLabelLength * 9 + 42)
+                                );
+                                const workerContentWidth =
+                                    workerColumnCount * workerNameMinWidth + Math.max(0, workerColumnCount - 1) * 6 + 18;
+                                const vehicleContentWidth =
+                                    vehicleColumnCount * vehicleCellMinWidth + Math.max(0, vehicleColumnCount - 1);
+                                const boardCardWidth = Math.max(
+                                    BOARD_CARD_MIN_WIDTH,
+                                    Math.min(760, Math.max(workerContentWidth, vehicleContentWidth))
+                                );
                                 const siteAddress = getResolvedSiteAddress(assignment, lookups);
                                 const navigationAssignment = { ...assignment, siteAddress };
                                 const destinationQuery = getDestinationQuery(navigationAssignment);
@@ -1652,7 +1703,7 @@ export const TomorrowScheduleWidget: React.FC = () => {
                                         {vehicleChips.length > 0 ? (
                                             <BoardVehicleGrid
                                                 style={{
-                                                    gridTemplateColumns: `repeat(${vehicleColumnCount}, minmax(0, 1fr))`,
+                                                    gridTemplateColumns: `repeat(${vehicleColumnCount}, minmax(${vehicleCellMinWidth}px, 1fr))`,
                                                 }}
                                             >
                                                 {vehicleChips.map((vehicle) => {

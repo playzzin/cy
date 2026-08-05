@@ -14,6 +14,11 @@
 import { dailyReportService, DailyReport } from './dailyReportService';
 import { aiSettingsService, normalizeGeminiModelName } from './aiSettingsService';
 import { manpowerAnalyticsService, SUPPORT_DIRECTIONS, type SupportDirection } from './manpowerAnalyticsService';
+import {
+    createDailyReportAiInsights,
+    type DailyReportAiInsights,
+} from '../features/report-ai-insights/dailyReportAiInsights';
+import type { ManpowerDbSearchResult } from '../features/manpower-db-ai-search/manpowerDbAiSearch';
 
 // ===========================
 // Types
@@ -162,6 +167,7 @@ export interface AnalyticsResult {
         dateRange: string;
     };
     aiInsight?: string;
+    advancedInsights?: DailyReportAiInsights;
     error?: string;
     debug?: AnalyticsDebug;
     // 비교분석용 이전 기간 데이터
@@ -187,6 +193,8 @@ export interface ChatMessage {
     role: 'user' | 'assistant';
     content: string;
     result?: AnalyticsResult;
+    dbResult?: ManpowerDbSearchResult;
+    resultKind?: 'analytics' | 'manpowerDb';
     timestamp: number;
 }
 
@@ -277,7 +285,7 @@ function buildSystemPrompt(): string {
 - 내부 + 온곳/들어온/받은/지원받은 => 내부지원온곳
 - 내부 + 간곳/나간/보낸/지원간 => 내부지원간곳
 - 지원 질문에서 teamName은 현장담당팀/받은 팀, workerTeamName은 작업자 소속팀/보낸 팀으로 해석
-- "지원", "지원팀", "용역", "외부지원", "내부지원", "온곳", "간곳" 질문은 analysisType=support_analysis
+- "지원", "지원팀", "용역", "외부팀", "내부팀", "외부지원", "내부지원", "온곳", "간곳" 질문은 analysisType=support_analysis
 
 ## analysisType
 team_summary: 팀별/팀순위/팀공수/각팀
@@ -288,7 +296,7 @@ daily_summary: 일별/추이/변화/날짜별
 support_analysis: 지원팀/용역팀/지원분석
 salary_model_analysis: 급여방식/일급제/월급제/급여별
 comparison: 비교/vs/대비/증감/변화비교 (두 기간 비교)
-general: 해당없음
+general: 해당없음/전체현황/위험신호/월말예상/예측/이상징후
 
 ## 날짜 규칙
 - "N월"/"N월달" -> 해당월 1일~말일
@@ -323,6 +331,12 @@ general: 해당없음
 질문: "지원팀 작업자들 이번 달 공수"
 {"startDate":"${year}-${mm}-01","endDate":"${todayStr}","siteName":null,"teamName":null,"workerTeamName":null,"workerName":null,"companyName":null,"salaryModel":"지원팀","analysisType":"support_analysis","parsedQuestion":"이번 달 지원팀 작업자 공수"}
 
+질문: "이번 달 외부팀 지원온곳"
+{"startDate":"${year}-${mm}-01","endDate":"${todayStr}","siteName":null,"teamName":null,"workerTeamName":null,"workerName":null,"companyName":null,"salaryModel":null,"supportDirection":"외부지원온곳","analysisType":"support_analysis","parsedQuestion":"이번 달 외부팀 지원온곳 분석"}
+
+질문: "이번 달 내부팀 지원간곳"
+{"startDate":"${year}-${mm}-01","endDate":"${todayStr}","siteName":null,"teamName":null,"workerTeamName":null,"workerName":null,"companyName":null,"salaryModel":null,"supportDirection":"내부지원간곳","analysisType":"support_analysis","parsedQuestion":"이번 달 내부팀 지원간곳 분석"}
+
 질문: "올해 공수 TOP 10"
 {"startDate":"${year}-01-01","endDate":"${todayStr}","siteName":null,"teamName":null,"workerTeamName":null,"workerName":null,"companyName":null,"salaryModel":null,"analysisType":"worker_ranking","parsedQuestion":"올해 공수 상위 10명"}
 
@@ -331,6 +345,12 @@ general: 해당없음
 
 질문: "이번 달 전체 현황"
 {"startDate":"${year}-${mm}-01","endDate":"${todayStr}","siteName":null,"teamName":null,"workerTeamName":null,"workerName":null,"companyName":null,"salaryModel":null,"analysisType":"general","parsedQuestion":"이번 달 전체 현황 요약"}
+
+질문: "이번 달 인건비 위험 신호 찾아줘"
+{"startDate":"${year}-${mm}-01","endDate":"${todayStr}","siteName":null,"teamName":null,"workerTeamName":null,"workerName":null,"companyName":null,"salaryModel":null,"analysisType":"general","parsedQuestion":"이번 달 인건비 위험 신호"}
+
+질문: "이번 달 월말 예상 공수와 인건비"
+{"startDate":"${year}-${mm}-01","endDate":"${todayStr}","siteName":null,"teamName":null,"workerTeamName":null,"workerName":null,"companyName":null,"salaryModel":null,"analysisType":"general","parsedQuestion":"이번 달 월말 예상 공수와 인건비"}
 
 질문: "이번 달 vs 지난달 팀별 공수 비교"
 {"startDate":"${year}-${mm}-01","endDate":"${todayStr}","siteName":null,"teamName":null,"workerTeamName":null,"workerName":null,"companyName":null,"salaryModel":null,"compareStartDate":"${lastMonthYear}-${lm}-01","compareEndDate":"${lastMonthYear}-${lm}-${lmDays}","analysisType":"comparison","parsedQuestion":"이번 달 vs 지난달 팀별 공수 비교"}`;
@@ -467,8 +487,8 @@ function detectSupportDirectionFromText(text: string): SupportDirection | undefi
     if (explicitMatches.length === 1) return explicitMatches[0];
     if (explicitMatches.length > 1) return undefined;
 
-    const hasExternal = /외부|타사|협력사|용역/.test(normalized);
-    const hasInternal = /내부|청연/.test(normalized);
+    const hasExternal = /외부|외부팀|외부인력|타사|협력사|용역|용역팀/.test(normalized);
+    const hasInternal = /내부|내부팀|내부인력|청연|우리팀|자사/.test(normalized);
     const hasIncoming = /온곳|들어온|받은|받는|지원받|온지원|들어오는/.test(normalized);
     const hasOutgoing = /간곳|나간|보낸|보내는|지원간|간지원|나가는/.test(normalized);
 
@@ -532,7 +552,7 @@ function validateAndCorrectQuery(
         } else if (/급여방식|일급제|월급제/.test(q)) {
             analysisType = 'salary_model_analysis';
             logs.push('분석유형 자동감지: salary_model_analysis');
-        } else if (/지원팀|용역팀|지원\s*분석/.test(q)) {
+        } else if (/지원팀|용역팀|외부팀|내부팀|지원온곳|지원간곳|지원\s*분석/.test(q)) {
             analysisType = 'support_analysis';
             logs.push('분석유형 자동감지: support_analysis');
         } else if (/비교|vs|대비|증감|변화\s*비교/.test(q)) {
@@ -542,7 +562,7 @@ function validateAndCorrectQuery(
     }
 
     const detectedSupportDirection = detectSupportDirectionFromText(originalQuestion);
-    const isSupportQuestion = /지원|용역|온곳|간곳|지원받|지원간|외부지원|내부지원/.test(originalQuestion);
+    const isSupportQuestion = /지원|용역|외부팀|내부팀|외부인력|내부인력|온곳|간곳|지원받|지원간|외부지원|내부지원/.test(originalQuestion);
     if (analysisType === 'general' && (detectedSupportDirection || isSupportQuestion)) {
         analysisType = 'support_analysis';
         logs.push('분석유형 자동감지: support_analysis');
@@ -1287,6 +1307,16 @@ export async function analyzeWithAI(question: string): Promise<AnalyticsResult> 
             timings,
         };
 
+        const advancedInsights = createDailyReportAiInsights({
+            query,
+            summary,
+            teamAgg: data.teamAgg,
+            siteAgg: data.siteAgg,
+            workerAgg: data.workerAgg,
+            dailyAgg: data.dailyAgg,
+            comparison,
+        });
+
         let error: string | undefined;
         if (data.detailRows.length === 0) {
             const suggestions: string[] = [];
@@ -1308,7 +1338,7 @@ export async function analyzeWithAI(question: string): Promise<AnalyticsResult> 
             query, parsedQuestion,
             teamAgg: data.teamAgg, siteAgg: data.siteAgg, workerAgg: data.workerAgg,
             dailyAgg: data.dailyAgg, salaryModelAgg: data.salaryModelAgg,
-            detailRows: data.detailRows, summary, aiInsight, error, debug,
+            detailRows: data.detailRows, summary, aiInsight, advancedInsights, error, debug,
             comparison,
             alternativeResult,
         };
@@ -1332,14 +1362,16 @@ export async function analyzeWithAI(question: string): Promise<AnalyticsResult> 
 // ===========================
 
 export const EXAMPLE_QUESTIONS: Array<{ text: string; category: string }> = [
+    { text: '이번 달 인건비 위험 신호 찾아줘', category: '위험 신호' },
+    { text: '이번 달 월말 예상 공수와 인건비', category: '월말 예측' },
+    { text: '이번 달 vs 지난달 공수 증가 원인 분석', category: '원인 분석' },
+    { text: '이번 달 vs 지난달 팀별 공수 비교', category: '비교 분석' },
     { text: '이번 달 팀별 공수 순위를 보여줘', category: '팀별 순위' },
     { text: '이번 달 현장별 총 공수와 인원수를 알려줘', category: '현장별 분석' },
     { text: '이번 달 공수 TOP 10 작업자를 알려줘', category: '작업자 순위' },
-    { text: '어제 출력한 전체 인원과 공수를 알려줘', category: '일일 현황' },
-    { text: '이번 달 급여방식별 공수와 금액 분석', category: '급여방식별' },
     { text: '이번 달 지원팀 작업자들 현장별 공수', category: '지원팀 분석' },
+    { text: '이번 달 외부팀 지원온곳', category: '지원팀 분석' },
+    { text: '이번 달 내부팀 지원간곳', category: '지원팀 분석' },
     { text: '이번 달 일별 공수 추이를 보여줘', category: '일별 추이' },
-    { text: '이번 달 vs 지난달 팀별 공수 비교', category: '비교 분석' },
-    { text: '이번 달 전체 현황 요약해줘', category: '종합 현황' },
-    { text: '이번 달 일급제 작업자 공수 순위', category: '일급제 분석' },
+    { text: '이번 달 급여방식별 공수와 금액 분석', category: '급여방식별' },
 ];

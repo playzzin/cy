@@ -7,7 +7,7 @@ import { accountLinkService } from '../../services/accountLinkService';
 import { AccountLink, ACCOUNT_TYPE_LABELS, getAccountRelationRoleLabel } from '../../types/accountLink';
 import AccountLinkingModal from '../../components/manpower/AccountLinkingModal';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faUser, faEnvelope, faPhone, faBuilding, faLink, faEdit, faSave, faTimes, faHardHat, faCalendar, faShieldAlt, faChartLine } from '@fortawesome/free-solid-svg-icons';
+import { faUser, faEnvelope, faPhone, faBuilding, faLink, faEdit, faSave, faTimes, faHardHat, faShieldAlt, faChartLine } from '@fortawesome/free-solid-svg-icons';
 
 const getWorkerTeamName = (worker: Worker): string => {
     const teamName = String(worker.teamName || '').trim();

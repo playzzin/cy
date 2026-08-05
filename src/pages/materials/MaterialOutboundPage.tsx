@@ -43,6 +43,7 @@ import MaterialPhotoPicker, {
     uploadMaterialPhotoAttachments,
 } from './MaterialPhotoPicker';
 import MaterialSelectionActionBar, { SelectedMaterial } from './MaterialSelectionActionBar';
+import MaterialMobileSitePicker from './MaterialMobileSitePicker';
 import {
     createOutboundCertificateDraftId,
     saveOutboundCertificateDraft,
@@ -379,7 +380,8 @@ const createOutboundCertificateImageFile = async ({
 const MaterialOutboundPage: React.FC = () => {
     const navigate = useNavigate();
     const { currentUser } = useAuth();
-    const [loading, setLoading] = useState(false);
+    const [initialLoading, setInitialLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
     const [transactionDate, setTransactionDate] = useState(new Date().toISOString().slice(0, 10));
     const [siteId, setSiteId] = useState('');
     const [siteName, setSiteName] = useState('');
@@ -402,6 +404,7 @@ const MaterialOutboundPage: React.FC = () => {
     const [sharingCertificate, setSharingCertificate] = useState(false);
     const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
     const photoAnalysisInputRef = React.useRef<HTMLInputElement | null>(null);
+    const savingRef = React.useRef(false);
 
     // 임시저장 데이터 로드
     const loadTempData = () => {
@@ -451,26 +454,6 @@ const MaterialOutboundPage: React.FC = () => {
     };
 
     // 임시저장 데이터 저장
-    const saveTempData = () => {
-        try {
-            const tempData: OutboundTempData = {
-                transactionDate,
-                siteId,
-                siteName,
-                vehicleNumber,
-                recipient,
-                rentalCompanyId,
-                rentalCompanyName,
-                notes,
-                quantities,
-                savedAt: Date.now()
-            };
-            localStorage.setItem('outbound_temp', JSON.stringify(tempData));
-            setHasTempData(true);
-        } catch (error) {
-            console.error('[Outbound] 임시저장 데이터 저장 실패:', error);
-        }
-    };
 
     // 임시저장 데이터 삭제
     const clearTempData = () => {
@@ -548,7 +531,7 @@ const MaterialOutboundPage: React.FC = () => {
     }, []);
 
     const loadData = async () => {
-        setLoading(true);
+        setInitialLoading(true);
         try {
             const [sitesData, materialsData, companiesData, settlementTargetsData] = await Promise.all([
                 siteService.getSites(),
@@ -570,7 +553,7 @@ const MaterialOutboundPage: React.FC = () => {
             console.error('Failed to load data:', error);
             alert('데이터를 불러오지 못했습니다.');
         } finally {
-            setLoading(false);
+            setInitialLoading(false);
         }
     };
 
@@ -743,7 +726,9 @@ const MaterialOutboundPage: React.FC = () => {
             return;
         }
 
-        setLoading(true);
+        if (savingRef.current) return;
+        savingRef.current = true;
+        setSaving(true);
         let uploadedPhotos: MaterialPhotoUpload[] = [];
         try {
             setPhotoUploadProgress(photoAttachments.length > 0 ? 0 : null);
@@ -761,6 +746,8 @@ const MaterialOutboundPage: React.FC = () => {
                     transactionType: 'outbound' as const,
                     transactionDate,
                     siteId,
+                    rentalCompanyId: rentalCompanyId || undefined,
+                    rentalCompanyName: rentalCompanyName || undefined,
                     photoCount: uploadedPhotos.length,
                     photos: uploadedPhotos,
                     createdBy: currentUser?.uid || '',
@@ -784,7 +771,8 @@ const MaterialOutboundPage: React.FC = () => {
             }
             alert('출고 등록에 실패했습니다.');
         } finally {
-            setLoading(false);
+            savingRef.current = false;
+            setSaving(false);
         }
     };
 
@@ -1108,7 +1096,7 @@ const MaterialOutboundPage: React.FC = () => {
                                                                         type="button"
                                                                         disabled={step < 0 && qty <= 0}
                                                                         onClick={() => handleQuantityStep(material.id, step)}
-                                                                        className={`h-8 rounded-md border text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${step > 0 ? accentClasses.positiveButton : accentClasses.negativeButton}`}
+                                                                        className={`h-10 touch-manipulation rounded-md border text-xs font-bold shadow-sm transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${step > 0 ? accentClasses.positiveButton : accentClasses.negativeButton}`}
                                                                     >
                                                                         {step > 0 ? `+${step}` : step}
                                                                     </button>
@@ -1189,6 +1177,8 @@ const MaterialOutboundPage: React.FC = () => {
         );
     };
 
+    if (initialLoading) return <div className="p-8 text-center">데이터 로딩 중...</div>;
+
     return (
         <div className="mx-auto min-h-screen w-full max-w-[calc(100vw-30px)] overflow-x-hidden bg-slate-50 p-3 sm:max-w-[2100px] sm:p-6">
             <input
@@ -1225,7 +1215,7 @@ const MaterialOutboundPage: React.FC = () => {
                 <button
                     type="button"
                     onClick={handlePhotoAnalysisClick}
-                    disabled={loading || analyzingPhoto || materials.length === 0}
+                    disabled={saving || analyzingPhoto || materials.length === 0}
                     className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm font-bold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                     <FontAwesomeIcon icon={analyzingPhoto ? faSpinner : faCamera} spin={analyzingPhoto} />
@@ -1257,7 +1247,7 @@ const MaterialOutboundPage: React.FC = () => {
                     <button
                         type="button"
                         onClick={handlePhotoAnalysisClick}
-                        disabled={loading || analyzingPhoto || materials.length === 0}
+                        disabled={saving || analyzingPhoto || materials.length === 0}
                         className="justify-center px-3 py-2.5 rounded-xl border border-red-200 bg-red-50 text-red-700 font-bold hover:bg-red-100 transition flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4"
                     >
                         <FontAwesomeIcon icon={analyzingPhoto ? faSpinner : faCamera} spin={analyzingPhoto} />
@@ -1265,7 +1255,7 @@ const MaterialOutboundPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleReset}
-                        disabled={loading}
+                        disabled={saving}
                         className="justify-center px-3 py-2.5 rounded-xl bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 transition flex items-center gap-2 disabled:opacity-50 sm:px-4"
                     >
                         <FontAwesomeIcon icon={faRotateRight} />
@@ -1273,11 +1263,11 @@ const MaterialOutboundPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleSave}
-                        disabled={loading}
+                        disabled={saving}
                         className="justify-center px-3 py-2.5 rounded-xl bg-red-600 text-white font-bold hover:bg-red-700 shadow-md transition flex items-center gap-2 disabled:opacity-50 sm:px-6"
                     >
                         <FontAwesomeIcon icon={faSave} />
-                        {loading ? '저장 중...' : '출고 완료'}
+                        {saving ? '저장 중...' : '출고 완료'}
                     </button>
                 </div>
             </div>
@@ -1294,7 +1284,7 @@ const MaterialOutboundPage: React.FC = () => {
                             className="h-10 w-full border border-slate-300 rounded-lg px-2 text-sm sm:h-auto sm:px-3 sm:py-2"
                         />
                     </div>
-                    <div>
+                    <div className="hidden md:block">
                         <label className="mb-1 block text-xs font-bold text-slate-700 sm:mb-2 sm:text-sm">현장명 *</label>
                         <select
                             value={siteId}
@@ -1307,6 +1297,13 @@ const MaterialOutboundPage: React.FC = () => {
                             ))}
                         </select>
                     </div>
+                    <MaterialMobileSitePicker
+                        sites={sites}
+                        value={siteId}
+                        onChange={handleSiteChange}
+                        tone="red"
+                        label="현장명 *"
+                    />
                     <div>
                         <label className="mb-1 block text-xs font-bold text-slate-700 sm:mb-2 sm:text-sm">임대사</label>
                         <select
@@ -1337,7 +1334,7 @@ const MaterialOutboundPage: React.FC = () => {
                             className="h-10 w-full border border-slate-300 rounded-lg px-2 text-sm sm:h-auto sm:px-3 sm:py-2"
                         />
                     </div>
-                    <div>
+                    <div className="col-span-2 md:col-span-1">
                         <label className="mb-1 block text-xs font-bold text-slate-700 sm:mb-2 sm:text-sm">반출자</label>
                         <input
                             type="text"
@@ -1353,7 +1350,7 @@ const MaterialOutboundPage: React.FC = () => {
                     photos={photoAttachments}
                     onPhotosChange={setPhotoAttachments}
                     tone="red"
-                    disabled={loading}
+                    disabled={saving}
                     uploadProgress={photoUploadProgress}
                 />
 
@@ -1534,7 +1531,12 @@ const MaterialOutboundPage: React.FC = () => {
                 )}
 
                 {/* 액션 버튼 */}
-                <div className="sticky bottom-0 z-20 -mx-3 -mb-3 mt-6 flex gap-2 border-t border-slate-200 bg-white/95 p-3 backdrop-blur sm:static sm:mx-0 sm:mb-0 sm:justify-end sm:bg-transparent sm:p-0 sm:pt-6 sm:backdrop-blur-0">
+                <div className="sticky bottom-0 z-20 -mx-3 -mb-3 mt-6 border-t border-slate-200 bg-white/95 p-3 backdrop-blur sm:static sm:mx-0 sm:mb-0 sm:flex sm:justify-end sm:gap-3 sm:bg-transparent sm:p-0 sm:pt-6 sm:backdrop-blur-0">
+                    <div className="mb-2 flex items-center justify-between rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-800 sm:hidden" aria-live="polite">
+                        <span className="truncate">{siteName || '현장을 선택하세요'}</span>
+                        <span className="shrink-0">{selectedItemCount}개 · 총 {selectedQuantityTotal}</span>
+                    </div>
+                    <div className="flex gap-2 sm:contents">
                     <button
                         onClick={() => window.history.back()}
                         className="hidden px-6 py-3 rounded-xl border border-slate-300 text-slate-600 font-bold hover:bg-slate-50 hover:text-slate-800 transition-colors sm:block"
@@ -1543,7 +1545,7 @@ const MaterialOutboundPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleReset}
-                        disabled={loading}
+                        disabled={saving}
                         className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-200 px-4 py-3 font-bold text-slate-700 transition hover:bg-slate-300 disabled:opacity-50 sm:flex-none sm:px-6"
                     >
                         <FontAwesomeIcon icon={faRotateRight} />
@@ -1551,12 +1553,13 @@ const MaterialOutboundPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleSave}
-                        disabled={loading}
+                        disabled={saving}
                         className="flex flex-[1.4] items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 font-bold text-white shadow-md transition hover:bg-red-700 disabled:opacity-50 sm:flex-none sm:px-6"
                     >
                         <FontAwesomeIcon icon={faSave} />
-                        {loading ? '저장 중...' : '출고 완료'}
+                        {saving ? '저장 중...' : '출고 완료'}
                     </button>
+                    </div>
                 </div>
             </div>
         </div>

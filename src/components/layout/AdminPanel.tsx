@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faXmark, faUserShield, faListCheck, faUserGear, faDatabase, faSitemap, faBuilding, faCalendarAlt, faFolder, faUserTag, faHistory, faCube, faToggleOn } from '@fortawesome/free-solid-svg-icons';
+import { faXmark, faUserShield, faListCheck, faUserGear, faDatabase, faSitemap, faBuilding, faCalendarAlt, faFolder, faHistory, faCube, faToggleOn } from '@fortawesome/free-solid-svg-icons';
 
 interface AdminPanelProps {
     isOpen: boolean;
@@ -21,12 +21,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, togglePanel, siteData, 
 
 
     return (
-        <aside id="admin-panel" className={`panel ${isOpen ? 'open' : ''}`} style={{ backgroundColor: '#ef4444' }}>
+        <aside
+            id="admin-panel"
+            data-html2canvas-ignore="true"
+            className={`panel ${isOpen ? 'open' : ''}`}
+            style={{ backgroundColor: '#ef4444' }}
+        >
             <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.2)' }}>
                 <span className="text-white font-bold flex items-center gap-2">
                     <FontAwesomeIcon icon={faUserShield} /> 관리자 메뉴
                 </span>
-                <button onClick={() => togglePanel('admin')} style={{ color: 'white' }}>
+                <button onClick={() => togglePanel('admin')} style={{ color: 'white' }} aria-label="관리자 메뉴 닫기" title="관리자 메뉴 닫기">
                     <FontAwesomeIcon icon={faXmark} />
                 </button>
             </div>
@@ -52,13 +57,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, togglePanel, siteData, 
                     >
                         <FontAwesomeIcon icon={faUserGear} className="w-5" />
                         <span className="font-bold">사용자 통합 관리</span>
-                    </button>
-                    <button
-                        onClick={() => handleNavigation('/hr/position-management')}
-                        className="flex items-center gap-3 p-3 rounded-lg bg-white/10 hover:bg-white/20 text-white transition text-left"
-                    >
-                        <FontAwesomeIcon icon={faUserTag} className="w-5" />
-                        <span className="font-bold">직책 관리</span>
                     </button>
                 </div>
             </div>

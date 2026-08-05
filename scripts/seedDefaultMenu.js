@@ -86,10 +86,10 @@ function seed() {
             switch (_a.label) {
                 case 0:
                     _a.trys.push([0, 2, , 3]);
-                    console.log("Seeding menus_v11 to ".concat(firebaseConfig.projectId, "..."));
+                    console.log("Seeding menus_v12 to ".concat(firebaseConfig.projectId, "..."));
                     app = (0, app_1.initializeApp)(firebaseConfig);
                     db = (0, firestore_1.getFirestore)(app);
-                    return [4 /*yield*/, (0, firestore_1.setDoc)((0, firestore_1.doc)(db, 'settings', 'menus_v11'), {
+                    return [4 /*yield*/, (0, firestore_1.setDoc)((0, firestore_1.doc)(db, 'settings', 'menus_v12'), {
                             updatedAt: new Date().toISOString(),
                             items: defaultMenu_1.DEFAULT_MENU_CONFIG
                         })];

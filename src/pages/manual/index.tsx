@@ -323,7 +323,7 @@ const ManualPage: React.FC = () => {
                                 <ul className="list-disc pl-5 text-sm text-slate-600 mt-3 space-y-1">
                                     <li>세금계산서 발행/원장: `/payroll/tax-invoice`, `/payroll/tax-invoice-ledger`</li>
                                     <li>거래처 장부/대시보드: `/payroll/partner-ledger`, `/payroll/taxinvoice/dashboard`</li>
-                                    <li>계좌관리/계좌조회/세무: `/payroll/taxinvoice/account-inquiry`, `/payroll/taxinvoice/bank-inquiry`, `/payroll/tax-affairs`</li>
+                                    <li>계좌관리/세무: `/payroll/taxinvoice/account-inquiry`, `/payroll/tax-affairs`</li>
                                     <li>서명/위임장: `/payroll/sign-management`, `/payroll/delegation-letter-v5`</li>
                                 </ul>
                             </div>

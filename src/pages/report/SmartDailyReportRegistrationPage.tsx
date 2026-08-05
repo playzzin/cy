@@ -2,7 +2,7 @@ import SmartExcelGrid from './SmartExcelGrid';
 
 import React, { useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPaste, faSave, faCheckCircle, faExclamationTriangle, faSpinner, faArrowRight } from '@fortawesome/free-solid-svg-icons';
+import { faPaste, faSave, faExclamationTriangle, faSpinner } from '@fortawesome/free-solid-svg-icons';
 import { dailyReportService } from '../../services/dailyReportService';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';
@@ -129,7 +129,7 @@ const SmartDailyReportRegistrationPage: React.FC = () => {
 
     const handleGridChange = (data: any[]) => {
         // Map grid data to component state
-        const mapped = data.map((row, idx) => {
+        const mapped = data.map((row, _idx) => {
             const { date, siteName, responsibleTeamName, name, teamName, manDay, workContent, payType, unitPrice } = row;
 
             const matchedWorker = workers.find(w => w.name === name);

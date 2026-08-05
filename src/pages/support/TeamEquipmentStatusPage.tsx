@@ -18,6 +18,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { teamService, Team } from '../../services/teamService';
 import { manpowerService, Worker } from '../../services/manpowerService';
+import { supportSharedDataService } from '../../services/supportSharedDataService';
 
 interface EquipmentItem {
     id: string;
@@ -61,6 +62,7 @@ type LegacyEquipmentInput = {
 
 const STORAGE_KEY = 'team_equipment_inventory_v2';
 const LEGACY_STORAGE_KEY = 'team_equipment_status_v1';
+const MIGRATION_KEY = 'team_equipment_inventory_firestore_migrated_v1';
 const DEFAULT_TEAM_COLOR = '#94a3b8';
 const FOREMAN_BREAKDOWN_TEAM_NAME = '이재욱팀';
 const DEFAULT_EQUIPMENT_ITEMS: EquipmentItem[] = [
@@ -190,26 +192,33 @@ const normalizeMetric = (id: string, value: Partial<TeamEquipmentMetric> | undef
     };
 };
 
-const loadSavedState = (): { items: EquipmentItem[]; rows: Record<string, TeamEquipmentMetric> } => {
-    if (typeof window === 'undefined') {
-        return { items: DEFAULT_EQUIPMENT_ITEMS, rows: {} };
-    }
+const normalizePersistedState = (value: unknown): { items: EquipmentItem[]; rows: Record<string, TeamEquipmentMetric> } | null => {
+    if (!value || typeof value !== 'object') return null;
+    const parsed = value as PersistedEquipmentState;
+    const items = normalizeItems(parsed.items, !Array.isArray(parsed.items));
+    const rows = Object.entries(parsed.rows ?? {}).reduce<Record<string, TeamEquipmentMetric>>((acc, [id, metric]) => {
+        const key = normalizeKey(id);
+        if (!key) return acc;
+        acc[key] = normalizeMetric(key, metric as Partial<TeamEquipmentMetric>, items);
+        return acc;
+    }, {});
+    return { items, rows };
+};
+
+const hasLocalSavedState = (): boolean => (
+    typeof window !== 'undefined'
+    && Boolean(window.localStorage.getItem(STORAGE_KEY) || window.localStorage.getItem(LEGACY_STORAGE_KEY))
+);
+
+const loadLocalSavedState = (): { items: EquipmentItem[]; rows: Record<string, TeamEquipmentMetric> } => {
+    if (typeof window === 'undefined') return { items: DEFAULT_EQUIPMENT_ITEMS, rows: {} };
 
     try {
         const raw = window.localStorage.getItem(STORAGE_KEY);
-        const parsed = raw ? JSON.parse(raw) as PersistedEquipmentState : null;
-        if (parsed && typeof parsed === 'object') {
-            const items = normalizeItems(parsed.items, !Array.isArray(parsed.items));
-            const rows = Object.entries(parsed.rows ?? {}).reduce<Record<string, TeamEquipmentMetric>>((acc, [id, value]) => {
-                const key = normalizeKey(id);
-                if (!key) return acc;
-                acc[key] = normalizeMetric(key, value as Partial<TeamEquipmentMetric>, items);
-                return acc;
-            }, {});
-            return { items, rows };
-        }
+        const normalized = normalizePersistedState(raw ? JSON.parse(raw) : null);
+        if (normalized) return normalized;
     } catch (error) {
-        console.warn('[TeamEquipmentStatusPage] Failed to load equipment inventory:', error);
+        console.warn('[TeamEquipmentStatusPage] Failed to load local equipment inventory:', error);
     }
 
     try {
@@ -247,10 +256,84 @@ const loadSavedState = (): { items: EquipmentItem[]; rows: Record<string, TeamEq
     }
 };
 
-const persistState = (items: EquipmentItem[], records: TeamEquipmentRecord[]) => {
-    if (typeof window === 'undefined') return;
+const needsLocalMigration = (): boolean => (
+    hasLocalSavedState()
+    && typeof window !== 'undefined'
+    && window.localStorage.getItem(MIGRATION_KEY) !== 'done'
+);
 
-    const payload: PersistedEquipmentState = {
+const markLocalMigrationComplete = () => {
+    if (typeof window !== 'undefined') {
+        window.localStorage.setItem(MIGRATION_KEY, 'done');
+    }
+};
+
+const mergeForemen = (
+    sharedForemen: ForemanEquipmentMetric[],
+    localForemen: ForemanEquipmentMetric[],
+    items: EquipmentItem[]
+): ForemanEquipmentMetric[] => {
+    const merged = normalizeForemen(sharedForemen, items);
+    localForemen.forEach((localForeman) => {
+        const index = merged.findIndex((sharedForeman) => (
+            sharedForeman.id === localForeman.id
+            || normalizeComparableText(sharedForeman.name) === normalizeComparableText(localForeman.name)
+        ));
+        if (index < 0) {
+            merged.push(normalizeForeman(localForeman.id, localForeman, items));
+            return;
+        }
+
+        const sharedForeman = merged[index];
+        merged[index] = {
+            ...sharedForeman,
+            quantities: items.reduce<Record<string, number>>((acc, item) => {
+                const sharedQuantity = toQuantity(sharedForeman.quantities[item.id]);
+                acc[item.id] = sharedQuantity > 0 ? sharedQuantity : toQuantity(localForeman.quantities[item.id]);
+                return acc;
+            }, {}),
+            note: sharedForeman.note || localForeman.note
+        };
+    });
+    return merged.sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
+};
+
+const mergeEquipmentStates = (
+    sharedState: { items: EquipmentItem[]; rows: Record<string, TeamEquipmentMetric> },
+    localState: { items: EquipmentItem[]; rows: Record<string, TeamEquipmentMetric> }
+): { items: EquipmentItem[]; rows: Record<string, TeamEquipmentMetric> } => {
+    const items = normalizeItems([...localState.items, ...sharedState.items], false);
+    const rowIds = new Set([...Object.keys(localState.rows), ...Object.keys(sharedState.rows)]);
+    const rows = Array.from(rowIds).reduce<Record<string, TeamEquipmentMetric>>((acc, id) => {
+        const sharedRow = sharedState.rows[id] ? normalizeMetric(id, sharedState.rows[id], items) : null;
+        const localRow = localState.rows[id] ? normalizeMetric(id, localState.rows[id], items) : null;
+        if (!sharedRow) {
+            if (localRow) acc[id] = localRow;
+            return acc;
+        }
+        if (!localRow) {
+            acc[id] = sharedRow;
+            return acc;
+        }
+
+        const foremen = mergeForemen(sharedRow.foremen ?? [], localRow.foremen ?? [], items);
+        acc[id] = {
+            id,
+            quantities: items.reduce<Record<string, number>>((quantities, item) => {
+                const sharedQuantity = toQuantity(sharedRow.quantities[item.id]);
+                quantities[item.id] = sharedQuantity > 0 ? sharedQuantity : toQuantity(localRow.quantities[item.id]);
+                return quantities;
+            }, {}),
+            note: sharedRow.note || localRow.note,
+            foremen,
+            useForemanTotals: Boolean(sharedRow.useForemanTotals || localRow.useForemanTotals || foremen.some(foremanHasData))
+        };
+        return acc;
+    }, {});
+    return { items, rows };
+};
+
+const buildPersistedState = (items: EquipmentItem[], records: TeamEquipmentRecord[]): PersistedEquipmentState => ({
         items,
         rows: records.reduce<Record<string, TeamEquipmentMetric>>((acc, record) => {
             acc[record.id] = {
@@ -262,7 +345,11 @@ const persistState = (items: EquipmentItem[], records: TeamEquipmentRecord[]) =>
             };
             return acc;
         }, {})
-    };
+    });
+
+const persistLocalState = (items: EquipmentItem[], records: TeamEquipmentRecord[]) => {
+    if (typeof window === 'undefined') return;
+    const payload = buildPersistedState(items, records);
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
 };
 
@@ -362,6 +449,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
     const [newForemanNames, setNewForemanNames] = useState<Record<string, string>>({});
     const [expandedTeamIds, setExpandedTeamIds] = useState<Set<string>>(() => new Set());
     const [changedIds, setChangedIds] = useState<Set<string>>(() => new Set());
+    const [saving, setSaving] = useState(false);
     const [toastMessage, setToastMessage] = useState('');
     const [toastVisible, setToastVisible] = useState(false);
     const toastTimerRef = useRef<number | null>(null);
@@ -382,7 +470,33 @@ const TeamEquipmentStatusPage: React.FC = () => {
         setLoadError(null);
         try {
             const teams = await teamService.getTeams();
-            const savedState = loadSavedState();
+            const localState = loadLocalSavedState();
+            let savedState = localState;
+            let loadWarning: string | null = null;
+            let migratedLocalData = false;
+
+            try {
+                const sharedState = await supportSharedDataService.load<PersistedEquipmentState>('team_equipment_inventory');
+                const normalizedSharedState = normalizePersistedState(sharedState);
+                if (normalizedSharedState) {
+                    if (needsLocalMigration()) {
+                        savedState = mergeEquipmentStates(normalizedSharedState, localState);
+                        await supportSharedDataService.save('team_equipment_inventory', savedState);
+                        migratedLocalData = true;
+                    } else {
+                        savedState = normalizedSharedState;
+                    }
+                    markLocalMigrationComplete();
+                } else if (hasLocalSavedState()) {
+                    await supportSharedDataService.save('team_equipment_inventory', localState);
+                    migratedLocalData = true;
+                    markLocalMigrationComplete();
+                }
+            } catch (sharedDataError) {
+                console.error('[TeamEquipmentStatusPage] Failed to load shared equipment inventory:', sharedDataError);
+                loadWarning = '공용 DB를 불러오지 못해 이 브라우저의 임시 사본을 표시합니다. 새로고침 후 다시 확인해 주세요.';
+            }
+
             const items = savedState.items;
             const constructionTeams = teams.filter(isConstructionTeam);
             let workers: Worker[] = [];
@@ -419,6 +533,8 @@ const TeamEquipmentStatusPage: React.FC = () => {
 
             setEquipmentItems(items);
             setRecords(sortRecords(nextRecords));
+            persistLocalState(items, nextRecords);
+            setLoadError(loadWarning);
             setExpandedTeamIds((prev) => {
                 const next = new Set(prev);
                 nextRecords
@@ -427,6 +543,9 @@ const TeamEquipmentStatusPage: React.FC = () => {
                 return next;
             });
             setChangedIds(new Set());
+            if (migratedLocalData) {
+                showToast('기존 장비 기록을 공용 DB로 이전했습니다.');
+            }
         } catch (error) {
             console.error('[TeamEquipmentStatusPage] Failed to load teams:', error);
             setLoadError(error instanceof Error ? error.message : '팀 정보를 불러오지 못했습니다.');
@@ -444,6 +563,22 @@ const TeamEquipmentStatusPage: React.FC = () => {
             window.clearTimeout(toastTimerRef.current);
         }
     }, []);
+
+    const persistSharedState = async (items: EquipmentItem[], nextRecords: TeamEquipmentRecord[]): Promise<boolean> => {
+        setSaving(true);
+        try {
+            await supportSharedDataService.save('team_equipment_inventory', buildPersistedState(items, nextRecords));
+            persistLocalState(items, nextRecords);
+            setLoadError(null);
+            return true;
+        } catch (error) {
+            console.error('[TeamEquipmentStatusPage] Failed to save shared equipment inventory:', error);
+            showToast('공용 DB 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+            return false;
+        } finally {
+            setSaving(false);
+        }
+    };
 
     const equipmentTotals = useMemo(() => {
         return equipmentItems.map((item) => ({
@@ -528,8 +663,9 @@ const TeamEquipmentStatusPage: React.FC = () => {
         setChangedIds((prev) => new Set(prev).add(teamId));
     };
 
-    const saveRecord = (id: string) => {
-        persistState(equipmentItems, records);
+    const saveRecord = async (id: string) => {
+        const saved = await persistSharedState(equipmentItems, records);
+        if (!saved) return;
         setChangedIds((prev) => {
             const next = new Set(prev);
             next.delete(id);
@@ -538,13 +674,14 @@ const TeamEquipmentStatusPage: React.FC = () => {
         showToast('저장되었습니다.');
     };
 
-    const saveAll = () => {
-        persistState(equipmentItems, records);
+    const saveAll = async () => {
+        const saved = await persistSharedState(equipmentItems, records);
+        if (!saved) return;
         setChangedIds(new Set());
         showToast('장비 수량을 저장했습니다.');
     };
 
-    const addEquipmentItem = () => {
+    const addEquipmentItem = async () => {
         const name = normalizeKey(newEquipmentName);
         if (!name) {
             showToast('추가할 장비명을 입력하세요.');
@@ -577,14 +714,15 @@ const TeamEquipmentStatusPage: React.FC = () => {
             };
         });
 
+        const saved = await persistSharedState(nextItems, nextRecords);
+        if (!saved) return;
         setEquipmentItems(nextItems);
         setRecords(nextRecords);
         setNewEquipmentName('');
-        persistState(nextItems, nextRecords);
         showToast(`${name} 항목을 추가했습니다.`);
     };
 
-    const addForeman = (teamId: string) => {
+    const addForeman = async (teamId: string) => {
         const name = normalizeKey(newForemanNames[teamId]);
         if (!name) {
             showToast('추가할 반장명을 입력하세요.');
@@ -627,14 +765,15 @@ const TeamEquipmentStatusPage: React.FC = () => {
             };
         });
 
+        const saved = await persistSharedState(equipmentItems, nextRecords);
+        if (!saved) return;
         setRecords(nextRecords);
         setNewForemanNames((prev) => ({ ...prev, [teamId]: '' }));
         setExpandedTeamIds((prev) => new Set(prev).add(teamId));
-        persistState(equipmentItems, nextRecords);
         showToast(`${name} 반장 메뉴를 추가했습니다.`);
     };
 
-    const removeForeman = (teamId: string, foreman: ForemanEquipmentMetric) => {
+    const removeForeman = async (teamId: string, foreman: ForemanEquipmentMetric) => {
         if (!window.confirm(`${foreman.name} 반장 하위메뉴를 삭제할까요? 입력된 수량도 함께 제거됩니다.`)) return;
 
         const nextRecords = records.map((record) => {
@@ -648,12 +787,13 @@ const TeamEquipmentStatusPage: React.FC = () => {
             };
         });
 
+        const saved = await persistSharedState(equipmentItems, nextRecords);
+        if (!saved) return;
         setRecords(nextRecords);
-        persistState(equipmentItems, nextRecords);
         showToast(`${foreman.name} 반장 메뉴를 삭제했습니다.`);
     };
 
-    const removeEquipmentItem = (item: EquipmentItem) => {
+    const removeEquipmentItem = async (item: EquipmentItem) => {
         if (!window.confirm(`${item.name} 장비 항목을 삭제할까요? 입력된 수량도 함께 제거됩니다.`)) return;
 
         const nextItems = equipmentItems.filter((equipment) => equipment.id !== item.id);
@@ -674,13 +814,14 @@ const TeamEquipmentStatusPage: React.FC = () => {
             };
         });
 
+        const saved = await persistSharedState(nextItems, nextRecords);
+        if (!saved) return;
         setEquipmentItems(nextItems);
         setRecords(nextRecords);
-        persistState(nextItems, nextRecords);
         showToast(`${item.name} 항목을 삭제했습니다.`);
     };
 
-    const resetEquipmentData = () => {
+    const resetEquipmentData = async () => {
         if (!window.confirm('팀별 장비 수량과 비고를 초기화할까요? 장비 항목과 팀 정보는 유지됩니다.')) return;
         const nextRecords = records.map((record) => ({
             ...record,
@@ -693,9 +834,10 @@ const TeamEquipmentStatusPage: React.FC = () => {
             })),
             useForemanTotals: record.isForemanBreakdown && record.foremen.length > 0
         }));
+        const saved = await persistSharedState(equipmentItems, nextRecords);
+        if (!saved) return;
         setRecords(nextRecords);
         setChangedIds(new Set());
-        persistState(equipmentItems, nextRecords);
         showToast('장비 수량과 비고를 초기화했습니다.');
     };
 
@@ -738,7 +880,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
                                 팀정보 새로고침
                             </button>
                             <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700">
-                                시공팀 전용 · 팀색상 자동반영 · 수량 로컬저장
+                                시공팀 전용 · 팀색상 자동반영 · 공용 DB 저장
                             </div>
                         </div>
                     </div>
@@ -758,6 +900,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
                                 <button
                                     type="button"
                                     onClick={() => removeEquipmentItem(item)}
+                                    disabled={saving}
                                     className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-red-100 bg-red-50 text-xs text-red-600 transition-colors hover:bg-red-100"
                                     title={`${item.name} 삭제`}
                                     aria-label={`${item.name} 삭제`}
@@ -791,7 +934,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
                                 onKeyDown={(event) => {
                                     if (event.key === 'Enter') {
                                         event.preventDefault();
-                                        addEquipmentItem();
+                                        void addEquipmentItem();
                                     }
                                 }}
                                 placeholder="장비 항목 추가"
@@ -800,6 +943,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={addEquipmentItem}
+                                disabled={saving}
                                 className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white transition-colors hover:bg-blue-700"
                             >
                                 <FontAwesomeIcon icon={faPlus} />
@@ -810,6 +954,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
                         <button
                             type="button"
                             onClick={saveAll}
+                            disabled={saving}
                             className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white transition-colors hover:bg-blue-700"
                         >
                             <FontAwesomeIcon icon={faFloppyDisk} />
@@ -819,6 +964,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
                         <button
                             type="button"
                             onClick={resetEquipmentData}
+                            disabled={saving}
                             className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-black text-red-700 transition-colors hover:bg-red-100"
                         >
                             <FontAwesomeIcon icon={faRotateLeft} />
@@ -848,6 +994,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
                                     <button
                                         type="button"
                                         onClick={() => removeEquipmentItem(item)}
+                                        disabled={saving}
                                         className="inline-flex h-6 w-6 items-center justify-center rounded-md text-xs text-red-500 transition-colors hover:bg-red-50 hover:text-red-700"
                                         title={`${item.name} 삭제`}
                                         aria-label={`${item.name} 삭제`}
@@ -987,6 +1134,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
                                                         <button
                                                             type="button"
                                                             onClick={() => saveRecord(record.id)}
+                                                            disabled={saving}
                                                             className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-black transition-colors ${
                                                                 changed
                                                                     ? 'bg-blue-600 text-white hover:bg-blue-700'
@@ -1026,7 +1174,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
                                                                         onKeyDown={(event) => {
                                                                             if (event.key === 'Enter') {
                                                                                 event.preventDefault();
-                                                                                addForeman(record.id);
+                                                                                void addForeman(record.id);
                                                                             }
                                                                         }}
                                                                         placeholder="반장명 추가"
@@ -1035,6 +1183,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => addForeman(record.id)}
+                                                                        disabled={saving}
                                                                         className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white transition-colors hover:bg-blue-700"
                                                                     >
                                                                         <FontAwesomeIcon icon={faPlus} />
@@ -1093,6 +1242,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
                                                                                             <button
                                                                                                 type="button"
                                                                                                 onClick={() => removeForeman(record.id, foreman)}
+                                                                                                disabled={saving}
                                                                                                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-100 bg-red-50 text-xs text-red-600 transition-colors hover:bg-red-100"
                                                                                                 title={`${foreman.name} 반장 삭제`}
                                                                                                 aria-label={`${foreman.name} 반장 삭제`}

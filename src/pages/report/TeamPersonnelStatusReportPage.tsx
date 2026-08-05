@@ -142,23 +142,30 @@ const TeamPersonnelStatusReportPage: React.FC = () => {
             const workerById = new Map<string, Worker>();
             workers.forEach(worker => {
                 if (worker.id) workerById.set(worker.id, worker);
+                if ((worker as any).legacyId) workerById.set(String((worker as any).legacyId), worker);
             });
 
             const baseRows: ReportRow[] = reports.flatMap((report: DailyReport) => {
                 const site = siteById.get(report.siteId);
                 const team = teamById.get(report.teamId);
 
-                const teamCategory = typeof team?.type === 'string' ? team.type : '';
-                const derivedType = typeof team?.role === 'string' && team.role.trim().length > 0
-                    ? team.role
-                    : typeof team?.type === 'string'
-                        ? team.type
-                        : '';
-
                 return report.workers.map((reportWorker: DailyReportWorker) => {
                     const workerInfo = workerById.get(reportWorker.workerId);
+                    const workerTeamId = String(workerInfo?.teamId ?? reportWorker.teamId ?? report.teamId ?? '').trim();
+                    const workerTeam = workerTeamId ? teamById.get(workerTeamId) : undefined;
+                    const workerTeamName = String(workerInfo?.teamName ?? workerTeam?.name ?? reportWorker.workerTeamName ?? report.teamName ?? team?.name ?? '').trim();
                     const salaryModel = deriveSalaryModel(reportWorker, workerInfo);
                     const note = reportWorker.workContent || '';
+                    const teamCategory = typeof workerTeam?.type === 'string' ? workerTeam.type : (typeof team?.type === 'string' ? team.type : '');
+                    const derivedType = typeof workerTeam?.role === 'string' && workerTeam.role.trim().length > 0
+                        ? workerTeam.role
+                        : typeof workerTeam?.type === 'string'
+                            ? workerTeam.type
+                            : typeof team?.role === 'string' && team.role.trim().length > 0
+                                ? team.role
+                                : typeof team?.type === 'string'
+                                    ? team.type
+                                    : '';
 
                     return {
                         date: report.date,
@@ -168,8 +175,8 @@ const TeamPersonnelStatusReportPage: React.FC = () => {
                         workerId: reportWorker.workerId,
                         workerName: reportWorker.name,
                         manDay: reportWorker.manDay,
-                        teamId: report.teamId,
-                        workTeamName: report.teamName || team?.name || '',
+                        teamId: workerTeamId || report.teamId,
+                        workTeamName: workerTeamName,
                         teamCategory,
                         responsibleTeamName: report.responsibleTeamName || site?.responsibleTeamName || '',
                         salaryModel,

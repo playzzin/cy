@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faCalendarAlt,
@@ -18,6 +17,7 @@ import {
     faUsers,
     faXmark,
     faCamera,
+    faChevronLeft,
     faChevronRight
 } from '@fortawesome/free-solid-svg-icons';
 import * as XLSX from 'xlsx-js-style';
@@ -55,6 +55,7 @@ import html2canvas from 'html2canvas';
 import { db, storage } from '../../config/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { getDownloadURL, ref } from 'firebase/storage';
+import PayrollIssueTopTabs from '../../components/payroll/PayrollIssueTopTabs';
 
 type SupportStatementPayType = SharedLaborStatementPayType;
 
@@ -89,10 +90,6 @@ interface SupportLaborExcelRow {
     workerLaborStatementPayType?: SupportStatementPayType;
 }
 
-interface CompanyExcelSheet {
-    aggregate: SupportCompanyAggregate;
-    rows: SupportLaborExcelRow[];
-}
 
 interface SupportWorkerBreakdown {
     date: string;
@@ -195,13 +192,6 @@ interface SupportCompanyAggregate {
     };
 }
 
-interface KBTransferRow {
-    bankCode: string;
-    accountNumber: string;
-    accountHolder: string;
-    amount: number;
-    description: string;
-}
 
 type StatementTargetSelection = {
     aggregateId: string;
@@ -287,7 +277,6 @@ interface SupportMonthlyRateOverrides {
     siteRates: Record<string, number>;
 }
 
-const TAX_INVOICE_VAT_RATE = 0.1;
 const normalize = (value: string | undefined | null): string => (value ?? '').replace(/\s+/g, '').trim();
 const normalizeName = (value: string | undefined | null): string =>
     (value ?? '').replace(/\(.*?\)/g, '').replace(/\s+/g, '').trim();
@@ -312,14 +301,13 @@ const getPaymentMethodBadgeClassName = (paymentMethod?: string | null): string =
 };
 const calculateBillingAmounts = (
     manDay: number,
-    billingUnitPrice: number,
-    paymentMethod?: string | null
+    billingUnitPrice: number
 ): { billingAmount: number; vatAmount: number; issuedAmount: number } => {
     const billingAmount = Math.round(Math.max(0, manDay) * Math.max(0, Math.round(billingUnitPrice)));
-    const vatAmount = isTaxInvoicePaymentMethod(paymentMethod) ? Math.round(billingAmount * TAX_INVOICE_VAT_RATE) : 0;
     return {
         billingAmount,
-        vatAmount,
+        // 지원팀 정산은 현장의 계산서 여부와 무관하므로 세금을 자동 반영하지 않는다.
+        vatAmount: 0,
         issuedAmount: billingAmount
     };
 };
@@ -395,11 +383,11 @@ const loadSupportLaborStatementDefaults = (
     preset: StatementIssueOptionPreset = loadStatementIssueOptionPreset()
 ) => loadLaborStatementPresetDefaults(preset);
 const SUPPORT_PROGRESS_OPTIONS: SupportProgressOption[] = [
-    { value: 'depositComplete', label: '입금완료', color: '#ffc000', rowColor: '#ffc000' },
-    { value: 'dawinIssued', label: '계산서(다윈)', color: '#00b0f0', rowColor: '#00b0f0' },
-    { value: 'cheongyeonIssued', label: '계산서(청연)', color: '#ffff00', rowColor: '#ffff00' },
-    { value: 'laborProcessed', label: '노무', color: '#00b050', rowColor: '#00b050' },
-    { value: 'issueRequested', label: '발행요청', color: '#ff00ff', rowColor: '#ff00ff' }
+    { value: 'depositComplete', label: '입금완료', color: '#ffe6a0', rowColor: '#fff4cf' },
+    { value: 'dawinIssued', label: '계산서(다윈)', color: '#b8e6ff', rowColor: '#dff4ff' },
+    { value: 'cheongyeonIssued', label: '계산서(청연)', color: '#fff38f', rowColor: '#fff9d0' },
+    { value: 'laborProcessed', label: '노무', color: '#b6ebcd', rowColor: '#ddf6e7' },
+    { value: 'issueRequested', label: '발행요청', color: '#ffc4ea', rowColor: '#ffe2f4' }
 ];
 
 const getManualStorageKey = (yearMonth: string): string => `${SUPPORT_MANUAL_STORAGE_PREFIX}:${yearMonth}`;
@@ -551,43 +539,28 @@ const SUPPORT_SCOPE_CONFIG: Record<SupportTeamPaymentScope, {
     title: string;
     description: string;
     directions: SupportDirection[];
-    path: string;
-    label: string;
 }> = {
     external: {
         title: '외부지원간곳',
         description: '외부지원간곳을 현장담당팀 기준으로 자동 정산합니다.',
-        directions: EXTERNAL_SUPPORT_DIRECTIONS,
-        path: '/payroll/support-team',
-        label: '외부지원간곳'
+        directions: EXTERNAL_SUPPORT_DIRECTIONS
     },
     incoming: {
         title: '외부지원온곳',
         description: '외부지원온곳만 분리해 작업팀 기준으로 지급 정산합니다.',
-        directions: INCOMING_SUPPORT_DIRECTIONS,
-        path: '/payroll/support-team-incoming',
-        label: '외부지원온곳'
+        directions: INCOMING_SUPPORT_DIRECTIONS
     },
     internalOut: {
         title: '내부지원간곳',
         description: '내부지원간곳을 작업팀 기준으로 묶고, 같은 팀 현장 투입은 제외합니다.',
-        directions: INTERNAL_SUPPORT_OUT_DIRECTIONS,
-        path: '/payroll/support-team-internal',
-        label: '내부지원간곳'
+        directions: INTERNAL_SUPPORT_OUT_DIRECTIONS
     },
     internalIn: {
         title: '내부지원온곳',
         description: '내부지원온곳을 현장담당팀 기준으로 묶고, 같은 팀 현장 투입은 제외합니다.',
-        directions: INTERNAL_SUPPORT_IN_DIRECTIONS,
-        path: '/payroll/support-team-internal-incoming',
-        label: '내부지원온곳'
+        directions: INTERNAL_SUPPORT_IN_DIRECTIONS
     }
 };
-
-const SUPPORT_SCOPE_NAV_ITEMS = (Object.keys(SUPPORT_SCOPE_CONFIG) as SupportTeamPaymentScope[]).map((scopeKey) => ({
-    scope: scopeKey,
-    ...SUPPORT_SCOPE_CONFIG[scopeKey]
-}));
 
 const getDefaultSelectedDirection = (scope: SupportTeamPaymentScope): 'all' | SupportDirection => {
     const directions = SUPPORT_SCOPE_CONFIG[scope].directions;
@@ -853,7 +826,7 @@ const mergeAggregatesBySettlementTeam = (rows: SupportCompanyAggregate[]): Suppo
         );
 };
 
-const getWorkerFlowLabel = (worker: SupportWorkerBreakdown, site: SupportSiteRow): string => {
+const getWorkerFlowLabel = (worker: SupportWorkerBreakdown, _site: SupportSiteRow): string => {
     const from = worker.workerTeamName || worker.teamName || '작업팀 미지정';
     const to = worker.siteResponsibleTeamName || worker.targetTeamName || '현장담당팀 미지정';
     return `작업팀 ${from} → 현장담당팀 ${to}`;
@@ -886,7 +859,7 @@ const applyBillingUnitPriceToSite = (site: SupportSiteRow, billingUnitPrice: num
     const workers = site.workers.map((worker) => ({
         ...worker,
         billingUnitPrice: normalizedRate,
-        ...calculateBillingAmounts(worker.manDay, normalizedRate, worker.paymentMethod || site.paymentMethod)
+        ...calculateBillingAmounts(worker.manDay, normalizedRate)
     }));
     return recalcSiteFromWorkers(site, workers);
 };
@@ -901,11 +874,7 @@ const applyUnitPriceToSite = (site: SupportSiteRow, unitPrice: number): SupportS
     const normalizedRate = Math.max(0, Math.round(unitPrice));
     const workers = site.workers.map((worker) => {
         const amount = Math.round(worker.manDay * normalizedRate);
-        const { vatAmount, issuedAmount } = calculateBillingAmounts(
-            worker.manDay,
-            worker.billingUnitPrice,
-            worker.paymentMethod || site.paymentMethod
-        );
+        const { vatAmount, issuedAmount } = calculateBillingAmounts(worker.manDay, worker.billingUnitPrice);
         return {
             ...worker,
             unitPrice: normalizedRate,
@@ -1264,73 +1233,23 @@ const getAggregateExpenseClaimAmount = (aggregate: SupportCompanyAggregate): num
 const getAggregateExpenseClaims = (aggregate: SupportCompanyAggregate): TeamExpenseClaim[] =>
     dedupeExpenseClaims(aggregate.sites.flatMap(site => getSiteExpenseClaims(site)));
 
-const getSiteVatExpenseClaimAmount = (site: SupportSiteRow): number =>
-    Math.max(0, Math.round(Number(site.vatAmount || 0)));
+// 지원팀 정산의 추가 금액은 현장 계산서나 세금과 연결하지 않는다.
+// 경비 청구분만 별도 내역으로 합산하고, 추가 금액은 사용자가 직접 입력한다.
+const getSiteExpenseStatementAmount = (site: SupportSiteRow, _adjustment?: SupportManualAdjustment): number =>
+    getSiteExpenseClaimAmount(site);
 
-const getAggregateVatExpenseClaimAmount = (aggregate: SupportCompanyAggregate): number =>
-    aggregate.sites.reduce((sum, site) => sum + getSiteVatExpenseClaimAmount(site), 0);
-
-const getSiteExpenseStatementAmount = (site: SupportSiteRow): number =>
-    getSiteExpenseClaimAmount(site) + getSiteVatExpenseClaimAmount(site);
-
-const getAggregateExpenseStatementAmount = (aggregate: SupportCompanyAggregate): number =>
-    getAggregateExpenseClaimAmount(aggregate) + getAggregateVatExpenseClaimAmount(aggregate);
-
-const buildVatExpenseClaim = (
-    aggregate: SupportCompanyAggregate,
-    site: SupportSiteRow,
-    yearMonth: string
-): TeamExpenseClaim | null => {
-    const amount = getSiteVatExpenseClaimAmount(site);
-    if (amount <= 0) return null;
-
-    const payerTeamId = site.viewTeamId || aggregate.viewTeamId || '';
-    const payerTeamName = site.viewTeamName || aggregate.viewTeamName || '-';
-    const chargeToTeamId = aggregate.settlementTeamId || aggregate.companyId || '';
-    const chargeToTeamName = aggregate.settlementTeamName || aggregate.companyName || '-';
-    const siteKey = site.siteId || normalizeName(site.siteName) || 'site';
-
-    return {
-        id: `support-vat:${yearMonth}:${aggregate.aggregateId}:${siteKey}`,
-        yearMonth,
-        date: `${yearMonth}-01`,
-        claimType: 'teamCharge',
-        payerTeamId,
-        payerTeamName,
-        chargeToTeamId,
-        chargeToTeamName,
-        siteId: site.siteId,
-        siteName: site.siteName,
-        category: '부가세',
-        description: `${site.siteName || aggregate.companyName} 계산서 부가세`,
-        amount,
-        status: 'charged',
-        memo: '노임명세 제외 후 경비내역 반영'
-    };
-};
-
-const getVatExpenseClaims = (
-    aggregate: SupportCompanyAggregate,
-    yearMonth: string,
-    site?: SupportSiteRow
-): TeamExpenseClaim[] => {
-    const sites = site ? [site] : aggregate.sites;
-    return sites
-        .map(row => buildVatExpenseClaim(aggregate, row, yearMonth))
-        .filter((claim): claim is TeamExpenseClaim => Boolean(claim));
-};
+const getAggregateExpenseStatementAmount = (aggregate: SupportCompanyAggregate, _adjustment?: SupportManualAdjustment): number =>
+    getAggregateExpenseClaimAmount(aggregate);
 
 const getExpenseStatementClaims = (
     aggregate: SupportCompanyAggregate,
-    yearMonth: string,
-    site?: SupportSiteRow
-): TeamExpenseClaim[] => dedupeExpenseClaims([
-    ...(site ? getSiteExpenseClaims(site) : getAggregateExpenseClaims(aggregate)),
-    ...getVatExpenseClaims(aggregate, yearMonth, site)
-]);
+    _yearMonth: string,
+    site?: SupportSiteRow,
+    _adjustment?: SupportManualAdjustment
+): TeamExpenseClaim[] => site ? getSiteExpenseClaims(site) : getAggregateExpenseClaims(aggregate);
 
 const getAggregateAdditionalAmount = (aggregate: SupportCompanyAggregate, adjustments: SupportManualAdjustments): number =>
-    getAdjustment(adjustments, aggregate.aggregateId).additionalAmount + getAggregateExpenseStatementAmount(aggregate);
+    getAdjustment(adjustments, aggregate.aggregateId).additionalAmount + getAggregateExpenseStatementAmount(aggregate, getAdjustment(adjustments, aggregate.aggregateId));
 
 const getAggregateTotalWithAdditional = (aggregate: SupportCompanyAggregate, adjustments: SupportManualAdjustments): number =>
     aggregate.issuedAmount + getAggregateAdditionalAmount(aggregate, adjustments);
@@ -1358,6 +1277,9 @@ const getSupportRemarkCompanyName = (aggregate: SupportCompanyAggregate, site?: 
 const getAggregateRemarkFallback = (aggregate: SupportCompanyAggregate): string =>
     getSupportRemarkCompanyName(aggregate) || aggregate.accountHolder || aggregate.bankName || '';
 
+const getSettlementAccountLabel = (aggregate: SupportCompanyAggregate): string =>
+    [aggregate.bankName, aggregate.accountNumber, aggregate.accountHolder].filter(Boolean).join(' · ');
+
 const getAggregateEtcFallback = (aggregate: SupportCompanyAggregate): string => {
     if (Object.values(aggregate.errors).some(Boolean)) return '계좌 확인 필요';
     if (aggregate.sites.length > 1) return `${aggregate.sites.length}개 현장`;
@@ -1381,12 +1303,19 @@ const buildLaborStatementExcelBlock = (preview: SitePreviewBlock): SupportLaborS
     siteName: preview.site.siteName,
     settlementName: preview.aggregate.companyName,
     direction: preview.aggregate.direction,
+    delegateBankName: preview.aggregate.bankName,
+    delegateAccountNumber: preview.aggregate.accountNumber,
+    delegateAccountHolder: preview.aggregate.accountHolder,
     rows: preview.rows.map(row => ({
         workerId: row.workerId,
         workerName: row.workerName,
         idNumber: row.idNumber,
         contact: row.contact,
         address: row.address,
+        bankName: row.bankName,
+        accountNumber: row.accountNumber,
+        accountHolder: row.accountHolder,
+        payType: row.payType,
         days: row.days,
         totalManDay: row.totalManDay,
         unitPrice: row.unitPrice,
@@ -1434,6 +1363,15 @@ const formatYearMonthLabel = (yearMonth: string): string => {
     const [year, month] = yearMonth.split('-');
     const monthNumber = parseInt(month ?? '', 10);
     return `${year || ''}년 ${Number.isFinite(monthNumber) && monthNumber > 0 ? monthNumber : ''}월`.trim();
+};
+
+const shiftYearMonth = (yearMonth: string, monthOffset: number): string => {
+    const [rawYear, rawMonth] = yearMonth.split('-').map(Number);
+    const fallback = new Date();
+    const year = Number.isFinite(rawYear) ? rawYear : fallback.getFullYear();
+    const month = Number.isFinite(rawMonth) ? rawMonth : fallback.getMonth() + 1;
+    const target = new Date(year, month - 1 + monthOffset, 1);
+    return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}`;
 };
 
 const buildWorkerStatementLine = (row: SupportLaborExcelRow): string => {
@@ -1611,196 +1549,6 @@ const resolveStatementLogoUrl = (logoUrl?: string | null): string => {
     return trimmed || DEFAULT_STATEMENT_LOGO_URL;
 };
 
-const createLaborStatementImageBlob = async (
-    preview: SitePreviewBlock,
-    yearMonth: string,
-    logoUrl?: string | null
-): Promise<Blob> => {
-    await waitForDocumentFonts();
-
-    const month = parseInt(yearMonth.split('-')[1] ?? '0', 10);
-    const rows = preview.rows;
-    const dayTotals = Array.from({ length: MAX_DAY_COLUMNS }, () => 0);
-    rows.forEach(row => row.days.forEach((value, index) => {
-        dayTotals[index] += value;
-    }));
-
-    const totalManDay = rows.reduce((sum, row) => sum + row.totalManDay, 0);
-    const totalBillingAmount = rows.reduce((sum, row) => sum + row.billingAmount, 0);
-    const avgBillingPrice = totalManDay > 0 ? Math.round(totalBillingAmount / totalManDay) : 0;
-
-    const margin = 48;
-    const tableTop = 220;
-    const headerRowHeight = 36;
-    const bodyRowHeight = 30;
-    const footerRowHeight = 36;
-    const workerBlockHeight = bodyRowHeight * 2;
-
-    const columns = {
-        no: 54,
-        name: 104,
-        id: 150,
-        address: 390,
-        day: 27,
-        total: 76,
-        amount: 132,
-        billing: 132
-    };
-    const fixedInfoWidth = columns.no + columns.name + columns.id + columns.address;
-    const dayAreaWidth = Math.max(DAY_LABELS_SECOND.length, DAY_LABELS_FIRST.length + 1) * columns.day;
-    const tableWidth = fixedInfoWidth + dayAreaWidth + columns.total + columns.amount;
-    const width = tableWidth + margin * 2;
-    const tableHeight = headerRowHeight * 2 + rows.length * workerBlockHeight + footerRowHeight * 2;
-    const height = tableTop + tableHeight + 54;
-    const outputScale = Math.max(2, Math.min(window.devicePixelRatio || 1, 2));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.ceil(width * outputScale);
-    canvas.height = Math.ceil(height * outputScale);
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas context unavailable');
-    ctx.scale(outputScale, outputScale);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, width, height);
-
-    ctx.fillStyle = '#111827';
-    ctx.font = '900 40px "Malgun Gothic", "Pretendard", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`노 무 비 지 급 명 세 서 (${month}월분)`, width / 2, 92);
-    ctx.strokeStyle = '#f59e0b';
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.moveTo(width / 2 - 270, 122);
-    ctx.lineTo(width / 2 + 270, 122);
-    ctx.stroke();
-
-    ctx.font = '700 22px "Malgun Gothic", "Pretendard", sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#111827';
-    ctx.fillText(`현장명: ${preview.site.siteName}`, margin, 166);
-    const logoSize = 46;
-    const logoX = width - margin - 248;
-    const logoY = 154;
-    try {
-        const logoImage = await loadCanvasImage(resolveStatementLogoUrl(logoUrl));
-        ctx.drawImage(logoImage, logoX, logoY, logoSize, logoSize);
-    } catch (error) {
-        console.warn('[SupportTeamPaymentPage] labor statement logo image failed:', error);
-        ctx.fillStyle = '#0f766e';
-        ctx.fillRect(logoX, logoY, logoSize, logoSize);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '900 18px "Malgun Gothic", "Pretendard", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('CY', logoX + logoSize / 2, logoY + logoSize / 2);
-    }
-    ctx.fillStyle = '#111827';
-    ctx.font = '900 24px "Malgun Gothic", "Pretendard", sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('(주) 청연이엔지', logoX + logoSize + 12, logoY + logoSize / 2);
-
-    let x = margin;
-    let y = tableTop;
-    const headerFill = '#f1f5f9';
-    const firstDayFill = '#e0f2fe';
-    const secondDayFill = '#fff1f2';
-    const bodyDayFill = '#f8fafc';
-    const totalFill = '#e2e8f0';
-    const smallFont = '18px "Malgun Gothic", "Pretendard", sans-serif';
-    const bodyFont = '19px "Malgun Gothic", "Pretendard", sans-serif';
-    const boldFont = '700 19px "Malgun Gothic", "Pretendard", sans-serif';
-    const tinyFont = '16px "Malgun Gothic", "Pretendard", sans-serif';
-
-    drawCanvasCell(ctx, x, y, columns.no, headerRowHeight * 2, 'NO', { fill: headerFill, font: boldFont });
-    x += columns.no;
-    drawCanvasCell(ctx, x, y, columns.name, headerRowHeight * 2, '성명', { fill: headerFill, font: boldFont });
-    x += columns.name;
-    drawCanvasCell(ctx, x, y, columns.id, headerRowHeight, '주민번호', { fill: headerFill, font: smallFont });
-    drawCanvasCell(ctx, x, y + headerRowHeight, columns.id, headerRowHeight, '전화번호', { fill: headerFill, font: smallFont });
-    x += columns.id;
-    drawCanvasCell(ctx, x, y, columns.address, headerRowHeight * 2, '주소', { fill: headerFill, font: boldFont });
-    x += columns.address;
-
-    DAY_LABELS_FIRST.forEach(day => {
-        drawCanvasCell(ctx, x, y, columns.day, headerRowHeight, String(day).padStart(2, '0'), { fill: firstDayFill, color: '#0369a1', font: tinyFont });
-        x += columns.day;
-    });
-    drawCanvasCell(ctx, x, y, columns.day, headerRowHeight, 'X', { fill: headerFill, font: tinyFont });
-    x += columns.day;
-    drawCanvasCell(ctx, x, y, columns.total, headerRowHeight * 2, '출역', { fill: headerFill, font: boldFont });
-    x += columns.total;
-    drawCanvasCell(ctx, x, y, columns.amount, headerRowHeight, '청구단가', { fill: headerFill, font: smallFont });
-    drawCanvasCell(ctx, x, y + headerRowHeight, columns.amount, headerRowHeight, '공급가액', { fill: headerFill, font: smallFont });
-
-    x = margin + columns.no + columns.name + columns.id + columns.address;
-    DAY_LABELS_SECOND.forEach(day => {
-        drawCanvasCell(ctx, x, y + headerRowHeight, columns.day, headerRowHeight, String(day), { fill: secondDayFill, color: '#be123c', font: tinyFont });
-        x += columns.day;
-    });
-
-    y += headerRowHeight * 2;
-    rows.forEach((row, index) => {
-        x = margin;
-        drawCanvasCell(ctx, x, y, columns.no, workerBlockHeight, String(index + 1), { fill: '#f8fafc', font: bodyFont });
-        x += columns.no;
-        drawCanvasCell(ctx, x, y, columns.name, workerBlockHeight, row.workerName, { font: boldFont, wrap: true, maxLines: 2 });
-        x += columns.name;
-        drawCanvasCell(ctx, x, y, columns.id, bodyRowHeight, formatFullIdNumber(row.idNumber), { font: tinyFont });
-        drawCanvasCell(ctx, x, y + bodyRowHeight, columns.id, bodyRowHeight, row.contact || '-', { font: tinyFont, color: '#475569' });
-        x += columns.id;
-        drawCanvasCell(ctx, x, y, columns.address, workerBlockHeight, row.address || '-', { font: tinyFont, align: 'left', wrap: true, maxLines: 3 });
-        x += columns.address;
-
-        DAY_LABELS_FIRST.forEach(day => {
-            drawCanvasCell(ctx, x, y, columns.day, bodyRowHeight, formatDayValue(row.days[day - 1]), { fill: bodyDayFill, font: tinyFont });
-            x += columns.day;
-        });
-        drawCanvasCell(ctx, x, y, columns.day, bodyRowHeight, '', { fill: bodyDayFill });
-        x += columns.day;
-        drawCanvasCell(ctx, x, y, columns.total, workerBlockHeight, formatDayValue(row.totalManDay), { fill: '#f8fafc', font: bodyFont });
-        x += columns.total;
-        drawCanvasCell(ctx, x, y, columns.amount, bodyRowHeight, formatNumber(row.billingUnitPrice), { font: tinyFont, align: 'right' });
-        drawCanvasCell(ctx, x, y + bodyRowHeight, columns.amount, bodyRowHeight, formatNumber(row.billingAmount), { fill: '#fef3c7', color: '#92400e', font: '700 17px "Malgun Gothic", "Pretendard", sans-serif', align: 'right' });
-
-        x = margin + columns.no + columns.name + columns.id + columns.address;
-        DAY_LABELS_SECOND.forEach(day => {
-            drawCanvasCell(ctx, x, y + bodyRowHeight, columns.day, bodyRowHeight, formatDayValue(row.days[day - 1]), { fill: bodyDayFill, font: tinyFont });
-            x += columns.day;
-        });
-        y += workerBlockHeight;
-    });
-
-    x = margin;
-    drawCanvasCell(ctx, x, y, columns.no + columns.name + columns.id + columns.address, footerRowHeight, '합 계', { fill: totalFill, font: boldFont });
-    x += columns.no + columns.name + columns.id + columns.address;
-    DAY_LABELS_FIRST.forEach(day => {
-        drawCanvasCell(ctx, x, y, columns.day, footerRowHeight, formatDayValue(dayTotals[day - 1]), { fill: totalFill, font: tinyFont });
-        x += columns.day;
-    });
-    drawCanvasCell(ctx, x, y, columns.day, footerRowHeight, '', { fill: totalFill });
-    x += columns.day;
-    drawCanvasCell(ctx, x, y, columns.total, footerRowHeight * 2, formatDayValue(totalManDay), { fill: totalFill, font: boldFont });
-    x += columns.total;
-    drawCanvasCell(ctx, x, y, columns.amount, footerRowHeight, formatNumber(avgBillingPrice), { fill: totalFill, font: boldFont, align: 'right' });
-
-    y += footerRowHeight;
-    x = margin;
-    drawCanvasCell(ctx, x, y, columns.no + columns.name + columns.id + columns.address, footerRowHeight, '공급가액', { fill: totalFill, font: boldFont });
-    x += columns.no + columns.name + columns.id + columns.address;
-    DAY_LABELS_SECOND.forEach(day => {
-        drawCanvasCell(ctx, x, y, columns.day, footerRowHeight, formatDayValue(dayTotals[day - 1]), { fill: totalFill, font: tinyFont });
-        x += columns.day;
-    });
-    x += columns.total;
-    drawCanvasCell(ctx, x, y, columns.amount, footerRowHeight, formatNumber(totalBillingAmount), { fill: '#fde68a', color: '#92400e', font: boldFont, align: 'right' });
-
-    const blob: Blob | null = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    if (!blob) throw new Error('PNG blob generation failed');
-    return blob;
-};
 
 const buildExpenseClaimStatementText = (
     aggregate: SupportCompanyAggregate,
@@ -1987,30 +1735,6 @@ const createExpenseClaimStatementImageBlob = async (
     return blob;
 };
 
-const copyTextToClipboard = async (text: string): Promise<void> => {
-    if (navigator.clipboard?.writeText) {
-        try {
-            await navigator.clipboard.writeText(text);
-            return;
-        } catch (error) {
-            console.warn('Clipboard API copy failed, trying fallback copy:', error);
-        }
-    }
-
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.setAttribute('readonly', 'true');
-    textarea.style.position = 'fixed';
-    textarea.style.left = '-9999px';
-    textarea.style.top = '0';
-    document.body.appendChild(textarea);
-    textarea.focus();
-    textarea.select();
-    const copied = document.execCommand('copy');
-    textarea.remove();
-
-    if (!copied) throw new Error('Clipboard copy failed');
-};
 
 const captureElementToPngBlob = async (node: HTMLElement): Promise<Blob> => {
     await waitForDocumentFonts();
@@ -2223,7 +1947,6 @@ interface SupportTeamPaymentPageProps {
 }
 
 const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope = 'external' }) => {
-    const navigate = useNavigate();
     const today = new Date();
     const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
     const statementLogoUrl = useErpStatementLogoUrl();
@@ -2730,7 +2453,7 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                         : 0;
                     const amount = Math.round(manDay * unitPrice);
                     const billingUnitPrice = unitPrice;
-                    const { billingAmount, vatAmount, issuedAmount } = calculateBillingAmounts(manDay, billingUnitPrice, paymentMethod);
+                    const { billingAmount, vatAmount, issuedAmount } = calculateBillingAmounts(manDay, billingUnitPrice);
 
                     classifiedEntries.forEach((entry) => {
                         const workerRecord: SupportWorkerBreakdown = {
@@ -3062,19 +2785,12 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
             totalManDay: acc.totalManDay + agg.totalManDay,
             issuedAmount: acc.issuedAmount + agg.issuedAmount,
             totalAmount: acc.totalAmount + agg.totalAmount,
-            vatAmount: acc.vatAmount + agg.vatAmount,
             additionalAmount: acc.additionalAmount + additionalAmount,
             partnerCount: acc.partnerCount + 1,
             siteCount: acc.siteCount + agg.sites.length
         };
-    }, { totalManDay: 0, issuedAmount: 0, totalAmount: 0, vatAmount: 0, additionalAmount: 0, partnerCount: 0, siteCount: 0 }), [displayAggregates, manualAdjustments]);
+    }, { totalManDay: 0, issuedAmount: 0, totalAmount: 0, additionalAmount: 0, partnerCount: 0, siteCount: 0 }), [displayAggregates, manualAdjustments]);
 
-    const handleDisplayContentChange = (aggregateId: string, siteId: string, value: string) => {
-        setAggregates(prev => prev.map(agg => ({
-            ...agg,
-            sites: agg.sites.map(s => agg.aggregateId === aggregateId && s.siteId === siteId ? { ...s, displayContent: value } : s)
-        })));
-    };
 
     const handleApplyBulkSupportRate = () => {
         const unitPrice = parseMoneyInput(bulkSupportRateInput);
@@ -3463,13 +3179,15 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
     const expenseStatementClaims = useMemo(
         () => {
             if (!expenseStatementContext) return [];
+            const adjustmentKey = expenseStatementContext.siteKey ?? expenseStatementContext.aggregate.aggregateId;
             return getExpenseStatementClaims(
                 expenseStatementContext.aggregate,
                 selectedMonth,
-                expenseStatementContext.site ?? undefined
+                expenseStatementContext.site ?? undefined,
+                getAdjustment(manualAdjustments, adjustmentKey)
             );
         },
-        [expenseStatementContext, selectedMonth]
+        [expenseStatementContext, manualAdjustments, selectedMonth]
     );
     const scopedTeamBasisLabel = scope === 'internalOut' ? '작업팀' : scope === 'internalIn' ? '현장담당팀' : '정산 주체';
     const scopedAllTeamLabel = scope === 'internalOut' ? '전체 작업팀' : scope === 'internalIn' ? '전체 현장담당팀' : '전체 기준팀';
@@ -3487,6 +3205,8 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
 
     return (
         <div className="support-team-font p-6 w-full max-w-none space-y-6 font-['Pretendard']">
+            <PayrollIssueTopTabs />
+
             {/* 상단 헤더 영역 */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-6 py-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
@@ -3502,29 +3222,6 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                     </div>
                 </div>
                 <div className="flex flex-wrap gap-2.5">
-                    <div className="flex flex-wrap items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
-                        {SUPPORT_SCOPE_NAV_ITEMS.map((item) => {
-                            const isActive = item.scope === scope;
-                            return (
-                                <button
-                                    key={item.scope}
-                                    type="button"
-                                    aria-pressed={isActive}
-                                    onClick={() => {
-                                        if (!isActive) navigate(item.path);
-                                    }}
-                                    className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-black transition ${
-                                        isActive
-                                            ? 'bg-slate-900 text-white shadow-sm'
-                                            : 'text-slate-600 hover:bg-white hover:text-slate-900'
-                                    }`}
-                                >
-                                    <FontAwesomeIcon icon={item.scope === 'incoming' ? faShareNodes : faUsers} />
-                                    {item.label}
-                                </button>
-                            );
-                        })}
-                    </div>
                     <ActionButton variant="solid-green" disabled={supportExcelRows.length === 0} onClick={() => setShowLaborPreview(true)}>
                         <FontAwesomeIcon icon={faFileExcel} /> 노무내역서 미리보기
                     </ActionButton>
@@ -3592,12 +3289,29 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                             <div className="flex items-center gap-3">
                                 <FontAwesomeIcon icon={faCalendarAlt} className="text-amber-500" />
                                 <span className="text-sm font-bold text-slate-500">집계 기준월</span>
-                                <input
-                                    type="month"
-                                    value={selectedMonth}
-                                    onChange={(e) => setSelectedMonth(e.target.value)}
-                                    className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-black focus:ring-2 focus:ring-amber-500 outline-none transition-all"
-                                />
+                                <div className="flex min-h-10 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 shadow-sm" aria-label="집계 기준월 선택">
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedMonth((current) => shiftYearMonth(current, -1))}
+                                        className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-50 hover:text-amber-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                                        aria-label="이전 달 보기"
+                                        title="이전 달"
+                                    >
+                                        <FontAwesomeIcon icon={faChevronLeft} className="text-xs" />
+                                    </button>
+                                    <span className="min-w-[92px] px-2 text-center text-sm font-black text-slate-800" aria-live="polite">
+                                        {formatYearMonthLabel(selectedMonth)}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedMonth((current) => shiftYearMonth(current, 1))}
+                                        className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-50 hover:text-amber-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                                        aria-label="다음 달 보기"
+                                        title="다음 달"
+                                    >
+                                        <FontAwesomeIcon icon={faChevronRight} className="text-xs" />
+                                    </button>
+                                </div>
                             </div>
                             <div className="h-6 w-px bg-slate-200 hidden sm:block" />
                             <div className="flex flex-wrap items-center gap-2">
@@ -3676,7 +3390,7 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
                         <SummaryCard label="총 투입 공수" value={`${formatNumber(totalSummary.totalManDay)} 공`} icon={faCalendarAlt} tone="violet" />
                         <SummaryCard label="총 노임총액" value={`${formatNumber(totalSummary.totalAmount)} 원`} icon={faCircleCheck} tone="sky" />
-                        <SummaryCard label="총 부가세" value={`${formatNumber(totalSummary.vatAmount)} 원`} icon={faFileInvoiceDollar} tone="orange" />
+                        <SummaryCard label="총 추가금액" value={`${formatNumber(totalSummary.additionalAmount)} 원`} icon={faFileInvoiceDollar} tone="orange" />
                         <SummaryCard label="총 발행금액" value={`${formatNumber(totalSummary.issuedAmount)} 원`} icon={faCircleCheck} tone="emerald" />
                         <SummaryCard label={scopedTeamBasisLabel} value={`${formatNumber(totalSummary.partnerCount)} 팀`} icon={faUsers} tone="sky" />
                         <SummaryCard label={`관련 ${pageTitle}`} value={`${formatNumber(totalSummary.siteCount)} 개`} icon={faCircleExclamation} tone="orange" />
@@ -3694,7 +3408,7 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                             </span>
                         </div>
                         <div className="overflow-x-auto">
-                            <table className="w-full min-w-[1560px] border-collapse text-[13px]">
+                            <table className="w-full min-w-[1700px] border-collapse text-[13px]">
                                 <thead>
                                     <tr className="text-center font-black text-slate-950">
                                         <th className="w-14 border border-slate-900 bg-gradient-to-br from-yellow-100 via-yellow-400 to-white p-2"></th>
@@ -3703,11 +3417,14 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                         </th>
                                         <th className="w-24 border border-slate-900 bg-gradient-to-br from-white via-amber-50 to-amber-200 p-2 tracking-[0.15em]">결제구분</th>
                                         <th className="w-20 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">공 수</th>
-                                        <th className="w-28 border border-slate-900 bg-gradient-to-br from-yellow-50 via-yellow-300 to-yellow-500 p-2 tracking-[0.05em] text-slate-950">지원단가</th>
-                                        <th className="w-32 border border-slate-900 bg-gradient-to-br from-yellow-50 via-yellow-300 to-yellow-500 p-2 tracking-[0.05em] text-slate-950">노임 총액</th>
-                                        <th className="w-28 border border-slate-900 bg-gradient-to-br from-emerald-50 via-emerald-300 to-emerald-500 p-2 tracking-[0.05em] text-emerald-950">청구단가</th>
-                                        <th className="w-32 border border-slate-900 bg-gradient-to-br from-emerald-50 via-emerald-300 to-emerald-500 p-2 tracking-[0.05em] text-emerald-950">발행금액</th>
-                                        <th className="w-24 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">추 가</th>
+                                        <th className="w-28 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.05em] text-slate-950">지원단가</th>
+                                        <th className="w-32 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.05em] text-slate-950">노임 총액</th>
+                                        <th className="w-28 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.05em] text-slate-950">청구단가</th>
+                                        <th className="w-32 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.05em] text-slate-950">발행금액</th>
+                                        <th className="w-24 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2">
+                                            <div>추가 금액</div>
+                                            <div className="mt-0.5 text-[9px] tracking-normal text-slate-600">직접입력 · 자동저장</div>
+                                        </th>
                                         <th className="w-32 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">합 계</th>
                                         <th className="w-36 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.2em]">진행구분</th>
                                         <th className="w-44 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">비 고</th>
@@ -3728,7 +3445,6 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                             const groupAmount = group.aggregates.reduce((sum, agg) => sum + agg.totalAmount, 0);
                                             const groupBillingAmount = group.aggregates.reduce((sum, agg) => sum + agg.billingAmount, 0);
                                             const groupIssuedAmount = group.aggregates.reduce((sum, agg) => sum + agg.issuedAmount, 0);
-                                            const groupVatExpenseAmount = group.aggregates.reduce((sum, agg) => sum + getAggregateVatExpenseClaimAmount(agg), 0);
                                             const groupExpenseClaimAmount = group.aggregates.reduce((sum, agg) => sum + getAggregateExpenseClaimAmount(agg), 0);
                                             const groupAdditional = group.aggregates.reduce((sum, agg) => sum + getAggregateAdditionalAmount(agg, manualAdjustments), 0);
                                             const groupTotal = group.aggregates.reduce((sum, agg) => sum + getAggregateTotalWithAdditional(agg, manualAdjustments), 0);
@@ -3784,11 +3500,11 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                     {groupPaymentMethod}
                                                                 </span>
                                                             </td>
-                                                            <td className="border border-slate-900 px-2 py-2 text-center font-mono font-black">{formatDayValue(groupManDay)}</td>
+                                                            <td className="border border-slate-900 px-2 py-2 text-center font-mono text-[16px] font-black">{formatDayValue(groupManDay)}</td>
                                                             <td className="border border-slate-900 px-2 py-2 text-right font-mono">{groupAverageUnitPrice > 0 ? formatNumber(groupAverageUnitPrice) : '-'}</td>
-                                                            <td className="border border-slate-900 px-2 py-2 text-right font-mono font-black text-slate-950">{formatNumber(groupAmount)}</td>
-                                                            <td className="border border-slate-900 px-2 py-2 text-right font-mono text-amber-700">{groupAverageBillingUnitPrice > 0 ? formatNumber(groupAverageBillingUnitPrice) : '-'}</td>
-                                                            <td className="border border-slate-900 px-2 py-2 text-right font-mono font-black text-amber-700">
+                                                            <td className="border border-slate-900 px-2 py-2 text-right font-mono text-[16px] font-black text-slate-950">{formatNumber(groupAmount)}</td>
+                                                            <td className="border border-slate-900 px-2 py-2 text-right font-mono text-slate-950">{groupAverageBillingUnitPrice > 0 ? formatNumber(groupAverageBillingUnitPrice) : '-'}</td>
+                                                            <td className="border border-slate-900 px-2 py-2 text-right font-mono text-[16px] font-black text-slate-950">
                                                                 {formatNumber(groupIssuedAmount)}
                                                             </td>
                                                             <td className="border border-slate-900 px-2 py-2 text-right font-mono text-blue-700">
@@ -3796,11 +3512,8 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                 {groupExpenseClaimAmount > 0 && (
                                                                     <div className="text-[10px] font-black leading-none text-emerald-700">경비 +{formatNumber(groupExpenseClaimAmount)}</div>
                                                                 )}
-                                                                {groupVatExpenseAmount > 0 && (
-                                                                    <div className="text-[10px] font-black leading-none text-amber-700">VAT +{formatNumber(groupVatExpenseAmount)}</div>
-                                                                )}
                                                             </td>
-                                                            <td className="border border-slate-900 px-2 py-2 text-right font-mono font-black text-slate-950">{formatNumber(groupTotal)}</td>
+                                                            <td className="border border-slate-900 px-2 py-2 text-right font-mono text-[16px] font-black text-slate-950">{formatNumber(groupTotal)}</td>
                                                             <td className="border border-slate-900 px-2 py-2 text-center text-[12px] font-black text-slate-500">-</td>
                                                             <td className="border border-slate-900 px-2 py-2 text-center text-[12px] font-bold text-slate-500">
                                                                 2단 현장담당팀 · 3단 현장 · 4단 작업자
@@ -3816,8 +3529,7 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                         const manualAdjustment = getAdjustment(manualAdjustments, aggKey);
                                                         const manualAdditionalAmount = manualAdjustment.additionalAmount;
                                                         const expenseClaimAmount = getAggregateExpenseClaimAmount(agg);
-                                                        const vatExpenseAmount = getAggregateVatExpenseClaimAmount(agg);
-                                                        const expenseStatementAmount = getAggregateExpenseStatementAmount(agg);
+                                                        const expenseStatementAmount = getAggregateExpenseStatementAmount(agg, manualAdjustment);
                                                         const aggregateTotal = getAggregateTotalWithAdditional(agg, manualAdjustments);
                                                         const progressOption = getSupportProgressOption(manualAdjustment.progressStatus);
                                                         const remarkPlaceholder = getAggregateRemarkFallback(agg) || '비고 입력';
@@ -3846,20 +3558,25 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                         className={`border border-slate-900 py-1.5 font-black text-slate-950 ${isExternalSupportGroup ? 'bg-white px-1 text-left' : 'px-2 text-center'} ${progressOption ? '' : isExternalSupportGroup ? '' : getTeamCellClass(agg.direction)}`}
                                                                         style={progressOption ? { backgroundColor: progressOption.rowColor } : undefined}
                                                                     >
-                                                                        <span className="inline-flex min-w-0 items-center gap-1">
-                                                                            <FontAwesomeIcon icon={faChevronRight} className={`shrink-0 text-[10px] ${isExpanded ? 'rotate-90' : ''}`} />
-                                                                            {isExternalSupportGroup && (
-                                                                                <span className="shrink-0 rounded bg-emerald-700 px-1.5 py-0.5 text-[10px] font-black text-white">2단</span>
-                                                                            )}
-                                                                            {agg.companyName}
-                                                                        </span>
+                                                                        <div className="min-w-0">
+                                                                            <span className="inline-flex min-w-0 items-center gap-1">
+                                                                                <FontAwesomeIcon icon={faChevronRight} className={`shrink-0 text-[10px] ${isExpanded ? 'rotate-90' : ''}`} />
+                                                                                {isExternalSupportGroup && (
+                                                                                    <span className="shrink-0 rounded bg-emerald-700 px-1.5 py-0.5 text-[10px] font-black text-white">2단</span>
+                                                                                )}
+                                                                                {agg.companyName}
+                                                                            </span>
+                                                                            <div className={`mt-1 truncate text-[10px] font-semibold ${agg.accountNumber ? 'text-slate-600' : 'text-rose-600'}`}>
+                                                                                {getSettlementAccountLabel(agg) || '계좌 정보 없음'}
+                                                                            </div>
+                                                                        </div>
                                                                     </td>
                                                                     <td className="border border-slate-900 px-2 py-1.5 text-center">
                                                                         <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-black ${getPaymentMethodBadgeClassName(aggregatePaymentMethod)}`}>
                                                                             {aggregatePaymentMethod}
                                                                         </span>
                                                                     </td>
-                                                                    <td className="border border-slate-900 px-2 py-1.5 text-center font-mono">{formatDayValue(agg.totalManDay)}</td>
+                                                                    <td className="border border-slate-900 px-2 py-1.5 text-center font-mono text-[16px] font-black">{formatDayValue(agg.totalManDay)}</td>
                                                                     <td className="border border-slate-900 px-1 py-1 text-right font-mono" onClick={(event) => event.stopPropagation()}>
                                                                         <input
                                                                             type="text"
@@ -3868,11 +3585,11 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                             value={formatOptionalMoney(getAggregateUnitPrice(agg))}
                                                                             onChange={(event) => handleApplyAggregateSupportRate(agg, event.target.value)}
                                                                             onFocus={(event) => event.currentTarget.select()}
-                                                                            className="h-7 w-full bg-transparent px-1 text-right font-mono text-sky-700 outline-none transition focus:bg-sky-50 focus:ring-1 focus:ring-sky-400"
+                                                                            className="h-7 w-full bg-transparent px-1 text-right font-mono text-slate-950 outline-none transition focus:bg-slate-50 focus:ring-1 focus:ring-slate-300"
                                                                             placeholder="0"
                                                                         />
                                                                     </td>
-                                                                    <td className="border border-slate-900 px-2 py-1.5 text-right font-mono">{formatNumber(agg.totalAmount)}</td>
+                                                                    <td className="border border-slate-900 px-2 py-1.5 text-right font-mono text-[16px] font-black text-slate-950">{formatNumber(agg.totalAmount)}</td>
                                                                     <td className="border border-slate-900 px-1 py-1 text-right font-mono" onClick={(event) => event.stopPropagation()}>
                                                                         <input
                                                                             type="text"
@@ -3881,11 +3598,11 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                             value={formatOptionalMoney(getAggregateBillingUnitPrice(agg))}
                                                                             onChange={(event) => handleApplyAggregateRate(agg, event.target.value)}
                                                                             onFocus={(event) => event.currentTarget.select()}
-                                                                            className="h-7 w-full bg-transparent px-1 text-right font-mono text-amber-700 outline-none transition focus:bg-amber-50 focus:ring-1 focus:ring-amber-400"
+                                                                            className="h-7 w-full bg-transparent px-1 text-right font-mono text-slate-950 outline-none transition focus:bg-slate-50 focus:ring-1 focus:ring-slate-300"
                                                                             placeholder="0"
                                                                         />
                                                                     </td>
-                                                                    <td className="border border-slate-900 px-2 py-1.5 text-right font-mono font-black text-amber-700">
+                                                                    <td className="border border-slate-900 px-2 py-1.5 text-right font-mono text-[16px] font-black text-slate-950">
                                                                         {formatNumber(agg.issuedAmount)}
                                                                     </td>
                                                                     <td className="border border-slate-900 px-1 py-1 text-right font-mono" onClick={(event) => event.stopPropagation()}>
@@ -3905,14 +3622,9 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                                     경비 +{formatNumber(expenseClaimAmount)}
                                                                                 </div>
                                                                             )}
-                                                                            {vatExpenseAmount > 0 && (
-                                                                                <div className="text-right text-[10px] font-black leading-none text-amber-700">
-                                                                                    VAT +{formatNumber(vatExpenseAmount)}
-                                                                                </div>
-                                                                            )}
                                                                         </div>
                                                                     </td>
-                                                                    <td className="border border-slate-900 px-2 py-1.5 text-right font-mono">{formatNumber(aggregateTotal)}</td>
+                                                                    <td className="border border-slate-900 px-2 py-1.5 text-right font-mono text-[16px] font-black text-slate-950">{formatNumber(aggregateTotal)}</td>
                                                                     <td className="border border-slate-900 px-1 py-1 text-center font-medium text-slate-900" onClick={(event) => event.stopPropagation()}>
                                                                         <select
                                                                             aria-label={`${agg.companyName} 진행구분`}
@@ -3943,6 +3655,9 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                             className="h-7 w-full bg-transparent px-1 text-center text-[12px] font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-amber-50 focus:ring-1 focus:ring-amber-400"
                                                                             placeholder={remarkPlaceholder}
                                                                         />
+                                                                        <div className={`mt-1 truncate px-1 text-[10px] font-semibold ${agg.accountNumber ? 'text-slate-600' : 'text-rose-600'}`}>
+                                                                            {getSettlementAccountLabel(agg) || '계좌 정보 없음'}
+                                                                        </div>
                                                                     </td>
                                                                     <td className="border border-slate-900 px-1 py-1 text-center font-medium text-slate-900" onClick={(event) => event.stopPropagation()}>
                                                                         <div className="flex flex-col gap-1">
@@ -3990,13 +3705,12 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                 {renderLaborStatementPanelRow(agg.aggregateId)}
                                                                 {isExpanded && agg.sites.map(site => {
                                                                     const siteExpenseClaimAmount = getSiteExpenseClaimAmount(site);
-                                                                    const siteVatExpenseAmount = getSiteVatExpenseClaimAmount(site);
-                                                                    const siteExpenseStatementAmount = getSiteExpenseStatementAmount(site);
-                                                                    const siteTotalAmount = site.issuedAmount + siteExpenseStatementAmount;
                                                                     const siteKey = getAggregateSiteRowKey(agg, site);
                                                                     const isSiteExpanded = expandedSiteRows.has(siteKey);
                                                                     const isSiteLaborPanelOpen = isLaborStatementPanelOpen(agg.aggregateId, siteKey);
                                                                     const siteManualAdjustment = getAdjustment(manualAdjustments, siteKey);
+                                                                    const siteExpenseStatementAmount = getSiteExpenseStatementAmount(site, siteManualAdjustment);
+                                                                    const siteTotalAmount = site.issuedAmount + siteExpenseStatementAmount;
                                                                     const siteProgressOption = getSupportProgressOption(siteManualAdjustment.progressStatus);
                                                                     const siteRemarkFallback = getSupportRemarkCompanyName(agg, site) || '비고 입력';
                                                                     return (
@@ -4020,7 +3734,7 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                                         {normalizePaymentMethod(site.paymentMethod)}
                                                                                     </span>
                                                                                 </td>
-                                                                                <td className="border border-slate-900 px-2 py-1 text-center font-mono text-slate-600">{formatDayValue(site.totalManDay)}</td>
+                                                                                <td className="border border-slate-900 px-2 py-1 text-center font-mono text-[16px] font-black text-slate-900">{formatDayValue(site.totalManDay)}</td>
                                                                                 <td className="border border-slate-900 px-1 py-1 text-right font-mono text-slate-600" onClick={(event) => event.stopPropagation()}>
                                                                                     <input
                                                                                         type="text"
@@ -4029,11 +3743,11 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                                         value={formatOptionalMoney(getSiteUnitPrice(site))}
                                                                                         onChange={(event) => handleApplySiteSupportRate(agg, site.siteId, event.target.value)}
                                                                                         onFocus={(event) => event.currentTarget.select()}
-                                                                                        className="h-7 w-full bg-transparent px-1 text-right font-mono text-sky-700 outline-none transition focus:bg-sky-50 focus:ring-1 focus:ring-sky-400"
+                                                                                        className="h-7 w-full bg-transparent px-1 text-right font-mono text-slate-950 outline-none transition focus:bg-slate-50 focus:ring-1 focus:ring-slate-300"
                                                                                         placeholder="0"
                                                                                     />
                                                                                 </td>
-                                                                                <td className="border border-slate-900 px-2 py-1 text-right font-mono text-slate-600">{formatNumber(site.totalAmount)}</td>
+                                                                                <td className="border border-slate-900 px-2 py-1 text-right font-mono text-[16px] font-black text-slate-950">{formatNumber(site.totalAmount)}</td>
                                                                                 <td className="border border-slate-900 px-1 py-1 text-right font-mono text-slate-500" onClick={(event) => event.stopPropagation()}>
                                                                                     <input
                                                                                         type="text"
@@ -4042,22 +3756,19 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                                         value={formatOptionalMoney(getSiteBillingUnitPrice(site))}
                                                                                         onChange={(event) => handleApplySiteRate(agg, site.siteId, event.target.value)}
                                                                                         onFocus={(event) => event.currentTarget.select()}
-                                                                                        className="h-7 w-full bg-transparent px-1 text-right font-mono text-amber-700 outline-none transition focus:bg-amber-50 focus:ring-1 focus:ring-amber-400"
+                                                                                        className="h-7 w-full bg-transparent px-1 text-right font-mono text-slate-950 outline-none transition focus:bg-slate-50 focus:ring-1 focus:ring-slate-300"
                                                                                         placeholder="0"
                                                                                     />
                                                                                 </td>
-                                                                                <td className="border border-slate-900 px-2 py-1 text-right font-mono font-black text-amber-700">
+                                                                                <td className="border border-slate-900 px-2 py-1 text-right font-mono text-[16px] font-black text-slate-950">
                                                                                     {formatNumber(site.issuedAmount)}
                                                                                 </td>
                                                                                 <td className="border border-slate-900 px-2 py-1 text-right font-mono font-black text-emerald-700">
                                                                                     {siteExpenseClaimAmount > 0 && (
                                                                                         <div className="text-[10px] leading-none">경비 +{formatNumber(siteExpenseClaimAmount)}</div>
                                                                                     )}
-                                                                                    {siteVatExpenseAmount > 0 && (
-                                                                                        <div className="text-[10px] leading-none text-amber-700">VAT +{formatNumber(siteVatExpenseAmount)}</div>
-                                                                                    )}
                                                                                 </td>
-                                                                                <td className="border border-slate-900 px-2 py-1 text-right font-mono text-slate-600">{formatNumber(siteTotalAmount)}</td>
+                                                                                <td className="border border-slate-900 px-2 py-1 text-right font-mono text-[16px] font-black text-slate-950">{formatNumber(siteTotalAmount)}</td>
                                                                                 <td className="border border-slate-900 px-1 py-1 text-center font-medium text-slate-900" onClick={(event) => event.stopPropagation()}>
                                                                                     <select
                                                                                         aria-label={`${site.siteName} 진행구분`}
@@ -4164,11 +3875,11 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                                                             <td className="border border-slate-900 px-4 py-2.5 font-bold text-slate-600">{worker.workerTeamName || worker.teamName || '-'}</td>
                                                                                                             <td className="border border-slate-900 px-4 py-2.5 font-bold text-slate-600">{worker.siteResponsibleTeamName || worker.targetTeamName || '-'}</td>
                                                                                                             <td className="border border-slate-900 px-4 py-2.5 font-bold text-slate-600">{worker.settlementTeamName || agg.companyName || '-'}</td>
-                                                                                                            <td className="border border-slate-900 px-4 py-2.5 text-right font-mono font-bold">{formatDayValue(worker.manDay)}</td>
-                                                                                                            <td className="border border-slate-900 px-4 py-2.5 text-right font-mono text-slate-500">{formatNumber(worker.unitPrice)}</td>
-                                                                                                            <td className="border border-slate-900 px-4 py-2.5 text-right font-mono font-black text-slate-800">{formatNumber(worker.amount)}</td>
-                                                                                                            <td className="border border-slate-900 px-4 py-2.5 text-right font-mono text-amber-600">{formatNumber(worker.billingUnitPrice)}</td>
-                                                                                                            <td className="border border-slate-900 px-4 py-2.5 text-right font-mono font-black text-amber-700">{formatNumber(worker.issuedAmount)}</td>
+                                                                                                            <td className="border border-slate-900 px-4 py-2.5 text-right font-mono text-[15px] font-black">{formatDayValue(worker.manDay)}</td>
+                                                                                                            <td className="border border-slate-900 px-4 py-2.5 text-right font-mono text-slate-950">{formatNumber(worker.unitPrice)}</td>
+                                                                                                            <td className="border border-slate-900 px-4 py-2.5 text-right font-mono text-[15px] font-black text-slate-800">{formatNumber(worker.amount)}</td>
+                                                                                                            <td className="border border-slate-900 px-4 py-2.5 text-right font-mono text-slate-950">{formatNumber(worker.billingUnitPrice)}</td>
+                                                                                                            <td className="border border-slate-900 px-4 py-2.5 text-right font-mono text-[15px] font-black text-slate-950">{formatNumber(worker.issuedAmount)}</td>
                                                                                                             <td className="border border-slate-900 px-4 py-2.5 text-slate-500">{worker.evidenceNote || site.evidenceNote || agg.evidenceNote || '-'}</td>
                                                                                                         </tr>
                                                                                                     ))}
@@ -4187,13 +3898,13 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                     {!isExternalSupportGroup && (
                                                         <tr className="bg-white font-black">
                                                             <td className="border border-slate-900 px-2 py-1.5 text-center tracking-[0.35em]">합 계</td>
-                                                            <td className="border border-slate-900 px-2 py-1.5 text-center font-mono">{formatDayValue(groupManDay)}</td>
+                                                            <td className="border border-slate-900 px-2 py-1.5 text-center font-mono text-[16px]">{formatDayValue(groupManDay)}</td>
                                                             <td className="border border-slate-900 px-2 py-1.5"></td>
-                                                            <td className="border border-slate-900 px-2 py-1.5 text-right font-mono">{formatNumber(groupAmount)}</td>
+                                                            <td className="border border-slate-900 px-2 py-1.5 text-right font-mono text-[16px]">{formatNumber(groupAmount)}</td>
                                                             <td className="border border-slate-900 px-2 py-1.5"></td>
-                                                            <td className="border border-slate-900 px-2 py-1.5 text-right font-mono text-amber-700">{formatNumber(groupIssuedAmount)}</td>
+                                                            <td className="border border-slate-900 px-2 py-1.5 text-right font-mono text-[16px] text-slate-950">{formatNumber(groupIssuedAmount)}</td>
                                                             <td className="border border-slate-900 px-2 py-1.5 text-right font-mono">{formatOptionalMoney(groupAdditional)}</td>
-                                                            <td className="border border-slate-900 px-2 py-1.5 text-right font-mono">{formatNumber(groupTotal)}</td>
+                                                            <td className="border border-slate-900 px-2 py-1.5 text-right font-mono text-[16px]">{formatNumber(groupTotal)}</td>
                                                             <td className="border border-slate-900 px-2 py-1.5"></td>
                                                             <td className="border border-slate-900 px-2 py-1.5"></td>
                                                             <td className="border border-slate-900 px-2 py-1.5"></td>
@@ -5092,145 +4803,6 @@ const ExpenseClaimShareModal: React.FC<{
     );
 };
 
-const DetailModal: React.FC<{
-    aggregate: SupportCompanyAggregate;
-    site: SupportSiteRow;
-    onClose: () => void;
-    yearMonth: string;
-    capturePreview: (key: string, fileName: string) => Promise<void>;
-    capturingKey: string | null;
-    previewRefs: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
-}> = ({ aggregate, site, onClose, yearMonth, capturePreview, capturingKey, previewRefs }) => {
-    const key = `${aggregate.aggregateId}-${site.siteId}`;
-    const detailCaptureKey = `${key}-detail`;
-    const siteExpenseClaimAmount = getSiteExpenseClaimAmount(site);
-    const siteVatExpenseAmount = getSiteVatExpenseClaimAmount(site);
-    const siteExpenseStatementAmount = getSiteExpenseStatementAmount(site);
-    const siteTotalAmount = site.issuedAmount + siteExpenseStatementAmount;
-    return (
-        <Modal title={`${site.siteName} 상세 내역 및 미리보기`} onClose={onClose} widthClass="max-w-6xl">
-            <div className="flex-1 overflow-auto bg-slate-50">
-                <div
-                    className="p-6 space-y-6"
-                    ref={el => { if (el) previewRefs.current[detailCaptureKey] = el; else delete previewRefs.current[detailCaptureKey]; }}
-                >
-                    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-10 gap-4">
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">분류</div>
-                            <div className="text-sm font-black text-indigo-600">{aggregate.direction}</div>
-                        </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">기준팀</div>
-                            <div className="text-sm font-black text-slate-800">{aggregate.viewTeamName}</div>
-                        </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">작업팀(작업자 소속)</div>
-                            <div className="text-sm font-black text-slate-800">{aggregate.sourceTeamName}</div>
-                        </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">정산 주체({getSettlementBasisLabel(aggregate.direction)})</div>
-                            <div className="text-sm font-black text-slate-800">{aggregate.companyName}</div>
-                        </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">결제구분</div>
-                            <div className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-black ${getPaymentMethodBadgeClassName(site.paymentMethod)}`}>
-                                {normalizePaymentMethod(site.paymentMethod)}
-                            </div>
-                        </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">노임총액</div>
-                            <div className="text-sm font-black text-amber-600">{formatNumber(site.totalAmount)}원</div>
-                        </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">부가세</div>
-                            <div className="text-sm font-black text-amber-700">{formatNumber(site.vatAmount)}원</div>
-                        </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">발행금액</div>
-                            <div className="text-sm font-black text-amber-700">{formatNumber(site.issuedAmount)}원</div>
-                        </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">추가</div>
-                            <div className="text-sm font-black text-emerald-600">{formatNumber(siteExpenseStatementAmount)}원</div>
-                            {siteExpenseClaimAmount > 0 && (
-                                <div className="mt-1 text-[10px] font-black leading-none text-emerald-700">경비 +{formatNumber(siteExpenseClaimAmount)}</div>
-                            )}
-                            {siteVatExpenseAmount > 0 && (
-                                <div className="mt-1 text-[10px] font-black leading-none text-amber-700">VAT +{formatNumber(siteVatExpenseAmount)}</div>
-                            )}
-                        </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">합계</div>
-                            <div className="text-sm font-black text-slate-900">{formatNumber(siteTotalAmount)}원</div>
-                        </div>
-                    </div>
-
-                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-                            <div>
-                                <h4 className="text-sm font-black text-slate-800">투입 인원 명단 ({site.workers.length}명)</h4>
-                                <p className="mt-1 text-[11px] font-semibold text-slate-500">{aggregate.settlementRule}</p>
-                            </div>
-                            <div className="flex gap-2" data-capture-ignore="true">
-                                <button
-                                    type="button"
-                                    disabled={capturingKey === detailCaptureKey}
-                                    onClick={() => capturePreview(detailCaptureKey, getSupportDetailImageFileName(aggregate, site, yearMonth))}
-                                    className="bg-amber-500 text-white px-3 py-1.5 rounded-lg text-xs font-black shadow-md hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    <FontAwesomeIcon icon={capturingKey === detailCaptureKey ? faSpinner : faCamera} spin={capturingKey === detailCaptureKey} className="mr-2" />
-                                    {capturingKey === detailCaptureKey ? '저장 중' : '이미지 캡처'}
-                                </button>
-                            </div>
-                        </div>
-                        <div className="p-0">
-                            <table className="w-full text-xs">
-                                <thead className="bg-slate-50 text-slate-400 border-b border-slate-100">
-                                    <tr>
-                                        <th className="px-4 py-2.5 text-left">날짜</th>
-                                        <th className="px-4 py-2.5 text-left">성명</th>
-                                        <th className="px-4 py-2.5 text-left">작업팀(작업자 소속)</th>
-                                        <th className="px-4 py-2.5 text-left">현장담당팀</th>
-                                        <th className="px-4 py-2.5 text-left">지원 흐름</th>
-                                        <th className="px-4 py-2.5 text-right">공수</th>
-                                        <th className="px-4 py-2.5 text-right">지원단가</th>
-                                        <th className="px-4 py-2.5 text-right">노임총액</th>
-                                        <th className="px-4 py-2.5 text-center">결제</th>
-                                        <th className="px-4 py-2.5 text-right">청구단가</th>
-                                        <th className="px-4 py-2.5 text-right">부가세</th>
-                                        <th className="px-4 py-2.5 text-right">발행금액</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {site.workers.map((w, i) => (
-                                        <tr key={i} className="border-b border-slate-50 last:border-0">
-                                            <td className="px-4 py-2.5 font-mono text-slate-500">{w.date}</td>
-                                            <td className="px-4 py-2.5 font-black text-slate-800">{w.workerName}</td>
-                                            <td className="px-4 py-2.5 font-bold text-slate-600">{w.workerTeamName || w.teamName || '-'}</td>
-                                            <td className="px-4 py-2.5 font-bold text-slate-600">{w.siteResponsibleTeamName || w.targetTeamName || '-'}</td>
-                                            <td className="px-4 py-2.5 text-slate-500">{getWorkerFlowLabel(w, site)}</td>
-                                            <td className="px-4 py-2.5 text-right font-mono font-bold">{w.manDay.toFixed(1)}</td>
-                                            <td className="px-4 py-2.5 text-right font-mono text-slate-400">{formatNumber(w.unitPrice)}</td>
-                                            <td className="px-4 py-2.5 text-right font-mono font-black text-slate-700">{formatNumber(w.amount)}</td>
-                                            <td className="px-4 py-2.5 text-center">
-                                                <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-black ${getPaymentMethodBadgeClassName(w.paymentMethod || site.paymentMethod)}`}>
-                                                    {normalizePaymentMethod(w.paymentMethod || site.paymentMethod)}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-2.5 text-right font-mono text-amber-600">{formatNumber(w.billingUnitPrice)}</td>
-                                            <td className="px-4 py-2.5 text-right font-mono text-amber-600">{formatNumber(w.vatAmount)}</td>
-                                            <td className="px-4 py-2.5 text-right font-mono font-black text-amber-700">{formatNumber(w.issuedAmount)}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </Modal>
-    );
-};
 
 const ExpenseClaimStatementPreview: React.FC<{
     aggregate: SupportCompanyAggregate;

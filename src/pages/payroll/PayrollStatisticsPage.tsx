@@ -8,7 +8,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { Square, CheckSquare } from 'lucide-react';
 
-import { dailyReportService, DailyReport, DailyReportWorker } from '../../services/dailyReportService';
+import { dailyReportService, DailyReportWorker } from '../../services/dailyReportService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';
@@ -17,7 +17,6 @@ import { payrollConfigService, PayrollConfig } from '../../services/payrollConfi
 
 // --- Types ---
 type SalaryMode = 'daily' | 'monthly' | 'all';
-type StatsScope = 'team' | 'worker';
 
 type DailyDeductionInputs = {
   actualDeductionUnitPrice: number;
@@ -80,8 +79,6 @@ const formatWon = (value: number): string => {
   return Math.round(safe).toLocaleString('ko-KR');
 };
 
-const normalizeKey = (value: string | undefined): string =>
-  (value ?? '').replace(/\(.*?\)/g, '').replace(/\s+/g, '').trim();
 
 const compareYearMonth = (a: string, b: string): number => {
   const left = (a ?? '').trim();

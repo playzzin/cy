@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faSearch, faEraser, faUserTag, faTruckPlane, faBuilding,
-    faChevronDown, faChevronRight, faUser, faUsers, faMapMarkerAlt,
-    faFilter, faEye, faEyeSlash, faIndustry, faStar
+    faSearch, faUserTag, faTruckPlane, faBuilding,
+    faUsers,
+    faEyeSlash, faIndustry, faStar
 } from '@fortawesome/free-solid-svg-icons';
 import { dailyReportService } from '../../services/dailyReportService';
 import { manpowerService, Worker } from '../../services/manpowerService';
@@ -303,30 +303,8 @@ const IntegratedSupportStatusBoard: React.FC = () => {
         }
     };
 
-    const handleClear = () => {
-        setYear(new Date().getFullYear());
-        setMonth(new Date().getMonth() + 1);
-    };
 
-    const toggleSite = (siteId: string) => {
-        const newSet = new Set(expandedSites);
-        if (newSet.has(siteId)) {
-            newSet.delete(siteId);
-        } else {
-            newSet.add(siteId);
-        }
-        setExpandedSites(newSet);
-    };
 
-    const toggleTeam = (teamId: string) => {
-        const newSet = new Set(expandedTeams);
-        if (newSet.has(teamId)) {
-            newSet.delete(teamId);
-        } else {
-            newSet.add(teamId);
-        }
-        setExpandedTeams(newSet);
-    };
 
     const currentStats = viewMode === 'inbound' ? inboundStats : outboundStats;
     const themeColor = viewMode === 'inbound' ? 'orange' : 'teal';

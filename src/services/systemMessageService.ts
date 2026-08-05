@@ -14,6 +14,7 @@ import type { NoticeAuthor, NoticePriority, UpsertNoticeInput } from '../types/n
 import type { TeamSettlementDocument } from '../types/teamSettlement';
 import type { DispatchAssignment } from './dispatchService';
 import { messageService } from './messageService';
+import { auditService } from './auditService';
 import {
   createDefaultRecipientRule,
   normalizeRecipientRule,
@@ -632,6 +633,61 @@ const saveSettings = async (settings: SystemMessageSettings): Promise<void> => {
   }, { merge: true });
 };
 
+type AutomationMessageLogResult = 'sent' | 'failed' | 'skipped';
+
+const writeAutomationMessageLog = async (params: {
+  result: AutomationMessageLogResult;
+  event: SystemMessageEvent;
+  payload: { title: string; priority?: ErpMessagePriority; actionUrl?: string };
+  messageId?: string;
+  recipientScope?: string;
+  recipientIds?: string[];
+  recipientNames?: string[];
+  recipientDescription?: string;
+  context?: MessageRecipientContext;
+  reason?: string;
+  error?: unknown;
+}): Promise<void> => {
+  const action = params.result === 'sent'
+    ? 'MESSAGE_AUTOMATION_SENT'
+    : params.result === 'failed'
+      ? 'MESSAGE_AUTOMATION_FAILED'
+      : 'MESSAGE_AUTOMATION_SKIPPED';
+  const errorMessage = params.error instanceof Error
+    ? params.error.message
+    : typeof params.error === 'string'
+      ? params.error
+      : params.error == null ? '' : String(params.error);
+
+  await auditService.log({
+    action,
+    category: 'MESSAGE_AUTOMATION',
+    actorId: 'system',
+    actorEmail: 'system',
+    actorName: 'ERP 자동 메시지',
+    targetId: params.messageId || params.event,
+    targetName: SYSTEM_MESSAGE_EVENT_LABELS[params.event],
+    details: {
+      event: params.event,
+      eventLabel: SYSTEM_MESSAGE_EVENT_LABELS[params.event],
+      result: params.result,
+      messageId: params.messageId || null,
+      messageTitle: params.payload.title,
+      priority: params.payload.priority || 'normal',
+      actionUrl: params.payload.actionUrl || null,
+      recipientScope: params.recipientScope || null,
+      recipientIds: params.recipientIds || [],
+      recipientNames: params.recipientNames || [],
+      recipientCount: params.recipientScope === 'all' ? null : (params.recipientIds || []).length,
+      recipientDescription: params.recipientDescription || '',
+      teamId: params.context?.teamId || null,
+      teamName: params.context?.teamName || null,
+      reason: params.reason || null,
+      errorMessage: errorMessage || null,
+    },
+  });
+};
+
 const notifyConfiguredEvent = async (
   event: SystemMessageEvent,
   payload: {
@@ -643,40 +699,87 @@ const notifyConfiguredEvent = async (
   },
   context?: MessageRecipientContext
 ): Promise<void> => {
-  const settings = await getSettings();
-  if (!settings.enabled || !settings.events[event]?.enabled) return;
-  const eventRule = normalizeRecipientRule(
-    settings.events[event]?.recipientRule || createDefaultRecipientRule('global'),
-    'global'
-  );
-  const resolvedRecipients = eventRule.mode === 'global'
-    ? {
-      recipientScope: settings.recipientScope,
-      recipientIds: settings.recipientScope === 'users' ? settings.recipientIds : [],
-      recipientNames: settings.recipientScope === 'users' ? settings.recipientNames : ['전체 사용자'],
+  let recipientScope: string | undefined;
+  let recipientIds: string[] = [];
+  let recipientNames: string[] = [];
+  let recipientDescription = '';
+
+  try {
+    const settings = await getSettings();
+    if (!settings.enabled || !settings.events[event]?.enabled) return;
+    const eventRule = normalizeRecipientRule(
+      settings.events[event]?.recipientRule || createDefaultRecipientRule('global'),
+      'global'
+    );
+    const resolvedRecipients = eventRule.mode === 'global'
+      ? {
+        recipientScope: settings.recipientScope,
+        recipientIds: settings.recipientScope === 'users' ? settings.recipientIds : [],
+        recipientNames: settings.recipientScope === 'users' ? settings.recipientNames : ['전체 사용자'],
+        description: settings.recipientScope === 'users' ? `지정 사용자 ${settings.recipientIds.length}명` : '전체 사용자',
+      }
+      : resolveMessageRecipients(eventRule, await getRecipientData(), context);
+
+    recipientScope = resolvedRecipients.recipientScope;
+    recipientIds = resolvedRecipients.recipientScope === 'users' ? resolvedRecipients.recipientIds : [];
+    recipientNames = resolvedRecipients.recipientNames;
+    recipientDescription = resolvedRecipients.description;
+
+    if (resolvedRecipients.recipientScope === 'users' && resolvedRecipients.recipientIds.length === 0) {
+      await writeAutomationMessageLog({
+        result: 'skipped',
+        event,
+        payload,
+        recipientScope,
+        recipientIds,
+        recipientNames,
+        recipientDescription,
+        context,
+        reason: 'recipient-empty',
+      });
+      return;
     }
-    : resolveMessageRecipients(eventRule, await getRecipientData(), context);
 
-  if (resolvedRecipients.recipientScope === 'users' && resolvedRecipients.recipientIds.length === 0) return;
+    const messageId = await messageService.createMessage({
+      type: 'system',
+      title: payload.title,
+      body: payload.body,
+      category: '시스템',
+      priority: payload.priority || 'normal',
+      senderId: 'system',
+      senderName: 'ERP 시스템',
+      recipientScope: resolvedRecipients.recipientScope,
+      recipientIds,
+      recipientNames: recipientNames.length > 0 ? recipientNames : ['전체 사용자'],
+      actionLabel: payload.actionLabel,
+      actionUrl: payload.actionUrl,
+    });
 
-  settings.recipientScope = resolvedRecipients.recipientScope;
-  settings.recipientIds = resolvedRecipients.recipientScope === 'users' ? resolvedRecipients.recipientIds : [];
-  settings.recipientNames = resolvedRecipients.recipientNames;
-
-  await messageService.createMessage({
-    type: 'system',
-    title: payload.title,
-    body: payload.body,
-    category: '시스템',
-    priority: payload.priority || 'normal',
-    senderId: 'system',
-    senderName: 'ERP 시스템',
-    recipientScope: settings.recipientScope,
-    recipientIds: settings.recipientScope === 'users' ? settings.recipientIds : [],
-    recipientNames: settings.recipientScope === 'users' ? settings.recipientNames : ['전체 사용자'],
-    actionLabel: payload.actionLabel,
-    actionUrl: payload.actionUrl,
-  });
+    await writeAutomationMessageLog({
+      result: 'sent',
+      event,
+      payload,
+      messageId,
+      recipientScope,
+      recipientIds,
+      recipientNames,
+      recipientDescription,
+      context,
+    });
+  } catch (error) {
+    await writeAutomationMessageLog({
+      result: 'failed',
+      event,
+      payload,
+      recipientScope,
+      recipientIds,
+      recipientNames,
+      recipientDescription,
+      context,
+      error,
+    });
+    throw error;
+  }
 };
 
 export const systemMessageService = {

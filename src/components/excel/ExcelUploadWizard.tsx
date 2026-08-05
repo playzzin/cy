@@ -6,6 +6,7 @@ import {
     faFileExcel, faArrowRight, faDatabase, faTimes, faDownload, faCog
 } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
+import { fileTransferAuditService } from '../../services/fileTransferAuditService';
 
 // --- Types ---
 export interface FieldDef {
@@ -110,7 +111,30 @@ const ExcelUploadWizard = <T extends Record<string, any>>({
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, '데이터');
         const fileName = sampleFileName || 'sample_upload_template';
-        XLSX.writeFile(wb, `${fileName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+        const outputFileName = `${fileName}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        try {
+            XLSX.writeFile(wb, outputFileName);
+            void fileTransferAuditService.log({
+                kind: 'excel',
+                direction: 'download',
+                status: 'success',
+                source: title,
+                operation: 'sample_template',
+                fileName: outputFileName,
+                recordCount: dataRows.length,
+            });
+        } catch (error) {
+            void fileTransferAuditService.log({
+                kind: 'excel',
+                direction: 'download',
+                status: 'failure',
+                source: title,
+                operation: 'sample_template',
+                fileName: outputFileName,
+                error,
+            });
+            throw error;
+        }
     };
 
     // --- 1. File Upload Logic ---
@@ -123,33 +147,59 @@ const ExcelUploadWizard = <T extends Record<string, any>>({
     const processFile = (file: File) => {
         const reader = new FileReader();
         reader.onload = (evt) => {
-            const bstr = evt.target?.result;
-            const wb = XLSX.read(bstr, { type: 'binary' });
-            const wsName = wb.SheetNames[0];
-            const ws = wb.Sheets[wsName];
+            try {
+                const bstr = evt.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsName = wb.SheetNames[0];
+                const ws = wb.Sheets[wsName];
 
-            // Read Headers
-            const headers = XLSX.utils.sheet_to_json(ws, { header: 1 })[0] as string[];
-            // Read Data
-            const data = XLSX.utils.sheet_to_json(ws);
+                // Read Headers
+                const headers = XLSX.utils.sheet_to_json(ws, { header: 1 })[0] as string[];
+                // Read Data
+                const data = XLSX.utils.sheet_to_json(ws);
 
-            setRawFile(file);
-            setExcelHeaders(headers);
-            setRawRows(data);
+                setRawFile(file);
+                setExcelHeaders(headers);
+                setRawRows(data);
 
-            // Auto mapping
-            const initialMapping: Record<string, string> = {};
-            fields.forEach(field => {
-                const matched = headers.find(h =>
-                    h === field.label ||
-                    field.aliases?.includes(h) ||
-                    h.includes(field.label) // Fuzzy
-                );
-                if (matched) initialMapping[field.key] = matched;
+                // Auto mapping
+                const initialMapping: Record<string, string> = {};
+                fields.forEach(field => {
+                    const matched = headers.find(h =>
+                        h === field.label ||
+                        field.aliases?.includes(h) ||
+                        h.includes(field.label) // Fuzzy
+                    );
+                    if (matched) initialMapping[field.key] = matched;
+                });
+                setFieldMapping(initialMapping);
+
+                setStep('MAPPING');
+            } catch (error) {
+                void fileTransferAuditService.log({
+                    kind: 'excel',
+                    direction: 'upload',
+                    status: 'failure',
+                    source: title,
+                    operation: 'parse',
+                    fileName: file.name,
+                    fileSize: file.size,
+                    error,
+                });
+                Swal.fire('오류', '엑셀 파일을 읽을 수 없습니다.', 'error');
+            }
+        };
+        reader.onerror = () => {
+            void fileTransferAuditService.log({
+                kind: 'excel',
+                direction: 'upload',
+                status: 'failure',
+                source: title,
+                operation: 'read',
+                fileName: file.name,
+                fileSize: file.size,
+                error: reader.error,
             });
-            setFieldMapping(initialMapping);
-
-            setStep('MAPPING');
         };
         reader.readAsBinaryString(file);
     };
@@ -271,6 +321,22 @@ const ExcelUploadWizard = <T extends Record<string, any>>({
 
         setResultSummary({ success: successTotal, failed: failTotal, skipped: skippedTotal, total });
         setStep('COMPLETE');
+        void fileTransferAuditService.log({
+            kind: 'excel',
+            direction: 'upload',
+            status: successTotal > 0 || (total === 0 && failTotal === 0) ? 'success' : 'failure',
+            source: title,
+            operation: 'import_completed',
+            fileName: rawFile?.name,
+            fileSize: rawFile?.size,
+            recordCount: successTotal,
+            details: {
+                attemptedRows: total,
+                successCount: successTotal,
+                failedCount: failTotal,
+                skippedCount: skippedTotal,
+            },
+        });
     };
 
     // --- 에러 로그 다운로드 함수 ---
@@ -301,9 +367,19 @@ const ExcelUploadWizard = <T extends Record<string, any>>({
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `upload_error_log_${new Date().toISOString().slice(0, 10)}.csv`;
+        const outputFileName = `upload_error_log_${new Date().toISOString().slice(0, 10)}.csv`;
+        link.download = outputFileName;
         link.click();
         URL.revokeObjectURL(url);
+        void fileTransferAuditService.log({
+            kind: 'excel',
+            direction: 'download',
+            status: 'success',
+            source: title,
+            operation: 'error_log',
+            fileName: outputFileName,
+            recordCount: errorLogs.length,
+        });
     };
 
     // --- 엑셀 형식 에러 로그 다운로드 ---
@@ -325,7 +401,30 @@ const ExcelUploadWizard = <T extends Record<string, any>>({
         const ws = XLSX.utils.json_to_sheet(data);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, '에러로그');
-        XLSX.writeFile(wb, `upload_error_log_${new Date().toISOString().slice(0, 10)}.xlsx`);
+        const outputFileName = `upload_error_log_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        try {
+            XLSX.writeFile(wb, outputFileName);
+            void fileTransferAuditService.log({
+                kind: 'excel',
+                direction: 'download',
+                status: 'success',
+                source: title,
+                operation: 'error_log',
+                fileName: outputFileName,
+                recordCount: errorLogs.length,
+            });
+        } catch (error) {
+            void fileTransferAuditService.log({
+                kind: 'excel',
+                direction: 'download',
+                status: 'failure',
+                source: title,
+                operation: 'error_log',
+                fileName: outputFileName,
+                error,
+            });
+            throw error;
+        }
     };
 
 

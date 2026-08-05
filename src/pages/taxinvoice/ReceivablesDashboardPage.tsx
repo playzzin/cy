@@ -6,11 +6,7 @@ import {
     faMoneyBillWave,
     faExclamationTriangle,
     faCheckCircle,
-    faArrowUp,
-    faArrowDown,
     faClock,
-    faBuilding,
-    faUniversity,
     faThumbtack
 } from '@fortawesome/free-solid-svg-icons';
 import { useNavigate } from 'react-router-dom';
@@ -236,7 +232,7 @@ const ReceivablesDashboardPage: React.FC = () => {
                 </div>
 
                 {/* Quick Actions */}
-                <div className="flex-shrink-0 grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                <div className="flex-shrink-0 grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
                     <button
                         onClick={() => navigate('/payroll/taxinvoice/receivables')}
                         className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all hover:border-blue-300"
@@ -248,21 +244,6 @@ const ReceivablesDashboardPage: React.FC = () => {
                             <div className="text-left">
                                 <div className="font-bold text-gray-800">미수금 관리</div>
                                 <div className="text-xs text-gray-500">입금 등록 및 관리</div>
-                            </div>
-                        </div>
-                    </button>
-
-                    <button
-                        onClick={() => navigate('/payroll/taxinvoice/bank-inquiry')}
-                        className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all hover:border-green-300"
-                    >
-                        <div className="flex items-center gap-4">
-                            <div className="p-3 bg-green-50 rounded-lg">
-                                <FontAwesomeIcon icon={faUniversity} className="text-xl text-green-600" />
-                            </div>
-                            <div className="text-left">
-                                <div className="font-bold text-gray-800">입금내역 계좌조회</div>
-                                <div className="text-xs text-gray-500">바로빌 계좌조회</div>
                             </div>
                         </div>
                     </button>

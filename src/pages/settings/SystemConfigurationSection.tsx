@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCog, faUpload, faSpinner, faCheck, faImage, faFilm } from '@fortawesome/free-solid-svg-icons';
+import { faCog, faUpload, faSpinner, faImage } from '@fortawesome/free-solid-svg-icons';
 import { storage } from '../../config/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import Swal from 'sweetalert2';

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { dailyReportService } from '../../services/dailyReportService';
-import { manpowerService, Worker } from '../../services/manpowerService';
+import { manpowerService } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import * as XLSX from 'xlsx';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -316,26 +316,7 @@ const DailyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         setPaymentData(prev => prev.map(item => (item.rowKey === rowKey ? { ...item, displayContent: value } : item)));
     };
 
-    const handleBulkDisplayContentApply = () => {
-        const visibleKeys = new Set(filteredPaymentData.map(item => item.rowKey));
-        setPaymentData(prev => prev.map(item => {
-            if (!visibleKeys.has(item.rowKey)) return item;
-            return { ...item, displayContent: bulkDisplayContent };
-        }));
-    };
 
-    const handleBulkAmountApply = () => {
-        const visibleKeys = new Set(filteredPaymentData.map(item => item.rowKey));
-        setPaymentData(prev => prev.map(item => {
-            if (!visibleKeys.has(item.rowKey)) return item;
-            return {
-                ...item,
-                actualPayment: bulkActualPayment,
-                billingAmount: bulkBillingAmount,
-                reportAmount: bulkReportAmount
-            };
-        }));
-    };
 
     const handleActualPaymentChange = (rowKey: string, value: number) => {
         setPaymentData(prev => prev.map(item => (item.rowKey === rowKey ? { ...item, actualPayment: value } : item)));

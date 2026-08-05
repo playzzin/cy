@@ -1,14 +1,10 @@
 /**
  * 카카오톡 알림톡 서비스
  * 
- * 바로빌 또는 솔라피 API를 통해 카카오톡 알림톡을 발송합니다.
+ * 외부 공급자 연동이 설정된 경우 카카오톡 알림톡을 발송합니다.
  * 세금계산서 발행 알림, 입금 요청 알림 등에 사용됩니다.
  */
 
-import { functions } from '../config/firebase';
-import { httpsCallable } from 'firebase/functions';
-
-// Firebase Functions URL
 // Mock 모드
 const MOCK_MODE = false;
 
@@ -158,25 +154,10 @@ export async function sendKakaoNotification(
         };
     }
 
-    // 실제 API 호출 (Firebase Callable Function)
-    try {
-        const sendAlimtalk = httpsCallable<any, KakaoNotificationResponse>(functions, 'sendKakaoAlimtalk');
-
-        const result = await sendAlimtalk({
-            to: request.recipientPhone,
-            templateName: request.templateType,
-            templateId: request.templateType,
-            variables: request.variables
-        });
-
-        return result.data;
-    } catch (error) {
-        console.error('알림톡 발송 오류:', error);
-        return {
-            success: false,
-            message: error instanceof Error ? error.message : '네트워크 오류가 발생했습니다.',
-        };
-    }
+    return {
+        success: false,
+        message: 'Kakao notification provider is not configured.',
+    };
 }
 
 /**
@@ -224,25 +205,10 @@ export async function sendFriendTalk(
         };
     }
 
-    // 실제 API 호출 (Firebase Callable Function)
-    try {
-        const sendFT = httpsCallable<any, KakaoNotificationResponse>(functions, 'sendFriendTalk');
-
-        const result = await sendFT({
-            to: request.recipientPhone,
-            content: request.message,
-            receiverName: request.recipientName,
-            adYN: request.adFlag ?? undefined,
-            refNum: request.adFlag ? 'AD' : undefined // Optional refNum logic
-        });
-        return result.data;
-    } catch (error) {
-        console.error('친구톡 발송 오류:', error);
-        return {
-            success: false,
-            message: error instanceof Error ? error.message : '네트워크 오류가 발생했습니다. (백엔드 미구현 가능성)',
-        };
-    }
+    return {
+        success: false,
+        message: 'Kakao notification provider is not configured.',
+    };
 }
 
 // 친구톡 타입 정보

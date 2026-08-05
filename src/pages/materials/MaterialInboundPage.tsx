@@ -19,6 +19,8 @@ import {
 import materialService from '../../services/materialService';
 import { geminiService } from '../../services/geminiService';
 import { siteService, Site } from '../../services/siteService';
+import { companyService } from '../../services/companyService';
+import { settlementTargetService } from '../../services/settlementTargetService';
 import { Material, InboundTransaction } from '../../types/materials';
 import { useAuth } from '../../contexts/AuthContext';
 import { filterCheongyeonMaterialSites } from './materialSiteFilters';
@@ -28,6 +30,7 @@ import {
     applyAnalyzedMaterialItemsToQuantities,
     buildMaterialAnalyzeContext,
     describeAnalyzedItem,
+    findMatchingNamedOption,
     findMatchingSite,
     normalizeAnalyzedDate,
 } from './materialPhotoAnalysisUtils';
@@ -39,10 +42,16 @@ import MaterialPhotoPicker, {
     uploadMaterialPhotoAttachments,
 } from './MaterialPhotoPicker';
 import MaterialSelectionActionBar, { SelectedMaterial } from './MaterialSelectionActionBar';
+import MaterialMobileSitePicker from './MaterialMobileSitePicker';
 import {
     createInboundCertificateDraftId,
     saveInboundCertificateDraft,
 } from './materialInboundCertificateDraftStore';
+import {
+    buildMaterialRentalCompanyOptions,
+    getMaterialRentalCompanyOptionId,
+    MaterialRentalCompanyOption,
+} from './materialRentalCompanyOptions';
 
 // 임시저장 데이터 타입
 type InboundTempData = {
@@ -51,6 +60,8 @@ type InboundTempData = {
     siteName: string;
     vehicleNumber: string;
     supplier: string;
+    rentalCompanyId?: string;
+    rentalCompanyName?: string;
     notes?: string;
     quantities: Record<string, number>;
     savedAt: number;
@@ -60,6 +71,7 @@ type MobileMaterialGroup = 'scaffolding' | 'dongbari' | 'other';
 
 const ITEMS_PER_COLUMN = 10;
 const QUICK_QUANTITY_STEPS = [-1, -10, -100, 1, 10, 100];
+const MAX_INBOUND_PHOTOS = 40;
 
 const createMaterialPhotoBatchId = (transactionType: 'inbound' | 'outbound') =>
     `matphoto_${transactionType}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -370,16 +382,20 @@ const createInboundCertificateImageFile = async ({
 const MaterialInboundPage: React.FC = () => {
     const navigate = useNavigate();
     const { currentUser } = useAuth();
-    const [loading, setLoading] = useState(false);
+    const [initialLoading, setInitialLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
     const [transactionDate, setTransactionDate] = useState(new Date().toISOString().slice(0, 10));
     const [siteId, setSiteId] = useState('');
     const [siteName, setSiteName] = useState('');
     const [vehicleNumber, setVehicleNumber] = useState('');
     const [supplier, setSupplier] = useState('');
+    const [rentalCompanyId, setRentalCompanyId] = useState('');
+    const [rentalCompanyName, setRentalCompanyName] = useState('');
     const [notes, setNotes] = useState('');
     const [searchFilter, setSearchFilter] = useState('');
 
     const [sites, setSites] = useState<Site[]>([]);
+    const [rentalCompanies, setRentalCompanies] = useState<MaterialRentalCompanyOption[]>([]);
     const [materials, setMaterials] = useState<Material[]>([]);
     const [quantities, setQuantities] = useState<Record<string, number>>({});
     const [hasTempData, setHasTempData] = useState(false);
@@ -390,6 +406,7 @@ const MaterialInboundPage: React.FC = () => {
     const [sharingCertificate, setSharingCertificate] = useState(false);
     const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
     const photoAnalysisInputRef = React.useRef<HTMLInputElement | null>(null);
+    const savingRef = React.useRef(false);
 
     // 임시저장 데이터 로드
     const loadTempData = () => {
@@ -412,6 +429,8 @@ const MaterialInboundPage: React.FC = () => {
             setSiteName(tempData.siteName);
             setVehicleNumber(tempData.vehicleNumber);
             setSupplier(tempData.supplier);
+            setRentalCompanyId(tempData.rentalCompanyId || '');
+            setRentalCompanyName(tempData.rentalCompanyName || '');
             setNotes(tempData.notes || '');
             setQuantities(tempData.quantities || {});
             setHasTempData(true);
@@ -423,6 +442,8 @@ const MaterialInboundPage: React.FC = () => {
                 siteName: tempData.siteName,
                 vehicleNumber: tempData.vehicleNumber,
                 supplier: tempData.supplier,
+                rentalCompanyId: tempData.rentalCompanyId || '',
+                rentalCompanyName: tempData.rentalCompanyName || '',
                 notes: tempData.notes || '',
                 quantities: tempData.quantities || {}
             };
@@ -435,24 +456,6 @@ const MaterialInboundPage: React.FC = () => {
     };
 
     // 임시저장 데이터 저장
-    const saveTempData = () => {
-        try {
-            const tempData: InboundTempData = {
-                transactionDate,
-                siteId,
-                siteName,
-                vehicleNumber,
-                supplier,
-                notes,
-                quantities,
-                savedAt: Date.now()
-            };
-            localStorage.setItem('inbound_temp', JSON.stringify(tempData));
-            setHasTempData(true);
-        } catch (error) {
-            console.error('[Inbound] 임시저장 데이터 저장 실패:', error);
-        }
-    };
 
     // 임시저장 데이터 삭제
     const clearTempData = () => {
@@ -467,6 +470,8 @@ const MaterialInboundPage: React.FC = () => {
         siteName,
         vehicleNumber,
         supplier,
+        rentalCompanyId,
+        rentalCompanyName,
         notes,
         quantities
     });
@@ -479,10 +484,12 @@ const MaterialInboundPage: React.FC = () => {
             siteName,
             vehicleNumber,
             supplier,
+            rentalCompanyId,
+            rentalCompanyName,
             notes,
             quantities
         };
-    }, [transactionDate, siteId, siteName, vehicleNumber, supplier, notes, quantities]);
+    }, [transactionDate, siteId, siteName, vehicleNumber, supplier, rentalCompanyId, rentalCompanyName, notes, quantities]);
 
     // 실제 저장 로직 (Ref 기준)
     const performSave = () => {
@@ -494,6 +501,8 @@ const MaterialInboundPage: React.FC = () => {
                 siteName: current.siteName,
                 vehicleNumber: current.vehicleNumber,
                 supplier: current.supplier,
+                rentalCompanyId: current.rentalCompanyId,
+                rentalCompanyName: current.rentalCompanyName,
                 notes: current.notes,
                 quantities: current.quantities,
                 savedAt: Date.now()
@@ -530,17 +539,20 @@ const MaterialInboundPage: React.FC = () => {
         }, 1000);
 
         return () => clearTimeout(timer);
-    }, [transactionDate, siteId, siteName, vehicleNumber, supplier, notes, quantities]);
+    }, [transactionDate, siteId, siteName, vehicleNumber, supplier, rentalCompanyId, rentalCompanyName, notes, quantities]);
 
     const loadData = async () => {
-        setLoading(true);
+        setInitialLoading(true);
         try {
-            const [sitesData, materialsData] = await Promise.all([
+            const [sitesData, materialsData, companiesData, settlementTargetsData] = await Promise.all([
                 siteService.getSites(),
-                materialService.getUniqueMaterialsForSelection()
+                materialService.getUniqueMaterialsForSelection(),
+                companyService.getCompanies(),
+                settlementTargetService.getTargets().catch(() => []),
             ]);
             setSites(filterCheongyeonMaterialSites(sitesData));
             setMaterials(materialsData);
+            setRentalCompanies(buildMaterialRentalCompanyOptions(companiesData, settlementTargetsData));
 
             // [FIX] 만약 이미 quantities에 데이터가 있다면 (임시저장 등),
             // 새로 불러온 자재 목록에 존재하는 ID들만 남기고 유지합니다.
@@ -554,7 +566,7 @@ const MaterialInboundPage: React.FC = () => {
             console.error('Failed to load data:', error);
             alert('데이터를 불러오지 못했습니다.');
         } finally {
-            setLoading(false);
+            setInitialLoading(false);
         }
     };
 
@@ -563,6 +575,20 @@ const MaterialInboundPage: React.FC = () => {
         const site = sites.find(s => s.id === selectedSiteId);
         setSiteName(site?.name || '');
     };
+
+    const handleRentalCompanyChange = (selectedCompanyId: string) => {
+        setRentalCompanyId(selectedCompanyId);
+        const company = rentalCompanies.find((row) => getMaterialRentalCompanyOptionId(row) === selectedCompanyId);
+        setRentalCompanyName(company?.name || '');
+    };
+
+    useEffect(() => {
+        if (!rentalCompanyId) return;
+        const company = rentalCompanies.find((row) => getMaterialRentalCompanyOptionId(row) === rentalCompanyId);
+        if (company?.name && company.name !== rentalCompanyName) {
+            setRentalCompanyName(company.name);
+        }
+    }, [rentalCompanyId, rentalCompanyName, rentalCompanies]);
 
     const handleQuantityChange = (materialId: string, value: string) => {
         const numValue = Math.max(0, parseInt(value, 10) || 0);
@@ -605,6 +631,7 @@ const MaterialInboundPage: React.FC = () => {
                     transactionType: 'inbound',
                     sites,
                     materials,
+                    rentalCompanies: rentalCompanies.map((company) => company.name).filter(Boolean),
                 })
             );
 
@@ -618,7 +645,19 @@ const MaterialInboundPage: React.FC = () => {
             }
 
             if (analysis.vehicleNumber?.trim()) setVehicleNumber(analysis.vehicleNumber.trim());
+            const analyzedRentalCompanyName = analysis.rentalCompanyName || analysis.supplier;
             if (analysis.supplier?.trim()) setSupplier(analysis.supplier.trim());
+            if (analyzedRentalCompanyName?.trim()) {
+                const matchedRentalCompany = findMatchingNamedOption(
+                    rentalCompanies,
+                    (company) => company.name,
+                    analyzedRentalCompanyName
+                );
+                if (matchedRentalCompany) {
+                    setRentalCompanyId(getMaterialRentalCompanyOptionId(matchedRentalCompany));
+                    setRentalCompanyName(matchedRentalCompany.name);
+                }
+            }
             if (analysis.notes?.trim()) {
                 setNotes((prev) => prev.trim() ? prev : analysis.notes!.trim());
             }
@@ -680,6 +719,8 @@ const MaterialInboundPage: React.FC = () => {
                         quantity,
                         unit: String(material.unit || '').trim(),
                         supplier: supplier || '',
+                        rentalCompanyId: rentalCompanyId || '',
+                        rentalCompanyName: rentalCompanyName || '',
                         notes: notes.trim(),
                         registeredBy: currentUser?.uid || '',
                         registeredByName: currentUser?.displayName || currentUser?.email || '관리자'
@@ -693,7 +734,9 @@ const MaterialInboundPage: React.FC = () => {
             return;
         }
 
-        setLoading(true);
+        if (savingRef.current) return;
+        savingRef.current = true;
+        setSaving(true);
         let uploadedPhotos: MaterialPhotoUpload[] = [];
         try {
             setPhotoUploadProgress(photoAttachments.length > 0 ? 0 : null);
@@ -711,6 +754,8 @@ const MaterialInboundPage: React.FC = () => {
                     transactionType: 'inbound' as const,
                     transactionDate,
                     siteId,
+                    rentalCompanyId: rentalCompanyId || undefined,
+                    rentalCompanyName: rentalCompanyName || undefined,
                     photoCount: uploadedPhotos.length,
                     photos: uploadedPhotos,
                     createdBy: currentUser?.uid || '',
@@ -724,7 +769,9 @@ const MaterialInboundPage: React.FC = () => {
             }));
 
             await materialService.addInboundTransactionsBatch(payload, photoBatch);
-            alert(`${transactions.length}건의 입고가 등록되었습니다.`);
+            alert(uploadedPhotos.length > 0
+                ? `${transactions.length}건의 입고와 사진 ${uploadedPhotos.length}장이 등록되었습니다.\n자재관리 > 입출고 내역에서 사진을 확인할 수 있습니다.`
+                : `${transactions.length}건의 입고가 등록되었습니다.`);
             // 저장 성공 후 임시저장 데이터 삭제
             clearTempData();
             handleReset();
@@ -735,7 +782,8 @@ const MaterialInboundPage: React.FC = () => {
             }
             alert('입고 등록에 실패했습니다.');
         } finally {
-            setLoading(false);
+            savingRef.current = false;
+            setSaving(false);
         }
     };
 
@@ -743,6 +791,8 @@ const MaterialInboundPage: React.FC = () => {
         setQuantities({});
         setVehicleNumber('');
         setSupplier('');
+        setRentalCompanyId('');
+        setRentalCompanyName('');
         setNotes('');
         revokeMaterialPhotoAttachments(photoAttachments);
         setPhotoAttachments([]);
@@ -1042,7 +1092,7 @@ const MaterialInboundPage: React.FC = () => {
                                                                         type="button"
                                                                         disabled={step < 0 && qty <= 0}
                                                                         onClick={() => handleQuantityStep(material.id, step)}
-                                                                        className={`h-8 rounded-md border text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${step > 0 ? accentClasses.positiveButton : accentClasses.negativeButton}`}
+                                                                        className={`h-10 touch-manipulation rounded-md border text-xs font-bold shadow-sm transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${step > 0 ? accentClasses.positiveButton : accentClasses.negativeButton}`}
                                                                     >
                                                                         {step > 0 ? `+${step}` : step}
                                                                     </button>
@@ -1123,7 +1173,7 @@ const MaterialInboundPage: React.FC = () => {
         );
     };
 
-    if (loading) return <div className="p-8 text-center">데이터 로딩 중...</div>;
+    if (initialLoading) return <div className="p-8 text-center">데이터 로딩 중...</div>;
 
     return (
         <div className="mx-auto w-full max-w-[calc(100vw-30px)] space-y-4 overflow-x-hidden p-3 sm:max-w-[2100px] sm:space-y-6 sm:p-4">
@@ -1161,7 +1211,7 @@ const MaterialInboundPage: React.FC = () => {
                 <button
                     type="button"
                     onClick={handlePhotoAnalysisClick}
-                    disabled={loading || analyzingPhoto || materials.length === 0}
+                    disabled={saving || analyzingPhoto || materials.length === 0}
                     className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm font-bold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                     <FontAwesomeIcon icon={analyzingPhoto ? faSpinner : faCamera} spin={analyzingPhoto} />
@@ -1193,7 +1243,7 @@ const MaterialInboundPage: React.FC = () => {
                     <button
                         type="button"
                         onClick={handlePhotoAnalysisClick}
-                        disabled={loading || analyzingPhoto || materials.length === 0}
+                        disabled={saving || analyzingPhoto || materials.length === 0}
                         className="justify-center px-3 py-2.5 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 font-bold hover:bg-blue-100 transition flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4"
                     >
                         <FontAwesomeIcon icon={analyzingPhoto ? faSpinner : faCamera} spin={analyzingPhoto} />
@@ -1201,7 +1251,7 @@ const MaterialInboundPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleReset}
-                        disabled={loading}
+                        disabled={saving}
                         className="justify-center px-3 py-2.5 rounded-xl bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 transition flex items-center gap-2 disabled:opacity-50 sm:px-4"
                     >
                         <FontAwesomeIcon icon={faRotateRight} />
@@ -1209,11 +1259,11 @@ const MaterialInboundPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleSave}
-                        disabled={loading}
+                        disabled={saving}
                         className="justify-center px-3 py-2.5 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition flex items-center gap-2 disabled:opacity-50 sm:px-6"
                     >
                         <FontAwesomeIcon icon={faSave} />
-                        {loading ? '저장 중...' : '입고 완료'}
+                        {saving ? '저장 중...' : '입고 완료'}
                     </button>
                 </div>
             </div>
@@ -1230,7 +1280,7 @@ const MaterialInboundPage: React.FC = () => {
                             className="h-10 w-full border border-slate-300 rounded-lg px-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm sm:h-auto sm:px-4 sm:py-3"
                         />
                     </div>
-                    <div className="space-y-1 sm:space-y-2">
+                    <div className="hidden space-y-1 md:block md:space-y-2">
                         <label className="text-xs font-bold text-slate-600 sm:text-sm">현장 선택</label>
                         <select
                             value={siteId}
@@ -1243,6 +1293,12 @@ const MaterialInboundPage: React.FC = () => {
                             ))}
                         </select>
                     </div>
+                    <MaterialMobileSitePicker
+                        sites={sites}
+                        value={siteId}
+                        onChange={handleSiteChange}
+                        tone="blue"
+                    />
                     <div className="space-y-1 sm:space-y-2">
                         <label className="text-xs font-bold text-slate-600 sm:text-sm">차량번호</label>
                         <input
@@ -1265,11 +1321,37 @@ const MaterialInboundPage: React.FC = () => {
                     </div>
                 </div>
 
+                <div className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 sm:mb-5">
+                    <label className="mb-1 block text-xs font-bold text-indigo-800 sm:text-sm">
+                        임대사 연결 (임대사 포털 조회 기준)
+                    </label>
+                    <select
+                        value={rentalCompanyId}
+                        onChange={(event) => handleRentalCompanyChange(event.target.value)}
+                        className="h-10 w-full rounded-lg border border-indigo-200 bg-white px-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 sm:h-auto sm:px-3 sm:py-2"
+                    >
+                        <option value="">임대사 미지정</option>
+                        {rentalCompanyId && rentalCompanyName && !rentalCompanies.some((company) =>
+                            getMaterialRentalCompanyOptionId(company) === rentalCompanyId
+                        ) && (
+                            <option value={rentalCompanyId}>{rentalCompanyName}</option>
+                        )}
+                        {rentalCompanies.map((company) => {
+                            const optionId = getMaterialRentalCompanyOptionId(company);
+                            return optionId ? <option key={optionId} value={optionId}>{company.name}</option> : null;
+                        })}
+                    </select>
+                    <p className="mt-1 text-xs font-medium text-indigo-700">
+                        지정한 임대사 계정에서는 이 거래와 연결된 현장만 조회됩니다.
+                    </p>
+                </div>
+
                 <MaterialPhotoPicker
                     photos={photoAttachments}
                     onPhotosChange={setPhotoAttachments}
                     tone="blue"
-                    disabled={loading}
+                    maxPhotos={MAX_INBOUND_PHOTOS}
+                    disabled={saving}
                     uploadProgress={photoUploadProgress}
                 />
 
@@ -1447,7 +1529,12 @@ const MaterialInboundPage: React.FC = () => {
                 )}
 
                 {/* 액션 버튼 */}
-                <div className="sticky bottom-0 z-20 -mx-3 -mb-3 mt-6 flex gap-2 border-t border-slate-200 bg-white/95 p-3 backdrop-blur sm:static sm:mx-0 sm:mb-0 sm:mt-8 sm:justify-end sm:gap-3 sm:bg-transparent sm:p-0 sm:pt-6 sm:backdrop-blur-0">
+                <div className="sticky bottom-0 z-20 -mx-3 -mb-3 mt-6 border-t border-slate-200 bg-white/95 p-3 backdrop-blur sm:static sm:mx-0 sm:mb-0 sm:mt-8 sm:flex sm:justify-end sm:gap-3 sm:bg-transparent sm:p-0 sm:pt-6 sm:backdrop-blur-0">
+                    <div className="mb-2 flex items-center justify-between rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800 sm:hidden" aria-live="polite">
+                        <span className="truncate">{siteName || '현장을 선택하세요'}</span>
+                        <span className="shrink-0">{selectedItemCount}개 · 총 {selectedQuantityTotal}</span>
+                    </div>
+                    <div className="flex gap-2 sm:contents">
                     <button
                         onClick={() => window.history.back()}
                         className="hidden px-6 py-3 rounded-xl border border-slate-300 text-slate-600 font-bold hover:bg-slate-50 hover:text-slate-800 transition-colors sm:block"
@@ -1456,7 +1543,7 @@ const MaterialInboundPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleReset}
-                        disabled={loading}
+                        disabled={saving}
                         className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-200 px-4 py-3 font-bold text-slate-700 transition hover:bg-slate-300 disabled:opacity-50 sm:flex-none sm:px-6"
                     >
                         <FontAwesomeIcon icon={faRotateRight} />
@@ -1464,11 +1551,12 @@ const MaterialInboundPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleSave}
-                        disabled={loading}
+                        disabled={saving}
                         className="flex flex-[1.4] items-center justify-center rounded-xl bg-blue-600 px-4 py-3 font-bold text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700 hover:shadow-blue-300 active:translate-y-0 disabled:opacity-50 sm:flex-none sm:px-8"
                     >
-                        {loading ? '저장 중...' : '입고 완료'}
+                        {saving ? '저장 중...' : '입고 완료'}
                     </button>
+                    </div>
                 </div>
             </div>
         </div>

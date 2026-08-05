@@ -1,155 +1,40 @@
-import React, { useState, useEffect } from 'react';
+import React, { lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../contexts/AuthContext';
-import { manpowerService } from '../../services/manpowerService';
-import { siteService } from '../../services/siteService';
-import { teamService } from '../../services/teamService';
-import { dailyReportService } from '../../services/dailyReportService';
-import { companyService } from '../../services/companyService';
-import { taskService } from '../../services/taskService';
 import { Task, STATUS_CONFIG } from '../../types/task';
+import type { DashboardExecutiveStats } from '../../services/dashboardExecutiveService';
+import { useDashboardExecutiveStats } from '../../hooks/useDashboardExecutiveStats';
+import { DashboardActionCenterPanel } from './DashboardActionCenterPanel';
+import { DashboardDailyReportCoveragePanel } from './DashboardDailyReportCoveragePanel';
+import { DashboardNextFeaturePanel } from './DashboardNextFeaturePanel';
+import { DashboardExecutiveMetricGrid } from './DashboardExecutiveMetricGrid';
+import { DashboardMobileKpiRail } from './DashboardMobileKpiRail';
+import { DashboardOperationsPulsePanel } from './DashboardOperationsPulsePanel';
+import { DashboardStatisticsPanel } from './DashboardStatisticsPanel';
 import { DashboardModeConfig } from './roleDashboardConfig';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faUsers, faBuilding, faClipboardList, faHardHat,
-    faArrowRight, faSpinner, faRightLeft,
-    faListCheck
+    faArrowRight, faSpinner,
+    faListCheck, faRotateRight
 } from '@fortawesome/free-solid-svg-icons';
 
 interface DashboardExecutiveViewProps {
     modeConfig?: DashboardModeConfig;
 }
 
-const formatManDay = (value: number) =>
-    Number(value || 0).toLocaleString('ko-KR', {
-        minimumFractionDigits: 1,
-        maximumFractionDigits: 1
-    });
+const DashboardOperationsChart = lazy(() =>
+    import('./DashboardOperationsChart').then((module) => ({
+        default: module.DashboardOperationsChart,
+    }))
+);
 
 export const DashboardExecutiveView: React.FC<DashboardExecutiveViewProps> = () => {
-    const { currentUser } = useAuth();
-    const [loading, setLoading] = useState(true);
-    const [stats, setStats] = useState({
-        workers: { total: 0, active: 0 },
-        sites: { total: 0, active: 0 },
-        teams: { total: 0 },
-        reports: { today: 0, thisMonth: 0, todayManDay: 0, thisMonthManDay: 0 },
-        support: { inbound: 0, outbound: 0, total: 0 },
-        recentReports: [] as any[],
-        recentTasks: [] as Task[]
-    });
-
-    useEffect(() => {
-        let isMounted = true;
-
-        const initDashboard = async () => {
-            if (!currentUser?.uid) {
-                if (isMounted) setLoading(false);
-                return;
-            }
-
-            try {
-                // Fetch Stats Data
-                const [workersData, sitesData, teamsData, reportsData, companiesData] = await Promise.all([
-                    manpowerService.getWorkersPaginated(1000),
-                    siteService.getSites(),
-                    teamService.getTeams(),
-                    dailyReportService.getAllReports(),
-                    companyService.getCompanies()
-                ]);
-
-                if (!isMounted) return;
-
-                const now = new Date();
-                const todayStr = now.toISOString().split('T')[0];
-                const thisMonthStr = todayStr.substring(0, 7);
-
-                // Identify My Company (Default to '청연' or first one)
-                const myCompany = companiesData.find(c => c.name.includes('청연')) || companiesData[0];
-                const myCompanyId = myCompany?.id;
-
-                // Calculate Support Man-days for This Month
-                let inboundManDay = 0;
-                let outboundManDay = 0;
-
-                if (myCompanyId) {
-                    const thisMonthReports = reportsData.filter(r => r.date.startsWith(thisMonthStr));
-                    const siteMap = new Map(sitesData.map(s => [s.id, s]));
-                    const teamMap = new Map(teamsData.map(t => [t.id, t]));
-
-                    thisMonthReports.forEach(report => {
-                        const site = siteMap.get(report.siteId);
-                        const team = teamMap.get(report.teamId);
-
-                        if (site && team) {
-                            const manDay = Number(report.totalManDay) || 0;
-
-                            // Inbound: My Site, Other Team (Received Support)
-                            if (site.companyId === myCompanyId && team.companyId !== myCompanyId) {
-                                inboundManDay += manDay;
-                            }
-                            // Outbound: Other Site, My Team (Sent Support)
-                            if (site.companyId !== myCompanyId && team.companyId === myCompanyId) {
-                                outboundManDay += manDay;
-                            }
-                        }
-                    });
-                }
-
-                setStats(prev => ({
-                    ...prev,
-                    workers: {
-                        total: workersData.workers.length,
-                        active: workersData.workers.filter(w => w.status === '재직').length
-                    },
-                    sites: {
-                        total: sitesData.length,
-                        active: sitesData.filter(s => s.status === 'active').length
-                    },
-                    teams: {
-                        total: teamsData.length
-                    },
-                    reports: {
-                        today: reportsData.filter(r => r.date === todayStr).length,
-                        thisMonth: reportsData.filter(r => r.date.startsWith(thisMonthStr)).length,
-                        todayManDay: reportsData.filter(r => r.date === todayStr).reduce((sum, r) => sum + (Number(r.totalManDay) || 0), 0),
-                        thisMonthManDay: reportsData.filter(r => r.date.startsWith(thisMonthStr)).reduce((sum, r) => sum + (Number(r.totalManDay) || 0), 0)
-                    },
-                    support: {
-                        inbound: inboundManDay,
-                        outbound: outboundManDay,
-                        total: inboundManDay + outboundManDay
-                    },
-                    recentReports: reportsData
-                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                        .slice(0, 5)
-                }));
-
-            } catch (error) {
-                console.error("Dashboard data load failed", error);
-            } finally {
-                if (isMounted) setLoading(false);
-            }
-        };
-
-        initDashboard();
-
-        // Subscribe to Tasks (Real-time)
-        const unsubscribeTasks = taskService.subscribe((tasksData) => {
-            if (!isMounted) return;
-            setStats(prev => ({
-                ...prev,
-                recentTasks: tasksData
-                    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                    .slice(0, 5)
-            }));
-        });
-
-        return () => {
-            isMounted = false;
-            unsubscribeTasks();
-        };
-    }, [currentUser]);
+    const {
+        loading,
+        refreshing,
+        lastUpdatedAt,
+        stats,
+        refresh,
+    } = useDashboardExecutiveStats();
 
     if (loading) {
         return (
@@ -163,135 +48,91 @@ export const DashboardExecutiveView: React.FC<DashboardExecutiveViewProps> = () 
     }
 
     return (
-        <DashboardExecutiveViewContent stats={stats} />
+        <DashboardExecutiveViewContent
+            stats={stats}
+            refreshing={refreshing}
+            lastUpdatedAt={lastUpdatedAt}
+            onRefresh={refresh}
+        />
     );
 };
 
 // Internal component to handle the displaying using the fetched stats
-const DashboardExecutiveViewContent: React.FC<{ stats: any }> = ({ stats }) => {
+const DashboardExecutiveViewContent = React.memo<{
+    stats: DashboardExecutiveStats;
+    refreshing: boolean;
+    lastUpdatedAt: Date | null;
+    onRefresh: () => void;
+}>(({ stats, refreshing, lastUpdatedAt, onRefresh }) => {
     const navigate = useNavigate();
+    const handleTodayManDayClick = React.useCallback(() => {
+        const todayStr = new Date().toISOString().split('T')[0];
+        navigate(`/reports/daily?tab=list-v2&date=${todayStr}`);
+    }, [navigate]);
+    const handleTodoClick = React.useCallback(() => {
+        navigate('/todo');
+    }, [navigate]);
+    const handleManualClick = React.useCallback(() => {
+        navigate('/manual');
+    }, [navigate]);
 
     return (
         <div>
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-                {/* Workers Card */}
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-200 hover:shadow-md transition-shadow">
-                    <div className="flex justify-between items-center mb-4">
-                        <div className="p-3 bg-blue-50 rounded-lg">
-                            <FontAwesomeIcon icon={faUsers} className="text-2xl text-blue-600" />
-                        </div>
-                        <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded-full">실시간</span>
-                    </div>
-                    <h3 className="text-slate-500 text-sm font-medium mb-1">총 등록 작업자</h3>
-                    <div className="flex items-baseline gap-2">
-                        <span className="text-3xl font-bold text-slate-800">{stats.workers.total}</span>
-                        <span className="text-sm text-slate-400">명</span>
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between text-sm">
-                        <span className="text-slate-500">현재 재직</span>
-                        <span className="font-medium text-slate-800">{stats.workers.active}명</span>
-                    </div>
+            <div className="mb-5 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm dark:border-slate-700 dark:bg-slate-800 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <h2 className="text-lg font-black text-slate-900 dark:text-white">운영 대시보드</h2>
+                    <p className="mt-1 text-sm font-medium text-slate-500 dark:text-slate-400">
+                        {lastUpdatedAt
+                            ? `마지막 업데이트 ${lastUpdatedAt.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`
+                            : '최신 운영 데이터를 준비 중입니다.'}
+                    </p>
                 </div>
-
-                {/* Sites Card */}
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-200 hover:shadow-md transition-shadow">
-                    <div className="flex justify-between items-center mb-4">
-                        <div className="p-3 bg-green-50 rounded-lg">
-                            <FontAwesomeIcon icon={faBuilding} className="text-2xl text-green-600" />
-                        </div>
-                        <span className="text-xs font-medium text-green-600 bg-green-50 px-2 py-1 rounded-full">진행중</span>
-                    </div>
-                    <h3 className="text-slate-500 text-sm font-medium mb-1">관리 현장</h3>
-                    <div className="flex items-baseline gap-2">
-                        <span className="text-3xl font-bold text-slate-800">{stats.sites.total}</span>
-                        <span className="text-sm text-slate-400">개소</span>
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between text-sm">
-                        <span className="text-slate-500">활성 현장</span>
-                        <span className="font-medium text-slate-800">{stats.sites.active}개소</span>
-                    </div>
-                </div>
-
-                {/* Teams Card - 운영팀 */}
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-200 hover:shadow-md transition-shadow">
-                    <div className="flex justify-between items-center mb-4">
-                        <div className="p-3 bg-purple-50 rounded-lg">
-                            <FontAwesomeIcon icon={faHardHat} className="text-2xl text-purple-600" />
-                        </div>
-                        <span className="text-xs font-medium text-purple-600 bg-purple-50 px-2 py-1 rounded-full">Teams</span>
-                    </div>
-                    <h3 className="text-slate-500 text-sm font-medium mb-1">운영 팀</h3>
-                    <div className="flex items-baseline gap-2">
-                        <span className="text-3xl font-bold text-slate-800">{stats.teams.total}</span>
-                        <span className="text-sm text-slate-400">팀</span>
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between text-sm">
-                        <span className="text-slate-500">시스템 등록</span>
-                        <span className="font-medium text-slate-800">완료</span>
-                    </div>
-                </div>
-
-                {/* Reports Card - 오늘의 공수 */}
-                <div
-                    onClick={() => {
-                        const todayStr = new Date().toISOString().split('T')[0];
-                        navigate(`/reports/daily?tab=list-v2&date=${todayStr}`);
-                    }}
-                    className="bg-white rounded-xl shadow-sm p-6 border border-slate-200 hover:shadow-md transition-all cursor-pointer group hover:border-orange-200"
+                <button
+                    type="button"
+                    onClick={onRefresh}
+                    disabled={refreshing}
+                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-extrabold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/40 dark:hover:text-blue-200"
                 >
-                    <div className="flex justify-between items-center mb-4">
-                        <div className="p-3 bg-orange-50 rounded-lg group-hover:bg-orange-100 transition-colors">
-                            <FontAwesomeIcon icon={faClipboardList} className="text-2xl text-orange-600" />
-                        </div>
-                        <span className="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-1 rounded-full group-hover:bg-orange-100">Today</span>
-                    </div>
-                    <h3 className="text-slate-500 text-sm font-medium mb-1 group-hover:text-orange-600 transition-colors">오늘 총공수</h3>
-                    <div className="flex items-baseline gap-2">
-                        <span className="text-3xl font-bold text-slate-800 group-hover:text-orange-600 transition-colors">{formatManDay(stats.reports.todayManDay)}</span>
-                        <span className="text-sm text-slate-400">공</span>
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between text-sm">
-                        <span className="text-slate-500">이번 달 누적</span>
-                        <span className="font-medium text-slate-800">{formatManDay(stats.reports.thisMonthManDay)}공</span>
-                    </div>
-                </div>
-
-                {/* Support Man-days Card */}
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-200 hover:shadow-md transition-shadow">
-                    <div className="flex justify-between items-center mb-4">
-                        <div className="p-3 bg-teal-50 rounded-lg">
-                            <FontAwesomeIcon icon={faRightLeft} className="text-2xl text-teal-600" />
-                        </div>
-                        <span className="text-xs font-medium text-teal-600 bg-teal-50 px-2 py-1 rounded-full">이번 달</span>
-                    </div>
-                    <h3 className="text-slate-500 text-sm font-medium mb-1">지원 현황</h3>
-                    <div className="flex flex-col gap-2 mt-2">
-                        <div className="flex justify-between items-center">
-                            <span className="text-sm text-slate-500">지원 공수</span>
-                            <span className="font-bold text-slate-800 text-lg">{(stats.support.inbound + stats.support.outbound).toFixed(1)}공</span>
-                        </div>
-                        <div className="w-full h-px bg-slate-100 my-1"></div>
-                        <div className="flex justify-between items-center">
-                            <span className="text-xs text-slate-400">지원온거</span>
-                            <span className="font-bold text-teal-600">+{stats.support.inbound.toFixed(1)}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                            <span className="text-xs text-slate-400">지원간거</span>
-                            <span className="font-bold text-orange-600">-{stats.support.outbound.toFixed(1)}</span>
-                        </div>
-                    </div>
-                </div>
+                    <FontAwesomeIcon icon={faRotateRight} spin={refreshing} />
+                    {refreshing ? '갱신 중' : '새로고침'}
+                </button>
             </div>
+
+            <DashboardOperationsPulsePanel stats={stats} />
+
+            <DashboardMobileKpiRail stats={stats} />
+
+            <DashboardActionCenterPanel stats={stats} />
+
+            <DashboardStatisticsPanel stats={stats} />
+
+            <DashboardExecutiveMetricGrid
+                stats={stats}
+                onTodayManDayClick={handleTodayManDayClick}
+            />
+
+            <Suspense
+                fallback={
+                    <div className="mb-8 h-64 rounded-xl border border-slate-200 bg-white p-5 text-sm font-bold text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                        차트 준비 중...
+                    </div>
+                }
+            >
+                <DashboardOperationsChart stats={stats} />
+            </Suspense>
+
+            <DashboardDailyReportCoveragePanel coverage={stats.dailyReportCoverage} />
+
+            <DashboardNextFeaturePanel stats={stats} />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2 space-y-8">
                     {/* Recent Tasks (Work Requests) */}
-                    <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                            <h2 className="text-lg font-bold text-slate-800">최근 업무 요청</h2>
+                    <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden dark:border-slate-700 dark:bg-slate-800">
+                        <div className="p-5 sm:p-6 border-b border-slate-100 flex justify-between items-center dark:border-slate-700">
+                            <h2 className="text-lg font-bold text-slate-800 dark:text-white">최근 업무 요청</h2>
                             <button
-                                onClick={() => navigate('/todo')}
+                                onClick={handleTodoClick}
                                 className="text-sm text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1"
                             >
                                 전체보기 <FontAwesomeIcon icon={faArrowRight} />
@@ -299,22 +140,23 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any }> = ({ stats }) => {
                         </div>
                         <div className="divide-y divide-slate-100">
                             {stats.recentTasks.length > 0 ? (
-                                stats.recentTasks.map((task: Task, index: number) => {
+                                stats.recentTasks.map((task: Task) => {
                                     const statusInfo = STATUS_CONFIG[task.status] || STATUS_CONFIG['요청'];
+                                    const taskKey = task.id || `${task.title}:${task.assignee}:${task.dueDate}`;
 
                                     return (
                                         <div
-                                            key={task.id || index}
-                                            onClick={() => navigate('/todo')}
-                                            className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between cursor-pointer"
+                                            key={taskKey}
+                                            onClick={handleTodoClick}
+                                            className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between cursor-pointer dark:hover:bg-slate-700/60"
                                         >
                                             <div className="flex items-center gap-4">
-                                                <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500">
+                                                <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 dark:bg-slate-700 dark:text-slate-300">
                                                     <FontAwesomeIcon icon={faListCheck} />
                                                 </div>
                                                 <div>
-                                                    <h4 className="font-semibold text-slate-800 line-clamp-1">{task.title}</h4>
-                                                    <p className="text-xs text-slate-500">{task.assignee} • {task.dueDate}</p>
+                                                    <h4 className="font-semibold text-slate-800 line-clamp-1 dark:text-slate-100">{task.title}</h4>
+                                                    <p className="text-xs text-slate-500 dark:text-slate-400">{task.assignee} • {task.dueDate}</p>
                                                 </div>
                                             </div>
                                             <div className="text-right">
@@ -326,7 +168,7 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any }> = ({ stats }) => {
                                     );
                                 })
                             ) : (
-                                <div className="p-8 text-center text-slate-500">
+                                <div className="p-8 text-center text-slate-500 dark:text-slate-400">
                                     등록된 업무 요청이 없습니다.
                                 </div>
                             )}
@@ -361,7 +203,7 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any }> = ({ stats }) => {
                         </div>
                         <div className="mt-6 pt-6 border-t border-slate-700">
                             <button
-                                onClick={() => navigate('/manual')}
+                                onClick={handleManualClick}
                                 className="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-medium transition-colors"
                             >
                                 사용자 매뉴얼 확인
@@ -373,4 +215,4 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any }> = ({ stats }) => {
 
         </div>
     );
-}
+});

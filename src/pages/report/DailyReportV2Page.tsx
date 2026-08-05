@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { HotTable } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
-import { dailyReportService, DailyReport } from '../../services/dailyReportService';
+import { dailyReportService } from '../../services/dailyReportService';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { geminiService } from '../../services/geminiService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSave, faCalendarAlt, faSpinner, faPlus, faComment, faCloudUploadAlt } from '@fortawesome/free-solid-svg-icons';
+import { faSave, faCalendarAlt, faSpinner, faComment } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 
 // Register Handsontable modules

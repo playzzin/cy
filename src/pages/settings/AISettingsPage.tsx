@@ -45,6 +45,7 @@ const AISettingsPage: React.FC = () => {
     const [pageEnabledById, setPageEnabledById] = useState<Record<string, boolean>>({});
     const [serverApiKey, setServerApiKey] = useState('');
     const [serverModel, setServerModel] = useState('gemini-2.5-flash');
+    const [serverDocumentModel, setServerDocumentModel] = useState('gemini-2.5-flash');
     const [serverBatchModel, setServerBatchModel] = useState('gemini-2.5-flash');
     const [serverStatus, setServerStatus] = useState<ServerAiSettingsStatus | null>(null);
     const [serverStatusError, setServerStatusError] = useState('');
@@ -67,6 +68,7 @@ const AISettingsPage: React.FC = () => {
             const status = await serverAiSettingsService.getStatus();
             setServerStatus(status);
             setServerModel(status.model || 'gemini-2.5-flash');
+            setServerDocumentModel(status.documentModel || 'gemini-2.5-flash');
             setServerBatchModel(status.batchModel || status.model || 'gemini-2.5-flash');
         } catch (error) {
             console.error('[AISettingsPage] load server settings failed:', error);
@@ -126,13 +128,25 @@ const AISettingsPage: React.FC = () => {
                 note: '서버 함수 내부 모델 정책 사용'
             },
             {
+                id: 'binding-document-recognition',
+                service: '공공요금·차량 과태료 문서 인식',
+                model: serverStatus?.documentModel || serverDocumentModel || 'gemini-2.5-flash',
+                note: '전기·가스·수도 청구서와 과태료 고지서의 고정밀 OCR·매칭'
+            },
+            {
+                id: 'binding-workbook-tax-invoice',
+                service: '매입매출 세금계산서 대량검수',
+                model: models.textModel,
+                note: 'PDF/사진 세금계산서 분석 및 입력폼 반영 전 검수'
+            },
+            {
                 id: 'binding-partner-recognition',
                 service: '사진 거래처 등록 (Cloud Function)',
                 model: serverStatus?.model || serverModel || 'server-managed',
                 note: '명함/업체자료 사진 인식'
             }
         ],
-        [models, serverModel, serverStatus]
+        [models, serverDocumentModel, serverModel, serverStatus]
     );
 
     const setAllPagesEnabled = (enabled: boolean) => {
@@ -154,6 +168,7 @@ const AISettingsPage: React.FC = () => {
             const status = await serverAiSettingsService.save({
                 apiKey: serverApiKey.trim() || undefined,
                 model: serverModel,
+                documentModel: serverDocumentModel,
                 batchModel: serverBatchModel,
             });
             setServerStatus(status);
@@ -174,6 +189,7 @@ const AISettingsPage: React.FC = () => {
         try {
             const status = await serverAiSettingsService.save({
                 model: serverModel,
+                documentModel: serverDocumentModel,
                 batchModel: serverBatchModel,
                 clearApiKey: true,
             });
@@ -280,7 +296,7 @@ const AISettingsPage: React.FC = () => {
                         </div>
                     )}
 
-                    <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-3">
+                    <div className="mt-4 grid grid-cols-1 lg:grid-cols-4 gap-3">
                         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                             <div className="text-xs font-bold text-slate-500">서버 키 상태</div>
                             <div className={`mt-1 text-sm font-extrabold ${serverStatus?.configured ? 'text-emerald-700' : 'text-rose-700'}`}>
@@ -297,6 +313,13 @@ const AISettingsPage: React.FC = () => {
                             </div>
                         </div>
                         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                            <div className="text-xs font-bold text-slate-500">문서 OCR 모델</div>
+                            <div className="mt-1 text-sm font-mono font-bold text-indigo-700">
+                                {serverStatus?.documentModel || serverDocumentModel}
+                            </div>
+                            <div className="mt-1 text-[10px] font-semibold text-slate-400">공공요금·과태료 고정밀 분석</div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                             <div className="text-xs font-bold text-slate-500">Batch 모델</div>
                             <div className="mt-1 text-sm font-mono font-bold text-slate-800">
                                 {serverStatus?.batchModel || serverBatchModel}
@@ -304,7 +327,7 @@ const AISettingsPage: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="mt-5 grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr_0.8fr_auto] gap-3 items-end">
+                    <div className="mt-5 grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr_auto] gap-3 items-end">
                         <div className="space-y-2">
                             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">서버 Gemini API Key</label>
                             <input
@@ -324,6 +347,22 @@ const AISettingsPage: React.FC = () => {
                                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono"
                                 placeholder="gemini-2.5-flash"
                             />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">문서 OCR 모델</label>
+                            <input
+                                type="text"
+                                list="server-document-model-options"
+                                value={serverDocumentModel}
+                                onChange={(e) => setServerDocumentModel(e.target.value)}
+                                className="w-full border border-indigo-200 bg-indigo-50 rounded-xl px-3 py-2.5 text-xs font-mono font-bold text-indigo-800"
+                                placeholder="gemini-2.5-flash"
+                            />
+                            <datalist id="server-document-model-options">
+                                {AI_TEXT_MODEL_OPTIONS.map((option) => (
+                                    <option key={`document-${option.value}`} value={option.value}>{option.label}</option>
+                                ))}
+                            </datalist>
                         </div>
                         <div className="space-y-2">
                             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Batch 모델</label>

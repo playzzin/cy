@@ -355,6 +355,7 @@ const Calculator: React.FC = () => {
                         key={idx}
                         type="button"
                         onClick={btn.onClick}
+                        aria-label={btn.id === 'backspace' ? '계산기 한 글자 삭제' : `계산기 ${typeof btn.label === 'string' ? btn.label : btn.id}`}
                         className={`
                             rounded-lg p-4 text-xl font-semibold transition-all duration-100
                             border border-gray-700 bg-gray-800

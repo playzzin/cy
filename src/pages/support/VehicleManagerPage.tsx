@@ -14,6 +14,8 @@ import { AssignmentBillingSetupModal, type AssignmentBillingSection } from '../.
 import { SupportTeamFilterTabs } from '../../components/support/SupportTeamFilterTabs';
 import { SupportCancellationHistory } from '../../components/support/SupportCancellationHistory';
 import { SupportCancellationModal, type SupportCancellationFormValue } from '../../components/support/SupportCancellationModal';
+import { SupportPageHeader } from '../../components/support/SupportPageHeader';
+import { SupportSegmentedTabs, type SupportSegmentedTabOption } from '../../components/support/SupportSegmentedTabs';
 import { supportCancellationLogService } from '../../services/supportCancellationLogService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlus, faCar, faChartPie, faTableCellsLarge, faRotateRight, faCircleExclamation, faHistory, faSearch, faOilCan, faScrewdriverWrench } from '@fortawesome/free-solid-svg-icons';
@@ -24,6 +26,14 @@ import { appendOfficeAssignmentTeam, isOfficeAssignmentReference, isOfficeAssign
 interface VehicleManagerPageProps {
     embedded?: boolean;
 }
+
+type VehicleTabId = 'status' | 'ledger' | 'history';
+
+const vehicleTabs: SupportSegmentedTabOption<VehicleTabId>[] = [
+    { id: 'status', label: '배정 및 청구현황', icon: faChartPie },
+    { id: 'ledger', label: '차량 통합관리대장', icon: faTableCellsLarge },
+    { id: 'history', label: '처리내역', icon: faHistory }
+];
 
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
 
@@ -45,7 +55,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
     const [searchTerm, setSearchTerm] = useState('');
 
     // Tab State
-    const [activeTab, setActiveTab] = useState<'status' | 'ledger' | 'history'>('status');
+    const [activeTab, setActiveTab] = useState<VehicleTabId>('status');
 
     // Modal State
     const [isFormOpen, setIsFormOpen] = useState(false);
@@ -337,16 +347,53 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
             setSavingCancellation(false);
         }
     };
+    const handleRestoreUse = async (vehicle: Vehicle) => {
+        if (vehicle.status !== 'DISPOSED') return;
+        const ok = window.confirm(`${vehicle.licensePlate || vehicle.model || '차량'} 처리 상태를 취소하고 다시 사용 가능으로 변경할까요?`);
+        if (!ok) return;
+
+        try {
+            await vehicleService.updateVehicle(vehicle.id, { status: 'AVAILABLE' } as Partial<Vehicle>);
+            await supportCancellationLogService.createLog({
+                resourceType: 'vehicle',
+                resourceId: vehicle.id,
+                resourceLabel: vehicle.licensePlate || vehicle.model || '차량',
+                reason: 'OTHER',
+                reasonLabel: '처리취소',
+                processedDate: new Date().toISOString().slice(0, 10),
+                statusBefore: vehicle.status,
+                statusAfter: 'AVAILABLE',
+                assigneeName: vehicle.currentAssigneeName || undefined,
+                billingTargetName: vehicle.billingTargetName || undefined,
+                note: '사용취소/만료 처리 번복',
+                snapshot: {
+                    licensePlate: vehicle.licensePlate,
+                    model: vehicle.model,
+                    type: vehicle.type,
+                    status: vehicle.status,
+                    contractEndDate: vehicle.contract?.endDate
+                }
+            });
+            handleRefresh();
+        } catch (error) {
+            console.error('Failed to restore vehicle status', error);
+            window.alert('차량 처리취소 중 오류가 발생했습니다.');
+        }
+    };
     const handleFormSuccess = () => {
         setIsFormOpen(false);
         setEditingVehicle(null);
         handleRefresh();
     };
     const handleFineChargeTargetChange = async (vehicleId: string, target: VehicleFineChargeTarget) => {
-        await vehicleService.updateVehicle(vehicleId, { fineChargeTarget: target });
+        const effectiveDate = new Date().toISOString().slice(0, 10);
+        await vehicleService.updateVehicle(vehicleId, {
+            fineChargeTarget: target,
+            fineChargeTargetEffectiveDate: effectiveDate
+        });
         setVehicles(prev => prev.map(vehicle => (
             String(vehicle.id) === String(vehicleId)
-                ? { ...vehicle, fineChargeTarget: target }
+                ? { ...vehicle, fineChargeTarget: target, fineChargeTargetEffectiveDate: effectiveDate }
                 : vehicle
         )));
     };
@@ -379,89 +426,70 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
 
     return (
         <div className={`${embedded ? 'space-y-5 sm:space-y-6 bg-transparent min-h-full w-full min-w-0 max-w-full overflow-x-hidden' : 'p-3 sm:p-6 space-y-5 sm:space-y-6 bg-slate-50 min-h-full w-full max-w-[calc(100vw-30px)] sm:max-w-full min-w-0 overflow-x-hidden'}`}>
-            {/* Header 섹션 */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex min-w-0 items-center gap-3">
-                    <div className="shrink-0 p-3 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-100">
-                        <FontAwesomeIcon icon={faCar} className="text-white text-xl" />
-                    </div>
-                    <div className="min-w-0">
-                        <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">차량 통합관리</h1>
-                        <p className="text-sm text-slate-500 font-medium">실시간 운전자 현황과 차량 통합관리대장을 관리합니다.</p>
-                    </div>
-                </div>
-
-                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <SupportPageHeader
+                icon={faCar}
+                title="차량 통합관리"
+                description="실시간 운전자 현황과 차량 통합관리대장을 관리합니다."
+                tone="blue"
+                actions={(
+                    <>
                     <button
+                        type="button"
                         onClick={() => navigate('/support/vehicles/oil-cycle')}
-                        className="flex flex-1 items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all border border-slate-700 shadow-sm sm:flex-none"
+                        className="flex basis-[calc(50%-0.25rem)] items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 sm:basis-auto sm:px-4"
                     >
                         <FontAwesomeIcon icon={faOilCan} />
                         <span>엔진오일 주기</span>
                     </button>
                     <button
+                        type="button"
                         onClick={() => navigate('/support/vehicles/team-equipment')}
-                        className="flex flex-1 items-center justify-center gap-2 px-4 py-2.5 bg-white text-slate-700 rounded-xl font-bold hover:text-blue-700 hover:border-blue-200 transition-all border border-slate-200 shadow-sm sm:flex-none"
+                        className="flex basis-[calc(50%-0.25rem)] items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-bold text-slate-700 shadow-sm transition-all hover:border-blue-200 hover:text-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 sm:basis-auto sm:px-4"
                     >
                         <FontAwesomeIcon icon={faScrewdriverWrench} />
                         <span>팀 장비여부</span>
                     </button>
                     <button
+                        type="button"
                         onClick={() => navigate('/support/vehicles/logs')}
-                        className="flex flex-1 items-center justify-center gap-2 px-4 py-2.5 bg-white text-slate-700 rounded-xl font-bold hover:text-indigo-700 hover:border-indigo-200 transition-all border border-slate-200 shadow-sm sm:flex-none"
+                        className="flex basis-[calc(50%-0.25rem)] items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-bold text-slate-700 shadow-sm transition-all hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 sm:basis-auto sm:px-4"
                     >
                         <FontAwesomeIcon icon={faHistory} />
                         <span>청구 로그</span>
                     </button>
                     <button
+                        type="button"
                         onClick={handleRefresh}
-                        className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-xl transition-all border border-transparent hover:border-slate-200"
+                        className="rounded-lg border border-transparent p-2.5 text-slate-400 transition-all hover:border-slate-200 hover:bg-white hover:text-indigo-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                         aria-label="새로고침"
                         title="새로고침"
                     >
                         <FontAwesomeIcon icon={faRotateRight} className={loading ? 'spin' : ''} />
                     </button>
                     <button
+                        type="button"
                         onClick={() => {
                             setEditingVehicle(null);
                             setIsFormOpen(true);
                         }}
-                        className="flex flex-1 items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 active:scale-95 sm:flex-none"
+                        className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 font-bold text-white shadow-lg shadow-indigo-100 transition-all hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 active:scale-95 sm:flex-none"
                     >
                         <FontAwesomeIcon icon={faPlus} />
                         <span>차량 신규등록</span>
                     </button>
-                </div>
-            </div>
+                    </>
+                )}
+            />
 
             {/* 필터 및 탭 섹션 */}
             <div className="flex max-w-full flex-col gap-2 overflow-hidden bg-white p-2 rounded-2xl border border-slate-200 shadow-sm xl:flex-row xl:items-center">
                 <div className="flex min-w-0 flex-1 flex-col gap-2 lg:flex-row lg:items-center">
-                    <div className="support-scroll-x w-full lg:w-auto lg:shrink-0">
-                        <div className="support-scroll-inner flex p-1 bg-slate-100 rounded-xl">
-                            <button
-                                onClick={() => setActiveTab('status')}
-                                className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold transition-all sm:px-6 ${activeTab === 'status' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                                <FontAwesomeIcon icon={faChartPie} className="mr-2" />
-                                운전자 및 청구현황
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('ledger')}
-                                className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold transition-all sm:px-6 ${activeTab === 'ledger' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                                <FontAwesomeIcon icon={faTableCellsLarge} className="mr-2" />
-                                차량 통합관리대장
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('history')}
-                                className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold transition-all sm:px-6 ${activeTab === 'history' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                                <FontAwesomeIcon icon={faHistory} className="mr-2" />
-                                처리내역
-                            </button>
-                        </div>
-                    </div>
+                    <SupportSegmentedTabs
+                        options={vehicleTabs}
+                        activeId={activeTab}
+                        onChange={setActiveTab}
+                        ariaLabel="차량 관리 보기"
+                    />
 
                     <SupportTeamFilterTabs
                         teams={assignableTeams}
@@ -481,6 +509,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                         <input
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
+                            aria-label="차량 검색"
                             placeholder="차량번호, 모델, 운전자 검색"
                             className="block w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm font-bold text-slate-700 outline-none focus:border-indigo-500 focus:ring-indigo-500"
                         />
@@ -495,7 +524,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                         <FontAwesomeIcon icon={faCircleExclamation} className="text-rose-500 text-3xl mb-3" />
                         <h3 className="text-rose-900 font-bold mb-1">데이터 로드 에러</h3>
                         <p className="text-rose-600 text-sm">{loadError}</p>
-                        <button onClick={handleRefresh} className="mt-4 px-4 py-2 bg-rose-100 text-rose-700 rounded-xl text-sm font-bold hover:bg-rose-200 transition-all">다시 시도</button>
+                        <button type="button" onClick={handleRefresh} className="mt-4 rounded-lg bg-rose-100 px-4 py-2 text-sm font-bold text-rose-700 transition-all hover:bg-rose-200">다시 시도</button>
                     </div>
                 ) : activeTab === 'status' ? (
                     <VehicleStatusBoard
@@ -508,12 +537,16 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                         onBillingTargetAssign={openBillingTargetVehicle}
                         onFineChargeTargetChange={handleFineChargeTargetChange}
                         onCancelUse={openCancellationModal}
+                        onRestoreUse={handleRestoreUse}
                     />
                 ) : activeTab === 'ledger' ? (
                     <VehicleMonthlyLedger
+                        key={refreshKey}
                         vehicles={filteredVehicles}
+                        fineImportVehicles={vehicles}
                         teams={teams}
                         teamFilterId={selectedTeamId}
+                        searchText={searchTerm}
                         loadingVehicles={loading}
                         onOpenSetup={openAssignmentVehicle}
                     />

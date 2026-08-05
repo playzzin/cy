@@ -576,7 +576,7 @@ const DelegationBuilderPage: React.FC = () => {
         }
     };
 
-    const handleDragCancel = (event: DragCancelEvent) => {
+    const handleDragCancel = (_event: DragCancelEvent) => {
         setActiveDragId(null);
         setActiveDragData(null);
     };

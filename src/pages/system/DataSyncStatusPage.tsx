@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { manpowerService, Worker } from '../../services/manpowerService';
-import { teamService, Team } from '../../services/teamService';
-import { siteService, Site } from '../../services/siteService';
-import { companyService, Company } from '../../services/companyService';
+import { manpowerService } from '../../services/manpowerService';
+import { teamService } from '../../services/teamService';
+import { siteService } from '../../services/siteService';
+import { companyService } from '../../services/companyService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCheckCircle, faTimesCircle, faSync, faExclamationTriangle, faArrowRight, faChartPie } from '@fortawesome/free-solid-svg-icons';
+import { faCheckCircle, faSync, faExclamationTriangle, faArrowRight, faChartPie } from '@fortawesome/free-solid-svg-icons';
 
 const DataSyncStatusPage: React.FC = () => {
     const [loading, setLoading] = useState(true);
@@ -80,7 +80,7 @@ const DataSyncStatusPage: React.FC = () => {
         );
     };
 
-    const renderUnlinkedList = (title: string, items: any[], colorClass: string) => (
+    const renderUnlinkedList = (title: string, items: any[], _colorClass: string) => (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full">
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
                 <h4 className="font-bold text-slate-700">{title}</h4>

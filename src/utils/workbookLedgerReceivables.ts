@@ -3,6 +3,8 @@ import type {
     WorkbookTransactionType,
 } from '../services/workbookLedgerService';
 
+const ADVANCE_USAGE_SOURCE_TYPE = 'advanceUsage';
+
 export interface WorkbookReceivableRow {
     id: string;
     transactionType: WorkbookTransactionType;
@@ -15,7 +17,9 @@ export interface WorkbookReceivableRow {
     taxAmount: number;
     totalAmount: number;
     settledAmount: number;
+    advanceUsedAmount: number;
     outstandingAmount: number;
+    advanceAmount: number;
     paymentDates: string[];
     settlementEntryIds: string[];
     note: string;
@@ -147,6 +151,7 @@ const getYearFromDate = (date: string): number | null => {
 const isInvoiceEntry = (entry: WorkbookLedgerEntry) => (entry.totalAmount ?? 0) > 0;
 const isNegativeInvoiceEntry = (entry: WorkbookLedgerEntry) => (entry.totalAmount ?? 0) < 0;
 const isPaymentEntry = (entry: WorkbookLedgerEntry) => (entry.paymentAmount ?? 0) > 0;
+const isAdvanceUsageEntry = (entry: WorkbookLedgerEntry) => normalizeText(entry.sourceType) === ADVANCE_USAGE_SOURCE_TYPE;
 
 const sortWorkbookEntries = (left: WorkbookLedgerEntry, right: WorkbookLedgerEntry) => {
     const dateCompare = (left.date ?? '').localeCompare(right.date ?? '', 'en');
@@ -212,9 +217,6 @@ export const buildWorkbookReceivableRows = (
     const summaryInvoiceEntries = entries
         .filter((entry) => entry.transactionType === transactionType)
         .filter((entry) => (entry.totalAmount ?? 0) !== 0)
-        .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
-        .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
-        .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
         .sort(sortWorkbookEntries);
 
     const positiveInvoiceEntries = summaryInvoiceEntries.filter(isInvoiceEntry);
@@ -234,7 +236,9 @@ export const buildWorkbookReceivableRows = (
         totalAmount: entry.totalAmount ?? 0,
         paymentDates: [],
         settledAmount: 0,
+        advanceUsedAmount: 0,
         outstandingAmount: entry.totalAmount ?? 0,
+        advanceAmount: 0,
         settlementEntryIds: [],
         remainingAmount: entry.totalAmount ?? 0,
         note: entry.note ?? '',
@@ -257,7 +261,9 @@ export const buildWorkbookReceivableRows = (
             totalAmount: entry.totalAmount ?? 0,
             paymentDates: [],
             settledAmount: 0,
+            advanceUsedAmount: 0,
             outstandingAmount: 0,
+            advanceAmount: 0,
             settlementEntryIds: [],
             note: entry.note ?? '',
             teamName: entry.teamName ?? '',
@@ -280,32 +286,35 @@ export const buildWorkbookReceivableRows = (
     const paymentEntries = entries
         .filter((entry) => entry.transactionType === transactionType)
         .filter(isPaymentEntry)
+        .filter((entry) => !isAdvanceUsageEntry(entry))
         .filter((entry) => {
             const paymentDate = normalizeDate(entry.date);
             if (!paymentDate) return false;
             return paymentDate <= paymentCutoffDate;
         })
-        .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
-        .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
-        .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
         .sort(sortWorkbookEntries);
 
     const applyPaymentToInvoice = (
         invoice: WorkingReceivableRow,
         paymentAmount: number,
         paymentDate: string,
-        options?: { recordDate?: boolean; note?: string; sourceEntryId?: string },
+        options?: { recordDate?: boolean; note?: string; sourceEntryId?: string; allowAdvance?: boolean },
     ) => {
         if (paymentAmount <= 0) return paymentAmount;
 
         const appliedAmount = invoice.remainingAmount > 0
             ? Math.min(invoice.remainingAmount, paymentAmount)
             : 0;
-        if (appliedAmount <= 0) return paymentAmount;
+        const advanceAmount = (options?.allowAdvance ?? true)
+            ? Math.max(paymentAmount - appliedAmount, 0)
+            : 0;
+        const settledAmount = appliedAmount + advanceAmount;
+        if (settledAmount <= 0) return paymentAmount;
 
-        invoice.settledAmount += appliedAmount;
+        invoice.settledAmount += settledAmount;
         invoice.remainingAmount = Math.max(invoice.remainingAmount - appliedAmount, 0);
         invoice.outstandingAmount = invoice.remainingAmount;
+        invoice.advanceAmount += advanceAmount;
         if ((options?.recordDate ?? true) && paymentDate && !invoice.paymentDates.includes(paymentDate)) {
             invoice.paymentDates = [...invoice.paymentDates, paymentDate].sort((left, right) => left.localeCompare(right, 'en'));
         }
@@ -314,7 +323,40 @@ export const buildWorkbookReceivableRows = (
         }
         invoice.note = appendSummaryNote(invoice.note, options?.note);
 
-        return paymentAmount - appliedAmount;
+        return paymentAmount - settledAmount;
+    };
+
+    const applyAdvanceUsageToInvoice = (usageEntry: WorkbookLedgerEntry) => {
+        const sourceId = normalizeText(usageEntry.sourceId);
+        const targetId = normalizeText(usageEntry.matchedEntryId);
+        const usageAmount = usageEntry.paymentAmount ?? 0;
+        if (!sourceId || !targetId || usageAmount <= 0) return;
+
+        const sourceInvoice = invoiceById.get(sourceId);
+        const targetInvoice = invoiceById.get(targetId);
+        if (!sourceInvoice || !targetInvoice || sourceInvoice.id === targetInvoice.id) return;
+        if (normalizeWorkbookPartnerKey(sourceInvoice.partnerName) !== normalizeWorkbookPartnerKey(targetInvoice.partnerName)) return;
+
+        const appliedAmount = Math.min(
+            usageAmount,
+            Math.max(sourceInvoice.advanceAmount, 0),
+            Math.max(targetInvoice.remainingAmount, 0),
+        );
+        if (appliedAmount <= 0) return;
+
+        sourceInvoice.advanceAmount = Math.max(sourceInvoice.advanceAmount - appliedAmount, 0);
+        targetInvoice.advanceUsedAmount += appliedAmount;
+        targetInvoice.remainingAmount = Math.max(targetInvoice.remainingAmount - appliedAmount, 0);
+        targetInvoice.outstandingAmount = targetInvoice.remainingAmount;
+
+        const usageEntryKey = getWorkbookEntryKey(usageEntry);
+        if (usageEntry.date && !targetInvoice.paymentDates.includes(usageEntry.date)) {
+            targetInvoice.paymentDates = [...targetInvoice.paymentDates, usageEntry.date].sort((left, right) => left.localeCompare(right, 'en'));
+        }
+        if (!targetInvoice.settlementEntryIds.includes(usageEntryKey)) {
+            targetInvoice.settlementEntryIds = [...targetInvoice.settlementEntryIds, usageEntryKey];
+        }
+        targetInvoice.note = appendSummaryNote(targetInvoice.note, usageEntry.note);
     };
 
     const findDirectOffsetInvoice = (adjustmentEntry: WorkbookLedgerEntry) => {
@@ -456,22 +498,33 @@ export const buildWorkbookReceivableRows = (
         if (adjustmentEntry.matchedEntryId) {
             const matchedInvoice = invoiceById.get(adjustmentEntry.matchedEntryId);
             if (matchedInvoice) {
-                applyPaymentToInvoice(matchedInvoice, adjustmentAmount, adjustmentEntry.date, { note: adjustmentEntry.note });
+                applyPaymentToInvoice(matchedInvoice, adjustmentAmount, adjustmentEntry.date, { note: adjustmentEntry.note, allowAdvance: false });
             }
             return;
         }
 
         const directOffsetInvoice = findDirectOffsetInvoice(adjustmentEntry);
         if (directOffsetInvoice) {
-            applyPaymentToInvoice(directOffsetInvoice, adjustmentAmount, adjustmentEntry.date, { note: adjustmentEntry.note });
+            applyPaymentToInvoice(directOffsetInvoice, adjustmentAmount, adjustmentEntry.date, { note: adjustmentEntry.note, allowAdvance: false });
             return;
         }
 
         const legacyMatchedInvoice = findLegacyMatchedInvoice(adjustmentEntry, adjustmentAmount);
         if (legacyMatchedInvoice) {
-            applyPaymentToInvoice(legacyMatchedInvoice, adjustmentAmount, adjustmentEntry.date, { note: adjustmentEntry.note });
+            applyPaymentToInvoice(legacyMatchedInvoice, adjustmentAmount, adjustmentEntry.date, { note: adjustmentEntry.note, allowAdvance: false });
         }
     });
+
+    entries
+        .filter((entry) => entry.transactionType === transactionType)
+        .filter((entry) => isPaymentEntry(entry) && isAdvanceUsageEntry(entry))
+        .filter((entry) => {
+            const usageDate = normalizeDate(entry.date);
+            if (!usageDate) return false;
+            return usageDate <= paymentCutoffDate;
+        })
+        .sort(sortWorkbookEntries)
+        .forEach(applyAdvanceUsageToInvoice);
 
     const finalizedPositiveRowsById = new Map<string, WorkbookReceivableRow>();
     invoices.forEach(({ remainingAmount, ...row }) => {
@@ -486,11 +539,16 @@ export const buildWorkbookReceivableRows = (
             return null;
         })
         .filter((row): row is WorkbookReceivableRow => Boolean(row))
-        .filter((row) => isDateWithinRange(row.issueDate, startDate, endDate));
+        .filter((row) => (
+            isDateWithinRange(row.issueDate, startDate, endDate) &&
+            matchesFilter(row.teamName, filter.teamName) &&
+            matchesFilter(row.partnerName, filter.partnerName) &&
+            matchesFilter(row.siteName, filter.siteName)
+        ));
 
     if (filter.settlementOnly) {
         return finalizedRows
-            .filter((row) => row.outstandingAmount > 0)
+            .filter((row) => row.outstandingAmount > 0 || row.advanceAmount > 0)
             .sort(sortReceivableRowsByDate);
     }
 

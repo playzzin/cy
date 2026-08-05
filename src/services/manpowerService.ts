@@ -18,6 +18,8 @@ import {
 import { deleteObject, ref } from 'firebase/storage';
 import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 import { resolveWorkerPayType, syncPayTypeFields } from '../utils/payType';
+import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
+import { devWorkers, updateDevWorker } from '../utils/devAdminFixtures';
 
 export type { Worker };
 
@@ -106,6 +108,10 @@ export const manpowerService = {
 
     // Get all workers
     getWorkers: async (forceRefresh: boolean = false): Promise<Worker[]> => {
+        if (isDevAdminSessionEnabled()) {
+            return [...devWorkers];
+        }
+
         const now = Date.now();
         if (!forceRefresh && cachedWorkers && (now - lastWorkerFetchTime < WORKER_CACHE_TTL)) {
             return cachedWorkers;
@@ -118,6 +124,10 @@ export const manpowerService = {
 
     // Get a single worker by ID
     getWorker: async (id: string): Promise<Worker | null> => {
+        if (isDevAdminSessionEnabled()) {
+            return devWorkers.find((worker) => String(worker.id) === String(id)) || null;
+        }
+
         const worker = await workerFirestoreService.getWorker(id);
         return worker ? normalizeWorkerSalaryFields(worker as Worker) : null;
     },
@@ -161,6 +171,10 @@ export const manpowerService = {
 
     // Get worker by Firebase Auth UID
     getWorkerByUid: async (uid: string): Promise<Worker | null> => {
+        if (isDevAdminSessionEnabled()) {
+            return devWorkers.find((worker) => String(worker.uid || '') === String(uid)) || null;
+        }
+
         const q = query(
             collection(db, 'workers'),
             where('uid', '==', uid),
@@ -200,6 +214,11 @@ export const manpowerService = {
 
     // Update a worker
     updateWorker: async (id: string, updates: Partial<Worker>): Promise<void> => {
+        if (isDevAdminSessionEnabled()) {
+            updateDevWorker(id, updates);
+            return;
+        }
+
         const before = await manpowerService.getWorker(id);
         const normalizedUpdates = stripUndefinedFields(syncWorkerSalaryFields(updates) as Record<string, unknown>);
         await workerFirestoreService.updateWorker(id, normalizedUpdates);

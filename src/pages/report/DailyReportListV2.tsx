@@ -1,20 +1,16 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faCalendarAlt,
-    faSearch,
-    faSortAmountDown,
-    faSortAmountUp,
     faPenToSquare,
-    faTrash,
     faSave,
     faFilter,
-    faDownload,
     faSpinner,
     faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import { dailyReportService, DailyReportWorker, DailyReportWorkerRow } from '../../services/dailyReportService';
 import { dailyReportTransferService } from '../../services/dailyReportTransferService';
+import { fileTransferAuditService } from '../../services/fileTransferAuditService';
 import { teamService, Team } from '../../services/teamService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
@@ -23,13 +19,32 @@ import { confirm, toast } from '../../utils/swal';
 import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typedDateInput';
 import { loadSessionState, saveSessionState } from '../../utils/sessionStorage';
 import { resolveReportPayType, resolveWorkerPayType } from '../../utils/payType';
-import AppIntroScreen from '../../components/common/AppIntroScreen';
 import SingleSelectPopover, { InputPopover } from '../../components/common/SingleSelectPopover';
+import DailyReportListSummary from './components/DailyReportListSummary';
+import DailyReportMobileList, { DailyReportMobileRow } from './components/DailyReportMobileList';
+import {
+    DailyReportListEmptyState,
+    DailyReportListErrorState,
+    DailyReportListLoadingState,
+} from './components/DailyReportListStates';
+import DailyReportListToolbar, {
+    DailyReportDatePresetKey,
+    DailyReportSortMode,
+} from './components/DailyReportListToolbar';
+import { buildDailyReportListSummary } from './dailyReportListMetrics';
+import {
+    useWorkerAccessScope,
+    workerAccessMatchesReportRow,
+    workerAccessMatchesSite,
+    workerAccessMatchesTeam,
+    workerAccessMatchesWorker,
+} from '../../hooks/useWorkerAccessScope';
 import '../taxinvoice/WorkbookLedgerPage.css';
 import './DailyReportListV2.css';
 
 interface DailyReportListV2Props {
     initialDate?: string;
+    initialSiteId?: string;
     targetReportId?: string;
 }
 
@@ -160,7 +175,7 @@ const clearDailyReportBoardDrafts = (dates: Iterable<string>) => {
     });
 };
 
-type DatePresetKey = 'prevMonth' | 'thisMonth' | 'yesterday' | 'today';
+type DatePresetKey = DailyReportDatePresetKey;
 
 const getMonthDateRange = (monthOffset: number): { start: string; end: string } => {
     const startDate = new Date();
@@ -192,56 +207,129 @@ const fromColumnFilterValue = (value: string): string => {
     return value === EMPTY_COLUMN_FILTER_VALUE ? '(빈값)' : value;
 };
 
-const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targetReportId }) => {
+const normalizeDateParam = (value?: string | null): string | null => {
+    return value ? normalizeTypedDateInput(value) : null;
+};
+
+const parseSortModeParam = (value?: string | null): DailyReportListViewState['sortMode'] | null => {
+    return value === 'date' || value === 'name' || value === 'site' ? value : null;
+};
+
+const parseSortOrderParam = (value?: string | null): 'asc' | 'desc' | null => {
+    return value === 'asc' || value === 'desc' ? value : null;
+};
+
+const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, initialSiteId, targetReportId }) => {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const lastSyncedSearchRef = useRef(searchParams.toString());
     const todayStr = formatYmd(new Date());
-    const defaultDate = initialDate || todayStr;
+    const hasUrlListState = searchParams.has('date')
+        || searchParams.has('startDate')
+        || searchParams.has('endDate')
+        || searchParams.has('siteId')
+        || searchParams.has('teamId')
+        || searchParams.has('workerTeamId')
+        || searchParams.has('q')
+        || searchParams.has('workerSearch')
+        || searchParams.has('sort')
+        || searchParams.has('order');
+    const urlDate = normalizeDateParam(searchParams.get('date') ?? initialDate);
+    const urlStartDate = normalizeDateParam(searchParams.get('startDate')) ?? urlDate;
+    const urlEndDate = normalizeDateParam(searchParams.get('endDate')) ?? urlDate ?? urlStartDate;
+    const hasUrlDateRange = !!(urlStartDate && urlEndDate);
+    const urlSelectedSiteId = searchParams.has('siteId') ? (searchParams.get('siteId') ?? '') : (hasUrlListState ? '' : (initialSiteId ?? ''));
+    const urlSelectedTeamId = searchParams.has('teamId') ? (searchParams.get('teamId') ?? '') : (hasUrlListState ? '' : null);
+    const urlSelectedWorkerTeamId = searchParams.has('workerTeamId') ? (searchParams.get('workerTeamId') ?? '') : (hasUrlListState ? '' : null);
+    const urlWorkerSearch = searchParams.has('q')
+        ? (searchParams.get('q') ?? '')
+        : (searchParams.has('workerSearch') ? (searchParams.get('workerSearch') ?? '') : (hasUrlListState ? '' : null));
+    const urlSortMode = parseSortModeParam(searchParams.get('sort'));
+    const urlSortOrder = parseSortOrderParam(searchParams.get('order'));
+    const defaultDate = urlStartDate || initialDate || todayStr;
     const persistedViewState = useMemo(() => {
         const fallback: DailyReportListViewState = {
             startDate: defaultDate,
             endDate: defaultDate,
             startDateInput: defaultDate,
             endDateInput: defaultDate,
-            selectedTeamId: '',
-            selectedWorkerTeamId: '',
-            selectedSiteId: '',
-            workerSearch: '',
+            selectedTeamId: urlSelectedTeamId ?? '',
+            selectedWorkerTeamId: urlSelectedWorkerTeamId ?? '',
+            selectedSiteId: urlSelectedSiteId,
+            workerSearch: urlWorkerSearch ?? '',
             dateSortOrder: 'desc',
-            sortMode: 'date',
+            sortMode: urlSortMode ?? 'date',
             nameSortOrder: 'asc',
             siteSortOrder: 'asc',
             columnFilters: {}
         };
         const persisted = loadSessionState<DailyReportListViewState>(DAILY_REPORT_LIST_VIEW_KEY, fallback);
 
-        if (!initialDate) {
-            return persisted;
+        const nextState: DailyReportListViewState = {
+            ...persisted,
+            ...(hasUrlDateRange && urlStartDate && urlEndDate ? {
+                startDate: urlStartDate,
+                endDate: urlEndDate,
+                startDateInput: urlStartDate,
+                endDateInput: urlEndDate
+            } : {}),
+            ...(hasUrlListState || initialSiteId ? { selectedSiteId: urlSelectedSiteId } : {}),
+            ...(urlSelectedTeamId !== null ? { selectedTeamId: urlSelectedTeamId } : {}),
+            ...(urlSelectedWorkerTeamId !== null ? { selectedWorkerTeamId: urlSelectedWorkerTeamId } : {}),
+            ...(urlWorkerSearch !== null ? { workerSearch: urlWorkerSearch } : {}),
+            ...(urlSortMode ? { sortMode: urlSortMode } : {})
+        };
+
+        if (urlSortMode && urlSortOrder) {
+            if (urlSortMode === 'date') nextState.dateSortOrder = urlSortOrder;
+            if (urlSortMode === 'name') nextState.nameSortOrder = urlSortOrder;
+            if (urlSortMode === 'site') nextState.siteSortOrder = urlSortOrder;
         }
 
-        return {
-            ...persisted,
-            startDate: initialDate,
-            endDate: initialDate,
-            startDateInput: initialDate,
-            endDateInput: initialDate
-        };
-    }, [defaultDate, initialDate]);
+        return nextState;
+    }, [
+        defaultDate,
+        hasUrlListState,
+        hasUrlDateRange,
+        initialSiteId,
+        searchParams,
+        urlEndDate,
+        urlSelectedSiteId,
+        urlSelectedTeamId,
+        urlSelectedWorkerTeamId,
+        urlSortMode,
+        urlSortOrder,
+        urlStartDate,
+        urlWorkerSearch
+    ]);
 
     const [rows, setRows] = useState<DailyReportWorkerRow[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
     const [companies, setCompanies] = useState<Company[]>([]);
-    const siteOptions = useMemo(() => {
-        return [...sites].sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
-    }, [sites]);
-    const sortedTeamsByName = useMemo(() => {
-        return [...teams].sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
-    }, [teams]);
-    const companyOptions = useMemo(() => {
-        return [...companies].sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
-    }, [companies]);
     const [allWorkers, setAllWorkers] = useState<Worker[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
+    const workerAccessScope = useWorkerAccessScope(allWorkers, teams);
+    const isScopedReadOnly = !workerAccessScope.loading && workerAccessScope.mode !== 'all';
+    const siteOptions = useMemo(() => {
+        return sites
+            .filter((site) => !workerAccessScope.loading && workerAccessMatchesSite(workerAccessScope, site))
+            .sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
+    }, [sites, workerAccessScope]);
+    const sortedTeamsByName = useMemo(() => {
+        return teams
+            .filter((team) => !workerAccessScope.loading && workerAccessMatchesTeam(workerAccessScope, team))
+            .sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
+    }, [teams, workerAccessScope]);
+    const companyOptions = useMemo(() => {
+        if (workerAccessScope.loading || workerAccessScope.mode !== 'all') return [];
+        return [...companies].sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
+    }, [companies, workerAccessScope.loading, workerAccessScope.mode]);
+    const [isQueryLoading, setIsQueryLoading] = useState(false);
+    const [isMutationLoading, setIsMutationLoading] = useState(false);
     const [queryLoadingMessage, setQueryLoadingMessage] = useState('');
+    const [queryError, setQueryError] = useState<string | null>(null);
+    const [dateRangeError, setDateRangeError] = useState<string | null>(null);
+    const [referenceDataError, setReferenceDataError] = useState<string | null>(null);
+    const queryRequestIdRef = useRef(0);
 
     const [startDate, setStartDate] = useState(persistedViewState.startDate);
     const [endDate, setEndDate] = useState(persistedViewState.endDate);
@@ -259,6 +347,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
 
     const [isEditMode, setIsEditMode] = useState(false);
     const [showSiteDetailColumns, setShowSiteDetailColumns] = useState(false);
+    const [mobileViewMode, setMobileViewMode] = useState<'cards' | 'table'>('cards');
     const isFixed = true;
 
     const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
@@ -277,6 +366,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
     const [bulkSiteType, setBulkSiteType] = useState('');
     const [bulkPaymentType, setBulkPaymentType] = useState('');
     const [bulkWorkerTeamName, setBulkWorkerTeamName] = useState('');
+    const [bulkCompanyName, setBulkCompanyName] = useState('');
+    const [bulkConstructorCompanyName, setBulkConstructorCompanyName] = useState('');
+    const [bulkPartnerName, setBulkPartnerName] = useState('');
+    const [bulkResponsibleTeamName, setBulkResponsibleTeamName] = useState('');
+    const [bulkSiteManagerName, setBulkSiteManagerName] = useState('');
     const [columnFilters, setColumnFilters] = useState<ColumnFilterState>(persistedViewState.columnFilters);
     const [openColumnFilter, setOpenColumnFilter] = useState<ColumnFilterKey | null>(null);
     const [columnFilterSearch, setColumnFilterSearch] = useState('');
@@ -284,24 +378,40 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
     const filterMenuRef = React.useRef<HTMLDivElement | null>(null);
     const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
 
-    useEffect(() => {
-        (async () => {
-            try {
-                const [teamsData, sitesData, workersData, companiesData] = await Promise.all([
-                    teamService.getTeams(),
-                    siteService.getSites(),
-                    manpowerService.getWorkers(),
-                    companyService.getActiveCompanies()
-                ]);
-                setTeams(teamsData);
-                setSites(sitesData);
-                setAllWorkers(workersData);
-                setCompanies(companiesData);
-            } catch (error) {
-                console.error('[DailyReportListV2] Failed to fetch initial data', error);
-            }
-        })();
+    const appliedRangeRef = useRef({ startDate, endDate });
+    appliedRangeRef.current = { startDate, endDate };
+
+    const loadReferenceData = useCallback(async () => {
+        setReferenceDataError(null);
+        const results = await Promise.allSettled([
+            teamService.getTeams(),
+            siteService.getSites(),
+            manpowerService.getWorkers(),
+            companyService.getActiveCompanies(),
+        ] as const);
+
+        const [teamsResult, sitesResult, workersResult, companiesResult] = results;
+        if (teamsResult.status === 'fulfilled') setTeams(teamsResult.value);
+        else console.error('[DailyReportListV2] Failed to fetch teams', teamsResult.reason);
+
+        if (sitesResult.status === 'fulfilled') setSites(sitesResult.value);
+        else console.error('[DailyReportListV2] Failed to fetch sites', sitesResult.reason);
+
+        if (workersResult.status === 'fulfilled') setAllWorkers(workersResult.value);
+        else console.error('[DailyReportListV2] Failed to fetch workers', workersResult.reason);
+
+        if (companiesResult.status === 'fulfilled') setCompanies(companiesResult.value);
+        else console.error('[DailyReportListV2] Failed to fetch companies', companiesResult.reason);
+
+        const failedCount = results.filter((result) => result.status === 'rejected').length;
+        if (failedCount > 0) {
+            setReferenceDataError(`필터 기준정보 ${failedCount}개를 불러오지 못했습니다.`);
+        }
     }, []);
+
+    useEffect(() => {
+        void loadReferenceData();
+    }, [loadReferenceData]);
 
     useEffect(() => {
         setStartDateInput(startDate);
@@ -343,26 +453,64 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         workerSearch
     ]);
 
-    const fetchRows = useCallback(async (): Promise<void> => {
+    const teamScopeIdsKey = JSON.stringify(
+        workerAccessScope.mode === 'team' ? [...workerAccessScope.teamIds].sort() : []
+    );
+    const effectiveTeamScopeIds = useMemo<string[]>(() => JSON.parse(teamScopeIdsKey), [teamScopeIdsKey]);
+    const selfScopeIdentityKey = JSON.stringify([
+        ...workerAccessScope.workerIds,
+        ...workerAccessScope.workerUids,
+        ...workerAccessScope.workerNames,
+    ].sort());
+    const hasSelfScopeIdentity = selfScopeIdentityKey !== '[]';
+
+    const runRowsQuery = useCallback(async (queryStartDate: string, queryEndDate: string): Promise<void> => {
+        const requestId = ++queryRequestIdRef.current;
+        if (workerAccessScope.loading) return;
+        if (
+            workerAccessScope.mode === 'self' &&
+            !hasSelfScopeIdentity
+        ) {
+            setRows([]);
+            setQueryError(null);
+            setIsQueryLoading(false);
+            setQueryLoadingMessage('');
+            return;
+        }
         setQueryLoadingMessage('출력일보 목록을 불러오는 중');
-        setIsLoading(true);
+        setQueryError(null);
+        setIsQueryLoading(true);
         try {
+            const teamIds = workerAccessScope.mode === 'team'
+                ? effectiveTeamScopeIds
+                : undefined;
             const data = await dailyReportService.getReportWorkerRowsByRange({
-                startDate,
-                endDate
+                startDate: queryStartDate,
+                endDate: queryEndDate,
+                teamIds,
             });
+            if (requestId !== queryRequestIdRef.current) return;
             setRows(data);
         } catch (error) {
             console.error('[DailyReportListV2] Failed to fetch rows', error);
+            if (requestId !== queryRequestIdRef.current) return;
+            setQueryError('네트워크 상태를 확인한 뒤 다시 시도해 주세요.');
         } finally {
-            setIsLoading(false);
-            setQueryLoadingMessage('');
+            if (requestId === queryRequestIdRef.current) {
+                setIsQueryLoading(false);
+                setQueryLoadingMessage('');
+            }
         }
-    }, [startDate, endDate]);
+    }, [effectiveTeamScopeIds, hasSelfScopeIdentity, workerAccessScope.loading, workerAccessScope.mode]);
+
+    const fetchRows = useCallback(async (): Promise<void> => {
+        const range = appliedRangeRef.current;
+        await runRowsQuery(range.startDate, range.endDate);
+    }, [runRowsQuery]);
 
     useEffect(() => {
-        fetchRows();
-    }, []);
+        void runRowsQuery(startDate, endDate);
+    }, [endDate, runRowsQuery, selfScopeIdentityKey, startDate, teamScopeIdsKey]);
 
     useEffect(() => {
         if (!openColumnFilter) return;
@@ -395,19 +543,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
 
         if (field === 'start') {
             setStartDateInput(normalizedValue);
-            if (normalizedValue !== startDate) {
-                setStartDate(normalizedValue);
-                return true;
-            }
-            return false;
+            return normalizedValue;
         }
 
         setEndDateInput(normalizedValue);
-        if (normalizedValue !== endDate) {
-            setEndDate(normalizedValue);
-            return true;
-        }
-        return false;
+        return normalizedValue;
     }, [endDate, endDateInput, startDate, startDateInput]);
 
     const applyDateRange = useCallback((nextStartDate: string, nextEndDate: string) => {
@@ -417,26 +557,110 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         setEndDate(nextEndDate);
     }, []);
 
-    const searchRowsByRange = useCallback((normalizedStart: string, normalizedEnd: string) => {
-        setStartDate(normalizedStart);
-        setEndDate(normalizedEnd);
-        setStartDateInput(normalizedStart);
-        setEndDateInput(normalizedEnd);
+    useEffect(() => {
+        const currentSearch = searchParams.toString();
+        if (currentSearch === lastSyncedSearchRef.current) return;
 
-        setQueryLoadingMessage('출력일보 조회 결과를 불러오는 중');
-        setIsLoading(true);
-        dailyReportService.getReportWorkerRowsByRange({
-            startDate: normalizedStart,
-            endDate: normalizedEnd
-        }).then(data => {
-            setRows(data);
-        }).catch(error => {
-            console.error('[DailyReportListV2] Search fetch failed', error);
-        }).finally(() => {
-            setIsLoading(false);
-            setQueryLoadingMessage('');
-        });
-    }, []);
+        lastSyncedSearchRef.current = currentSearch;
+
+        if (urlStartDate && urlEndDate) {
+            applyDateRange(urlStartDate, urlEndDate);
+        }
+
+        if (hasUrlListState || initialSiteId) {
+            setSelectedSiteId(urlSelectedSiteId);
+        }
+
+        if (urlSelectedTeamId !== null) {
+            setSelectedTeamId(urlSelectedTeamId);
+        }
+
+        if (urlSelectedWorkerTeamId !== null) {
+            setSelectedWorkerTeamId(urlSelectedWorkerTeamId);
+        }
+
+        if (urlWorkerSearch !== null) {
+            setWorkerSearch(urlWorkerSearch);
+        }
+
+        if (urlSortMode) {
+            setSortMode(urlSortMode);
+        }
+
+        if (urlSortMode && urlSortOrder) {
+            if (urlSortMode === 'date') setDateSortOrder(urlSortOrder);
+            if (urlSortMode === 'name') setNameSortOrder(urlSortOrder);
+            if (urlSortMode === 'site') setSiteSortOrder(urlSortOrder);
+        }
+    }, [
+        hasUrlListState,
+        initialSiteId,
+        applyDateRange,
+        searchParams,
+        urlEndDate,
+        urlSelectedSiteId,
+        urlSelectedTeamId,
+        urlSelectedWorkerTeamId,
+        urlSortMode,
+        urlSortOrder,
+        urlStartDate,
+        urlWorkerSearch
+    ]);
+
+    useEffect(() => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.set('tab', 'list-v2');
+
+            if (startDate === endDate) {
+                next.set('date', startDate);
+                next.delete('startDate');
+                next.delete('endDate');
+            } else {
+                next.delete('date');
+                next.set('startDate', startDate);
+                next.set('endDate', endDate);
+            }
+
+            if (selectedSiteId) next.set('siteId', selectedSiteId);
+            else next.delete('siteId');
+
+            if (selectedTeamId) next.set('teamId', selectedTeamId);
+            else next.delete('teamId');
+
+            if (selectedWorkerTeamId) next.set('workerTeamId', selectedWorkerTeamId);
+            else next.delete('workerTeamId');
+
+            const trimmedWorkerSearch = workerSearch.trim();
+            if (trimmedWorkerSearch) next.set('q', trimmedWorkerSearch);
+            else {
+                next.delete('q');
+                next.delete('workerSearch');
+            }
+
+            next.set('sort', sortMode);
+            next.set('order', sortMode === 'date' ? dateSortOrder : sortMode === 'name' ? nameSortOrder : siteSortOrder);
+
+            const nextSearch = next.toString();
+            if (nextSearch !== prev.toString()) {
+                lastSyncedSearchRef.current = nextSearch;
+                return next;
+            }
+            return prev;
+        }, { replace: true });
+    }, [
+        dateSortOrder,
+        endDate,
+        nameSortOrder,
+        selectedSiteId,
+        selectedTeamId,
+        selectedWorkerTeamId,
+        setSearchParams,
+        siteSortOrder,
+        sortMode,
+        startDate,
+        workerSearch
+    ]);
 
     const datePresets = useMemo<Record<DatePresetKey, { label: string; start: string; end: string }>>(() => {
         const prevMonth = getMonthDateRange(-1);
@@ -464,15 +688,41 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
 
     const handleDatePresetClick = useCallback((key: DatePresetKey) => {
         const preset = datePresets[key];
+        setDateRangeError(null);
+        if (preset.start === startDate && preset.end === endDate) {
+            void fetchRows();
+            return;
+        }
         applyDateRange(preset.start, preset.end);
-    }, [applyDateRange, datePresets]);
+    }, [applyDateRange, datePresets, endDate, fetchRows, startDate]);
 
     const handleSearch = useCallback(() => {
         const normalizedStart = normalizeTypedDateInput(startDateInput) ?? startDate;
         const normalizedEnd = normalizeTypedDateInput(endDateInput) ?? endDate;
 
-        searchRowsByRange(normalizedStart, normalizedEnd);
-    }, [startDateInput, endDateInput, startDate, endDate, searchRowsByRange]);
+        setStartDateInput(normalizedStart);
+        setEndDateInput(normalizedEnd);
+
+        if (normalizedStart > normalizedEnd) {
+            setDateRangeError('조회 시작일은 종료일보다 늦을 수 없습니다.');
+            return;
+        }
+
+        setDateRangeError(null);
+        if (normalizedStart === startDate && normalizedEnd === endDate) {
+            void fetchRows();
+            return;
+        }
+
+        applyDateRange(normalizedStart, normalizedEnd);
+    }, [applyDateRange, endDate, endDateInput, fetchRows, startDate, startDateInput]);
+
+    const handleToggleSort = useCallback((mode: DailyReportSortMode) => {
+        setSortMode(mode);
+        if (mode === 'date') setDateSortOrder((previous) => previous === 'desc' ? 'asc' : 'desc');
+        if (mode === 'name') setNameSortOrder((previous) => previous === 'asc' ? 'desc' : 'asc');
+        if (mode === 'site') setSiteSortOrder((previous) => previous === 'asc' ? 'desc' : 'asc');
+    }, []);
 
     const getRowKey = useCallback((r: DailyReportWorkerRow) => {
         const workerIndex = typeof r.workerIndex === 'number' ? String(r.workerIndex) : 'none';
@@ -686,6 +936,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
 
         return allWorkers
             .filter((worker) => {
+                if (workerAccessScope.loading || !workerAccessMatchesWorker(workerAccessScope, worker)) return false;
                 const role = String(worker.role ?? '').trim();
                 if (role !== '팀장' && role !== '반장') return false;
 
@@ -700,7 +951,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                 if (rankA !== rankB) return rankA - rankB;
                 return String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko');
             });
-    }, [allWorkers, normalizeTeamId, resolveResponsibleTeamCanonicalId, resolveResponsibleTeamDisplayName]);
+    }, [allWorkers, normalizeTeamId, resolveResponsibleTeamCanonicalId, resolveResponsibleTeamDisplayName, workerAccessScope]);
 
     const getFiltered = useCallback((criteria: { teamId?: string; siteId?: string; workerTeamId?: string }) => {
         const wantTeam = criteria.teamId ? normalizeTeamId(criteria.teamId) : '';
@@ -735,6 +986,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         const wantWorkerTeam = criteria.workerTeamId ? normalizeTeamId(criteria.workerTeamId) : '';
 
         return rows.filter(r => {
+            if (workerAccessScope.loading || !workerAccessMatchesReportRow(workerAccessScope, r)) return false;
             if (wantTeam) {
                 const rowResponsibleTeamId = resolveResponsibleTeamCanonicalId({
                     responsibleTeamId: r.responsibleTeamId ?? r.teamId,
@@ -767,7 +1019,25 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
             }
             return true;
         });
-    }, [rows, normalizeTeamId, normalizeSiteId, resolveResponsibleTeamCanonicalId, resolveResponsibleTeamDisplayName, resolveWorkerTeamCanonicalId, sites, teams]);
+    }, [rows, normalizeTeamId, normalizeSiteId, resolveResponsibleTeamCanonicalId, resolveResponsibleTeamDisplayName, resolveWorkerTeamCanonicalId, sites, teams, workerAccessScope]);
+
+    useEffect(() => {
+        if (!selectedSiteId || sites.length === 0) return;
+
+        const normalizedSelectedSiteId = normalizeSiteId(selectedSiteId);
+        const matchedSite = sites.find((site) => {
+            const siteId = normalizeSiteId(site.id ?? '');
+            const legacyId = normalizeSiteId(site.legacyId ?? '');
+            return siteId === normalizedSelectedSiteId || legacyId === normalizedSelectedSiteId;
+        });
+        const canonicalSiteId = matchedSite?.id
+            ? String(matchedSite.id)
+            : (matchedSite?.legacyId ? String(matchedSite.legacyId) : '');
+
+        if (canonicalSiteId && canonicalSiteId !== selectedSiteId) {
+            setSelectedSiteId(canonicalSiteId);
+        }
+    }, [normalizeSiteId, selectedSiteId, sites]);
 
     const availableSites = useMemo(() => {
         const filtered = getFiltered({ teamId: selectedTeamId });
@@ -813,9 +1083,23 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
             } as Site);
         });
 
+        if (selectedSiteId) {
+            const normalizedSelectedSiteId = normalizeSiteId(selectedSiteId);
+            const selectedSite = sites.find((site) => {
+                const siteId = normalizeSiteId(site.id ?? '');
+                const legacyId = normalizeSiteId(site.legacyId ?? '');
+                return siteId === normalizedSelectedSiteId || legacyId === normalizedSelectedSiteId;
+            });
+
+            if (selectedSite) {
+                const optionId = String(selectedSite.id ?? selectedSite.legacyId ?? selectedSiteId);
+                if (optionId && !optionMap.has(optionId)) optionMap.set(optionId, selectedSite);
+            }
+        }
+
         return Array.from(optionMap.values())
             .sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
-    }, [getFiltered, normalizeSiteId, selectedTeamId, sites]);
+    }, [getFiltered, normalizeSiteId, selectedSiteId, selectedTeamId, sites]);
 
     useEffect(() => {
         if (!selectedSiteId) return;
@@ -823,13 +1107,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
             String(site.id ?? '') === selectedSiteId || String(site.legacyId ?? '') === selectedSiteId
         ));
         if (!hasSelectedSite) {
+            if (rows.length === 0 && availableSites.length === 0) return;
             setSelectedSiteId('');
         }
-    }, [availableSites, selectedSiteId]);
+    }, [availableSites, rows.length, selectedSiteId]);
 
     const availableReportTeams = useMemo(() => {
         if (rows.length === 0) {
             return teams
+                .filter((team) => !workerAccessScope.loading && workerAccessMatchesTeam(workerAccessScope, team))
                 .slice()
                 .sort((a, b) => compareTeamsWithPriority(a.name ?? '', b.name ?? ''));
         }
@@ -872,7 +1158,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
 
         return [...matchedTeams, ...virtualTeams]
             .sort((a, b) => compareTeamsWithPriority(a.name ?? '', b.name ?? ''));
-    }, [getFiltered, normalizeTeamId, resolveResponsibleTeamCanonicalId, resolveResponsibleTeamDisplayName, teams, selectedSiteId, rows.length]);
+    }, [getFiltered, normalizeTeamId, resolveResponsibleTeamCanonicalId, resolveResponsibleTeamDisplayName, teams, selectedSiteId, rows.length, workerAccessScope]);
 
     const availableWorkerTeams = useMemo(() => {
         const scopedRows = getFiltered({ siteId: selectedSiteId, teamId: selectedTeamId });
@@ -891,6 +1177,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
 
         if (scopedRows.length === 0) {
             return teams
+                .filter((team) => !workerAccessScope.loading && workerAccessMatchesTeam(workerAccessScope, team))
                 .slice()
                 .sort((a, b) => compareTeamsWithPriority(a.name ?? '', b.name ?? ''));
         }
@@ -916,7 +1203,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
 
         return [...matchedTeams, ...virtualTeams]
             .sort((a, b) => compareTeamsWithPriority(a.name ?? '', b.name ?? ''));
-    }, [getFiltered, selectedSiteId, selectedTeamId, teams, normalizeTeamId, resolveWorkerTeamDisplayName]);
+    }, [getFiltered, selectedSiteId, selectedTeamId, teams, normalizeTeamId, resolveWorkerTeamDisplayName, workerAccessScope]);
 
     const baseFilteredRows = useMemo(() => {
         let result = getFiltered({
@@ -1034,12 +1321,42 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                 ? (a.date ?? '').localeCompare(b.date ?? '', 'en')
                 : (b.date ?? '').localeCompare(a.date ?? '', 'en');
             if (diff !== 0) return diff;
+            const site = compareKo(a.siteName ?? '', b.siteName ?? '');
+            if (site !== 0) return site;
             const team = compareKo(a.teamName ?? '', b.teamName ?? '');
             if (team !== 0) return team;
             return compareKo(a.workerName ?? '', b.workerName ?? '');
         });
         return copied;
     }, [filteredRows, dateSortOrder, sortMode, nameSortOrder, siteSortOrder]);
+
+    const mobileRows = useMemo<DailyReportMobileRow[]>(() => {
+        return sortedRows.map((row) => ({
+            key: getRowKey(row),
+            date: row.date ?? '',
+            siteName: row.siteName ?? '',
+            siteType: row.siteType ?? '',
+            paymentType: row.paymentType ?? '',
+            responsibleTeamName: resolveResponsibleTeamDisplayName({
+                responsibleTeamId: row.responsibleTeamId ?? row.teamId,
+                responsibleTeamName: row.responsibleTeamName ?? row.teamName,
+            }),
+            workerName: row.workerName ?? '',
+            workerTeamName: resolveWorkerTeamDisplayName({
+                workerTeamId: row.workerTeamId,
+                workerTeamName: row.workerTeamName,
+            }),
+            salaryModel: resolveReportPayType(row) ?? '',
+            manDay: Number.isFinite(row.manDay) ? row.manDay : 0,
+            unitPrice: Number.isFinite(row.unitPrice) ? row.unitPrice : 0,
+            amount: Number.isFinite(row.amount) ? row.amount : 0,
+            workContent: row.workContent ?? '',
+            isEmptyReport: !!row.isEmptyReport,
+            isTargetReport: !!targetReportId && row.reportId === targetReportId,
+        }));
+    }, [getRowKey, resolveResponsibleTeamDisplayName, resolveWorkerTeamDisplayName, sortedRows, targetReportId]);
+
+    const effectiveMobileViewMode = isEditMode ? 'table' : mobileViewMode;
 
     const isLightEditMode = isEditMode && sortedRows.length > INLINE_EDIT_ALL_ROW_LIMIT;
     const shouldVirtualizeRows = sortedRows.length > VIRTUAL_ROW_LIMIT;
@@ -1097,12 +1414,14 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
     }, [syncTableViewport, sortedRows.length, isEditMode, showSiteDetailColumns]);
 
     const workerNameOptions = useMemo(() => {
-        return allWorkers.map((worker, index) => ({
+        return allWorkers
+            .filter((worker) => !workerAccessScope.loading && workerAccessMatchesWorker(workerAccessScope, worker))
+            .map((worker, index) => ({
             id: String(worker.id ?? worker.legacyId ?? `${worker.name ?? 'worker'}-${index}`),
             name: worker.name ?? '',
             teamName: worker.teamName ?? '',
         }));
-    }, [allWorkers]);
+    }, [allWorkers, workerAccessScope]);
 
     const openColumnFilterOptions = useMemo(() => {
         if (!openColumnFilter) return [];
@@ -1469,6 +1788,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
     }, []);
 
     const handleToggleEditMode = () => {
+        if (isScopedReadOnly) {
+            toast.info('팀장·반장·작업자 계정은 범위 내 일보를 조회할 수 있습니다. 수정 권한은 별도로 부여하세요.');
+            return;
+        }
         setIsEditMode((prev) => {
             const next = !prev;
             if (!next) {
@@ -1481,6 +1804,16 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
             return next;
         });
     };
+
+    useEffect(() => {
+        if (!isScopedReadOnly) return;
+        setIsEditMode(false);
+        setSelectedRowKeys(new Set());
+        setIsBulkEditOpen(false);
+        setRowDrafts({});
+        setRowSavingKeys(new Set());
+        setActiveEditRowKey(null);
+    }, [isScopedReadOnly]);
 
     const handleToggleSiteDetailColumns = useCallback(() => {
         setShowSiteDetailColumns((prev) => !prev);
@@ -2069,6 +2402,50 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         await handleQuickRowUpdate(r, nextChanges);
     }, [allWorkers, getRowKey, handleQuickRowUpdate, normalizeTeamId, rowDrafts, rows, teams, toast]);
 
+    const buildBulkReportLevelUpdates = (): Partial<DailyReportWorkerRow> & { siteId?: string; siteName?: string } => {
+        const updates: Partial<DailyReportWorkerRow> & { siteId?: string; siteName?: string } = {};
+
+        const applyCompany = (
+            name: string,
+            idKey: 'companyId' | 'constructorCompanyId' | 'partnerId',
+            nameKey: 'companyName' | 'constructorCompanyName' | 'partnerName'
+        ) => {
+            const trimmed = name.trim();
+            if (!trimmed) return;
+            const resolved = resolveCompanySelection({ companyName: trimmed });
+            (updates as any)[idKey] = resolved.id;
+            (updates as any)[nameKey] = resolved.name;
+        };
+
+        applyCompany(bulkCompanyName, 'companyId', 'companyName');
+        applyCompany(bulkConstructorCompanyName, 'constructorCompanyId', 'constructorCompanyName');
+        applyCompany(bulkPartnerName, 'partnerId', 'partnerName');
+
+        const responsibleTeamText = bulkResponsibleTeamName.trim();
+        if (responsibleTeamText) {
+            const matchedTeam = teams.find((team) => {
+                const id = String(team.id ?? team.legacyId ?? '').trim();
+                return id === responsibleTeamText || normalizeTeamNameKey(team.name) === normalizeTeamNameKey(responsibleTeamText);
+            });
+            updates.responsibleTeamId = matchedTeam?.id ? String(matchedTeam.id) : resolveResponsibleTeamCanonicalId({ responsibleTeamName: responsibleTeamText });
+            updates.responsibleTeamName = matchedTeam?.name ?? responsibleTeamText;
+        }
+
+        const siteManagerText = bulkSiteManagerName.trim();
+        if (siteManagerText) {
+            const normalizedSiteManagerName = siteManagerText.replace(/\s+/g, '');
+            const matchedWorker = allWorkers.find((worker) => String(worker.id ?? '') === siteManagerText || String(worker.legacyId ?? '') === siteManagerText)
+                || allWorkers.find((worker) => String(worker.name ?? '').trim() === siteManagerText)
+                || (normalizedSiteManagerName
+                    ? allWorkers.find((worker) => String(worker.name ?? '').replace(/\s+/g, '') === normalizedSiteManagerName)
+                    : undefined);
+            updates.siteManagerId = matchedWorker?.id ? String(matchedWorker.id) : '';
+            updates.siteManagerName = matchedWorker?.name ?? siteManagerText;
+        }
+
+        return updates;
+    };
+
     const handleBulkApply = async () => {
         const selected = Array.from(selectedRowKeys)
             .map((k) => rowByKey.get(k))
@@ -2080,6 +2457,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         const parsedUnitPrice = bulkUnitPrice.trim() === '' ? null : Number(bulkUnitPrice);
         const nextSalaryModel = bulkSalaryModel.trim() === '' ? null : bulkSalaryModel.trim();
         const nextWorkContent = bulkWorkContent.trim() === '' ? null : bulkWorkContent.trim();
+        const bulkReportLevelUpdates = buildBulkReportLevelUpdates();
+        const hasBulkReportLevelUpdates = Object.keys(bulkReportLevelUpdates).length > 0;
 
         if (parsedManDay != null && (!Number.isFinite(parsedManDay) || parsedManDay < 0)) {
             alert('공수 값이 올바르지 않습니다.');
@@ -2097,7 +2476,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
             nextWorkContent == null && 
             !bulkSiteType && 
             !bulkPaymentType && 
-            !bulkWorkerTeamName.trim()
+            !bulkWorkerTeamName.trim() &&
+            !hasBulkReportLevelUpdates
         ) {
             toast.info('변경할 값이 없습니다.');
             return;
@@ -2106,25 +2486,33 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         const ok = await confirm.batch('일보', selected.length);
         if (!ok.isConfirmed) return;
 
-        setIsLoading(true);
+        setIsMutationLoading(true);
         try {
-            const emptyReportUpdatesById = new Map<string, Record<string, unknown>>();
+            const reportUpdatesById = new Map<string, Record<string, unknown>>();
             const workerUpdateTargets: Parameters<typeof dailyReportService.bulkUpdateWorkersInReports>[0] = [];
+            const mergeReportUpdates = (reportId: string, updates: Record<string, unknown>) => {
+                if (!reportId || Object.keys(updates).length === 0) return;
+                reportUpdatesById.set(reportId, {
+                    ...(reportUpdatesById.get(reportId) ?? {}),
+                    ...updates
+                });
+            };
 
             for (const r of selected) {
                 if (r.isEmptyReport) {
-                    const reportUpdates: Record<string, unknown> = {};
+                    const reportUpdates: Record<string, unknown> = { ...bulkReportLevelUpdates };
                     if (nextWorkContent != null) reportUpdates.workContent = nextWorkContent;
                     if (bulkSiteType) reportUpdates.siteType = bulkSiteType;
                     if (bulkPaymentType) reportUpdates.paymentType = bulkPaymentType;
 
-                    if (Object.keys(reportUpdates).length > 0) {
-                        emptyReportUpdatesById.set(r.reportId, {
-                            ...(emptyReportUpdatesById.get(r.reportId) ?? {}),
-                            ...reportUpdates
-                        });
-                    }
+                    mergeReportUpdates(r.reportId, reportUpdates);
                     continue;
+                }
+
+                if (hasBulkReportLevelUpdates) {
+                    getSameDateSiteReportIds(r).forEach((reportId) => {
+                        mergeReportUpdates(reportId, bulkReportLevelUpdates as Record<string, unknown>);
+                    });
                 }
 
                 const updates: Partial<DailyReportWorker> = {};
@@ -2136,10 +2524,12 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                 if (bulkPaymentType) updates.paymentType = bulkPaymentType;
                 if (bulkWorkerTeamName.trim()) updates.workerTeamName = bulkWorkerTeamName.trim();
                 
-                workerUpdateTargets.push({ reportId: r.reportId, workerId: r.workerId, workerIndex: r.workerIndex, updates });
+                if (Object.keys(updates).length > 0) {
+                    workerUpdateTargets.push({ reportId: r.reportId, workerId: r.workerId, workerIndex: r.workerIndex, updates });
+                }
             }
 
-            for (const [reportId, reportUpdates] of emptyReportUpdatesById.entries()) {
+            for (const [reportId, reportUpdates] of reportUpdatesById.entries()) {
                 await dailyReportService.updateReport(reportId, reportUpdates as any);
             }
 
@@ -2157,12 +2547,17 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
             setBulkSiteType('');
             setBulkPaymentType('');
             setBulkWorkerTeamName('');
+            setBulkCompanyName('');
+            setBulkConstructorCompanyName('');
+            setBulkPartnerName('');
+            setBulkResponsibleTeamName('');
+            setBulkSiteManagerName('');
             await fetchRows();
         } catch (error) {
             console.error('[DailyReportListV2] bulk update failed', error);
             toast.error('일괄 수정에 실패했습니다.');
         } finally {
-            setIsLoading(false);
+            setIsMutationLoading(false);
         }
     };
 
@@ -2176,7 +2571,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         const ok = await confirm.delete(`선택한 ${selected.length}건 삭제`);
         if (!ok.isConfirmed) return;
 
-        setIsLoading(true);
+        setIsMutationLoading(true);
         try {
             const selectedDates = new Set(selected.map((row) => row.date).filter(Boolean));
             const emptyReportIds = Array.from(new Set(
@@ -2221,15 +2616,27 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
             console.error('[DailyReportListV2] bulk delete failed', error);
             toast.error('삭제 중 오류가 발생했습니다.');
         } finally {
-            setIsLoading(false);
+            setIsMutationLoading(false);
         }
     };
 
-    const totals = useMemo(() => {
-        const totalManDay = sortedRows.reduce((sum, r) => sum + (Number.isFinite(r.manDay) ? r.manDay : 0), 0);
-        const totalAmount = sortedRows.reduce((sum, r) => sum + (Number.isFinite(r.amount) ? r.amount : 0), 0);
-        return { totalManDay, totalAmount };
-    }, [sortedRows]);
+    const summaryMetrics = useMemo(() => buildDailyReportListSummary(sortedRows), [sortedRows]);
+
+    const getTableGroupKey = useCallback((row: DailyReportWorkerRow) => {
+        return `${row.date ?? ''}::${String(row.siteId || row.siteName || '').trim()}`;
+    }, []);
+
+    const tableGroupMetrics = useMemo(() => {
+        const metrics = new Map<string, { rowCount: number; totalManDay: number }>();
+        sortedRows.forEach((row) => {
+            const key = getTableGroupKey(row);
+            const current = metrics.get(key) ?? { rowCount: 0, totalManDay: 0 };
+            current.rowCount += 1;
+            current.totalManDay += Number.isFinite(row.manDay) ? row.manDay : 0;
+            metrics.set(key, current);
+        });
+        return metrics;
+    }, [getTableGroupKey, sortedRows]);
 
     const dirtyRowCount = useMemo(() => {
         let count = 0;
@@ -2250,7 +2657,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         const result = await confirm.save(`변경된 ${dirtyRowCount}건의 항목을 일괄 저장하시겠습니까?`);
         if (!result.isConfirmed) return;
 
-        setIsLoading(true);
+        setIsMutationLoading(true);
         try {
             const dirtyKeys = Object.keys(rowDrafts).filter(key => {
                 const original = rowByKey.get(key);
@@ -2361,11 +2768,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
             console.error('[DailyReportListV2] Save All Failed (Critical)', error);
             toast.error('일괄 저장 중 시스템 오류가 발생했습니다.');
         } finally {
-            setIsLoading(false);
+            setIsMutationLoading(false);
         }
     };
 
-    const isTransferBusy = isLoading || isDownloadingExcel;
+    const isTransferBusy = isQueryLoading
+        || isMutationLoading
+        || isDownloadingExcel
+        || !!queryError
+        || sortedRows.length === 0;
 
     const handleDownloadExcel = useCallback(async () => {
         if (sortedRows.length === 0) {
@@ -2387,36 +2798,36 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                 })
             }));
 
-            await dailyReportTransferService.exportRowsToExcel(exportRows, `조회일보목록_${startDate}_${endDate}`);
+            const rangeLabel = `조회일보목록_${startDate}_${endDate}`;
+            const outputFileName = `일보목록V2_${rangeLabel}.xlsx`;
+            await dailyReportTransferService.exportRowsToExcel(exportRows, rangeLabel);
+            void fileTransferAuditService.log({
+                kind: 'excel',
+                direction: 'download',
+                status: 'success',
+                source: '일보 목록 V2',
+                operation: 'report_export',
+                fileName: outputFileName,
+                recordCount: exportRows.length,
+                details: { startDate, endDate },
+            });
             toast.success('조회 목록 엑셀 다운로드 완료');
         } catch (error) {
             console.error('[DailyReportListV2] Excel download failed', error);
+            void fileTransferAuditService.log({
+                kind: 'excel',
+                direction: 'download',
+                status: 'failure',
+                source: '일보 목록 V2',
+                operation: 'report_export',
+                error,
+                details: { startDate, endDate, recordCount: sortedRows.length },
+            });
             toast.error('조회 목록 엑셀 다운로드에 실패했습니다.');
         } finally {
             setIsDownloadingExcel(false);
         }
     }, [endDate, resolveWorkerTeamDisplayName, sortedRows, startDate]);
-
-    const renderDatePresetButton = (key: DatePresetKey) => {
-        const preset = datePresets[key];
-        const isActive = activeDatePreset === key;
-
-        return (
-            <button
-                key={key}
-                type="button"
-                onClick={() => handleDatePresetClick(key)}
-                aria-pressed={isActive}
-                title={`${preset.label} 기간 선택: ${preset.start} ~ ${preset.end}`}
-                className={`daily-report-v2-preset-btn px-2.5 py-1.5 text-xs rounded-lg font-semibold border transition-colors ${isActive
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                    }`}
-            >
-                {preset.label}
-            </button>
-        );
-    };
 
     const emptyTitle = rows.length > 0
         ? '현재 필터에 맞는 작업자가 없습니다'
@@ -2428,318 +2839,136 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
     return (
         <div className="daily-report-v2-page flex flex-col flex-1 min-h-0 gap-3 p-0 pb-1">
             {queryLoadingMessage && (
-                <AppIntroScreen message={queryLoadingMessage} />
-            )}
-            <div className="daily-report-v2-toolbar flex-shrink-0 bg-white px-3 py-2.5 rounded-xl shadow-sm border border-slate-200">
-                <div className="daily-report-v2-toolbar-main">
-                    <section className="daily-report-v2-toolbar-section daily-report-v2-date-section" aria-label="조회 기간">
-                        <div className="daily-report-v2-date-inputs">
-                            <div className="relative">
-                                <FontAwesomeIcon icon={faCalendarAlt} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                                <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    value={startDateInput}
-                                    onChange={(e) => setStartDateInput(sanitizeTypedDateInput(e.target.value))}
-                                    onBlur={() => { commitDateInput('start'); }}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                            commitDateInput('start');
-                                        }
-                                    }}
-                                    aria-label="조회 시작일"
-                                    title="조회 시작일"
-                                    placeholder="YYYY-MM-DD"
-                                    className="pl-10 pr-3 py-2 border-slate-300 rounded-lg text-sm w-[130px]"
-                                />
-                            </div>
-                            <span className="text-slate-400">~</span>
-                            <input
-                                type="text"
-                                inputMode="numeric"
-                                value={endDateInput}
-                                onChange={(e) => setEndDateInput(sanitizeTypedDateInput(e.target.value))}
-                                onBlur={() => { commitDateInput('end'); }}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                        commitDateInput('end');
-                                    }
-                                }}
-                                aria-label="조회 종료일"
-                                title="조회 종료일"
-                                placeholder="YYYY-MM-DD"
-                                className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[130px]"
-                            />
-                        </div>
-
-                        <div className="daily-report-v2-preset-group" role="group" aria-label="빠른 날짜 선택">
-                            {renderDatePresetButton('prevMonth')}
-                            {renderDatePresetButton('thisMonth')}
-                            {renderDatePresetButton('yesterday')}
-                            {renderDatePresetButton('today')}
-                        </div>
-                    </section>
-
-                    <section className="daily-report-v2-toolbar-section daily-report-v2-filter-section" aria-label="목록 필터">
-                        <select
-                            value={selectedSiteId}
-                            onChange={(e) => setSelectedSiteId(e.target.value)}
-                            aria-label="현장 필터"
-                            title="현장 필터"
-                            className="daily-report-v2-select px-3 py-2 border-slate-300 rounded-lg text-sm"
-                        >
-                            <option value="">전체 현장</option>
-                            {[...availableSites].sort((a, b) => a.name.localeCompare(b.name, 'ko')).map((s) => (
-                                <option key={String(s.id)} value={String(s.id)}>{s.name}</option>
-                            ))}
-                        </select>
-
-                        <select
-                            value={selectedTeamId}
-                            onChange={(e) => setSelectedTeamId(e.target.value)}
-                            aria-label="현장소속팀 필터"
-                            title="현장소속팀 필터"
-                            className="daily-report-v2-select px-3 py-2 border-slate-300 rounded-lg text-sm"
-                        >
-                            <option value="">전체 현장소속팀</option>
-                            {availableReportTeams.map((t) => (
-                                <option key={String(t.id ?? t.legacyId ?? t.name)} value={String(t.id ?? t.legacyId ?? t.name)}>{t.name}</option>
-                            ))}
-                        </select>
-
-                        <select
-                            value={selectedWorkerTeamId}
-                            onChange={(e) => setSelectedWorkerTeamId(e.target.value)}
-                            aria-label="작업자 소속팀 필터"
-                            title="작업자 소속팀 필터"
-                            className="daily-report-v2-select px-3 py-2 border-slate-300 rounded-lg text-sm bg-slate-50"
-                        >
-                            <option value="">전체 소속팀</option>
-                            {availableWorkerTeams.map((t) => (
-                                <option key={String(t.id)} value={String(t.id)}>{t.name}</option>
-                            ))}
-                        </select>
-
-                        <div className="relative daily-report-v2-worker-search">
-                            <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                            <input
-                                type="text"
-                                value={workerSearch}
-                                onChange={(e) => setWorkerSearch(e.target.value)}
-                                aria-label="작업자 이름 검색"
-                                title="작업자 이름 검색"
-                                placeholder="작업자 검색"
-                                className="w-full pl-10 pr-4 py-2 border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all"
-                            />
-                        </div>
-                    </section>
-
-                    <section className="daily-report-v2-toolbar-section daily-report-v2-sort-section" aria-label="정렬 및 수정 도구">
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setSortMode('date');
-                                setDateSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'));
-                            }}
-                            aria-label={`날짜 ${dateSortOrder === 'desc' ? '최신순' : '오래된순'} 정렬`}
-                            title={`날짜 ${dateSortOrder === 'desc' ? '최신순' : '오래된순'} 정렬`}
-                            className={`daily-report-v2-sort-btn px-3 py-2 text-sm rounded-lg font-semibold flex items-center gap-2 transition-colors border ${sortMode === 'date'
-                                ? 'bg-indigo-50 text-indigo-600 border-indigo-100'
-                                : 'bg-slate-50 text-slate-600 border-slate-200'
-                                }`}
-                        >
-                            <FontAwesomeIcon icon={dateSortOrder === 'desc' ? faSortAmountDown : faSortAmountUp} />
-                            <span className="text-xs font-bold">날짜</span>
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setSortMode('name');
-                                setNameSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
-                            }}
-                            aria-label={`이름 ${nameSortOrder === 'asc' ? '오름차순' : '내림차순'} 정렬`}
-                            title={`이름 ${nameSortOrder === 'asc' ? '오름차순' : '내림차순'} 정렬`}
-                            className={`daily-report-v2-sort-btn px-3 py-2 text-sm rounded-lg font-semibold flex items-center gap-2 transition-colors border ${sortMode === 'name'
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                : 'bg-slate-50 text-slate-600 border-slate-200'
-                                }`}
-                        >
-                            <span className="text-xs font-bold">이름순</span>
-                            <FontAwesomeIcon icon={nameSortOrder === 'asc' ? faSortAmountUp : faSortAmountDown} />
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setSortMode('site');
-                                setSiteSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
-                            }}
-                            aria-label={`현장 ${siteSortOrder === 'asc' ? '오름차순' : '내림차순'} 정렬`}
-                            title={`현장 ${siteSortOrder === 'asc' ? '오름차순' : '내림차순'} 정렬`}
-                            className={`daily-report-v2-sort-btn px-3 py-2 text-sm rounded-lg font-semibold flex items-center gap-2 transition-colors border ${sortMode === 'site'
-                                ? 'bg-amber-50 text-amber-700 border-amber-100'
-                                : 'bg-slate-50 text-slate-600 border-slate-200'
-                                }`}
-                        >
-                            <span className="text-xs font-bold">현장순</span>
-                            <FontAwesomeIcon icon={siteSortOrder === 'asc' ? faSortAmountUp : faSortAmountDown} />
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={handleToggleEditMode}
-                            aria-pressed={isEditMode}
-                            title={isEditMode ? '수정모드 종료' : '수정모드 시작'}
-                            className={`daily-report-v2-tool-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm border transition-colors ${isEditMode
-                                ? 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700'
-                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                                }`}
-                        >
-                            <FontAwesomeIcon icon={faPenToSquare} />
-                            {isEditMode ? '수정 종료' : '수정모드'}
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={handleToggleSiteDetailColumns}
-                            aria-pressed={showSiteDetailColumns}
-                            title={showSiteDetailColumns ? '현장상세 컬럼 숨기기' : '현장상세 컬럼 보기'}
-                            className={`daily-report-v2-tool-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm border transition-colors ${showSiteDetailColumns
-                                ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
-                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                                }`}
-                        >
-                            <FontAwesomeIcon icon={faFilter} />
-                            현장상세
-                        </button>
-
-                        {isEditMode && (
-                            <>
-                                <button
-                                    type="button"
-                                    onClick={() => setIsBulkEditOpen(true)}
-                                    disabled={selectedRowKeys.size === 0}
-                                    className={`daily-report-v2-tool-btn px-4 py-2 rounded-lg text-sm font-bold shadow-sm border transition-colors ${selectedRowKeys.size > 0
-                                        ? 'bg-indigo-100 text-indigo-700 border-indigo-200 hover:bg-indigo-200'
-                                        : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                        }`}
-                                    title="선택 항목 일괄 수정"
-                                >
-                                    일괄수정 ({selectedRowKeys.size})
-                                </button>
-
-                                <button
-                                    type="button"
-                                    onClick={handleBulkDelete}
-                                    disabled={selectedRowKeys.size === 0}
-                                    className={`daily-report-v2-tool-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm border transition-colors ${selectedRowKeys.size > 0
-                                        ? 'bg-red-100 text-red-700 border-red-200 hover:bg-red-200'
-                                        : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                        }`}
-                                    title="선택 항목 삭제"
-                                >
-                                    <FontAwesomeIcon icon={faTrash} />
-                                    삭제
-                                </button>
-                            </>
-                        )}
-                    </section>
-
-                    <section className="daily-report-v2-toolbar-actions" aria-label="조회 작업">
-                        <button
-                            type="button"
-                            onClick={handleSearch}
-                            className="daily-report-v2-primary-action bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 transition-transform active:scale-95"
-                            title="현재 조건으로 조회"
-                        >
-                            <FontAwesomeIcon icon={faSearch} />
-                            조회
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={() => { void handleDownloadExcel(); }}
-                            disabled={isTransferBusy}
-                            className={`daily-report-v2-secondary-action flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm border transition-colors ${isTransferBusy
-                                ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                                }`}
-                            title="현재 조회 목록을 엑셀로 다운로드"
-                        >
-                            <FontAwesomeIcon icon={isDownloadingExcel ? faSpinner : faDownload} spin={isDownloadingExcel} />
-                            엑셀 다운로드
-                        </button>
-
-                        {isEditMode && (
-                            <button
-                                type="button"
-                                onClick={handleSaveAllDirtyRows}
-                                disabled={isLoading || dirtyRowCount === 0}
-                                className={`daily-report-v2-secondary-action px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 border transition-colors ${dirtyRowCount > 0
-                                    ? 'bg-red-500 hover:bg-red-600 text-white border-red-500 animate-pulse'
-                                    : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                    }`}
-                                title="변경된 모든 항목 저장"
-                            >
-                                <FontAwesomeIcon icon={faSave} />
-                                전체 저장 ({dirtyRowCount})
-                            </button>
-                        )}
-
-                        <div className="daily-report-v2-total-chip bg-slate-800 text-white px-4 py-2 rounded-lg shadow-sm flex items-center gap-2" aria-label={`총 공수 ${totals.totalManDay.toFixed(1)}, 총 금액 ${formatNumber(Math.round(totals.totalAmount))}원`}>
-                            <span className="text-xs font-light text-slate-300">Total</span>
-                            <span className="font-bold text-lg">{totals.totalManDay.toFixed(1)}</span>
-                            <span className="text-xs">공수</span>
-                            <span className="ml-2 text-xs font-light text-slate-300">|</span>
-                            <span className="font-bold text-lg">{formatNumber(Math.round(totals.totalAmount))}</span>
-                            <span className="text-xs">원</span>
-                        </div>
-                    </section>
+                <div className="flex flex-shrink-0 items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700" role="status" aria-live="polite">
+                    <FontAwesomeIcon icon={faSpinner} spin />
+                    <span>{queryLoadingMessage}</span>
                 </div>
-                {isEditMode && (
-                    <div className="w-full flex items-center gap-2 text-xs text-slate-500">
-                        <span className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-600 font-semibold">수정중</span>
-                        <span>조회된 행은 모두 바로 수정할 수 있고, 변경분은 각 행 저장 또는 상단 전체 저장으로 반영됩니다.</span>
-                    </div>
-                )}
-            </div>
+            )}
+            {dateRangeError && (
+                <div className="daily-report-v2-inline-alert daily-report-v2-inline-alert--error" role="alert">
+                    <span>{dateRangeError}</span>
+                </div>
+            )}
+            {referenceDataError && (
+                <div className="daily-report-v2-inline-alert daily-report-v2-inline-alert--warning" role="status">
+                    <span>{referenceDataError} 조회 결과는 표시되지만 일부 필터 항목이 누락될 수 있습니다.</span>
+                    <button type="button" onClick={() => { void loadReferenceData(); }}>다시 불러오기</button>
+                </div>
+            )}
+            {isScopedReadOnly && (
+                <div className="flex flex-shrink-0 items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700" role="status">
+                    <FontAwesomeIcon icon={faFilter} />
+                    <span>
+                        {workerAccessScope.mode === 'team'
+                            ? `${workerAccessScope.label} 팀 일보만 표시합니다.`
+                            : `${workerAccessScope.label} 본인 일보만 표시합니다.`}
+                    </span>
+                </div>
+            )}
+            <DailyReportListToolbar
+                startDateInput={startDateInput}
+                endDateInput={endDateInput}
+                presets={(Object.keys(datePresets) as DatePresetKey[]).map((key) => ({
+                    key,
+                    ...datePresets[key],
+                    active: activeDatePreset === key,
+                }))}
+                siteOptions={[
+                    { value: '', label: '전체 현장' },
+                    ...[...availableSites]
+                        .sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+                        .map((site) => ({ value: String(site.id), label: site.name })),
+                ]}
+                reportTeamOptions={[
+                    { value: '', label: '전체 현장소속팀' },
+                    ...availableReportTeams.map((team) => ({
+                        value: String(team.id ?? team.legacyId ?? team.name),
+                        label: team.name ?? '',
+                    })),
+                ]}
+                workerTeamOptions={[
+                    { value: '', label: '전체 작업자 소속팀' },
+                    ...availableWorkerTeams.map((team) => ({
+                        value: String(team.id),
+                        label: team.name ?? '',
+                    })),
+                ]}
+                selectedSiteId={selectedSiteId}
+                selectedTeamId={selectedTeamId}
+                selectedWorkerTeamId={selectedWorkerTeamId}
+                workerSearch={workerSearch}
+                activeFilterLabels={activeFilterLabels}
+                sortMode={sortMode}
+                dateSortOrder={dateSortOrder}
+                nameSortOrder={nameSortOrder}
+                siteSortOrder={siteSortOrder}
+                isEditMode={isEditMode}
+                showSiteDetailColumns={showSiteDetailColumns}
+                selectedRowCount={selectedRowKeys.size}
+                dirtyRowCount={dirtyRowCount}
+                isSearchDisabled={isQueryLoading || isMutationLoading}
+                isTransferBusy={isTransferBusy}
+                isDownloadingExcel={isDownloadingExcel}
+                onStartDateChange={(value) => setStartDateInput(sanitizeTypedDateInput(value))}
+                onEndDateChange={(value) => setEndDateInput(sanitizeTypedDateInput(value))}
+                onDateBlur={(field) => { commitDateInput(field); }}
+                onPresetSelect={handleDatePresetClick}
+                onSiteChange={setSelectedSiteId}
+                onReportTeamChange={setSelectedTeamId}
+                onWorkerTeamChange={setSelectedWorkerTeamId}
+                onWorkerSearchChange={setWorkerSearch}
+                onClearFilters={handleClearListFilters}
+                onToggleSort={handleToggleSort}
+                onToggleEditMode={handleToggleEditMode}
+                onToggleSiteDetails={handleToggleSiteDetailColumns}
+                onOpenBulkEdit={() => setIsBulkEditOpen(true)}
+                onBulkDelete={() => { void handleBulkDelete(); }}
+                onSearch={handleSearch}
+                onDownloadExcel={() => { void handleDownloadExcel(); }}
+                onSaveAll={() => { void handleSaveAllDirtyRows(); }}
+            />
+
+            {!isQueryLoading && !queryError && (
+                <DailyReportListSummary metrics={summaryMetrics} formatNumber={formatNumber} />
+            )}
 
             {isEditMode && isBulkEditOpen && (
                 <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-3 items-end">
                     <div className="text-sm font-bold text-slate-700">선택 항목 일괄 수정</div>
 
                     <div className="flex flex-col">
-                        <label className="text-[11px] text-slate-500">공수</label>
-                        <input
-                            type="number"
-                            value={bulkManDay}
-                            onChange={(e) => setBulkManDay(e.target.value)}
-                            placeholder="(미입력=변경없음)"
-                            className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[160px]"
-                        />
-                    </div>
-
-                    <div className="flex flex-col">
-                        <label className="text-[11px] text-slate-500">단가</label>
-                        <input
-                            type="number"
-                            value={bulkUnitPrice}
-                            onChange={(e) => setBulkUnitPrice(e.target.value)}
-                            placeholder="(미입력=변경없음)"
-                            className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[160px]"
-                        />
-                    </div>
-
-                    <div className="flex flex-col">
-                        <label className="text-[11px] text-slate-500">급여방식</label>
+                        <label className="text-[11px] text-slate-500">발주사</label>
                         <input
                             type="text"
-                            list="daily-report-v2-salary-model-options"
-                            value={bulkSalaryModel}
-                            onChange={(e) => setBulkSalaryModel(e.target.value)}
-                            placeholder="(미입력=변경없음)"
-                            className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[200px]"
+                            list="company-list-v2"
+                            value={bulkCompanyName}
+                            onChange={(e) => setBulkCompanyName(e.target.value)}
+                            placeholder="(미입력 변경없음)"
+                            className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[170px]"
+                        />
+                    </div>
+
+                    <div className="flex flex-col">
+                        <label className="text-[11px] text-slate-500">시공사</label>
+                        <input
+                            type="text"
+                            list="company-list-v2"
+                            value={bulkConstructorCompanyName}
+                            onChange={(e) => setBulkConstructorCompanyName(e.target.value)}
+                            placeholder="(미입력 변경없음)"
+                            className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[170px]"
+                        />
+                    </div>
+
+                    <div className="flex flex-col">
+                        <label className="text-[11px] text-slate-500">협력사</label>
+                        <input
+                            type="text"
+                            list="company-list-v2"
+                            value={bulkPartnerName}
+                            onChange={(e) => setBulkPartnerName(e.target.value)}
+                            placeholder="(미입력 변경없음)"
+                            className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[170px]"
                         />
                     </div>
 
@@ -2771,13 +3000,71 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                     </div>
 
                     <div className="flex flex-col">
-                        <label className="text-[11px] text-slate-500">소속팀명</label>
+                        <label className="text-[11px] text-slate-500">현장소속팀</label>
+                        <input
+                            type="text"
+                            list="responsible-team-list-v2"
+                            value={bulkResponsibleTeamName}
+                            onChange={(e) => setBulkResponsibleTeamName(e.target.value)}
+                            placeholder="(미입력 변경없음)"
+                            className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[150px]"
+                        />
+                    </div>
+
+                    <div className="flex flex-col">
+                        <label className="text-[11px] text-slate-500">현장책임자</label>
+                        <input
+                            type="text"
+                            list="worker-list-v2"
+                            value={bulkSiteManagerName}
+                            onChange={(e) => setBulkSiteManagerName(e.target.value)}
+                            placeholder="(미입력 변경없음)"
+                            className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[150px]"
+                        />
+                    </div>
+
+                    <div className="flex flex-col">
+            <label className="text-[11px] text-slate-500">소속팀</label>
                         <input
                             type="text"
                             value={bulkWorkerTeamName}
                             onChange={(e) => setBulkWorkerTeamName(e.target.value)}
                             placeholder="(미입력=변경없음)"
                             className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[150px]"
+                        />
+                    </div>
+
+                    <div className="flex flex-col">
+                        <label className="text-[11px] text-slate-500">급여방식</label>
+                        <input
+                            type="text"
+                            list="daily-report-v2-salary-model-options"
+                            value={bulkSalaryModel}
+                            onChange={(e) => setBulkSalaryModel(e.target.value)}
+                            placeholder="(미입력=변경없음)"
+                            className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[200px]"
+                        />
+                    </div>
+
+                    <div className="flex flex-col">
+                        <label className="text-[11px] text-slate-500">공수</label>
+                        <input
+                            type="number"
+                            value={bulkManDay}
+                            onChange={(e) => setBulkManDay(e.target.value)}
+                            placeholder="(미입력=변경없음)"
+                            className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[160px]"
+                        />
+                    </div>
+
+                    <div className="flex flex-col">
+                        <label className="text-[11px] text-slate-500">단가</label>
+                        <input
+                            type="number"
+                            value={bulkUnitPrice}
+                            onChange={(e) => setBulkUnitPrice(e.target.value)}
+                            placeholder="(미입력=변경없음)"
+                            className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[160px]"
                         />
                     </div>
 
@@ -2845,6 +3132,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                 <option key={String(team.id ?? team.name)} value={team.name ?? ''} />
                             ))}
                         </datalist>
+                        <datalist id="responsible-team-list-v2">
+                            {sortedTeamsByName.map((team) => (
+                                <option key={String(team.id ?? team.legacyId ?? team.name)} value={team.name ?? ''} />
+                            ))}
+                        </datalist>
                         <datalist id="company-list-v2">
                             {companyOptions.map((company) => (
                                 <option key={String(company.id ?? company.legacyId ?? company.name)} value={company.name ?? ''} />
@@ -2852,56 +3144,59 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                         </datalist>
                     </>
                 )}
-                {isLoading ? (
-                    <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mb-2"></div>
-                        <span className="text-sm font-medium">불러오는 중...</span>
-                    </div>
+                {isQueryLoading ? (
+                    <DailyReportListLoadingState />
+                ) : queryError ? (
+                    <DailyReportListErrorState
+                        message={queryError}
+                        startDate={startDate}
+                        endDate={endDate}
+                        onRetry={() => { void fetchRows(); }}
+                    />
                 ) : sortedRows.length === 0 ? (
-                    <div className="daily-report-v2-empty-state" role="status" aria-live="polite">
-                        <div className="daily-report-v2-empty-icon" aria-hidden="true">
-                            <FontAwesomeIcon icon={faFilter} />
-                        </div>
-                        <div className="daily-report-v2-empty-copy">
-                            <h2>{emptyTitle}</h2>
-                            <p>{emptyDescription}</p>
-                        </div>
-                        <div className="daily-report-v2-empty-meta" aria-label="현재 조회 조건">
-                            <span>기간: {startDate} ~ {endDate}</span>
-                            {activeFilterLabels.length > 0 ? (
-                                activeFilterLabels.map((label) => (
-                                    <span key={label}>{label}</span>
-                                ))
-                            ) : (
-                                <span>추가 필터 없음</span>
-                            )}
-                        </div>
-                        <div className="daily-report-v2-empty-actions">
-                            {hasActiveListFilters && (
-                                <button
-                                    type="button"
-                                    onClick={handleClearListFilters}
-                                    className="px-4 py-2 rounded-lg text-sm font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
-                                    title="현장, 팀, 작업자 검색, 표 필터를 모두 초기화"
-                                >
-                                    필터 초기화
-                                </button>
-                            )}
-                            <button
-                                type="button"
-                                onClick={() => searchRowsByRange(todayStr, todayStr)}
-                                className="px-4 py-2 rounded-lg text-sm font-bold bg-blue-600 text-white border border-blue-600 hover:bg-blue-700"
-                                title="오늘 날짜로 다시 조회"
-                            >
-                                오늘 날짜로 조회
-                            </button>
-                        </div>
-                    </div>
+                    <DailyReportListEmptyState
+                        title={emptyTitle}
+                        description={emptyDescription}
+                        startDate={startDate}
+                        endDate={endDate}
+                        activeFilterLabels={activeFilterLabels}
+                        hasActiveListFilters={hasActiveListFilters}
+                        onClearFilters={handleClearListFilters}
+                        onToday={() => handleDatePresetClick('today')}
+                    />
                 ) : (
+                    <>
+                    <div className="daily-report-v2-mobile-view-switch md:hidden" role="group" aria-label="목록 표시 방식">
+                        <button
+                            type="button"
+                            onClick={() => setMobileViewMode('cards')}
+                            disabled={isEditMode}
+                            aria-pressed={effectiveMobileViewMode === 'cards'}
+                            className={effectiveMobileViewMode === 'cards' ? 'is-active' : ''}
+                            title={isEditMode ? '수정 모드에서는 표 보기를 사용합니다.' : '카드형 목록으로 보기'}
+                        >
+                            카드
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setMobileViewMode('table')}
+                            aria-pressed={effectiveMobileViewMode === 'table'}
+                            className={effectiveMobileViewMode === 'table' ? 'is-active' : ''}
+                        >
+                            표
+                        </button>
+                        {isEditMode && <span>수정 중에는 표로 표시됩니다.</span>}
+                    </div>
+                    {effectiveMobileViewMode === 'cards' && (
+                        <DailyReportMobileList rows={mobileRows} sortMode={sortMode} formatNumber={formatNumber} />
+                    )}
                     <div
                         ref={tableScrollRef}
                         onScroll={handleTableScroll}
-                        className="sheet-table-wrapper workbook-frozen-table-wrapper daily-report-v2-wrapper"
+                        role="region"
+                        aria-label="일보 상세 표, 좌우로 스크롤 가능"
+                        tabIndex={0}
+                        className={`sheet-table-wrapper workbook-frozen-table-wrapper daily-report-v2-wrapper ${effectiveMobileViewMode === 'cards' ? 'hidden md:block' : 'block'}`}
                         style={{ flex: 1 }}
                     >
                     <table className={`sheet-table daily-report-workbook-table ${showSiteDetailColumns ? 'min-w-[1730px]' : 'min-w-[1310px]'} text-left text-slate-700`}>
@@ -3036,8 +3331,14 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                     <td colSpan={tableColumnCount} style={{ height: topVirtualSpacerHeight }} />
                                 </tr>
                             )}
-                            {renderedRows.map((row) => {
+                            {renderedRows.map((row, renderedIndex) => {
                                 const key = getRowKey(row);
+                                const absoluteRowIndex = shouldVirtualizeRows ? virtualStartIndex + renderedIndex : renderedIndex;
+                                const previousRow = absoluteRowIndex > 0 ? sortedRows[absoluteRowIndex - 1] : undefined;
+                                const groupingEnabled = sortMode !== 'name';
+                                const isDateGroupStart = groupingEnabled && (!previousRow || previousRow.date !== row.date);
+                                const isSiteGroupStart = groupingEnabled && (!previousRow || getTableGroupKey(previousRow) !== getTableGroupKey(row));
+                                const groupMetrics = tableGroupMetrics.get(getTableGroupKey(row));
                                 const isSelected = selectedRowKeys.has(key);
                                 const draft = rowDrafts[key];
                                 const isDirty = isRowDirty(row, draft);
@@ -3071,7 +3372,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                 return (
                                     <tr
                                         key={key}
-                                        className={`sheet-row hover:bg-slate-50 transition-colors border-b border-slate-100 ${isSelected ? 'bg-indigo-50/50' : ''} ${isDirty ? 'bg-amber-50/50' : ''} ${isTargetReport ? 'ring-2 ring-rose-300 bg-rose-50/60' : ''}`}
+                                        className={`sheet-row hover:bg-slate-50 transition-colors border-b border-slate-100 ${isDateGroupStart ? 'daily-report-v2-date-group-start' : ''} ${isSiteGroupStart ? 'daily-report-v2-site-group-start' : ''} ${isSelected ? 'bg-indigo-50/50' : ''} ${isDirty ? 'bg-amber-50/50' : ''} ${isTargetReport ? 'ring-2 ring-rose-300 bg-rose-50/60' : ''}`}
                                         style={shouldVirtualizeRows ? { height: VIRTUAL_ROW_HEIGHT } : undefined}
                                     >
                                         {isEditMode && (
@@ -3108,7 +3409,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                                     </select>
                                                 </div>
                                             ) : (
-                                                <span className="truncate block" title={row.siteName ?? ''}>{row.siteName}</span>
+                                                <span className="daily-report-v2-site-cell" title={isSiteGroupStart && groupMetrics
+                                                    ? `${row.siteName ?? ''} · ${groupMetrics.rowCount}건 · ${groupMetrics.totalManDay.toFixed(1)}공수`
+                                                    : (row.siteName ?? '')}
+                                                >
+                                                    <span>{row.siteName}</span>
+                                                    {isSiteGroupStart && groupMetrics && (
+                                                        <small>{groupMetrics.rowCount}건</small>
+                                                    )}
+                                                </span>
                                             )}
                                         </td>
                                         {showSiteDetailColumns && (
@@ -3406,6 +3715,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                         </tbody>
                     </table>
                     </div>
+                    </>
                 )}
             </div>
         </div>

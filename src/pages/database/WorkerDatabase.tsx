@@ -5,9 +5,7 @@ import {
     faUsers, faUser, faPlus, faSearch, faEdit, faTrash,
     faCheckSquare, faSquare, faTable, faBuilding,
     faIdCard, faArrowUp, faArrowDown,
-    faEye, faEyeSlash, faLink, faImages, faPenToSquare, faDownload, faMoneyCheck,
-    IconDefinition
-} from '@fortawesome/free-solid-svg-icons';
+    faEye, faEyeSlash, faLink, faImages, faPenToSquare, faDownload, faMoneyCheck} from '@fortawesome/free-solid-svg-icons';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';
@@ -30,6 +28,11 @@ import SignatureGeneratorModal from '../../components/signatures/SignatureGenera
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import SingleSelectPopover, { InputPopover } from '../../components/common/SingleSelectPopover';
 import { DEFAULT_TEAM_COLOR } from '../../constants/solidColorPalette';
+import {
+    classifyWorkerAffiliation,
+    isCheongyeonEngCompanyName,
+    type WorkerAffiliationCategory,
+} from '../../utils/cheongyeonTeams';
 
 type WorkerLaborStatementPayType = 'direct' | 'delegate';
 
@@ -168,6 +171,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
     const [isStickyHeader, setIsStickyHeader] = useState(false); // Sticky header toggle
     const [selectedTeamId, setSelectedTeamId] = useState('');
     const [selectedCompanyFilterId, setSelectedCompanyFilterId] = useState('');
+    const [affiliationFilter, setAffiliationFilter] = useState<'all' | WorkerAffiliationCategory>('all');
 
     // Highlight scroll control (for Data Integrity "관리" navigation)
     const highlightScrolledRef = useRef(false);
@@ -290,18 +294,6 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
         }
     };
 
-    const handleWorkerSiteSelect = async (workerId: string, siteId: string) => {
-        if (!siteId) {
-            setWorkers(prev => prev.map(w => w.id === workerId ? { ...w, siteId: '', siteName: '' } : w));
-            await manpowerService.updateWorker(workerId, { siteId: '', siteName: '' });
-            return;
-        }
-        const site = sites.find(s => s.id === siteId);
-        if (site) {
-            setWorkers(prev => prev.map(w => w.id === workerId ? { ...w, siteId: site.id, siteName: site.name } : w));
-            await manpowerService.updateWorker(workerId, { siteId: site.id, siteName: site.name });
-        }
-    }
 
     const handleWorkerCompanySelect = async (workerId: string, companyId: string) => {
         if (!companyId) {
@@ -409,6 +401,22 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
         return map;
     }, [companies]);
 
+    const cheongyeonCompanyIds = React.useMemo(() => {
+        const ids = new Set<string>();
+        companies.forEach((company) => {
+            if (
+                !isCheongyeonEngCompanyName(company.name) &&
+                !isCheongyeonEngCompanyName(company.code)
+            ) return;
+
+            [company.id, company.legacyId]
+                .map((id) => String(id ?? '').trim())
+                .filter(Boolean)
+                .forEach((id) => ids.add(id));
+        });
+        return ids;
+    }, [companies]);
+
     const teamById = React.useMemo(() => {
         const map = new Map<string, Team>();
         teams.forEach((team) => {
@@ -449,6 +457,39 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
         return { id, name };
     }, [companyById, companyByNameKey, teamById, teamByNameKey]);
 
+    const getWorkerAffiliation = React.useCallback((worker: Worker): WorkerAffiliationCategory => {
+        const resolvedCompany = resolveWorkerCompany(worker);
+        const workerTeamId = String(worker.teamId ?? '').trim();
+        const workerTeamName = String(worker.teamName ?? '').trim().toLowerCase();
+        const workerTeam = (workerTeamId ? teamById.get(workerTeamId) : undefined)
+            || (workerTeamName ? teamByNameKey.get(workerTeamName) : undefined);
+
+        return classifyWorkerAffiliation({
+            companyId: resolvedCompany.id,
+            companyName: resolvedCompany.name,
+            teamType: workerTeam?.type ?? worker.teamType,
+        }, cheongyeonCompanyIds);
+    }, [cheongyeonCompanyIds, resolveWorkerCompany, teamById, teamByNameKey]);
+
+    const affiliationCounts = React.useMemo(() => {
+        const counts: Record<'all' | WorkerAffiliationCategory, number> = {
+            all: 0,
+            cheongyeon: 0,
+            external: 0,
+            unassigned: 0,
+        };
+
+        workers.forEach((worker) => {
+            const isActive = worker.status === '재직' || worker.status === 'active' || worker.status === '미배정' || !worker.status;
+            if (!showInactive && !isActive) return;
+
+            counts.all += 1;
+            counts[getWorkerAffiliation(worker)] += 1;
+        });
+
+        return counts;
+    }, [getWorkerAffiliation, showInactive, workers]);
+
     const matchesSelectedCompany = React.useCallback((worker: Worker): boolean => {
         if (!selectedCompanyFilterId) return true;
 
@@ -487,6 +528,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
         // Status filter: If showInactive is false, only show 'active'/'재직' or 'unassigned'/'미배정'.
         const isActive = worker.status === '재직' || worker.status === 'active' || worker.status === '미배정' || !worker.status;
         if (!showInactive && !isActive) return false;
+        if (affiliationFilter !== 'all' && getWorkerAffiliation(worker) !== affiliationFilter) return false;
         if (!matchesTeam) return false;
         if (!matchesSelectedCompany(worker)) return false;
 
@@ -502,6 +544,38 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             resolvedCompany.name.toLowerCase().includes(lowerSearch)
         );
     });
+
+    const affiliationOptions: Array<{
+        id: 'all' | WorkerAffiliationCategory;
+        label: string;
+        description: string;
+        activeClassName: string;
+    }> = [
+        {
+            id: 'all',
+            label: '전체',
+            description: '모든 소속의 작업자를 표시합니다.',
+            activeClassName: 'border-slate-700 bg-slate-800 text-white',
+        },
+        {
+            id: 'cheongyeon',
+            label: '청연 소속회사',
+            description: '청연이엔지 소속 회사와 팀의 작업자입니다.',
+            activeClassName: 'border-blue-600 bg-blue-600 text-white',
+        },
+        {
+            id: 'external',
+            label: '외부팀',
+            description: '협력사 또는 외부 지원팀 소속 작업자입니다.',
+            activeClassName: 'border-amber-500 bg-amber-500 text-white',
+        },
+        {
+            id: 'unassigned',
+            label: '소속 미지정',
+            description: '소속회사 구분이 아직 지정되지 않은 작업자입니다.',
+            activeClassName: 'border-slate-500 bg-slate-500 text-white',
+        },
+    ];
 
     // 선택 기능
     const selectedTeamName = React.useMemo(
@@ -1176,6 +1250,43 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                 </div>
                             )}
                         </div>
+                    </div>
+
+                    <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                        <div
+                            className="flex flex-wrap items-center gap-2"
+                            role="group"
+                            aria-label="작업자 소속 구분"
+                        >
+                            <span className="mr-1 text-sm font-semibold text-slate-700">소속 구분</span>
+                            {affiliationOptions.map((option) => {
+                                const isSelected = affiliationFilter === option.id;
+                                return (
+                                    <button
+                                        key={option.id}
+                                        type="button"
+                                        aria-pressed={isSelected}
+                                        title={option.description}
+                                        onClick={() => setAffiliationFilter(option.id)}
+                                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+                                            isSelected
+                                                ? option.activeClassName
+                                                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-100'
+                                        }`}
+                                    >
+                                        <span>{option.label}</span>
+                                        <span className={`rounded-full px-1.5 py-0.5 text-xs ${
+                                            isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+                                        }`}>
+                                            {affiliationCounts[option.id]}명
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <p className="mt-2 text-xs text-slate-500">
+                            {affiliationOptions.find((option) => option.id === affiliationFilter)?.description}
+                        </p>
                     </div>
 
                     <div className={`overflow-auto ${isStickyHeader ? 'h-[calc(100vh-250px)] border-b border-gray-200' : 'pb-80'}`}>

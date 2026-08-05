@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faUserShield, faUserTag, faInfoCircle, faSpinner, faCheck, faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
+import { faUserShield, faUserTag, faInfoCircle, faSpinner } from '@fortawesome/free-solid-svg-icons';
 import { userService, UserData } from '../../services/userService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { useNavigate } from 'react-router-dom';

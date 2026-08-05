@@ -6,6 +6,16 @@ export type VehicleAssigneeType = 'TEAM' | 'WORKER';
 export type VehicleBillingTargetType = VehicleAssigneeType | 'OFFICE' | 'OFFICE_STAFF';
 export type VehicleFineChargeTarget = 'BILLING_TARGET' | 'DRIVER';
 
+// A driver chosen for one already-recorded fine.  This is deliberately stored
+// on the expense, not on the vehicle assignment, so a historical correction
+// cannot rewrite another month's assignment/billing history.
+export interface VehicleFineDriverBillingTarget {
+    workerId: string;
+    workerName: string;
+    teamId?: string;
+    teamName?: string;
+}
+
 export interface VehicleContract {
     type: VehicleType;
     startDate: string; // YYYY-MM-DD
@@ -54,6 +64,8 @@ export interface Vehicle {
     billingTargetStartDate?: string | null;
     billingTargetEndDate?: string | null;
     fineChargeTarget?: VehicleFineChargeTarget;
+    // Changes to the default fine target apply from this date forward.
+    fineChargeTargetEffectiveDate?: string | null;
     memo?: string;
 
     createdAt?: Timestamp | FieldValue | null;
@@ -99,6 +111,29 @@ export interface VehicleBillingTargetRecord {
 // Expense (Variable Cost) Record
 export type VehicleExpenseType = 'FUEL' | 'REPAIR' | 'TOLL' | 'FINE' | 'OTHER';
 export type VehicleExpensePayer = 'COMPANY' | 'DRIVER';
+export type VehicleExpenseStatus = 'ACTIVE' | 'CANCELLED';
+
+export interface VehicleFineNoticeMeta {
+    sourceFileName: string;
+    issuer: string;
+    noticeType: 'PARKING_FINE' | 'TRAFFIC_FINE' | 'OTHER';
+    extractedLicensePlate: string;
+    violationDateTime: string;
+    violationLocation: string;
+    violationDescription: string;
+    dueDate: string;
+    noticeNumber: string;
+    electronicPaymentNumber: string;
+    originalAmount: number;
+    reductionAmount: number;
+    payableAmount: number;
+    driverPenaltyAmount: number;
+    ownerFineAmount: number;
+    confidence: number;
+    warnings: string[];
+    dedupeKey: string;
+    manualMatch: boolean;
+}
 
 export interface VehicleExpenseRecord {
     id: string;
@@ -110,9 +145,17 @@ export interface VehicleExpenseRecord {
     amount: number;
     payer: VehicleExpensePayer;
     fineChargeTarget?: VehicleFineChargeTarget;
+    fineDriverBillingTarget?: VehicleFineDriverBillingTarget;
+    status?: VehicleExpenseStatus;
 
     note?: string;
     evidenceUrl?: string; // Receipt Image
+    importSource?: 'GEMINI_FINE_NOTICE';
+    fineNotice?: VehicleFineNoticeMeta;
+    operationId?: string;
+    lastOperationId?: string;
 
     createdAt?: Timestamp | FieldValue;
+    updatedAt?: Timestamp | FieldValue;
+    cancelledAt?: Timestamp | FieldValue | null;
 }

@@ -19,7 +19,7 @@ async function sync() {
             const serviceAccount = require(serviceAccountPath);
             const adminApp = initAdminApp({ credential: cert(serviceAccount) });
             const prodDb = getAdminFirestore(adminApp);
-            const docSnap = await prodDb.collection('settings').doc('menus_v11').get();
+            const docSnap = await prodDb.collection('settings').doc('menus_v12').get();
             if(docSnap.exists) prodData = docSnap.data();
         } else {
             const firebaseConfig = {
@@ -29,12 +29,12 @@ async function sync() {
             };
             const clientApp = initClientApp(firebaseConfig, 'prod');
             const prodDb = getClientFirestore(clientApp);
-            const snap = await getDoc(doc(prodDb, 'settings', 'menus_v11'));
+            const snap = await getDoc(doc(prodDb, 'settings', 'menus_v12'));
             if(snap.exists()) prodData = snap.data();
         }
 
         if (!prodData) {
-            console.log('No menus_v11 in prod DB');
+            console.log('No menus_v12 in prod DB');
             process.exit(0);
         }
 
@@ -46,7 +46,7 @@ async function sync() {
         const localApp = initClientApp(devFirebaseConfig, 'local');
         const localDb = getClientFirestore(localApp);
         
-        await setDoc(doc(localDb, 'settings', 'menus_v11'), prodData);
+        await setDoc(doc(localDb, 'settings', 'menus_v12'), prodData);
         console.log('Successfully synced to Dev Firebase project (cyee-9c1e4)!');
         process.exit(0);
     } catch(e) {

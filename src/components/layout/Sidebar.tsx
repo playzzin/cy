@@ -47,6 +47,10 @@ import { userMenuPositionService } from '../../services/userMenuPositionService'
 import { rolePermissionService } from '../../services/rolePermissionService';
 import { SiteDataType, MenuItem } from '../../types/menu';
 import { isRunningAsStandaloneApp } from '../../pwaInstallPrompt';
+import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
+import { devUsers } from '../../utils/devAdminFixtures';
+import { buildMenuAccessRoles } from '../../utils/menuAccess';
+import { isOperationManagementMenuPath, isOperationManagementMenuText } from '../../utils/operationMenuAccess';
 
 import { resolveIcon } from '../../constants/iconMap';
 
@@ -91,17 +95,6 @@ const MENU_PERMISSION_MAP: { [key: string]: string } = {
 const PATH_PERMISSION_MAP: { [key: string]: string } = {
     '/memos': 'smart-memo',
     '/admin/welfare-assets': 'welfare-assets',
-    '/recruiting/dashboard': 'recruiting-dashboard',
-    '/recruiting/service-workers': 'recruiting-service-workers',
-    '/recruiting/worker-history': 'recruiting-worker-history',
-    '/recruiting/monthly-settlement': 'recruiting-monthly-settlement',
-    '/recruiting/payments': 'recruiting-payments',
-    '/recruiting/deposits': 'recruiting-deposits',
-    '/recruiting/receivables': 'recruiting-receivables',
-    '/recruiting/monthly-statistics': 'recruiting-statistics',
-    '/recruiting/referrers': 'recruiting-referrers',
-    '/recruiting/settings': 'recruiting-settings',
-    '/recruiting/logs': 'recruiting-logs',
 };
 
 const normalizeRole = (role: unknown): string => String(role || '').trim();
@@ -183,7 +176,6 @@ const inferMenuIconName = (text: string, path?: string, explicitIcon?: string): 
     if (normalizedPath.startsWith('/support/vehicles')) return 'fa-truck-front';
     if (normalizedPath.startsWith('/support/cards')) return 'fa-credit-card';
     if (normalizedPath.startsWith('/support')) return 'fa-hand-holding-dollar';
-    if (normalizedPath.startsWith('/recruiting')) return 'fa-hand-holding-dollar';
     if (normalizedPath.startsWith('/assignment')) return 'fa-list-check';
     if (normalizedPath.startsWith('/manpower')) return 'fa-users';
     if (normalizedPath.startsWith('/hr')) return 'fa-user-tag';
@@ -236,13 +228,14 @@ const Sidebar: React.FC<SidebarProps> = ({
     const location = useLocation();
     const navigate = useNavigate();
     const { currentUser } = useAuth();
+    const devAdminMode = isDevAdminSessionEnabled();
     const [userProfile, setUserProfile] = useState<any>(null);
     const [additionalMenuPositions, setAdditionalMenuPositions] = useState<string[]>([]);
     const [linkedEntityRoles, setLinkedEntityRoles] = useState<string[]>([]);
     const [permissions, setPermissions] = useState<any>(null);
     const userAccessRoles = useMemo(() => {
         const basePositionRoles = linkedEntityRoles.length > 0 ? linkedEntityRoles : userProfile?.position;
-        return uniqueRoles([
+        return buildMenuAccessRoles(
             basePositionRoles,
             userProfile?.role,
             userProfile?.systemRole,
@@ -250,7 +243,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             userProfile?.additionalPositions,
             additionalMenuPositions,
             'user'
-        ]);
+        );
     }, [userProfile, linkedEntityRoles, additionalMenuPositions]);
     const safeCurrentSiteData = currentSiteData || {
         name: '청연ENG ERP',
@@ -265,19 +258,28 @@ const Sidebar: React.FC<SidebarProps> = ({
 
         if (currentUser) {
             setLinkedEntityRoles([]);
-            // Listen to user role changes in real-time
-            userUnsubscribe = onSnapshot(doc(db, 'users', currentUser.uid), (docSnap: any) => {
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    setUserProfile(data || null);
-                    console.log("Sidebar: User access profile updated", {
-                        role: data?.role,
-                        position: data?.position
-                    });
-                } else {
-                    setUserProfile(null);
-                }
-            });
+            if (devAdminMode) {
+                setUserProfile(devUsers.find((user) => user.uid === currentUser.uid) || {
+                    uid: currentUser.uid,
+                    email: currentUser.email,
+                    role: 'admin',
+                    position: '사장'
+                });
+            } else {
+                // Listen to user role changes in real-time
+                userUnsubscribe = onSnapshot(doc(db, 'users', currentUser.uid), (docSnap: any) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        setUserProfile(data || null);
+                        console.log("Sidebar: User access profile updated", {
+                            role: data?.role,
+                            position: data?.position
+                        });
+                    } else {
+                        setUserProfile(null);
+                    }
+                });
+            }
 
             positionUnsubscribe = userMenuPositionService.subscribe((map) => {
                 setAdditionalMenuPositions(map[currentUser.uid] || []);
@@ -319,10 +321,11 @@ const Sidebar: React.FC<SidebarProps> = ({
             if (userUnsubscribe) userUnsubscribe();
             if (positionUnsubscribe) positionUnsubscribe();
         };
-    }, [currentUser]);
+    }, [currentUser, devAdminMode]);
 
     const hasPermission = (itemText: string, itemRoles?: string[], itemPath?: string): boolean => {
         if (userAccessRoles.some(isAdminRole)) return true;
+        if (isOperationManagementMenuPath(itemPath) || isOperationManagementMenuText(itemText)) return true;
 
         // 1. Dynamic Check (Priority 1)
         if (itemRoles && itemRoles.length > 0) {
@@ -664,15 +667,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                 onClick={(e) => {
                                                                     e.preventDefault();
                                                                     if (linkPath) {
-                                                                        if (shouldOpenInNewTab(linkPath)) {
-                                                                            openMenuPath(linkPath);
-                                                                            return;
-                                                                        }
-                                                                        if (typeof subItem !== 'string' && (subItem as MenuItem).path) {
-                                                                            handleMenuItemClick(subItem as MenuItem);
-                                                                            return;
-                                                                        }
-                                                                        handleSubMenuClick(linkText);
+                                                                        openMenuPath(linkPath);
                                                                     }
                                                                 }}
                                                                 className={isSubActive ? 'active' : ''}

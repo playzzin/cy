@@ -7,6 +7,7 @@ export const VehicleAssigneeTypeSchema = z.enum(['TEAM', 'WORKER']);
 export const VehicleBillingTargetTypeSchema = z.enum(['TEAM', 'WORKER', 'OFFICE', 'OFFICE_STAFF']);
 export const VehicleExpenseTypeSchema = z.enum(['FUEL', 'REPAIR', 'TOLL', 'FINE', 'OTHER']);
 export const VehicleExpensePayerSchema = z.enum(['COMPANY', 'DRIVER']);
+export const VehicleExpenseStatusSchema = z.enum(['ACTIVE', 'CANCELLED']);
 export const VehicleFineChargeTargetSchema = z.enum(['BILLING_TARGET', 'DRIVER']);
 
 // Vehicle Contract Schema
@@ -55,6 +56,7 @@ export const vehicleSchema = z.object({
     billingTargetStartDate: z.string().nullable().optional(),
     billingTargetEndDate: z.string().nullable().optional(),
     fineChargeTarget: VehicleFineChargeTargetSchema.optional().default('BILLING_TARGET'),
+    fineChargeTargetEffectiveDate: z.string().nullable().optional(),
     memo: z.string().optional(),
     createdAt: z.any().optional(),
     updatedAt: z.any().optional(),
@@ -100,9 +102,42 @@ export const vehicleExpenseSchema = z.object({
     amount: z.number().default(0),
     payer: VehicleExpensePayerSchema.default('COMPANY'),
     fineChargeTarget: VehicleFineChargeTargetSchema.optional().default('BILLING_TARGET'),
+    fineDriverBillingTarget: z.object({
+        workerId: z.string(),
+        workerName: z.string(),
+        teamId: z.string().optional(),
+        teamName: z.string().optional(),
+    }).optional(),
+    status: VehicleExpenseStatusSchema.optional().default('ACTIVE'),
     note: z.string().optional(),
     evidenceUrl: z.string().optional(),
+    importSource: z.enum(['GEMINI_FINE_NOTICE']).optional(),
+    fineNotice: z.object({
+        sourceFileName: z.string(),
+        issuer: z.string(),
+        noticeType: z.enum(['PARKING_FINE', 'TRAFFIC_FINE', 'OTHER']),
+        extractedLicensePlate: z.string(),
+        violationDateTime: z.string(),
+        violationLocation: z.string(),
+        violationDescription: z.string(),
+        dueDate: z.string(),
+        noticeNumber: z.string(),
+        electronicPaymentNumber: z.string(),
+        originalAmount: z.number(),
+        reductionAmount: z.number(),
+        payableAmount: z.number(),
+        driverPenaltyAmount: z.number(),
+        ownerFineAmount: z.number(),
+        confidence: z.number(),
+        warnings: z.array(z.string()),
+        dedupeKey: z.string(),
+        manualMatch: z.boolean(),
+    }).optional(),
+    operationId: z.string().optional(),
+    lastOperationId: z.string().optional(),
     createdAt: z.any().optional(),
+    updatedAt: z.any().optional(),
+    cancelledAt: z.any().nullable().optional(),
 });
 
 export type VehicleSchema = z.infer<typeof vehicleSchema>;

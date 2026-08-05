@@ -5,12 +5,12 @@ import { ko } from 'date-fns/locale';
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 
-const toDateFromYearMonth = (yearMonth: string): Date => {
+const toDateFromYearMonth = (yearMonth: string): Date | null => {
   const m = String(yearMonth ?? '').trim().match(/^(\d{4})-(\d{2})$/);
-  if (!m) return new Date();
+  if (!m) return null;
   const year = Number(m[1]);
   const month = Number(m[2]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return new Date();
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
   return new Date(year, month - 1, 1);
 };
 
@@ -22,13 +22,22 @@ const toYearMonthFromDate = (date: Date): string => {
 
 type YearMonthPickerInputProps = React.InputHTMLAttributes<HTMLInputElement> & {
   value?: string;
+  externalInputRef?: React.Ref<HTMLInputElement>;
+};
+
+const assignInputRef = (ref: React.Ref<HTMLInputElement> | undefined, input: HTMLInputElement | null) => {
+  if (typeof ref === 'function') ref(input);
+  else if (ref) (ref as React.MutableRefObject<HTMLInputElement | null>).current = input;
 };
 
 const YearMonthPickerInput = forwardRef<HTMLInputElement, YearMonthPickerInputProps>(
-  ({ value, onClick, className, disabled, ...rest }, ref) => {
+  ({ value, onClick, className, disabled, externalInputRef, ...rest }, ref) => {
     return (
       <input
-        ref={ref}
+        ref={(input) => {
+          assignInputRef(ref, input);
+          assignInputRef(externalInputRef, input);
+        }}
         readOnly
         value={value ?? ''}
         onClick={onClick}
@@ -48,6 +57,15 @@ export type YearMonthPickerProps = {
   disabled?: boolean;
   className?: string;
   inputClassName?: string;
+  inputRef?: React.Ref<HTMLInputElement>;
+  onBlur?: React.FocusEventHandler<HTMLElement>;
+  onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void;
+  ariaLabel?: string;
+  placeholderText?: string;
+  portalId?: string;
+  popperClassName?: string;
+  minDate?: Date;
+  maxDate?: Date;
 };
 
 export const YearMonthPicker: React.FC<YearMonthPickerProps> = ({
@@ -55,7 +73,16 @@ export const YearMonthPicker: React.FC<YearMonthPickerProps> = ({
   onChange,
   disabled,
   className,
-  inputClassName
+  inputClassName,
+  inputRef,
+  onBlur,
+  onKeyDown,
+  ariaLabel,
+  placeholderText,
+  portalId,
+  popperClassName,
+  minDate,
+  maxDate
 }) => {
   const selectedDate = useMemo(() => toDateFromYearMonth(value), [value]);
 
@@ -80,6 +107,15 @@ export const YearMonthPicker: React.FC<YearMonthPickerProps> = ({
         showMonthYearPicker
         showPopperArrow
         disabled={disabled}
+        onBlur={onBlur}
+        onKeyDown={onKeyDown}
+        aria-label={ariaLabel}
+        placeholderText={placeholderText}
+        portalId={portalId}
+        popperClassName={popperClassName}
+        minDate={minDate}
+        maxDate={maxDate}
+        closeOnScroll
         renderCustomHeader={(args) => {
           const {
             date,
@@ -113,6 +149,7 @@ export const YearMonthPicker: React.FC<YearMonthPickerProps> = ({
         }}
         customInput={(
           <YearMonthPickerInput
+            externalInputRef={inputRef}
             className={
               inputClassName
               ?? 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none text-left'

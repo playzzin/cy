@@ -25,4 +25,28 @@ if (!indexHtml.includes('/static/js/')) {
   process.exit(1);
 }
 
-console.log('Hosting build verified.');
+const jsDir = path.join(buildDir, 'static', 'js');
+const jsFiles = fs.readdirSync(jsDir)
+  .filter((fileName) => fileName.endsWith('.js'))
+  .map((fileName) => path.join(jsDir, fileName));
+const captureBundle = jsFiles.find((filePath) => {
+  const source = fs.readFileSync(filePath, 'utf8');
+  return source.includes('exact-pixel-current-tab-selection-v3');
+});
+
+if (!captureBundle) {
+  console.error(
+    'Hosting build is stale: the exact-pixel current-tab capture engine marker is missing.'
+  );
+  process.exit(1);
+}
+
+const captureSource = fs.readFileSync(captureBundle, 'utf8');
+if (!captureSource.includes('document.body') || !captureSource.includes('allowTaint')) {
+  console.error(
+    'Hosting build is invalid: the capture bundle does not contain the direct DOM capture path.'
+  );
+  process.exit(1);
+}
+
+console.log(`Hosting build verified (${path.basename(captureBundle)} · exact-pixel current-tab capture).`);

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faAddressBook,
@@ -33,6 +34,8 @@ import type {
 } from '../../types/partnerRecognition';
 import PartnerMenuTopNav from '../../components/common/PartnerMenuTopNav';
 import { getFriendlyErrorMessage, isDeadlineExceededError } from '../../utils/firebaseError';
+import PartnerSearchSelect, { type PartnerSearchSelectOption } from './PartnerSearchSelect';
+import './partnerSuite.css';
 
 const STATUS_LABELS: Record<string, string> = {
     draft: '작성중',
@@ -58,6 +61,17 @@ const RESULT_BADGE_CLASS: Record<string, string> = {
     excluded: 'border-slate-200 bg-slate-100 text-slate-500',
     committed: 'border-blue-200 bg-blue-50 text-blue-700',
     failed: 'border-rose-200 bg-rose-50 text-rose-700',
+};
+
+const panelMotion = {
+    hidden: { opacity: 0, y: 14 },
+    visible: { opacity: 1, y: 0, transition: { duration: 0.28 } },
+};
+
+const tableRowMotion = {
+    hidden: { opacity: 0, y: 8 },
+    visible: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: -6 },
 };
 
 const emptyContact: ExtractedPartnerContact = {
@@ -209,6 +223,7 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
     const [lastPhoneContactFile, setLastPhoneContactFile] = useState<File | null>(null);
     const [phoneContactSaveMessage, setPhoneContactSaveMessage] = useState('');
     const [savingPhoneContacts, setSavingPhoneContacts] = useState(false);
+    const [fileNotice, setFileNotice] = useState('');
     const [busy, setBusy] = useState(false);
     const [preparingFiles, setPreparingFiles] = useState(false);
     const [rotatingFileIndex, setRotatingFileIndex] = useState<number | null>(null);
@@ -267,6 +282,87 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
         return map;
     }, [sites]);
 
+    const companyOptions = useMemo<PartnerSearchSelectOption[]>(() =>
+        companies
+            .flatMap((company: any): PartnerSearchSelectOption[] => {
+                const value = company.id || '';
+                if (!value) return [];
+                const description = [company.type, company.businessNumber, company.phone]
+                    .filter(Boolean)
+                    .join(' · ');
+                return [{
+                    value,
+                    label: company.name || '(회사명 없음)',
+                    description,
+                    keywords: [
+                        company.name,
+                        company.type,
+                        company.businessNumber,
+                        company.phone,
+                        company.address,
+                    ].filter(Boolean).join(' '),
+                }];
+            }),
+        [companies]
+    );
+
+    const siteOptions = useMemo<PartnerSearchSelectOption[]>(() =>
+        sites
+            .flatMap((site: any): PartnerSearchSelectOption[] => {
+                const value = site.id || '';
+                if (!value) return [];
+                const description = [site.address, site.constructorName, site.partnerName]
+                    .filter(Boolean)
+                    .join(' · ');
+                return [{
+                    value,
+                    label: site.name || '(현장명 없음)',
+                    description,
+                    keywords: [
+                        site.name,
+                        site.address,
+                        site.constructorName,
+                        site.partnerName,
+                        site.managerName,
+                    ].filter(Boolean).join(' '),
+                }];
+            }),
+        [sites]
+    );
+
+    const getResultCompanyOptions = (result: PartnerRecognitionResult): PartnerSearchSelectOption[] => {
+        const candidateIds = new Set<string>();
+        const candidateOptions = result.candidates
+            .flatMap((candidate): PartnerSearchSelectOption[] => {
+                const value = candidate.companyId || '';
+                if (!value) return [];
+                candidateIds.add(value);
+                const baseOption = companyOptions.find((option) => option.value === value);
+                return [{
+                    value,
+                    label: candidate.companyName || baseOption?.label || '(회사명 없음)',
+                    description: [
+                        `추천점수 ${candidate.score}`,
+                        (candidate.reasons || []).slice(0, 2).join(', '),
+                        baseOption?.description,
+                    ].filter(Boolean).join(' · '),
+                    badge: '추천',
+                    keywords: [
+                        candidate.companyName,
+                        candidate.businessNumber,
+                        candidate.phone,
+                        candidate.address,
+                        baseOption?.keywords,
+                    ].filter(Boolean).join(' '),
+                }];
+            });
+
+        return [
+            ...candidateOptions,
+            ...companyOptions.filter((option) => !candidateIds.has(option.value)),
+        ];
+    };
+
     const commitableResults = useMemo(
         () => results.filter(canCommitResult),
         [results]
@@ -280,11 +376,14 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
 
     const prepareFilesForPreview = async (inputFiles: File[]) => {
         const selected = inputFiles.filter(isRecognitionImageFile);
+        const rejectedCount = inputFiles.length - selected.length;
         if (selected.length === 0) {
             setFiles([]);
+            setFileNotice(rejectedCount > 0 ? '이미지 파일만 업로드할 수 있습니다.' : '');
             return;
         }
 
+        setFileNotice(rejectedCount > 0 ? `이미지가 아닌 파일 ${rejectedCount}개는 제외했습니다.` : '');
         setPreparingFiles(true);
         try {
             const normalized = await Promise.all(selected.map(async (file) => {
@@ -478,14 +577,6 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
         });
     };
 
-    const handleSelectCompanyByName = async (result: PartnerRecognitionResult, companyName: string) => {
-        if (!result.id) return;
-        const trimmed = companyName.trim();
-        const found = companies.find((company) => company.name === trimmed);
-        if (!found?.id) return;
-        await handleSelectCompany(result, found.id);
-    };
-
     const handleExclude = async (result: PartnerRecognitionResult) => {
         if (!result.id) return;
         const reason = window.prompt('제외 사유', '오인식 또는 등록 제외') || '사용자 제외';
@@ -600,52 +691,73 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
         setSelectedResultIds([]);
         setLastPhoneContactFile(null);
         setPhoneContactSaveMessage('');
+        setFileNotice('');
         setTitle(`사진 거래처 등록 ${new Date().toLocaleDateString('ko-KR')}`);
     };
 
     return (
-        <div className="min-h-screen bg-slate-100 p-4 text-slate-900 sm:p-6">
-            <datalist id="partner-companies">
-                {companies.map((company) => (
-                    <option key={company.id || company.name} value={company.name} />
-                ))}
-            </datalist>
+        <div className="partner-suite">
+            <div className="partner-suite-shell">
+                <PartnerMenuTopNav />
 
-            <div className="mx-auto flex w-full max-w-none flex-col gap-4">
-                <PartnerMenuTopNav className="rounded-lg" />
-
-                <header className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                        <h1 className="text-2xl font-extrabold text-slate-900">사진 거래처 등록</h1>
-                        <p className="mt-1 text-sm font-semibold text-slate-500">
-                            명함/업체자료 사진을 Gemini로 인식하고 통합DB 회사와 연결합니다.
-                        </p>
+                <motion.header
+                    initial="hidden"
+                    animate="visible"
+                    variants={panelMotion}
+                    className="partner-hero"
+                >
+                    <div className="partner-hero-grid">
+                        <div className="partner-hero-main">
+                            <div className="partner-hero-content">
+                                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                    <div className="min-w-0">
+                                        <div className="partner-eyebrow">
+                                            <FontAwesomeIcon icon={faWandMagicSparkles} />
+                                            Gemini Recognition Console
+                                        </div>
+                                        <h1 className="partner-title">사진 거래처 등록</h1>
+                                        <p className="partner-subtitle">
+                                            명함과 업체자료 사진을 인식해 기존 통합DB 회사에 연결하고, 검수 후 담당자와 관계 데이터를 확정합니다.
+                                        </p>
+                                    </div>
+                                    <div className="partner-hero-actions">
+                                        <button
+                                            type="button"
+                                            onClick={handleNewJob}
+                                            className="partner-btn partner-btn-secondary"
+                                        >
+                                            <FontAwesomeIcon icon={faRotateRight} />
+                                            새 작업
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleCommit}
+                                            disabled={busy || selectedResultIds.length === 0}
+                                            className="partner-btn partner-btn-primary"
+                                        >
+                                            {busy ? <FontAwesomeIcon icon={faCircleNotch} spin /> : <FontAwesomeIcon icon={faCheck} />}
+                                            선택 확정 등록
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="partner-hero-aside">
+                            <div className="text-xs font-black uppercase text-slate-500">작업 현황</div>
+                            <div className="partner-metric-grid mt-3">
+                                <HeroMetric label="업로드 대기" value={`${files.length}개`} />
+                                <HeroMetric label="인식 결과" value={`${results.length}건`} />
+                                <HeroMetric label="선택됨" value={`${selectedResultIds.length}건`} />
+                                <HeroMetric label="등록 가능" value={`${commitableResults.length}건`} />
+                            </div>
+                        </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                        <button
-                            type="button"
-                            onClick={handleNewJob}
-                            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
-                        >
-                            <FontAwesomeIcon icon={faRotateRight} />
-                            새 작업
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleCommit}
-                            disabled={busy || selectedResultIds.length === 0}
-                            className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                            {busy ? <FontAwesomeIcon icon={faCircleNotch} spin /> : <FontAwesomeIcon icon={faCheck} />}
-                            선택 확정 등록
-                        </button>
-                    </div>
-                </header>
+                </motion.header>
 
                 <section className="grid w-full grid-cols-1 gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
                     <aside className="flex flex-col gap-4">
-                        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                            <h2 className="text-base font-extrabold text-slate-900">작업 설정</h2>
+                        <div className="partner-panel partner-panel-pad partner-animate-in" data-delay="1">
+                            <h2 className="partner-section-title">작업 설정</h2>
                             <div className="mt-4 flex flex-col gap-3">
                                 <label className="flex flex-col gap-1 text-sm font-bold text-slate-700">
                                     작업명
@@ -655,21 +767,16 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                         className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                                     />
                                 </label>
-                                <label className="flex flex-col gap-1 text-sm font-bold text-slate-700">
-                                    기준 회사
-                                    <select
+                                <div className="flex flex-col gap-1 text-sm font-bold text-slate-700">
+                                    <span>기준 회사</span>
+                                    <PartnerSearchSelect
                                         value={baseCompanyId}
-                                        onChange={(event) => setBaseCompanyId(event.target.value)}
-                                        className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                                    >
-                                        <option value="">선택 안 함</option>
-                                        {companies.map((company) => (
-                                            <option key={company.id || company.name} value={company.id || ''}>
-                                                {company.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
+                                        options={companyOptions}
+                                        placeholder="회사명, 사업자번호, 전화 검색"
+                                        emptyLabel="선택 안 함"
+                                        onChange={setBaseCompanyId}
+                                    />
+                                </div>
                                 <label className="flex flex-col gap-1 text-sm font-bold text-slate-700">
                                     기본 관계유형
                                     <select
@@ -700,7 +807,7 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                             type="button"
                                             onClick={handleAddRelationshipType}
                                             disabled={savingRelationshipTypes || !newRelationshipType.trim()}
-                                            className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-sm font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                            className="partner-btn partner-btn-primary"
                                         >
                                             {savingRelationshipTypes ? <FontAwesomeIcon icon={faCircleNotch} spin /> : <FontAwesomeIcon icon={faPlus} />}
                                             추가
@@ -731,21 +838,16 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                         ))}
                                     </div>
                                 </div>
-                                <label className="flex flex-col gap-1 text-sm font-bold text-slate-700">
-                                    관련 현장
-                                    <select
+                                <div className="flex flex-col gap-1 text-sm font-bold text-slate-700">
+                                    <span>관련 현장</span>
+                                    <PartnerSearchSelect
                                         value={siteId}
-                                        onChange={(event) => setSiteId(event.target.value)}
-                                        className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                                    >
-                                        <option value="">선택 안 함</option>
-                                        {sites.map((site) => (
-                                            <option key={site.id || site.name} value={site.id || ''}>
-                                                {site.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
+                                        options={siteOptions}
+                                        placeholder="현장명, 주소, 회사명 검색"
+                                        emptyLabel="선택 안 함"
+                                        onChange={setSiteId}
+                                    />
+                                </div>
                                 <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
                                     <input
                                         type="checkbox"
@@ -771,7 +873,7 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                             type="button"
                                             onClick={() => handleSharePhoneContactFile(lastPhoneContactFile)}
                                             disabled={savingPhoneContacts}
-                                            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-extrabold text-white hover:bg-blue-700 disabled:opacity-50"
+                                            className="partner-btn partner-btn-primary mt-2 w-full"
                                         >
                                             <FontAwesomeIcon icon={savingPhoneContacts ? faCircleNotch : faAddressBook} spin={savingPhoneContacts} />
                                             휴대폰 연락처 저장
@@ -781,12 +883,12 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                            <h2 className="text-base font-extrabold text-slate-900">사진 업로드</h2>
+                        <div className="partner-panel partner-panel-pad partner-animate-in" data-delay="2">
+                            <h2 className="partner-section-title">사진 업로드</h2>
                             <div
                                 onDrop={handleDrop}
                                 onDragOver={(event) => event.preventDefault()}
-                                className="mt-4 flex min-h-[160px] flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 p-4 text-center"
+                                className="partner-dropzone mt-4 flex min-h-[170px] flex-col items-center justify-center p-4 text-center"
                             >
                                 <FontAwesomeIcon icon={faCloudArrowUp} className="text-3xl text-blue-500" />
                                 <p className="mt-3 text-sm font-extrabold text-slate-800">{uploadSummary}</p>
@@ -794,7 +896,7 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                     명함 여러 장 또는 업체자료 사진을 선택하세요.
                                 </p>
                                 <div className="mt-4 flex flex-wrap justify-center gap-2">
-                                    <label className="cursor-pointer rounded-md bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">
+                                    <label className="partner-btn partner-btn-primary cursor-pointer">
                                         사진 선택
                                         <input
                                             type="file"
@@ -804,7 +906,7 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                             className="hidden"
                                         />
                                     </label>
-                                    <label className="cursor-pointer rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">
+                                    <label className="partner-btn partner-btn-secondary cursor-pointer">
                                         카메라 촬영
                                         <input
                                             type="file"
@@ -817,6 +919,11 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                     </label>
                                 </div>
                             </div>
+                            {fileNotice && (
+                                <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                                    {fileNotice}
+                                </div>
+                            )}
                             {files.length > 0 && (
                                 <div className="mt-3 max-h-32 overflow-auto rounded-md border border-slate-200">
                                     {files.map((file, index) => (
@@ -834,7 +941,7 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                 type="button"
                                 onClick={() => handleCreateAndAnalyze('instant')}
                                 disabled={busy || preparingFiles || files.length === 0}
-                                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-extrabold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="partner-btn partner-btn-primary mt-4 w-full"
                             >
                                 {busy ? <FontAwesomeIcon icon={faCircleNotch} spin /> : <FontAwesomeIcon icon={faWandMagicSparkles} />}
                                 업로드 후 즉시 분석
@@ -843,7 +950,7 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                 type="button"
                                 onClick={() => handleCreateAndAnalyze('batch')}
                                 disabled={busy || preparingFiles || files.length === 0}
-                                className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-extrabold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="partner-btn partner-btn-soft mt-2 w-full"
                             >
                                 {busy ? <FontAwesomeIcon icon={faCircleNotch} spin /> : <FontAwesomeIcon icon={faCloudArrowUp} />}
                                 업로드 후 Batch 예약
@@ -851,8 +958,8 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                         </div>
 
                         {job && (
-                            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                                <h2 className="text-base font-extrabold text-slate-900">진행 상태</h2>
+                            <div className="partner-panel partner-panel-pad partner-animate-in">
+                                <h2 className="partner-section-title">진행 상태</h2>
                                 <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
                                     <StatusItem label="상태" value={getStatusLabel(job.status)} />
                                     <StatusItem label="사진" value={`${analyzedCount}/${images.length || job.totalImages}`} />
@@ -902,7 +1009,7 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                             type="button"
                                             onClick={handleSyncBatch}
                                             disabled={busy || !jobId}
-                                            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                                            className="partner-btn partner-btn-secondary mt-2 w-full"
                                         >
                                             {busy ? <FontAwesomeIcon icon={faCircleNotch} spin /> : <FontAwesomeIcon icon={faRotateRight} />}
                                             Batch 결과 동기화
@@ -913,7 +1020,7 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                     type="button"
                                     onClick={handleAnalyzeAgain}
                                     disabled={busy || !jobId || job.status === 'analyzing'}
-                                    className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                                    className="partner-btn partner-btn-soft mt-4 w-full"
                                 >
                                     <FontAwesomeIcon icon={faWandMagicSparkles} />
                                     미처리 사진 다시 분석
@@ -922,11 +1029,11 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                         )}
                     </aside>
 
-                    <main className="min-w-0 w-full rounded-lg border border-slate-200 bg-white shadow-sm">
-                        <div className="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
+                    <main className="partner-panel min-w-0 w-full partner-animate-in" data-delay="1">
+                        <div className="partner-panel-header flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                             <div>
-                                <h2 className="text-lg font-extrabold text-slate-900">인식 결과 검수</h2>
-                                <p className="mt-1 text-sm font-semibold text-slate-500">
+                                <h2 className="partner-section-title">인식 결과 검수</h2>
+                                <p className="partner-section-caption">
                                     회사는 기존 통합DB 회사에 연결해야 확정 등록됩니다.
                                 </p>
                             </div>
@@ -935,7 +1042,7 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                     type="button"
                                     onClick={toggleAllCommitable}
                                     disabled={commitableResults.length === 0}
-                                    className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                    className="partner-btn partner-btn-secondary"
                                 >
                                     <FontAwesomeIcon icon={faCheck} />
                                     등록 가능 전체 선택
@@ -944,7 +1051,7 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                     type="button"
                                     onClick={handleSaveSelectedPhoneContacts}
                                     disabled={selectedResultIds.length === 0 || savingPhoneContacts}
-                                    className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                                    className="partner-btn partner-btn-soft"
                                 >
                                     <FontAwesomeIcon icon={savingPhoneContacts ? faCircleNotch : faAddressBook} spin={savingPhoneContacts} />
                                     휴대폰 저장
@@ -956,7 +1063,7 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                         </div>
 
                         {results.length === 0 ? (
-                            <div className="flex min-h-[420px] flex-col items-center justify-center p-8 text-center">
+                            <div className="partner-empty-state m-4 flex min-h-[420px] flex-col items-center justify-center p-8 text-center">
                                 <FontAwesomeIcon
                                     icon={job?.status === 'failed' ? faTriangleExclamation : faMagnifyingGlass}
                                     className={`text-4xl ${job?.status === 'failed' ? 'text-rose-300' : 'text-slate-300'}`}
@@ -971,28 +1078,36 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                 </p>
                             </div>
                         ) : (
-                            <div className="overflow-auto">
-                                <table className="min-w-[1280px] w-full border-collapse text-left text-sm">
-                                    <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase text-slate-500">
+                            <div className="partner-table-wrap">
+                                <table className="partner-table">
+                                    <thead>
                                         <tr>
-                                            <th className="border-b border-slate-200 px-3 py-3">선택</th>
-                                            <th className="border-b border-slate-200 px-3 py-3">상태</th>
-                                            <th className="border-b border-slate-200 px-3 py-3">사진</th>
-                                            <th className="border-b border-slate-200 px-3 py-3">추출 회사</th>
-                                            <th className="border-b border-slate-200 px-3 py-3">통합DB 연결</th>
-                                            <th className="border-b border-slate-200 px-3 py-3">담당자</th>
-                                            <th className="border-b border-slate-200 px-3 py-3">연락처</th>
-                                            <th className="border-b border-slate-200 px-3 py-3">신뢰도/경고</th>
-                                            <th className="border-b border-slate-200 px-3 py-3">작업</th>
+                                            <th>선택</th>
+                                            <th>상태</th>
+                                            <th>사진</th>
+                                            <th>추출 회사</th>
+                                            <th>통합DB 연결</th>
+                                            <th>담당자</th>
+                                            <th>연락처</th>
+                                            <th>신뢰도/경고</th>
+                                            <th>작업</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {results.map((result) => {
-                                            const contact = getEffectiveContact(result);
-                                            const canCommit = canCommitResult(result);
-                                            const selected = !!result.id && selectedResultIds.includes(result.id);
-                                            return (
-                                                <tr key={result.id} className="border-b border-slate-100 align-top hover:bg-slate-50">
+                                        <AnimatePresence initial={false}>
+                                            {results.map((result) => {
+                                                const contact = getEffectiveContact(result);
+                                                const canCommit = canCommitResult(result);
+                                                const selected = !!result.id && selectedResultIds.includes(result.id);
+                                                return (
+                                                    <motion.tr
+                                                        key={result.id}
+                                                        variants={tableRowMotion}
+                                                        initial="hidden"
+                                                        animate="visible"
+                                                        exit="exit"
+                                                        transition={{ duration: 0.18 }}
+                                                    >
                                                     <td className="px-3 py-3">
                                                         <input
                                                             type="checkbox"
@@ -1048,24 +1163,12 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                                     </td>
                                                     <td className="px-3 py-3">
                                                         <div className="flex min-w-[220px] flex-col gap-2">
-                                                            <select
+                                                            <PartnerSearchSelect
                                                                 value={result.selectedCompanyId || ''}
-                                                                onChange={(event) => handleSelectCompany(result, event.target.value)}
-                                                                className="rounded-md border border-slate-300 px-2 py-2 text-sm font-semibold outline-none focus:border-blue-500"
-                                                            >
-                                                                <option value="">회사 선택</option>
-                                                                {result.candidates.map((candidate) => (
-                                                                    <option key={candidate.companyId} value={candidate.companyId}>
-                                                                        {candidate.companyName} ({candidate.score})
-                                                                    </option>
-                                                                ))}
-                                                            </select>
-                                                            <input
-                                                                list="partner-companies"
-                                                                defaultValue={result.selectedCompanyName || ''}
-                                                                onBlur={(event) => handleSelectCompanyByName(result, event.target.value)}
+                                                                options={getResultCompanyOptions(result)}
                                                                 placeholder="회사명 직접 검색"
-                                                                className="rounded-md border border-slate-300 px-2 py-2 text-sm font-semibold outline-none focus:border-blue-500"
+                                                                emptyLabel="회사 선택 해제"
+                                                                onChange={(companyId) => handleSelectCompany(result, companyId)}
                                                             />
                                                             {result.matchReasons.length > 0 && (
                                                                 <div className="text-xs font-semibold text-slate-500">
@@ -1135,7 +1238,7 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                                                 type="button"
                                                                 onClick={() => handleCompanyRequest(result)}
                                                                 disabled={result.status === 'committed'}
-                                                                className="inline-flex items-center justify-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-extrabold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                                                                className="partner-btn partner-btn-warning w-full text-xs"
                                                             >
                                                                 <FontAwesomeIcon icon={faBuilding} />
                                                                 신규요청
@@ -1144,16 +1247,17 @@ const PartnerPhotoRegistrationPage: React.FC = () => {
                                                                 type="button"
                                                                 onClick={() => handleExclude(result)}
                                                                 disabled={result.status === 'committed'}
-                                                                className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                                                                className="partner-btn partner-btn-secondary w-full text-xs"
                                                             >
                                                                 <FontAwesomeIcon icon={faTrash} />
                                                                 제외
                                                             </button>
                                                         </div>
                                                     </td>
-                                                </tr>
-                                            );
-                                        })}
+                                                    </motion.tr>
+                                                );
+                                            })}
+                                        </AnimatePresence>
                                     </tbody>
                                 </table>
                             </div>
@@ -1177,8 +1281,15 @@ const canCommitResult = (result: PartnerRecognitionResult): boolean =>
     !!result.selectedCompanyId &&
     !['committed', 'excluded', 'failed'].includes(result.status);
 
+const HeroMetric: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+    <div className="partner-metric-tile">
+        <div className="partner-metric-value">{value}</div>
+        <div className="partner-metric-label">{label}</div>
+    </div>
+);
+
 const StatusItem: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-    <div className="rounded-md bg-slate-50 p-3">
+    <div className="rounded-md border border-slate-100 bg-slate-50 p-3">
         <dt className="text-xs font-bold text-slate-500">{label}</dt>
         <dd className="mt-1 text-sm font-extrabold text-slate-900">{value}</dd>
     </div>
@@ -1193,7 +1304,7 @@ const InlineEdit: React.FC<{
         defaultValue={value || ''}
         placeholder={placeholder}
         onBlur={(event) => onBlur(event.target.value)}
-        className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+        className="partner-field px-2 py-2"
     />
 );
 
@@ -1213,7 +1324,7 @@ const SelectedFileRow: React.FC<{
 
     return (
         <div className="flex items-center gap-3 border-b border-slate-100 px-3 py-2 text-xs font-semibold last:border-b-0">
-            <div className="flex h-14 w-20 shrink-0 items-center justify-center rounded border border-slate-200 bg-white">
+            <div className="flex h-14 w-20 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white shadow-sm">
                 {previewUrl && (
                     <img
                         src={previewUrl}
@@ -1231,7 +1342,7 @@ const SelectedFileRow: React.FC<{
                     type="button"
                     onClick={() => onRotate(-90)}
                     disabled={disabled}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700 disabled:opacity-50"
                     title="왼쪽으로 회전"
                     aria-label={`${file.name} 왼쪽으로 회전`}
                 >
@@ -1241,7 +1352,7 @@ const SelectedFileRow: React.FC<{
                     type="button"
                     onClick={() => onRotate(180)}
                     disabled={disabled}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700 disabled:opacity-50"
                     title="위아래 뒤집기"
                     aria-label={`${file.name} 위아래 뒤집기`}
                 >
@@ -1251,7 +1362,7 @@ const SelectedFileRow: React.FC<{
                     type="button"
                     onClick={() => onRotate(90)}
                     disabled={disabled}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700 disabled:opacity-50"
                     title="오른쪽으로 회전"
                     aria-label={`${file.name} 오른쪽으로 회전`}
                 >
@@ -1263,13 +1374,13 @@ const SelectedFileRow: React.FC<{
 };
 
 const SummaryCard: React.FC<{ icon: any; label: string; value: string }> = ({ icon, label, value }) => (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="partner-panel p-4">
         <div className="flex items-center justify-between">
             <div>
                 <div className="text-sm font-bold text-slate-500">{label}</div>
                 <div className="mt-1 text-2xl font-extrabold text-slate-900">{value}</div>
             </div>
-            <div className="flex h-11 w-11 items-center justify-center rounded-md bg-blue-50 text-blue-600">
+            <div className="flex h-11 w-11 items-center justify-center rounded-md bg-teal-50 text-teal-700">
                 <FontAwesomeIcon icon={icon} />
             </div>
         </div>

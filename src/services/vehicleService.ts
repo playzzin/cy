@@ -246,9 +246,17 @@ export const vehicleService = {
         await vehicleFirestoreService.saveVehicleExpense({ ...data, id } as Partial<VehicleExpenseRecord> & { id: string });
     },
 
+    applyVehicleExpenseChanges: async (params: {
+        upserts?: Array<Partial<VehicleExpenseRecord> & { id: string }>;
+        cancelIds?: string[];
+        operationId?: string;
+    }): Promise<void> => {
+        await vehicleFirestoreService.applyVehicleExpenseChanges(params);
+    },
+
     addExpense: async (data: Omit<VehicleExpenseRecord, 'id' | 'createdAt'>): Promise<string> => {
         const id = makeId('vehicle_expense');
-        await vehicleFirestoreService.saveVehicleExpense({ ...data, id });
+        await vehicleFirestoreService.saveVehicleExpense({ ...data, id, status: data.status ?? 'ACTIVE' });
         return id;
     },
 

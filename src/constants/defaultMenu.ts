@@ -1,4 +1,8 @@
 import { SiteDataType } from '../types/menu';
+import {
+    BUSINESS_PARTNER_POSITION_CONFIGS,
+    BUSINESS_PARTNER_POSITION_SITES,
+} from './businessPartnerPositions';
 
 export const DEFAULT_MENU_CONFIG: SiteDataType = {
     admin: {
@@ -25,6 +29,9 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             },
             {
                 text: "통합DB 로그", icon: "fa-clock-rotate-left", path: "/database/logs"
+            },
+            {
+                text: "사건·사고 기록", icon: "fa-shield-halved", path: "/hr/incident-cases"
             },
             {
                 text: "출력 관리",
@@ -83,7 +90,23 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "시스템 관리",
                 icon: "fa-gears",
-                sub: ["메뉴관리", "시스템 메시지 설정", "로그인 로그", "데이터 연결 점검", { text: "현장 관리", path: "/site/management" }]
+                sub: [
+                    "메뉴관리",
+                    "시스템 메시지 설정",
+                    {
+                        text: "로그 관리",
+                        icon: "fa-clock-rotate-left",
+                        sub: [
+                            "로그인 로그",
+                            "권한 변경 로그",
+                            "엑셀 업로드·다운로드 로그",
+                            "PDF 업로드·다운로드 로그",
+                            "자동 메시지 발송 로그"
+                        ]
+                    },
+                    "데이터 연결 점검",
+                    { text: "현장 관리", path: "/site/management" }
+                ]
             },
             {
                 text: "클라우드 저장소",
@@ -98,7 +121,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "세무 관리",
                 icon: "fa-file-invoice-dollar",
-                sub: ["세무 대시보드", "세금계산서 발행", "수금 관리(원청)", "지급 관리(업체)", "매입매출 로그"]
+                sub: ["세무 대시보드", "은행 입출금 알림", "세금계산서 발행", "수금 관리(원청)", "지급 관리(업체)", "매입매출 로그"]
             },
             {
                 text: "노무비 지급명세서 생성기",
@@ -122,6 +145,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             { id: 'manager1', name: '메니저1', icon: 'fa-user-tie', color: 'from-blue-600 to-blue-400', order: 2 },
             { id: 'manager2', name: '메니저2', icon: 'fa-user-tie', color: 'from-indigo-600 to-indigo-400', order: 3 },
             { id: 'manager3', name: '메니저3', icon: 'fa-user-tie', color: 'from-purple-600 to-purple-400', order: 4 },
+            ...BUSINESS_PARTNER_POSITION_CONFIGS,
             { id: 'newbie', name: '신규', icon: 'fa-user-plus', color: 'from-pink-500 to-rose-400', order: 8 }
         ]
     },
@@ -132,7 +156,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "세금관리",
                 icon: "fa-file-invoice",
-                sub: ["세금계산서 발행", "세금계산서 거래장", "미수금 대시보드", "미수금 관리", "매입매출 로그"]
+                sub: ["은행 입출금 알림", "세금계산서 발행", "세금계산서 거래장", "미수금 대시보드", "미수금 관리", "매입매출 로그"]
             },
             {
                 text: "숙소관리",
@@ -257,5 +281,6 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                 sub: ["일급제", "월급제", "사무실 직원 급여", "외부지원간곳", "외부지원온곳", "내부지원간곳", "내부지원온곳", "협력사별 지원 출력", "기성관리", "기성청구서", "바이백 정리", "팀정산 관리", "팀정산 통계", "팀별 연간 통계", { text: "가불관리", sub: ["가불신청", "가불등록", "세금/가불"] }]
             }
         ]
-    }
+    },
+    ...BUSINESS_PARTNER_POSITION_SITES
 };

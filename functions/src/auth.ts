@@ -49,6 +49,7 @@ export async function requireCallableAdmin(context: functions.https.CallableCont
         hasAdminRoleValue(token.role)
         || hasAdminRoleValue(token.position)
         || hasAdminRoleValue(token.systemRole)
+        || hasAdminRoleValue(token.roles)
         || hasAdminRoleValue(token.additionalPositions)
     ) {
         return auth;
@@ -60,6 +61,7 @@ export async function requireCallableAdmin(context: functions.https.CallableCont
         hasAdminRoleValue(user.role)
         || hasAdminRoleValue(user.position)
         || hasAdminRoleValue(user.systemRole)
+        || hasAdminRoleValue(user.roles)
         || hasAdminRoleValue(user.additionalPositions)
     ) {
         return auth;

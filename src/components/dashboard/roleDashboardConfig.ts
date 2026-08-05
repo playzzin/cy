@@ -21,12 +21,18 @@ import {
     faRightLeft,
     faShieldHalved,
     faSignature,
+    faTruckFront,
     faUser,
     faUserGear,
     faUserTie,
     faUsers,
+    faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons';
 import type { PositionItem } from '../../types/menu';
+import {
+    BusinessPartnerPositionId,
+    findBusinessPartnerPositionDefinition,
+} from '../../constants/businessPartnerPositions';
 
 export type DashboardModeId = 'executive' | 'manager' | 'teamLead' | 'foreman' | 'worker';
 export type DashboardLayoutKind = 'executive' | 'field';
@@ -87,6 +93,7 @@ export const DASHBOARD_MODES: DashboardModeConfig[] = [
             { label: '통합 DB', desc: '인력 및 현장 데이터 관리', path: '/database/manpower-db', icon: faDatabase, color: 'blue' },
             { label: '현장 현황', desc: '현장별 실시간 현황판', path: '/dashboard/site-status', icon: faBuilding, color: 'purple' },
             { label: '지원비 지급', desc: '지원비 지급과 정산 확인', path: '/payroll/support-team', icon: faFileInvoiceDollar, color: 'green' },
+            { label: '정산 경고', desc: '누락·이상금액 확인', path: '/settlement/alerts', icon: faTriangleExclamation, color: 'rose' },
             { label: '급여 지급', desc: '급여 대장 및 지급 현황', path: '/payroll/wage-payment', icon: faHandHoldingDollar, color: 'emerald' },
             { label: '급여 통계', desc: '일급·월급 통계 분석', path: '/payroll/statistics', icon: faChartLine, color: 'sky' },
             { label: '위임장', desc: '급여 수령 위임장 관리', path: '/payroll/delegation-letter', icon: faFileSignature, color: 'rose' },
@@ -117,6 +124,7 @@ export const DASHBOARD_MODES: DashboardModeConfig[] = [
             { label: '통합 DB', desc: '인력 및 현장 데이터 관리', path: '/database/manpower-db', icon: faDatabase, color: 'blue' },
             { label: '팀 관리', desc: '팀 정보와 소속 확인', path: '/database/team-db', icon: faHardHat, color: 'violet' },
             { label: '지원비 명세서', desc: '지원비 지급명세서 작성', path: '/payroll/support-claim', icon: faFileExcel, color: 'teal' },
+            { label: '정산 경고', desc: '누락·이상금액 확인', path: '/settlement/alerts', icon: faTriangleExclamation, color: 'rose' },
             { label: '월급 집계', desc: '월급자 공수와 지급 관리', path: '/payroll/monthly-wage', icon: faListCheck, color: 'orange' },
             { label: '가불·공제', desc: '가불 등록 및 공제 현황', path: '/payroll/advance-payment?tab=register', icon: faMoneyBillTrendUp, color: 'amber' },
             { label: '업무 요청', desc: '요청 업무 처리 현황', path: '/todo', icon: faClipboardCheck, color: 'slate' },
@@ -200,7 +208,7 @@ export const DASHBOARD_MODES: DashboardModeConfig[] = [
             { label: '가불 신청', desc: '가불 등록과 내역 확인', path: '/payroll/advance-payment', icon: faHandHoldingDollar, color: 'amber' },
             { label: '오늘 현황', desc: '오늘 일보와 공수 확인', path: '/reports/daily?tab=list-v2', icon: faClipboardList, color: 'orange' },
             { label: '일보 작성', desc: '작업 내용 기록', path: '/reports/daily?tab=input', icon: faCalendarCheck, color: 'brand' },
-            { label: '위임장', desc: '급여 수령 위임장 확인', path: '/payroll/delegation-letter', icon: faSignature, color: 'rose' },
+            { label: '위임장 서명', desc: '내용 확인·동의·직접 서명', path: '/worker/delegation-signature', icon: faSignature, color: 'rose' },
             { label: '알림톡', desc: '공지와 발송 내역 확인', path: '/payroll/kakao-notification', icon: faBell, color: 'cyan' },
             { label: '내 프로필', desc: '계정 정보 확인', path: '/profile', icon: faUserGear, color: 'slate' },
             { label: '작업 추세', desc: '최근 투입 흐름 확인', path: '/reports/statistics', icon: faArrowTrendUp, color: 'sky' },
@@ -213,8 +221,64 @@ const MODE_BY_ID = DASHBOARD_MODES.reduce<Record<DashboardModeId, DashboardModeC
     return acc;
 }, {} as Record<DashboardModeId, DashboardModeConfig>);
 
+const BUSINESS_PARTNER_DASHBOARD_OVERRIDES: Record<BusinessPartnerPositionId, Partial<DashboardModeConfig>> = {
+    client: {
+        roleGroup: '건설 / 정산',
+        icon: faBuilding,
+        gradient: 'linear-gradient(135deg, #0f172a 0%, #1d4ed8 48%, #0f766e 100%)',
+        accent: '#2563eb',
+        softBg: '#eff6ff',
+        heroTitle: '건설 기준 현장과 정산 흐름을 확인합니다',
+        heroDescription: '현장별 출력, 지원 정산, 기성관리와 청구서를 건설 업무 순서로 모았습니다.',
+        focusItems: [
+            { label: '현장 출력', value: '건설 현장', description: '현장별 출력인원과 노무비 흐름을 우선 확인합니다.' },
+            { label: '지원 정산', value: '지원·기성', description: '지원 정산과 기성관리 화면으로 바로 이동합니다.' },
+            { label: '기준 정보', value: '건설 DB', description: '통합DB의 건설 회사 정보를 함께 관리합니다.' },
+        ],
+        quickActions: [
+            { label: '건설 DB', desc: '건설 회사 데이터 관리', path: '/database/manpower-db?tab=companies&companyTab=client', icon: faDatabase, color: 'blue' },
+            { label: '현장 출력인원', desc: '건설 현장 노무 내역', path: '/payroll/client-site-labor', icon: faFileInvoiceDollar, color: 'indigo' },
+            { label: '현장별 지원', desc: '건설/현장 단위 지원 정산', path: '/payroll/support-client-site', icon: faHandHoldingDollar, color: 'emerald' },
+            { label: '기성관리', desc: '계약·기성 입력과 대장 확인', path: '/payroll/progress-claims', icon: faListCheck, color: 'orange' },
+            { label: '기성청구서', desc: '기성 청구서 출력', path: '/payroll/progress-claim-invoice', icon: faFileSignature, color: 'rose' },
+        ],
+    },
+    rental: {
+        roleGroup: '임대 / 거래',
+        icon: faTruckFront,
+        gradient: 'linear-gradient(135deg, #111827 0%, #b45309 48%, #0f766e 100%)',
+        accent: '#d97706',
+        softBg: '#fffbeb',
+        heroTitle: '임대 거래와 자재 흐름을 한 곳에서 봅니다',
+        heroDescription: '임대사 DB, 임대 거래명세표, 견적, 자재와 매입매출 장부를 연결했습니다.',
+        focusItems: [
+            { label: '거래처 정보', value: '임대사 DB', description: '통합DB의 임대사 회사 정보를 바로 확인합니다.' },
+            { label: '거래 문서', value: '견적·명세', description: '임대 견적과 거래명세표 작성 화면으로 이동합니다.' },
+            { label: '장부 확인', value: '자재·매입매출', description: '자재 흐름과 매입매출 장부를 함께 점검합니다.' },
+        ],
+        quickActions: [
+            { label: '임대사 DB', desc: '임대사 회사 데이터 관리', path: '/database/manpower-db?tab=companies&companyTab=rental', icon: faDatabase, color: 'orange' },
+            { label: '임대 거래명세표', desc: '임대 거래 문서 작성', path: '/transaction/manage', icon: faClipboardList, color: 'amber' },
+            { label: '임대 견적', desc: '임대 견적 작성 및 관리', path: '/estimate/manage', icon: faFileExcel, color: 'sky' },
+            { label: '자재 통합관리', desc: '자재 입출고와 재고 확인', path: '/materials', icon: faBuilding, color: 'slate' },
+            { label: '매입매출 장부', desc: '임대 거래 매입매출 확인', path: '/payroll/workbook-ledger-upgrade', icon: faFileInvoiceDollar, color: 'green' },
+        ],
+    },
+    referral: {
+        roleGroup: '소개',
+        icon: faUsers,
+        gradient: 'linear-gradient(135deg, #0f172a 0%, #0e7490 48%, #047857 100%)',
+        accent: '#0891b2',
+        softBg: '#ecfeff',
+        heroTitle: '소개소 업무 공간',
+        heroDescription: '현재 등록된 소개소 전용 메뉴가 없습니다.',
+        focusItems: [],
+        quickActions: [],
+    },
+};
+
 const ROLE_MATCHERS: Array<{ mode: DashboardModeId; keywords: string[] }> = [
-    { mode: 'executive', keywords: ['사장', '대표', '최고관리자', '관리자', 'admin', 'owner'] },
+    { mode: 'executive', keywords: ['사장', '대표', '최고관리자', '관리자', 'ceo', 'chief executive', 'admin', 'owner'] },
     { mode: 'manager', keywords: ['실장', '매니저', '관리', '사무', 'manager', 'office', 'staff', 'office_staff'] },
     { mode: 'teamLead', keywords: ['팀장', '대장', '소장', '시공', 'leader'] },
     { mode: 'foreman', keywords: ['반장', 'foreman'] },
@@ -248,6 +312,7 @@ export const getDashboardModeForPosition = (
     const name = String(positionName || '').trim();
 
     if (!id && !name) return 'executive';
+    if (findBusinessPartnerPositionDefinition(positionId, positionName)) return 'manager';
     if (id === 'full') return 'executive';
     if (['ceo', 'owner', 'president', 'executive', 'admin'].includes(id)) return 'executive';
     if (id.startsWith('manager') || id === 'manager') return 'manager';
@@ -263,6 +328,21 @@ export const getDashboardModeConfigForPosition = (
     positionId?: string | null,
     positionName?: string | null
 ): DashboardModeConfig => {
+    const partnerDefinition = findBusinessPartnerPositionDefinition(positionId, positionName);
+    if (partnerDefinition) {
+        const baseConfig = getDashboardMode('manager');
+        const override = BUSINESS_PARTNER_DASHBOARD_OVERRIDES[partnerDefinition.id];
+        const label = String(positionName || partnerDefinition.name).trim();
+        return {
+            ...baseConfig,
+            ...override,
+            id: baseConfig.id,
+            layout: baseConfig.layout,
+            label: `${label} 모드`,
+            shortLabel: label,
+        };
+    }
+
     const baseConfig = getDashboardMode(getDashboardModeForPosition(positionId, positionName));
     const label = String(positionName || '').trim();
 

@@ -3,8 +3,8 @@ import { useLocation } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faBook, faChartPie, faDatabase, faClipboardList, faFileInvoiceDollar,
-    faCogs, faCheckCircle, faChevronRight, faStar, faCalendarCheck,
-    faChartSimple, faListCheck, faCode, faRocket, faLayerGroup, faMobileScreen, faBrain, faUserGroup
+    faCogs, faChevronRight,
+    faChartSimple, faCode, faRocket, faLayerGroup, faMobileScreen, faBrain, faUserGroup
 } from '@fortawesome/free-solid-svg-icons';
 
 const ManualPage: React.FC = () => {

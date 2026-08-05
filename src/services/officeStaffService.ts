@@ -17,6 +17,8 @@ import { OfficeStaffSchema, OfficeStaffZod as OfficeStaff } from '../types/zod/o
 import { createConverter } from '../utils/firestoreConverter';
 import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 import { toast } from '../utils/swal';
+import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
+import { devOfficeStaff, updateDevOfficeStaff } from '../utils/devAdminFixtures';
 
 export type { OfficeStaff };
 
@@ -51,6 +53,10 @@ export const officeStaffService = {
     },
 
     async getOfficeStaff(forceRefresh: boolean = false): Promise<OfficeStaff[]> {
+        if (isDevAdminSessionEnabled()) {
+            return [...devOfficeStaff];
+        }
+
         const now = Date.now();
         if (!forceRefresh && cachedOfficeStaff && now - lastFetchTime < CACHE_TTL) {
             return cachedOfficeStaff;
@@ -64,6 +70,10 @@ export const officeStaffService = {
     },
 
     async getOfficeStaffMember(id: string): Promise<OfficeStaff | null> {
+        if (isDevAdminSessionEnabled()) {
+            return devOfficeStaff.find((staff) => String(staff.id) === String(id)) || null;
+        }
+
         const snap = await getDoc(doc(db, COLLECTION_NAME, id).withConverter(officeStaffConverter));
         return snap.exists() ? normalizeSalaryFields(snap.data()) : null;
     },
@@ -80,6 +90,10 @@ export const officeStaffService = {
     },
 
     async getOfficeStaffByUid(uid: string): Promise<OfficeStaff | null> {
+        if (isDevAdminSessionEnabled()) {
+            return devOfficeStaff.find((staff) => String(staff.uid || '') === String(uid)) || null;
+        }
+
         const q = query(
             collection(db, COLLECTION_NAME),
             where('uid', '==', uid),
@@ -120,6 +134,11 @@ export const officeStaffService = {
     },
 
     async updateOfficeStaff(id: string, updates: Partial<OfficeStaff>): Promise<void> {
+        if (isDevAdminSessionEnabled()) {
+            updateDevOfficeStaff(id, updates);
+            return;
+        }
+
         const shouldSyncUserPosition = Object.prototype.hasOwnProperty.call(updates as Record<string, unknown>, 'role');
         const before = shouldSyncUserPosition ? await this.getOfficeStaffMember(id) : null;
         const salaryModel = updates.salaryModel || updates.payType;

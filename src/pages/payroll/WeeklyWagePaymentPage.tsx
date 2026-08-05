@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { dailyReportService, DailyReport } from '../../services/dailyReportService';
-import { manpowerService, Worker } from '../../services/manpowerService';
+import { dailyReportService } from '../../services/dailyReportService';
+import { manpowerService } from '../../services/manpowerService';
 import * as XLSX from 'xlsx';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faFileExcel, faSearch, faSpinner, faExclamationTriangle, faCalendarAlt } from '@fortawesome/free-solid-svg-icons';

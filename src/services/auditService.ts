@@ -1,4 +1,6 @@
 import { createAuditLog, listAllAuditLogs } from './firestoreCrudCompat';
+import { collection, getDocs, limit, orderBy, query, where, type QueryConstraint } from 'firebase/firestore';
+import { db } from '../config/firebase';
 import { Timestamp } from '../types/timestamp';
 
 export interface AuditLog {
@@ -53,7 +55,9 @@ export const auditService = {
                 category: logData.category ?? null,
                 actorId: logData.actorId ?? null,
                 actorEmail: logData.actorEmail ?? null,
+                actorName: logData.actorName ?? null,
                 targetId: logData.targetId ?? null,
+                targetName: logData.targetName ?? null,
                 details: logData.details !== undefined ? JSON.stringify(logData.details) : null,
                 timestamp: new Date().toISOString()
             } as any);
@@ -67,18 +71,19 @@ export const auditService = {
     // Fetch logs with basic filtering
     getLogs: async (limitCount: number = 100, category?: string, actorId?: string): Promise<AuditLog[]> => {
         try {
-            const where: any = {};
-            if (category) where.category = { eq: category };
-            if (actorId) where.actorId = { eq: actorId };
+            const fetchLimit = Math.min(Math.max(limitCount * 5, 200), 1000);
+            const constraints: QueryConstraint[] = [orderBy('timestamp', 'desc'), limit(fetchLimit)];
+            if (category) constraints.unshift(where('category', '==', category));
+            if (actorId) constraints.unshift(where('actorId', '==', actorId));
 
-            const res = await listAllAuditLogs({
-                limit: limitCount,
-                where: Object.keys(where).length > 0 ? where : undefined,
-                orderBy: [{ timestamp: 'DESC' }]
-            } as any);
-
-            const rows = (res as any)?.data?.auditLogs ?? [];
-            return rows.map((row: any): AuditLog => {
+            // firestoreCrudCompat deliberately ignores ordering/filter arguments. A
+            // direct query is required for log screens to show recent records.
+            const snapshot = await getDocs(query(collection(db, 'audit_logs'), ...constraints));
+            const rows: unknown[] = snapshot.docs.map((docSnapshot) => ({
+                id: docSnapshot.id,
+                ...docSnapshot.data(),
+            }));
+            const logs: AuditLog[] = rows.map((row: any): AuditLog => {
                 const rawTimestamp = row?.timestamp ?? row?.createdAt;
                 return {
                     id: row?.id ? String(row.id) : undefined,
@@ -86,14 +91,46 @@ export const auditService = {
                     category: row?.category ? String(row.category) : '',
                     actorId: row?.actorId ? String(row.actorId) : '',
                     actorEmail: row?.actorEmail ? String(row.actorEmail) : '',
+                    actorName: row?.actorName ? String(row.actorName) : undefined,
                     targetId: row?.targetId ? String(row.targetId) : undefined,
+                    targetName: row?.targetName ? String(row.targetName) : undefined,
                     details: safeJsonParse(row?.details),
                     timestamp: toTimestamp(rawTimestamp)
                 } as AuditLog;
             });
+
+            return logs
+                .filter((log) => !category || log.category === category)
+                .filter((log) => !actorId || log.actorId === actorId)
+                .sort((left, right) => right.timestamp.toMillis() - left.timestamp.toMillis())
+                .slice(0, limitCount);
         } catch (error) {
-            console.error("Failed to fetch logs", error);
-            return [];
+            // The fallback keeps log screens usable while a newly added composite
+            // index is still being created in Firestore.
+            try {
+                const res = await listAllAuditLogs({ limit: 1000 } as any);
+                const rawRows = (res as { data?: { auditLogs?: unknown } })?.data?.auditLogs;
+                const rows: unknown[] = Array.isArray(rawRows) ? rawRows : [];
+                return rows.map((row: any): AuditLog => ({
+                    id: row?.id ? String(row.id) : undefined,
+                    action: row?.action ? String(row.action) : '',
+                    category: row?.category ? String(row.category) : '',
+                    actorId: row?.actorId ? String(row.actorId) : '',
+                    actorEmail: row?.actorEmail ? String(row.actorEmail) : '',
+                    actorName: row?.actorName ? String(row.actorName) : undefined,
+                    targetId: row?.targetId ? String(row.targetId) : undefined,
+                    targetName: row?.targetName ? String(row.targetName) : undefined,
+                    details: safeJsonParse(row?.details),
+                    timestamp: toTimestamp(row?.timestamp ?? row?.createdAt),
+                } as AuditLog))
+                    .filter((log) => !category || log.category === category)
+                    .filter((log) => !actorId || log.actorId === actorId)
+                    .sort((left, right) => right.timestamp.toMillis() - left.timestamp.toMillis())
+                    .slice(0, limitCount);
+            } catch (fallbackError) {
+                console.error('Failed to fetch logs', error, fallbackError);
+                return [];
+            }
         }
     }
 };

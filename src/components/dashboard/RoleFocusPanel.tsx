@@ -1,9 +1,9 @@
 import React from 'react';
 import styled from 'styled-components';
-import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons';
 import { DashboardModeConfig } from './roleDashboardConfig';
+import { useRouteAction } from '../../hooks/useRouteAction';
 
 interface RoleFocusPanelProps {
     modeConfig: DashboardModeConfig;
@@ -13,7 +13,7 @@ const Panel = styled.section<{ $gradient: string }>`
     background: ${(props) => props.$gradient};
     border-radius: 16px;
     color: #ffffff;
-    padding: 24px;
+    padding: clamp(18px, 2vw, 28px);
     box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
     overflow: hidden;
 `;
@@ -68,6 +68,9 @@ const ActionRow = styled.div`
     @media (max-width: 768px) {
         justify-content: flex-start;
         min-width: 0;
+        width: 100%;
+        overflow-x: auto;
+        padding-bottom: 2px;
     }
 `;
 
@@ -81,7 +84,8 @@ const ActionButton = styled.button`
     color: #0f172a;
     font-size: 0.86rem;
     font-weight: 800;
-    padding: 9px 13px;
+    min-height: 42px;
+    padding: 10px 14px;
     transition: transform 0.18s ease, background 0.18s ease;
 
     &:hover {
@@ -97,6 +101,10 @@ const FocusGrid = styled.div`
     margin-top: 22px;
 
     @media (max-width: 900px) {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    @media (max-width: 560px) {
         grid-template-columns: 1fr;
     }
 `;
@@ -128,9 +136,9 @@ const FocusDescription = styled.p`
     margin: 8px 0 0;
 `;
 
-export const RoleFocusPanel: React.FC<RoleFocusPanelProps> = ({ modeConfig }) => {
-    const navigate = useNavigate();
-    const primaryActions = modeConfig.quickActions.slice(0, 2);
+export const RoleFocusPanel = React.memo<RoleFocusPanelProps>(({ modeConfig }) => {
+    const runRouteAction = useRouteAction();
+    const primaryActions = React.useMemo(() => modeConfig.quickActions.slice(0, 2), [modeConfig.quickActions]);
 
     return (
         <Panel $gradient={modeConfig.gradient}>
@@ -146,7 +154,11 @@ export const RoleFocusPanel: React.FC<RoleFocusPanelProps> = ({ modeConfig }) =>
 
                 <ActionRow>
                     {primaryActions.map((action) => (
-                        <ActionButton key={action.path} onClick={() => navigate(action.path)}>
+                        <ActionButton
+                            key={action.path}
+                            type="button"
+                            onClick={() => runRouteAction(action.path)}
+                        >
                             <FontAwesomeIcon icon={action.icon} />
                             {action.label}
                             <FontAwesomeIcon icon={faArrowRight} />
@@ -166,4 +178,4 @@ export const RoleFocusPanel: React.FC<RoleFocusPanelProps> = ({ modeConfig }) =>
             </FocusGrid>
         </Panel>
     );
-};
+});

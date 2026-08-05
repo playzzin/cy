@@ -29,18 +29,7 @@ export const DEFAULT_PERMISSIONS: PermissionConfig = {
         'welfare-assets': true,
         'system-config': true,
         'jeonkuk-dashboard': true,
-        'jeonkuk-status': true,
-        'recruiting-dashboard': true,
-        'recruiting-service-workers': true,
-        'recruiting-worker-history': true,
-        'recruiting-monthly-settlement': true,
-        'recruiting-payments': true,
-        'recruiting-deposits': true,
-        'recruiting-receivables': true,
-        'recruiting-statistics': true,
-        'recruiting-referrers': true,
-        'recruiting-settings': true,
-        'recruiting-logs': true
+        'jeonkuk-status': true
     },
     [UserRole.MANAGER]: {
         'dashboard': true,
@@ -57,18 +46,7 @@ export const DEFAULT_PERMISSIONS: PermissionConfig = {
         'welfare-assets': false,
         'system-config': false,
         'jeonkuk-dashboard': false,
-        'jeonkuk-status': false,
-        'recruiting-dashboard': true,
-        'recruiting-service-workers': true,
-        'recruiting-worker-history': true,
-        'recruiting-monthly-settlement': false,
-        'recruiting-payments': true,
-        'recruiting-deposits': true,
-        'recruiting-receivables': true,
-        'recruiting-statistics': true,
-        'recruiting-referrers': false,
-        'recruiting-settings': false,
-        'recruiting-logs': true
+        'jeonkuk-status': false
     },
     [UserRole.GENERAL]: {
         'dashboard': true,
@@ -85,56 +63,9 @@ export const DEFAULT_PERMISSIONS: PermissionConfig = {
         'welfare-assets': false,
         'system-config': false,
         'jeonkuk-dashboard': false,
-        'jeonkuk-status': false,
-        'recruiting-dashboard': false,
-        'recruiting-service-workers': false,
-        'recruiting-worker-history': false,
-        'recruiting-monthly-settlement': false,
-        'recruiting-payments': false,
-        'recruiting-deposits': false,
-        'recruiting-receivables': false,
-        'recruiting-statistics': false,
-        'recruiting-referrers': false,
-        'recruiting-settings': false,
-        'recruiting-logs': false
+        'jeonkuk-status': false
     },
-    [UserRole.PAYROLL_MANAGER]: {
-        'recruiting-dashboard': true,
-        'recruiting-service-workers': true,
-        'recruiting-worker-history': true,
-        'recruiting-monthly-settlement': true,
-        'recruiting-payments': true,
-        'recruiting-deposits': true,
-        'recruiting-receivables': true,
-        'recruiting-statistics': true,
-        'recruiting-referrers': true,
-        'recruiting-settings': false,
-        'recruiting-logs': true
-    },
-    [UserRole.OFFICE_STAFF]: {
-        'recruiting-dashboard': true,
-        'recruiting-service-workers': true,
-        'recruiting-worker-history': true,
-        'recruiting-monthly-settlement': false,
-        'recruiting-payments': true,
-        'recruiting-deposits': true,
-        'recruiting-receivables': true,
-        'recruiting-statistics': true,
-        'recruiting-referrers': true,
-        'recruiting-settings': false,
-        'recruiting-logs': true
-    },
-    [UserRole.SITE_MANAGER]: {
-        'recruiting-dashboard': true,
-        'recruiting-service-workers': false,
-        'recruiting-worker-history': true,
-        'recruiting-monthly-settlement': false,
-        'recruiting-payments': true,
-        'recruiting-deposits': true,
-        'recruiting-receivables': true,
-        'recruiting-statistics': true,
-        'recruiting-referrers': false,
-        'recruiting-settings': false,
-        'recruiting-logs': true
-    }
+    [UserRole.PAYROLL_MANAGER]: {},
+    [UserRole.OFFICE_STAFF]: {},
+    [UserRole.SITE_MANAGER]: {}
 };

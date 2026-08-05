@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faPlus, faSave, faSpinner, faTrash, faPrint, faEye,
-    faFileAlt, faEdit, faMagnifyingGlass, faFileInvoiceDollar,
-    faClipboardList, faRotateRight
+    faPlus, faSave, faSpinner, faTrash,
+    faMagnifyingGlass, faFileInvoiceDollar,
 } from '@fortawesome/free-solid-svg-icons';
 import { estimateService, Estimate, EstimateItem } from '../../services/estimateService';
 import { companyFirestoreService } from '../../services/companyFirestoreService';
@@ -414,17 +413,6 @@ const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdit, upda
     const removeRatio = 100 - installRatio;
     const isRental = draft.estimateMode === 'rental';
 
-    const moveItem = (id: string, direction: 'up' | 'down') => {
-        setDraft((prev: any) => {
-            const items = [...prev.items];
-            const idx = items.findIndex(i => i.id === id);
-            if (idx === -1) return prev;
-            const newIdx = direction === 'up' ? idx - 1 : idx + 1;
-            if (newIdx < 0 || newIdx >= items.length) return prev;
-            [items[idx], items[newIdx]] = [items[newIdx], items[idx]];
-            return { ...prev, items };
-        });
-    };
 
     const groups: { name: string; items: any[] }[] = [];
     itemsWithCalc.forEach((item: any) => {

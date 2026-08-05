@@ -3,13 +3,10 @@ import { motion, useScroll, useTransform } from 'framer-motion';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { useNavigate } from 'react-router-dom';
 import {
-    faNetworkWired,
-    faChartPie,
     faHandshake,
     faCommentsDollar,
     faArrowRight,
     faHelmetSafety,
-    faTruckFast,
     faBuilding
 } from '@fortawesome/free-solid-svg-icons';
 import { useSiteMode } from '../../contexts/SiteModeContext';

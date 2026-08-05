@@ -3,6 +3,15 @@ import type { KeyboardEvent } from 'react';
 const MATERIAL_NAV_INPUT_SELECTOR = 'input[data-material-nav="true"]';
 const MATERIAL_NAV_SECTION_SELECTOR = '[data-material-nav-section="true"]';
 
+const isVisibleNavigationElement = (element: HTMLElement) => (
+    element.getClientRects().length > 0
+    && window.getComputedStyle(element).visibility !== 'hidden'
+);
+
+const getVisibleNavigationElements = <T extends HTMLElement>(selector: string): T[] => (
+    Array.from(document.querySelectorAll<T>(selector)).filter(isVisibleNavigationElement)
+);
+
 const toNumber = (value: string | undefined): number => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : 0;
@@ -25,26 +34,26 @@ const pickClosest = (values: number[], preferred: number): number | null => {
 };
 
 const getSectionIndices = () => uniqueSorted(
-    Array.from(document.querySelectorAll<HTMLElement>(MATERIAL_NAV_SECTION_SELECTOR))
+    getVisibleNavigationElements<HTMLElement>(MATERIAL_NAV_SECTION_SELECTOR)
         .map((section) => toNumber(section.dataset.sectionIndex))
 );
 
 const getColumnIndices = (sectionIndex: number) => uniqueSorted(
-    Array.from(document.querySelectorAll<HTMLInputElement>(
+    getVisibleNavigationElements<HTMLInputElement>(
         `${MATERIAL_NAV_INPUT_SELECTOR}[data-section-index="${sectionIndex}"]`
-    )).map((input) => toNumber(input.dataset.columnIndex))
+    ).map((input) => toNumber(input.dataset.columnIndex))
 );
 
 const getRowIndices = (sectionIndex: number, columnIndex: number) => uniqueSorted(
-    Array.from(document.querySelectorAll<HTMLInputElement>(
+    getVisibleNavigationElements<HTMLInputElement>(
         `${MATERIAL_NAV_INPUT_SELECTOR}[data-section-index="${sectionIndex}"][data-column-index="${columnIndex}"]`
-    )).map((input) => toNumber(input.dataset.rowIndex))
+    ).map((input) => toNumber(input.dataset.rowIndex))
 );
 
 const getInput = (sectionIndex: number, columnIndex: number, rowIndex: number) => (
-    document.querySelector<HTMLInputElement>(
+    getVisibleNavigationElements<HTMLInputElement>(
         `${MATERIAL_NAV_INPUT_SELECTOR}[data-section-index="${sectionIndex}"][data-column-index="${columnIndex}"][data-row-index="${rowIndex}"]`
-    )
+    )[0] ?? null
 );
 
 const findInExactColumn = (

@@ -24,6 +24,7 @@ import {
     ACCOUNT_RELATION_ROLE_LABELS,
     getAccountRelationRoleLabel,
 } from '../../types/accountLink';
+import { findBusinessPartnerPositionDefinition } from '../../constants/businessPartnerPositions';
 
 interface AccountLinkManagerProps {
     users?: UserData[];
@@ -85,6 +86,12 @@ const matchesCompanyFilter = (company: Company, filter: CompanyFilter): boolean 
 };
 
 const relationRoleOptions: AccountRelationRole[] = ['owner', 'manager', 'staff', 'viewer'];
+
+const getCompanyPositionName = (company: Pick<Company, 'type'>): string =>
+    findBusinessPartnerPositionDefinition(company.type, company.type)?.name || '';
+
+const getAccountLinkPositionName = (link: AccountLink): string =>
+    toText(link.requestedEntity?.role) || findBusinessPartnerPositionDefinition(link.entitySubType, link.entitySubType)?.name || '';
 
 const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
     users,
@@ -502,7 +509,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
         const worker = workerById.get(selectedWorkerId);
         if (!worker?.id) return;
 
-        const label = `${getUserLabel(selectedUser)} 계정에 ${worker.name} 작업자를 연결하시겠습니까?`;
+        const label = `${getUserLabel(selectedUser)} 계정에 ${worker.name} 작업자를 연결하시겠습니까?${worker.role ? `\n계정 기본 직책이 '${worker.role}'으로 적용됩니다.` : ''}`;
         if (!window.confirm(label)) return;
 
         setBusy(true);
@@ -540,7 +547,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
         const staff = officeStaffById.get(selectedOfficeStaffId);
         if (!staff?.id) return;
 
-        const label = `${getUserLabel(selectedUser)} 계정에 ${staff.name} 사무실 직원을 연결하시겠습니까?`;
+        const label = `${getUserLabel(selectedUser)} 계정에 ${staff.name} 사무실 직원을 연결하시겠습니까?${staff.role ? `\n계정 기본 직책이 '${staff.role}'으로 적용됩니다.` : ''}`;
         if (!window.confirm(label)) return;
 
         setBusy(true);
@@ -578,7 +585,8 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
         const company = companyById.get(selectedCompanyId);
         if (!company?.id) return;
 
-        const label = `${getUserLabel(selectedUser)} 계정에 ${company.name} ${company.type || '회사'}를 연결하시겠습니까?`;
+        const linkedPosition = getCompanyPositionName(company);
+        const label = `${getUserLabel(selectedUser)} 계정에 ${company.name} ${company.type || '회사'}를 연결하시겠습니까?${linkedPosition ? `\n계정 기본 직책이 '${linkedPosition}'으로 적용됩니다.` : ''}`;
         if (!window.confirm(label)) return;
 
         setBusy(true);
@@ -780,6 +788,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                             <span key={`worker-${worker.id || worker.legacyId}`} className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-xs font-bold text-emerald-700">
                                 <FontAwesomeIcon icon={faHardHat} />
                                 {worker.name}
+                                {worker.role && <span className="font-medium text-emerald-600">({worker.role})</span>}
                                 <button type="button" onClick={() => handleWorkerUnlink(worker)} disabled={busy} className="text-rose-500 hover:text-rose-700 disabled:opacity-50" title="연동 해제">
                                     <FontAwesomeIcon icon={faXmark} />
                                 </button>
@@ -789,6 +798,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                             <span key={`office-${staff.id || staff.legacyId}`} className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-white px-2.5 py-1 text-xs font-bold text-indigo-700">
                                 <FontAwesomeIcon icon={faIdBadge} />
                                 {staff.name}
+                                {staff.role && <span className="font-medium text-indigo-600">({staff.role})</span>}
                                 <button type="button" onClick={() => handleOfficeStaffUnlink(staff)} disabled={busy} className="text-rose-500 hover:text-rose-700 disabled:opacity-50" title="연동 해제">
                                     <FontAwesomeIcon icon={faXmark} />
                                 </button>
@@ -798,6 +808,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                             <span key={link.id || `${link.uid}-${link.entityId}`} className={`inline-flex items-center gap-2 rounded-full border bg-white px-2.5 py-1 text-xs font-bold ${link.status === 'pending' ? 'border-amber-200 text-amber-700' : 'border-blue-200 text-blue-700'}`}>
                                 <FontAwesomeIcon icon={faBuilding} />
                                 {link.entityName}
+                                {getAccountLinkPositionName(link) && <span className="font-medium text-blue-600">({getAccountLinkPositionName(link)})</span>}
                                 {link.status === 'pending' && <span className="text-[10px]">(대기)</span>}
                                 <button type="button" onClick={() => handleCompanyUnlink(link)} disabled={busy} className="text-rose-500 hover:text-rose-700 disabled:opacity-50" title="연동 해제">
                                     <FontAwesomeIcon icon={faXmark} />
@@ -929,6 +940,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                     const linkedToSelected = linkedCompanyLinks.some((link) => link.entityId === companyId && link.status !== 'inactive' && link.status !== 'rejected');
                     const isSelectedCompany = selectedCompanyId === companyId;
                     const canSelect = Boolean(company.id && !linkedToSelected);
+                    const linkedPosition = getCompanyPositionName(company);
 
                     return (
                         <button
@@ -950,6 +962,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                                 <div className="flex flex-wrap items-center gap-2">
                                     <div className="truncate font-bold text-slate-800">{company.name}</div>
                                     <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">{company.type || '미지정'}</span>
+                                    {linkedPosition && <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">직책: {linkedPosition}</span>}
                                     {linkedToSelected && <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">현재 계정</span>}
                                 </div>
                                 <div className="truncate text-xs text-slate-500">

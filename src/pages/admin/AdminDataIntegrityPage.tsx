@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheckCircle, faExclamationTriangle, faSync, faTools, faBuilding, faUserGroup, faHardHat } from '@fortawesome/free-solid-svg-icons';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';
-import { companyService, Company } from '../../services/companyService';
+import { companyService } from '../../services/companyService';
 import { toast } from '../../utils/swal';
+import { DataQualityAuditPanel } from '../../components/admin/DataQualityAuditPanel';
 
 interface Discrepancy {
     type: 'team' | 'site' | 'company' | 'siteResponsibleTeam';
@@ -311,6 +312,8 @@ const AdminDataIntegrityPage: React.FC = () => {
                     )}
                 </div>
             </div>
+
+            <DataQualityAuditPanel />
 
             {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">

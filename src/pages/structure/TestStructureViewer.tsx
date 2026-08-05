@@ -1,6 +1,6 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBuilding, faUserGroup, faHelmetSafety, faMapLocationDot, faFileLines, faArrowDown, faArrowRight, faDatabase, faKey, faLink, faSitemap, faCheckCircle, faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
+import { faBuilding, faUserGroup, faHelmetSafety, faMapLocationDot, faFileLines, faArrowDown, faKey, faLink, faSitemap, faCheckCircle, faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
 
 const TestStructureViewer: React.FC = () => {
     return (

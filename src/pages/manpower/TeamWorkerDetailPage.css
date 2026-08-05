@@ -279,6 +279,11 @@
     display: none;
 }
 
+.tw-mobile-filter-bar,
+.tw-mobile-team-context {
+    display: none;
+}
+
 .tw-workspace {
     display: grid;
     grid-template-columns: minmax(330px, 430px) minmax(0, 1fr);
@@ -329,6 +334,16 @@
     color: #0f172a;
     font-size: 18px;
     font-weight: 900;
+}
+
+.tw-panel-heading__count {
+    align-items: flex-end;
+    flex: 0 0 auto;
+    text-align: right;
+}
+
+.tw-panel-heading__count strong {
+    font-variant-numeric: tabular-nums;
 }
 
 .tw-team-list,
@@ -642,6 +657,18 @@
     min-width: 0;
     flex: 1;
     position: relative;
+}
+
+.tw-worker-hero__actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.tw-worker-hero__action {
+    white-space: nowrap;
 }
 
 .tw-worker-hero__title {
@@ -1284,10 +1311,335 @@
     margin: 0;
 }
 
-.tw-output-section__header span {
+.tw-output-section__summary {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.tw-output-period {
+    padding: 6px 8px;
+    color: #475569;
+    background: #eef2f7;
+    border: 1px solid #dbe3ee;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 900;
+    white-space: nowrap;
+}
+
+.tw-output-summary-item {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    padding: 5px 7px;
+    background: #fff;
+    border: 1px solid #dbe3ee;
+    border-radius: 6px;
+    white-space: nowrap;
+}
+
+.tw-output-summary-item small {
     color: #64748b;
+    font-size: 10px;
+    font-weight: 900;
+}
+
+.tw-output-summary-item strong {
+    color: #1e293b;
     font-size: 12px;
     font-weight: 900;
+    font-variant-numeric: tabular-nums;
+}
+
+.tw-output-summary-item--days {
+    border-color: #ddd6fe;
+    background: #f5f3ff;
+}
+
+.tw-output-summary-item--days strong {
+    color: #6d28d9;
+}
+
+.tw-output-summary-item--manday {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+}
+
+.tw-output-summary-item--manday strong {
+    color: #1d4ed8;
+}
+
+.tw-output-summary-item--amount {
+    border-color: #a7f3d0;
+    background: #ecfdf5;
+}
+
+.tw-output-summary-item--amount strong {
+    color: #047857;
+}
+
+.tw-output-view-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    border-bottom: 1px solid #e7ecf3;
+    background: #fff;
+}
+
+.tw-output-view-toggle {
+    display: inline-grid;
+    flex: 0 0 auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid #dbe3ee;
+    border-radius: 8px;
+    background: #f1f5f9;
+}
+
+.tw-output-view-button {
+    display: inline-flex;
+    min-width: 112px;
+    height: 34px;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: #64748b;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 900;
+    transition: color 150ms ease, background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.tw-output-view-button:hover {
+    color: #1e40af;
+    background: rgba(255, 255, 255, 0.72);
+}
+
+.tw-output-view-button--active {
+    color: #fff;
+    border-color: #2563eb;
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    box-shadow: 0 5px 12px rgba(37, 99, 235, 0.22);
+}
+
+.tw-output-view-button--active:hover {
+    color: #fff;
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+}
+
+.tw-output-view-helper {
+    min-width: 0;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 800;
+    text-align: right;
+}
+
+.tw-output-view-panel {
+    min-width: 0;
+}
+
+.tw-output-view-panel > .tw-empty-state {
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tw-worker-calendar-wrap {
+    overflow: auto;
+    padding: 14px;
+    border-bottom: 1px solid #e7ecf3;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
+.tw-worker-calendar-table {
+    width: 100%;
+    min-width: 840px;
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 0;
+    overflow: hidden;
+    border: 1px solid #dbe3ee;
+    border-radius: 8px;
+}
+
+.tw-worker-calendar-table th {
+    padding: 9px 6px;
+    color: #fff;
+    background: linear-gradient(90deg, #2e75b6 0%, #3b82f6 100%);
+    border-right: 1px solid rgba(255, 255, 255, 0.22);
+    font-size: 12px;
+    font-weight: 900;
+    text-align: center;
+}
+
+.tw-worker-calendar-table th:last-child {
+    border-right: 0;
+}
+
+.tw-worker-calendar-table th.tw-worker-calendar-saturday {
+    background: #2563eb;
+}
+
+.tw-worker-calendar-table th.tw-worker-calendar-sunday {
+    background: #dc2626;
+}
+
+.tw-worker-calendar-day {
+    height: 144px;
+    padding: 7px;
+    vertical-align: top;
+    background: #fff;
+    border-right: 1px solid #e5eaf1;
+    border-top: 1px solid #e5eaf1;
+}
+
+.tw-worker-calendar-day:last-child {
+    border-right: 0;
+}
+
+.tw-worker-calendar-day--outside {
+    background: #f8fafc;
+}
+
+.tw-worker-calendar-day--saturday:not(.tw-worker-calendar-day--outside) {
+    background: #f8fbff;
+}
+
+.tw-worker-calendar-day--sunday:not(.tw-worker-calendar-day--outside) {
+    background: #fffafa;
+}
+
+.tw-worker-calendar-day__number {
+    margin-bottom: 6px;
+    color: #334155;
+    font-size: 11px;
+    font-weight: 900;
+}
+
+.tw-worker-calendar-day--saturday .tw-worker-calendar-day__number {
+    color: #2563eb;
+}
+
+.tw-worker-calendar-day--sunday .tw-worker-calendar-day__number {
+    color: #dc2626;
+}
+
+.tw-worker-calendar-day--outside .tw-worker-calendar-day__number {
+    color: #94a3b8;
+}
+
+.tw-worker-calendar-day__entries {
+    display: grid;
+    gap: 5px;
+}
+
+.tw-worker-calendar-entry {
+    min-width: 0;
+    padding: 5px 6px;
+    border: 1px solid #e2e8f0;
+    border-left: 3px solid #64748b;
+    border-radius: 5px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.tw-worker-calendar-entry > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+}
+
+.tw-worker-calendar-entry strong,
+.tw-worker-calendar-entry span,
+.tw-worker-calendar-entry small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tw-worker-calendar-entry strong {
+    min-width: 0;
+    color: #1e293b;
+    font-size: 10px;
+    font-weight: 900;
+}
+
+.tw-worker-calendar-entry span {
+    flex: 0 0 auto;
+    color: #2563eb;
+    font-size: 9px;
+    font-weight: 900;
+}
+
+.tw-worker-calendar-entry small {
+    display: block;
+    margin-top: 3px;
+    font-size: 9px;
+    font-weight: 800;
+}
+
+.tw-worker-calendar-entry .tw-worker-calendar-entry__worker {
+    margin-top: 4px;
+}
+
+.tw-worker-calendar-entry__worker strong {
+    color: #334155;
+    font-size: 9px;
+}
+
+.tw-worker-calendar-entry__worker span {
+    max-width: 72px;
+    padding: 2px 4px;
+    color: color-mix(in srgb, var(--worker-team-color, #2563eb) 88%, #0f172a);
+    background: color-mix(in srgb, var(--worker-team-color, #2563eb) 14%, #ffffff);
+    border: 1px solid color-mix(in srgb, var(--worker-team-color, #2563eb) 40%, #ffffff);
+    border-radius: 3px;
+    font-size: 8px;
+    font-weight: 900;
+}
+
+.tw-worker-calendar-entry .tw-worker-calendar-entry__amounts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 3px;
+    margin-top: 4px;
+}
+
+.tw-worker-calendar-entry__amounts span {
+    min-width: 0;
+    padding: 2px 3px;
+    overflow: hidden;
+    color: #475569;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 3px;
+    font-size: 8px;
+    font-weight: 800;
+    line-height: 1.2;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tw-worker-calendar-entry__amounts span:last-child {
+    color: #047857;
+    background: #ecfdf5;
+    border-color: #a7f3d0;
 }
 
 .tw-output-card-list {
@@ -1518,13 +1870,122 @@
     }
 
     .tw-page__header {
-        gap: 12px;
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+
+    .tw-page__eyebrow {
+        font-size: 12px;
+    }
+
+    .tw-page h1 {
+        margin-top: 4px;
+        font-size: 24px;
     }
 
     .tw-toolbar {
-        gap: 10px;
+        display: none;
+    }
+
+    .tw-toolbar--mobile-expanded {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 8px;
         margin-bottom: 10px;
-        padding: 12px;
+        padding: 10px;
+    }
+
+    .tw-toolbar--mobile-expanded .tw-control--search {
+        display: none;
+    }
+
+    .tw-mobile-filter-bar {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: stretch;
+        gap: 8px;
+        margin-bottom: 10px;
+    }
+
+    .tw-mobile-search {
+        position: relative;
+        display: flex;
+        min-width: 0;
+        align-items: center;
+    }
+
+    .tw-mobile-search > svg {
+        position: absolute;
+        left: 14px;
+        z-index: 1;
+        color: #64748b;
+        pointer-events: none;
+    }
+
+    .tw-mobile-search input {
+        width: 100%;
+        height: 48px;
+        padding: 0 42px 0 42px;
+        border: 1px solid #bfdbfe;
+        border-radius: 10px;
+        outline: none;
+        background: #fff;
+        color: #0f172a;
+        font-size: 16px;
+        font-weight: 700;
+        box-shadow: 0 7px 18px rgba(37, 99, 235, 0.08);
+    }
+
+    .tw-mobile-search input:focus {
+        border-color: #2563eb;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+    }
+
+    .tw-mobile-search button {
+        position: absolute;
+        right: 8px;
+        width: 32px;
+        height: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 0;
+        border-radius: 999px;
+        color: #64748b;
+        background: #f1f5f9;
+    }
+
+    .tw-mobile-filter-button {
+        min-width: 76px;
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1px;
+        padding: 4px 9px;
+        border: 1px solid #d8dee8;
+        border-radius: 10px;
+        color: #334155;
+        background: #fff;
+        font-size: 11px;
+        font-weight: 900;
+        line-height: 1.1;
+    }
+
+    .tw-mobile-filter-button small {
+        color: #64748b;
+        font-size: 10px;
+        font-weight: 800;
+    }
+
+    .tw-mobile-filter-button--active {
+        border-color: #93c5fd;
+        color: #1d4ed8;
+        background: #eff6ff;
+    }
+
+    .tw-mobile-filter-button--active small {
+        color: #2563eb;
     }
 
     .tw-control input,
@@ -1537,7 +1998,24 @@
     .tw-header-actions {
         width: 100%;
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(3, 44px) minmax(110px, 1fr);
+        gap: 7px;
+    }
+
+    .tw-header-actions .tw-icon-button {
+        width: 44px;
+        min-width: 44px;
+        min-height: 44px;
+        padding: 0;
+    }
+
+    .tw-header-actions .tw-icon-button span {
+        display: none;
+    }
+
+    .tw-header-actions .tw-primary-button {
+        min-height: 44px;
+        padding: 0 12px;
     }
 
     .tw-kpi-grid {
@@ -1573,6 +2051,10 @@
     .tw-mobile-switch__button {
         min-height: 44px;
         height: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
         border-radius: 7px;
         color: #64748b;
         font-size: 13px;
@@ -1615,8 +2097,69 @@
         padding: 8px;
     }
 
+    .tw-panel-heading {
+        min-height: 64px;
+        padding: 11px 12px;
+    }
+
+    .tw-panel-heading__title strong {
+        max-width: min(220px, 58vw);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .tw-mobile-team-context {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 7px;
+        margin: 0 2px 2px;
+    }
+
+    .tw-mobile-team-context > div {
+        min-width: 0;
+        padding: 9px 10px;
+        border: 1px solid #dbeafe;
+        border-radius: 9px;
+        background: linear-gradient(135deg, #f8fbff, #eff6ff);
+    }
+
+    .tw-mobile-team-context > div + div {
+        border-color: #ccfbf1;
+        background: linear-gradient(135deg, #f5fffc, #ecfdf5);
+    }
+
+    .tw-mobile-team-context span {
+        display: block;
+        overflow: hidden;
+        color: #64748b;
+        font-size: 10px;
+        font-weight: 900;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .tw-mobile-team-context strong {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 4px;
+        margin-top: 3px;
+        overflow: hidden;
+        color: #0f172a;
+        font-size: 12px;
+        font-weight: 900;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .tw-mobile-team-context strong svg {
+        flex: 0 0 auto;
+        color: #0f766e;
+    }
+
     .tw-team-picker-button {
-        min-height: 62px;
+        min-height: 64px;
     }
 
     .tw-team-picker-button__body strong,
@@ -1633,8 +2176,32 @@
 
     .tw-team-item,
     .tw-worker-item {
-        min-height: 62px;
-        padding: 10px;
+        min-height: 66px;
+        padding: 11px 10px;
+    }
+
+    .tw-worker-item__badges {
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 4px;
+    }
+
+    .tw-worker-item__badges svg {
+        display: none;
+    }
+
+    .tw-worker-item__badges small {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        padding: 0 7px;
+        border: 1px solid #bfdbfe;
+        border-radius: 999px;
+        color: #1d4ed8;
+        background: #eff6ff;
+        font-size: 10px;
+        font-weight: 900;
+        white-space: nowrap;
     }
 
     .tw-worker-hero h2 {
@@ -1649,8 +2216,17 @@
         padding: 12px;
     }
 
+    .tw-worker-hero__actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-left: 0;
+    }
+
     .tw-worker-hero .tw-secondary-button {
         width: 100%;
+        min-width: 0;
     }
 
     .tw-worker-stat-grid {
@@ -1677,6 +2253,86 @@
     .tw-output-section__header {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .tw-output-section__summary {
+        justify-content: flex-start;
+    }
+
+    .tw-output-view-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+        padding: 10px 12px;
+    }
+
+    .tw-output-view-toggle {
+        width: 100%;
+    }
+
+    .tw-output-view-button {
+        min-width: 0;
+        min-height: 40px;
+    }
+
+    .tw-output-view-helper {
+        text-align: left;
+    }
+
+    /* Keep the whole month visible on phones instead of requiring horizontal scrolling. */
+    .tw-worker-calendar-wrap {
+        overflow-x: hidden;
+        padding: 8px 4px 10px;
+    }
+
+    .tw-worker-calendar-table {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .tw-worker-calendar-table th {
+        padding: 7px 2px;
+        font-size: 11px;
+    }
+
+    .tw-worker-calendar-day {
+        height: 104px;
+        padding: 4px 3px;
+    }
+
+    .tw-worker-calendar-day__number {
+        margin-bottom: 4px;
+        font-size: 11px;
+        line-height: 1;
+    }
+
+    .tw-worker-calendar-day__entries {
+        gap: 3px;
+    }
+
+    .tw-worker-calendar-entry {
+        padding: 3px 4px;
+        border-left-width: 3px;
+        border-radius: 4px;
+    }
+
+    .tw-worker-calendar-entry > div:first-child {
+        display: grid;
+        gap: 1px;
+    }
+
+    .tw-worker-calendar-entry strong,
+    .tw-worker-calendar-entry span {
+        display: block;
+        width: 100%;
+        font-size: 10px;
+        line-height: 1.2;
+    }
+
+    /* The selected worker is already shown above the calendar; retain the useful daily summary. */
+    .tw-worker-calendar-entry small,
+    .tw-worker-calendar-entry__worker,
+    .tw-worker-calendar-entry__amounts {
+        display: none;
     }
 
     .tw-mobile-back {
@@ -1785,6 +2441,35 @@
 
     .tw-output-card dl {
         grid-template-columns: 1fr;
+    }
+
+    .tw-worker-calendar-wrap {
+        padding: 6px 2px 8px;
+    }
+
+    .tw-worker-calendar-table th {
+        padding: 6px 1px;
+        font-size: 10px;
+    }
+
+    .tw-worker-calendar-day {
+        height: 90px;
+        padding: 3px 2px;
+    }
+
+    .tw-worker-calendar-day__number {
+        margin-bottom: 3px;
+        font-size: 10px;
+    }
+
+    .tw-worker-calendar-entry {
+        padding: 3px;
+        border-left-width: 2px;
+    }
+
+    .tw-worker-calendar-entry strong,
+    .tw-worker-calendar-entry span {
+        font-size: 9px;
     }
 
     .tw-payslip-sign {

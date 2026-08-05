@@ -3,7 +3,7 @@ import ExcelUploadWizard, { FieldDef, ValidationResult } from '../../components/
 import { teamService, Team } from '../../services/teamService';
 import { companyService, Company } from '../../services/companyService';
 import { manpowerService, Worker } from '../../services/manpowerService';
-import { normalizeString, normalizePhone } from '../../utils/excelUtils';
+import { normalizeString } from '../../utils/excelUtils';
 import Swal from 'sweetalert2';
 
 const TeamMassUploader: React.FC = () => {

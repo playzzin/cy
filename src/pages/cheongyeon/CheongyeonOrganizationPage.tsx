@@ -5,8 +5,6 @@ import {
     faUsers,
     faUserTie,
     faUser,
-    faSpinner,
-    faExclamationTriangle,
     faCrown,
     faIdCard
 } from '@fortawesome/free-solid-svg-icons';
@@ -17,35 +15,8 @@ import PremiumOrgChart from '../../components/structure/PremiumOrgChart';
 
 type PositionLevel = 'executive' | 'management' | 'field';
 
-const getPositionLevel = (worker: Worker): PositionLevel => {
-    const baseText = `${worker.rank ?? ''} ${worker.role ?? ''}`.toLowerCase();
 
-    if (/(대표|사장|이사|본부장|임원|ceo|cfo|coo)/.test(baseText)) {
-        return 'executive';
-    }
-    if (/(부장|차장|과장|팀장|실장|소장|관리|매니저|관리자)/.test(baseText)) {
-        return 'management';
-    }
-    return 'field';
-};
 
-const getPositionLabel = (level: PositionLevel): string => {
-    if (level === 'executive') return '임원';
-    if (level === 'management') return '관리직';
-    return '현장직';
-};
-
-const getPositionBadgeClass = (level: PositionLevel): string => {
-    switch (level) {
-        case 'executive':
-            return 'bg-indigo-50 text-indigo-600 border border-indigo-100';
-        case 'management':
-            return 'bg-amber-50 text-amber-700 border border-amber-100';
-        case 'field':
-        default:
-            return 'bg-emerald-50 text-emerald-700 border border-emerald-100';
-    }
-};
 
 const CheongyeonOrganizationPage: React.FC = () => {
     const [workers, setWorkers] = useState<Worker[]>([]);

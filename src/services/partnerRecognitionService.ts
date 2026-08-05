@@ -585,7 +585,11 @@ export const partnerRecognitionService = {
         });
     },
 
-    subscribeContacts(callback: (contacts: BusinessContact[]) => void, maxCount = 500): Unsubscribe {
+    subscribeContacts(
+        callback: (contacts: BusinessContact[]) => void,
+        maxCount = 500,
+        onError?: (error: unknown) => void,
+    ): Unsubscribe {
         const q = query(
             collection(db, PARTNER_RECOGNITION_COLLECTIONS.contacts),
             orderBy('createdAt', 'desc'),
@@ -593,10 +597,17 @@ export const partnerRecognitionService = {
         );
         return onSnapshot(q, (snapshot) => {
             callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as BusinessContact)));
+        }, (error) => {
+            console.error('Failed to subscribe business contacts:', error);
+            onError?.(error);
         });
     },
 
-    subscribeCardImages(callback: (cards: BusinessCardImage[]) => void, maxCount = 1000): Unsubscribe {
+    subscribeCardImages(
+        callback: (cards: BusinessCardImage[]) => void,
+        maxCount = 1000,
+        onError?: (error: unknown) => void,
+    ): Unsubscribe {
         const q = query(
             collection(db, PARTNER_RECOGNITION_COLLECTIONS.cardImages),
             orderBy('createdAt', 'desc'),
@@ -604,6 +615,9 @@ export const partnerRecognitionService = {
         );
         return onSnapshot(q, (snapshot) => {
             callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as BusinessCardImage)));
+        }, (error) => {
+            console.error('Failed to subscribe business card images:', error);
+            onError?.(error);
         });
     },
 

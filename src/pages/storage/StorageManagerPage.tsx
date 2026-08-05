@@ -4,8 +4,8 @@ import { storageService, StorageItem } from '../../services/storageService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faFolder, faFile, faFileImage, faFilePdf, faFileWord, faFileExcel, faCloudUploadAlt,
-    faTrash, faDownload, faHdd, faChevronRight, faHome, faPlus, faSpinner, faEllipsisV,
-    faThLarge, faList, faSearch, faSort, faPencilAlt, faTimes, faFolderOpen
+    faTrash, faDownload, faHdd, faChevronRight, faHome, faEllipsisV,
+    faThLarge, faList, faSearch, faPencilAlt, faFolderOpen
 } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -436,12 +436,6 @@ const StorageManagerPage: React.FC = () => {
 
     // --- Render Helpers ---
 
-    const toggleSort = (key: 'name' | 'size' | 'date') => {
-        setSortConfig(current => ({
-            key,
-            direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
-        }));
-    };
 
     const displayItems = [...items];
     if (currentPath) {

@@ -20,42 +20,42 @@ const formatEditableCurrency = (value: number | null | undefined): string => (
 );
 
 export const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdit, updateItem, setDraft }: any) => {
-    const inputStyle: React.CSSProperties = { width: '100%', border: 'none', outline: 'none', background: 'transparent', fontFamily: EXCEL_FONT, fontSize: '9pt', textAlign: 'center' };
+    const inputStyle: React.CSSProperties = { width: '100%', border: 'none', outline: 'none', background: 'transparent', fontFamily: EXCEL_FONT, fontSize: 'calc(9pt + var(--estimate-font-size-offset, 0pt))', textAlign: 'center' };
     const installRatio = draft.installRatio || 50;
     const removeRatio = 100 - installRatio;
 
     const isRental = draft.estimateMode === 'rental';
 
     return (
-        <div style={tableWrapperStyle}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <div style={{ ...tableWrapperStyle, overflowX: 'auto' }}>
+            <table style={{ width: '100%', minWidth: isEdit ? '1400px' : '1340px', borderCollapse: 'collapse', tableLayout: 'fixed', whiteSpace: 'nowrap' }}>
                 <colgroup>
-                    <col style={{ width: '110px' }} />
-                    <col style={{ width: '140px' }} />
-                    <col style={{ width: '50px' }} />
-                    <col style={{ width: '80px' }} />
+                    <col style={{ width: '130px' }} />
+                    <col style={{ width: '250px' }} />
+                    <col style={{ width: '75px' }} />
+                    <col style={{ width: '90px' }} />
                     {/* 인건비 */}
-                    <col style={{ width: '100px' }} />
-                    <col style={{ width: '110px' }} />
+                    <col style={{ width: '125px' }} />
+                    <col style={{ width: '145px' }} />
                     
                     {isRental ? (
                         <>
                             {/* 임대료 */}
-                            <col style={{ width: '100px' }} />
-                            <col style={{ width: '110px' }} />
+                            <col style={{ width: '125px' }} />
+                            <col style={{ width: '145px' }} />
                         </>
                     ) : (
                         <>
                             {/* 청구 */}
-                            <col style={{ width: '100px' }} />
-                            <col style={{ width: '110px' }} />
+                            <col style={{ width: '125px' }} />
+                            <col style={{ width: '145px' }} />
                         </>
                     )}
-                    <col style={{ width: 'auto' }} />
-                    {isEdit && <col style={{ width: '30px' }} />}
+                    <col style={{ width: '190px' }} />
+                    {isEdit && <col style={{ width: '42px' }} />}
                 </colgroup>
                 <thead>
-                    <tr style={{ height: '32px' }}>
+                    <tr style={{ height: 'calc(32px + var(--estimate-table-row-offset, 0px))' }}>
                         <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>품 명</th>
                         <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>설치 구간</th>
                         <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>단위</th>
@@ -69,7 +69,7 @@ export const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdi
                         <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>비 고</th>
                         {isEdit && <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>삭제</th>}
                     </tr>
-                    <tr style={{ height: '28px' }}>
+                    <tr style={{ height: 'calc(28px + var(--estimate-table-row-offset, 0px))' }}>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>단 가</th>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>금 액</th>
                         {isRental ? (
@@ -116,9 +116,9 @@ export const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdi
                                     return (
                                         <React.Fragment key={`group-idx-${cIdx}`}>
                                             {displayItems.map((item: any, rIdx: number) => (
-                                                <tr key={item.id} style={{ height: '28px' }} className="group/row hover:bg-slate-50">
+                                                <tr key={item.id} style={{ height: 'calc(28px + var(--estimate-table-row-offset, 0px))' }} className="group/row hover:bg-slate-50">
                                                     {rIdx === 0 && (
-                                                        <td rowSpan={displayItems.length + 1} style={{ ...cellStyle(), border: BORDER_THIN, fontWeight: 900, backgroundColor: '#fcfcfc', color: '#64748b', fontSize: '9.5pt', verticalAlign: 'middle' }}>
+                                                        <td rowSpan={displayItems.length + 1} style={{ ...cellStyle(), border: BORDER_THIN, fontWeight: 900, backgroundColor: '#fcfcfc', color: '#64748b', fontSize: 'calc(9.5pt + var(--estimate-font-size-offset, 0pt))', verticalAlign: 'middle' }}>
                                                             {isEdit && !item.isFiller ? (
                                                                 <>
                                                                     <input
@@ -133,7 +133,7 @@ export const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdi
                                                                                 )
                                                                             }));
                                                                         }}
-                                                                        style={{ ...inputStyle, fontWeight: 900, fontSize: '9.5pt', color: '#64748b' }}
+                                                                        style={{ ...inputStyle, fontWeight: 900, fontSize: 'calc(9.5pt + var(--estimate-font-size-offset, 0pt))', color: '#64748b' }}
                                                                     />
                                                                     <datalist id="categories-list">
                                                                         {COMMON_CATEGORIES.map(c => <option key={c} value={c} />)}
@@ -228,7 +228,7 @@ export const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdi
                                                     )}
                                                 </tr>
                                             ))}
-                                            <tr style={{ height: '30px', backgroundColor: '#eef2ff' }}>
+                                            <tr style={{ height: 'calc(30px + var(--estimate-table-row-offset, 0px))', backgroundColor: '#eef2ff' }}>
                                                 <td style={{ ...labelCellStyle(), border: BORDER_THIN, textAlign: 'center', color: '#4338ca', letterSpacing: '1em', backgroundColor: '#eef2ff' }}>합 계</td>
                                                 <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
                                                 <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 800 }}>{gQty ? formatDecimal(gQty) : '0'}</td>
@@ -252,7 +252,7 @@ export const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdi
                                                     <td style={{ ...cellStyle(), border: BORDER_THIN, padding: '0', backgroundColor: '#f5f3ff' }}>
                                                         <button
                                                             onClick={() => setDraft((d: any) => ({ ...d, items: [...d.items, createItem({ category: cat })] }))}
-                                                            style={{ width: '100%', height: '100%', background: 'transparent', color: '#6366f1', border: 'none', cursor: 'pointer', fontWeight: 900, fontSize: '14pt' }}
+                                                            style={{ width: '100%', height: '100%', background: 'transparent', color: '#6366f1', border: 'none', cursor: 'pointer', fontWeight: 900, fontSize: 'calc(14pt + var(--estimate-font-size-offset, 0pt))' }}
                                                             title="항목 추가"
                                                         >
                                                             +
@@ -263,21 +263,21 @@ export const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdi
                                         </React.Fragment>
                                     );
                                 })}
-                                <tr style={{ height: '32px', backgroundColor: '#f8fafc' }}>
-                                    <td colSpan={3} style={{ ...labelCellStyle(), border: BORDER_THICK, fontSize: '10pt', fontWeight: 950, letterSpacing: '1.5em', textAlign: 'center', backgroundColor: '#f8fafc', color: '#000' }}>총&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;계</td>
-                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '9.5pt' }}>{totalQty ? formatDecimal(totalQty) : '0'}</td>
+                                <tr style={{ height: 'calc(32px + var(--estimate-table-row-offset, 0px))', backgroundColor: '#f8fafc' }}>
+                                    <td colSpan={3} style={{ ...labelCellStyle(), border: BORDER_THICK, fontSize: 'calc(10pt + var(--estimate-font-size-offset, 0pt))', fontWeight: 950, letterSpacing: '1.5em', textAlign: 'center', backgroundColor: '#f8fafc', color: '#000' }}>총&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;계</td>
+                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: 'calc(9.5pt + var(--estimate-font-size-offset, 0pt))' }}>{totalQty ? formatDecimal(totalQty) : '0'}</td>
                                     <td style={{ ...cellStyle(), border: BORDER_THICK }}></td>
-                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, color: '#000', fontSize: '10pt', backgroundColor: '#ffff00' }}>{formatCurrency(subtotal)}</td>
+                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, color: '#000', fontSize: 'calc(10pt + var(--estimate-font-size-offset, 0pt))', backgroundColor: '#ffff00' }}>{formatCurrency(subtotal)}</td>
                                     
                                     {isRental ? (
                                         <>
                                             <td style={{ ...cellStyle(), border: BORDER_THICK }}></td>
-                                            <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '9.5pt' }}>{totalRental ? formatCurrency(totalRental) : '0'}</td>
+                                            <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: 'calc(9.5pt + var(--estimate-font-size-offset, 0pt))' }}>{totalRental ? formatCurrency(totalRental) : '0'}</td>
                                         </>
                                     ) : (
                                         <>
-                                            <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '9.5pt' }}>{totalInstall ? formatCurrency(totalInstall) : '0'}</td>
-                                            <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '9.5pt' }}>{totalRemove ? formatCurrency(totalRemove) : '0'}</td>
+                                            <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: 'calc(9.5pt + var(--estimate-font-size-offset, 0pt))' }}>{totalInstall ? formatCurrency(totalInstall) : '0'}</td>
+                                            <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: 'calc(9.5pt + var(--estimate-font-size-offset, 0pt))' }}>{totalRemove ? formatCurrency(totalRemove) : '0'}</td>
                                         </>
                                     )}
                                     

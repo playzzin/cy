@@ -41,6 +41,8 @@ const createEmptyLineItem = (): CardBillingCostItem => ({
     category: 'OTHER'
 });
 
+const POSTED_CARD_BILLING_STATUSES = new Set<CardBillingDocument['status']>(['CONFIRMED', 'PAID', 'OVERDUE']);
+
 const computeTotals = (lineItems: CardBillingCostItem[] = []) => {
     const total = lineItems.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0);
     return {
@@ -153,7 +155,7 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
         return workers.filter((worker) => Boolean(worker.id) && worker.teamId && teamIdCandidates.has(String(worker.teamId)));
     }, [workers, selectedTeamId, selectedTeam]);
 
-    const canEdit = selectedDocument?.status !== 'CONFIRMED';
+    const canEdit = selectedDocument ? !POSTED_CARD_BILLING_STATUSES.has(selectedDocument.status) : false;
 
     const selectedTotals = useMemo(() => {
         return computeTotals(selectedDocument?.lineItems ?? []);
@@ -609,15 +611,12 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
 
         const result = await showConfirmAlert('확정 취소', '선택한 카드 청구서의 확정을 취소하고 다시 수정 가능하게 변경할까요?', '확정 취소');
         if (!result.isConfirmed) return;
+        const reason = window.prompt('확정 취소 사유를 입력해주세요.');
+        if (!reason?.trim()) return;
 
         setSaving(true);
         try {
-            await cardBillingService.saveBilling({
-                ...selectedDocument,
-                status: 'DRAFT',
-                confirmedAt: null as unknown as Timestamp,
-                updatedAt: Timestamp.now()
-            });
+            await cardBillingService.cancelConfirmation(selectedDocument.id, { reason: reason.trim() });
             toast.success('확정이 취소되었습니다.');
             await loadBillings();
         } catch (e: unknown) {

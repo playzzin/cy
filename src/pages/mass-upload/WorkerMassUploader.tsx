@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import ExcelUploadWizard, { FieldDef, ValidationResult, SampleDataRow } from '../../components/excel/ExcelUploadWizard';
+import ExcelUploadWizard, { FieldDef, ValidationResult } from '../../components/excel/ExcelUploadWizard';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService, Company } from '../../services/companyService';

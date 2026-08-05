@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import mermaid from 'mermaid';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faProjectDiagram, faSync, faSpinner, faFilter, faSearch } from '@fortawesome/free-solid-svg-icons';
+import { faProjectDiagram, faSync, faSpinner, faFilter } from '@fortawesome/free-solid-svg-icons';
 import { companyService, Company } from '../../services/companyService';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';

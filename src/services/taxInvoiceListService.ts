@@ -20,6 +20,36 @@ const normalizeText = (value: unknown): string => String(value ?? '').trim();
 
 const normalizeKey = (value: unknown): string => normalizeText(value).replace(/\s+/g, '').toLowerCase();
 
+const compareKoreanText = (left: unknown, right: unknown): number =>
+    normalizeText(left).localeCompare(normalizeText(right), 'ko-KR', {
+        numeric: true,
+        sensitivity: 'base',
+    });
+
+const compareKoreanTextEmptyLast = (left: unknown, right: unknown): number => {
+    const leftText = normalizeText(left);
+    const rightText = normalizeText(right);
+    if (leftText && !rightText) return -1;
+    if (!leftText && rightText) return 1;
+    return compareKoreanText(leftText, rightText);
+};
+
+const compareSiteWorkSummary = (left: SiteWorkSummary, right: SiteWorkSummary): number => {
+    const teamDiff = compareKoreanTextEmptyLast(left.teamName, right.teamName);
+    if (teamDiff !== 0) return teamDiff;
+
+    const siteDiff = compareKoreanTextEmptyLast(left.siteName, right.siteName);
+    if (siteDiff !== 0) return siteDiff;
+
+    const companyDiff = compareKoreanTextEmptyLast(left.companyName, right.companyName);
+    if (companyDiff !== 0) return companyDiff;
+
+    const siteTypeDiff = compareKoreanText(left.siteType, right.siteType);
+    if (siteTypeDiff !== 0) return siteTypeDiff;
+
+    return compareKoreanText(left.paymentType, right.paymentType);
+};
+
 const GENERIC_COMPANY_LABEL_KEYS = new Set(['외부팀', '지원팀', '용역팀', '미지정']);
 
 const isGenericCompanyLabel = (value: unknown): boolean => GENERIC_COMPANY_LABEL_KEYS.has(normalizeKey(value));
@@ -28,10 +58,20 @@ type SiteLookupRow = {
     id?: unknown;
     legacyId?: unknown;
     name?: unknown;
+    clientCompanyId?: unknown;
     clientCompanyName?: unknown;
+    companyId?: unknown;
     companyName?: unknown;
+    constructorCompanyId?: unknown;
     constructorCompanyName?: unknown;
+    partnerId?: unknown;
     partnerName?: unknown;
+};
+
+type CompanyLookupRow = {
+    id?: unknown;
+    legacyId?: unknown;
+    name?: unknown;
 };
 
 const buildSiteLookup = (sites: SiteLookupRow[]): Map<string, SiteLookupRow> => {
@@ -45,15 +85,54 @@ const buildSiteLookup = (sites: SiteLookupRow[]): Map<string, SiteLookupRow> => 
     return map;
 };
 
+const buildCompanyLookup = (companies: CompanyLookupRow[]): Map<string, CompanyLookupRow> => {
+    const map = new Map<string, CompanyLookupRow>();
+    companies.forEach((company) => {
+        [company.id, company.legacyId, company.name].forEach((value) => {
+            const key = normalizeKey(value);
+            if (key) map.set(key, company);
+        });
+    });
+    return map;
+};
+
+const resolveCompanyNameById = (
+    companyLookup: Map<string, CompanyLookupRow> | undefined,
+    companyId?: unknown
+): string => {
+    const key = normalizeKey(companyId);
+    if (!key || !companyLookup) return '';
+    return normalizeText(companyLookup.get(key)?.name);
+};
+
 const resolveCurrentSiteCompanyName = (
     site: SiteLookupRow | undefined,
     siteType: string,
-    fallback = ''
+    fallback = '',
+    companyLookup?: Map<string, CompanyLookupRow>
 ): string => {
     if (!site) return fallback;
     const candidateNames = siteType === '지원'
-        ? [site.partnerName, site.clientCompanyName, site.companyName, site.constructorCompanyName]
-        : [site.clientCompanyName, site.companyName, site.constructorCompanyName, site.partnerName];
+        ? [
+            resolveCompanyNameById(companyLookup, site.partnerId),
+            site.partnerName,
+            resolveCompanyNameById(companyLookup, site.clientCompanyId),
+            site.clientCompanyName,
+            resolveCompanyNameById(companyLookup, site.companyId),
+            site.companyName,
+            resolveCompanyNameById(companyLookup, site.constructorCompanyId),
+            site.constructorCompanyName,
+        ]
+        : [
+            resolveCompanyNameById(companyLookup, site.clientCompanyId),
+            site.clientCompanyName,
+            resolveCompanyNameById(companyLookup, site.companyId),
+            site.companyName,
+            resolveCompanyNameById(companyLookup, site.constructorCompanyId),
+            site.constructorCompanyName,
+            resolveCompanyNameById(companyLookup, site.partnerId),
+            site.partnerName,
+        ];
 
     return candidateNames.map(normalizeText).find(value => value && !isGenericCompanyLabel(value)) || fallback;
 };
@@ -68,14 +147,21 @@ const findSiteFromLookup = (siteLookup: Map<string, SiteLookupRow>, siteId?: unk
 const syncIssueRecipientsWithCurrentSites = async (issues: TaxInvoiceIssue[]): Promise<TaxInvoiceIssue[]> => {
     if (issues.length === 0) return issues;
 
-    const { siteService } = await import('./siteService');
-    const sites = await siteService.getSites().catch(() => [] as SiteLookupRow[]);
+    const [{ siteService }, { companyService }] = await Promise.all([
+        import('./siteService'),
+        import('./companyService'),
+    ]);
+    const [sites, companies] = await Promise.all([
+        siteService.getSites().catch(() => [] as SiteLookupRow[]),
+        companyService.getCompanies().catch(() => [] as CompanyLookupRow[]),
+    ]);
     const siteLookup = buildSiteLookup(sites);
+    const companyLookup = buildCompanyLookup(companies);
     if (siteLookup.size === 0) return issues;
 
     const normalized = issues.map((issue) => {
         const site = findSiteFromLookup(siteLookup, issue.siteId, issue.siteName || issue.note);
-        const currentRecipient = resolveCurrentSiteCompanyName(site, normalizeText(issue.siteType), normalizeText(issue.recipient));
+        const currentRecipient = resolveCurrentSiteCompanyName(site, normalizeText(issue.siteType), normalizeText(issue.recipient), companyLookup);
         return currentRecipient && currentRecipient !== issue.recipient
             ? { ...issue, recipient: currentRecipient }
             : issue;
@@ -188,48 +274,9 @@ const normalizeIssueNos = async (issues: TaxInvoiceIssue[]): Promise<TaxInvoiceI
     return normalized;
 };
 
-const normalizeIssueDatesToMonthEnd = async (
-    issues: TaxInvoiceIssue[],
-    yearMonth: string
-): Promise<TaxInvoiceIssue[]> => {
-    const monthEndDate = getMonthEndDate(yearMonth);
-    const normalized = issues.map(issue => (
-        issue.issueDate === monthEndDate ? issue : { ...issue, issueDate: monthEndDate }
-    ));
-
-    let batch = writeBatch(db);
-    let pendingWrites = 0;
-
-    for (const issue of issues) {
-        if (!issue.id || issue.issueDate === monthEndDate) continue;
-
-        batch.update(doc(db, COLLECTION_NAME, issue.id), {
-            issueDate: monthEndDate,
-            updatedAt: serverTimestamp(),
-        });
-        pendingWrites += 1;
-
-        if (pendingWrites >= BATCH_WRITE_LIMIT) {
-            await batch.commit();
-            batch = writeBatch(db);
-            pendingWrites = 0;
-        }
-    }
-
-    if (pendingWrites > 0) {
-        await batch.commit();
-    }
-
-    return normalized;
-};
-
 const normalizeIssuesForMonth = async (
-    issues: TaxInvoiceIssue[],
-    yearMonth: string
-): Promise<TaxInvoiceIssue[]> => {
-    const normalizedNos = await normalizeIssueNos(issues);
-    return normalizeIssueDatesToMonthEnd(normalizedNos, yearMonth);
-};
+    issues: TaxInvoiceIssue[]
+): Promise<TaxInvoiceIssue[]> => normalizeIssueNos(issues);
 
 export const taxInvoiceListService = {
     async addIssue(
@@ -266,7 +313,7 @@ export const taxInvoiceListService = {
     async getIssuesByMonth(yearMonth: string): Promise<TaxInvoiceIssue[]> {
         const issues = await fetchIssuesByMonth(yearMonth);
         const siteSyncedIssues = await syncIssueRecipientsWithCurrentSites(issues);
-        return normalizeIssuesForMonth(siteSyncedIssues, yearMonth);
+        return normalizeIssuesForMonth(siteSyncedIssues);
     },
 
     async getDeferredIssuesByMonth(yearMonth: string): Promise<TaxInvoiceIssue[]> {
@@ -276,7 +323,7 @@ export const taxInvoiceListService = {
 
     async renumberIssuesByMonth(yearMonth: string): Promise<TaxInvoiceIssue[]> {
         const issues = await fetchIssuesByMonth(yearMonth);
-        return normalizeIssuesForMonth(issues, yearMonth);
+        return normalizeIssuesForMonth(issues);
     },
 
     /**
@@ -288,20 +335,37 @@ export const taxInvoiceListService = {
         const startDate = `${year}-${month}-01`;
         const endDate = getMonthEndDate(yearMonth);
 
-        const [{ dailyReportService }, { siteService }] = await Promise.all([
+        const [{ dailyReportService }, { siteService }, { companyService }] = await Promise.all([
             import('./dailyReportService'),
             import('./siteService'),
+            import('./companyService'),
         ]);
-        const [rows, sites] = await Promise.all([
+        const [rows, sites, companies] = await Promise.all([
             dailyReportService.getWorkerRows({ startDate, endDate }),
             siteService.getSites().catch(() => [] as SiteLookupRow[]),
+            companyService.getCompanies().catch(() => [] as CompanyLookupRow[]),
         ]);
         const siteLookup = buildSiteLookup(sites);
+        const companyLookup = buildCompanyLookup(companies);
 
         const resolveSavedReportCompanyName = (row: any, siteType: string) => {
             const candidateNames = siteType === '지원'
-                ? [row.partnerName, row.companyName, row.constructorCompanyName]
-                : [row.companyName, row.constructorCompanyName, row.partnerName];
+                ? [
+                    resolveCompanyNameById(companyLookup, row.partnerId),
+                    row.partnerName,
+                    resolveCompanyNameById(companyLookup, row.companyId),
+                    row.companyName,
+                    resolveCompanyNameById(companyLookup, row.constructorCompanyId),
+                    row.constructorCompanyName,
+                ]
+                : [
+                    resolveCompanyNameById(companyLookup, row.companyId),
+                    row.companyName,
+                    resolveCompanyNameById(companyLookup, row.constructorCompanyId),
+                    row.constructorCompanyName,
+                    resolveCompanyNameById(companyLookup, row.partnerId),
+                    row.partnerName,
+                ];
 
             return candidateNames.map(normalizeText).find(value => value && !isGenericCompanyLabel(value)) || '';
         };
@@ -321,7 +385,7 @@ export const taxInvoiceListService = {
 
             const savedCompanyName = resolveSavedReportCompanyName(row, siteType);
             const site = findSiteFromLookup(siteLookup, siteId, siteName);
-            const companyName = resolveCurrentSiteCompanyName(site, siteType, savedCompanyName);
+            const companyName = resolveCurrentSiteCompanyName(site, siteType, savedCompanyName, companyLookup);
 
             const teamKey = normalizeText(row.responsibleTeamId) || normalizeText(row.responsibleTeamName) || normalizeText(row.teamId) || teamName;
             const key = `${siteId || siteName}|${siteType}|${paymentType}|${teamKey}|${companyName}`;
@@ -345,6 +409,6 @@ export const taxInvoiceListService = {
         // 공수를 소수점 첫째 자리까지 반올림
         const results = Array.from(aggregateMap.values());
         results.forEach(s => { s.manDays = Math.round(s.manDays * 10) / 10; });
-        return results.sort((a, b) => a.siteName.localeCompare(b.siteName, 'ko'));
+        return results.sort(compareSiteWorkSummary);
     },
 };

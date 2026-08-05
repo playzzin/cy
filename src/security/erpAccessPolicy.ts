@@ -174,6 +174,7 @@ export const ERP_RECRUITING_COLLECTIONS = [
 export const ERP_FINANCE_COLLECTIONS = [
   'advance_payments',
   'advance_requests',
+  'monthly_payroll_settlements',
   'payments',
   'tax_invoices',
   'receivables',

@@ -2,7 +2,7 @@
     min-height: 100%;
     background:
         linear-gradient(180deg, #eef3fb 0%, #f8fafc 100%);
-    padding: 24px;
+    padding: 20px clamp(18px, 1.5vw, 32px) 28px;
     color: #1f2937;
     font-family: 'Segoe UI', 'Malgun Gothic', sans-serif;
 }
@@ -11,8 +11,9 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    max-width: 1600px;
-    margin: 0 auto;
+    width: 100%;
+    max-width: none;
+    margin: 0;
 }
 
 .workbook-titlebar {
@@ -24,21 +25,24 @@
 
 .workbook-titlebar h1 {
     margin: 0;
-    font-size: 28px;
+    font-size: 26px;
     font-weight: 800;
-    letter-spacing: -0.03em;
+    letter-spacing: 0;
     color: #172554;
 }
 
 .workbook-titlebar p {
     margin: 6px 0 0;
     color: #475569;
-    font-size: 14px;
+    font-size: 12px;
 }
 
 .workbook-title-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
+    max-width: 100%;
+    justify-content: flex-end;
 }
 
 .workbook-toolbar-button,
@@ -51,7 +55,7 @@
     border: 1px solid rgba(15, 23, 42, 0.18);
     border-radius: 10px;
     padding: 10px 14px;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 700;
     line-height: 1.2;
     white-space: nowrap;
@@ -83,16 +87,16 @@
     width: 100%;
     min-height: 36px;
     padding: 8px 10px;
-    font-size: 12px;
+    font-size: 13px;
 }
 
 .workbook-inline-actions-horizontal .workbook-inline-button {
     width: auto;
     min-width: 52px;
     flex: 1 1 0;
-    min-height: 32px;
+    min-height: 34px;
     padding: 6px 8px;
-    font-size: 11px;
+    font-size: 12px;
 }
 
 .workbook-danger-button {
@@ -127,6 +131,31 @@
     color: #f8fafc;
 }
 
+.excel-button-purple {
+    background: linear-gradient(180deg, #6d28d9 0%, #4c1d95 100%);
+    color: #f8fafc;
+}
+
+.workbook-button-label-short {
+    display: none;
+}
+
+@media (max-width: 720px) {
+    .input-sheet-table .excel-button {
+        gap: 4px;
+        padding-inline: 5px;
+        font-size: 12px;
+    }
+
+    .workbook-button-label-full {
+        display: none;
+    }
+
+    .workbook-button-label-short {
+        display: inline;
+    }
+}
+
 .workbook-toolbar-button:hover,
 .excel-button:hover {
     transform: translateY(-1px);
@@ -156,7 +185,7 @@
 .workbook-tenant-tab {
     padding: 8px 14px;
     border-radius: 999px;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 800;
     line-height: 1;
     cursor: pointer;
@@ -208,7 +237,7 @@
     color: #334155;
     padding: 10px 16px;
     border-radius: 12px 12px 0 0;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 700;
     white-space: nowrap;
     cursor: pointer;
@@ -238,7 +267,7 @@
     border-radius: 8px;
     background: #ffffff;
     color: #334155;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 800;
     cursor: pointer;
 }
@@ -289,7 +318,7 @@
 
     .workbook-tenant-tab {
         padding: 7px 12px;
-        font-size: 12px;
+        font-size: 14px;
     }
 
     .workbook-summary-mode-tabs {
@@ -314,8 +343,8 @@
 .sheet-control-table th,
 .sheet-control-table td {
     border: 1px solid #d8dee7;
-    padding: 8px 10px;
-    font-size: 13px;
+    padding: 12px 14px;
+    font-size: 18px;
     text-align: left;
     vertical-align: middle;
 }
@@ -323,22 +352,53 @@
 .sheet-control-table input,
 .sheet-control-table select {
     width: 100%;
-    height: 34px;
+    height: 42px;
     border: none;
     background: transparent;
     color: #0f172a;
-    font-size: 13px;
+    font-size: 18px;
     outline: none;
 }
 
 .sheet-title-dark {
     background: linear-gradient(180deg, #263240 0%, #19212c 100%);
     color: #f8fafc;
-    font-size: 18px;
+    font-size: 19px;
     font-weight: 800;
     text-align: center;
     letter-spacing: 0.02em;
     padding: 14px 12px;
+}
+
+.sheet-control-table .sheet-title-dark {
+    font-size: 19px;
+}
+
+/* 입력폼의 큰 글자 크기에 맞춰 입력 여백만 컴팩트하게 유지합니다. */
+.input-sheet-table tr:not(:first-child) > th,
+.input-sheet-table tr:not(:first-child) > td {
+    padding: 7px 10px;
+}
+
+.input-sheet-table input,
+.input-sheet-table select {
+    height: 34px;
+    line-height: 1.3;
+}
+
+.input-sheet-table .sheet-label-yellow {
+    white-space: nowrap;
+    font-size: 14px;
+}
+
+.input-sheet-table .sheet-value input,
+.input-sheet-table .sheet-value select {
+    font-size: 14px;
+}
+
+.input-sheet-table .excel-button {
+    min-height: 36px;
+    padding: 7px 10px;
 }
 
 .sheet-label-yellow {
@@ -427,12 +487,12 @@
 
 .workbook-db-mapping-summary strong {
     color: #0f172a;
-    font-size: 13px;
+    font-size: 16px;
 }
 
 .workbook-db-mapping-summary span {
     color: #1e40af;
-    font-size: 13px;
+    font-size: 16px;
     font-weight: 800;
 }
 
@@ -452,23 +512,27 @@
 
 .query-sheet-table th,
 .query-sheet-table td {
-    padding: 5px 8px;
+    padding: 7px 8px;
+    font-size: 14px;
+    line-height: 1.3;
 }
 
 .query-sheet-table input,
 .query-sheet-table select,
 .sheet-filter-input {
-    height: 28px;
-    font-size: 12px;
+    height: 36px;
+    font-size: 14px;
 }
 
 .query-sheet-table .sheet-value,
 .query-sheet-table .sheet-value-light {
-    padding: 4px 8px;
+    padding: 6px 8px;
 }
 
 .query-sheet-table .sheet-label-blue,
 .query-sheet-table .sheet-label-green {
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
 }
 
@@ -485,14 +549,18 @@
 }
 
 .query-sheet-table .excel-button {
-    min-height: 34px;
-    padding: 7px 10px;
+    gap: 4px;
+    letter-spacing: -0.02em;
+    min-height: 38px;
+    overflow: hidden;
+    padding: 7px 4px;
     font-size: 12px;
+    text-overflow: ellipsis;
 }
 
 .sheet-button-count {
     color: #475569;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
     text-align: right;
     line-height: 1.2;
@@ -676,6 +744,19 @@
     background: #f8fafc;
 }
 
+.workbook-grid-loading {
+    display: flex;
+    min-height: 760px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #d7dde7;
+    border-radius: 12px;
+    background: #ffffff;
+    color: #64748b;
+    font-size: 16px;
+    font-weight: 700;
+}
+
 .workbook-input-grid .handsontable {
     border-radius: 12px;
     overflow: hidden;
@@ -691,11 +772,27 @@
     color: #f8fafc;
     font-weight: 700;
     border-color: #1a2330;
+    /* 입력폼·DB·조회 탭과 같은 크기로 열 제목을 통일합니다. */
+    font-size: 14px;
+    vertical-align: middle;
 }
 
 .workbook-input-grid .handsontable tbody td {
     border-color: #d7dde7;
     background: #ffffff;
+    font-size: calc(18px - 2pt);
+    line-height: 1.3;
+    vertical-align: middle;
+}
+
+.workbook-input-grid .handsontable tbody th {
+    vertical-align: middle;
+}
+
+.workbook-input-grid .handsontableInput {
+    font-size: calc(18px - 2pt);
+    line-height: 24px;
+    padding: 4px 5px 3px;
 }
 
 .workbook-input-grid .handsontable .workbook-readonly-cell {
@@ -713,10 +810,10 @@
 }
 
 .sheet-merged-heading {
-    padding: 14px 16px;
+    padding: 16px 18px;
     background: linear-gradient(180deg, #365f91 0%, #27466b 100%);
     color: #ffffff;
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 800;
 }
 
@@ -725,9 +822,10 @@
 }
 
 .sheet-table-wrapper.workbook-frozen-table-wrapper {
-    max-height: min(78vh, 820px);
+    max-height: min(82vh, 920px);
     overscroll-behavior: contain;
     scrollbar-gutter: stable both-edges;
+    container-type: inline-size;
     background: #ffffff;
 }
 
@@ -744,8 +842,9 @@
 .sheet-table th,
 .sheet-table td {
     border: 1px solid #d7dde7;
-    padding: 8px 10px;
-    font-size: 13px;
+    padding: 10px 12px;
+    font-size: 15px;
+    line-height: 1.35;
     background: #ffffff;
 }
 
@@ -768,91 +867,111 @@
     font-weight: 700;
 }
 
+.workbook-ledger-table {
+    min-width: 1460px;
+}
+
 .workbook-ledger-table .workbook-ledger-col-date {
-    width: 82px;
+    width: 100px;
 }
 
 .workbook-ledger-table .workbook-ledger-col-partner {
-    width: 160px;
+    width: 200px;
 }
 
 .workbook-ledger-table .workbook-ledger-col-description {
-    width: 220px;
+    width: 280px;
 }
 
 .workbook-ledger-table .workbook-ledger-col-transaction,
 .workbook-ledger-table .workbook-ledger-col-payment,
 .workbook-ledger-table .workbook-ledger-col-balance {
-    width: 92px;
+    width: 120px;
 }
 
 .workbook-ledger-table .workbook-ledger-col-site {
-    width: 200px;
+    width: 240px;
 }
 
 .workbook-ledger-table .workbook-ledger-col-note {
-    width: 100px;
+    width: 140px;
 }
 
 .workbook-ledger-table .workbook-ledger-col-team {
-    width: 64px;
+    width: 90px;
+}
+
+.workbook-summary-table {
+    min-width: 1680px;
+}
+
+.workbook-summary-table .workbook-summary-col-select {
+    width: 68px;
 }
 
 .workbook-summary-table .workbook-summary-col-no {
-    width: 42px;
+    width: 50px;
 }
 
 .workbook-summary-table .workbook-summary-col-partner {
-    width: 132px;
+    width: 145px;
 }
 
 .workbook-summary-table .workbook-summary-col-site {
-    width: 250px;
+    width: 220px;
 }
 
 .workbook-summary-table .workbook-summary-col-issue-date {
-    width: 74px;
+    width: 105px;
 }
 
 .workbook-summary-table .workbook-summary-col-amount,
-.workbook-summary-table .workbook-summary-col-tax,
 .workbook-summary-table .workbook-summary-col-total,
 .workbook-summary-table .workbook-summary-col-settled,
+.workbook-summary-table .workbook-summary-col-advance {
+    width: 105px;
+}
+
+.workbook-summary-table .workbook-summary-col-tax {
+    width: 90px;
+}
+
 .workbook-summary-table .workbook-summary-col-outstanding {
-    width: 80px;
+    width: 110px;
 }
 
 .workbook-summary-table .workbook-summary-col-payment-date {
-    width: 74px;
+    width: 105px;
 }
 
 .workbook-summary-table .workbook-summary-col-note {
-    width: 156px;
+    width: 130px;
 }
 
 .workbook-summary-table .workbook-summary-col-team {
-    width: 54px;
+    width: 64px;
 }
 
 .workbook-summary-table .workbook-summary-col-action {
-    width: 110px;
+    width: 164px;
 }
 
 .workbook-summary-table th:first-child,
 .workbook-summary-table td:first-child {
-    padding-left: 6px;
-    padding-right: 6px;
+    padding-left: 8px;
+    padding-right: 8px;
 }
 
 .workbook-summary-table th,
 .workbook-summary-table td {
-    padding: 6px 7px;
-    font-size: 12px;
+    padding: 8px;
+    font-size: 14px;
+    line-height: 1.3;
 }
 
 .workbook-summary-table .summary-header th {
-    padding-top: 7px;
-    padding-bottom: 7px;
+    padding-top: 9px;
+    padding-bottom: 9px;
 }
 
 .workbook-summary-table th:first-child,
@@ -867,9 +986,39 @@
 .workbook-summary-table td:nth-child(5),
 .workbook-summary-table th:nth-child(9),
 .workbook-summary-table td:nth-child(9),
-.workbook-summary-table th:nth-child(13),
-.workbook-summary-table td:nth-child(13) {
+.workbook-summary-table th:nth-child(14),
+.workbook-summary-table td:nth-child(14) {
     text-align: center;
+}
+
+.workbook-summary-table th:nth-child(5),
+.workbook-summary-table td:nth-child(5),
+.workbook-summary-table th:nth-child(6),
+.workbook-summary-table td:nth-child(6),
+.workbook-summary-table th:nth-child(7),
+.workbook-summary-table td:nth-child(7),
+.workbook-summary-table th:nth-child(8),
+.workbook-summary-table td:nth-child(8),
+.workbook-summary-table th:nth-child(9),
+.workbook-summary-table td:nth-child(9),
+.workbook-summary-table th:nth-child(10),
+.workbook-summary-table td:nth-child(10),
+.workbook-summary-table th:nth-child(11),
+.workbook-summary-table td:nth-child(11),
+.workbook-summary-table th:nth-child(12),
+.workbook-summary-table td:nth-child(12) {
+    white-space: nowrap;
+    word-break: keep-all;
+    overflow-wrap: normal;
+}
+
+.workbook-summary-table td:nth-child(6),
+.workbook-summary-table td:nth-child(7),
+.workbook-summary-table td:nth-child(8),
+.workbook-summary-table td:nth-child(10),
+.workbook-summary-table td:nth-child(11),
+.workbook-summary-table td:nth-child(12) {
+    font-variant-numeric: tabular-nums;
 }
 
 .workbook-summary-select-btn {
@@ -893,15 +1042,15 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
     color: #0f172a;
     white-space: nowrap;
 }
 
 .workbook-summary-select-checkbox {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     accent-color: #2563eb;
     cursor: pointer;
     vertical-align: middle;
@@ -914,9 +1063,9 @@
 }
 
 .workbook-summary-table .workbook-inline-actions-horizontal .workbook-inline-button {
-    min-height: 28px;
-    padding: 5px 7px;
-    font-size: 10px;
+    min-height: 34px;
+    padding: 6px 8px;
+    font-size: 12px;
 }
 
 .workbook-summary-table .cell-date-list {
@@ -924,8 +1073,133 @@
     line-height: 1.2;
 }
 
+.workbook-summary-table .cell-date-list > div {
+    white-space: nowrap;
+}
+
 .workbook-summary-table td:nth-child(9) .cell-date-list {
     align-items: center;
+}
+
+@container (max-width: 1100px) {
+    .workbook-summary-table {
+        min-width: 1600px;
+    }
+
+    .workbook-summary-table .workbook-summary-col-select {
+        width: 60px;
+    }
+
+    .workbook-summary-table .workbook-summary-col-no {
+        width: 44px;
+    }
+
+    .workbook-summary-table .workbook-summary-col-partner {
+        width: 130px;
+    }
+
+    .workbook-summary-table .workbook-summary-col-site {
+        width: 190px;
+    }
+
+    .workbook-summary-table .workbook-summary-col-issue-date,
+    .workbook-summary-table .workbook-summary-col-payment-date {
+        width: 100px;
+    }
+
+    .workbook-summary-table .workbook-summary-col-amount,
+    .workbook-summary-table .workbook-summary-col-total,
+    .workbook-summary-table .workbook-summary-col-settled,
+    .workbook-summary-table .workbook-summary-col-advance {
+        width: 100px;
+    }
+
+    .workbook-summary-table .workbook-summary-col-tax {
+        width: 84px;
+    }
+
+    .workbook-summary-table .workbook-summary-col-outstanding {
+        width: 104px;
+    }
+
+    .workbook-summary-table .workbook-summary-col-note {
+        width: 120px;
+    }
+
+    .workbook-summary-table .workbook-summary-col-team {
+        width: 60px;
+    }
+
+    .workbook-summary-table .workbook-summary-col-action {
+        width: 154px;
+    }
+
+    .workbook-summary-table th,
+    .workbook-summary-table td,
+    .workbook-summary-table th:first-child,
+    .workbook-summary-table td:first-child {
+        padding: 8px 7px;
+        font-size: 14px;
+        line-height: 1.3;
+    }
+
+    .workbook-summary-table .summary-header th {
+        padding-top: 9px;
+        padding-bottom: 9px;
+    }
+
+    .workbook-summary-table th:nth-child(5),
+    .workbook-summary-table td:nth-child(5),
+    .workbook-summary-table th:nth-child(6),
+    .workbook-summary-table td:nth-child(6),
+    .workbook-summary-table th:nth-child(7),
+    .workbook-summary-table td:nth-child(7),
+    .workbook-summary-table th:nth-child(8),
+    .workbook-summary-table td:nth-child(8),
+    .workbook-summary-table th:nth-child(9),
+    .workbook-summary-table td:nth-child(9),
+    .workbook-summary-table th:nth-child(10),
+    .workbook-summary-table td:nth-child(10),
+    .workbook-summary-table th:nth-child(11),
+    .workbook-summary-table td:nth-child(11),
+    .workbook-summary-table th:nth-child(12),
+    .workbook-summary-table td:nth-child(12) {
+        white-space: nowrap;
+        word-break: keep-all;
+        overflow-wrap: normal;
+    }
+
+    .workbook-summary-select-inline {
+        gap: 0;
+    }
+
+    .workbook-summary-select-inline span {
+        display: none;
+    }
+
+    .workbook-summary-select-checkbox {
+        width: 18px;
+        height: 18px;
+    }
+
+    .workbook-summary-table .workbook-inline-actions-horizontal {
+        flex-direction: row;
+        gap: 6px;
+    }
+
+    .workbook-summary-table .workbook-inline-actions-horizontal .workbook-inline-button {
+        width: auto;
+        min-width: 52px;
+        min-height: 34px;
+        padding: 6px 8px;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+
+    .workbook-summary-table .cell-date-list {
+        gap: 2px;
+        line-height: 1.25;
+    }
 }
 
 .sheet-empty-state {
@@ -1100,7 +1374,7 @@
     border: 1px solid #d7dde7;
     border-radius: 8px;
     background: #f8fafc;
-    font-size: 13px;
+    font-size: 16px;
 }
 
 .workbook-match-candidate-list {
@@ -1141,7 +1415,7 @@
 }
 
 .workbook-match-candidate-row strong {
-    font-size: 13px;
+    font-size: 16px;
     color: #0f172a;
 }
 
@@ -1252,12 +1526,22 @@
         flex-direction: column;
     }
 
+    .workbook-title-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .workbook-title-actions .workbook-toolbar-button {
+        flex: 1 1 112px;
+        padding-inline: 10px;
+    }
+
     .sheet-control-table th,
     .sheet-control-table td,
     .sheet-table th,
     .sheet-table td {
-        font-size: 12px;
-        padding: 7px 8px;
+        font-size: 14px;
+        padding: 8px;
     }
 
     .sheet-title-dark {
@@ -1316,7 +1600,7 @@
 
 .workbook-vat-metric-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
     gap: 10px;
     margin: 12px 0;
 }
@@ -1371,6 +1655,92 @@
 
 .workbook-vat-metric-muted {
     background: #f8fafc;
+}
+
+.workbook-vat-metric-payment {
+    border-color: #86efac;
+    background: #f0fdf4;
+}
+
+.workbook-vat-metric-remaining {
+    border-color: #fde68a;
+    background: #fffbeb;
+}
+
+.workbook-vat-payment-panel {
+    border-color: #c7d2fe;
+    background: #f8faff;
+}
+
+.workbook-vat-payment-form {
+    display: flex;
+    align-items: end;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.workbook-vat-payment-form label {
+    display: flex;
+    min-width: 150px;
+    flex: 1 1 150px;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.workbook-vat-payment-form label span {
+    color: #475569;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.workbook-vat-payment-form input {
+    min-width: 0;
+    width: 100%;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    background: #ffffff;
+    padding: 7px 8px;
+    color: #0f172a;
+    font-size: 13px;
+}
+
+.workbook-vat-payment-form label:nth-child(2) input {
+    font-weight: 800;
+    text-align: right;
+}
+
+.workbook-vat-payment-form input:disabled {
+    background: #f8fafc;
+    color: #64748b;
+}
+
+.workbook-vat-payment-form button {
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 0 12px;
+}
+
+.workbook-vat-payment-form button:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.workbook-vat-payment-note-field {
+    flex-basis: 240px !important;
+}
+
+.workbook-vat-payment-history-wrapper {
+    max-height: 260px;
+}
+
+.workbook-vat-payment-history-table {
+    min-width: 660px;
+}
+
+.workbook-vat-payment-history-table td:nth-child(1),
+.workbook-vat-payment-history-table td:last-child {
+    text-align: center;
 }
 
 .workbook-vat-grid {

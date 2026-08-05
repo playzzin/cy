@@ -3,8 +3,8 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faProjectDiagram, faUser, faBuilding, faSync, faUsers, faMapMarkerAlt,
     faUserGroup, faIndustry, faSearch, faFilter, faExclamationTriangle,
-    faCheckCircle, faChartLine, faNetworkWired, faInfoCircle, faTimes,
-    faSave, faUndo, faExpand, faCompress
+    faCheckCircle, faChartLine, faInfoCircle,
+    faExpand, faCompress
 } from '@fortawesome/free-solid-svg-icons';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';

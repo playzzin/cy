@@ -48,6 +48,10 @@ const BILLING_FIELD_LABELS: Record<string, string> = {
   memo: '메모',
   statementAttachmentPaths: '명세서 첨부',
   confirmedAt: '확정일시',
+  confirmationCancelReason: '확정취소 사유',
+  confirmationCancelledAt: '확정취소 일시',
+  confirmationCancelledById: '확정취소 작업자 ID',
+  confirmationCancelledByName: '확정취소 작업자',
 };
 
 const LINE_ITEM_FIELD_LABELS: Record<string, string> = {
@@ -142,6 +146,10 @@ const snapshotBilling = (billing?: Partial<CardBillingDocument> | null): Partial
     lineItems: Array.isArray(billing.lineItems) ? billing.lineItems.map(snapshotLineItem) : [],
     statementAttachmentPaths: Array.isArray(billing.statementAttachmentPaths) ? billing.statementAttachmentPaths.map(String) : [],
     memo: billing.memo,
+    confirmationCancelReason: billing.confirmationCancelReason,
+    confirmationCancelledAt: normalizeTimestamp(billing.confirmationCancelledAt),
+    confirmationCancelledById: billing.confirmationCancelledById,
+    confirmationCancelledByName: billing.confirmationCancelledByName,
     createdAt: normalizeTimestamp(billing.createdAt),
     updatedAt: normalizeTimestamp(billing.updatedAt),
     confirmedAt: normalizeTimestamp(billing.confirmedAt),

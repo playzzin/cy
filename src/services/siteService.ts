@@ -162,6 +162,17 @@ export const siteService = {
         return rows;
     },
 
+    getSitesByClientCompanyIds: async (companyIds: string[]): Promise<Site[]> => {
+        const ids = Array.from(new Set(companyIds.map((value) => String(value ?? '').trim()).filter(Boolean)));
+        const groups = await Promise.all(ids.map((companyId) => siteFirestoreService.getSitesByClientCompany(companyId)));
+        const byId = new Map<string, Site>();
+        groups.flat().forEach((site) => {
+            const id = String(site.id || '').trim();
+            if (id) byId.set(id, site);
+        });
+        return Array.from(byId.values());
+    },
+
     getSiteByName: async (name: string): Promise<Site | null> => {
         return siteFirestoreService.getSiteByCode(name); // Note: Original was getSiteByName but implementing via code/name search
     },

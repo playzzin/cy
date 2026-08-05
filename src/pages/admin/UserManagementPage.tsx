@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faArrowsRotate,
@@ -9,8 +9,7 @@ import {
     faSpinner,
     faSitemap,
     faTag,
-    faUserGear,
-    faUserTag
+    faUserGear
 } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { useAuth } from '../../contexts/AuthContext';
@@ -19,29 +18,23 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { officeStaffService, OfficeStaff } from '../../services/officeStaffService';
 import { positionService, Position } from '../../services/positionService';
 import { userMenuPositionService, UserMenuPositionMap } from '../../services/userMenuPositionService';
+import { userAccessClaimsService } from '../../services/userAccessClaimsService';
 import { menuServiceV11 } from '../../services/menuServiceV11';
-import { MenuItem, SiteDataType } from '../../types/menu';
-import { UserRole } from '../../types/roles';
-import { MENU_PATHS } from '../../constants/menuPaths';
+import { permissionAuditService } from '../../services/permissionAuditService';
+import { SiteDataType } from '../../types/menu';
 import AccountLinkManager from '../../components/admin/AccountLinkManager';
+import IntegratedPositionManager from '../../components/admin/IntegratedPositionManager';
+import { flattenMenuPermissions } from '../../features/permission-matrix/permissionMatrix';
+import { buildMenuAccessRoles, canAccessMenuRoles } from '../../utils/menuAccess';
+import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 
 type CanonicalSystemRole = 'admin' | 'manager' | 'user';
-
-interface MenuLeaf {
-    text: string;
-    roles: string[];
-}
+type UserManagementSection = 'access' | 'account-links' | 'positions' | 'integrity';
 
 const SYSTEM_ROLE_OPTIONS: Array<{ value: CanonicalSystemRole; label: string }> = [
     { value: 'admin', label: '관리자' },
     { value: 'manager', label: '매니저' },
     { value: 'user', label: '일반' }
-];
-
-const POSITION_ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
-    { value: UserRole.ADMIN, label: '관리자' },
-    { value: UserRole.MANAGER, label: '매니저' },
-    { value: UserRole.GENERAL, label: '일반' }
 ];
 
 const normalizeSystemRole = (role: unknown): CanonicalSystemRole => {
@@ -51,58 +44,57 @@ const normalizeSystemRole = (role: unknown): CanonicalSystemRole => {
     return 'user';
 };
 
-const getPositionAliases = (position: string): Set<string> => {
-    const alias = new Set<string>();
-    const base = String(position || '').trim() || '일반';
-    alias.add(base);
-    if (base === '사장' || base === '실장' || base === '관리자') ['admin', '관리자', '사장', '실장'].forEach((v) => alias.add(v));
-    if (base.startsWith('매니저') || base.startsWith('메니저')) ['manager', '매니저', '메니저', '매니저1', '매니저2', '매니저3', '메니저1', '메니저2', '메니저3'].forEach((v) => alias.add(v));
-    if (base === '일반') ['user', 'general', '일반'].forEach((v) => alias.add(v));
-    if (base === '신규자' || base === '신규') ['신규자', '신규', 'newbie'].forEach((v) => alias.add(v));
-    return alias;
-};
+const USER_MANAGEMENT_SECTIONS: Array<{
+    id: UserManagementSection;
+    label: string;
+    description: string;
+    path: string;
+    icon: typeof faUserGear;
+}> = [
+    {
+        id: 'access',
+        label: '사용자 권한',
+        description: '사용자별 시스템 권한과 기본·추가 직책을 설정합니다.',
+        path: '/admin/user-management',
+        icon: faUserGear
+    },
+    {
+        id: 'account-links',
+        label: '계정 연동',
+        description: '사용자 계정과 작업자·사무실 직원 정보를 연결합니다.',
+        path: '/admin/user-management/account-links',
+        icon: faShieldHalved
+    },
+    {
+        id: 'positions',
+        label: '직책 관리',
+        description: '직책 체계, 권한 그룹, 인력 배정을 관리합니다.',
+        path: '/admin/user-management/positions',
+        icon: faSitemap
+    },
+    {
+        id: 'integrity',
+        label: '정합성 점검',
+        description: '사용자와 연동 인력의 직책·권한 데이터를 점검하고 보정합니다.',
+        path: '/admin/user-management/integrity',
+        icon: faCircleInfo
+    }
+];
 
-const expandLegacyRole = (role: string): string[] => {
-    const raw = String(role || '').trim();
-    if (!raw) return [];
-    if (raw === 'admin') return ['사장', '관리자'];
-    if (raw === 'manager') return ['매니저', '매니저1', '매니저2', '매니저3'];
-    if (raw === 'user' || raw === 'general') return ['일반'];
-    if (raw === 'newbie') return ['신규자', '신규'];
-    return [raw];
-};
-
-const isMenuAllowed = (roles: string[], aliases: Set<string>): boolean => {
-    if (!roles || roles.length === 0) return true;
-    return roles.flatMap((role) => expandLegacyRole(role)).some((role) => aliases.has(role));
-};
-
-const toMenuItem = (item: string | MenuItem): MenuItem => {
-    if (typeof item === 'string') return { text: item, path: MENU_PATHS[item] };
-    return item;
-};
-
-const collectLeafMenus = (items: Array<string | MenuItem>): MenuLeaf[] => {
-    const leaves: MenuLeaf[] = [];
-    items.forEach((raw) => {
-        const item = toMenuItem(raw);
-        if (!item.text) return;
-        const children = Array.isArray(item.sub) ? item.sub : [];
-        if (children.length > 0) {
-            leaves.push(...collectLeafMenus(children));
-            return;
-        }
-        leaves.push({
-            text: item.text,
-            roles: Array.isArray(item.roles) ? item.roles.filter((v): v is string => typeof v === 'string' && v.trim().length > 0) : []
-        });
-    });
-    return leaves;
+const getUserManagementSection = (pathname: string): UserManagementSection => {
+    if (pathname.endsWith('/account-links')) return 'account-links';
+    if (pathname.endsWith('/positions')) return 'positions';
+    if (pathname.endsWith('/integrity')) return 'integrity';
+    return 'access';
 };
 
 const UserManagementPage: React.FC = () => {
     const navigate = useNavigate();
+    const location = useLocation();
     const { currentUser } = useAuth();
+    const devAdminMode = isDevAdminSessionEnabled();
+    const activeSection = getUserManagementSection(location.pathname);
+    const activeSectionMeta = USER_MANAGEMENT_SECTIONS.find((section) => section.id === activeSection) || USER_MANAGEMENT_SECTIONS[0];
 
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -119,11 +111,10 @@ const UserManagementPage: React.FC = () => {
     const [draftRole, setDraftRole] = useState<CanonicalSystemRole>('user');
     const [draftPosition, setDraftPosition] = useState('일반');
     const [draftAdditionalPositions, setDraftAdditionalPositions] = useState<string[]>([]);
-    const [syncLinkedWorkerRole, setSyncLinkedWorkerRole] = useState(true);
+    const [syncLinkedWorkerRole, setSyncLinkedWorkerRole] = useState(false);
 
     const [savingCore, setSavingCore] = useState(false);
     const [savingAdditional, setSavingAdditional] = useState(false);
-    const [savingPositionRoleId, setSavingPositionRoleId] = useState('');
     const [runningAutoFix, setRunningAutoFix] = useState(false);
 
     const loadAll = useCallback(async () => {
@@ -308,36 +299,19 @@ const UserManagementPage: React.FC = () => {
         }
     };
 
-    const previewLeaves = useMemo(() => {
-        const site = menuConfig?.admin;
-        if (!site) return [];
-        return collectLeafMenus(site.menu || []);
+    const previewMenuRows = useMemo(() => {
+        return flattenMenuPermissions(menuConfig, { selectedSite: 'admin' });
     }, [menuConfig]);
 
-    const previewAliases = useMemo(() => {
-        const aliases = new Set<string>();
-        getPositionAliases(draftPosition).forEach((alias) => aliases.add(alias));
-        draftAdditionalPositions.forEach((pos) => {
-            getPositionAliases(pos).forEach((alias) => aliases.add(alias));
-        });
-        return aliases;
+    const previewAccessRoles = useMemo(() => {
+        return buildMenuAccessRoles(draftPosition, draftAdditionalPositions);
     }, [draftPosition, draftAdditionalPositions]);
 
     const previewSummary = useMemo(() => {
-        const total = previewLeaves.length;
-        const allowed = previewLeaves.filter((leaf) => isMenuAllowed(leaf.roles, previewAliases)).length;
+        const total = previewMenuRows.length;
+        const allowed = previewMenuRows.filter((row) => canAccessMenuRoles(previewAccessRoles, row.roles)).length;
         return { total, allowed, blocked: total - allowed };
-    }, [previewLeaves, previewAliases]);
-
-    const positionSummary = useMemo(() => {
-        return positions.map((position) => ({
-            position,
-            users: users.filter((user) => String(user.position || '').trim() === position.name).length,
-            extraUsers: users.filter((user) => (userPositionMap[user.uid] || []).includes(position.name)).length,
-            workers: workers.filter((worker) => String(worker.role || '').trim() === position.name).length,
-            officeStaff: officeStaffRows.filter((staff) => String(staff.role || '').trim() === position.name).length
-        }));
-    }, [officeStaffRows, positions, users, userPositionMap, workers]);
+    }, [previewAccessRoles, previewMenuRows]);
 
     const handleAutoSyncUserPositionFromLinkedWorker = async () => {
         setRunningAutoFix(true);
@@ -404,6 +378,9 @@ const UserManagementPage: React.FC = () => {
                 const cleaned = current.filter((name) => validPositionNames.has(String(name).trim()));
                 if (cleaned.length === current.length) continue;
                 await userMenuPositionService.setPositions(user.uid, cleaned);
+                await userAccessClaimsService.syncUser(user.uid).catch((claimError) => {
+                    console.warn('[UserManagementPage] claim sync failed:', claimError);
+                });
                 updatedCount += 1;
             }
             await userMenuPositionService.refresh();
@@ -416,54 +393,60 @@ const UserManagementPage: React.FC = () => {
         }
     };
 
-    const handleSaveCore = async () => {
+    const handleSaveSelectedUserAccess = async () => {
         if (!selectedUser) return;
         setSavingCore(true);
+        setSavingAdditional(true);
         try {
+            const beforeAccess = {
+                systemRole: normalizeSystemRole(selectedUser.role),
+                position: String(selectedUser.position || ''),
+                additionalPositions: [...(userPositionMap[selectedUser.uid] || [])].sort(),
+            };
+            const afterAccess = {
+                systemRole: draftRole,
+                position: draftPosition,
+                additionalPositions: [...draftAdditionalPositions].sort(),
+            };
             await userService.updateUserRole(selectedUser.uid, draftRole);
             await userService.updateUserProfile(selectedUser.uid, { position: draftPosition });
+            await userMenuPositionService.setPositions(selectedUser.uid, draftAdditionalPositions);
             if (syncLinkedWorkerRole && draftPosition) {
                 await Promise.all([
                     ...selectedLinkedWorkers.map((worker) => worker.id ? manpowerService.updateWorker(String(worker.id), { role: draftPosition }) : Promise.resolve()),
                     ...selectedLinkedOfficeStaff.map((staff) => staff.id ? officeStaffService.updateOfficeStaff(String(staff.id), { role: draftPosition }) : Promise.resolve())
                 ]);
             }
+            await userAccessClaimsService.syncUser(selectedUser.uid).catch((claimError) => {
+                console.warn('[UserManagementPage] claim sync failed:', claimError);
+            });
+            const accessChanged = JSON.stringify(beforeAccess) !== JSON.stringify(afterAccess);
+            if (accessChanged) {
+                await permissionAuditService.log({
+                    action: 'USER_ACCESS_UPDATED',
+                    targetId: selectedUser.uid,
+                    targetName: selectedUser.displayName || selectedUser.email || selectedUser.uid,
+                    details: {
+                        scope: 'user_access',
+                        before: beforeAccess,
+                        after: afterAccess,
+                        syncedLinkedProfiles: syncLinkedWorkerRole,
+                    },
+                });
+            }
             await loadAll();
-            Swal.fire('저장 완료', '사용자 권한과 기본 직책을 저장했습니다.', 'success');
+            await userMenuPositionService.refresh();
+            Swal.fire('저장 완료', '사용자 권한, 기본 직책, 추가 직책을 저장했습니다.', 'success');
         } catch (error) {
-            console.error('[UserManagementPage] save core failed:', error);
+            console.error('[UserManagementPage] save selected user access failed:', error);
             Swal.fire('오류', '저장에 실패했습니다.', 'error');
         } finally {
             setSavingCore(false);
-        }
-    };
-
-    const handleSaveAdditional = async () => {
-        if (!selectedUser) return;
-        setSavingAdditional(true);
-        try {
-            await userMenuPositionService.setPositions(selectedUser.uid, draftAdditionalPositions);
-            Swal.fire('저장 완료', '추가 직책 권한을 저장했습니다.', 'success');
-        } catch (error) {
-            console.error('[UserManagementPage] save additional failed:', error);
-            Swal.fire('오류', '추가 직책 저장에 실패했습니다.', 'error');
-        } finally {
             setSavingAdditional(false);
         }
     };
 
-    const handlePositionRoleChange = async (position: Position, nextRole: UserRole) => {
-        if (!position.id) return;
-        setSavingPositionRoleId(position.id);
-        try {
-            await positionService.updatePosition(position.id, { systemRole: nextRole });
-            setPositions(await positionService.getPositions());
-        } catch (error) {
-            console.error('[UserManagementPage] update position role failed:', error);
-        } finally {
-            setSavingPositionRoleId('');
-        }
-    };
+    const savingUserAccess = savingCore || savingAdditional;
 
     if (loading) {
         return <div className="p-10 text-center text-slate-500"><FontAwesomeIcon icon={faSpinner} spin className="mr-2" />로딩중...</div>;
@@ -474,18 +457,41 @@ const UserManagementPage: React.FC = () => {
             <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                     <div>
-                        <h1 className="text-2xl font-extrabold text-slate-800 flex items-center gap-2"><FontAwesomeIcon icon={faUserGear} className="text-red-500" />사용자 통합 관리</h1>
-                        <p className="text-sm text-slate-500 mt-1">사용자 기준으로 시스템 권한, 직책모드, 추가 직책 권한을 통합 관리합니다.</p>
+                        <h1 className="text-2xl font-extrabold text-slate-800 flex items-center gap-2"><FontAwesomeIcon icon={activeSectionMeta.icon} className="text-red-500" />사용자 관리</h1>
+                        <p className="text-sm text-slate-500 mt-1">{activeSectionMeta.description}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                         <button type="button" onClick={refreshAll} className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold"><FontAwesomeIcon icon={refreshing ? faSpinner : faArrowsRotate} spin={refreshing} className="mr-2" />새로고침</button>
-                        <button type="button" onClick={() => navigate('/admin/role-menu')} className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-bold">권한 매트릭스</button>
-                        <button type="button" onClick={() => navigate('/hr/position-management')} className="px-3 py-2 rounded-lg bg-slate-800 text-white text-sm font-bold"><FontAwesomeIcon icon={faSitemap} className="mr-2" />직책 관리</button>
+                        <button type="button" onClick={() => navigate('/admin/role-menu')} className="px-3 py-2 rounded-lg bg-slate-800 text-white text-sm font-bold"><FontAwesomeIcon icon={faShieldHalved} className="mr-2" />메뉴 권한 설정</button>
                     </div>
                 </div>
+                <nav aria-label="사용자 관리 메뉴" className="mt-5 border-t border-slate-100 pt-4">
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                        {USER_MANAGEMENT_SECTIONS.map((section) => {
+                            const isActive = section.id === activeSection;
+                            const hasIntegrityIssues = section.id === 'integrity' && Object.values(integritySummary).some((count) => count > 0);
+                            return (
+                                <button
+                                    key={section.id}
+                                    type="button"
+                                    onClick={() => navigate(section.path)}
+                                    aria-current={isActive ? 'page' : undefined}
+                                    className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-extrabold transition-colors ${isActive
+                                        ? 'border-indigo-600 bg-indigo-600 text-white shadow-sm'
+                                        : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700'
+                                    }`}
+                                >
+                                    <FontAwesomeIcon icon={section.icon} />
+                                    {section.label}
+                                    {hasIntegrityIssues && <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${isActive ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'}`}>확인</span>}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </nav>
             </section>
 
-            <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+            {activeSection === 'integrity' && <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                     <h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
                         <FontAwesomeIcon icon={faCircleInfo} className="text-amber-500" />
@@ -540,20 +546,47 @@ const UserManagementPage: React.FC = () => {
                         <div className="text-lg font-bold text-rose-800">{integritySummary.invalidAdditional}</div>
                     </div>
                 </div>
-            </section>
+            </section>}
 
-            <AccountLinkManager
+            {activeSection === 'account-links' && (devAdminMode ? (
+                <section className="bg-sky-50 border border-sky-200 rounded-2xl p-4">
+                    <div className="flex items-start gap-3">
+                        <FontAwesomeIcon icon={faCircleInfo} className="text-sky-600 mt-1" />
+                        <div>
+                            <div className="font-bold text-sky-900">개발자 관리자 모드</div>
+                            <p className="text-sm text-sky-800 mt-1">
+                                계정 연동 승인/거절 패널은 실제 사용자, 인력, 내근직 데이터를 변경할 수 있어 개발 확인 모드에서는 비활성화했습니다.
+                                아래 권한 편집 영역은 샘플 데이터로 직접 테스트할 수 있습니다.
+                            </p>
+                        </div>
+                    </div>
+                </section>
+            ) : (
+                <AccountLinkManager
+                    users={users}
+                    workers={workers}
+                    loading={refreshing}
+                    selectedUserId={selectedUserId}
+                    onSelectUser={setSelectedUserId}
+                    onChanged={loadAll}
+                    actorEmail={currentUser?.email || 'system'}
+                    embedded
+                />
+            ))}
+
+            {activeSection === 'positions' && <IntegratedPositionManager
+                positions={positions}
                 users={users}
                 workers={workers}
-                loading={refreshing}
-                selectedUserId={selectedUserId}
-                onSelectUser={setSelectedUserId}
-                onChanged={loadAll}
-                actorEmail={currentUser?.email || 'system'}
-                embedded
-            />
+                officeStaffRows={officeStaffRows}
+                userPositionMap={userPositionMap}
+                onChanged={async () => {
+                    await loadAll();
+                    await userMenuPositionService.refresh();
+                }}
+            />}
 
-            <section className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+            {activeSection === 'access' && <section className="grid grid-cols-1 xl:grid-cols-12 gap-6">
                 <div className="xl:col-span-5 bg-white border border-slate-200 rounded-2xl overflow-hidden">
                     <div className="p-4 border-b border-slate-100"><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="사용자 검색" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
                     <div className="max-h-[620px] overflow-y-auto divide-y divide-slate-100">
@@ -573,31 +606,42 @@ const UserManagementPage: React.FC = () => {
                     ) : (
                         <>
                             <section className="bg-white border border-slate-200 rounded-2xl p-4">
-                                <div className="flex flex-wrap gap-2 items-center">
-                                    <span className="text-xs font-bold text-slate-500">선택 사용자 점검</span>
-                                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${selectedUserIntegrity?.missingBasePosition ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                                        {selectedUserIntegrity?.missingBasePosition ? '기본직책 미지정' : '기본직책 정상'}
-                                    </span>
-                                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${selectedUserIntegrity?.mismatchWithLinkedWorker ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
-                                        {selectedUserIntegrity?.mismatchWithLinkedWorker ? '연동 직책 불일치' : '연동 직책 일치'}
-                                    </span>
-                                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${(selectedUserIntegrity?.invalidAdditionalPositions.length || 0) > 0 ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>
-                                        {(selectedUserIntegrity?.invalidAdditionalPositions.length || 0) > 0 ? `잘못된 추가직책 ${selectedUserIntegrity?.invalidAdditionalPositions.length}건` : '추가직책 정상'}
-                                    </span>
+                                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                    <div className="flex flex-wrap gap-2 items-center">
+                                        <span className="text-xs font-bold text-slate-500">선택 사용자 점검</span>
+                                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${selectedUserIntegrity?.missingBasePosition ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                            {selectedUserIntegrity?.missingBasePosition ? '기본직책 미지정' : '기본직책 정상'}
+                                        </span>
+                                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${selectedUserIntegrity?.mismatchWithLinkedWorker ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
+                                            {selectedUserIntegrity?.mismatchWithLinkedWorker ? '연동 직책 불일치' : '연동 직책 일치'}
+                                        </span>
+                                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${(selectedUserIntegrity?.invalidAdditionalPositions.length || 0) > 0 ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>
+                                            {(selectedUserIntegrity?.invalidAdditionalPositions.length || 0) > 0 ? `잘못된 추가직책 ${selectedUserIntegrity?.invalidAdditionalPositions.length}건` : '추가직책 정상'}
+                                        </span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={handleSaveSelectedUserAccess}
+                                        disabled={savingUserAccess}
+                                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-extrabold text-white disabled:opacity-60"
+                                    >
+                                        <FontAwesomeIcon icon={savingUserAccess ? faSpinner : faCheck} spin={savingUserAccess} />
+                                        선택 사용자 권한 저장
+                                    </button>
                                 </div>
                             </section>
 
                             <section className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
-                                <div className="flex items-center justify-between"><h2 className="font-extrabold text-slate-800 flex items-center gap-2"><FontAwesomeIcon icon={faShieldHalved} className="text-indigo-500" />기본 권한/직책</h2><button onClick={handleSaveCore} disabled={savingCore} className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-bold"><FontAwesomeIcon icon={savingCore ? faSpinner : faCheck} spin={savingCore} className="mr-2" />저장</button></div>
+                                <div className="flex items-center justify-between"><h2 className="font-extrabold text-slate-800 flex items-center gap-2"><FontAwesomeIcon icon={faShieldHalved} className="text-indigo-500" />기본 권한/직책</h2></div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                     <select value={draftRole} onChange={(e) => setDraftRole(e.target.value as CanonicalSystemRole)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm">{SYSTEM_ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label} ({option.value})</option>)}</select>
                                     <select value={draftPosition} onChange={(e) => setDraftPosition(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm">{positions.map((position) => <option key={position.id || position.name} value={position.name}>{position.name} ({position.systemRole})</option>)}</select>
                                 </div>
-                                <label className="inline-flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={syncLinkedWorkerRole} onChange={(e) => setSyncLinkedWorkerRole(e.target.checked)} className="rounded border-slate-300" />연동 작업자/사무실 직원 직책 동기화</label>
+                                <label className="inline-flex items-start gap-2 text-sm text-slate-600"><input type="checkbox" checked={syncLinkedWorkerRole} onChange={(e) => setSyncLinkedWorkerRole(e.target.checked)} className="mt-0.5 rounded border-slate-300" /><span>연동 작업자/사무실 직원 직책도 변경 <span className="text-xs text-slate-400">(선택 시에만 인력 직책을 함께 변경합니다)</span></span></label>
                             </section>
 
                             <section className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
-                                <div className="flex items-center justify-between"><h2 className="font-extrabold text-slate-800 flex items-center gap-2"><FontAwesomeIcon icon={faTag} className="text-cyan-500" />추가 직책 권한</h2><button onClick={handleSaveAdditional} disabled={savingAdditional} className="px-3 py-2 rounded-lg bg-cyan-600 text-white text-sm font-bold"><FontAwesomeIcon icon={savingAdditional ? faSpinner : faCheck} spin={savingAdditional} className="mr-2" />저장</button></div>
+                                <div className="flex items-center justify-between"><h2 className="font-extrabold text-slate-800 flex items-center gap-2"><FontAwesomeIcon icon={faTag} className="text-cyan-500" />추가 직책 권한</h2></div>
                                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                                     {positions.map((position) => {
                                         const isBase = position.name === draftPosition;
@@ -622,19 +666,8 @@ const UserManagementPage: React.FC = () => {
                         </>
                     )}
                 </div>
-            </section>
+            </section>}
 
-            <section className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                <div className="p-5 border-b border-slate-100 bg-slate-50"><h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2"><FontAwesomeIcon icon={faUserTag} className="text-indigo-500" />직책 모드 통합 현황</h2></div>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                        <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500"><tr><th className="px-4 py-3 text-left">직책</th><th className="px-4 py-3 text-left">기본 사용자</th><th className="px-4 py-3 text-left">추가 배정</th><th className="px-4 py-3 text-left">작업자 수</th><th className="px-4 py-3 text-left">사무실 직원 수</th><th className="px-4 py-3 text-left">시스템 권한</th></tr></thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {positionSummary.map((row) => <tr key={row.position.id || row.position.name}><td className="px-4 py-3"><div className="font-bold text-slate-800">{row.position.name}</div><div className="text-[11px] text-slate-400">rank: {row.position.rank}</div></td><td className="px-4 py-3">{row.users}</td><td className="px-4 py-3">{row.extraUsers}</td><td className="px-4 py-3">{row.workers}</td><td className="px-4 py-3">{row.officeStaff}</td><td className="px-4 py-3"><select value={row.position.systemRole} onChange={(e) => handlePositionRoleChange(row.position, e.target.value as UserRole)} disabled={!row.position.id || savingPositionRoleId === row.position.id} className="px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-bold">{POSITION_ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>{savingPositionRoleId === row.position.id && <FontAwesomeIcon icon={faSpinner} spin className="ml-2 text-slate-400" />}</td></tr>)}
-                        </tbody>
-                    </table>
-                </div>
-            </section>
         </div>
     );
 };

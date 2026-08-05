@@ -12,7 +12,7 @@ import {
     closestCenter
 } from '@dnd-kit/core';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faUsers, faArrowRight, faExchangeAlt, faCalendarAlt, faSearch } from '@fortawesome/free-solid-svg-icons';
+import { faUsers, faArrowRight, faExchangeAlt, faCalendarAlt } from '@fortawesome/free-solid-svg-icons';
 import { teamService, Team } from '../../services/teamService';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
 import { manpowerService, Worker } from '../../services/manpowerService';

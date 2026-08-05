@@ -2,13 +2,32 @@ import { storage } from '../config/firebase';
 import { ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
 import { manpowerService } from './manpowerService';
 
+export interface SignatureConsentSnapshot {
+    version: 1;
+    documentText: string;
+    documentDate: string;
+    workMonth: string;
+    siteName: string;
+    mandataryName: string;
+    workerName: string;
+}
+
+export interface SignatureSaveOptions {
+    source?: 'administrator' | 'worker_direct';
+    consent?: SignatureConsentSnapshot;
+}
+
 export const signatureService = {
     /**
      * Upload a signature image (Data URL) to Firebase Storage and update Worker profile
      * @param workerId Worker's Firestore ID
      * @param dataUrl Base64 Image Data URL (PNG)
      */
-    saveSignature: async (workerId: string, dataUrl: string): Promise<string> => {
+    saveSignature: async (
+        workerId: string,
+        dataUrl: string,
+        options?: SignatureSaveOptions
+    ): Promise<string> => {
         try {
             const rawWorkerId = String((workerId as any) ?? '').trim();
             if (!rawWorkerId || rawWorkerId === 'undefined' || rawWorkerId === 'null') {
@@ -34,8 +53,19 @@ export const signatureService = {
             // 3. Update Worker Document
             // First, get the old signature URL to delete later if needed (optional cleanup)
             try {
+                const agreedAt = new Date().toISOString();
                 await manpowerService.updateWorker(canonicalWorkerId, {
-                    signatureUrl: downloadUrl
+                    signatureUrl: downloadUrl,
+                    ...(options?.source ? {
+                        signatureSource: options.source,
+                        signatureUpdatedAt: agreedAt,
+                    } : {}),
+                    ...(options?.consent ? {
+                        signatureConsent: {
+                            ...options.consent,
+                            agreedAt,
+                        },
+                    } : {}),
                 });
             } catch (e) {
                 try {

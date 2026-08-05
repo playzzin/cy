@@ -78,11 +78,12 @@ export const dailyReportFirestoreService = {
     async getReportsByDate(date: string): Promise<DailyReportZod[]> {
         const q = query(
             this.getCollection(),
-            where('date', '==', date),
-            orderBy('createdAt', 'desc')
+            where('date', '==', date)
         );
         const snap = await getDocs(q);
-        return snap.docs.map(d => normalizeReport(d.data() as DailyReportInputZod));
+        return snap.docs
+            .map(d => normalizeReport(d.data() as DailyReportInputZod))
+            .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
     },
 
     async getReportsByTeam(teamId: string, limitCount: number = 50): Promise<DailyReportZod[]> {
@@ -92,6 +93,16 @@ export const dailyReportFirestoreService = {
             orderBy('date', 'desc'),
             limit(limitCount)
         );
+        const snap = await getDocs(q);
+        return snap.docs.map(d => normalizeReport(d.data() as DailyReportInputZod));
+    },
+
+    /**
+     * 발주사 포털은 회사 ID 조건을 포함한 쿼리만 사용한다.
+     * 날짜는 서비스 계층에서 추가로 좁혀, 보안 규칙이 회사 범위를 증명할 수 있게 한다.
+     */
+    async getReportsByClientCompany(companyId: string): Promise<DailyReportZod[]> {
+        const q = query(this.getCollection(), where('companyId', '==', companyId));
         const snap = await getDocs(q);
         return snap.docs.map(d => normalizeReport(d.data() as DailyReportInputZod));
     },

@@ -44,6 +44,17 @@ const toDateInputValue = (d: Date): string => {
 };
 const toShortDateInputValue = (d: Date): string => toShortYearDateInputValue(toDateInputValue(d));
 const displayDate = (value?: string | null): string => toShortYearDateInputValue(value) || '';
+const DEFAULT_BILLING_START_DATE = '2026-01-01';
+const normalizeKey = (value: unknown): string => String(value ?? '').trim();
+
+const buildEndDateAsDayBefore = (value: string): string => {
+    const parsed = normalizeTypedDateInput(value);
+    if (!parsed) return '';
+    const [year, month, day] = parsed.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    date.setDate(date.getDate() - 1);
+    return toDateInputValue(date);
+};
 
 const hasActiveCardAssignment = (card: Card): boolean => (
     Boolean(card.currentAssigneeType && (card.currentAssigneeId || card.currentAssigneeName))
@@ -96,6 +107,7 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
     const [selectedCardId, setSelectedCardId] = useState<string>('');
     const [startDate, setStartDate] = useState<string>(today);
     const [autoUnassignExisting, setAutoUnassignExisting] = useState<boolean>(true);
+    const [syncBillingWithAssignee, setSyncBillingWithAssignee] = useState<boolean>(true);
 
     const [saving, setSaving] = useState<boolean>(false);
     const [assignmentRecords, setAssignmentRecords] = useState<CardAssignmentRecord[]>([]);
@@ -305,6 +317,9 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                 await cardService.assignCard(selectedCard.id, selectedTarget.id, selectedTarget.type, selectedTarget.name, normalizedStartDate);
                 toast.success('카드 배정이 완료되었습니다.');
             }
+            if (syncBillingWithAssignee) {
+                await syncCardBillingWithAssignee(selectedCard.id, normalizedStartDate);
+            }
             await loadAssignmentRecords();
             onRefresh();
         } catch (e: unknown) {
@@ -372,6 +387,32 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                 startDate: toDateInputValue(new Date())
             });
         }
+    };
+
+    const syncCardBillingWithAssignee = async (cardId: string, effectiveDate: string) => {
+        const normalizedEffectiveDate = normalizeTypedDateInput(effectiveDate) ?? DEFAULT_BILLING_START_DATE;
+        const previousEndDate = buildEndDateAsDayBefore(normalizedEffectiveDate);
+        const records = await cardService.listAllCardBillingTargets(cardId);
+        const deleteIds = records
+            .filter((record) => normalizeKey(record.startDate) >= normalizedEffectiveDate)
+            .map((record) => record.id)
+            .filter(Boolean);
+        const closeRecords = records
+            .filter((record) => {
+                const start = normalizeKey(record.startDate);
+                if (!start || start >= normalizedEffectiveDate) return false;
+                const end = normalizeKey(record.endDate);
+                return !end || end >= normalizedEffectiveDate;
+            })
+            .map((record) => ({ id: record.id, endDate: previousEndDate }))
+            .filter((record) => Boolean(record.id && record.endDate));
+
+        await cardService.applyCardBillingTargetChanges({
+            cardId,
+            deleteIds,
+            closeRecords,
+            clearSnapshot: true
+        });
     };
 
     const handleCardSelect = (cardId: string) => {
@@ -460,6 +501,28 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
 
                 <div className="mt-6 grid grid-cols-1 xl:grid-cols-12 gap-4">
                     <div className="xl:col-span-12 space-y-3">
+                        {selectedCard && (
+                            <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="min-w-0">
+                                        <div className="text-xs font-extrabold text-indigo-500">선택 카드</div>
+                                        <div className="mt-1 truncate text-lg font-black text-slate-900">{selectedCard.name} ({selectedCard.last4})</div>
+                                        <div className="mt-1 truncate text-sm font-semibold text-slate-600">{selectedCard.issuer} · {selectedCard.maskedNumber || '카드번호 미입력'}</div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 text-xs font-bold sm:min-w-[360px]">
+                                        <div className="rounded-xl bg-white/80 px-3 py-2">
+                                            <div className="text-slate-400">현재 배정</div>
+                                            <div className="mt-1 truncate text-slate-800">{assignmentLabel(selectedCard)}</div>
+                                        </div>
+                                        <div className="rounded-xl bg-white/80 px-3 py-2">
+                                            <div className="text-slate-400">저장 후</div>
+                                            <div className="mt-1 truncate text-indigo-700">{selectedTarget ? `${selectedTarget.type === 'TEAM' ? '팀' : '개인'} · ${selectedTarget.name}` : '대상 선택 필요'}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="flex bg-slate-100 p-1 rounded-xl">
                             <button
                                 onClick={() => setMode('TEAM')}
@@ -478,24 +541,26 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                         </div>
 
                         <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-600 mb-1">카드 선택</label>
-                                <select
-                                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
-                                    value={selectedCardId}
-                                    onChange={(e) => handleCardSelect(e.target.value)}
-                                >
-                                    <option value="">카드를 선택하세요</option>
-                                    {cards
-                                        .slice()
-                                        .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko-KR'))
-                                        .map((c) => (
-                                            <option key={c.id} value={c.id}>
-                                                {c.name} ({c.last4}) · {assignmentLabel(c)}
-                                            </option>
-                                        ))}
-                                </select>
-                            </div>
+                            {!initialCardId && (
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-1">카드 선택</label>
+                                    <select
+                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
+                                        value={selectedCardId}
+                                        onChange={(e) => handleCardSelect(e.target.value)}
+                                    >
+                                        <option value="">카드를 선택하세요</option>
+                                        {cards
+                                            .slice()
+                                            .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko-KR'))
+                                            .map((c) => (
+                                                <option key={c.id} value={c.id}>
+                                                    {c.name} ({c.last4}) · {assignmentLabel(c)}
+                                                </option>
+                                            ))}
+                                    </select>
+                                </div>
+                            )}
 
                             {mode === 'TEAM' && (
                                 <div className="relative">
@@ -573,6 +638,21 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                                     </label>
                                 </div>
                             </div>
+
+                            <label className="flex items-start gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2.5 text-sm font-bold text-emerald-800">
+                                <input
+                                    type="checkbox"
+                                    className="mt-1"
+                                    checked={syncBillingWithAssignee}
+                                    onChange={(e) => setSyncBillingWithAssignee(e.target.checked)}
+                                />
+                                <span>
+                                    <span className="block">청구도 배정 대상과 동일하게 변경</span>
+                                    <span className="mt-0.5 block text-xs font-semibold text-emerald-700/80">
+                                        별도 청구대상이 있으면 배정 시작일 이후는 새 배정자를 따라가도록 정리합니다.
+                                    </span>
+                                </span>
+                            </label>
                         </div>
 
                         {selectedCard && (

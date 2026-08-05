@@ -1,5 +1,9 @@
 import type { ProgressClaim, ProgressClaimLine } from '../types/progressClaim';
-import { calculateProgressClaimSummary } from './progressClaimCalculations';
+import {
+    calculateProgressClaimSummary,
+    getMonthDateRange,
+    toProgressNumber,
+} from './progressClaimCalculations';
 
 const makeClaim = (yearMonth: string, progressLines: ProgressClaimLine[]): ProgressClaim => ({
     siteId: 'site-1',
@@ -52,5 +56,33 @@ describe('progressClaimCalculations', () => {
         expect(row?.remainingQuantity).toBe(3);
         expect(row?.remainingAmount).toBe(300);
         expect(result.summary.remainingAmount).toBe(300);
+    });
+
+    describe('toProgressNumber', () => {
+        it('parses formatted currency and percentage inputs used by progress claim forms', () => {
+            expect(toProgressNumber('1,234,567원')).toBe(1234567);
+            expect(toProgressNumber('₩ 25,000')).toBe(25000);
+            expect(toProgressNumber('10%')).toBe(10);
+            expect(toProgressNumber('(3,500)')).toBe(-3500);
+            expect(toProgressNumber('−12.5')).toBe(-12.5);
+        });
+
+        it('keeps non-numeric identifiers from being interpreted as amounts', () => {
+            expect(toProgressNumber('site-123')).toBe(0);
+            expect(toProgressNumber('10 / 20')).toBe(0);
+        });
+    });
+
+    it('falls back to the current month range for invalid month values', () => {
+        const range = getMonthDateRange('2026-99');
+        expect(range.startDate).toMatch(/^\d{4}-\d{2}-01$/);
+        expect(range.endDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('normalizes single-digit month values before building date ranges', () => {
+        expect(getMonthDateRange('2026-7')).toEqual({
+            startDate: '2026-07-01',
+            endDate: '2026-07-31',
+        });
     });
 });

@@ -11,6 +11,10 @@ export interface SupportLaborStatementExcelRow {
     idNumber?: string;
     contact?: string;
     address?: string;
+    bankName?: string;
+    accountNumber?: string;
+    accountHolder?: string;
+    payType?: 'direct' | 'delegate';
     days: number[];
     totalManDay: number;
     unitPrice: number;
@@ -26,6 +30,9 @@ export interface SupportLaborStatementExcelBlock {
     siteName: string;
     settlementName: string;
     direction: string;
+    delegateBankName?: string;
+    delegateAccountNumber?: string;
+    delegateAccountHolder?: string;
     rows: SupportLaborStatementExcelRow[];
 }
 
@@ -112,11 +119,11 @@ const buildStatementWorksheet = (
     worksheet.mergeCells('A2:D2');
     worksheet.getCell('A2').value = `현장명: ${statement.siteName || '-'}`;
     worksheet.mergeCells(`E2:${lastColumnLetter}2`);
-    worksheet.getCell('E2').value = '';
+    worksheet.getCell('E2').value = getDelegateAccountHeader(statement);
     ['A2', 'E2'].forEach((address) => {
         const cell = worksheet.getCell(address);
         cell.font = { bold: true, color: { argb: 'FF334155' } };
-        cell.alignment = { horizontal: 'left', vertical: 'middle' };
+        cell.alignment = { horizontal: address === 'E2' ? 'right' : 'left', vertical: 'middle', wrapText: true };
     });
     worksheet.getRow(2).height = 22;
 
@@ -351,6 +358,35 @@ const resolveUniqueSheetName = (
         counter++;
     }
     return sheetName;
+};
+
+export const getDelegateAccountHeader = (statement: SupportLaborStatementExcelBlock): string => {
+    const labels = statement.rows
+        .filter((row) => row.payType === 'delegate')
+        .map(formatDelegateAccountLabel)
+        .filter((label): label is string => Boolean(label));
+
+    const uniqueLabels = Array.from(new Set(labels));
+    if (uniqueLabels.length === 0) {
+        const fallbackLabel = formatDelegateAccountLabel({
+            bankName: statement.delegateBankName,
+            accountNumber: statement.delegateAccountNumber,
+            accountHolder: statement.delegateAccountHolder
+        });
+        return fallbackLabel ? `위임계좌번호: ${fallbackLabel}` : '';
+    }
+
+    const visibleLabels = uniqueLabels.slice(0, 2).join(' / ');
+    const hiddenCount = uniqueLabels.length - 2;
+    return `위임계좌번호: ${visibleLabels}${hiddenCount > 0 ? ` 외 ${hiddenCount}건` : ''}`;
+};
+
+const formatDelegateAccountLabel = (row: Pick<SupportLaborStatementExcelRow, 'bankName' | 'accountNumber' | 'accountHolder'>): string => {
+    const bankName = String(row.bankName ?? '').trim();
+    const accountNumber = String(row.accountNumber ?? '').trim();
+    const accountHolder = String(row.accountHolder ?? '').trim();
+    const holderLabel = accountHolder ? `예금주 ${accountHolder}` : '';
+    return [bankName, accountNumber, holderLabel].filter(Boolean).join(' ');
 };
 
 const sanitizeSheetName = (value: string): string => {

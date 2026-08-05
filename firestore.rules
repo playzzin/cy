@@ -150,8 +150,143 @@ service cloud.firestore {
       return isAdmin() || hasAnyRole(officeRoles());
     }
 
+    function hasLinkedWorker(workerId) {
+      return hasUserProfile()
+        && ('linkedWorkerIds' in userProfile())
+        && userProfile().linkedWorkerIds is list
+        && workerId in userProfile().linkedWorkerIds;
+    }
+
+    function canReadOwnWorker(workerId) {
+      return isSignedIn()
+        && (
+          hasLinkedWorker(workerId)
+          || (('uid' in resource.data) && resource.data.uid == request.auth.uid)
+        );
+    }
+
+    function isValidOwnWorkerSignatureUpdate(workerId) {
+      return canReadOwnWorker(workerId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'signatureUrl',
+          'signatureSource',
+          'signatureUpdatedAt',
+          'signatureConsent',
+          'updatedAt'
+        ])
+        && request.resource.data.signatureUrl is string
+        && request.resource.data.signatureSource == 'worker_direct'
+        && request.resource.data.signatureConsent is map
+        && request.resource.data.signatureConsent.version == 1
+        && request.resource.data.signatureConsent.workerName == resource.data.name
+        && request.resource.data.signatureConsent.agreedAt is string;
+    }
+
     function canReadOperations() {
       return canReadMasterData();
+    }
+
+    // Client portal accounts are scoped to the company links managed by an
+    // administrator. These helpers are deliberately read-only: a client can
+    // view only the records related to its linked company and cannot mutate
+    // operational or financial source data.
+    function hasLinkedClientCompany(companyId) {
+      return hasUserProfile()
+        && ('linkedCompanyIds' in userProfile())
+        && userProfile().linkedCompanyIds is list
+        && companyId in userProfile().linkedCompanyIds;
+    }
+
+    function isClientPortalAccount() {
+      return hasUserProfile()
+        && (
+          (('accountType' in userProfile()) && userProfile().accountType == 'construction_company')
+          || (('role' in userProfile()) && userProfile().role in ['발주사', '건설사', '원청', 'client', 'client_company', 'construction_company'])
+          || (('position' in userProfile()) && userProfile().position in ['발주사', '건설사', '원청', 'client', 'client_company', 'construction_company'])
+        );
+    }
+
+    function canReadClientCompany(companyId) {
+      return isClientPortalAccount() && hasLinkedClientCompany(companyId);
+    }
+
+    function canReadClientSite() {
+      return isClientPortalAccount()
+        && ('clientCompanyId' in resource.data)
+        && hasLinkedClientCompany(resource.data.clientCompanyId);
+    }
+
+    function canReadClientDailyReport() {
+      return isClientPortalAccount()
+        && ('companyId' in resource.data)
+        && hasLinkedClientCompany(resource.data.companyId);
+    }
+
+    function canReadClientProgressClaim() {
+      return isClientPortalAccount()
+        && ('siteId' in resource.data)
+        && resource.data.siteId is string
+        && exists(/databases/$(database)/documents/sites/$(resource.data.siteId))
+        && ('clientCompanyId' in get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data)
+        && hasLinkedClientCompany(
+          get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data.clientCompanyId
+        );
+    }
+
+    function hasLinkedRentalCompany(companyId) {
+      return hasUserProfile()
+        && ('linkedCompanyIds' in userProfile())
+        && userProfile().linkedCompanyIds is list
+        && companyId in userProfile().linkedCompanyIds;
+    }
+
+    function isRentalPortalAccount() {
+      return hasUserProfile()
+        && (
+          (('accountType' in userProfile()) && userProfile().accountType == 'rental_company')
+          || (('role' in userProfile()) && userProfile().role in ['임대사', 'rental', 'rental_company'])
+          || (('position' in userProfile()) && userProfile().position in ['임대사', 'rental', 'rental_company'])
+        );
+    }
+
+    function canReadRentalCompany(companyId) {
+      return isRentalPortalAccount() && hasLinkedRentalCompany(companyId);
+    }
+
+    function canReadClientMaterialTransaction() {
+      return isClientPortalAccount()
+        && ('siteId' in resource.data)
+        && resource.data.siteId is string
+        && exists(/databases/$(database)/documents/sites/$(resource.data.siteId))
+        && ('clientCompanyId' in get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data)
+        && hasLinkedClientCompany(
+          get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data.clientCompanyId
+        );
+    }
+
+    function canReadRentalMaterialTransaction() {
+      return isRentalPortalAccount()
+        && ('rentalCompanyId' in resource.data)
+        && resource.data.rentalCompanyId is string
+        && hasLinkedRentalCompany(resource.data.rentalCompanyId);
+    }
+
+    function canReadClientMaterialPhotoBatch() {
+      return isClientPortalAccount()
+        && ('siteId' in resource.data)
+        && resource.data.siteId is string
+        && exists(/databases/$(database)/documents/sites/$(resource.data.siteId))
+        && ('clientCompanyId' in get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data)
+        && hasLinkedClientCompany(
+          get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data.clientCompanyId
+        );
+    }
+
+    function canReadRentalMaterialPhotoBatch() {
+      return isRentalPortalAccount()
+        && ('rentalCompanyId' in resource.data)
+        && resource.data.rentalCompanyId is string
+        && hasLinkedRentalCompany(resource.data.rentalCompanyId);
     }
 
     function canWriteOperations() {
@@ -164,6 +299,66 @@ service cloud.firestore {
 
     function canWriteFinance() {
       return canReadFinance();
+    }
+
+    // Monthly payroll becomes immutable once it has been reviewed. The UI
+    // writes a complete draft snapshot first, then performs status-only
+    // transitions. This keeps a confirmed or paid payroll from being silently
+    // overwritten by a later recalculation of its source data.
+    function payrollSettlementStatus(data) {
+      return ('runStatus' in data && data.runStatus in ['reviewed', 'confirmed', 'paid'])
+        ? data.runStatus
+        : 'draft';
+    }
+
+    function isPayrollSettlementStatusOnlyUpdate(allowedKeys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowedKeys);
+    }
+
+    function isValidPayrollSettlementCreate() {
+      return canWriteFinance()
+        && (!('runStatus' in request.resource.data) || request.resource.data.runStatus == 'draft');
+    }
+
+    function isValidPayrollSettlementUpdate() {
+      let beforeStatus = payrollSettlementStatus(resource.data);
+      let afterStatus = payrollSettlementStatus(request.resource.data);
+      return canWriteFinance()
+        && (
+          (beforeStatus == 'draft' && afterStatus == 'draft')
+          || (
+            beforeStatus == 'draft'
+            && afterStatus == 'reviewed'
+            && isPayrollSettlementStatusOnlyUpdate([
+              'runStatus', 'reviewedAt', 'reviewedByUid', 'reviewedByName',
+              'updatedAt', 'updatedByUid', 'updatedByName'
+            ])
+          )
+          || (
+            beforeStatus == 'draft'
+            && afterStatus == 'confirmed'
+            && isPayrollSettlementStatusOnlyUpdate([
+              'runStatus', 'confirmedAt', 'confirmedByUid', 'confirmedByName',
+              'updatedAt', 'updatedByUid', 'updatedByName'
+            ])
+          )
+          || (
+            beforeStatus == 'reviewed'
+            && afterStatus == 'confirmed'
+            && isPayrollSettlementStatusOnlyUpdate([
+              'runStatus', 'confirmedAt', 'confirmedByUid', 'confirmedByName',
+              'updatedAt', 'updatedByUid', 'updatedByName'
+            ])
+          )
+          || (
+            beforeStatus == 'confirmed'
+            && afterStatus == 'paid'
+            && isPayrollSettlementStatusOnlyUpdate([
+              'runStatus', 'paidAt', 'paidByUid', 'paidByName',
+              'updatedAt', 'updatedByUid', 'updatedByName'
+            ])
+          )
+        );
     }
 
     function canReadSupport() {
@@ -222,6 +417,15 @@ service cloud.firestore {
       ];
     }
 
+    function isMaterialCollection(collectionId) {
+      return collectionId in [
+        'materials',
+        'materialInbounds',
+        'materialOutbounds',
+        'materialPhotoBatches'
+      ];
+    }
+
     function isRecruitingCollection(collectionId) {
       return collectionId in [
         'recruiting_referrers',
@@ -240,6 +444,7 @@ service cloud.firestore {
       return collectionId in [
         'advance_payments',
         'advance_requests',
+        'monthly_payroll_settlements',
         'payments',
         'tax_invoices',
         'receivables',
@@ -250,6 +455,7 @@ service cloud.firestore {
         'client_site_labor_adjustments',
         'settlements',
         'settlement_targets',
+        'buyback_workbook_entries',
         'team_settlement_documents',
         'daily_advance_workbook_profiles',
         'daily_advance_statement_recruiter_fees',
@@ -416,6 +622,7 @@ service cloud.firestore {
     function isLockedCollection(collectionId) {
       return isMasterDataCollection(collectionId)
         || isOperationsCollection(collectionId)
+        || isMaterialCollection(collectionId)
         || isRecruitingCollection(collectionId)
         || isFinanceCollection(collectionId)
         || isCardStatementImportCollection(collectionId)
@@ -623,16 +830,9 @@ service cloud.firestore {
         ]);
     }
 
-    function keepsDevRecruitingMenuChildren() {
-      return !('pos_jhl2VTnk9V3C4EiZ4QQI' in request.resource.data)
-        || !('menu' in request.resource.data.pos_jhl2VTnk9V3C4EiZ4QQI)
-        || !(request.resource.data.pos_jhl2VTnk9V3C4EiZ4QQI.menu is list)
-        || request.resource.data.pos_jhl2VTnk9V3C4EiZ4QQI.menu.size() <= 9
-        || (
-          ('sub' in request.resource.data.pos_jhl2VTnk9V3C4EiZ4QQI.menu[9])
-          && request.resource.data.pos_jhl2VTnk9V3C4EiZ4QQI.menu[9].sub is list
-          && request.resource.data.pos_jhl2VTnk9V3C4EiZ4QQI.menu[9].sub.size() >= 11
-        );
+    function canWriteSettingsDocument(settingsId) {
+      return !settingsId.matches('^menus_v[0-9]+$')
+        || settingsId == 'menus_v12';
     }
 
     function isLoginFailureLogCreate() {
@@ -697,8 +897,11 @@ service cloud.firestore {
 
     match /settings/{settingsId} {
       allow read: if isSignedIn();
-      allow create, update: if isAdmin()
-        && (settingsId != 'menus_v12' || keepsDevRecruitingMenuChildren());
+      allow create, update: if (isAdmin() && canWriteSettingsDocument(settingsId))
+        || (
+          settingsId == 'delegation_letter_v2_public'
+          && (canWriteFinance() || hasAnyRole(siteRoles()))
+        );
       allow delete: if isAdmin();
     }
 
@@ -886,13 +1089,52 @@ service cloud.firestore {
       allow create, update, delete: if canWriteSupport();
     }
 
+    match /materials/{materialId} {
+      allow read: if canReadOperations() || isClientPortalAccount() || isRentalPortalAccount();
+      allow create, update, delete: if canWriteOperations();
+    }
+
+    match /materialInbounds/{transactionId} {
+      allow read: if canReadOperations()
+        || canReadClientMaterialTransaction()
+        || canReadRentalMaterialTransaction();
+      allow create, update, delete: if canWriteOperations();
+    }
+
+    match /materialOutbounds/{transactionId} {
+      allow read: if canReadOperations()
+        || canReadClientMaterialTransaction()
+        || canReadRentalMaterialTransaction();
+      allow create, update, delete: if canWriteOperations();
+    }
+
+    match /materialPhotoBatches/{photoBatchId} {
+      allow read: if canReadOperations()
+        || canReadClientMaterialPhotoBatch()
+        || canReadRentalMaterialPhotoBatch();
+      allow create, update, delete: if canWriteOperations();
+    }
+
+    match /workers/{workerId} {
+      allow read: if canReadMasterData() || canReadOwnWorker(workerId);
+      allow update: if canWriteMasterData() || isValidOwnWorkerSignatureUpdate(workerId);
+      allow create, delete: if canWriteMasterData();
+    }
+
     match /{collectionId}/{docId} {
-      allow read: if isMasterDataCollection(collectionId) && canReadMasterData();
+      allow read: if isMasterDataCollection(collectionId)
+        && (
+          canReadMasterData()
+          || (collectionId == 'companies' && canReadClientCompany(docId))
+          || (collectionId == 'companies' && canReadRentalCompany(docId))
+          || (collectionId == 'sites' && canReadClientSite())
+        );
       allow create, update, delete: if isMasterDataCollection(collectionId) && canWriteMasterData();
     }
 
     match /{collectionId}/{docId} {
-      allow read: if isOperationsCollection(collectionId) && canReadOperations();
+      allow read: if isOperationsCollection(collectionId)
+        && (canReadOperations() || (collectionId == 'daily_reports' && canReadClientDailyReport()));
       allow create, update, delete: if isOperationsCollection(collectionId) && canWriteOperations();
     }
 
@@ -954,9 +1196,19 @@ service cloud.firestore {
       allow create, update, delete: if canWriteFinance();
     }
 
+    match /monthly_payroll_settlements/{settlementId} {
+      allow read: if canReadFinance();
+      allow create: if isValidPayrollSettlementCreate();
+      allow update: if isValidPayrollSettlementUpdate();
+      allow delete: if false;
+    }
+
     match /{collectionId}/{docId} {
-      allow read: if isFinanceCollection(collectionId) && canReadFinance();
-      allow create, update, delete: if isFinanceCollection(collectionId) && canWriteFinance();
+      allow read: if isFinanceCollection(collectionId) && collectionId != 'monthly_payroll_settlements'
+        && (canReadFinance() || (collectionId == 'progress_claims' && canReadClientProgressClaim()));
+      allow create, update, delete: if isFinanceCollection(collectionId)
+        && collectionId != 'monthly_payroll_settlements'
+        && canWriteFinance();
     }
 
     match /{collectionId}/{docId} {
@@ -995,8 +1247,12 @@ service cloud.firestore {
       allow read: if isOperationsCollection(collectionId) && canReadOperations();
       allow create, update, delete: if isOperationsCollection(collectionId) && canWriteOperations();
 
-      allow read: if isFinanceCollection(collectionId) && canReadFinance();
-      allow create, update, delete: if isFinanceCollection(collectionId) && canWriteFinance();
+      allow read: if isFinanceCollection(collectionId)
+        && collectionId != 'monthly_payroll_settlements'
+        && canReadFinance();
+      allow create, update, delete: if isFinanceCollection(collectionId)
+        && collectionId != 'monthly_payroll_settlements'
+        && canWriteFinance();
 
       allow read: if isCardStatementImportCollection(collectionId) && canReadCardBillingStatements();
       allow create, update, delete: if false;

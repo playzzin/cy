@@ -21,7 +21,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBuilding, faCalendarAlt, faMapMarkerAlt, faArrowLeft } from '@fortawesome/free-solid-svg-icons';
+import { faBuilding, faMapMarkerAlt, faArrowLeft } from '@fortawesome/free-solid-svg-icons';
 import { siteService, Site } from '../../services/siteService';
 
 // --- Types ---

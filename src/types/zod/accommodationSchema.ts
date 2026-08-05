@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 // Accommodation Enum values
-export const AccommodationType = z.enum(['OneRoom', 'TwoRoom', 'Apartment']);
+export const AccommodationType = z.enum(['OneRoom', 'TwoRoom', 'ThreeRoom', 'Apartment']);
 export const AccommodationStatus = z.enum(['active', 'inactive']);
 export const AccommodationOwnership = z.enum(['Cheongyeon', 'Dawon', 'Individual']);
 export const UtilityPaymentStatus = z.enum(['unpaid', 'paid', 'pending']);
@@ -45,6 +45,7 @@ export const accommodationSchema = z.object({
     name: z.string(),
     address: z.string(),
     type: AccommodationType,
+    utilityOverchargeThreshold: z.number().nonnegative().optional(),
     status: AccommodationStatus.default('active'),
     ownership: AccommodationOwnership,
     contract: AccommodationContractSchema,
@@ -68,6 +69,51 @@ export const UtilityCostsSchema = z.object({
     total: z.number().default(0),
 });
 
+export const UtilityElectricityBillImportSchema = z.object({
+    sourceFileName: z.string(),
+    provider: z.string().default(''),
+    customerNumber: z.string().default(''),
+    billingYearMonth: z.string(),
+    dueDate: z.string().default(''),
+    usagePeriodStart: z.string().default(''),
+    usagePeriodEnd: z.string().default(''),
+    address: z.string().default(''),
+    housingName: z.string().default(''),
+    usageKwh: z.number().default(0),
+    confidence: z.number().min(0).max(1).default(0),
+    analyzedAt: z.string(),
+});
+
+export const UtilityGasBillImportSchema = z.object({
+    sourceFileName: z.string(),
+    provider: z.string().default(''),
+    payerNumber: z.string().default(''),
+    billingYearMonth: z.string(),
+    dueDate: z.string().default(''),
+    usagePeriodStart: z.string().default(''),
+    usagePeriodEnd: z.string().default(''),
+    address: z.string().default(''),
+    housingName: z.string().default(''),
+    usageCubicMeters: z.number().default(0),
+    confidence: z.number().min(0).max(1).default(0),
+    analyzedAt: z.string(),
+});
+
+export const UtilityWaterBillImportSchema = z.object({
+    sourceFileName: z.string(),
+    provider: z.string().default(''),
+    consumerNumber: z.string().default(''),
+    billingYearMonth: z.string(),
+    dueDate: z.string().default(''),
+    usagePeriodStart: z.string().default(''),
+    usagePeriodEnd: z.string().default(''),
+    address: z.string().default(''),
+    housingName: z.string().default(''),
+    usageCubicMeters: z.number().default(0),
+    confidence: z.number().min(0).max(1).default(0),
+    analyzedAt: z.string(),
+});
+
 // Utility Record Schema
 export const utilityRecordSchema = z.object({
     id: z.string(),
@@ -78,6 +124,9 @@ export const utilityRecordSchema = z.object({
     paymentDate: z.string().optional(),
     paymentStatus: UtilityPaymentStatus.default('unpaid'),
     memo: z.string().optional(),
+    electricityBillImport: UtilityElectricityBillImportSchema.optional(),
+    gasBillImport: UtilityGasBillImportSchema.optional(),
+    waterBillImport: UtilityWaterBillImportSchema.optional(),
     isAnomaly: z.boolean().default(false),
     createdAt: z.any().optional(),
     updatedAt: z.any().optional(),

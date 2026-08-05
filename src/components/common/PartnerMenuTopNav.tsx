@@ -31,17 +31,12 @@ const NAV_ITEMS: PartnerMenuTopNavItem[] = [
 const PartnerMenuTopNav: React.FC<PartnerMenuTopNavProps> = ({ className = '' }) => {
     const location = useLocation();
 
-    const rootClass = 'border-slate-200 bg-white text-slate-900 shadow-sm';
-    const labelClass = 'text-slate-500';
-    const inactiveClass = 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700';
-    const activeClass = 'border-blue-600 bg-blue-600 text-white shadow-sm shadow-blue-100';
-
     return (
-        <nav className={`flex flex-col gap-2 border px-3 py-2 sm:flex-row sm:items-center sm:justify-between ${rootClass} ${className}`}>
-            <div className={`text-xs font-extrabold uppercase tracking-wide ${labelClass}`}>
-                공통 메뉴
+        <nav className={`partner-topnav ${className}`}>
+            <div className="partner-topnav-label">
+                거래처 인식 업무
             </div>
-            <div className="flex gap-2 overflow-x-auto">
+            <div className="partner-topnav-items">
                 {NAV_ITEMS.map((item) => {
                     const activePaths = [item.path, ...(item.activePaths || [])];
                     const isActive = activePaths.some((path) => location.pathname === path);
@@ -50,7 +45,8 @@ const PartnerMenuTopNav: React.FC<PartnerMenuTopNavProps> = ({ className = '' })
                         <Link
                             key={item.path}
                             to={item.path}
-                            className={`inline-flex min-h-9 items-center gap-2 whitespace-nowrap rounded-md border px-3 py-2 text-sm font-extrabold transition-colors ${isActive ? activeClass : inactiveClass}`}
+                            aria-current={isActive ? 'page' : undefined}
+                            className={`partner-topnav-link ${isActive ? 'is-active' : ''}`}
                         >
                             <FontAwesomeIcon icon={item.icon} className="text-sm" />
                             {item.label}

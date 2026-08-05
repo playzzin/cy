@@ -27,30 +27,42 @@ export const RentalTransactionTable = React.memo(({ draft, itemsWithCalc, isEdit
         outline: 'none',
         background: 'transparent',
         fontFamily: EXCEL_FONT,
-        fontSize: '9pt',
+        fontSize: 'calc(9pt + var(--estimate-font-size-offset, 0pt))',
         textAlign: 'center'
     };
     const vatRate = draft.vatRate || 10;
+    const noteColumnStyle: React.CSSProperties = {
+        position: 'sticky',
+        right: isEdit ? '55px' : 0,
+        zIndex: 2,
+        textAlign: 'center',
+        boxShadow: '-2px 0 4px rgba(15, 23, 42, 0.08)'
+    };
+    const deleteColumnStyle: React.CSSProperties = {
+        position: 'sticky',
+        right: 0,
+        zIndex: 3
+    };
 
     return (
-        <div style={{ ...tableWrapperStyle, overflowX: 'auto' }}>
-            <table style={{ width: '100%', minWidth: isEdit ? '1240px' : '1120px', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <div style={{ ...tableWrapperStyle, width: '100%', overflowX: 'auto' }}>
+            <table style={{ width: '100%', minWidth: isEdit ? '1320px' : '1265px', margin: '0 auto', borderCollapse: 'collapse', tableLayout: 'fixed', whiteSpace: 'nowrap' }}>
                 <colgroup>
                     <col style={{ width: '110px' }} />
-                    <col style={{ width: '210px' }} />
-                    <col style={{ width: '70px' }} />
-                    <col style={{ width: '80px' }} />
+                    <col style={{ width: '230px' }} />
+                    <col style={{ width: '65px' }} />
+                    <col style={{ width: '75px' }} />
                     <col style={{ width: '100px' }} />
-                    <col style={{ width: '90px' }} />
+                    <col style={{ width: '88px' }} />
                     <col style={{ width: '100px' }} />
+                    <col style={{ width: '118px' }} />
+                    <col style={{ width: '105px' }} />
                     <col style={{ width: '120px' }} />
-                    <col style={{ width: '110px' }} />
-                    <col style={{ width: '120px' }} />
-                    <col style={{ width: 'auto' }} />
+                    <col style={{ width: '155px' }} />
                     {isEdit && <col style={{ width: '55px' }} />}
                 </colgroup>
                 <thead>
-                    <tr style={{ height: '34px' }}>
+                    <tr style={{ height: 'calc(34px + var(--estimate-table-row-offset, 0px))' }}>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>날짜</th>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>품목</th>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>단위</th>
@@ -61,8 +73,8 @@ export const RentalTransactionTable = React.memo(({ draft, itemsWithCalc, isEdit
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>공급가</th>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>부가세</th>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>합계</th>
-                        <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>비고</th>
-                        {isEdit && <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>삭제</th>}
+                        <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK, ...noteColumnStyle, zIndex: 4 })}>비고</th>
+                        {isEdit && <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK, ...deleteColumnStyle, zIndex: 5 })}>삭제</th>}
                     </tr>
                 </thead>
                 <tbody style={{ borderBottom: BORDER_THICK }}>
@@ -72,7 +84,7 @@ export const RentalTransactionTable = React.memo(({ draft, itemsWithCalc, isEdit
                         const lineTotal = supplyAmt + vatAmt;
 
                         return (
-                            <tr key={item.id} style={{ height: '28px' }}>
+                            <tr key={item.id} style={{ height: 'calc(28px + var(--estimate-table-row-offset, 0px))' }}>
                                 <td style={cellStyle({ border: BORDER_THIN, textAlign: 'center', padding: '4px' })}>
                                     {isEdit ? (
                                         <input value={item.itemDate || ''} onChange={e => updateItem(item.id, 'itemDate', e.target.value)} style={inputStyle} placeholder="날짜" />
@@ -138,11 +150,11 @@ export const RentalTransactionTable = React.memo(({ draft, itemsWithCalc, isEdit
                                 <td style={cellStyle({ border: BORDER_THIN, textAlign: 'right', padding: '4px 6px', fontWeight: 700 })}>{supplyAmt ? formatCurrency(supplyAmt) : ''}</td>
                                 <td style={cellStyle({ border: BORDER_THIN, textAlign: 'right', padding: '4px 6px' })}>{vatAmt ? formatCurrency(vatAmt) : ''}</td>
                                 <td style={cellStyle({ border: BORDER_THIN, textAlign: 'right', padding: '4px 6px', fontWeight: 900 })}>{lineTotal ? formatCurrency(lineTotal) : ''}</td>
-                                <td style={cellStyle({ border: BORDER_THIN, textAlign: 'left', padding: '4px 6px' })}>
-                                    {isEdit ? <input value={item.note || ''} onChange={e => updateItem(item.id, 'note', e.target.value)} style={{ ...inputStyle, textAlign: 'left' }} /> : item.note}
+                                <td style={cellStyle({ border: BORDER_THIN, padding: '4px 6px', overflow: 'hidden', ...noteColumnStyle })}>
+                                    {isEdit ? <input value={item.note || ''} onChange={e => updateItem(item.id, 'note', e.target.value)} style={{ ...inputStyle, textAlign: 'center' }} /> : item.note}
                                 </td>
                                 {isEdit && (
-                                    <td style={cellStyle({ border: BORDER_THIN, padding: '0' })}>
+                                    <td style={cellStyle({ border: BORDER_THIN, padding: '0', ...deleteColumnStyle })}>
                                         <button onClick={() => setDraft((d: any) => ({ ...d, items: d.items.filter((it: any) => it.id !== item.id) }))} style={{ width: '100%', height: '100%', background: '#ef5350', color: '#fff', border: 'none', cursor: 'pointer' }}>×</button>
                                     </td>
                                 )}
@@ -150,23 +162,23 @@ export const RentalTransactionTable = React.memo(({ draft, itemsWithCalc, isEdit
                         );
                     })}
                     {!isEdit && Array.from({ length: Math.max(0, 15 - itemsWithCalc.length) }).map((_, i) => (
-                        <tr key={`rental-empty-${i}`} style={{ height: '28px' }}>
+                        <tr key={`rental-empty-${i}`} style={{ height: 'calc(28px + var(--estimate-table-row-offset, 0px))' }}>
                             {Array.from({ length: 11 }).map((__, col) => (
-                                <td key={col} style={cellStyle({ border: BORDER_THIN })}></td>
+                                <td key={col} style={cellStyle({ border: BORDER_THIN, ...(col === 10 ? noteColumnStyle : {}) })}></td>
                             ))}
                         </tr>
                     ))}
                     {isEdit && (
-                        <tr style={{ height: '34px', backgroundColor: '#f8fafc' }}>
+                        <tr style={{ height: 'calc(34px + var(--estimate-table-row-offset, 0px))', backgroundColor: '#f8fafc' }}>
                             <td colSpan={11} style={cellStyle({ border: BORDER_THIN, padding: '0' })}>
                                 <button
                                     onClick={() => setDraft((d: any) => ({ ...d, items: [...d.items, createItem({ category: '임대자재', section: '', unit: 'EA', period: draft.items?.[0]?.period || 26 })] }))}
-                                    style={{ width: '100%', height: '100%', background: 'transparent', color: '#6366f1', border: 'none', cursor: 'pointer', fontWeight: 900, fontSize: '11pt' }}
+                                    style={{ width: '100%', height: '100%', background: 'transparent', color: '#6366f1', border: 'none', cursor: 'pointer', fontWeight: 900, fontSize: 'calc(11pt + var(--estimate-font-size-offset, 0pt))' }}
                                 >
                                     + 임대 항목 추가
                                 </button>
                             </td>
-                            <td style={cellStyle({ border: BORDER_THIN })}></td>
+                            <td style={cellStyle({ border: BORDER_THIN, ...deleteColumnStyle })}></td>
                         </tr>
                     )}
                 </tbody>

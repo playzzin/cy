@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     DndContext,
@@ -8,7 +8,6 @@ import {
     PointerSensor,
     DragStartEvent,
     DragEndEvent,
-    DragOverEvent,
     closestCenter
 } from '@dnd-kit/core';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -20,14 +19,10 @@ import {
     faCheckCircle,
     faExclamationTriangle,
     faRotateRight,
-    faUsers,
-    faGlobe,
-    faArrowRight,
-    faArrowLeft,
     faCopy,
     faList,
     faGrip,
-    faPlus
+    faBroom
 } from '@fortawesome/free-solid-svg-icons';
 import { arrayMove } from '@dnd-kit/sortable';
 
@@ -41,6 +36,8 @@ import RoleManager from './components/RoleManager';
 import SiteManager from './components/SiteManager';
 import MenuManagerHeader from './components/MenuManagerHeader';
 import PositionMenuCopyModal from './components/PositionMenuCopyModal';
+import { isDevAdminSessionEnabled } from '../../../utils/devAdminSession';
+import { useSiteMode } from '../../../contexts/SiteModeContext';
 
 // --- Recursive Helpers ---
 
@@ -177,19 +174,6 @@ const collectDescendantIds = (item: MenuItem | string, ids = new Set<string>()):
     return ids;
 };
 
-const createUniqueMenuId = (items: (MenuItem | string)[], text: string, path?: string): string => {
-    const existingIds = collectMenuIds(items);
-    const base = createIdBase(path || text || 'menu');
-    let candidate = `menu_${base}`;
-    let counter = 1;
-
-    while (existingIds.has(candidate)) {
-        candidate = `menu_${base}_${counter}`;
-        counter += 1;
-    }
-
-    return candidate;
-};
 
 const createIdBase = (value: unknown) => {
     const base = String(value || 'menu')
@@ -251,6 +235,58 @@ const setSurfaceItems = (data: SiteDataType, siteKey: string, surface: MenuSurfa
     (data[siteKey] as any)[surface] = items;
 };
 
+const getNormalizedMenuRoute = (item: MenuItem | string): string => {
+    const text = typeof item === 'string' ? item : item.text;
+    const rawPath = typeof item === 'string' ? MENU_PATHS[text] : (item.path || MENU_PATHS[text]);
+    return String(rawPath || '').trim();
+};
+
+const findMenuItemByRoute = (
+    nodes: (MenuItem | string)[],
+    route: string
+): MenuItem | string | null => {
+    for (const item of nodes) {
+        if (getNormalizedMenuRoute(item) === route) return item;
+
+        if (typeof item !== 'string' && Array.isArray(item.sub)) {
+            const found = findMenuItemByRoute(item.sub, route);
+            if (found) return found;
+        }
+    }
+
+    return null;
+};
+
+const removeDuplicateLeafMenuRoutes = (
+    nodes: (MenuItem | string)[],
+    seenRoutes = new Set<string>()
+): { items: (MenuItem | string)[]; removed: number } => {
+    let removed = 0;
+    const items: (MenuItem | string)[] = [];
+
+    nodes.forEach((item) => {
+        const hasChildren = typeof item !== 'string' && Array.isArray(item.sub) && item.sub.length > 0;
+        const route = hasChildren ? '' : getNormalizedMenuRoute(item);
+
+        if (route && seenRoutes.has(route)) {
+            removed += 1;
+            return;
+        }
+        if (route) seenRoutes.add(route);
+
+        if (typeof item === 'string' || !hasChildren) {
+            items.push(item);
+            return;
+        }
+
+        const childResult = removeDuplicateLeafMenuRoutes(item.sub || [], seenRoutes);
+        removed += childResult.removed;
+        items.push({ ...item, sub: childResult.items });
+    });
+
+    return { items, removed };
+};
+
 const getInitialMenuSite = (requestedSite: string | null) => {
     if (requestedSite) return requestedSite;
 
@@ -275,9 +311,10 @@ const resolveExistingMenuSite = (data: SiteDataType, desiredSite: string) => {
     return candidates.find(key => Boolean(data[key])) || 'admin';
 };
 
-const AdvancedMenuManager: React.FC = () => {
+const AdvancedMenuManagerEditor: React.FC = () => {
     const [searchParams] = useSearchParams();
     const initialSite = getInitialMenuSite(searchParams.get('site'));
+    const { positions: previewPositions, changePosition: changePreviewPosition } = useSiteMode();
 
     // --- State ---
     const [menuData, setMenuData] = useState<SiteDataType | null>(null);
@@ -306,8 +343,14 @@ const AdvancedMenuManager: React.FC = () => {
 
     const activeItem = selectedItems.length === 1 ? selectedItems[0] : undefined;
 
+    const currentMenuDuplicateCount = useMemo(() => {
+        if (!menuData) return 0;
+        return removeDuplicateLeafMenuRoutes(getSurfaceItems(menuData, selectedSite, 'menu')).removed;
+    }, [menuData, selectedSite]);
+
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
     const [saveError, setSaveError] = useState<string>('');
+    const latestSaveRequestRef = useRef(0);
 
     const formatSaveError = useCallback((err: any): string => {
         if (!err) return 'Unknown error';
@@ -324,19 +367,35 @@ const AdvancedMenuManager: React.FC = () => {
     }, []);
 
     const persistMenuData = useCallback((data: SiteDataType) => {
+        const saveRequestId = ++latestSaveRequestRef.current;
         setSaveStatus('saving');
         setSaveError('');
         menuServiceV11.saveMenuConfig(data)
-            .then(() => {
+            .then((savedData) => {
+                if (saveRequestId !== latestSaveRequestRef.current) return;
+                setMenuData(savedData);
                 setSaveStatus('saved');
                 setSaveError('');
             })
             .catch((err) => {
                 console.error('[MenuManager] saveMenuConfig failed:', err);
+                if (saveRequestId !== latestSaveRequestRef.current) return;
                 setSaveStatus('error');
                 setSaveError(formatSaveError(err));
             });
     }, [formatSaveError]);
+
+    useEffect(() => {
+        if (saveStatus !== 'saving') return;
+
+        const preventReloadDuringSave = (event: BeforeUnloadEvent) => {
+            event.preventDefault();
+            event.returnValue = '';
+        };
+
+        window.addEventListener('beforeunload', preventReloadDuringSave);
+        return () => window.removeEventListener('beforeunload', preventReloadDuringSave);
+    }, [saveStatus]);
 
     // Actions
     const handleNodeSelect = useCallback((id: string, multiSelect: boolean = false) => {
@@ -525,6 +584,26 @@ const AdvancedMenuManager: React.FC = () => {
         setSelectedIds([]);
     }, [selectedSite, selectedSurface]);
 
+    const handleSelectMenuSite = useCallback((siteKey: string) => {
+        setSelectedSite(siteKey);
+
+        if (siteKey === 'admin') {
+            changePreviewPosition('full');
+            return;
+        }
+
+        const matchingPosition = previewPositions.find((position) => {
+            const positionSiteKey = position.id.startsWith('pos_')
+                ? position.id
+                : `pos_${position.id}`;
+            return positionSiteKey === siteKey;
+        });
+
+        if (matchingPosition) {
+            changePreviewPosition(matchingPosition.id);
+        }
+    }, [changePreviewPosition, previewPositions]);
+
     // --- Actions ---
 
     const updateMenuData = useCallback((newData: SiteDataType) => {
@@ -565,6 +644,89 @@ const AdvancedMenuManager: React.FC = () => {
         setMenuData(next);
         persistMenuData(next);
     };
+
+    const handleRenameSystemPage = useCallback((path: string, name: string) => {
+        if (!menuData?.admin) return;
+
+        const normalizedPath = path.trim();
+        const normalizedName = name.trim();
+        if (!normalizedPath || !normalizedName) return;
+
+        const newData = JSON.parse(JSON.stringify(menuData)) as SiteDataType;
+        newData.admin.systemPageLabels = {
+            ...(newData.admin.systemPageLabels || {}),
+            [normalizedPath]: normalizedName
+        };
+        updateMenuData(newData);
+    }, [menuData, updateMenuData]);
+
+    const isSystemPageAdded = useCallback((path: string) => {
+        const normalizedPath = String(path || '').trim();
+        if (!normalizedPath) return false;
+
+        return Boolean(findMenuItemByRoute(
+            getSurfaceItems(menuData, selectedSite, 'menu'),
+            normalizedPath
+        ));
+    }, [menuData, selectedSite]);
+
+    const handleAddSystemPage = useCallback((page: { name: string; path: string }) => {
+        if (!menuData?.[selectedSite]) return;
+
+        const normalizedPath = String(page.path || '').trim();
+        const normalizedName = String(page.name || '').trim();
+        if (!normalizedPath || !normalizedName) return;
+
+        const existingItem = findMenuItemByRoute(
+            getSurfaceItems(menuData, selectedSite, 'menu'),
+            normalizedPath
+        );
+
+        setSelectedSurface('menu');
+        if (existingItem) {
+            const existingId = getMenuItemId(existingItem);
+            setSelectedIds(existingId ? [existingId] : []);
+            return;
+        }
+
+        const newData = JSON.parse(JSON.stringify(menuData)) as SiteDataType;
+        const targetMenu = [...getSurfaceItems(newData, selectedSite, 'menu')];
+        const existingIds = collectMenuIds(targetMenu);
+        const baseId = `menu-${Date.now()}`;
+        let newId = baseId;
+        let suffix = 1;
+
+        while (existingIds.has(newId)) {
+            newId = `${baseId}-${suffix}`;
+            suffix += 1;
+        }
+
+        targetMenu.push({
+            id: newId,
+            text: normalizedName,
+            path: normalizedPath,
+            icon: 'faFileLines'
+        });
+        setSurfaceItems(newData, selectedSite, 'menu', targetMenu);
+        updateMenuData(newData);
+        setSelectedIds([newId]);
+    }, [menuData, selectedSite, updateMenuData]);
+
+    const handleRemoveDuplicateMenuLinks = useCallback(() => {
+        if (!menuData || currentMenuDuplicateCount === 0) return;
+
+        const siteName = menuData[selectedSite]?.name || selectedSite;
+        const confirmed = window.confirm(
+            `${siteName} 좌측 메뉴에서 같은 이동 경로를 사용하는 중복 링크 ${currentMenuDuplicateCount}개를 정리할까요?\n\n위에 있는 메뉴를 남기고 나머지만 제거합니다.`
+        );
+        if (!confirmed) return;
+
+        const newData = JSON.parse(JSON.stringify(menuData)) as SiteDataType;
+        const cleanup = removeDuplicateLeafMenuRoutes(getSurfaceItems(newData, selectedSite, 'menu'));
+        setSurfaceItems(newData, selectedSite, 'menu', cleanup.items as MenuItem[]);
+        setSelectedIds([]);
+        updateMenuData(newData);
+    }, [currentMenuDuplicateCount, menuData, selectedSite, updateMenuData]);
 
     const handleCopyFromPosition = useCallback((sourceSite: string, itemIds: string[]) => {
         if (!menuData || !menuData[selectedSite]) return;
@@ -795,12 +957,18 @@ const AdvancedMenuManager: React.FC = () => {
                 </div>
             </header>
 
+            {isDevAdminSessionEnabled() && (
+                <div className="border-b border-amber-500/30 bg-amber-500/10 px-6 py-2 text-xs font-medium text-amber-200">
+                    개발 관리자 모드에서는 메뉴 설정이 현재 브라우저에 저장됩니다. 다른 탭에는 즉시 동기화되며, 다른 브라우저와는 공유되지 않습니다.
+                </div>
+            )}
+
             {/* New Tabs Header */}
             {menuData && (
                 <MenuManagerHeader
                     menuData={menuData}
                     selectedSite={selectedSite}
-                    onSelectSite={setSelectedSite}
+                    onSelectSite={handleSelectMenuSite}
                     onUpdateMenuData={updateMenuData}
                     onOpenSiteManager={() => setIsSiteManagerOpen(true)}
                     onOpenRoleManager={() => setIsRoleManagerOpen(true)}
@@ -854,6 +1022,11 @@ const AdvancedMenuManager: React.FC = () => {
                     <ToolboxPanel
                         isOpen={leftPanelOpen}
                         toggle={() => setLeftPanelOpen(!leftPanelOpen)}
+                        systemPageLabels={menuData.admin?.systemPageLabels}
+                        onRenameSystemPage={handleRenameSystemPage}
+                        targetMenuName={menuData[selectedSite]?.name || selectedSite}
+                        isSystemPageAdded={isSystemPageAdded}
+                        onAddSystemPage={handleAddSystemPage}
                     />
 
                     {/* 2. Canvas (Center) */}
@@ -898,15 +1071,27 @@ const AdvancedMenuManager: React.FC = () => {
                                         </button>
                                     </div>
                                     {selectedSurface === 'menu' && (
-                                        <button
-                                            type="button"
-                                            onClick={() => setIsCopyModalOpen(true)}
-                                            className="flex items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-600/15 px-3 py-2 text-xs font-bold text-blue-200 transition-colors hover:border-blue-400 hover:bg-blue-600/25 hover:text-white"
-                                            title="다른 직책에 있는 메뉴를 선택해서 현재 메뉴로 복사"
-                                        >
-                                            <FontAwesomeIcon icon={faCopy} />
-                                            다른 직책에서 복사
-                                        </button>
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={handleRemoveDuplicateMenuLinks}
+                                                disabled={currentMenuDuplicateCount === 0}
+                                                className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-200 transition-colors hover:border-amber-400 hover:bg-amber-500/20 hover:text-white disabled:cursor-default disabled:border-slate-700 disabled:bg-slate-800/50 disabled:text-slate-500"
+                                                title={currentMenuDuplicateCount > 0 ? '현재 직책의 같은 경로 중복 링크 정리' : '현재 좌측 메뉴에 중복 링크가 없습니다'}
+                                            >
+                                                <FontAwesomeIcon icon={faBroom} />
+                                                {currentMenuDuplicateCount > 0 ? `중복 ${currentMenuDuplicateCount}개 정리` : '중복 없음'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsCopyModalOpen(true)}
+                                                className="flex items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-600/15 px-3 py-2 text-xs font-bold text-blue-200 transition-colors hover:border-blue-400 hover:bg-blue-600/25 hover:text-white"
+                                                title="다른 직책에 있는 메뉴를 선택해서 현재 메뉴로 복사"
+                                            >
+                                                <FontAwesomeIcon icon={faCopy} />
+                                                다른 직책에서 복사
+                                            </button>
+                                        </>
                                     )}
                                 </>
                             )}
@@ -935,6 +1120,35 @@ const AdvancedMenuManager: React.FC = () => {
             </DndContext >
         </div >
     );
+};
+
+const CanonicalMenuManagerRedirect: React.FC = () => {
+    useEffect(() => {
+        const configuredOrigin = String(process.env.REACT_APP_CANONICAL_APP_ORIGIN || '').trim();
+        const projectId = String(process.env.REACT_APP_FIREBASE_PROJECT_ID || '').trim();
+        const canonicalOrigin = configuredOrigin || (projectId ? `https://${projectId}.web.app` : '');
+
+        if (!canonicalOrigin) return;
+        window.location.replace(`${canonicalOrigin.replace(/\/+$/, '')}/admin/menu-manager`);
+    }, []);
+
+    return (
+        <main className="flex min-h-[60vh] items-center justify-center bg-slate-950 px-6 text-center text-slate-200">
+            <div>
+                <FontAwesomeIcon icon={faRotateRight} className="mb-4 animate-spin text-2xl text-blue-400" />
+                <p className="font-semibold">CEO·DEV 운영 통합메뉴로 이동 중입니다.</p>
+                <p className="mt-2 text-sm text-slate-400">메뉴 설정은 운영 통합메뉴 한 곳에서만 관리합니다.</p>
+            </div>
+        </main>
+    );
+};
+
+const AdvancedMenuManager: React.FC = () => {
+    if (isDevAdminSessionEnabled()) {
+        return <CanonicalMenuManagerRedirect />;
+    }
+
+    return <AdvancedMenuManagerEditor />;
 };
 
 export default AdvancedMenuManager;

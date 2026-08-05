@@ -153,11 +153,20 @@ export const cardService = {
         const yearMonth = payload.date.slice(0, 7);
         return cardFirestoreService.addTransaction({
             ...payload,
-            yearMonth
+            yearMonth,
+            status: 'ACTIVE'
         });
     },
 
     deleteTransaction: async (id: string): Promise<void> => {
         await cardFirestoreService.deleteTransaction(id);
+    },
+
+    applyCardTransactionChanges: async (params: {
+        upserts?: Array<Partial<CardTransaction> & { id: string }>;
+        cancelIds?: string[];
+        operationId?: string;
+    }): Promise<void> => {
+        await cardFirestoreService.applyCardTransactionChanges(params);
     }
 };

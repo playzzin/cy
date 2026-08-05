@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
+import ActiveDailyReportPage from '../report/DailyReportPage';
 
 const ReportContainer = styled.div`
   padding: 2rem;
@@ -23,7 +24,7 @@ const FormGroup = styled.div`
   }
 `;
 
-const DailyReportPage: React.FC = () => {
+const LegacyDailyReportPage: React.FC = () => {
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     site: '',
@@ -37,7 +38,7 @@ const DailyReportPage: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // TODO: 제출 로직 구현
+    // Legacy local form path retained for reference; default export uses the maintained report module.
     console.log('일일 보고서 제출:', formData);
     alert('일일 보고서가 제출되었습니다.');
     navigate('/reports');
@@ -159,4 +160,5 @@ const DailyReportPage: React.FC = () => {
   );
 };
 
-export default DailyReportPage;
+export { LegacyDailyReportPage };
+export default ActiveDailyReportPage;

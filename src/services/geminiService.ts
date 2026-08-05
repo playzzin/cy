@@ -12,6 +12,15 @@ export interface AnalyzedBankBook {
     accountHolder?: string;
 }
 
+export interface AnalyzedReceipt {
+    isReceipt: boolean;
+    totalAmount: number;
+    merchantName: string;
+    purchaseDate: string;
+    confidence: number;
+    warning: string;
+}
+
 export interface AnalyzedDailyReport {
     teamName?: string;
     siteName?: string;
@@ -132,6 +141,38 @@ const ID_CARD_JSON_SCHEMA = {
     },
     required: ['name', 'idNumber', 'address'],
     propertyOrdering: ['name', 'idNumber', 'address']
+};
+
+const RECEIPT_JSON_SCHEMA = {
+    type: 'object',
+    properties: {
+        isReceipt: {
+            type: 'boolean',
+            description: '영수증, 카드전표, 결제내역 화면 등 실제 결제 증빙이면 true.'
+        },
+        totalAmount: {
+            type: 'number',
+            description: '실제로 결제된 최종 총금액. 대한민국 원 정수이며 읽을 수 없으면 0.'
+        },
+        merchantName: {
+            type: 'string',
+            description: '가맹점 또는 판매자 이름. 읽을 수 없으면 빈 문자열.'
+        },
+        purchaseDate: {
+            type: 'string',
+            description: '결제일 또는 거래일 YYYY-MM-DD. 읽을 수 없으면 빈 문자열.'
+        },
+        confidence: {
+            type: 'number',
+            description: '최종 총금액 판독 신뢰도. 0부터 1 사이 숫자.'
+        },
+        warning: {
+            type: 'string',
+            description: '금액이 불명확하거나 영수증이 아니면 짧은 확인 안내. 문제없으면 빈 문자열.'
+        }
+    },
+    required: ['isReceipt', 'totalAmount', 'merchantName', 'purchaseDate', 'confidence', 'warning'],
+    propertyOrdering: ['isReceipt', 'totalAmount', 'merchantName', 'purchaseDate', 'confidence', 'warning']
 };
 
 const DAILY_REPORT_ARRAY_JSON_SCHEMA = {
@@ -520,6 +561,49 @@ Return empty strings for fields that are not visible.`;
             ID_CARD_JSON_SCHEMA,
             'ID card analysis'
         );
+    },
+
+    analyzeReceiptImage: async (file: File): Promise<AnalyzedReceipt> => {
+        const apiKey = getApiKeyOrThrow();
+
+        const base64Data = await geminiService.fileToBase64(file);
+        const base64Content = base64Data.split(',')[1];
+        const mimeType = file.type || 'image/jpeg';
+
+        const prompt = `
+이 사진에서 경비 청구에 사용할 영수증의 실제 최종 결제 총금액을 판독하세요.
+
+판독 규칙:
+1. 영수증, 카드 매출전표, 현금영수증, 결제 완료 화면처럼 실제 결제를 증명하는 이미지인지 먼저 판단하세요.
+2. totalAmount에는 고객이 실제로 결제한 최종 금액 한 개만 대한민국 원 정수로 반환하세요.
+3. "합계", "총액", "받을 금액", "결제금액", "승인금액", "청구금액"을 우선 확인하세요.
+4. 공급가액, 부가세, 할인 전 금액, 포인트, 잔액, 거스름돈, 승인번호, 카드번호, 전화번호는 totalAmount로 사용하지 마세요.
+5. 한 사진에 영수증과 카드전표가 함께 있고 같은 거래라면 중복 합산하지 말고 실제 결제금액 한 번만 반환하세요.
+6. 최종 결제금액을 확실히 읽을 수 없으면 추측하지 말고 totalAmount를 0으로 반환하고 warning에 이유를 적으세요.
+7. 설명 없이 제공된 JSON 스키마에 맞는 결과만 반환하세요.`;
+
+        const analyzed = await fetchGeminiStructuredJson<AnalyzedReceipt>(
+            apiKey,
+            [
+                { text: prompt },
+                { inlineData: { mimeType, data: base64Content } }
+            ],
+            RECEIPT_JSON_SCHEMA,
+            'Receipt total analysis'
+        );
+
+        const rawAmount = Number(analyzed?.totalAmount);
+        const rawConfidence = Number(analyzed?.confidence);
+        const isReceipt = analyzed?.isReceipt === true;
+
+        return {
+            isReceipt,
+            totalAmount: isReceipt && Number.isFinite(rawAmount) && rawAmount > 0 ? Math.round(rawAmount) : 0,
+            merchantName: String(analyzed?.merchantName || '').trim(),
+            purchaseDate: String(analyzed?.purchaseDate || '').trim(),
+            confidence: Number.isFinite(rawConfidence) ? Math.min(1, Math.max(0, rawConfidence)) : 0,
+            warning: String(analyzed?.warning || '').trim()
+        };
     },
 
     analyzeDailyReportText: async (text: string): Promise<AnalyzedDailyReport> => {

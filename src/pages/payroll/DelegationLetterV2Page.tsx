@@ -12,6 +12,8 @@ import { dailyReportService, DailyReport } from '../../services/dailyReportServi
 import { companyService, Company } from '../../services/companyService';
 import { YearMonthPicker } from '../../components/common/YearMonthPicker';
 import SignatureGeneratorPage from './SignatureGeneratorPage';
+import { DEFAULT_DELEGATION_BODY_TEXT } from '../../constants/delegationLetter';
+import { delegationLetterTemplateService } from '../../services/delegationLetterTemplateService';
 
 // --- Types ---
 interface DelegationWorker {
@@ -26,10 +28,6 @@ interface DelegationWorker {
 }
 
 const DELEGATION_BODY_STORAGE_KEY = 'delegationLetterV2:bodyText';
-const DEFAULT_DELEGATION_BODY_TEXT = [
-    '상기 수임인을 대리인으로 정하여 노무비 청구 및 수령에 관한 모든 권한을 위임합니다.',
-    '또한 수임인에게 지급된 금액은 위임인에게 직접 지급된 것으로 간주하며, 위임인은 이에 대하여 어떠한 이의도 제기하지 않겠습니다.'
-].join('\n');
 
 const MAX_WORKERS_PER_PAGE = 24;
 const DEFAULT_WORKERS_PER_PAGE = 24;
@@ -73,6 +71,7 @@ const DelegationLetterV2Page: React.FC = () => {
 
     // --- State: UI ---
     const printRef = useRef<HTMLDivElement>(null);
+    const publicTemplateLoadedRef = useRef(false);
     const [activeTab, setActiveTab] = useState<'filter' | 'document' | 'workers' | 'signature'>('filter');
 
     // --- State: Custom Mandatary ---
@@ -106,6 +105,13 @@ const DelegationLetterV2Page: React.FC = () => {
     }, []);
 
     useEffect(() => {
+        const unsubscribe = manpowerService.subscribeWorkers((workers) => {
+            setAllWorkers(workers);
+        });
+        return unsubscribe;
+    }, []);
+
+    useEffect(() => {
         if (typeof window === 'undefined') return;
         const trimmedText = delegationText.trim();
         if (!trimmedText) {
@@ -113,6 +119,32 @@ const DelegationLetterV2Page: React.FC = () => {
             return;
         }
         window.localStorage.setItem(DELEGATION_BODY_STORAGE_KEY, delegationText);
+    }, [delegationText]);
+
+    useEffect(() => {
+        let alive = true;
+        void delegationLetterTemplateService.getPublicTemplate()
+            .then((template) => {
+                if (alive && template?.bodyText) setDelegationText(template.bodyText);
+            })
+            .catch((error) => {
+                console.warn('Unable to load the shared delegation template:', error);
+            })
+            .finally(() => {
+                if (alive) publicTemplateLoadedRef.current = true;
+            });
+        return () => {
+            alive = false;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!publicTemplateLoadedRef.current || !delegationText.trim()) return;
+        const timer = window.setTimeout(() => {
+            void delegationLetterTemplateService.savePublicTemplate(delegationText)
+                .catch((error) => console.warn('Unable to save the shared delegation template:', error));
+        }, 600);
+        return () => window.clearTimeout(timer);
     }, [delegationText]);
 
     // --- 2. Cascade Step 1: Month Selection -> Fetch Reports ---
@@ -149,13 +181,15 @@ const DelegationLetterV2Page: React.FC = () => {
     const activeSites = useMemo(() => {
         const siteIdsInReports = new Set(allReports.map(r => r.siteId));
         // "외부팀"(siteType이 '외부팀' 또는 partnerName에 '외부' 포함) 제외
-        return sites.filter(s => {
+        return sites
+            .filter(s => {
             if (!siteIdsInReports.has(s.id!)) return false;
             // siteType이 '외부팀'이거나 partnerName에 '외부'가 포함되면 제외
             if (String(s.siteType ?? '').includes('외부팀')) return false;
             if (String(s.partnerName ?? '').includes('외부')) return false;
             return true;
-        });
+            })
+            .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko-KR', { numeric: true, sensitivity: 'base' }));
     }, [allReports, sites]);
 
     // --- 4. Derived Logic: Active Teams (Dependent on Site) ---
@@ -1238,13 +1272,10 @@ const DelegationLetterV2Page: React.FC = () => {
                                 <div className="w-1.5 h-6 rounded-full bg-indigo-500"></div>
                                 <h3 className="text-white font-semibold">서명 등록</h3>
                             </div>
-
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="bg-slate-700/30 rounded-xl p-4 border border-slate-600/30">
                                     <p className="text-slate-400 text-xs mb-1">전체 서명</p>
-                                    <p className="text-white font-bold text-lg">
-                                        {allWorkers.filter(worker => worker.signatureUrl).length}명
-                                    </p>
+                                    <p className="text-white font-bold text-lg">{allWorkers.filter(worker => worker.signatureUrl).length}명</p>
                                 </div>
                                 <div className="bg-slate-700/30 rounded-xl p-4 border border-slate-600/30">
                                     <p className="text-slate-400 text-xs mb-1">현재 명단</p>
@@ -1557,14 +1588,14 @@ const DelegationLetterV2Page: React.FC = () => {
                                                     pageGlobalWorkerIdx += 1;
                                                     return (
                                                         <tr key={`print-${worker.workerId}`} className="border-b border-black">
-                                                            <td className="border-r border-black p-1 text-center font-bold text-black">{pageGlobalWorkerIdx}</td>
-                                                            <td className="border-r border-black p-1 font-bold tracking-[0.08em] text-center text-[10px]">{worker.workerName}</td>
-                                                            <td className="border-r border-black p-1 text-center font-medium tracking-wider text-[10.5px]">{worker.idNumber}</td>
-                                                            {showManDays && <td className="border-r border-black p-1 text-center text-gray-600 font-medium">{worker.manDays.toFixed(1)}</td>}
-                                                            <td className="border-r border-black p-1 text-[9px] leading-snug break-all font-bold text-black">
+                                                            <td className="border-r border-black p-1 text-center font-normal text-black">{pageGlobalWorkerIdx}</td>
+                                                            <td className="border-r border-black p-1 font-normal tracking-[0.08em] text-center text-[10px]">{worker.workerName}</td>
+                                                            <td className="border-r border-black p-1 text-center font-normal tracking-wider text-[10.5px]">{worker.idNumber}</td>
+                                                            {showManDays && <td className="border-r border-black p-1 text-center text-gray-600 font-normal">{worker.manDays.toFixed(1)}</td>}
+                                                            <td className="border-r border-black p-1 text-[9px] leading-snug break-all font-normal text-black">
                                                                 <div className="line-clamp-2">{worker.address || ''}</div>
                                                             </td>
-                                                            <td className="border-r border-black p-1 px-1 text-right font-bold text-[10px] tracking-wide">
+                                                            <td className="border-r border-black p-1 px-1 text-right font-normal text-[10px] tracking-wide">
                                                                 {worker.amount.toLocaleString()}
                                                             </td>
                                                             <td className="delegation-signature-cell align-middle">

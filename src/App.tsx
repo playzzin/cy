@@ -2,29 +2,17 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import PrivateRoute from './components/auth/PrivateRoute';
-import { Login } from './components/auth/index';
+import Login from './components/auth/Login';
 import AppIntroScreen from './components/common/AppIntroScreen';
 import AnalyticsRouteTracker from './components/analytics/AnalyticsRouteTracker';
-
-const lazyNamed = <T extends React.ComponentType<any>>(
-  loader: () => Promise<unknown>,
-  exportName: string
-) =>
-  React.lazy(async () => {
-    const module = (await loader()) as Record<string, unknown>;
-    const Component = module[exportName] ?? module.default;
-
-    if (!Component) {
-      throw new Error(`Lazy route export "${exportName}" was not found.`);
-    }
-
-    return { default: Component as T };
-  });
+import { lazyNamed } from './utils/lazyNamed';
 
 const ProtectedRouteShell = React.lazy(() => import('./routes/ProtectedRouteShell'));
 const DashboardPage = React.lazy(() => import('./pages/DashboardPage'));
 const DashboardExecutiveView = lazyNamed(() => import('./components/dashboard/executive/DashboardExecutiveView'), 'DashboardExecutiveView');
 const DailyReportPage = React.lazy(() => import('./pages/report/DailyReportPage'));
+const DailyReportWorkerCalendarPage = React.lazy(() => import('./pages/report/DailyReportWorkerCalendarPage'));
+const LaborCheckPage = React.lazy(() => import('./pages/report/LaborCheckPage'));
 const TestSettingsPage = React.lazy(() => import('./pages/settings/TestSettingsPage'));
 const DailyDispatchPage = React.lazy(() => import('./pages/assignment/DailyDispatchPage'));
 const FieldScheduleRequestPage = React.lazy(() => import('./pages/assignment/FieldScheduleRequestPage'));
@@ -34,8 +22,8 @@ const ScheduleConfirmationBoardPage = React.lazy(() => import('./pages/assignmen
 const TeamAssignmentPage = React.lazy(() => import('./pages/assignment/TeamAssignmentPage'));
 const SiteAssignmentPage = React.lazy(() => import('./pages/assignment/SiteAssignmentPage'));
 const SupportAssignmentPage = React.lazy(() => import('./pages/assignment/SupportAssignmentPage'));
-const PositionManager = React.lazy(() => import('./pages/hr/PositionManager'));
 const RateChangePage = React.lazy(() => import('./pages/hr/RateChangePage'));
+const IncidentCaseRegisterPage = React.lazy(() => import('./pages/hr/IncidentCaseRegisterPage'));
 const SupportSettingsPage = React.lazy(() => import('./pages/support/SupportSettingsPage'));
 const SupportStatusPage = React.lazy(() => import('./pages/support/SupportStatusPage'));
 const WorkerSummaryPage = React.lazy(() => import('./pages/manpower/WorkerSummaryPage'));
@@ -81,7 +69,8 @@ const PartnerSupportWorkersPage = React.lazy(() => import('./pages/payroll/Partn
 const ClientSiteLaborPage = React.lazy(() => import('./pages/payroll/ClientSiteLaborPage'));
 const SupportClaimPage = React.lazy(() => import('./pages/payroll/SupportClaimPage'));
 const ProgressClaimPage = React.lazy(() => import('./pages/payroll/ProgressClaimPage'));
-const BuybackLedgerPage = React.lazy(() => import('./pages/payroll/BuybackLedgerPage'));
+const ProgressClaimsEntry = React.lazy(() => import('./pages/payroll/ProgressClaimsEntry'));
+const FieldBuybackWorkbookPage = React.lazy(() => import('./pages/payroll/FieldBuybackWorkbookPage'));
 const PayrollRateManagementPage = React.lazy(() => import('./pages/payroll/PayrollRateManagementPage'));
 const AdvancePaymentPage = React.lazy(() => import('./pages/payroll/AdvancePaymentPage'));
 const WorkerAdvanceRequestPage = React.lazy(() => import('./pages/payroll/WorkerAdvanceRequestPage'));
@@ -102,7 +91,6 @@ const TeamSettlementAnnualStatisticsPage = React.lazy(() => import('./pages/payr
 const TeamSettlementAnnualStatisticsManagementPage = React.lazy(() => import('./pages/payroll/TeamSettlementAnnualStatisticsManagementPage'));
 const SupportRateManagementPage = React.lazy(() => import('./pages/support/SupportRateManagementPage'));
 const SupportManagerPage = React.lazy(() => import('./pages/support/SupportManagerPage'));
-const ExpenseLedgerPage = React.lazy(() => import('./pages/support/ExpenseLedgerPage'));
 const VehicleBillingLogPage = React.lazy(() => import('./pages/support/VehicleBillingLogPage'));
 const EngineOilCyclePage = React.lazy(() => import('./pages/support/EngineOilCyclePage'));
 const TeamEquipmentStatusPage = React.lazy(() => import('./pages/support/TeamEquipmentStatusPage'));
@@ -125,9 +113,11 @@ const IntegratedDatabase = React.lazy(() => import('./pages/database/ManpowerDat
 const DatabaseLogPage = React.lazy(() => import('./pages/database/DatabaseLogPage'));
 const ManualPage = React.lazy(() => import('./pages/manual'));
 const ProfilePage = React.lazy(() => import('./pages/profile/ProfilePage'));
+const WorkerDelegationSignaturePage = React.lazy(() => import('./pages/worker/WorkerDelegationSignaturePage'));
 const MessageCenterPage = React.lazy(() => import('./pages/messages/MessageCenterPage'));
 const NoticeBoardPage = React.lazy(() => import('./pages/notices/NoticeBoardPage'));
 const MessageAutomationSettingsPage = React.lazy(() => import('./pages/messages/MessageAutomationSettingsPage'));
+const MessageAutomationLogPage = React.lazy(() => import('./pages/messages/MessageAutomationLogPage'));
 const StorageManagerPage = React.lazy(() => import('./pages/storage/StorageManagerPage'));
 const GoogleDriveManagerPage = lazyNamed(() => import('./pages/storage/GoogleDriveManagerPage'), 'GoogleDriveManagerPage');
 const SchemaDesignViewer = React.lazy(() => import('./pages/structure/SchemaDesignViewer'));
@@ -167,6 +157,9 @@ const SalaryModelUpdater = React.lazy(() => import('./pages/admin/SalaryModelUpd
 const AdminDataIntegrityPage = React.lazy(() => import('./pages/admin/AdminDataIntegrityPage'));
 const UserManagementPage = React.lazy(() => import('./pages/admin/UserManagementPage'));
 const LoginLogPage = React.lazy(() => import('./pages/admin/LoginLogPage'));
+const PermissionChangeLogPage = React.lazy(() => import('./pages/admin/PermissionChangeLogPage'));
+const ExcelTransferLogPage = lazyNamed(() => import('./pages/admin/FileTransferLogPage'), 'ExcelTransferLogPage');
+const PdfTransferLogPage = lazyNamed(() => import('./pages/admin/FileTransferLogPage'), 'PdfTransferLogPage');
 const WelfareAssetPlatformPage = React.lazy(() => import('./pages/admin/WelfareAssetPlatformPage'));
 const AgentPlayground = React.lazy(() => import('./pages/developer/AgentPlayground'));
 const AgentDashboard = React.lazy(() => import('./pages/developer/AgentDashboard'));
@@ -217,7 +210,6 @@ const WorkbookLedgerLogPage = React.lazy(() => import('./pages/taxinvoice/Workbo
 const WorkbookLedgerUpgradePage = React.lazy(() => import('./pages/taxinvoice/WorkbookLedgerUpgradePage'));
 const PartnerTransactionLedgerPage = React.lazy(() => import('./pages/taxinvoice/PartnerTransactionLedgerPage'));
 const KakaoNotificationPage = React.lazy(() => import('./pages/taxinvoice/KakaoNotificationPage'));
-const AccountInquiryPage = React.lazy(() => import('./pages/taxinvoice/AccountInquiryPage'));
 const RefineWrapper = lazyNamed(() => import('./providers/refine/RefineWrapper'), 'RefineWrapper');
 const RefineSiteList = React.lazy(() => import('./pages/refine/RefineSiteList'));
 const RefineSmartSelectDemo = lazyNamed(() => import('./pages/refine/RefineSmartSelectDemo'), 'RefineSmartSelectDemo');
@@ -229,30 +221,22 @@ const RefineWorkerList = React.lazy(() => import('./pages/refine/RefineWorkerLis
 const RefineTeamList = React.lazy(() => import('./pages/refine/RefineTeamList'));
 const RefineCompanyList = React.lazy(() => import('./pages/refine/RefineCompanyList'));
 const MemoPage = lazyNamed(() => import('./features/smart-memo/pages/MemoPage'), 'MemoPage');
-const BarobillKakaoConnectionPage = React.lazy(() => import('./pages/admin/settings/BarobillKakaoConnectionPage'));
 const KakaoSenderPage = React.lazy(() => import('./pages/helper/KakaoSenderPage'));
 const TodoPage = React.lazy(() => import('./pages/helper/TodoPage'));
 const TaxAffairsPage = React.lazy(() => import('./pages/tax/TaxAffairsPage'));
+const SettlementAlertCenterPage = React.lazy(() => import('./pages/settlement/SettlementAlertCenterPage'));
+const BankNotificationsPage = React.lazy(() => import('./features/bank-notifications/BankNotificationsPage'));
 const KakaoMessageCenterPage = React.lazy(() => import('./pages/kakao/KakaoMessageCenterPage'));
 const FreelancerPage = React.lazy(() => import('./pages/manpower/FreelancerPage'));
-const RecruitingDashboardPage = React.lazy(() => import('./pages/recruiting/RecruitingDashboardPage'));
-const RecruitingServiceWorkersPage = React.lazy(() => import('./pages/recruiting/RecruitingServiceWorkersPage'));
-const RecruitingWorkerHistoryPage = React.lazy(() => import('./pages/recruiting/RecruitingWorkerHistoryPage'));
-const RecruitingMonthlySettlementPage = React.lazy(() => import('./pages/recruiting/RecruitingMonthlySettlementPage'));
-const RecruitingPaymentsPage = React.lazy(() => import('./pages/recruiting/RecruitingPaymentsPage'));
-const RecruitingDepositsPage = React.lazy(() => import('./pages/recruiting/RecruitingDepositsPage'));
-const RecruitingReceivablesPage = React.lazy(() => import('./pages/recruiting/RecruitingReceivablesPage'));
-const RecruitingMonthlyStatisticsPage = React.lazy(() => import('./pages/recruiting/RecruitingMonthlyStatisticsPage'));
-const RecruitingReferrersPage = React.lazy(() => import('./pages/recruiting/RecruitingReferrersPage'));
-const RecruitingSettingsPage = React.lazy(() => import('./pages/recruiting/RecruitingSettingsPage'));
-const RecruitingLogsPage = React.lazy(() => import('./pages/recruiting/RecruitingLogsPage'));
 
-const INITIAL_INTRO_DURATION_MS = 2000;
+const INITIAL_INTRO_DURATION_MS = 0;
 
 const App: React.FC = () => {
-  const [introVisible, setIntroVisible] = React.useState(true);
+  const [introVisible, setIntroVisible] = React.useState(INITIAL_INTRO_DURATION_MS > 0);
 
   React.useEffect(() => {
+    if (INITIAL_INTRO_DURATION_MS <= 0) return;
+
     const timer = window.setTimeout(() => {
       setIntroVisible(false);
     }, INITIAL_INTRO_DURATION_MS);
@@ -266,7 +250,7 @@ const App: React.FC = () => {
 
   return (
     <AuthProvider>
-      <Router future={{ v7_relativeSplatPath: true }}>
+      <Router future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
         <AnalyticsRouteTracker />
         <React.Suspense fallback={<AppIntroScreen />}>
           <Routes>
@@ -293,6 +277,8 @@ const App: React.FC = () => {
             {/* Reports */}
             {/* Daily Reports */}
             <Route path="/reports/daily" element={<DailyReportPage />} />
+            <Route path="/reports/daily-worker-calendar" element={<DailyReportWorkerCalendarPage />} />
+            <Route path="/reports/labor-check" element={<LaborCheckPage />} />
             <Route path="/reports/daily-v2" element={<DailyReportV2Page />} />
             <Route path="/reports/daily-logs" element={<DailyReportLogPage />} />
             <Route path="/reports/team-personnel-status" element={<TeamPersonnelStatusReportPage />} />
@@ -326,6 +312,8 @@ const App: React.FC = () => {
             {/* Smart Memo System - Phase 5 Integration */}
             <Route path="/memos" element={<MemoPage />} />
             <Route path="/todo" element={<TodoPage />} />
+            <Route path="/settlement/alerts" element={<SettlementAlertCenterPage />} />
+            <Route path="/finance/bank-notifications" element={<BankNotificationsPage />} />
 
             {/* Refine Integration - Safe Zone */}
             <Route element={<RefineWrapper />}>
@@ -349,6 +337,9 @@ const App: React.FC = () => {
               <Route path="partner-photo-registration" element={<PartnerPhotoRegistrationPage />} />
               <Route path="business-card-contacts" element={<BusinessCardContactsPage />} />
             </Route>
+
+            {/* Restricted internal compliance records */}
+            <Route path="/hr/incident-cases" element={<IncidentCaseRegisterPage />} />
 
             {/* Mass Upload (Excel) */}
             <Route path="/upload/worker" element={<WorkerMassUploader />} />
@@ -385,9 +376,10 @@ const App: React.FC = () => {
               <Route path="client-site-labor" element={<ClientSiteLaborPage />} />
               <Route path="client-site-labor-statement" element={<ClientSiteLaborPage />} />
               <Route path="support-claim" element={<SupportClaimPage />} />
-              <Route path="progress-claims" element={<ProgressClaimPage />} />
+              <Route path="progress-claims" element={<ProgressClaimsEntry />} />
               <Route path="progress-claim-invoice" element={<ProgressClaimPage mode="invoice" />} />
-              <Route path="buyback-ledger" element={<BuybackLedgerPage />} />
+              <Route path="field-buyback" element={<FieldBuybackWorkbookPage />} />
+              <Route path="buyback-ledger" element={<Navigate to="/payroll/field-buyback" replace />} />
               <Route path="rate-management" element={<PayrollRateManagementPage />} />
               <Route path="advance-payment" element={<AdvancePaymentPage />} />
               <Route path="advance-request" element={<WorkerAdvanceRequestPage />} />
@@ -412,11 +404,9 @@ const App: React.FC = () => {
               <Route path="partner-ledger" element={<PartnerTransactionLedgerPage />} />
               <Route path="kakao-notification" element={<KakaoNotificationPage />} />
               <Route path="taxinvoice/account-inquiry" element={<AccountManagementPage />} />
-              <Route path="taxinvoice/bank-inquiry" element={<AccountInquiryPage />} />
               <Route path="kakao-test" element={<KakaoTestPage />} />
               <Route path="kakao-sender" element={<KakaoSenderPage />} />
               <Route path="kakao-message-center" element={<KakaoMessageCenterPage />} />
-              <Route path="barobill-kakao-connection" element={<BarobillKakaoConnectionPage />} />
               <Route path="tax-affairs" element={<TaxAffairsPage />} />
               <Route path="delegation-letter" element={<DelegationLetterPage />} />
               <Route path="delegation-letter-v2" element={<DelegationLetterV2Page />} />
@@ -544,25 +534,12 @@ const App: React.FC = () => {
                     { label: '내 출역 확인', description: '최근 출역과 일보 기록을 확인합니다.', path: '/reports/daily?tab=list-v2' },
                     { label: '가불 신청', description: '가불 신청과 처리 상태를 확인합니다.', path: '/payroll/advance-request' },
                     { label: '휴무 신청', description: '휴무/결근/개인 일정 요청을 등록합니다.', path: '/assignment/off-duty-request' },
+                    { label: '위임장 서명', description: '위임장 내용을 확인하고 동의한 뒤 직접 서명합니다.', path: '/worker/delegation-signature' },
                   ]}
                 />
               }
             />
-
-            {/* Recruiting Settlement */}
-            <Route path="/recruiting">
-              <Route path="dashboard" element={<RecruitingDashboardPage />} />
-              <Route path="service-workers" element={<RecruitingServiceWorkersPage />} />
-              <Route path="worker-history" element={<RecruitingWorkerHistoryPage />} />
-              <Route path="monthly-settlement" element={<RecruitingMonthlySettlementPage />} />
-              <Route path="payments" element={<RecruitingPaymentsPage />} />
-              <Route path="deposits" element={<RecruitingDepositsPage />} />
-              <Route path="receivables" element={<RecruitingReceivablesPage />} />
-              <Route path="monthly-statistics" element={<RecruitingMonthlyStatisticsPage />} />
-              <Route path="referrers" element={<RecruitingReferrersPage />} />
-              <Route path="settings" element={<RecruitingSettingsPage />} />
-              <Route path="logs" element={<RecruitingLogsPage />} />
-            </Route>
+            <Route path="/worker/delegation-signature" element={<WorkerDelegationSignaturePage />} />
 
             {/* Support Management */}
             <Route path="/support">
@@ -596,6 +573,7 @@ const App: React.FC = () => {
             <Route path="/messages" element={<MessageCenterPage />} />
             <Route path="/messages/compose" element={<MessageCenterPage mode="compose" />} />
             <Route path="/messages/settings" element={<MessageAutomationSettingsPage />} />
+            <Route path="/messages/automation-logs" element={<MessageAutomationLogPage />} />
 
             {/* Storage Management */}
             <Route path="/storage" element={<StorageManagerPage />} />
@@ -619,8 +597,8 @@ const App: React.FC = () => {
             <Route path="/assignment/site-assignment" element={<SiteAssignmentPage />} />
 
             {/* HR Management */}
-            <Route path="/hr/position-management" element={<PositionManager />} />
-            <Route path="/hr/position-assignment" element={<Navigate to="/hr/position-management" replace />} />
+            <Route path="/hr/position-management" element={<Navigate to="/admin/user-management" replace />} />
+            <Route path="/hr/position-assignment" element={<Navigate to="/admin/user-management" replace />} />
             <Route path="/hr/rate-change" element={<RateChangePage />} />
 
             {/* Support Management */}
@@ -638,7 +616,7 @@ const App: React.FC = () => {
             <Route path="/support/vehicles/logs" element={<VehicleBillingLogPage />} />
             <Route path="/support/cards" element={<SupportManagerPage />} />
             <Route path="/support/cards/logs" element={<CardBillingLogPage />} />
-            <Route path="/support/expense-ledger" element={<ExpenseLedgerPage />} />
+            <Route path="/support/expense-ledger" element={<SupportManagerPage />} />
             <Route path="/support/expense-claims" element={<ExpenseClaimManagementPage />} />
             <Route path="/support/expense-claim-input" element={<ExpenseClaimManagementPage />} />
             <Route path="/support/team-resource-detail" element={<TeamResourceDetailPage />} />
@@ -695,8 +673,11 @@ const App: React.FC = () => {
 
             {/* Admin Routes */}
             <Route path="/admin">
-              <Route path="user-management" element={<UserManagementPage />} />
+              <Route path="user-management/*" element={<UserManagementPage />} />
               <Route path="login-logs" element={<LoginLogPage />} />
+              <Route path="permission-change-logs" element={<PermissionChangeLogPage />} />
+              <Route path="excel-transfer-logs" element={<ExcelTransferLogPage />} />
+              <Route path="pdf-transfer-logs" element={<PdfTransferLogPage />} />
               <Route path="welfare-assets" element={<WelfareAssetPlatformPage />} />
               <Route path="component-management" element={<ComponentManagementPage />} />
               <Route path="activity-logs" element={<ActivityLogPage />} />
@@ -729,6 +710,7 @@ const App: React.FC = () => {
             <Route path="/structure/organization" element={<OrganizationChartPage />} />
             <Route path="/cheongyeon/organization" element={<CheongyeonOrgChartPage />} />
             <Route path="/cheongyeon/greeting" element={<CheongyeonGreetingPage />} />
+            <Route path="/corp/company/ceo-intro" element={<CheongyeonGreetingPage />} />
             <Route path="/cheongyeon/directions" element={<CheongyeonDirectionsPage />} />
             <Route path="/cheongyeon/tech-vision" element={<CheongyeonTechVisionPage />} />
             <Route path="/cheongyeon/philosophy" element={<CheongyeonPhilosophyPage />} />

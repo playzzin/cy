@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Company } from '../../services/companyService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBuilding, faCheck, faTimes } from '@fortawesome/free-solid-svg-icons';
+import { COMPANY_TYPE_OPTIONS } from '../../utils/companyTypeLabel';
 
 interface CompanyFormProps {
     initialData?: Company | null;
@@ -121,12 +122,9 @@ const CompanyForm: React.FC<CompanyFormProps> = ({ initialData, onSave, onCancel
                                     onChange={handleChange}
                                     className="w-full border-slate-200 rounded text-sm py-1.5 px-3 font-medium cursor-pointer focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white"
                                 >
-                                    <option value="미지정">미지정</option>
-                                    <option value="시공사">시공사</option>
-                                    <option value="협력사">협력사</option>
-                                    <option value="건설사">건설사</option>
-                                    <option value="임대사">임대사</option>
-                                    <option value="기타">기타</option>
+                                    {COMPANY_TYPE_OPTIONS.map(({ value, label }) => (
+                                        <option key={value} value={value}>{label}</option>
+                                    ))}
                                 </select>
                             </div>
                             <div className="hidden md:flex col-span-3 md:col-span-2 bg-slate-50 items-center px-4 py-3 font-semibold text-slate-700 border-r border-slate-200 border-t md:border-t-0">

@@ -1,4 +1,6 @@
 const CACHE_PREFIX = 'cy-erp-pwa-';
+const SERVICE_WORKER_REFRESH_KEY = 'cy-erp-service-worker-refresh-at';
+const SERVICE_WORKER_REFRESH_GUARD_MS = 15000;
 
 async function clearAppCaches() {
   if (!('caches' in window)) return;
@@ -36,6 +38,22 @@ export function registerServiceWorker() {
     });
     return;
   }
+
+  const hadControllerAtStartup = Boolean(navigator.serviceWorker.controller);
+  let refreshingForNewController = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadControllerAtStartup || refreshingForNewController) return;
+
+    const now = Date.now();
+    const lastRefreshAt = Number(
+      window.sessionStorage.getItem(SERVICE_WORKER_REFRESH_KEY) ?? 0
+    );
+    if (now - lastRefreshAt < SERVICE_WORKER_REFRESH_GUARD_MS) return;
+
+    refreshingForNewController = true;
+    window.sessionStorage.setItem(SERVICE_WORKER_REFRESH_KEY, String(now));
+    window.location.reload();
+  });
 
   window.addEventListener('load', () => {
     const publicUrl = process.env.PUBLIC_URL || '';

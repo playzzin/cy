@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
     Calculator,
     Download,
@@ -146,7 +147,7 @@ const inputClassName =
 const numberInputClassName =
     'h-10 w-full min-w-[112px] rounded-md border border-slate-300 bg-white px-3 text-right text-sm text-slate-800 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100';
 const buttonClassName =
-    'inline-flex h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50';
+    'inline-flex h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50';
 const primaryButtonClassName =
     'inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white transition hover:bg-emerald-700';
 
@@ -156,6 +157,26 @@ const getCurrentMonth = (): string => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 };
+
+const isYearMonth = (value: unknown): value is string => {
+    const matched = /^(\d{4})-(\d{2})$/.exec(String(value ?? '').trim());
+    if (!matched) return false;
+    const month = Number(matched[2]);
+    return Number.isFinite(month) && month >= 1 && month <= 12;
+};
+
+const getMonthFromSearchParams = (params: URLSearchParams): string | null => {
+    const value = params.get('yearMonth') || params.get('month');
+    return isYearMonth(value) ? value : null;
+};
+
+const getStatusFilterFromSearchParams = (params: URLSearchParams): StatusFilter => {
+    const value = params.get('status');
+    return value === 'all' || value === 'active' ? value : 'active';
+};
+
+const getSearchFromSearchParams = (params: URLSearchParams): string =>
+    (params.get('q') || params.get('search') || '').trim();
 
 const toNumber = (value: unknown): number => {
     const numberValue = Number(value || 0);
@@ -450,16 +471,18 @@ const getCsvValue = (value: unknown): string => {
 };
 
 const OfficeStaffPayrollPage: React.FC = () => {
-    const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth);
+    const [searchParams, setSearchParams] = useSearchParams();
+    const [selectedMonth, setSelectedMonth] = useState(() => getMonthFromSearchParams(searchParams) ?? getCurrentMonth());
     const [staffRows, setStaffRows] = useState<OfficeStaff[]>([]);
     const [rowInputs, setRowInputs] = useState<Record<string, PayrollInputState>>({});
     const [manualRows, setManualRows] = useState<ManualPayrollRow[]>([]);
     const [settings, setSettings] = useState<InsuranceSettings>(DEFAULT_INSURANCE_SETTINGS);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
+    const [searchTerm, setSearchTerm] = useState(() => getSearchFromSearchParams(searchParams));
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => getStatusFilterFromSearchParams(searchParams));
     const [loading, setLoading] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
     const [periodReady, setPeriodReady] = useState(false);
+    const isHydratingPeriodRef = useRef(false);
 
     const fetchStaff = async () => {
         setLoading(true);
@@ -480,6 +503,48 @@ const OfficeStaffPayrollPage: React.FC = () => {
     }, []);
 
     useEffect(() => {
+        const nextMonth = getMonthFromSearchParams(searchParams) ?? getCurrentMonth();
+        const nextStatus = getStatusFilterFromSearchParams(searchParams);
+        const nextSearch = getSearchFromSearchParams(searchParams);
+
+        setSelectedMonth((prev) => (prev === nextMonth ? prev : nextMonth));
+        setStatusFilter((prev) => (prev === nextStatus ? prev : nextStatus));
+        setSearchTerm((prev) => (prev === nextSearch ? prev : nextSearch));
+    }, [searchParams]);
+
+    useEffect(() => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            const shouldKeepMonth =
+                selectedMonth !== getCurrentMonth() || prev.has('yearMonth') || prev.has('month');
+
+            if (shouldKeepMonth) {
+                next.set('yearMonth', selectedMonth);
+            } else {
+                next.delete('yearMonth');
+            }
+            next.delete('month');
+
+            if (statusFilter !== 'active' || prev.has('status')) {
+                next.set('status', statusFilter);
+            } else {
+                next.delete('status');
+            }
+
+            const trimmedSearch = searchTerm.trim();
+            if (trimmedSearch) {
+                next.set('q', trimmedSearch);
+            } else {
+                next.delete('q');
+            }
+            next.delete('search');
+
+            return next.toString() === prev.toString() ? prev : next;
+        }, { replace: true });
+    }, [searchTerm, selectedMonth, setSearchParams, statusFilter]);
+
+    useEffect(() => {
+        isHydratingPeriodRef.current = true;
         const stored = readStoredPayrollData();
         const monthData = stored[selectedMonth] || {};
         setRowInputs(monthData.rowInputs || {});
@@ -490,6 +555,10 @@ const OfficeStaffPayrollPage: React.FC = () => {
 
     useEffect(() => {
         if (!periodReady) return;
+        if (isHydratingPeriodRef.current) {
+            isHydratingPeriodRef.current = false;
+            return;
+        }
         const stored = readStoredPayrollData();
         stored[selectedMonth] = {
             rowInputs,
@@ -712,11 +781,17 @@ const OfficeStaffPayrollPage: React.FC = () => {
                             className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                             aria-label="지급월"
                         />
-                        <button type="button" onClick={fetchStaff} className={buttonClassName}>
+                        <button
+                            type="button"
+                            onClick={fetchStaff}
+                            disabled={loading}
+                            aria-label="사무실 직원 목록 새로고침"
+                            className={buttonClassName}
+                        >
                             <RefreshCw size={16} />
                             새로고침
                         </button>
-                        <button type="button" onClick={exportCsv} className={buttonClassName}>
+                        <button type="button" onClick={exportCsv} aria-label="현재 필터 조건 CSV 다운로드" className={buttonClassName}>
                             <Download size={16} />
                             CSV
                         </button>
@@ -984,6 +1059,7 @@ const OfficeStaffPayrollPage: React.FC = () => {
                                     type="search"
                                     value={searchTerm}
                                     onChange={(event) => setSearchTerm(event.target.value)}
+                                    aria-label="직원 검색"
                                     className="h-10 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                                     placeholder="직원, 부서, 직책 검색"
                                 />

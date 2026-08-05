@@ -1,6 +1,7 @@
 import { Timestamp } from 'firebase/firestore';
 
 export type AccommodationBillingStatus = 'draft' | 'confirmed';
+export type AccommodationBillingLineItemStatus = 'active' | 'cancelled';
 
 export type AccommodationBillingIssuedToType = 'team' | 'team_leader' | 'worker';
 
@@ -23,6 +24,9 @@ export interface AccommodationBillingLineItem {
     sourceType?: 'utility_ledger' | 'manual';
     sourceAccommodationId?: string;
     sourceUtilityRecordId?: string;
+    status?: AccommodationBillingLineItemStatus;
+    cancelledAt?: Timestamp;
+    updatedAt?: Timestamp;
 }
 
 export interface AccommodationBillingDocument {

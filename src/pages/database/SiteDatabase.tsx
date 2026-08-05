@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faSearch, faFilter, faDownload, faPenToSquare, faPlus, faTable, faTrash,
+    faSearch, faPenToSquare, faPlus, faTable, faTrash,
     faChevronDown, faChevronRight, faBuilding, faMapMarkerAlt, faTimes, faUsers, faHardHat,
     faBriefcase, faHandshake, faFileInvoiceDollar, faUserTie, faShieldHalved, faExclamationTriangle
 } from '@fortawesome/free-solid-svg-icons';
@@ -64,6 +64,13 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
         });
         return map;
     }, [companies]);
+
+    const companiesSortedByName = useMemo(
+        () => [...companies].sort((a, b) =>
+            String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko-KR')
+        ),
+        [companies]
+    );
 
     const teamLookup = useMemo(() => {
         const byAnyId = new Map<string, Team>();
@@ -777,7 +784,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                         className="border rounded px-2 py-1 w-full text-sm"
                                                                     >
                                                                         <option value="">발주사 선택</option>
-                                                                        {companies
+                                                                        {companiesSortedByName
                                                                             .filter(c => {
                                                                                 const type = String(c.type ?? '').trim();
                                                                                 const selectedId = String(site.clientCompanyId ?? '').trim();
@@ -809,7 +816,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                         className="border rounded px-2 py-1 w-full text-sm"
                                                                     >
                                                                         <option value="">시공사 선택</option>
-                                                                        {companies
+                                                                        {companiesSortedByName
                                                                             .filter(c => {
                                                                                 const type = String(c.type ?? '').trim();
                                                                                 return type === '시공사' || type === '미지정';
@@ -832,7 +839,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                         className="border rounded px-2 py-1 w-full text-sm"
                                                                     >
                                                                         <option value="">협력사 선택</option>
-                                                                        {companies
+                                                                        {companiesSortedByName
                                                                             .filter(c => c.type === '협력사')
                                                                             .map(company => (
                                                                                 <option key={company.id} value={company.id}>{company.name}</option>
@@ -965,7 +972,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                     </div>
                                                                 ) : col.key === 'clientCompanyName' ? (
                                                                     <SingleSelectPopover
-                                                                        options={companies
+                                                                        options={companiesSortedByName
                                                                             .filter((company) => {
                                                                                 const type = String(company.type ?? '').trim();
                                                                                 const selectedId = String(site.clientCompanyId ?? '').trim();
@@ -990,7 +997,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                     />
                                                                 ) : col.key === 'companyName' ? (
                                                                     <SingleSelectPopover
-                                                                        options={companies
+                                                                        options={companiesSortedByName
                                                                             .filter((company) => {
                                                                                 const type = String(company.type ?? '').trim();
                                                                                 const selectedId = String(site.companyId ?? '').trim();
@@ -1022,7 +1029,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                     />
                                                                 ) : col.key === 'partnerName' ? (
                                                                     <SingleSelectPopover
-                                                                        options={companies
+                                                                        options={companiesSortedByName
                                                                             .filter((company) => {
                                                                                 const type = String(company.type ?? '').trim();
                                                                                 const selectedId = String(site.partnerId ?? '').trim();

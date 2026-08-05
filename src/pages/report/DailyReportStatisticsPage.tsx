@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import {
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+    XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell, AreaChart, Area, Legend
 } from 'recharts';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -29,7 +29,7 @@ import {
     faArrowDown,
     faSync
 } from '@fortawesome/free-solid-svg-icons';
-import { format, startOfMonth, endOfMonth, subMonths, addMonths, getDay, getDaysInMonth, isSameMonth, startOfWeek, addDays } from 'date-fns';
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, getDay, isSameMonth, startOfWeek, addDays } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import {
     manpowerAnalyticsService,
@@ -40,8 +40,15 @@ import {
     DailySummary,
     SupportAnalysis
 } from '../../services/manpowerAnalyticsService';
-import { analyzeWithAI, EXAMPLE_QUESTIONS, AnalyticsResult, ChatMessage, AnalyticsDebug } from '../../services/geminiAnalyticsService';
+import { analyzeWithAI, EXAMPLE_QUESTIONS, AnalyticsResult, ChatMessage } from '../../services/geminiAnalyticsService';
 import { AiResultCharts } from './components/AiResultCharts';
+import {
+    MANPOWER_DB_EXAMPLE_QUESTIONS,
+    searchManpowerDatabase,
+    shouldUseManpowerDbSearch,
+    type ManpowerDbSearchResult,
+    type ManpowerDbSearchRow,
+} from '../../features/manpower-db-ai-search/manpowerDbAiSearch';
 
 // --- Types & Interfaces ---
 
@@ -51,6 +58,7 @@ interface DateRange {
 }
 
 type TabId = 'dashboard' | 'calendar' | 'team' | 'site' | 'worker' | 'support' | 'ai';
+type AiAnalysisMode = 'auto' | 'analytics' | 'manpowerDb';
 
 const DATA_LOAD_TIMEOUT_MS = 30_000;
 const DATA_LOAD_TIMEOUT_MESSAGE = '통계 데이터 조회가 30초 이상 지연되고 있습니다. 네트워크 또는 Firebase 응답 상태를 확인한 뒤 다시 시도해 주세요.';
@@ -1040,6 +1048,612 @@ const AiComparisonTable: React.FC<{
     );
 };
 
+const AiAdvancedInsightsPanel: React.FC<{
+    result: AnalyticsResult;
+    formatCurrency: (val: number) => string;
+    onAsk?: (question: string) => void;
+}> = ({ result, formatCurrency, onAsk }) => {
+    const insights = result.advancedInsights;
+    if (!insights) return null;
+
+    const severityStyle = {
+        critical: {
+            label: '긴급',
+            card: 'border-rose-500/30 bg-rose-500/10',
+            text: 'text-rose-300',
+            badge: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+        },
+        warning: {
+            label: '주의',
+            card: 'border-amber-500/30 bg-amber-500/10',
+            text: 'text-amber-300',
+            badge: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+        },
+        info: {
+            label: '관찰',
+            card: 'border-cyan-500/25 bg-cyan-500/10',
+            text: 'text-cyan-300',
+            badge: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+        },
+    } as const;
+
+    const confidenceLabel = {
+        high: '높음',
+        medium: '중간',
+        low: '낮음',
+    } as const;
+
+    const directionLabel = {
+        up: '증가',
+        down: '감소',
+        flat: '보합',
+    } as const;
+
+    const signedManDay = (value: number): string => {
+        if (Math.abs(value) < 0.05) return '0.0공수';
+        return `${value > 0 ? '+' : '-'}${Math.abs(value).toFixed(1)}공수`;
+    };
+
+    return (
+        <div className="space-y-4">
+            {/* Highlights */}
+            {insights.narrativeHighlights.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {insights.narrativeHighlights.map((highlight, index) => (
+                        <div key={index} className="rounded-xl border border-slate-700/30 bg-slate-900/45 p-3">
+                            <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-cyan-400">
+                                <FontAwesomeIcon icon={index === 0 ? faBolt : index === 1 ? faCalendarAlt : faPercent} />
+                                핵심 {index + 1}
+                            </div>
+                            <p className="text-xs leading-relaxed text-slate-300">{highlight}</p>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Forecast + Risks */}
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                {insights.forecast && (
+                    <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 p-4">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/15 text-violet-300">
+                                    <FontAwesomeIcon icon={faChartPie} />
+                                </div>
+                                <div>
+                                    <div className="text-sm font-bold text-white">월말 예측</div>
+                                    <div className="text-[10px] text-slate-500">{insights.forecast.basis}</div>
+                                </div>
+                            </div>
+                            <span className="rounded-lg border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-[10px] font-bold text-violet-300">
+                                신뢰도 {confidenceLabel[insights.forecast.confidence]}
+                            </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <div className="text-[10px] text-slate-500">예상 공수</div>
+                                <div className="text-xl font-black text-violet-200">{insights.forecast.projectedManDay.toFixed(1)}</div>
+                            </div>
+                            <div>
+                                <div className="text-[10px] text-slate-500">예상 인건비</div>
+                                <div className="text-xl font-black text-amber-300">{formatCurrency(insights.forecast.projectedAmount)}원</div>
+                            </div>
+                            <div>
+                                <div className="text-[10px] text-slate-500">일 평균</div>
+                                <div className="text-sm font-bold text-slate-200">{insights.forecast.projectedDailyAverage.toFixed(1)}공수</div>
+                            </div>
+                            <div>
+                                <div className="text-[10px] text-slate-500">추세</div>
+                                <div className="text-sm font-bold text-slate-200">{insights.forecast.trendLabel}</div>
+                            </div>
+                        </div>
+                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-900/70">
+                            <div
+                                className="h-full rounded-full bg-violet-400"
+                                style={{ width: `${Math.min(100, Math.round((insights.forecast.elapsedDays / insights.forecast.totalDays) * 100))}%` }}
+                            />
+                        </div>
+                        <div className="mt-1 text-[10px] text-slate-500">
+                            {insights.forecast.elapsedDays}/{insights.forecast.totalDays}일 경과
+                        </div>
+                    </div>
+                )}
+
+                <div className="xl:col-span-2 rounded-xl border border-slate-700/30 bg-slate-900/45 p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <FontAwesomeIcon icon={faBolt} className="text-amber-300" />
+                            <span className="text-sm font-bold text-white">위험 신호</span>
+                        </div>
+                        <span className="text-[10px] text-slate-500">{insights.riskSignals.length}건 감지</span>
+                    </div>
+                    {insights.riskSignals.length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {insights.riskSignals.map((signal) => {
+                                const style = severityStyle[signal.severity];
+                                return (
+                                    <div key={signal.id} className={`rounded-xl border p-3 ${style.card}`}>
+                                        <div className="mb-2 flex items-start justify-between gap-2">
+                                            <div>
+                                                <div className={`text-sm font-bold ${style.text}`}>{signal.title}</div>
+                                                <div className="text-xs leading-relaxed text-slate-300">{signal.description}</div>
+                                            </div>
+                                            <span className={`shrink-0 rounded-lg border px-2 py-1 text-[10px] font-bold ${style.badge}`}>
+                                                {severityStyle[signal.severity].label}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between rounded-lg bg-slate-950/30 px-2 py-1.5">
+                                            <span className="text-[10px] text-slate-500">{signal.metricLabel}</span>
+                                            <span className="text-xs font-bold text-white">{signal.metricValue}</span>
+                                        </div>
+                                        <div className="mt-2 text-[10px] text-slate-500">{signal.basis}</div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="rounded-xl border border-slate-700/30 bg-slate-800/40 p-4 text-sm text-slate-400">
+                            현재 조건에서는 즉시 조치할 만한 큰 이상징후가 감지되지 않았습니다.
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Contributions + Recommendations */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div className="rounded-xl border border-slate-700/30 bg-slate-900/45 overflow-hidden">
+                    <div className="flex items-center justify-between border-b border-slate-700/30 bg-slate-800/60 px-4 py-3">
+                        <div className="flex items-center gap-2">
+                            <FontAwesomeIcon icon={faTrophy} className="text-cyan-300" />
+                            <span className="text-sm font-bold text-white">
+                                {result.comparison ? '증감 원인 기여도' : '현재 공수 집중도'}
+                            </span>
+                        </div>
+                        <span className="text-[10px] text-slate-500">{insights.contributions.length}개 항목</span>
+                    </div>
+                    <div className="divide-y divide-slate-800/80">
+                        {insights.contributions.length > 0 ? insights.contributions.map((item) => (
+                            <div key={item.id} className="flex items-center gap-3 px-4 py-3">
+                                <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+                                    item.type === 'team' ? 'bg-cyan-500/10 text-cyan-300' :
+                                        item.type === 'site' ? 'bg-indigo-500/10 text-indigo-300' :
+                                            'bg-emerald-500/10 text-emerald-300'
+                                }`}>
+                                    <FontAwesomeIcon icon={item.direction === 'down' ? faArrowDown : faArrowUp} className="text-xs" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="truncate text-sm font-bold text-white">{item.label}</span>
+                                        <span className={item.direction === 'down' ? 'text-rose-300 text-sm font-bold' : 'text-emerald-300 text-sm font-bold'}>
+                                            {result.comparison ? signedManDay(item.diff) : `${item.share.toFixed(1)}%`}
+                                        </span>
+                                    </div>
+                                    <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500">
+                                        <span>{item.type === 'team' ? '팀' : item.type === 'site' ? '현장' : '작업자'}</span>
+                                        <span>{directionLabel[item.direction]}</span>
+                                        <span>{item.description}</span>
+                                    </div>
+                                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
+                                        <div className="h-full rounded-full bg-cyan-400" style={{ width: `${Math.min(100, item.share)}%` }} />
+                                    </div>
+                                </div>
+                            </div>
+                        )) : (
+                            <div className="px-4 py-6 text-sm text-slate-500">기여도 항목이 없습니다.</div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-700/30 bg-slate-900/45 p-4">
+                    <div className="mb-3 flex items-center gap-2">
+                        <FontAwesomeIcon icon={faArrowRight} className="text-emerald-300" />
+                        <span className="text-sm font-bold text-white">다음 액션</span>
+                    </div>
+                    <div className="space-y-3">
+                        {insights.recommendations.map((recommendation) => {
+                            const style = severityStyle[recommendation.priority];
+                            return (
+                                <div key={recommendation.id} className="rounded-xl border border-slate-700/30 bg-slate-800/45 p-3">
+                                    <div className="mb-1 flex items-center justify-between gap-2">
+                                        <span className="text-sm font-bold text-white">{recommendation.title}</span>
+                                        <span className={`rounded-lg border px-2 py-1 text-[10px] font-bold ${style.badge}`}>
+                                            {style.label}
+                                        </span>
+                                    </div>
+                                    <p className="text-xs leading-relaxed text-slate-400">{recommendation.description}</p>
+                                    {onAsk && (
+                                        <button
+                                            type="button"
+                                            onClick={() => onAsk(recommendation.question)}
+                                            className="mt-3 inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-bold text-emerald-300 transition-colors hover:bg-emerald-500/15"
+                                        >
+                                            <FontAwesomeIcon icon={faPaperPlane} className="text-[10px]" />
+                                            {recommendation.actionLabel}
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                    {onAsk && insights.followUpQuestions.length > 0 && (
+                        <div className="mt-4 border-t border-slate-700/30 pt-3">
+                            <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">후속 질문</div>
+                            <div className="flex flex-wrap gap-2">
+                                {insights.followUpQuestions.slice(0, 4).map((question) => (
+                                    <button
+                                        key={question}
+                                        type="button"
+                                        onClick={() => onAsk(question)}
+                                        className="rounded-lg border border-slate-700/40 bg-slate-800/60 px-2.5 py-1.5 text-[11px] text-slate-300 transition-colors hover:border-cyan-500/30 hover:text-white"
+                                    >
+                                        {question}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const AI_MODE_OPTIONS: Array<{ id: AiAnalysisMode; label: string; description: string }> = [
+    { id: 'auto', label: '자동 판단', description: '질문 내용으로 통계 분석과 DB 검색을 자동 선택' },
+    { id: 'analytics', label: '일보 통계', description: '기존 일보 기반 공수/금액 통계 분석' },
+    { id: 'manpowerDb', label: '인력 DB 검색', description: '작업자, 팀, 현장, 회사, 계좌, 무결성 검색' },
+];
+
+const rowTypeLabel: Record<ManpowerDbSearchRow['rowType'], string> = {
+    worker: '작업자',
+    team: '팀',
+    site: '현장',
+    company: '회사',
+    support: '지원',
+    integrity: '무결성',
+};
+
+const resultTypeLabel: Record<ManpowerDbSearchResult['resultType'], string> = {
+    worker_list: '작업자 목록',
+    team_list: '팀 목록',
+    site_list: '현장 목록',
+    company_list: '회사 목록',
+    support: '지원 흐름',
+    mixed: '통합 결과',
+    integrity: '무결성 점검',
+};
+
+const fieldToneClass: Record<NonNullable<ManpowerDbSearchRow['fields'][number]['tone']>, string> = {
+    default: 'text-slate-300',
+    muted: 'text-slate-500',
+    success: 'text-emerald-300',
+    warning: 'text-amber-300',
+    danger: 'text-rose-300',
+    info: 'text-cyan-300',
+};
+
+const getManpowerDbExamples = (mode: AiAnalysisMode) => {
+    if (mode === 'analytics') return EXAMPLE_QUESTIONS;
+    if (mode === 'manpowerDb') return MANPOWER_DB_EXAMPLE_QUESTIONS;
+    return [
+        ...MANPOWER_DB_EXAMPLE_QUESTIONS.slice(0, 6),
+        ...EXAMPLE_QUESTIONS.slice(0, 3),
+    ];
+};
+
+const getManpowerDbFilterTags = (result: ManpowerDbSearchResult): string[] => {
+    const filters = result.query.filters;
+    const tags: string[] = [
+        `대상: ${result.query.entity}`,
+        `의도: ${result.query.intent}`,
+    ];
+
+    if (filters.keyword) tags.push(`키워드: ${filters.keyword}`);
+    if (filters.name) tags.push(`이름: ${filters.name}`);
+    if (filters.teamName) tags.push(`팀: ${filters.teamName}`);
+    if (filters.siteName) tags.push(`현장: ${filters.siteName}`);
+    if (filters.companyName) tags.push(`회사: ${filters.companyName}`);
+    if (filters.status) tags.push(`상태: ${filters.status}`);
+    if (filters.dateRange) tags.push(`기간: ${filters.dateRange.startDate}~${filters.dateRange.endDate}`);
+    if (filters.missingFields?.length) tags.push(`누락: ${filters.missingFields.join(', ')}`);
+
+    return tags;
+};
+
+const AiModeSelector: React.FC<{
+    mode: AiAnalysisMode;
+    setMode: (mode: AiAnalysisMode) => void;
+    disabled?: boolean;
+}> = ({ mode, setMode, disabled }) => (
+    <div className="rounded-2xl border border-slate-700/40 bg-slate-900/45 p-2">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+            {AI_MODE_OPTIONS.map((option) => {
+                const active = mode === option.id;
+                return (
+                    <button
+                        key={option.id}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => setMode(option.id)}
+                        className={`rounded-xl border px-3 py-2 text-left transition-all disabled:opacity-50 ${
+                            active
+                                ? 'border-cyan-500/40 bg-cyan-500/10 text-white'
+                                : 'border-slate-700/40 bg-slate-800/40 text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                        }`}
+                    >
+                        <span className="block text-xs font-bold">{option.label}</span>
+                        <span className="mt-1 block text-[10px] leading-relaxed text-slate-500">{option.description}</span>
+                    </button>
+                );
+            })}
+        </div>
+    </div>
+);
+
+const AiManpowerDbRelatedCards: React.FC<{ result: ManpowerDbSearchResult }> = ({ result }) => {
+    const groups: Array<{ label: string; rows?: ManpowerDbSearchRow[] }> = [
+        { label: '관련 작업자', rows: result.related?.workers },
+        { label: '관련 팀', rows: result.related?.teams },
+        { label: '관련 현장', rows: result.related?.sites },
+        { label: '관련 회사', rows: result.related?.companies },
+    ].filter((group) => (group.rows?.length || 0) > 0);
+
+    if (groups.length === 0) return null;
+
+    return (
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {groups.map((group) => (
+                <div key={group.label} className="rounded-xl border border-slate-700/30 bg-slate-900/45 p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                        <span className="text-sm font-bold text-white">{group.label}</span>
+                        <span className="text-[10px] text-slate-500">{group.rows?.length || 0}건</span>
+                    </div>
+                    <div className="space-y-2">
+                        {group.rows?.slice(0, 6).map((row) => (
+                            <a
+                                key={`${group.label}_${row.id}_${row.name}`}
+                                href={row.path}
+                                className="block rounded-lg border border-slate-800 bg-slate-800/40 px-3 py-2 transition-colors hover:border-cyan-500/30"
+                            >
+                                <div className="flex items-center justify-between gap-3">
+                                    <span className="truncate text-sm font-bold text-slate-200">{row.name}</span>
+                                    <span className="text-[10px] text-slate-500">{rowTypeLabel[row.rowType]}</span>
+                                </div>
+                                {row.subtitle && <div className="mt-1 truncate text-xs text-slate-500">{row.subtitle}</div>}
+                            </a>
+                        ))}
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+};
+
+const AiManpowerDbSearchPanel: React.FC<{
+    result: ManpowerDbSearchResult;
+    onAsk: (question: string) => void;
+}> = ({ result, onAsk }) => (
+    <div className="ml-11 space-y-4">
+        <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-cyan-300">인력 DB 검색 결과</div>
+                    <div className="mt-1 text-lg font-bold text-white">{result.summary}</div>
+                </div>
+                <div className="rounded-xl border border-slate-700/40 bg-slate-900/50 px-3 py-2 text-right">
+                    <div className="text-[10px] text-slate-500">표시 / 전체</div>
+                    <div className="text-sm font-bold text-cyan-300">{result.counts.shown} / {result.counts.total}</div>
+                </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="rounded-xl border border-slate-700/30 bg-slate-900/45 p-3">
+                    <div className="text-[10px] text-slate-500">결과 유형</div>
+                    <div className="mt-1 text-sm font-bold text-white">{resultTypeLabel[result.resultType]}</div>
+                </div>
+                <div className="rounded-xl border border-slate-700/30 bg-slate-900/45 p-3">
+                    <div className="text-[10px] text-slate-500">파싱된 질문</div>
+                    <div className="mt-1 text-sm font-bold text-white">{result.parsedQuestion}</div>
+                </div>
+                <div className="rounded-xl border border-slate-700/30 bg-slate-900/45 p-3">
+                    <div className="text-[10px] text-slate-500">개인정보 보호</div>
+                    <div className="mt-1 text-sm font-bold text-emerald-300">기본 마스킹 적용</div>
+                </div>
+            </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+            {getManpowerDbFilterTags(result).map((tag) => (
+                <span key={tag} className="rounded-lg border border-slate-700/40 bg-slate-800/50 px-2.5 py-1 text-xs text-slate-300">
+                    {tag}
+                </span>
+            ))}
+        </div>
+
+        {result.interpretation && (
+            <div className="rounded-xl border border-slate-700/30 bg-slate-900/45 p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                    <span className="text-sm font-bold text-white">질문 해석</span>
+                    <span className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-2 py-1 text-[10px] font-bold text-cyan-200">
+                        신뢰도 {Math.round(result.interpretation.confidence * 100)}%
+                    </span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div className="rounded-lg bg-slate-800/45 p-3">
+                        <div className="text-[10px] text-slate-500">Entity</div>
+                        <div className="mt-1 text-sm font-bold text-white">{result.interpretation.entity}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-800/45 p-3">
+                        <div className="text-[10px] text-slate-500">Intent</div>
+                        <div className="mt-1 text-sm font-bold text-white">{result.interpretation.intent}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-800/45 p-3">
+                        <div className="text-[10px] text-slate-500">Clarification</div>
+                        <div className={result.interpretation.clarificationNeeded ? 'mt-1 text-sm font-bold text-amber-300' : 'mt-1 text-sm font-bold text-emerald-300'}>
+                            {result.interpretation.clarificationNeeded ? '후보 확인 필요' : '자동 해석'}
+                        </div>
+                    </div>
+                </div>
+                {!!result.interpretation.filters.length && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        {result.interpretation.filters.map((filter) => (
+                            <span key={`${filter.label}_${filter.value}`} className="rounded-lg border border-slate-700/40 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300">
+                                {filter.label}: {filter.value}
+                            </span>
+                        ))}
+                    </div>
+                )}
+                {!!result.interpretation.candidates?.length && (
+                    <div className="mt-4">
+                        <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">모호한 검색어 후보</div>
+                        <div className="flex flex-wrap gap-2">
+                            {result.interpretation.candidates.slice(0, 6).map((candidate) => (
+                                <button
+                                    key={`${candidate.entity}_${candidate.id}`}
+                                    type="button"
+                                    onClick={() => onAsk(`${candidate.name} ${result.query.intent === 'relation' ? '관계 보여줘' : '정보 보여줘'}`)}
+                                    className="rounded-lg border border-slate-700/40 bg-slate-800/60 px-2.5 py-1.5 text-left text-xs text-slate-300 hover:border-cyan-500/30 hover:text-white"
+                                    title={candidate.matchReason}
+                                >
+                                    <span className="font-bold">{candidate.name}</span>
+                                    <span className="ml-2 text-slate-500">{candidate.entity} · {Math.round(candidate.score * 100)}%</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
+        )}
+
+        {!!result.plan?.length && (
+            <div className="rounded-xl border border-slate-700/30 bg-slate-900/45 p-4">
+                <div className="mb-3 text-sm font-bold text-white">실행 계획</div>
+                <div className="space-y-2">
+                    {result.plan.map((step) => (
+                        <div key={`${step.step}_${step.op}`} className="flex flex-wrap items-center gap-3 rounded-lg bg-slate-800/45 px-3 py-2 text-xs">
+                            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-cyan-500/10 font-bold text-cyan-300">{step.step}</span>
+                            <span className="font-bold text-slate-200">{step.label}</span>
+                            <span className="text-slate-500">{step.op}</span>
+                            {step.input && <span className="text-slate-500">입력: {step.input}</span>}
+                            {typeof step.outputCount === 'number' && <span className="text-cyan-300">결과 {step.outputCount}건</span>}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        )}
+
+        <div className="overflow-hidden rounded-xl border border-slate-700/30 bg-slate-900/45">
+            <div className="flex items-center justify-between border-b border-slate-700/30 bg-slate-800/50 px-4 py-3">
+                <span className="text-sm font-bold text-white">검색 결과 테이블</span>
+                <span className="text-[10px] text-slate-500">민감정보 마스킹 표시</span>
+            </div>
+            <div className="overflow-x-auto">
+                <table className="w-full min-w-[980px] text-left">
+                    <thead>
+                        <tr className="border-b border-slate-800 text-xs text-slate-500">
+                            <th className="px-4 py-3">유형</th>
+                            <th className="px-4 py-3">이름</th>
+                            <th className="px-4 py-3">상태</th>
+                            <th className="px-4 py-3">주요 정보</th>
+                            <th className="px-4 py-3">매칭 근거</th>
+                            <th className="px-4 py-3">출처</th>
+                            <th className="px-4 py-3">신뢰도</th>
+                            <th className="px-4 py-3">이동</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {result.rows.map((row) => (
+                            <tr key={`${row.rowType}_${row.id}_${row.name}`} className="border-b border-slate-800/70 hover:bg-slate-800/25">
+                                <td className="px-4 py-3 text-xs text-cyan-300">{rowTypeLabel[row.rowType]}</td>
+                                <td className="px-4 py-3">
+                                    <div className="font-bold text-white">{row.name}</div>
+                                    {row.subtitle && <div className="mt-1 max-w-[220px] truncate text-xs text-slate-500">{row.subtitle}</div>}
+                                    {!!row.badges?.length && (
+                                        <div className="mt-2 flex flex-wrap gap-1">
+                                            {row.badges.slice(0, 3).map((badge) => (
+                                                <span key={badge} className="rounded-md bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">{badge}</span>
+                                            ))}
+                                        </div>
+                                    )}
+                                </td>
+                                <td className="px-4 py-3 text-xs text-slate-300">{row.status || '미지정'}</td>
+                                <td className="px-4 py-3">
+                                    <div className="grid grid-cols-1 gap-1 md:grid-cols-2">
+                                        {row.fields.map((field) => (
+                                            <div key={`${row.id}_${field.label}`} className="text-xs">
+                                                <span className="text-slate-500">{field.label}: </span>
+                                                <span className={fieldToneClass[field.tone || 'default']}>{field.value}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </td>
+                                <td className="px-4 py-3 text-xs text-slate-300">{row.matchReason || '조건 일치'}</td>
+                                <td className="px-4 py-3 text-xs text-cyan-300">{row.source || 'master'}</td>
+                                <td className="px-4 py-3 text-xs text-slate-300">{typeof row.confidence === 'number' ? `${Math.round(row.confidence * 100)}%` : '-'}</td>
+                                <td className="px-4 py-3">
+                                    {row.path && (
+                                        <a href={row.path} className="inline-flex items-center gap-2 rounded-lg border border-slate-700/40 bg-slate-800/60 px-2.5 py-1.5 text-xs text-slate-300 hover:border-cyan-500/30 hover:text-white">
+                                            보기
+                                            <FontAwesomeIcon icon={faArrowRight} className="text-[10px]" />
+                                        </a>
+                                    )}
+                                </td>
+                            </tr>
+                        ))}
+                        {result.rows.length === 0 && (
+                            <tr>
+                                <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-500">조건에 맞는 결과가 없습니다.</td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <AiManpowerDbRelatedCards result={result} />
+
+        {!!result.actions?.length && (
+            <div className="flex flex-wrap gap-2">
+                {result.actions.map((action) => (
+                    <a
+                        key={`${action.label}_${action.path}`}
+                        href={action.path}
+                        className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-2 text-xs font-bold text-cyan-200 transition-colors hover:bg-cyan-500/15"
+                    >
+                        {action.label}
+                        <FontAwesomeIcon icon={faArrowRight} className="text-[10px]" />
+                    </a>
+                ))}
+            </div>
+        )}
+
+        {!!result.followUpQuestions?.length && (
+            <div className="rounded-xl border border-slate-700/30 bg-slate-900/45 p-4">
+                <div className="mb-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">후속 질문</div>
+                <div className="flex flex-wrap gap-2">
+                    {result.followUpQuestions.slice(0, 5).map((question) => (
+                        <button
+                            key={question}
+                            type="button"
+                            onClick={() => onAsk(question)}
+                            className="rounded-lg border border-slate-700/40 bg-slate-800/60 px-2.5 py-1.5 text-xs text-slate-300 transition-colors hover:border-cyan-500/30 hover:text-white"
+                        >
+                            {question}
+                        </button>
+                    ))}
+                </div>
+            </div>
+        )}
+
+        {!!result.warnings?.length && (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs leading-relaxed text-amber-200/80">
+                {result.warnings.map((warning) => (
+                    <div key={warning}>{warning}</div>
+                ))}
+            </div>
+        )}
+    </div>
+);
+
 const AiAnalyticsView: React.FC<{
     messages: ChatMessage[];
     input: string;
@@ -1048,7 +1662,9 @@ const AiAnalyticsView: React.FC<{
     onReset?: () => void;
     loading: boolean;
     formatCurrency: (val: number) => string;
-}> = ({ messages, input, setInput, onSubmit, onReset, loading, formatCurrency }) => {
+    mode: AiAnalysisMode;
+    setMode: (mode: AiAnalysisMode) => void;
+}> = ({ messages, input, setInput, onSubmit, onReset, loading, formatCurrency, mode, setMode }) => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set());
@@ -1068,6 +1684,21 @@ const AiAnalyticsView: React.FC<{
     const handleCopyTable = useCallback((result: AnalyticsResult, msgId: string) => {
         const lines: string[] = [];
         const type = result.query.analysisType;
+
+        if (result.advancedInsights) {
+            lines.push('[고급 분석 요약]');
+            result.advancedInsights.narrativeHighlights.forEach((highlight, index) => {
+                lines.push(`${index + 1}. ${highlight}`);
+            });
+            if (result.advancedInsights.forecast) {
+                const forecast = result.advancedInsights.forecast;
+                lines.push(`월말예측\t${forecast.projectedManDay.toFixed(1)}공수\t${formatCurrency(forecast.projectedAmount)}원`);
+            }
+            result.advancedInsights.riskSignals.forEach((signal) => {
+                lines.push(`위험신호\t${signal.title}\t${signal.metricLabel}: ${signal.metricValue}\t${signal.basis}`);
+            });
+            lines.push('');
+        }
 
         if (type === 'team_summary' || type === 'general') {
             lines.push('순위\t팀명\t총공수\t인원\t총금액\t가동일\t일평균');
@@ -1094,21 +1725,29 @@ const AiAnalyticsView: React.FC<{
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSubmit(input); }
     }, [input, onSubmit]);
 
+    const examples = getManpowerDbExamples(mode);
+    const inputPlaceholder = mode === 'manpowerDb'
+        ? '인력 DB 질문을 입력하세요. 예: 1팀 소속 작업자 중 계좌 없는 사람'
+        : mode === 'analytics'
+            ? '일보 통계 질문을 입력하세요. 예: 이번 달 팀별 공수 순위'
+            : '질문을 입력하세요. 예: 과천 현장 담당팀, 이번 달 팀별 공수 순위';
+
     return (
         <div className="flex flex-col" style={{ minHeight: '600px' }}>
+            <AiModeSelector mode={mode} setMode={setMode} disabled={loading} />
             <div className="flex-1 space-y-6 pb-4">
                 {messages.length === 0 ? (
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center justify-center py-16">
                         <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-indigo-500/20 border border-cyan-500/20 flex items-center justify-center mb-6">
                             <FontAwesomeIcon icon={faRobot} className="text-3xl text-cyan-400" />
                         </div>
-                        <h3 className="text-2xl font-bold text-white mb-2">AI 통계 분석</h3>
+                        <h3 className="text-2xl font-bold text-white mb-2">AI 분석</h3>
                         <p className="text-slate-400 text-center max-w-lg mb-8">
-                            자연어로 일보 데이터를 분석하세요. 팀별/현장별/작업자별/급여방식별 집계를 자동으로 수행합니다.<br />
-                            <span className="text-slate-500 text-xs">모든 수치는 실제 DB 데이터 기반입니다.</span>
+                            일보 통계 분석은 그대로 유지하고, 인력 DB 검색 모드에서는 작업자/팀/현장/회사/계좌/무결성 데이터를 자연어로 조회합니다.<br />
+                            <span className="text-slate-500 text-xs">DB 검색 결과는 UI 렌더링 가능한 구조화 결과로 표시됩니다.</span>
                         </p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-w-2xl w-full">
-                            {EXAMPLE_QUESTIONS.map((eq, idx) => (
+                            {examples.map((eq, idx) => (
                                 <button key={idx} onClick={() => onSubmit(eq.text)} disabled={loading}
                                     className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:border-cyan-500/30 hover:bg-slate-800/80 transition-all text-left group">
                                     <span className="text-[10px] font-bold text-cyan-500/60 uppercase tracking-wider mb-1 block">{eq.category}</span>
@@ -1144,6 +1783,10 @@ const AiAnalyticsView: React.FC<{
                                             </div>
                                             <p className="text-sm text-slate-300 pt-1">{msg.content}</p>
                                         </div>
+
+                                        {msg.dbResult && (
+                                            <AiManpowerDbSearchPanel result={msg.dbResult} onAsk={onSubmit} />
+                                        )}
 
                                         {msg.result && msg.result.success && (
                                             <div className="ml-11 space-y-4">
@@ -1191,6 +1834,7 @@ const AiAnalyticsView: React.FC<{
                                                 )}
 
                                                 {/* Aggregated Summary Table */}
+                                                <AiAdvancedInsightsPanel result={msg.result} formatCurrency={formatCurrency} onAsk={onSubmit} />
                                                 <AiResultCharts result={msg.result} />
                                                 <AiAggregatedTable result={msg.result} formatCurrency={formatCurrency} />
 
@@ -1333,7 +1977,7 @@ const AiAnalyticsView: React.FC<{
             <div className="sticky bottom-0 pt-4 bg-gradient-to-t from-[#0f172a] via-[#0f172a] to-transparent">
                 <div className="flex gap-3 items-end bg-slate-800/60 border border-slate-700/50 rounded-2xl p-2 backdrop-blur-sm">
                     <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
-                        placeholder="질문을 입력하세요... (예: 12월 팀별 공수 순위, 지난달 일급제 작업자 TOP 10)"
+                        placeholder={inputPlaceholder}
                         rows={1} disabled={loading}
                         className="flex-1 bg-transparent text-sm text-white placeholder-slate-500 resize-none outline-none px-3 py-2 max-h-[120px] overflow-y-auto disabled:opacity-50"
                         style={{ minHeight: '40px' }} />
@@ -1343,7 +1987,7 @@ const AiAnalyticsView: React.FC<{
                     </button>
                 </div>
                 <p className="text-[10px] text-slate-600 text-center mt-2">
-                    AI가 자연어를 분석하여 실제 DB 데이터를 조회합니다. 팀별·현장별·작업자별·급여방식별 자동 집계.
+                    자동 판단 모드에서는 질문 키워드에 따라 일보 통계 분석 또는 인력 DB 검색을 선택합니다.
                 </p>
             </div>
         </div>
@@ -1376,6 +2020,7 @@ const DailyReportStatisticsPage: React.FC = () => {
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [chatInput, setChatInput] = useState('');
     const [aiLoading, setAiLoading] = useState(false);
+    const [aiMode, setAiMode] = useState<AiAnalysisMode>('auto');
 
     // Filter Quick Actions
     const handleQuickDate = (type: 'thisMonth' | 'lastMonth' | '3months') => {
@@ -1475,7 +2120,26 @@ const DailyReportStatisticsPage: React.FC = () => {
         setAiLoading(true);
 
         try {
-            const result = await analyzeWithAI(question.trim());
+            const trimmedQuestion = question.trim();
+            const useDbSearch = aiMode === 'manpowerDb' || (aiMode === 'auto' && shouldUseManpowerDbSearch(trimmedQuestion));
+
+            if (useDbSearch) {
+                const result = await searchManpowerDatabase(trimmedQuestion);
+                const assistantMsg: ChatMessage = {
+                    id: `msg_${Date.now()}_db`,
+                    role: 'assistant',
+                    content: result.success
+                        ? `인력 DB에서 "${result.parsedQuestion}" 검색 결과입니다.`
+                        : '인력 DB 검색에 실패했습니다.',
+                    dbResult: result,
+                    resultKind: 'manpowerDb',
+                    timestamp: Date.now(),
+                };
+                setChatMessages(prev => [...prev, assistantMsg]);
+                return;
+            }
+
+            const result = await analyzeWithAI(trimmedQuestion);
             const assistantMsg: ChatMessage = {
                 id: `msg_${Date.now()}_ai`,
                 role: 'assistant',
@@ -1483,6 +2147,7 @@ const DailyReportStatisticsPage: React.FC = () => {
                     ? `${result.parsedQuestion}에 대한 분석 결과입니다.`
                     : (result.error || '분석에 실패했습니다.'),
                 result: result.success ? result : undefined,
+                resultKind: 'analytics',
                 timestamp: Date.now(),
             };
             setChatMessages(prev => [...prev, assistantMsg]);
@@ -1497,7 +2162,7 @@ const DailyReportStatisticsPage: React.FC = () => {
         } finally {
             setAiLoading(false);
         }
-    }, [aiLoading]);
+    }, [aiLoading, aiMode]);
 
     // Formatters
     const formatCurrency = useCallback((val: number) => new Intl.NumberFormat('ko-KR').format(val), []);
@@ -1720,7 +2385,7 @@ const DailyReportStatisticsPage: React.FC = () => {
                                                     dataKey="totalAmount"
                                                     nameKey="teamName"
                                                 >
-                                                    {teamData.slice(0, 5).map((entry, index) => (
+                                                    {teamData.slice(0, 5).map((_entry, index) => (
                                                         <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                                                     ))}
                                                 </Pie>
@@ -1942,6 +2607,8 @@ const DailyReportStatisticsPage: React.FC = () => {
                                 onReset={() => setChatMessages([])}
                                 loading={aiLoading}
                                 formatCurrency={formatCurrency}
+                                mode={aiMode}
+                                setMode={setAiMode}
                             />
                         ) : null}
                     </motion.div>

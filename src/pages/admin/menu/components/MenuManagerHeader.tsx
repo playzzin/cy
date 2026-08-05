@@ -3,7 +3,6 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faGlobe,
     faUsers,
-    faPlus,
     faCog
 } from '@fortawesome/free-solid-svg-icons';
 import {
@@ -23,7 +22,7 @@ import {
     useSortable
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { SiteDataType, PositionItem } from '../../../../types/menu';
+import { SiteDataType } from '../../../../types/menu';
 
 interface MenuManagerHeaderProps {
     menuData: SiteDataType;

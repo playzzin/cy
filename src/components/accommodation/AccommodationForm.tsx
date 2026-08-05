@@ -4,6 +4,7 @@ import { IconProp } from '@fortawesome/fontawesome-svg-core';
 import { faSave, faTimes, faWonSign, faBolt, faFire, faTint, faWifi, faBroom, faBuilding, faMapMarkerAlt, faFileContract, faPlus } from '@fortawesome/free-solid-svg-icons';
 import { Accommodation, CostProfile, Contract } from '../../types/accommodation';
 import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
+import { getDefaultAccommodationOverchargeThreshold } from '../../utils/accommodationOvercharge';
 
 type CostMode = 'variable' | 'fixed' | 'included';
 
@@ -49,6 +50,14 @@ const toFiniteNumber = (value: unknown, fallback = 0): number => {
     }
     return fallback;
 };
+
+const formatCurrencyInput = (value: number): string => (
+    Number.isFinite(value) && value !== 0 ? value.toLocaleString('ko-KR') : ''
+);
+
+const parseCurrencyInput = (value: string): number => (
+    Number(value.replace(/[^0-9]/g, '')) || 0
+);
 
 const normalizeDay = (value: unknown, fallback = 1): number => {
     const parsed = Math.floor(toFiniteNumber(value, fallback));
@@ -221,9 +230,19 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
         return normalizeContractForForm((data as any)?.contract, data as any);
     };
 
+    const getInitialOverchargeThreshold = (data?: Accommodation): number => (
+        toFiniteNumber(
+            data?.utilityOverchargeThreshold,
+            getDefaultAccommodationOverchargeThreshold(data?.type) ?? 0
+        )
+    );
+
     const [name, setName] = useState(initialData?.name || '');
     const [address, setAddress] = useState(initialData?.address || '');
     const [type, setType] = useState<Accommodation['type']>(initialData?.type || 'OneRoom');
+    const [utilityOverchargeThreshold, setUtilityOverchargeThreshold] = useState(
+        getInitialOverchargeThreshold(initialData)
+    );
     const [status, setStatus] = useState<Accommodation['status']>(initialData?.status || 'active');
     const [ownership, setOwnership] = useState<Accommodation['ownership']>(initialData?.ownership || 'Cheongyeon');
 
@@ -237,6 +256,7 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
         setName(initialData?.name || '');
         setAddress(initialData?.address || '');
         setType(initialData?.type || 'OneRoom');
+        setUtilityOverchargeThreshold(getInitialOverchargeThreshold(initialData));
         setStatus(initialData?.status || 'active');
         setOwnership(initialData?.ownership || 'Cheongyeon');
         setContract(getNormalizedContract(initialData));
@@ -259,10 +279,14 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         const normalizedContract = normalizeContractForForm(contract);
+        const defaultOverchargeThreshold = getDefaultAccommodationOverchargeThreshold(type);
         onSubmit({
             name,
             address,
             type,
+            utilityOverchargeThreshold: defaultOverchargeThreshold
+                ? utilityOverchargeThreshold || defaultOverchargeThreshold
+                : 0,
             status,
             ownership,
             contract: normalizedContract,
@@ -343,11 +367,18 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
                                             <label className="block text-xs font-bold text-slate-500 mb-1.5 ml-1">유형</label>
                                             <select
                                                 value={type}
-                                                onChange={(e) => setType(e.target.value as Accommodation['type'])}
+                                                onChange={(e) => {
+                                                    const nextType = e.target.value as Accommodation['type'];
+                                                    setType(nextType);
+                                                    setUtilityOverchargeThreshold(
+                                                        getDefaultAccommodationOverchargeThreshold(nextType) ?? 0
+                                                    );
+                                                }}
                                                 className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-100 outline-none font-medium text-slate-700"
                                             >
                                                 <option value="OneRoom">원룸</option>
                                                 <option value="TwoRoom">투룸</option>
+                                                <option value="ThreeRoom">쓰리룸</option>
                                                 <option value="Apartment">아파트</option>
                                             </select>
                                         </div>
@@ -367,6 +398,27 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
                                             </select>
                                         </div>
                                     </div>
+                                    {(type === 'TwoRoom' || type === 'ThreeRoom') && (
+                                        <div className="rounded-xl border border-rose-100 bg-rose-50/60 p-3">
+                                            <label className="mb-1.5 ml-1 block text-xs font-bold text-rose-700">
+                                                과청구 기준금액
+                                            </label>
+                                            <div className="relative">
+                                                <input
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    value={formatCurrencyInput(utilityOverchargeThreshold)}
+                                                    onChange={(e) => setUtilityOverchargeThreshold(parseCurrencyInput(e.target.value))}
+                                                    className="w-full rounded-xl border border-rose-200 bg-white p-2.5 pr-8 text-right font-mono font-bold text-rose-700 outline-none transition-all focus:border-rose-400 focus:ring-2 focus:ring-rose-100"
+                                                    placeholder={type === 'TwoRoom' ? '200,000' : '300,000'}
+                                                />
+                                                <span className="absolute right-3 top-2.5 text-sm text-rose-400">₩</span>
+                                            </div>
+                                            <p className="mt-1.5 text-[11px] font-medium text-rose-600">
+                                                월세를 제외한 전기·가스·수도·인터넷·관리비·기타 합계가 이 금액 이상이면 과청구 대상으로 표시합니다.
+                                            </p>
+                                        </div>
+                                    )}
                                     <div>
                                         <label className="block text-xs font-bold text-slate-500 mb-1.5 ml-1">명의 (소유주)</label>
                                         <div className="flex bg-slate-100 p-1 rounded-xl">
@@ -404,10 +456,12 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
                                             <label className="block text-xs font-bold text-slate-500 mb-1.5 ml-1">보증금</label>
                                             <div className="relative">
                                                 <input
-                                                    type="number"
-                                                    value={contract.deposit}
-                                                    onChange={(e) => setContract({ ...contract, deposit: toFiniteNumber(e.target.value, 0) })}
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    value={formatCurrencyInput(contract.deposit)}
+                                                    onChange={(e) => setContract({ ...contract, deposit: parseCurrencyInput(e.target.value) })}
                                                     className="w-full p-2.5 pr-8 bg-white border border-slate-200 rounded-xl text-right font-mono text-slate-700 focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none transition-all"
+                                                    placeholder="0"
                                                 />
                                                 <span className="absolute right-3 top-2.5 text-slate-400 text-sm">₩</span>
                                             </div>
@@ -416,10 +470,12 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
                                             <label className="block text-xs font-bold text-slate-500 mb-1.5 ml-1">월세 (기본)</label>
                                             <div className="relative">
                                                 <input
-                                                    type="number"
-                                                    value={contract.monthlyRent}
-                                                    onChange={(e) => setContract({ ...contract, monthlyRent: toFiniteNumber(e.target.value, 0) })}
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    value={formatCurrencyInput(contract.monthlyRent)}
+                                                    onChange={(e) => setContract({ ...contract, monthlyRent: parseCurrencyInput(e.target.value) })}
                                                     className="w-full p-2.5 pr-8 bg-white border border-indigo-200 text-indigo-700 rounded-xl text-right font-mono font-bold focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none transition-all"
+                                                    placeholder="0"
                                                 />
                                                 <span className="absolute right-3 top-2.5 text-indigo-300 text-sm">₩</span>
                                             </div>
@@ -504,27 +560,27 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
 
                                     <div className="pt-3 border-t border-slate-100">
                                         <label className="block text-xs font-bold text-slate-500 mb-2 ml-1">계좌 정보</label>
-                                        <div className="grid grid-cols-3 gap-2">
+                                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                                             <input
                                                 type="text"
                                                 placeholder="은행명"
                                                 value={contract.bankName || ''}
                                                 onChange={(e) => setContract({ ...contract, bankName: e.target.value })}
-                                                className="p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
+                                                className="min-w-0 p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
                                             />
                                             <input
                                                 type="text"
                                                 placeholder="예금주"
                                                 value={contract.accountHolder || ''}
                                                 onChange={(e) => setContract({ ...contract, accountHolder: e.target.value })}
-                                                className="p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
+                                                className="min-w-0 p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
                                             />
                                             <input
                                                 type="text"
                                                 placeholder="계좌번호"
                                                 value={contract.accountNumber || ''}
                                                 onChange={(e) => setContract({ ...contract, accountNumber: e.target.value })}
-                                                className="p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-100 outline-none col-span-3 lg:col-span-1"
+                                                className="col-span-2 min-w-0 p-2.5 bg-white border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-100 outline-none"
                                             />
                                         </div>
                                     </div>

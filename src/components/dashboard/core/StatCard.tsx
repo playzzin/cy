@@ -1,6 +1,5 @@
 
 import React from 'react';
-import { motion } from 'framer-motion';
 import { TrendBadge } from './TrendBadge';
 import { cn } from '../../../utils/cn';
 import { LucideIcon } from 'lucide-react';
@@ -36,10 +35,9 @@ export const StatCard: React.FC<StatCardProps> = ({
     className
 }) => {
     return (
-        <motion.div
-            whileHover={{ y: -4, boxShadow: "0 10px 30px -10px rgba(0,0,0,0.1)" }}
+        <div
             className={cn(
-                "bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-100 dark:border-slate-700/50 shadow-sm transition-colors",
+                "bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-100 dark:border-slate-700/50 shadow-sm transition-all hover:-translate-y-1 hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)]",
                 className
             )}
         >
@@ -64,6 +62,6 @@ export const StatCard: React.FC<StatCardProps> = ({
                     </div>
                 )}
             </div>
-        </motion.div>
+        </div>
     );
 };

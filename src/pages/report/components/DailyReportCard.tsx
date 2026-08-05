@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { DailyReport, DailyReportWorker } from '../../../services/dailyReportService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faBuilding, faUsers, faUser, faTrash, faComment, faUserShield, faUserGear, faCoins, faClock
+    faBuilding, faUsers, faUser, faTrash, faComment, faUserShield, faUserGear,
 } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 

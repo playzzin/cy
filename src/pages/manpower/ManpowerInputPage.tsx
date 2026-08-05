@@ -1,10 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faLayerGroup } from '@fortawesome/free-solid-svg-icons';
 import WorkerManagement from '../../components/manpower/WorkerManagement';
-import SiteManagement from '../../components/manpower/SiteManagement';
-import TeamManagement from '../../components/manpower/TeamManagement';
 
 const ManpowerInputPage: React.FC = () => {
     return (

@@ -20,6 +20,8 @@ export interface SiteData {
     trash?: MenuItem[];
     headerActions?: MenuItem[];
     deletedItems?: string[];
+    /** 시스템 페이지 원본 경로별 사용자 지정 표시명 */
+    systemPageLabels?: Record<string, string>;
     positionConfig?: PositionItem[];
     delegationTemplatePath?: string;
 }

@@ -6,7 +6,7 @@ import { format } from 'date-fns';
 import Swal from 'sweetalert2';
 import { receivableService, ReceivableLedger } from '../../../services/receivableService';
 
-// Reusing styled components or defining new ones consistent with BankMatchModal
+// Styled consistently with the tax invoice modal set.
 const ModalOverlay = styled.div`
     position: fixed;
     top: 0;
@@ -160,10 +160,12 @@ interface ManualPaymentModalProps {
     isOpen: boolean;
     onClose: () => void;
     receivable: ReceivableLedger;
+    actorId?: string;
+    actorName?: string;
     onSuccess: () => void;
 }
 
-export const ManualPaymentModal: React.FC<ManualPaymentModalProps> = ({ isOpen, onClose, receivable, onSuccess }) => {
+export const ManualPaymentModal: React.FC<ManualPaymentModalProps> = ({ isOpen, onClose, receivable, actorId, actorName, onSuccess }) => {
     const [amount, setAmount] = useState<number>(receivable.outstandingAmount);
     const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
     const [method, setMethod] = useState<'Cash' | 'Corporate' | 'Personal' | 'Manual'>('Cash');
@@ -182,7 +184,9 @@ export const ManualPaymentModal: React.FC<ManualPaymentModalProps> = ({ isOpen, 
                 amount,
                 paymentDate: date,
                 method: method,
-                memo
+                memo: memo.trim() || undefined,
+                createdBy: actorId || undefined,
+                createdByName: actorName || undefined
             });
             Swal.fire({
                 title: '완료',

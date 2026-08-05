@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronDown, faDownload, faFileInvoiceDollar, faSearch, faSync, faTimes, faUser } from '@fortawesome/free-solid-svg-icons';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -10,9 +10,12 @@ import { teamService, Team } from '../../services/teamService';
 import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typedDateInput';
 import { resolveReportPayType, resolveWorkerPayType } from '../../utils/payType';
 import OutputManagementTabs from '../../components/common/OutputManagementTabs';
+import { useSearchParams } from 'react-router-dom';
 
 type CompanyTypeFilter = 'construction' | 'partner';
 type SalaryModelFilter = '전체' | '일급제' | '월급제' | '지원팀' | '용역팀';
+
+const TABLE_COLUMN_COUNT = 12;
 
 interface PersonnelHistoryRow {
     workerId: string;
@@ -25,6 +28,11 @@ interface PersonnelHistoryRow {
     laborManDay: number;
     invoiceManDay: number;
     unitPrice: number;
+    unitPriceBreakdown: Array<{
+        unitPrice: number;
+        manDay: number;
+        amount: number;
+    }>;
     laborAmount: number;
     invoiceAmount: number;
     totalAmount: number;
@@ -90,8 +98,48 @@ const formatResidentNumberForDisplay = (rawValue: string): string => {
     return raw;
 };
 
+const maskResidentNumberForDisplay = (rawValue: string): string => {
+    const formatted = formatResidentNumberForDisplay(rawValue);
+    if (!formatted) return '-';
+
+    const digits = formatted.replace(/[^0-9]/g, '');
+    if (digits.length === 13) {
+        return `${digits.slice(0, 6)}-${digits.slice(6, 7)}******`;
+    }
+    if (formatted.length > 8) {
+        return `${formatted.slice(0, 8)}******`;
+    }
+    return formatted;
+};
+
 const formatManDay = (value: number): string => {
     return Number.isFinite(value) ? value.toFixed(2) : '0.00';
+};
+
+const escapeRegExp = (value: string): string => {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
+const normalizeDateParam = (value?: string | null): string | null => {
+    return value ? normalizeTypedDateInput(value) : null;
+};
+
+const parseCompanyTypeParam = (value?: string | null): CompanyTypeFilter | null => {
+    return value === 'construction' || value === 'partner' ? value : null;
+};
+
+const parseSalaryModelParam = (value?: string | null): SalaryModelFilter | null => {
+    return value === '전체'
+        || value === '일급제'
+        || value === '월급제'
+        || value === '지원팀'
+        || value === '용역팀'
+        ? value
+        : null;
+};
+
+const parseSortOrderParam = (value?: string | null): 'asc' | 'desc' | null => {
+    return value === 'asc' || value === 'desc' ? value : null;
 };
 
 
@@ -107,6 +155,11 @@ const TotalPersonnelHistoryPage: React.FC = () => {
 };
 
 const TotalPersonnelHistoryInner: React.FC = () => {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const searchParamsKey = searchParams.toString();
+    const initialUrlSearchRef = useRef(searchParams.toString());
+    const didAutoSearchFromUrlRef = useRef(false);
+    const didRunCompanyTypeEffectRef = useRef(false);
     const today = new Date();
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
     const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
@@ -118,17 +171,23 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         return `${year}-${month}-${day}`;
     };
 
-    const [startDate, setStartDate] = useState(formatDate(firstDay));
-    const [endDate, setEndDate] = useState(formatDate(lastDay));
-    const [startDateInput, setStartDateInput] = useState(formatDate(firstDay));
-    const [endDateInput, setEndDateInput] = useState(formatDate(lastDay));
+    const initialStartDate = normalizeDateParam(searchParams.get('startDate')) ?? formatDate(firstDay);
+    const initialEndDate = normalizeDateParam(searchParams.get('endDate')) ?? formatDate(lastDay);
+    const initialCompanyType = parseCompanyTypeParam(searchParams.get('companyType')) ?? 'construction';
+    const initialSalaryModel = parseSalaryModelParam(searchParams.get('salaryModel')) ?? (initialCompanyType === 'partner' ? '지원팀' : '전체');
+    const initialSortOrder = parseSortOrderParam(searchParams.get('sortOrder') ?? searchParams.get('sort')) ?? 'asc';
 
-    const [companyType, setCompanyType] = useState<CompanyTypeFilter>('construction');
-    const [salaryModel, setSalaryModel] = useState<SalaryModelFilter>('전체');
+    const [startDate, setStartDate] = useState(initialStartDate);
+    const [endDate, setEndDate] = useState(initialEndDate);
+    const [startDateInput, setStartDateInput] = useState(initialStartDate);
+    const [endDateInput, setEndDateInput] = useState(initialEndDate);
 
-    const [selectedTeamId, setSelectedTeamId] = useState<string>('');
-    const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
-    const [workerSearchTerm, setWorkerSearchTerm] = useState<string>('');
+    const [companyType, setCompanyType] = useState<CompanyTypeFilter>(initialCompanyType);
+    const [salaryModel, setSalaryModel] = useState<SalaryModelFilter>(initialSalaryModel);
+
+    const [selectedTeamId, setSelectedTeamId] = useState<string>(searchParams.get('teamId') ?? '');
+    const [selectedWorkerId, setSelectedWorkerId] = useState<string>(searchParams.get('workerId') ?? '');
+    const [workerSearchTerm, setWorkerSearchTerm] = useState<string>(searchParams.get('q') ?? searchParams.get('search') ?? '');
     const [isWorkerDropdownOpen, setIsWorkerDropdownOpen] = useState(false);
     const [activeIndex, setActiveIndex] = useState(0);
 
@@ -137,8 +196,11 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     const [companies, setCompanies] = useState<Company[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [allWorkers, setAllWorkers] = useState<Worker[]>([]);
+    const [initialLoading, setInitialLoading] = useState(true);
     const [loading, setLoading] = useState(false);
-    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+    const [errorMessage, setErrorMessage] = useState('');
+    const [hasSearched, setHasSearched] = useState(false);
+    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(initialSortOrder);
     const [isFixed, setIsFixed] = useState<boolean>(true);
 
     // Lock parent scroll for internal scrolling
@@ -154,6 +216,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     }, []);
 
     const fetchInitialData = async () => {
+        setInitialLoading(true);
         try {
             const [fetchedTeams, fetchedCompanies, fetchedWorkers] = await Promise.all([
                 teamService.getTeams(),
@@ -165,6 +228,9 @@ const TotalPersonnelHistoryInner: React.FC = () => {
             setAllWorkers(fetchedWorkers);
         } catch (error) {
             console.error('Error fetching initial data:', error);
+            setErrorMessage('기초 데이터를 불러오지 못했습니다. 네트워크 또는 권한 상태를 확인한 뒤 다시 시도해주세요.');
+        } finally {
+            setInitialLoading(false);
         }
     };
 
@@ -181,6 +247,66 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     }, [endDate]);
 
     useEffect(() => {
+        const nextStartDate = normalizeDateParam(searchParams.get('startDate'));
+        const nextEndDate = normalizeDateParam(searchParams.get('endDate'));
+        const nextCompanyType = parseCompanyTypeParam(searchParams.get('companyType'));
+        const nextSalaryModel = parseSalaryModelParam(searchParams.get('salaryModel'));
+        const nextSortOrder = parseSortOrderParam(searchParams.get('sortOrder') ?? searchParams.get('sort'));
+        const nextTeamId = searchParams.has('teamId') ? (searchParams.get('teamId') ?? '') : null;
+        const nextWorkerId = searchParams.has('workerId') ? (searchParams.get('workerId') ?? '') : null;
+        const nextWorkerSearch = searchParams.has('q')
+            ? (searchParams.get('q') ?? '')
+            : (searchParams.has('search') ? (searchParams.get('search') ?? '') : null);
+
+        if (nextStartDate && nextStartDate !== startDate) {
+            setStartDate(nextStartDate);
+            setStartDateInput(nextStartDate);
+        }
+        if (nextEndDate && nextEndDate !== endDate) {
+            setEndDate(nextEndDate);
+            setEndDateInput(nextEndDate);
+        }
+        if (nextCompanyType && nextCompanyType !== companyType) setCompanyType(nextCompanyType);
+        if (nextSalaryModel && nextSalaryModel !== salaryModel) setSalaryModel(nextSalaryModel);
+        if (nextSortOrder && nextSortOrder !== sortOrder) setSortOrder(nextSortOrder);
+        if (nextTeamId !== null && nextTeamId !== selectedTeamId) setSelectedTeamId(nextTeamId);
+        if (nextWorkerId !== null && nextWorkerId !== selectedWorkerId) setSelectedWorkerId(nextWorkerId);
+        if (nextWorkerSearch !== null && nextWorkerSearch !== workerSearchTerm) setWorkerSearchTerm(nextWorkerSearch);
+    }, [searchParamsKey]);
+
+    useEffect(() => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.set('startDate', startDate);
+            next.set('endDate', endDate);
+            next.set('companyType', companyType);
+            next.set('salaryModel', salaryModel);
+            next.set('sortOrder', sortOrder);
+            next.delete('sort');
+
+            if (selectedTeamId) next.set('teamId', selectedTeamId);
+            else next.delete('teamId');
+
+            if (selectedWorkerId) next.set('workerId', selectedWorkerId);
+            else next.delete('workerId');
+
+            const trimmedSearch = workerSearchTerm.trim();
+            if (trimmedSearch) next.set('q', trimmedSearch);
+            else {
+                next.delete('q');
+                next.delete('search');
+            }
+
+            return next.toString() === prev.toString() ? prev : next;
+        }, { replace: true });
+    }, [companyType, endDate, salaryModel, selectedTeamId, selectedWorkerId, setSearchParams, sortOrder, startDate, workerSearchTerm]);
+
+    useEffect(() => {
+        if (!didRunCompanyTypeEffectRef.current) {
+            didRunCompanyTypeEffectRef.current = true;
+            return;
+        }
+
         if (companyType === 'partner') {
             setSalaryModel('지원팀');
         } else {
@@ -220,6 +346,17 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         return map;
     }, [teams]);
 
+    const workerByAnyId = useMemo(() => {
+        const map = new Map<string, Worker>();
+        allWorkers.forEach((worker) => {
+            const id = String(worker.id ?? '').trim();
+            const legacyId = String((worker as any).legacyId ?? '').trim();
+            if (id) map.set(id, worker);
+            if (legacyId) map.set(legacyId, worker);
+        });
+        return map;
+    }, [allWorkers]);
+
     const allowedTeamIds = useMemo(() => {
         const ids = new Set<string>();
         teams.forEach((team) => {
@@ -248,10 +385,10 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                 ? new Set(
                     teamScopeRows
                         .map((row) => {
-                            const rawTeamId = String(row.workerTeamId ?? '').trim();
-                            if (rawTeamId) {
-                                return String(teamById.get(rawTeamId)?.id ?? rawTeamId).trim();
-                            }
+                            const rowWorkerId = String(row.workerId ?? '').trim();
+                            const worker = rowWorkerId ? workerByAnyId.get(rowWorkerId) : undefined;
+                            const rawTeamId = String(row.workerTeamId ?? worker?.teamId ?? '').trim();
+                            if (rawTeamId) return String(teamById.get(rawTeamId)?.id ?? rawTeamId).trim();
                             const rawTeamName = String(row.workerTeamName ?? '').replace(/\s+/g, '').trim();
                             return String(teamByName.get(rawTeamName)?.id ?? '').trim();
                         })
@@ -268,7 +405,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
             })
             .slice()
             .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko'));
-    }, [allowedTeamIds, companyType, teamById, teamByName, teamScopeRows, teams]);
+    }, [allowedTeamIds, companyType, teamById, teamByName, teamScopeRows, teams, workerByAnyId]);
 
     const workerOptions = useMemo(() => {
         const filtered = allWorkers
@@ -343,12 +480,15 @@ const TotalPersonnelHistoryInner: React.FC = () => {
 
     // Text Highlighter Utility
     const HighlightText = ({ text, highlight }: { text: string; highlight: string }) => {
-        if (!highlight.trim()) return <span>{text}</span>;
-        const parts = text.split(new RegExp(`(${highlight})`, 'gi'));
+        const sourceText = String(text ?? '');
+        const trimmedHighlight = highlight.trim();
+        if (!trimmedHighlight) return <span>{sourceText}</span>;
+
+        const parts = sourceText.split(new RegExp(`(${escapeRegExp(trimmedHighlight)})`, 'gi'));
         return (
             <span>
                 {parts.map((part, i) =>
-                    part.toLowerCase() === highlight.toLowerCase() ? (
+                    part.toLowerCase() === trimmedHighlight.toLowerCase() ? (
                         <span key={i} className="bg-yellow-200 text-slate-900 rounded-sm px-0.5">{part}</span>
                     ) : (
                         <span key={i}>{part}</span>
@@ -397,6 +537,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                 console.error('Error fetching support team options:', error);
                 if (!cancelled) {
                     setTeamScopeRows([]);
+                    setErrorMessage('지원팀 팀 목록을 불러오지 못했습니다. 기간을 확인한 뒤 다시 시도해주세요.');
                 }
             }
         };
@@ -408,12 +549,33 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         };
     }, [companyType, endDate, startDate]);
 
-    const commitDateDrafts = () => {
-        const nextStartDate = normalizeTypedDateInput(startDateInput) ?? startDate;
-        const nextEndDate = normalizeTypedDateInput(endDateInput) ?? endDate;
+    const validateDateRange = (nextStartDate: string, nextEndDate: string): string => {
+        if (nextStartDate > nextEndDate) {
+            return '시작일은 종료일보다 늦을 수 없습니다.';
+        }
+        return '';
+    };
+
+    const commitDateDrafts = (): { startDate: string; endDate: string } | null => {
+        const nextStartDate = normalizeTypedDateInput(startDateInput);
+        const nextEndDate = normalizeTypedDateInput(endDateInput);
+
+        if (!nextStartDate || !nextEndDate) {
+            setErrorMessage('날짜는 YYYY-MM-DD 형식으로 입력해주세요.');
+            setHistoryData([]);
+            return null;
+        }
+
+        const dateRangeError = validateDateRange(nextStartDate, nextEndDate);
+        if (dateRangeError) {
+            setErrorMessage(dateRangeError);
+            setHistoryData([]);
+            return null;
+        }
 
         setStartDateInput(nextStartDate);
         setEndDateInput(nextEndDate);
+        setErrorMessage('');
 
         if (nextStartDate !== startDate) setStartDate(nextStartDate);
         if (nextEndDate !== endDate) setEndDate(nextEndDate);
@@ -424,15 +586,43 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         };
     };
 
+    const handleDateInputChange = (field: 'start' | 'end', value: string) => {
+        const sanitized = sanitizeTypedDateInput(value);
+        const normalized = normalizeTypedDateInput(sanitized);
+
+        if (field === 'start') {
+            setStartDateInput(sanitized);
+            if (normalized && normalized !== startDate) {
+                setStartDate(normalized);
+            }
+            return;
+        }
+
+        setEndDateInput(sanitized);
+        if (normalized && normalized !== endDate) {
+            setEndDate(normalized);
+        }
+    };
+
     const fetchData = async (dateOverride?: { startDate: string; endDate: string }) => {
+        const effectiveStartDate = dateOverride?.startDate ?? startDate;
+        const effectiveEndDate = dateOverride?.endDate ?? endDate;
+        const dateRangeError = validateDateRange(effectiveStartDate, effectiveEndDate);
+        if (dateRangeError) {
+            setErrorMessage(dateRangeError);
+            setHistoryData([]);
+            return;
+        }
+
         setLoading(true);
+        setErrorMessage('');
+        setHasSearched(true);
         try {
-            const effectiveStartDate = dateOverride?.startDate ?? startDate;
-            const effectiveEndDate = dateOverride?.endDate ?? endDate;
             const [workers, reportRows] = await Promise.all([
                 manpowerService.getWorkers(),
                 dailyReportService.getReportWorkerRowsByRange({ startDate: effectiveStartDate, endDate: effectiveEndDate })
             ]);
+            setAllWorkers(workers);
             setTeamScopeRows(reportRows);
             const workerById = new Map<string, Worker>();
             workers.forEach((w) => {
@@ -470,7 +660,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
 
             const search = workerSearchTerm.trim();
 
-            const statsByWorker = new Map<string, {
+            const statsByWorkerTeam = new Map<string, {
                 workerId: string;
                 name: string;
                 idNumber: string;
@@ -481,8 +671,9 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                 invoiceManDay: number;
                 laborAmount: number;
                 invoiceAmount: number;
+                unitPriceBreakdown: Map<number, { manDay: number; amount: number }>;
             }>();
-            const salaryByWorker = new Map<string, SalaryModelFilter>();
+            const salaryByWorkerTeam = new Map<string, SalaryModelFilter>();
             const siteById = new Map<string, { siteType?: unknown; paymentMethod?: unknown }>();
 
             reportRows.forEach((row) => {
@@ -502,12 +693,28 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                     if (!matchesName && !matchesIdNumber) return;
                 }
 
-                const workerTeamId = normalizeTeamId(String(row.workerTeamId ?? worker?.teamId ?? '').trim());
+                // A daily report is the historical source of truth. A worker's master-team
+                // assignment can change later, so it must only be used for legacy rows
+                // that do not have a saved team snapshot.
+                const snapshotTeamName = String(row.workerTeamName ?? '').trim();
+                const snapshotTeamId =
+                    normalizeTeamId(row.workerTeamId)
+                    || String(teamByName.get(snapshotTeamName.replace(/\s+/g, ''))?.id ?? '').trim();
+                const workerTeamId = snapshotTeamId || normalizeTeamId(worker?.teamId);
                 if (!workerTeamId) return;
                 if (!allowedTeamIds.has(workerTeamId)) return;
                 if (selectedNormalizedTeamId && workerTeamId !== selectedNormalizedTeamId) return;
+                const workerTeamName = String(
+                    (snapshotTeamId && snapshotTeamName ? snapshotTeamName : undefined)
+                    ??
+                    teamById.get(workerTeamId)?.name ??
+                    worker?.teamName ??
+                    row.workerTeamName ??
+                    ''
+                ).trim();
 
                 const workerId = normalizedWorkerId;
+                const statsKey = `${workerId}::${workerTeamId}`;
                 const rw = row;
                 const report = row as any;
 
@@ -533,8 +740,8 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                         }
                     }
 
-                    const prevModel = salaryByWorker.get(workerId);
-                    if (!prevModel) salaryByWorker.set(workerId, model);
+                    const prevModel = salaryByWorkerTeam.get(statsKey);
+                    if (!prevModel) salaryByWorkerTeam.set(statsKey, model);
 
                     const manDay = typeof rw.manDay === 'number' ? rw.manDay : 0;
                     const snapshotUnitPrice = typeof rw.unitPrice === 'number' ? rw.unitPrice : null;
@@ -542,23 +749,24 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                     const unitPrice = snapshotUnitPrice ?? fallbackUnitPrice;
                     const amount = typeof rw.amount === 'number' ? rw.amount : (manDay * unitPrice);
 
-                    const current = statsByWorker.get(workerId) ?? {
+                    const current = statsByWorkerTeam.get(statsKey) ?? {
                         workerId,
                         name: workerName,
                         idNumber,
                         salaryModel: model,
                         teamId: workerTeamId,
-                        teamName: String(rw.workerTeamName ?? teamById.get(workerTeamId)?.name ?? worker?.teamName ?? '').trim(),
+                        teamName: workerTeamName,
                         laborManDay: 0,
                         invoiceManDay: 0,
                         laborAmount: 0,
-                        invoiceAmount: 0
+                        invoiceAmount: 0,
+                        unitPriceBreakdown: new Map<number, { manDay: number; amount: number }>()
                     };
                     if (!current.name && workerName) current.name = workerName;
                     if (!current.idNumber && idNumber) current.idNumber = idNumber;
                     if (!current.teamId && workerTeamId) current.teamId = workerTeamId;
                     if (!current.teamName) {
-                        current.teamName = String(rw.workerTeamName ?? teamById.get(workerTeamId)?.name ?? worker?.teamName ?? '').trim();
+                        current.teamName = workerTeamName;
                     }
                     // 2024-05-22 Separate Labor/Invoice based on siteType & paymentType
                     const site = siteById.get(String(report.siteId ?? '').trim());
@@ -578,20 +786,35 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                         current.laborAmount += amount;
                     }
 
-                    statsByWorker.set(workerId, current);
+                    const unitPriceStats = current.unitPriceBreakdown.get(unitPrice) ?? { manDay: 0, amount: 0 };
+                    unitPriceStats.manDay += manDay;
+                    unitPriceStats.amount += amount;
+                    current.unitPriceBreakdown.set(unitPrice, unitPriceStats);
+
+                    statsByWorkerTeam.set(statsKey, current);
             });
 
             const result: PersonnelHistoryRow[] = [];
-            statsByWorker.forEach((stats, workerId) => {
+            statsByWorkerTeam.forEach((stats) => {
+                const workerId = stats.workerId;
                 const worker = workerById.get(workerId);
                 const teamId = stats.teamId || String(worker?.teamId ?? '').trim();
                 const teamName = stats.teamName || teamById.get(teamId)?.name || String(worker?.teamName ?? '');
-                const model = salaryByWorker.get(workerId) ?? stats.salaryModel ?? resolveWorkerSalaryModel(worker ?? ({ name: stats.name } as Worker));
+                const model = salaryByWorkerTeam.get(`${workerId}::${stats.teamId}`)
+                    ?? stats.salaryModel
+                    ?? resolveWorkerSalaryModel(worker ?? ({ name: stats.name } as Worker));
                 const fallbackUnitPrice = typeof worker?.unitPrice === 'number' ? worker.unitPrice : 0;
 
                 const totalManDay = stats.laborManDay + stats.invoiceManDay;
                 const totalAmount = stats.laborAmount + stats.invoiceAmount;
                 const computedUnitPrice = totalManDay > 0 ? Math.round(totalAmount / totalManDay) : fallbackUnitPrice;
+                const unitPriceBreakdown = Array.from(stats.unitPriceBreakdown.entries())
+                    .map(([unitPrice, priceStats]) => ({
+                        unitPrice,
+                        manDay: priceStats.manDay,
+                        amount: priceStats.amount
+                    }))
+                    .sort((a, b) => a.unitPrice - b.unitPrice);
 
                 result.push({
                     workerId,
@@ -604,6 +827,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                     invoiceManDay: stats.invoiceManDay,
                     totalManDay,
                     unitPrice: computedUnitPrice,
+                    unitPriceBreakdown,
                     laborAmount: stats.laborAmount,
                     invoiceAmount: stats.invoiceAmount,
                     totalAmount
@@ -612,20 +836,42 @@ const TotalPersonnelHistoryInner: React.FC = () => {
 
             result.sort((a, b) => {
                 const cmp = String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko');
-                return sortOrder === 'asc' ? cmp : -cmp;
+                if (cmp !== 0) return sortOrder === 'asc' ? cmp : -cmp;
+                return String(a.teamName ?? '').localeCompare(String(b.teamName ?? ''), 'ko');
             });
 
             setHistoryData(result);
         } catch (error) {
             console.error('Error fetching history data:', error);
-            alert('데이터 조회 중 오류가 발생했습니다.');
+            setHistoryData([]);
+            setErrorMessage('데이터 조회 중 오류가 발생했습니다. 잠시 후 다시 조회해주세요.');
         } finally {
             setLoading(false);
         }
     };
 
+    useEffect(() => {
+        if (didAutoSearchFromUrlRef.current) return;
+        if (!initialUrlSearchRef.current) return;
+        if (initialLoading) return;
+
+        didAutoSearchFromUrlRef.current = true;
+        void fetchData({ startDate, endDate });
+        // Direct-link reproduction should run once after master data is ready.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [endDate, initialLoading, startDate]);
+
+    const sortedHistoryData = useMemo(() => {
+        return historyData
+            .slice()
+            .sort((a, b) => {
+                const cmp = String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko');
+                return sortOrder === 'asc' ? cmp : -cmp;
+            });
+    }, [historyData, sortOrder]);
+
     const handleDownloadExcel = () => {
-        if (historyData.length === 0) {
+        if (sortedHistoryData.length === 0) {
             alert('다운로드할 데이터가 없습니다. 먼저 조회해주세요.');
             return;
         }
@@ -633,7 +879,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         const headers = ['No', '이름', '주민번호', '본봉'] as const;
         const wsData: Array<Array<string | number>> = [headers.slice() as unknown as Array<string | number>];
 
-        historyData.forEach((row, index) => {
+        sortedHistoryData.forEach((row, index) => {
             wsData.push([
                 index + 1,
                 row.name,
@@ -670,22 +916,6 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         XLSX.writeFile(wb, `인원전체내역_${startDate}_${endDate}.xlsx`);
     };
 
-    const handleSyncPartner = async () => {
-        if (!window.confirm('협력사 소속 작업자들의 급여방식을 "지원팀"으로 일괄 동기화합니다. 계속하시겠습니까?')) return;
-        try {
-            const result = await manpowerService.syncPartnerCompanyWorkersTeamType();
-            if (result.updated > 0) {
-                alert(`${result.updated}명의 작업자가 "지원팀"으로 동기화되었습니다.`);
-            } else if (result.errors.length > 0) {
-                alert(`동기화 실패: ${result.errors.join(', ')}`);
-            } else {
-                alert('동기화할 작업자가 없습니다. (이미 모두 동기화됨)');
-            }
-        } catch (error) {
-            alert('동기화 중 오류가 발생했습니다.');
-            console.error(error);
-        }
-    };
 
     const handleSyncReports = async () => {
         if (!window.confirm('기존 일보의 작업자별 급여방식을 일괄 동기화합니다. 시간이 걸릴 수 있습니다. 계속하시겠습니까?')) return;
@@ -707,7 +937,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     return (
         <div className="flex-1 flex flex-col min-h-0 bg-slate-50 overflow-hidden">
             {/* Header */}
-            <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between flex-shrink-0">
+            <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-shrink-0">
                 <div className="flex flex-col">
                     <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                         <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-blue-600" />
@@ -718,7 +948,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                     </p>
                 </div>
                 {/* Header Buttons Row */}
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                     <button
                         onClick={handleDownloadExcel}
                         className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all shadow-sm font-medium text-sm"
@@ -740,7 +970,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
             <div className="flex-1 flex flex-col p-4 overflow-hidden gap-3">
                 {/* Filter Bar */}
                 <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col gap-3 flex-shrink-0">
-                    <div className="flex flex-wrap items-end gap-3">
+                    <div className="flex flex-wrap items-stretch sm:items-end gap-3">
                         <div className="flex flex-col gap-1">
                             <div className="flex items-center gap-1">
                                 <label className="text-xs font-medium text-slate-500">시작일</label>
@@ -776,8 +1006,9 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                             <input
                                 type="text"
                                 inputMode="numeric"
+                                aria-label="조회 시작일"
                                 value={startDateInput}
-                                onChange={(e) => setStartDateInput(sanitizeTypedDateInput(e.target.value))}
+                                onChange={(e) => handleDateInputChange('start', e.target.value)}
                                 onBlur={() => {
                                     const nextStartDate = normalizeTypedDateInput(startDateInput) ?? startDate;
                                     setStartDateInput(nextStartDate);
@@ -800,8 +1031,9 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                             <input
                                 type="text"
                                 inputMode="numeric"
+                                aria-label="조회 종료일"
                                 value={endDateInput}
-                                onChange={(e) => setEndDateInput(sanitizeTypedDateInput(e.target.value))}
+                                onChange={(e) => handleDateInputChange('end', e.target.value)}
                                 onBlur={() => {
                                     const nextEndDate = normalizeTypedDateInput(endDateInput) ?? endDate;
                                     setEndDateInput(nextEndDate);
@@ -868,12 +1100,12 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                             </select>
                         </div>
 
-                        <div className="flex flex-col gap-1 relative">
+                        <div className="flex flex-col gap-1 relative w-full sm:w-auto">
                             <label className="text-xs font-medium text-slate-500">작업자 검색 및 선택</label>
                             <div className="relative">
                                 <div
                                     onClick={() => setIsWorkerDropdownOpen(!isWorkerDropdownOpen)}
-                                    className={`flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm w-72 h-[38px] cursor-pointer hover:border-blue-400 transition-all ${isWorkerDropdownOpen ? 'ring-2 ring-blue-500 border-blue-500' : ''}`}
+                                    className={`flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm w-full sm:w-72 h-[38px] cursor-pointer hover:border-blue-400 transition-all ${isWorkerDropdownOpen ? 'ring-2 ring-blue-500 border-blue-500' : ''}`}
                                 >
                                     <FontAwesomeIcon icon={faSearch} className="text-slate-400 text-xs" />
                                     <input
@@ -888,16 +1120,19 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                         }}
                                         onKeyDown={handleWorkerKeyDown}
                                         placeholder="이름 또는 주민번호 입력"
+                                        aria-label="작업자 검색어"
                                         className="bg-transparent border-none outline-none text-sm w-full"
                                         onFocus={() => setIsWorkerDropdownOpen(true)}
                                     />
                                     {(selectedWorkerId || workerSearchTerm) && (
                                         <button
+                                            type="button"
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 setSelectedWorkerId('');
                                                 setWorkerSearchTerm('');
                                             }}
+                                            aria-label="작업자 검색 초기화"
                                             className="ml-auto text-slate-400 hover:text-slate-600 p-1"
                                         >
                                             <FontAwesomeIcon icon={faTimes} className="text-[10px]" />
@@ -918,7 +1153,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                                 exit={{ opacity: 0, y: -10, scale: 0.95 }}
                                                 transition={{ duration: 0.15, ease: 'easeOut' }}
-                                                className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden min-w-[320px]"
+                                                className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden min-w-full sm:min-w-[320px]"
                                             >
                                                 <div className="max-h-[300px] overflow-y-auto p-2 space-y-1 custom-scrollbar">
                                                     {workerOptions.length > 0 ? (
@@ -988,15 +1223,31 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                         <button
                             onClick={() => {
                                 const nextRange = commitDateDrafts();
-                                fetchData(nextRange);
+                                if (nextRange) {
+                                    void fetchData(nextRange);
+                                }
                             }}
-                            className="px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md font-bold flex items-center gap-2 text-sm"
+                            disabled={loading || initialLoading}
+                            className={`px-4 py-1.5 rounded-lg transition-all shadow-md font-bold flex items-center justify-center gap-2 text-sm ${loading || initialLoading ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
                         >
                             <FontAwesomeIcon icon={faSearch} />
                             조회
                         </button>
                     </div>
                 </div>
+
+                {errorMessage && (
+                    <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm flex items-center justify-between gap-3">
+                        <span>{errorMessage}</span>
+                        <button
+                            type="button"
+                            onClick={() => setErrorMessage('')}
+                            className="text-red-500 hover:text-red-700 font-bold text-xs"
+                        >
+                            닫기
+                        </button>
+                    </div>
+                )}
 
                 {/* Table Area */}
                 <div className="flex-1 min-h-0 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
@@ -1009,7 +1260,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                     </div>
 
                     <div className="flex-1 min-h-0 overflow-auto overscroll-contain">
-                        <table className="w-full text-sm text-left border-separate border-spacing-0">
+                        <table className="w-full min-w-[980px] text-sm text-left border-separate border-spacing-0">
                             <thead className="bg-slate-50 text-slate-500 font-semibold sticky top-0 z-40">
                                 <tr className="text-xs uppercase tracking-wider">
                                     <th rowSpan={2} className={`px-4 py-2 text-center w-12 border-b border-r border-slate-200 ${isFixed ? 'sticky left-0 z-50 bg-slate-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`}>No</th>
@@ -1018,7 +1269,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                     <th rowSpan={2} className="px-4 py-2 border-b border-r border-slate-200">주민번호</th>
                                     <th rowSpan={2} className="px-4 py-2 border-b border-r border-slate-200">급여방식</th>
                                     <th colSpan={3} className="px-4 py-1 text-center border-b border-r border-slate-200 bg-slate-100/50">공수 (Man-Days)</th>
-                                    <th rowSpan={2} className="px-4 py-2 text-right border-b border-r border-slate-200">단가</th>
+                                    <th rowSpan={2} className="px-4 py-2 text-right border-b border-r border-slate-200">적용 단가</th>
                                     <th colSpan={3} className="px-4 py-1 text-center border-b border-slate-200 bg-blue-50/50 text-blue-700">본봉 (Total Amount)</th>
                                 </tr>
                                 <tr>
@@ -1031,30 +1282,30 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {loading ? (
+                                {loading || initialLoading ? (
                                     <tr>
-                                        <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
+                                        <td colSpan={TABLE_COLUMN_COUNT} className="px-4 py-12 text-center text-slate-500">
                                             <div className="flex flex-col items-center gap-2">
                                                 <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                                                <span>데이터 분석 중...</span>
+                                                <span>{initialLoading ? '기초 데이터 불러오는 중...' : '데이터 분석 중...'}</span>
                                             </div>
                                         </td>
                                     </tr>
-                                ) : historyData.length === 0 ? (
+                                ) : sortedHistoryData.length === 0 ? (
                                     <tr>
-                                        <td colSpan={8} className="px-4 py-12 text-center text-slate-500 bg-slate-50/50">
+                                        <td colSpan={TABLE_COLUMN_COUNT} className="px-4 py-12 text-center text-slate-500 bg-slate-50/50">
                                             <FontAwesomeIcon icon={faSearch} className="text-2xl text-slate-300 mb-2" />
-                                            <p className="font-medium">조회된 데이터가 없습니다.</p>
-                                            <p className="text-xs text-slate-400">검색 조건을 변경하여 다시 조회해보세요.</p>
+                                            <p className="font-medium">{hasSearched ? '조회된 데이터가 없습니다.' : '조회 대기 중입니다.'}</p>
+                                            <p className="text-xs text-slate-400">{hasSearched ? '검색 조건을 변경하여 다시 조회해보세요.' : '기간과 조건을 확인한 뒤 조회를 눌러주세요.'}</p>
                                         </td>
                                     </tr>
                                 ) : (
-                                    historyData.map((item, index) => (
-                                        <tr key={item.workerId} className="hover:bg-blue-50/50 transition-colors">
+                                    sortedHistoryData.map((item, index) => (
+                                        <tr key={`${item.workerId}-${item.teamId}`} className="hover:bg-blue-50/50 transition-colors">
                                             <td className={`px-4 py-3 text-center text-slate-400 text-xs border-b border-slate-100 ${isFixed ? 'sticky left-0 z-10 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`}>{index + 1}</td>
                                             <td className={`px-4 py-3 font-bold text-slate-800 border-b border-slate-100 ${isFixed ? 'sticky left-[48px] z-10 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`}>{item.name}</td>
                                             <td className={`px-4 py-3 text-slate-600 border-b border-slate-100 ${isFixed ? 'sticky left-[148px] z-10 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`}>{item.teamName || '-'}</td>
-                                            <td className="px-4 py-3 text-slate-500 font-mono text-xs border-b border-slate-100">{item.idNumber}</td>
+                                            <td className="px-4 py-3 text-slate-500 font-mono text-xs border-b border-slate-100">{maskResidentNumberForDisplay(item.idNumber)}</td>
                                             <td className="px-4 py-3 border-b border-slate-100">
                                                 <span className={`px-2 py-0.5 rounded text-xs font-medium ${item.salaryModel === '일급제' ? 'bg-blue-50 text-blue-600' :
                                                     item.salaryModel === '월급제' ? 'bg-indigo-50 text-indigo-600' :
@@ -1064,7 +1315,27 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                             <td className="px-3 py-3 text-right font-mono text-slate-500 bg-slate-50/30 border-b border-r border-slate-100">{item.laborManDay > 0 ? formatManDay(item.laborManDay) : '-'}</td>
                                             <td className="px-3 py-3 text-right font-mono text-slate-500 bg-slate-50/30 border-b border-r border-slate-100">{item.invoiceManDay > 0 ? formatManDay(item.invoiceManDay) : '-'}</td>
                                             <td className="px-3 py-3 text-right font-mono text-slate-800 font-bold bg-slate-100/30 border-b border-r border-slate-100 tracking-tighter">{formatManDay(item.totalManDay)}</td>
-                                            <td className="px-4 py-3 text-right font-mono text-slate-500 text-xs border-b border-r border-slate-100">{item.unitPrice.toLocaleString()}</td>
+                                            <td
+                                                className="px-4 py-3 text-right font-mono text-xs border-b border-r border-slate-100"
+                                                title={item.unitPriceBreakdown.length > 1
+                                                    ? `기간 가중 평균: ${item.unitPrice.toLocaleString()}원\n${item.unitPriceBreakdown
+                                                        .map((price) => `${price.unitPrice.toLocaleString()}원 × ${formatManDay(price.manDay)}일 = ${price.amount.toLocaleString()}원`)
+                                                        .join('\n')}`
+                                                    : undefined}
+                                            >
+                                                {item.unitPriceBreakdown.length > 1 ? (
+                                                    <div className="flex flex-col items-end gap-0.5 whitespace-nowrap">
+                                                        <span className="font-bold text-amber-700">단가 변동</span>
+                                                        {item.unitPriceBreakdown.map((price) => (
+                                                            <span key={price.unitPrice} className="text-[10px] leading-4 text-slate-500">
+                                                                {price.unitPrice.toLocaleString()}원 × {formatManDay(price.manDay)}일 = {price.amount.toLocaleString()}원
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-slate-500">{item.unitPrice.toLocaleString()}원</span>
+                                                )}
+                                            </td>
                                             <td className="px-3 py-3 text-right font-mono text-slate-600 border-b border-r border-slate-100">{item.laborAmount > 0 ? item.laborAmount.toLocaleString() : '-'}</td>
                                             <td className="px-3 py-3 text-right font-mono text-slate-600 border-b border-r border-slate-100">{item.invoiceAmount > 0 ? item.invoiceAmount.toLocaleString() : '-'}</td>
                                             <td className="px-4 py-3 text-right border-b border-slate-100 bg-blue-50/10">
@@ -1075,28 +1346,28 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                     ))
                                 )}
                             </tbody>
-                            {!loading && historyData.length > 0 && (
+                            {!loading && !initialLoading && sortedHistoryData.length > 0 && (
                                 <tfoot className="bg-slate-50 font-bold border-t border-slate-200 sticky bottom-0 z-40">
                                     <tr>
                                         <td colSpan={5} className="px-4 py-3 text-center text-slate-600 border-r border-slate-200">전체 합계</td>
                                         <td className="px-3 py-3 text-right text-slate-500 font-mono text-xs border-r border-slate-200">
-                                            {formatManDay(historyData.reduce((sum, item) => sum + item.laborManDay, 0))}
+                                            {formatManDay(sortedHistoryData.reduce((sum, item) => sum + item.laborManDay, 0))}
                                         </td>
                                         <td className="px-3 py-3 text-right text-slate-500 font-mono text-xs border-r border-slate-200">
-                                            {formatManDay(historyData.reduce((sum, item) => sum + item.invoiceManDay, 0))}
+                                            {formatManDay(sortedHistoryData.reduce((sum, item) => sum + item.invoiceManDay, 0))}
                                         </td>
                                         <td className="px-3 py-3 text-right text-slate-900 font-mono border-r border-slate-200">
-                                            {formatManDay(historyData.reduce((sum, item) => sum + item.totalManDay, 0))}
+                                            {formatManDay(sortedHistoryData.reduce((sum, item) => sum + item.totalManDay, 0))}
                                         </td>
                                         <td className="px-4 py-3 border-r border-slate-200"></td>
                                         <td className="px-3 py-3 text-right text-slate-600 font-mono text-xs border-r border-slate-200">
-                                            {historyData.reduce((sum, item) => sum + item.laborAmount, 0).toLocaleString()}
+                                            {sortedHistoryData.reduce((sum, item) => sum + item.laborAmount, 0).toLocaleString()}
                                         </td>
                                         <td className="px-3 py-3 text-right text-slate-600 font-mono text-xs border-r border-slate-200">
-                                            {historyData.reduce((sum, item) => sum + item.invoiceAmount, 0).toLocaleString()}
+                                            {sortedHistoryData.reduce((sum, item) => sum + item.invoiceAmount, 0).toLocaleString()}
                                         </td>
                                         <td className="px-4 py-3 text-right text-blue-800 font-mono font-black text-base">
-                                            {historyData.reduce((sum, item) => sum + item.totalAmount, 0).toLocaleString()} <span className="text-[10px] font-normal">원</span>
+                                            {sortedHistoryData.reduce((sum, item) => sum + item.totalAmount, 0).toLocaleString()} <span className="text-[10px] font-normal">원</span>
                                         </td>
                                     </tr>
                                 </tfoot>

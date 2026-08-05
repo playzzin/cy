@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "audit_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "category", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "daily_reports",
       "queryScope": "COLLECTION",
       "fields": [

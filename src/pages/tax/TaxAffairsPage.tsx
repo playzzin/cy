@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { format, startOfMonth } from 'date-fns';
-import { fetchNtsTaxInvoicesRange } from '../../services/barobillService';
+import { fetchNtsTaxInvoicesRange } from '../../services/taxInvoiceApiService';
 import { TransactionFilterBar } from './components/TransactionFilterBar';
 import { TransactionSummaryCards } from './components/TransactionSummaryCards';
 import { TransactionTable, TaxAffairsRecord } from './components/TransactionTable';

@@ -1,6 +1,7 @@
 import { freelancerFirestoreService } from './freelancerFirestoreService';
 import { Freelancer, FreelancerPayment } from '../types/freelancer';
 import { DailyReportWorkerRow } from './dailyReportService';
+import { monthlyPayrollSettlementService } from './monthlyPayrollSettlementService';
 
 const normalizeKoreanToken = (value: unknown): string =>
     String(value ?? '').trim().replace(/\s+/g, '');
@@ -187,20 +188,16 @@ export const freelancerService = {
         freelancers: any[];
         companies: any[];
     }> {
-        const { dailyReportService } = await import('./dailyReportService');
         const { teamService } = await import('./teamService');
         const { manpowerService } = await import('./manpowerService');
 
-        // 모든 데이터 병렬 로드 (단일 진실의 원천)
-        const [freelancersRaw, paymentsRaw, allTeams, workersRaw, reportRows] = await Promise.all([
+        // 월별 신고 금액은 통합급여관리에서 "전체법인"으로 정산 저장한 세전 금액만 사용한다.
+        const [freelancersRaw, paymentsRaw, allTeams, workersRaw, savedSettlements] = await Promise.all([
             this.getFreelancers(),
             this.getPayments(undefined, year),
             teamService.getTeams(),
             manpowerService.getWorkers(true),
-            dailyReportService.getReportWorkerRowsByRange({
-                startDate: `${year}-01-01`,
-                endDate: `${year}-12-31`
-            })
+            monthlyPayrollSettlementService.getSettlementsByYear(year),
         ]);
 
         const toNum = (v: unknown): number => {
@@ -245,6 +242,7 @@ export const freelancerService = {
         const paymentMap = new Map<string, {
             amounts: { [m: number]: number };
             ids: { [m: number]: string };
+            manualOverrides: { [m: number]: boolean };
             allPayments: FreelancerPayment[];
         }>();
 
@@ -252,24 +250,20 @@ export const freelancerService = {
             const key = p.freelancerId;
             if (!key) return;
             if (!paymentMap.has(key)) {
-                paymentMap.set(key, { amounts: {}, ids: {}, allPayments: [] });
+                paymentMap.set(key, { amounts: {}, ids: {}, manualOverrides: {}, allPayments: [] });
             }
             const entry = paymentMap.get(key)!;
             entry.allPayments.push(p);
             const m = p.month;
-            if (m >= 1 && m <= 12) {
-                // 월급제/일급제 구별없이: amount > 0이면 사용, 아니면 dailyRate × manDays
-                const payAmt = toNum(p.amount);
-                const calcAmt = toNum(p.dailyRate) > 0 && toNum(p.manDays) > 0
-                    ? toNum(p.dailyRate) * toNum(p.manDays) : 0;
-                const resolved = payAmt > 0 ? payAmt : calcAmt;
-                entry.amounts[m] = Math.max(entry.amounts[m] || 0, resolved);
-                if (!entry.ids[m] && p.id) entry.ids[m] = p.id;
+            if (m >= 1 && m <= 12 && p.isManualTaxOverride) {
+                entry.amounts[m] = toNum(p.amount);
+                entry.manualOverrides[m] = true;
+                if (p.id) entry.ids[m] = p.id;
             }
         });
 
-        // ── Step 2: 일보 작업자 행 → 월별 금액 맵 ───────────────────────
-        const reportMap = new Map<string, {
+        // ── Step 2: 저장된 월 급여 정산 → 전체법인 세전 금액 맵 ───────────
+        const savedBusinessMap = new Map<string, {
             amounts: { [m: number]: number };
             meta: { name: string; teamId: string; teamName: string; salaryModel: string; salaryModels: { [m: number]: string } };
         }>();
@@ -284,39 +278,39 @@ export const freelancerService = {
         workersRaw.forEach(addWorkerMaster);
         freelancersRaw.forEach(addWorkerMaster);
 
-        (reportRows as DailyReportWorkerRow[]).forEach(row => {
-            // 프리랜서 집계는 법인 계산서 현장 + 용역팀 작업을 반영한다.
-            if (!isCorporateInvoiceSiteRow(row) && !isServiceTeamWorkRow(row)) return;
+        savedSettlements.forEach((settlement) => {
+            settlement.rows.forEach((row) => {
+                if (row.manualInput?.allocationMode !== 'corporate') return;
+                const appliedAmount = row.invoiceGrossAmount === undefined
+                    ? toNum(row.grossAmount)
+                    : toNum(row.invoiceGrossAmount);
+                if (appliedAmount <= 0) return;
 
-            const date = String(row.date || '');
-            if (date.length < 7) return;
-            const month = Number(date.slice(5, 7));
-            if (month < 1 || month > 12) return;
-            const workerId = String(row.workerId || '').trim();
-            if (!workerId) return;
+                const month = Number(String(row.yearMonth || settlement.yearMonth).slice(5, 7));
+                if (month < 1 || month > 12) return;
+                const workerId = String(row.workerId || '').trim();
+                if (!workerId) return;
 
-            if (!reportMap.has(workerId)) {
-                reportMap.set(workerId, {
-                    amounts: {},
-                    meta: {
-                        name: row.workerName || '',
-                        teamId: row.workerTeamId || row.teamId || '',
-                        teamName: row.workerTeamName || row.teamName || '',
-                        salaryModel: normalizeSalaryModel(row.salaryModel || row.payType),
-                        salaryModels: {}
-                    }
-                });
-            }
-            const entry = reportMap.get(workerId)!;
-            const amt = toNum(row.amount) > 0 ? toNum(row.amount) : (toNum(row.manDay) * toNum(row.unitPrice));
-            const rowSalaryModel = resolveSalaryModel(row.salaryModel, row.payType);
-            if (rowSalaryModel) {
-                entry.meta.salaryModels[month] = rowSalaryModel;
-                if (!entry.meta.salaryModel) {
-                    entry.meta.salaryModel = rowSalaryModel;
+                if (!savedBusinessMap.has(workerId)) {
+                    savedBusinessMap.set(workerId, {
+                        amounts: {},
+                        meta: {
+                            name: row.workerName || '',
+                            teamId: row.teamId || settlement.teamId || '',
+                            teamName: row.teamName || settlement.teamName || '',
+                            salaryModel: normalizeSalaryModel(row.salaryModel),
+                            salaryModels: {}
+                        }
+                    });
                 }
-            }
-            entry.amounts[month] = (entry.amounts[month] || 0) + amt;
+                const entry = savedBusinessMap.get(workerId)!;
+                const rowSalaryModel = resolveSalaryModel(row.salaryModel);
+                if (rowSalaryModel) {
+                    entry.meta.salaryModels[month] = rowSalaryModel;
+                    if (!entry.meta.salaryModel) entry.meta.salaryModel = rowSalaryModel;
+                }
+                entry.amounts[month] = (entry.amounts[month] || 0) + appliedAmount;
+            });
         });
 
         // ── Step 3: 팀 조회 맵 ──────────────────────────────────────────
@@ -326,7 +320,7 @@ export const freelancerService = {
             if ((t as any).legacyId) teamById.set(String((t as any).legacyId), t);
         });
 
-        // ── Step 4: 프리랜서마다 최적 월별 금액 계산 (Payment + 일보 MAX) ──
+        // ── Step 4: 프리랜서마다 저장된 사업소득 적용금액 계산 ───────────
         const freelancers: any[] = [];
         const coveredWorkerIds = new Set<string>();
 
@@ -337,9 +331,9 @@ export const freelancerService = {
             if (fId) coveredWorkerIds.add(fId);
             if (fLegacyId) coveredWorkerIds.add(fLegacyId);
 
-            // id 또는 legacyId로 결제/일보 데이터 조회
+            // id 또는 legacyId로 저장된 전체법인 세전 금액 조회
             const payData = paymentMap.get(fId) || paymentMap.get(fLegacyId);
-            const reportData = reportMap.get(fId) || reportMap.get(fLegacyId);
+            const savedBusinessData = savedBusinessMap.get(fId) || savedBusinessMap.get(fLegacyId);
 
             const team = teamById.get(String(f.teamId || ''));
             const workerMaster = workerMasterById.get(fId) || workerMasterById.get(fLegacyId);
@@ -348,22 +342,24 @@ export const freelancerService = {
                 || (f as any).payType
                 || workerMaster?.salaryModel
                 || workerMaster?.payType
-                || reportData?.meta.salaryModel
+                || savedBusinessData?.meta.salaryModel
             );
-            const salaryModel = getLatestMonthlySalaryModel(reportData?.meta.salaryModels, baseSalaryModel);
+            const salaryModel = getLatestMonthlySalaryModel(savedBusinessData?.meta.salaryModels, baseSalaryModel);
 
             const monthlyPayments: any = {};
             let monthlyTotal = 0;
 
             for (let i = 1; i <= 12; i++) {
                 const mk = `m${String(i).padStart(2, '0')}`;
-                const payAmt = payData?.amounts[i] || 0;
-                const reportAmt = reportData?.amounts[i] || 0;
-                const finalAmt = Math.max(payAmt, reportAmt); // 두 소스 중 큰 값
+                const sourceAmount = savedBusinessData?.amounts[i] || 0;
+                const finalAmt = payData?.manualOverrides[i]
+                    ? payData.amounts[i]
+                    : sourceAmount;
                 monthlyPayments[mk] = finalAmt;
+                monthlyPayments[`${mk}_sourceAmount`] = sourceAmount;
                 monthlyPayments[`${mk}_id`] = payData?.ids[i] || null;
                 monthlyPayments[`${mk}_salaryModel`] = finalAmt > 0
-                    ? resolveSalaryModel(reportData?.meta.salaryModels[i], baseSalaryModel)
+                    ? resolveSalaryModel(savedBusinessData?.meta.salaryModels[i], baseSalaryModel)
                     : '';
                 monthlyTotal += finalAmt;
             }
@@ -376,6 +372,7 @@ export const freelancerService = {
 
             freelancers.push({
                 ...f,
+                residentNumber: f.residentNumber || workerMaster?.residentNumber || workerMaster?.idNumber || '',
                 teamName: (team as any)?.name || f.teamName || '소속 없음',
                 companyName: (team as any)?.companyName || '업체 미지정',
                 ...monthlyPayments,
@@ -392,29 +389,38 @@ export const freelancerService = {
             });
         });
 
-        // ── Step 5: 일보에만 있는 작업자 추가 ────────────────────────────
-        reportMap.forEach((data, workerId) => {
+        // ── Step 5: 저장본에만 있는 작업자 추가 ──────────────────────────
+        savedBusinessMap.forEach((data, workerId) => {
             if (coveredWorkerIds.has(workerId)) return;
 
             const team = teamById.get(data.meta.teamId);
+            const payData = paymentMap.get(workerId);
+            const workerMaster = workerMasterById.get(workerId);
             const monthlyPayments: any = {};
             let monthlyTotal = 0;
+            let sourceMonthlyTotal = 0;
 
             for (let i = 1; i <= 12; i++) {
                 const mk = `m${String(i).padStart(2, '0')}`;
-                const amt = data.amounts[i] || 0;
+                const sourceAmount = data.amounts[i] || 0;
+                const amt = payData?.manualOverrides[i]
+                    ? payData.amounts[i]
+                    : sourceAmount;
                 monthlyPayments[mk] = amt;
-                monthlyPayments[`${mk}_id`] = null;
+                monthlyPayments[`${mk}_sourceAmount`] = sourceAmount;
+                monthlyPayments[`${mk}_id`] = payData?.ids[i] || null;
                 monthlyPayments[`${mk}_salaryModel`] = amt > 0
                     ? resolveSalaryModel(data.meta.salaryModels[i], data.meta.salaryModel)
                     : '';
                 monthlyTotal += amt;
+                sourceMonthlyTotal += sourceAmount;
             }
 
-            if (monthlyTotal > 0) { // 실적이 있는 작업자만 추가
+            if (sourceMonthlyTotal > 0) { // 전체법인 정산 저장본이 있는 작업자만 추가
                 freelancers.push({
                     id: workerId,
-                    name: data.meta.name,
+                    name: data.meta.name || workerMaster?.name || '',
+                    residentNumber: workerMaster?.residentNumber || workerMaster?.idNumber || '',
                     teamId: data.meta.teamId,
                     teamName: data.meta.teamName || (team as any)?.name || '소속 없음',
                     companyName: (team as any)?.companyName || '업체 미지정',
@@ -425,7 +431,11 @@ export const freelancerService = {
                     reportingBalance: 0,
                     reportableAmount: 0,
                     depositDate: null,
-                    paymentMemo: '출력일보 자동로드',
+                    paymentMemo: '월 급여 정산 저장본',
+                    latestPaymentId: payData?.allPayments
+                        .slice()
+                        .sort((a, b) => b.month - a.month)[0]?.id || null,
+                    isSettlementOnly: true,
                 });
             }
         });

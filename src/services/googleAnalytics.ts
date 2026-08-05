@@ -1,3 +1,5 @@
+import { scheduleAfterInitialLoad } from '../utils/deferredStartup';
+
 type Gtag = (...args: any[]) => void;
 
 declare global {
@@ -11,7 +13,10 @@ const GA_MEASUREMENT_ID =
   process.env.REACT_APP_GA_MEASUREMENT_ID || process.env.REACT_APP_FIREBASE_MEASUREMENT_ID || '';
 
 const GTAG_SCRIPT_ID = 'google-analytics-gtag';
+const ANALYTICS_BOOT_DELAY_MS = 7000;
 let lastTrackedPagePath: string | null = null;
+let analyticsInitScheduled = false;
+let queuedPageView: { pagePath: string; pageTitle?: string } | null = null;
 
 export const isGoogleAnalyticsConfigured = GA_MEASUREMENT_ID.length > 0;
 
@@ -40,10 +45,8 @@ export const initializeGoogleAnalytics = () => {
   }
 };
 
-export const trackPageView = (pagePath: string, pageTitle?: string) => {
+const sendPageView = (pagePath: string, pageTitle?: string) => {
   if (!canUseBrowserAnalytics()) return;
-
-  initializeGoogleAnalytics();
 
   const normalizedPath = pagePath.startsWith('/') ? pagePath : `/${pagePath}`;
   if (lastTrackedPagePath === normalizedPath) return;
@@ -55,4 +58,26 @@ export const trackPageView = (pagePath: string, pageTitle?: string) => {
     page_location: `${window.location.origin}${normalizedPath}`,
     page_path: normalizedPath,
   });
+};
+
+const scheduleAnalyticsInitialization = () => {
+  if (analyticsInitScheduled) return;
+  analyticsInitScheduled = true;
+
+  scheduleAfterInitialLoad(() => {
+    initializeGoogleAnalytics();
+
+    if (queuedPageView) {
+      const { pagePath, pageTitle } = queuedPageView;
+      queuedPageView = null;
+      sendPageView(pagePath, pageTitle);
+    }
+  }, { delayMs: ANALYTICS_BOOT_DELAY_MS });
+};
+
+export const trackPageView = (pagePath: string, pageTitle?: string) => {
+  if (!canUseBrowserAnalytics()) return;
+
+  queuedPageView = { pagePath, pageTitle };
+  scheduleAnalyticsInitialization();
 };

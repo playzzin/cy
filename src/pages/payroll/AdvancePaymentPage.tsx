@@ -637,9 +637,14 @@ const AdvancePaymentPage: React.FC = () => {
     const [canUseAdvanceManagement, setCanUseAdvanceManagement] = useState<boolean | null>(null);
 
     const parseNumberFromInput = useCallback((raw: string): number => {
-        const cleaned = String(raw ?? '').replace(/[^0-9-]/g, '').trim();
-        if (!cleaned) return 0;
-        const parsed = Number(cleaned);
+        const cleaned = String(raw ?? '').replace(/,/g, '').replace(/[^0-9-]/g, '').trim();
+        if (!cleaned || cleaned === '-') return 0;
+
+        const sign = cleaned.startsWith('-') ? '-' : '';
+        const digits = cleaned.replace(/-/g, '');
+        if (!digits) return 0;
+
+        const parsed = Number(`${sign}${digits}`);
         return Number.isFinite(parsed) ? parsed : 0;
     }, []);
 
@@ -731,6 +736,8 @@ const AdvancePaymentPage: React.FC = () => {
     const [hasTempData, setHasTempData] = useState(false);
     const [tempDataSavedAt, setTempDataSavedAt] = useState<number | null>(null);
     const [autoImportedCellMap, setAutoImportedCellMap] = useState<Record<string, true>>({});
+    // Keep an in-progress minus sign visible while a user types a negative amount.
+    const [deductionInputDrafts, setDeductionInputDrafts] = useState<Record<string, string>>({});
 
     // 최신 상태 추적용 Ref
     const stateRef = useRef({
@@ -1625,6 +1632,7 @@ const AdvancePaymentPage: React.FC = () => {
             });
 
             // 3. 숙소 청구 내역(Billing) 자동 연동
+            // 관리비와 기타는 가불·공제 관리에서 직접 입력하는 항목이므로 자동 연동에서 제외한다.
             // workerId -> { field: totalAmount }
             const billingAggregate: Record<string, Record<string, number>> = {};
             const billingProvidedFields: Record<string, Set<string>> = {};
@@ -1635,10 +1643,7 @@ const AdvancePaymentPage: React.FC = () => {
                 'water',
                 'privateRoom',
                 'internet',
-                'fines',
-                'maintenance',
-                'other',
-                resolvedOtherDeductionId
+                'fines'
             ]);
             const buildBillingSourceFieldKey = (sourceId: unknown, field: string): string =>
                 `${String(sourceId ?? '').trim()}::${String(field ?? '').trim()}`;
@@ -1851,9 +1856,7 @@ const AdvancePaymentPage: React.FC = () => {
                 'water',
                 'privateRoom',
                 'internet',
-                'fines',
-                'maintenance',
-                resolvedOtherDeductionId
+                'fines'
             ]);
 
             Object.entries(advancesMap).forEach(([workerKey, target]) => {
@@ -1861,9 +1864,7 @@ const AdvancePaymentPage: React.FC = () => {
                 let hasUpdate = false;
 
                 billingControlledFields.forEach((field) => {
-                    const isProvided =
-                        providedFields.has(field) ||
-                        (field === resolvedOtherDeductionId && providedFields.has('other'));
+                    const isProvided = providedFields.has(field);
                     if (isProvided) return;
 
                     const currentAmount = getAdvanceFieldValue(target, field);
@@ -1884,6 +1885,7 @@ const AdvancePaymentPage: React.FC = () => {
             setWorkerPaymentSummaryMap(aggregatedWorkerPaymentSummaryMap);
             setSelectedMonthSalaryModels(selectedMonthSalaryModelMap);
             setAutoImportedCellMap(importedCellMap);
+            setDeductionInputDrafts({});
             setHasChanges(hasAutoImportUpdates);
 
         } catch (error) {
@@ -1891,6 +1893,7 @@ const AdvancePaymentPage: React.FC = () => {
             setWorkerPaymentSummaryMap({});
             setSelectedMonthSalaryModels({});
             setAutoImportedCellMap({});
+            setDeductionInputDrafts({});
             Swal.fire('오류', '데이터를 불러오는 중 오류가 발생했습니다.', 'error');
         } finally {
             setLoading(false);
@@ -2414,18 +2417,34 @@ const AdvancePaymentPage: React.FC = () => {
 
 
     const renderDeductionInput = (workerId: string, deductionId: string, rowNum: 0 | 1) => {
-        const isAutoImported = Boolean(autoImportedCellMap[buildAutoImportedCellKey(workerId, deductionId)]);
+        const inputKey = buildAutoImportedCellKey(workerId, deductionId);
+        const isAutoImported = Boolean(autoImportedCellMap[inputKey]);
         // 윗칸/아랫칸 색상 구분
         let rowBg = '';
         if (!isAutoImported) {
-            rowBg = rowNum === 0 ? 'bg-blue-100 focus:bg-blue-200' : 'bg-emerald-100 focus:bg-emerald-200';
+            rowBg = rowNum === 0 ? 'bg-blue-50 focus:bg-blue-100' : 'bg-white focus:bg-blue-50';
         }
         return (
             <input
                 type="text"
-                inputMode="numeric"
-                value={formatNumberForInput(getDeductionValue(advances[workerId], deductionId) || 0)}
-                onChange={(e) => handleDeductionChange(workerId, deductionId, e.target.value)}
+                inputMode="decimal"
+                value={deductionInputDrafts[inputKey] ?? formatNumberForInput(getDeductionValue(advances[workerId], deductionId) || 0)}
+                readOnly={isAutoImported}
+                aria-label={`${deductionId} ${isAutoImported ? '자동 반영 금액' : '직접 입력 금액'}`}
+                title={isAutoImported ? '자동 반영 금액입니다. 원본 공과금/청구 내역에서 수정하세요.' : '직접 입력할 수 있습니다. 음수 금액도 입력 가능합니다.'}
+                onChange={(e) => {
+                    const nextValue = e.target.value;
+                    setDeductionInputDrafts((prev) => ({ ...prev, [inputKey]: nextValue }));
+                    handleDeductionChange(workerId, deductionId, nextValue);
+                }}
+                onBlur={() => {
+                    setDeductionInputDrafts((prev) => {
+                        if (!(inputKey in prev)) return prev;
+                        const next = { ...prev };
+                        delete next[inputKey];
+                        return next;
+                    });
+                }}
                 onKeyDown={(e) => handleArrowNavigation(e, workerId, deductionId, rowNum)}
                 ref={setInputRef(workerId, deductionId, rowNum)}
                 className={`w-full text-right outline-none rounded px-1 transition-colors ${isAutoImported
@@ -2950,7 +2969,9 @@ const AdvancePaymentPage: React.FC = () => {
                 <br />
                 <span>* 숫자를 입력하면 자동으로 합계가 계산됩니다. 입력 후 반드시 [저장] 버튼을 눌러주세요.</span>
                 <br />
-                <span>* <span className="text-emerald-600 font-bold">연녹색 배경</span>: 자동 반영된 값 (숙소/공과금 등)</span>
+                <span>* <span className="text-emerald-600 font-bold">연녹색 배경</span>: 자동 반영된 값 (숙소/공과금 등, 수정 불가)</span>
+                <br />
+                <span>* 흰색 입력칸: 직접 입력 항목 (관리비·기타 포함, 음수 금액 입력 가능)</span>
             </div>
         </div>
     );

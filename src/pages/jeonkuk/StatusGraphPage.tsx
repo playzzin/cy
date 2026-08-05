@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-    LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
+    BarChart, Bar, PieChart, Pie, Cell,
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
     AreaChart, Area
 } from 'recharts';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faChartPie, faCalendarAlt, faBuilding, faUserGroup,
-    faSearch, faDownload, faChartLine, faChartBar
-} from '@fortawesome/free-solid-svg-icons';
+    faSearch, faChartLine} from '@fortawesome/free-solid-svg-icons';
 import { dailyReportService } from '../../services/dailyReportService';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
@@ -344,7 +343,7 @@ const StatusGraphPage: React.FC = () => {
                                         fill="#8884d8"
                                         dataKey="value"
                                     >
-                                        {teamDistribution.map((entry, index) => (
+                                        {teamDistribution.map((_entry, index) => (
                                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                                         ))}
                                     </Pie>

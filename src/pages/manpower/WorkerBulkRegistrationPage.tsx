@@ -1,9 +1,9 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { HotTable } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSave, faPlus, faTrash, faPaste, faKeyboard, faInfoCircle, faCheckCircle, faExclamationTriangle, faSpinner } from '@fortawesome/free-solid-svg-icons';
+import { faSave, faPlus, faTrash, faPaste, faKeyboard, faSpinner } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { manpowerService } from '../../services/manpowerService';
 import { teamService } from '../../services/teamService';

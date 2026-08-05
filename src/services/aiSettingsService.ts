@@ -55,6 +55,7 @@ const DEPRECATED_GEMINI_MODEL_REPLACEMENTS: Record<string, string> = {
     'gemini-2.0-flash-lite-preview-02-05': 'gemini-2.5-flash-lite',
     'gemini-2.5-flash-preview-05-20': 'gemini-2.5-flash',
     'gemini-2.5-flash-preview-09-25': 'gemini-2.5-flash',
+    'gemini-2.5-pro': 'gemini-2.5-flash',
     'gemini-2.5-flash-lite-preview-09-2025': 'gemini-2.5-flash-lite',
     'gemini-2.5-flash-image-preview': 'gemini-2.5-flash-image'
 };
@@ -66,8 +67,7 @@ export const normalizeGeminiModelName = (model: string | null | undefined, fallb
 
 export const AI_TEXT_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
     { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (권장)' },
-    { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' },
-    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' }
+    { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' }
 ];
 
 export const AI_IMAGE_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
@@ -146,11 +146,39 @@ export const AI_MANAGED_PAGES: AiManagedPage[] = [
         modelScope: 'textModel'
     },
     {
+        id: 'support-expense-receipt-analysis',
+        name: '경비청구 영수증 총금액 인식',
+        description: '경비청구 영수증 사진에서 최종 결제 총금액 추출',
+        paths: ['/support/expense-claims', '/support/expense-claim-input'],
+        modelScope: 'textModel'
+    },
+    {
         id: 'support-card-billing',
         name: '법인카드 청구관리',
         description: '첨부 문서 Gemini 분석(Cloud Function)',
         paths: ['/support/cards'],
         modelScope: 'server'
+    },
+    {
+        id: 'support-accommodation-electricity-billing',
+        name: '숙소 전기·가스·수도요금 청구서 등록',
+        description: '전기·가스·수도요금 이미지/PDF Gemini 분석 및 숙소 공과금 대장 검수',
+        paths: ['/support/accommodation'],
+        modelScope: 'server'
+    },
+    {
+        id: 'support-vehicle-fine-import',
+        name: '차량 과태료 고지서 등록',
+        description: '주정차·교통 과태료 이미지/PDF Gemini 분석 및 차량 대장 검수',
+        paths: ['/support/vehicles'],
+        modelScope: 'server'
+    },
+    {
+        id: 'workbook-tax-invoice-import',
+        name: '매입매출 세금계산서 대량검수',
+        description: 'PDF/사진 세금계산서 Gemini 분석 및 입력폼 검수',
+        paths: ['/payroll/workbook-ledger', '/payroll/workbook-ledger-dawon'],
+        modelScope: 'textModel'
     },
     {
         id: 'partner-photo-registration',
@@ -354,6 +382,13 @@ export const aiSettingsService = {
                 note: '일보/신분증/통장/작업자 등록 분석에 사용'
             },
             {
+                id: 'binding-expense-receipt-analysis',
+                service: '경비청구 영수증 총금액 인식',
+                model: models.textModel,
+                source: 'textModel',
+                note: '영수증 사진의 실제 최종 결제금액을 경비청구 입력폼에 반영'
+            },
+            {
                 id: 'binding-analytics-agent',
                 service: 'analyticsAgent + agentOrchestrator',
                 model: models.textModel,
@@ -380,6 +415,27 @@ export const aiSettingsService = {
                 model: 'server-managed',
                 source: 'server',
                 note: '서버 함수 내부 모델 정책 사용'
+            },
+            {
+                id: 'binding-accommodation-electricity-billing',
+                service: '숙소 전기요금 청구서 등록',
+                model: 'server-managed',
+                source: 'server',
+                note: '서버 AI 설정의 Gemini 키/모델 사용'
+            },
+            {
+                id: 'binding-vehicle-fine-import',
+                service: '차량 과태료 고지서 등록',
+                model: 'server-managed',
+                source: 'server',
+                note: '서버 AI 설정의 Gemini 키/모델 사용'
+            },
+            {
+                id: 'binding-workbook-tax-invoice',
+                service: '매입매출 세금계산서 대량검수',
+                model: models.textModel,
+                source: 'textModel',
+                note: 'PDF/사진 세금계산서를 분석해 입력폼 검수 행 생성'
             },
             {
                 id: 'binding-partner-recognition',

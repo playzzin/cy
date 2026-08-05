@@ -1,11 +1,51 @@
 import { cardFirestoreService } from './cardFirestoreService';
-import { CardBillingDocument, CardBillingIssuedToType } from '../types/cardBilling';
+import { CardBillingCostItem, CardBillingDocument, CardBillingIssuedToType } from '../types/cardBilling';
 import { Card, CardAssignmentRecord, CardBillingTargetRecord, CardBillingTargetType, CardTransaction, cardService } from './cardService';
 import { Timestamp } from '../types/timestamp';
 import { manpowerService } from './manpowerService';
 import { DEFAULT_SUPPORT_BILLING_START_DATE, isSupportBillingMonthEnabled, maxIsoDate, minIsoDate } from '../utils/supportBillingPeriod';
 
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
+const POSTED_CARD_BILLING_STATUSES = new Set(['CONFIRMED', 'PAID', 'OVERDUE']);
+
+export const isPostedCardBillingStatus = (status: unknown): boolean => (
+    POSTED_CARD_BILLING_STATUSES.has(String(status ?? '').trim().toUpperCase())
+);
+
+const normalizeLineItemsForProtection = (lineItems: CardBillingCostItem[] | undefined): string => (
+    JSON.stringify((lineItems ?? [])
+        .map((item) => ({
+            id: normalizeKey(item.id),
+            label: normalizeKey(item.label),
+            amount: Number.isFinite(Number(item.amount)) ? Number(item.amount) : 0,
+            type: normalizeKey(item.type),
+            category: normalizeKey(item.category),
+            sourceType: normalizeKey(item.sourceType),
+            sourceLedgerRowId: normalizeKey(item.sourceLedgerRowId),
+            sourceSegmentId: normalizeKey(item.sourceSegmentId),
+            sourceStartDate: normalizeKey(item.sourceStartDate),
+            sourceEndDate: normalizeKey(item.sourceEndDate)
+        }))
+        .sort((a, b) => a.id.localeCompare(b.id) || a.label.localeCompare(b.label))
+    )
+);
+
+const hasPostedBillingProtectedChange = (
+    before: CardBillingDocument | null,
+    after: CardBillingDocument
+): boolean => {
+    if (!before || !isPostedCardBillingStatus(before.status)) return false;
+    if (String(before.status ?? '').trim().toUpperCase() !== String(after.status ?? '').trim().toUpperCase()) return true;
+    if (Number(before.variableCost ?? 0) !== Number(after.variableCost ?? 0)) return true;
+    if (Number(before.totalAmount ?? 0) !== Number(after.totalAmount ?? 0)) return true;
+    return normalizeLineItemsForProtection(before.lineItems) !== normalizeLineItemsForProtection(after.lineItems);
+};
+
+export interface CardBillingCancelConfirmationInput {
+    reason: string;
+    actorId?: string;
+    actorName?: string;
+}
 
 const parseYmdDate = (value?: string): Date | null => {
     const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').trim());
@@ -22,7 +62,10 @@ const isAssignmentActiveOnDate = (assignment: CardAssignmentRecord, date: Date):
     const start = parseYmdDate(assignment.startDate);
     if (!start || start.getTime() > date.getTime()) return false;
 
-    const end = assignment.endDate ? parseYmdDate(assignment.endDate) : null;
+    const rawEndDate = normalizeKey(assignment.endDate);
+    const end = rawEndDate ? parseYmdDate(rawEndDate) : null;
+    if (rawEndDate && !end) return false;
+    if (end && end.getTime() < start.getTime()) return false;
     if (end && end.getTime() < date.getTime()) return false;
     return true;
 };
@@ -38,7 +81,10 @@ const isBillingTargetActiveOnDate = (target: CardBillingTargetRecord, date: Date
     const start = parseYmdDate(target.startDate);
     if (!start || start.getTime() > date.getTime()) return false;
 
-    const end = target.endDate ? parseYmdDate(target.endDate) : null;
+    const rawEndDate = normalizeKey(target.endDate);
+    const end = rawEndDate ? parseYmdDate(rawEndDate) : null;
+    if (rawEndDate && !end) return false;
+    if (end && end.getTime() < start.getTime()) return false;
     if (end && end.getTime() < date.getTime()) return false;
     return true;
 };
@@ -85,7 +131,7 @@ const resolveBillingTargetForDate = (
     }
 
     return {
-        targetType: card.currentAssigneeType,
+        targetType: card.currentAssigneeType ?? undefined,
         targetId: normalizeKey(card.currentAssigneeId),
         targetName: normalizeKey(card.currentAssigneeName)
     };
@@ -127,8 +173,8 @@ export const cardBillingService = {
 
         const variableCost = lineItems.reduce((acc, it) => acc + (it.amount || 0), 0);
 
-        let assignedTeamId = card.currentAssigneeType === 'TEAM' ? card.currentAssigneeId : undefined;
-        let assignedTeamName = card.currentAssigneeType === 'TEAM' ? card.currentAssigneeName : undefined;
+        let assignedTeamId = card.currentAssigneeType === 'TEAM' ? card.currentAssigneeId ?? undefined : undefined;
+        let assignedTeamName = card.currentAssigneeType === 'TEAM' ? card.currentAssigneeName ?? undefined : undefined;
         let workers: Awaited<ReturnType<typeof manpowerService.getWorkers>> = [];
 
         try {
@@ -168,16 +214,20 @@ export const cardBillingService = {
         const billingTeamName = targetType === 'TEAM' || targetType === 'OFFICE'
             ? (targetName ?? undefined)
             : (targetWorker?.teamName || assignedTeamName);
+        const normalizedAssignedTeamId = assignedTeamId ?? undefined;
+        const normalizedAssignedTeamName = assignedTeamName ?? undefined;
+        const normalizedBillingTeamId = billingTeamId ?? undefined;
+        const normalizedBillingTeamName = billingTeamName ?? undefined;
         const issuedToType: CardBillingIssuedToType | undefined =
             targetType === 'WORKER' || targetType === 'OFFICE_STAFF'
                 ? 'worker'
-                : billingTeamId
+                : normalizedBillingTeamId
                     ? 'team'
                     : undefined;
 
         const billingId = cardBillingService.buildBillingDocumentId({
             cardId: card.id,
-            teamId: billingTeamId || 'unassigned',
+            teamId: normalizedBillingTeamId || 'unassigned',
             issuedToType: issuedToType || 'team',
             workerId: issuedToType === 'worker' ? targetId : undefined,
             yearMonth
@@ -188,15 +238,15 @@ export const cardBillingService = {
             yearMonth,
             cardId: card.id,
             cardLabel: `${card.name} (${card.last4})`,
-            assignedTeamId,
-            assignedTeamName,
-            teamId: billingTeamId,
-            teamName: billingTeamName,
+            assignedTeamId: normalizedAssignedTeamId,
+            assignedTeamName: normalizedAssignedTeamName,
+            teamId: normalizedBillingTeamId,
+            teamName: normalizedBillingTeamName,
             issuedToType,
             issuedToWorkerId: issuedToType === 'worker' ? targetId : undefined,
             issuedToWorkerName: issuedToType === 'worker'
                 ? (targetName ?? targetWorker?.name ?? undefined)
-                : billingTeamName,
+                : normalizedBillingTeamName,
             variableCost,
             totalAmount: variableCost,
             status: 'DRAFT',
@@ -317,22 +367,25 @@ export const cardBillingService = {
             });
         };
 
+        const hasAssignmentHistory = assignments.length > 0;
+        const buildLegacySnapshotAssignment = (): CardAssignmentRecord | null => (
+            !hasAssignmentHistory && card.currentAssigneeId && card.currentAssigneeType && card.currentAssigneeName
+                ? {
+                    id: `snapshot-${card.id}`,
+                    cardId: card.id,
+                    cardLabel: `${card.name} (${card.last4})`,
+                    assigneeId: card.currentAssigneeId,
+                    assigneeType: card.currentAssigneeType,
+                    assigneeName: card.currentAssigneeName,
+                    startDate: `${yearMonth}-01`
+                }
+                : null
+        );
+
         transactions.forEach((tx) => {
             const txDate = parseYmdDate(tx.date);
             if (!txDate) return;
-            const assignment = findAssignmentForDate(assignments, txDate) ?? (
-                card.currentAssigneeId && card.currentAssigneeType && card.currentAssigneeName
-                    ? {
-                        id: `snapshot-${card.id}`,
-                        cardId: card.id,
-                        cardLabel: `${card.name} (${card.last4})`,
-                        assigneeId: card.currentAssigneeId,
-                        assigneeType: card.currentAssigneeType,
-                        assigneeName: card.currentAssigneeName,
-                        startDate: `${yearMonth}-01`
-                    }
-                    : null
-            );
+            const assignment = findAssignmentForDate(assignments, txDate) ?? buildLegacySnapshotAssignment();
             if (!assignment) return;
             addTransactionToGroup(tx, assignment);
         });
@@ -342,6 +395,9 @@ export const cardBillingService = {
 
     saveBilling: async (billing: CardBillingDocument): Promise<void> => {
         const beforeBilling = await cardFirestoreService.getBillingById(billing.id).catch(() => null);
+        if (hasPostedBillingProtectedChange(beforeBilling, billing)) {
+            throw new Error('card-billing-posted-modification-blocked');
+        }
         await cardFirestoreService.saveBilling(billing);
         try {
             const { cardBillingLogService } = await import('./cardBillingLogService');
@@ -363,6 +419,9 @@ export const cardBillingService = {
 
     deleteBilling: async (id: string): Promise<void> => {
         const beforeBilling = await cardFirestoreService.getBillingById(id).catch(() => null);
+        if (isPostedCardBillingStatus(beforeBilling?.status)) {
+            throw new Error('card-billing-posted-delete-blocked');
+        }
         await cardFirestoreService.deleteBilling(id);
         if (beforeBilling) {
             try {
@@ -383,8 +442,50 @@ export const cardBillingService = {
         return cardFirestoreService.getBillingById(id);
     },
 
+    cancelConfirmation: async (
+        id: string,
+        input: CardBillingCancelConfirmationInput
+    ): Promise<void> => {
+        const reason = String(input.reason ?? '').trim();
+        if (!reason) throw new Error('card-billing-cancel-reason-required');
+
+        const beforeBilling = await cardFirestoreService.getBillingById(id).catch(() => null);
+        if (!beforeBilling) throw new Error('card-billing-not-found');
+        if (!isPostedCardBillingStatus(beforeBilling.status)) return;
+
+        const cancelledAt = Timestamp.now();
+        const afterBilling: CardBillingDocument = {
+            ...beforeBilling,
+            status: 'DRAFT',
+            confirmedAt: null as unknown as Timestamp,
+            confirmationCancelReason: reason,
+            confirmationCancelledAt: cancelledAt,
+            confirmationCancelledById: input.actorId,
+            confirmationCancelledByName: input.actorName,
+            updatedAt: cancelledAt,
+            memo: beforeBilling.memo
+                ? `${beforeBilling.memo}\n확정취소: ${reason}`
+                : `확정취소: ${reason}`
+        };
+
+        await cardFirestoreService.saveBilling(afterBilling);
+
+        try {
+            const { cardBillingLogService } = await import('./cardBillingLogService');
+            await cardBillingLogService.createLog({
+                action: 'updated',
+                before: beforeBilling,
+                after: afterBilling,
+                source: 'cardBillingService.cancelConfirmation'
+            });
+        } catch (logError) {
+            console.warn('[cardBillingService] card billing cancel confirmation log failed:', logError);
+        }
+    },
+
     getBillingsByMonth: async (yearMonth: string): Promise<CardBillingDocument[]> => {
-        return cardFirestoreService.getBillingsByMonth(yearMonth);
+        const docs = await cardFirestoreService.getBillingsByMonth(yearMonth);
+        return docs.filter((doc) => String(doc.status ?? '').toUpperCase() !== 'CANCELLED');
     },
 
     generateMonthlyBillings: async (yearMonth: string): Promise<CardBillingDocument[]> => {

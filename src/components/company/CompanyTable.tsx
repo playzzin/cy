@@ -2,6 +2,7 @@ import React from 'react';
 import { Company } from '../../services/companyService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPenToSquare, faTrash, faBuilding } from '@fortawesome/free-solid-svg-icons';
+import { getCompanyTypeLabel } from '../../utils/companyTypeLabel';
 
 interface CompanyTableProps {
     companies: Company[];
@@ -63,7 +64,7 @@ const CompanyTable: React.FC<CompanyTableProps> = ({
                                                     company.type === '임대사' ? 'bg-amber-100 text-amber-800' :
                                                     'bg-slate-100 text-slate-800'
                                         }`}>
-                                        {company.type}
+                                        {getCompanyTypeLabel(company.type)}
                                     </span>
                                 </td>
                                 <td className="px-4 py-3 text-slate-600 whitespace-nowrap max-w-[200px] truncate" title={company.address}>

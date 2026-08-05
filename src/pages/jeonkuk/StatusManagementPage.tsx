@@ -5,7 +5,6 @@ import {
     faHardHat,
     faMapLocationDot,
     faSearch,
-    faFilter,
     faCheckCircle,
     faTimesCircle,
     faClock,
@@ -13,9 +12,7 @@ import {
     faUserCheck,
     faUserClock,
     faArrowRight,
-    faArrowLeft,
-    faExchangeAlt
-} from '@fortawesome/free-solid-svg-icons';
+    faArrowLeft} from '@fortawesome/free-solid-svg-icons';
 import { companyService, Company } from '../../services/companyService';
 import { siteService, Site } from '../../services/siteService';
 import { manpowerService, Worker } from '../../services/manpowerService';

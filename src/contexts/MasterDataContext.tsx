@@ -3,6 +3,8 @@ import { companyService, Company } from '../services/companyService';
 import { teamService, Team } from '../services/teamService';
 import { siteService, Site } from '../services/siteService';
 import { positionService, Position } from '../services/positionService';
+import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
+import { devPositions } from '../utils/devAdminFixtures';
 
 export interface PositionStyle {
     color: string;
@@ -52,6 +54,11 @@ export function MasterDataProvider({ children }: { children: React.ReactNode }) 
 
     // 회사 로드
     const refreshCompanies = useCallback(async () => {
+        if (isDevAdminSessionEnabled()) {
+            setCompanies([]);
+            return;
+        }
+
         try {
             const data = await companyService.getCompanies();
             setCompanies(data);
@@ -62,6 +69,11 @@ export function MasterDataProvider({ children }: { children: React.ReactNode }) 
 
     // 팀 로드
     const refreshTeams = useCallback(async () => {
+        if (isDevAdminSessionEnabled()) {
+            setTeams([]);
+            return;
+        }
+
         try {
             const data = await teamService.getTeams();
             setTeams(data);
@@ -72,6 +84,11 @@ export function MasterDataProvider({ children }: { children: React.ReactNode }) 
 
     // 현장 로드
     const refreshSites = useCallback(async () => {
+        if (isDevAdminSessionEnabled()) {
+            setSites([]);
+            return;
+        }
+
         try {
             const data = await siteService.getSites();
             setSites(data);
@@ -82,6 +99,11 @@ export function MasterDataProvider({ children }: { children: React.ReactNode }) 
 
     // 직책 로드
     const refreshPositions = useCallback(async () => {
+        if (isDevAdminSessionEnabled()) {
+            setPositions(devPositions);
+            return;
+        }
+
         try {
             const data = await positionService.getPositions();
             setPositions(data);

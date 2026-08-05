@@ -5,6 +5,7 @@ import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
 import Handsontable from 'handsontable';
 import { freelancerService } from '../../services/freelancerService';
+import { buildFreelancerTaxExcelRows } from '../../utils/freelancerTaxExcel';
 
 import { addYears, subYears } from 'date-fns';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -30,12 +31,14 @@ const FreelancerPage: React.FC = () => {
     const [reportTeams, setReportTeams] = useState<Array<{ id: string; name: string }>>([]);
     const [loading, setLoading] = useState(true);
     const [downloadingExcel, setDownloadingExcel] = useState(false);
+    const [downloadingTaxExcel, setDownloadingTaxExcel] = useState(false);
+    const [taxExcelMonth, setTaxExcelMonth] = useState(new Date().getMonth() + 1);
     const [tableHeight, setTableHeight] = useState<number>(480);
     const hotRef = useRef<any>(null);
     const tableWrapRef = useRef<HTMLDivElement>(null);
     const allFreelancersRef = useRef<any[]>([]);
     const modifiedRowsRef = useRef<Set<number>>(new Set());
-    const [modifiedRows, setModifiedRows] = useState<Set<number>>(new Set()); // UI 갱신용 (저장 활성화 등)
+    const [, setModifiedRows] = useState<Set<number>>(new Set()); // UI 갱신용
     const year = currentDate.getFullYear();
     const toFiniteAmount = useCallback((value: unknown): number => {
         if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -75,17 +78,6 @@ const FreelancerPage: React.FC = () => {
         td.className = 'htRight htMiddle px-3 ht-total-red';
         if (value) {
             td.innerText = Number(value).toLocaleString();
-        }
-        return td;
-    }, []);
-
-    const statusRenderer = useCallback((instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any, cellProperties: any) => {
-        Handsontable.renderers.TextRenderer.apply(this, [instance, td, row, col, prop, value, cellProperties]);
-        td.className = 'htCenter htMiddle';
-        if (value === '신고안함') {
-            td.className += ' ht-text-dimmed';
-        } else if (typeof value === 'string' && (value.includes('신고') || value.includes('선행') || value.includes('완료'))) {
-            td.className += ' ht-status-label';
         }
         return td;
     }, []);
@@ -426,8 +418,8 @@ const FreelancerPage: React.FC = () => {
         { data: 'm06', title: '06월', type: 'numeric', width: 85, renderer: currencyRenderer },
         { data: 'm07', title: '07월', type: 'numeric', width: 85, renderer: currencyRenderer },
         { data: 'm08', title: '08월', type: 'numeric', width: 85, renderer: currencyRenderer },
-        { data: 'm09', title: '09월', type: 'numeric', width: 85, renderer: statusRenderer },
-        { data: 'm10', title: '10월', type: 'numeric', width: 85, renderer: statusRenderer },
+        { data: 'm09', title: '09월', type: 'numeric', width: 85, renderer: currencyRenderer },
+        { data: 'm10', title: '10월', type: 'numeric', width: 85, renderer: currencyRenderer },
         { data: 'm11', title: '11월', type: 'numeric', width: 85, renderer: currencyRenderer },
         { data: 'm12', title: '12월', type: 'numeric', width: 85, renderer: currencyRenderer },
 
@@ -436,7 +428,7 @@ const FreelancerPage: React.FC = () => {
         { data: 'reportableAmount', title: '신고 가능 금액', type: 'numeric', width: 120, className: 'col-orange-bg', renderer: glowRenderer },
         { data: 'depositDate', title: '입금 날짜', type: 'date', dateFormat: 'YYYY-MM-DD', width: 110, className: 'htCenter htMiddle' },
         { data: 'paymentMemo', title: '비     고', type: 'text', width: 180, className: 'htMiddle px-3' }
-    ], [centerRenderer, currencyRedRenderer, currencyRenderer, statusRenderer, glowRenderer]);
+    ], [centerRenderer, currencyRedRenderer, currencyRenderer, glowRenderer]);
 
     const nestedHeaders = useMemo(() => [
         [
@@ -604,12 +596,13 @@ const FreelancerPage: React.FC = () => {
 
         setLoading(true);
         try {
-            const dataToSave = Array.from(modifiedRows)
+            const dataToSave = Array.from(modifiedRowsRef.current)
                 .map(rowIdx => hotInstance.getSourceDataAtRow(rowIdx))
                 .filter(row => row && row.name && row.name.trim() !== '');
 
             if (dataToSave.length > 0) {
                 await freelancerService.saveYearlyPayments(year, dataToSave);
+                modifiedRowsRef.current.clear();
                 setModifiedRows(new Set());
                 await Swal.fire('Success', '변경사항이 안전하게 저장되었습니다.', 'success');
                 fetchData();
@@ -799,6 +792,197 @@ const FreelancerPage: React.FC = () => {
         }
     }, [allFreelancers, normalizeTeamId, selectedTeamId, sortFreelancers, toFiniteAmount, visibleTeams, year]);
 
+    const handleDownloadTaxExcel = useCallback(async () => {
+        const monthKey = `m${String(taxExcelMonth).padStart(2, '0')}`;
+        const gridData = hotRef.current?.hotInstance?.getSourceData?.();
+        const currentTeamRows = Array.isArray(gridData)
+            ? gridData.filter((row: any) => row && !row.isEmpty && !row.isFooter)
+            : undefined;
+        const taxReport = buildFreelancerTaxExcelRows({
+            allRows: allFreelancers,
+            currentTeamRows,
+            selectedTeamId,
+            monthKey,
+            normalizeTeamId,
+            sortFreelancers,
+            toFiniteAmount,
+        });
+
+        if (taxReport.detailRows.length === 0) {
+            Swal.fire('안내', `${taxExcelMonth}월 전체법인 정산 인원이 없습니다.`, 'info');
+            return;
+        }
+
+        setDownloadingTaxExcel(true);
+        try {
+            const XLSX = await import('xlsx-js-style');
+            const monthText = String(taxExcelMonth).padStart(2, '0');
+            const lastDay = new Date(year, taxExcelMonth, 0).getDate();
+            const firstDataRow = 4;
+            const lastDataRow = firstDataRow + taxReport.detailRows.length - 1;
+            const totalRow = lastDataRow + 1;
+            const worksheetRows: Array<Array<string | number>> = [
+                ['세무서 제출 자료', '', '', '', ''],
+                [`기간 : ${year}-${monthText}-01  ~  ${year}-${monthText}-${String(lastDay).padStart(2, '0')}`, '', '', '', ''],
+                ['번호', '이름', '주민등록번호', '본봉', ''],
+                ...taxReport.detailRows.map((row) => [...row, '']),
+                ['', '합  계', '', taxReport.grandTotal, ''],
+            ];
+            const worksheet = XLSX.utils.aoa_to_sheet(worksheetRows);
+
+            worksheet['!merges'] = [
+                { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
+                { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
+            ];
+            worksheet['!cols'] = [{ wch: 7 }, { wch: 16 }, { wch: 23 }, { wch: 18 }, { wch: 18 }];
+            worksheet['!rows'] = worksheetRows.map((_, index) => ({
+                hpt: index === 0 ? 30 : index === 1 ? 22 : index === 2 ? 28 : 20,
+            }));
+            (worksheet as any)['!pageSetup'] = {
+                orientation: 'portrait',
+                paperSize: 9,
+                fitToWidth: 1,
+                fitToHeight: 0,
+            };
+            (worksheet as any)['!printArea'] = `A1:D${totalRow}`;
+            (worksheet as any)['!margins'] = { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0, footer: 0 };
+
+            const thinBorder = {
+                top: { style: 'thin', color: { rgb: '000000' } },
+                bottom: { style: 'thin', color: { rgb: '000000' } },
+                left: { style: 'thin', color: { rgb: '000000' } },
+                right: { style: 'thin', color: { rgb: '000000' } },
+            };
+            const applyCellStyle = (row: number, col: number, style: Record<string, unknown>) => {
+                const address = XLSX.utils.encode_cell({ r: row - 1, c: col - 1 });
+                const cell = worksheet[address] as any;
+                if (!cell) return;
+                cell.s = style;
+            };
+            const ensureCell = (address: string) => {
+                if (!worksheet[address]) worksheet[address] = { t: 's', v: '' } as any;
+                return worksheet[address] as any;
+            };
+
+            applyCellStyle(1, 1, {
+                font: { name: '맑은 고딕', sz: 18, bold: false, color: { rgb: '000000' } },
+                fill: { patternType: 'solid', fgColor: { rgb: 'FFFFFF' } },
+                alignment: { horizontal: 'center', vertical: 'center' },
+            });
+            applyCellStyle(2, 1, {
+                font: { name: '맑은 고딕', sz: 12, color: { rgb: '000000' } },
+                fill: { patternType: 'solid', fgColor: { rgb: 'FFFFFF' } },
+                alignment: { horizontal: 'center', vertical: 'center' },
+                border: { bottom: { style: 'thin', color: { rgb: '000000' } } },
+            });
+
+            for (let col = 1; col <= 4; col += 1) {
+                applyCellStyle(3, col, {
+                    font: { name: '맑은 고딕', sz: 12, bold: true, color: { rgb: 'FFFFFF' } },
+                    fill: { patternType: 'solid', fgColor: { rgb: col === 4 ? 'C00000' : '4F6228' } },
+                    alignment: { horizontal: 'center', vertical: 'center' },
+                    border: thinBorder,
+                });
+            }
+
+            for (let row = firstDataRow; row <= lastDataRow; row += 1) {
+                for (let col = 1; col <= 4; col += 1) {
+                    applyCellStyle(row, col, {
+                        font: { name: '맑은 고딕', sz: 12, color: { rgb: '000000' } },
+                        fill: { patternType: 'solid', fgColor: { rgb: 'FFFFFF' } },
+                        alignment: { horizontal: col === 4 ? 'right' : 'center', vertical: 'center' },
+                        border: thinBorder,
+                        ...(col === 4 ? { numFmt: '#,##0' } : {}),
+                    });
+                }
+                ensureCell(`E${row}`).s = {
+                    font: { name: '맑은 고딕', sz: 11, color: { rgb: '000000' } },
+                    fill: { patternType: 'solid', fgColor: { rgb: 'FFFFFF' } },
+                    alignment: { horizontal: 'left', vertical: 'center' },
+                };
+            }
+
+            taxReport.teamSummaries.forEach((summary) => {
+                const startRow = firstDataRow + summary.startIndex;
+                const endRow = firstDataRow + summary.endIndex;
+                const labelRow = Math.max(startRow, endRow - 1);
+                const labelCell = ensureCell(`E${labelRow}`);
+                const totalCell = ensureCell(`E${endRow}`);
+
+                if (startRow === endRow) {
+                    labelCell.v = `${summary.teamName}  ${summary.total.toLocaleString('ko-KR')}`;
+                    labelCell.t = 's';
+                } else {
+                    labelCell.v = summary.teamName;
+                    labelCell.t = 's';
+                    totalCell.f = `SUM(D${startRow}:D${endRow})`;
+                    totalCell.v = summary.total;
+                    totalCell.t = 'n';
+                    totalCell.z = '#,##0';
+                }
+
+                labelCell.s = {
+                    font: { name: '맑은 고딕', sz: 11, color: { rgb: '000000' } },
+                    fill: { patternType: 'solid', fgColor: { rgb: 'FFFFFF' } },
+                    alignment: { horizontal: 'left', vertical: 'center' },
+                };
+                totalCell.s = {
+                    ...(totalCell.s ?? {}),
+                    font: { name: '맑은 고딕', sz: 11, color: { rgb: '000000' } },
+                    fill: { patternType: 'solid', fgColor: { rgb: 'FFFFFF' } },
+                    alignment: { horizontal: startRow === endRow ? 'left' : 'right', vertical: 'center' },
+                    ...(startRow === endRow ? {} : { numFmt: '#,##0' }),
+                };
+
+                for (let col = 1; col <= 5; col += 1) {
+                    const address = XLSX.utils.encode_cell({ r: endRow - 1, c: col - 1 });
+                    const cell = worksheet[address] as any;
+                    if (!cell) continue;
+                    cell.s = {
+                        ...(cell.s ?? {}),
+                        border: {
+                            ...((cell.s ?? {}).border ?? {}),
+                            bottom: { style: 'double', color: { rgb: '000000' } },
+                        },
+                    };
+                }
+            });
+
+            for (let col = 1; col <= 4; col += 1) {
+                applyCellStyle(totalRow, col, {
+                    font: { name: '맑은 고딕', sz: 12, bold: col === 2, color: { rgb: '000000' } },
+                    fill: { patternType: 'solid', fgColor: { rgb: 'FFFF00' } },
+                    alignment: { horizontal: col === 4 ? 'right' : 'center', vertical: 'center' },
+                    border: thinBorder,
+                    ...(col === 4 ? { numFmt: '#,##0' } : {}),
+                });
+            }
+            const grandTotalCell = worksheet[`D${totalRow}`] as any;
+            grandTotalCell.f = `SUM(D${firstDataRow}:D${lastDataRow})`;
+            grandTotalCell.v = taxReport.grandTotal;
+
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, '세무서제출');
+            XLSX.writeFile(
+                workbook,
+                `세무서제출자료_${year}-${monthText}_전체팀.xlsx`
+            );
+        } catch (error) {
+            console.error('Tax Excel download failed:', error);
+            Swal.fire('오류', '세무용 엑셀 다운로드 중 오류가 발생했습니다.', 'error');
+        } finally {
+            setDownloadingTaxExcel(false);
+        }
+    }, [
+        allFreelancers,
+        normalizeTeamId,
+        selectedTeamId,
+        sortFreelancers,
+        taxExcelMonth,
+        toFiniteAmount,
+        year,
+    ]);
+
     return (
         <div className="freelancer-page-container">
             {/* 상단 팀 내비게이션 */}
@@ -844,6 +1028,9 @@ const FreelancerPage: React.FC = () => {
                 <span className="freelancer-salary-legend-chip is-daily">일급제</span>
                 <span className="freelancer-salary-legend-chip is-monthly">월급제</span>
                 <span className="freelancer-salary-legend-chip is-agency">용역팀</span>
+                <span className="ml-3 text-xs font-semibold text-slate-600">
+                    월별 금액은 통합급여관리에서 전체법인으로 정산 저장한 세전 금액이며 직접 수정할 수 있습니다.
+                </span>
             </div>
 
             <main className="excel-main">
@@ -861,7 +1048,7 @@ const FreelancerPage: React.FC = () => {
                         nestedHeaders={nestedHeaders}
                         language="ko-KR"
                         layoutDirection="ltr"
-                        beforeRenderer={(td, row, col, prop, value, cellProperties) => {
+                        beforeRenderer={(td, row, _col, _prop, value, _cellProperties) => {
                             // 헤더 그라데이션 적용 로직 (prop 기준)
                             if (row < 0) { // Header row
                                 const headerText = String(value);
@@ -870,14 +1057,14 @@ const FreelancerPage: React.FC = () => {
                                 if (headerText.includes('신고 가능 금액')) td.classList.add('header-orange');
                             }
                         }}
-                        afterGetColHeader={(col, TH) => {
+                        afterGetColHeader={(_col, TH) => {
                             // 중첩 헤더인 경우 TH 내부에 클래스 주입
                             const headerText = TH.innerText;
                             if (headerText.includes('성 과 급')) TH.classList.add('header-yellow');
                             if (headerText.includes('신고 잔액')) TH.classList.add('header-green');
                             if (headerText.includes('신고 가능 금액')) TH.classList.add('header-orange');
                         }}
-                        afterRenderer={(TD, row, col, prop, value, cellProperties) => {
+                        afterRenderer={(TD, row, _col, prop, _value, cellProperties) => {
 
                             if (cellProperties?.isFooter) {
                                 TD.classList.add('ht-footer-row');
@@ -914,7 +1101,7 @@ const FreelancerPage: React.FC = () => {
                         autoWrapCol={false}
                         autoWrapRow={false}
                         afterChange={afterChange}
-                        cells={(row, col, prop) => {
+                        cells={(row, _col, _prop) => {
                             const cellProperties: any = {};
                             const rowData = displayData[row];
                             if (rowData && rowData.isFooter) {
@@ -929,6 +1116,25 @@ const FreelancerPage: React.FC = () => {
                 </div>
 
                 <div className="flex justify-end gap-3 mt-4">
+                    <select
+                        value={taxExcelMonth}
+                        onChange={(event) => setTaxExcelMonth(Number(event.target.value))}
+                        disabled={loading || downloadingTaxExcel}
+                        aria-label="세무용 엑셀 월 선택"
+                        className="rounded border border-emerald-300 bg-white px-3 py-3 font-bold text-emerald-800 shadow-sm disabled:opacity-60"
+                    >
+                        {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
+                            <option key={month} value={month}>{month}월</option>
+                        ))}
+                    </select>
+                    <button
+                        onClick={handleDownloadTaxExcel}
+                        disabled={loading || downloadingTaxExcel}
+                        className="flex items-center gap-2 px-6 py-3 bg-teal-700 text-white rounded font-black shadow-lg hover:bg-teal-800 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                        <FontAwesomeIcon icon={downloadingTaxExcel ? faSpinner : faFileExcel} spin={downloadingTaxExcel} />
+                        세무서 제출 자료
+                    </button>
                     <button
                         onClick={handleDownloadExcel}
                         disabled={loading || downloadingExcel}

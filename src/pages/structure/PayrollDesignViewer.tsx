@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faFileInvoiceDollar, faCalculator, faLayerGroup, faPrint, faFileExcel, faSave,
-    faFilter, faCalendarAlt, faWonSign
-} from '@fortawesome/free-solid-svg-icons';
+    faFilter, faCalendarAlt} from '@fortawesome/free-solid-svg-icons';
 
 import { PayrollData } from '../../services/payrollService';
 

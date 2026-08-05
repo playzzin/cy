@@ -1,4 +1,4 @@
-import React, { forwardRef } from 'react';
+import { forwardRef } from 'react';
 import styled from 'styled-components';
 import { mmToPx, MM_TO_PX } from '../../../utils/units';
 import { BuilderElement } from '../../../components/delegation-v3/builder/types';

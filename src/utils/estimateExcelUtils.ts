@@ -9,6 +9,8 @@ type DownloadEstimateExcelOptions = {
 };
 
 const EMU_PER_PIXEL = 9525;
+const REFERENCE_ESTIMATE_LOGO_URL = '/assets/estimate/cheongyeon-logo.png';
+const REFERENCE_ESTIMATE_STAMP_URL = '/assets/estimate/cheongyeon-stamp-round.png';
 
 /**
  * 브라우저 환경에서 ExcelJS가 안정적으로 처리할 수 있도록 이미지를 data URL로 변환합니다.
@@ -87,7 +89,12 @@ const sanitizeExcelText = (value: unknown): string => {
 };
 
 const setTextCellValue = (cell: ExcelJS.Cell, value: unknown) => {
-    cell.value = sanitizeExcelText(value);
+    const text = sanitizeExcelText(value);
+    if (!text) {
+        cell.value = null;
+        return;
+    }
+    cell.value = text;
     cell.numFmt = '@';
 };
 
@@ -98,6 +105,995 @@ const setCellValue = (cell: ExcelJS.Cell, value: unknown) => {
     }
 
     cell.value = value as ExcelJS.CellValue;
+};
+
+const splitBankAccount = (value: unknown): { bank: string; account: string } => {
+    const text = sanitizeExcelText(value).trim();
+    if (!text) return { bank: '', account: '' };
+
+    const parts = text.split(/\s+/);
+    if (parts.length > 1) {
+        return { bank: parts[0], account: parts.slice(1).join(' ') };
+    }
+
+    return /은행|농협|수협|신협|금고|뱅크/i.test(text)
+        ? { bank: text, account: '' }
+        : { bank: '', account: text };
+};
+
+const formatReferenceScopeNotes = (scopeNotes: string, includeVat: boolean): string => {
+    const normalized = getExportScopeNotes(scopeNotes, includeVat)
+        .split(/\r?\n/)
+        .map(line => line.trimEnd())
+        .filter(line => line.trim().length > 0);
+
+    return normalized.length > 0 ? `\n${normalized.join('\n\n')}` : '';
+};
+
+const downloadReferenceEstimateExcel = async (
+    draft: EstimateDraft,
+    items: any[],
+    subtotal: number,
+    total: number,
+    options: DownloadEstimateExcelOptions
+) => {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = '청연ENG ERP';
+    workbook.created = new Date();
+    workbook.modified = new Date();
+
+    const worksheet = workbook.addWorksheet('견적서');
+    worksheet.properties.defaultRowHeight = 21.95;
+    worksheet.columns = [
+        { width: 3 },
+        { width: 13.125 },
+        { width: 20.625 },
+        { width: 5.625 },
+        { width: 13.125 },
+        { width: 13.125 },
+        { width: 13.125 },
+        { width: 13.125 },
+        { width: 13.125 },
+        { width: 13.125 },
+        { width: 13.125 },
+        { width: 3.625 },
+    ];
+
+    const fontName = '맑은 고딕';
+    const colorText = 'FF111827';
+    const colorBorder = 'FF111827';
+    const colorLabel = 'FFF4F2F8';
+    const colorWhite = 'FFFFFFFF';
+    const colorStripe = 'FFF2F2F2';
+    const headerFill = {
+        type: 'gradient',
+        gradient: 'angle',
+        degree: 90,
+        stops: [
+            { position: 0, color: { theme: 0 } },
+            { position: 1, color: { theme: 7, tint: 0.5999938962981048 } }
+        ]
+    } as unknown as ExcelJS.Fill;
+    const labelFill = {
+        type: 'gradient',
+        gradient: 'angle',
+        degree: 0,
+        stops: [
+            { position: 0, color: { theme: 0 } },
+            { position: 1, color: { theme: 7, tint: 0.8000122074037904 } }
+        ]
+    } as unknown as ExcelJS.Fill;
+    const amountFill = {
+        type: 'gradient',
+        gradient: 'angle',
+        degree: 90,
+        stops: [
+            { position: 0, color: { theme: 0 } },
+            { position: 1, color: { theme: 0, tint: -0.1490218817712943 } }
+        ]
+    } as unknown as ExcelJS.Fill;
+    const allCols = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'];
+    const installRatio = draft.installRatio || 50;
+    const removeRatio = 100 - installRatio;
+    const isRental = draft.estimateMode === 'rental';
+    const vatInclusionLabel = draft.includeVat === false ? 'VAT 별도' : 'VAT 포함';
+    const { bank, account } = splitBankAccount(draft.supplierAccount);
+
+    const border = (style: ExcelJS.BorderStyle = 'thin'): ExcelJS.Border => ({
+        style,
+        color: { argb: colorBorder }
+    });
+
+    const setCellBorder = (
+        cell: ExcelJS.Cell,
+        edges: Partial<Record<'top' | 'bottom' | 'left' | 'right', ExcelJS.BorderStyle>> = {}
+    ) => {
+        cell.border = {
+            top: border(edges.top || 'thin'),
+            bottom: border(edges.bottom || 'thin'),
+            left: border(edges.left || 'thin'),
+            right: border(edges.right || 'thin')
+        };
+    };
+
+    const setTextStyle = (
+        cell: ExcelJS.Cell,
+        {
+            size = 9,
+            bold = false,
+            horizontal = 'center',
+            vertical = 'middle',
+            wrapText = false,
+            fill
+        }: {
+            size?: number;
+            bold?: boolean;
+            horizontal?: ExcelJS.Alignment['horizontal'];
+            vertical?: ExcelJS.Alignment['vertical'];
+            wrapText?: boolean;
+            fill?: string | ExcelJS.Fill;
+        } = {}
+    ) => {
+        cell.font = { name: fontName, size, bold, color: { argb: colorText } };
+        cell.alignment = { horizontal, vertical, wrapText };
+        if (fill) {
+            cell.fill = typeof fill === 'string'
+                ? { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } }
+                : fill;
+        }
+    };
+
+    const styleBlock = (
+        startRow: number,
+        endRow: number,
+        startCol: number,
+        endCol: number,
+        fill?: string | ExcelJS.Fill
+    ) => {
+        for (let row = startRow; row <= endRow; row++) {
+            for (let col = startCol; col <= endCol; col++) {
+                const cell = worksheet.getCell(row, col);
+                // The supplied reference uses one consistent thin rule.  A
+                // medium outside border becomes noticeably heavier in Excel
+                // and in printed output, especially on the left edge.
+                setCellBorder(cell);
+                if (fill) {
+                    cell.fill = typeof fill === 'string'
+                        ? { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } }
+                        : fill;
+                }
+            }
+        }
+    };
+
+    const styleTableRow = (
+        row: number,
+        {
+            fill = colorWhite,
+            bold = false,
+            size = 9,
+            bottomStyle = 'thin'
+        }: {
+            fill?: string | ExcelJS.Fill;
+            bold?: boolean;
+            size?: number;
+            bottomStyle?: ExcelJS.BorderStyle;
+        } = {}
+    ) => {
+        allCols.forEach((col, index) => {
+            const cell = worksheet.getCell(`${col}${row}`);
+            setTextStyle(cell, { size, bold, fill });
+            setCellBorder(cell, {
+                left: 'thin',
+                right: 'thin',
+                bottom: bottomStyle
+            });
+        });
+    };
+
+    // 제목 영역
+    [1, 2, 3, 4].forEach(row => { worksheet.getRow(row).height = 30; });
+    worksheet.mergeCells('B2:K3');
+    const titleCell = worksheet.getCell('B2');
+    titleCell.value = '견   적   서';
+    setTextStyle(titleCell, { size: 28, bold: true });
+
+    // 공급받는자 / 공급자 정보
+    for (let row = 5; row <= 10; row++) worksheet.getRow(row).height = 30;
+    worksheet.mergeCells('B5:D5');
+    worksheet.mergeCells('F5:K5');
+    worksheet.mergeCells('C6:D6');
+    worksheet.mergeCells('G6:K6');
+    worksheet.mergeCells('C7:D7');
+    worksheet.mergeCells('G7:H7');
+    worksheet.mergeCells('J7:K7');
+    worksheet.mergeCells('C8:D8');
+    worksheet.mergeCells('G8:K8');
+    worksheet.mergeCells('C9:D9');
+    worksheet.mergeCells('G9:H9');
+    worksheet.mergeCells('J9:K9');
+    worksheet.mergeCells('C10:D10');
+    worksheet.mergeCells('G10:H10');
+    worksheet.mergeCells('J10:K10');
+
+    styleBlock(5, 10, 2, 4);
+    styleBlock(5, 10, 6, 11);
+
+    ['B5', 'F5'].forEach(address => {
+        const cell = worksheet.getCell(address);
+        setTextStyle(cell, { size: 10, bold: true, fill: headerFill });
+    });
+    worksheet.getCell('B5').value = '공 급 받 는 자';
+    worksheet.getCell('F5').value = '공  급  자';
+
+    const infoLabels: Array<[string, string, number]> = [
+        ['B6', '업 체 명', 9],
+        ['B7', '현 장 명', 9],
+        ['B8', '결제조건', 9],
+        ['B9', '비     고', 9],
+        ['B10', '견적일자', 9],
+        ['F6', '상     호', 10],
+        ['F7', '등록번호', 10],
+        ['F8', '주     소', 10],
+        ['F9', '전     화', 10],
+        ['F10', '은     행', 10],
+        ['I7', '대     표', 10],
+        ['I9', '팩     스', 10],
+        ['I10', '계     좌', 10],
+    ];
+    infoLabels.forEach(([address, label, size]) => {
+        const cell = worksheet.getCell(address);
+        cell.value = label;
+        setTextStyle(cell, { size, bold: true, fill: labelFill });
+    });
+
+    const infoValues: Array<[string, unknown]> = [
+        ['C6', draft.clientCompany],
+        ['C7', draft.projectName],
+        ['C8', draft.paymentTerms],
+        ['C9', draft.notes],
+        ['C10', draft.issueDate],
+        ['G7', draft.supplierBizNo],
+        ['J7', draft.supplierName],
+        ['G8', draft.supplierAddress],
+        ['G9', draft.supplierContact],
+        ['J9', draft.supplierFax],
+        ['G10', bank],
+        ['J10', account],
+    ];
+    infoValues.forEach(([address, value]) => {
+        const cell = worksheet.getCell(address);
+        setCellValue(cell, value);
+        setTextStyle(cell, { size: 9 });
+    });
+
+    try {
+        const [logo, stamp] = await Promise.all([
+            getImageDataUrl(REFERENCE_ESTIMATE_LOGO_URL),
+            getImageDataUrl(REFERENCE_ESTIMATE_STAMP_URL)
+        ]);
+        const logoId = workbook.addImage({ base64: logo.base64, extension: logo.extension });
+        const stampId = workbook.addImage({ base64: stamp.base64, extension: stamp.extension });
+        worksheet.addImage(logoId, {
+            tl: {
+                nativeCol: 6,
+                nativeRow: 5,
+                nativeColOff: 64350,
+                nativeRowOff: 60000
+            },
+            ext: { width: 157, height: 28 }
+        } as any);
+        worksheet.addImage(stampId, {
+            // ExcelJS normalizes fractional columns against a default width,
+            // moving the stamp to the left of the representative's name.
+            // Match the supplied template's stamp anchor at the right edge of K6.
+            tl: {
+                nativeCol: 10,
+                nativeRow: 5,
+                nativeColOff: 266700,
+                nativeRowOff: 85725
+            },
+            ext: { width: 70, height: 63 }
+        } as any);
+    } catch (error) {
+        console.warn('Reference estimate images could not be embedded.', error);
+        const supplierCell = worksheet.getCell('G6');
+        setCellValue(supplierCell, draft.supplierCompany);
+        setTextStyle(supplierCell, { size: 10, bold: true });
+    }
+
+    // 합계 금액
+    worksheet.getRow(11).height = 20.1;
+    worksheet.getRow(12).height = 30;
+    worksheet.getRow(13).height = 20.1;
+    worksheet.mergeCells('B12:D12');
+    worksheet.mergeCells('E12:K12');
+    const amountLabel = worksheet.getCell('B12');
+    amountLabel.value = `합계 금액 (${vatInclusionLabel})`;
+    setTextStyle(amountLabel, { size: 10, bold: true, fill: headerFill });
+    setCellBorder(amountLabel);
+    const amountValue = worksheet.getCell('E12');
+    setTextCellValue(amountValue, `일금 ${numberToKorean(total)}원 정  ( ￦ ${formatCurrency(total)} )`);
+    setTextStyle(amountValue, { size: 11, bold: true, fill: amountFill });
+    setCellBorder(amountValue);
+
+    // 품목 헤더
+    worksheet.getRow(14).height = 30;
+    worksheet.getRow(15).height = 30;
+    worksheet.mergeCells('B14:B15');
+    worksheet.mergeCells('C14:C15');
+    worksheet.mergeCells('D14:D15');
+    worksheet.mergeCells('E14:E15');
+    worksheet.mergeCells('F14:G14');
+    worksheet.mergeCells('H14:I14');
+    worksheet.mergeCells('J14:K15');
+    styleBlock(14, 15, 2, 11, headerFill);
+    [
+        ['B14', '품 명'],
+        ['C14', '설치 구간'],
+        ['D14', '단위'],
+        ['E14', '물 량'],
+        ['F14', '인 건 비'],
+        ['H14', isRental ? '임 대 료' : '청 구'],
+        ['J14', '비 고'],
+        ['F15', '단 가'],
+        ['G15', '금 액'],
+        ['H15', isRental ? '단 가' : `설치 ${installRatio}%`],
+        ['I15', isRental ? '금 액' : `해체 ${removeRatio}%`],
+    ].forEach(([address, value]) => {
+        const cell = worksheet.getCell(address);
+        cell.value = value;
+        setTextStyle(cell, { size: 10, bold: true, fill: headerFill });
+    });
+
+    // 품목 본문: 첨부 양식처럼 그룹마다 최소 4행을 확보합니다.
+    const groupedItems = groupEstimateItems(items);
+    const groups = groupedItems.length > 0 ? groupedItems : [{ category: '기타', items: [] }];
+    const subtotalRows: number[] = [];
+    let currentRow = 16;
+    let totalQuantity = 0;
+    let totalLabor = 0;
+    let totalRental = 0;
+    let totalInstall = 0;
+    let totalRemove = 0;
+
+    groups.forEach(group => {
+        const groupStartRow = currentRow;
+        const slotCount = Math.max(4, group.items.length);
+        const groupEndRow = groupStartRow + slotCount - 1;
+
+        for (let index = 0; index < slotCount; index++) {
+            const row = currentRow;
+            const item = group.items[index];
+            worksheet.getRow(row).height = 22.5;
+            worksheet.mergeCells(`J${row}:K${row}`);
+            styleTableRow(row, { fill: (row - groupStartRow) % 2 === 0 ? colorWhite : colorStripe });
+
+            if (item) {
+                const quantity = normalizeNumber(item.quantity);
+                const laborUnitPrice = normalizeNumber(item.laborUnitPrice || item.finalUnitPrice);
+                const standardUnitPrice = normalizeNumber(item.finalUnitPrice);
+                const laborAmount = normalizeNumber(item.laborAmount || quantity * laborUnitPrice);
+                const rentalUnitPrice = normalizeNumber(item.rentalUnitPrice);
+                const rentalAmount = normalizeNumber(item.rentalAmount || quantity * rentalUnitPrice);
+                const amount = normalizeNumber(item.amount || quantity * standardUnitPrice);
+                const installAmount = normalizeNumber(item.install50 || Math.round(amount * installRatio / 100));
+                const removeAmount = normalizeNumber(item.remove50 || amount - installAmount);
+
+                setCellValue(worksheet.getCell(`C${row}`), item.section || item.label || '');
+                setCellValue(worksheet.getCell(`D${row}`), item.unit || '');
+                worksheet.getCell(`E${row}`).value = quantity || null;
+                worksheet.getCell(`F${row}`).value = (isRental ? laborUnitPrice : standardUnitPrice) || null;
+                worksheet.getCell(`G${row}`).value = quantity || (isRental ? laborUnitPrice : standardUnitPrice)
+                    ? { formula: `F${row}*E${row}`, result: isRental ? laborAmount : amount }
+                    : null;
+                worksheet.getCell(`H${row}`).value = isRental
+                    ? (rentalUnitPrice || null)
+                    : (amount ? { formula: `G${row}*${installRatio / 100}`, result: installAmount } : null);
+                worksheet.getCell(`I${row}`).value = isRental
+                    ? (quantity || rentalUnitPrice ? { formula: `H${row}*E${row}`, result: rentalAmount } : null)
+                    : (amount ? { formula: `G${row}*${removeRatio / 100}`, result: removeAmount } : null);
+                setCellValue(worksheet.getCell(`J${row}`), item.note || '');
+
+                totalQuantity += quantity;
+                totalLabor += isRental ? laborAmount : amount;
+                totalRental += rentalAmount;
+                totalInstall += installAmount;
+                totalRemove += removeAmount;
+            }
+
+            ['E', 'F', 'G', 'H', 'I'].forEach(col => {
+                const cell = worksheet.getCell(`${col}${row}`);
+                cell.numFmt = '#,##0';
+                cell.alignment = { horizontal: 'right', vertical: 'middle' };
+            });
+            ['B', 'C', 'D', 'J'].forEach(col => {
+                worksheet.getCell(`${col}${row}`).alignment = {
+                    horizontal: 'center',
+                    vertical: 'middle',
+                    wrapText: col === 'J'
+                };
+            });
+            currentRow++;
+        }
+
+        worksheet.mergeCells(`B${groupStartRow}:B${groupEndRow}`);
+        const categoryCell = worksheet.getCell(`B${groupStartRow}`);
+        setTextCellValue(categoryCell, group.category);
+        setTextStyle(categoryCell, { size: 9, bold: true, fill: colorWhite });
+
+        const subtotalRow = currentRow;
+        subtotalRows.push(subtotalRow);
+        worksheet.getRow(subtotalRow).height = 30;
+        worksheet.mergeCells(`B${subtotalRow}:D${subtotalRow}`);
+        worksheet.mergeCells(`J${subtotalRow}:K${subtotalRow}`);
+        styleTableRow(subtotalRow, { fill: colorLabel, bold: true });
+        worksheet.getCell(`B${subtotalRow}`).value = `${group.category} 합계`;
+        setTextStyle(worksheet.getCell(`B${subtotalRow}`), { size: 10, bold: true, fill: colorLabel });
+
+        const groupQuantity = group.items.reduce((sum, item) => sum + normalizeNumber(item.quantity), 0);
+        const groupLabor = group.items.reduce((sum, item) => {
+            const quantity = normalizeNumber(item.quantity);
+            return sum + (isRental
+                ? normalizeNumber(item.laborAmount || quantity * normalizeNumber(item.laborUnitPrice || item.finalUnitPrice))
+                : normalizeNumber(item.amount || quantity * normalizeNumber(item.finalUnitPrice)));
+        }, 0);
+        const groupRental = group.items.reduce((sum, item) => {
+            const quantity = normalizeNumber(item.quantity);
+            return sum + normalizeNumber(item.rentalAmount || quantity * normalizeNumber(item.rentalUnitPrice));
+        }, 0);
+        const groupInstall = group.items.reduce((sum, item) => {
+            const amount = normalizeNumber(item.amount || normalizeNumber(item.quantity) * normalizeNumber(item.finalUnitPrice));
+            return sum + normalizeNumber(item.install50 || Math.round(amount * installRatio / 100));
+        }, 0);
+        const groupRemove = group.items.reduce((sum, item) => {
+            const amount = normalizeNumber(item.amount || normalizeNumber(item.quantity) * normalizeNumber(item.finalUnitPrice));
+            const installAmount = normalizeNumber(item.install50 || Math.round(amount * installRatio / 100));
+            return sum + normalizeNumber(item.remove50 || amount - installAmount);
+        }, 0);
+
+        worksheet.getCell(`E${subtotalRow}`).value = {
+            formula: `SUM(E${groupStartRow}:E${groupEndRow})`,
+            result: groupQuantity
+        };
+        worksheet.getCell(`G${subtotalRow}`).value = {
+            formula: `SUM(G${groupStartRow}:G${groupEndRow})`,
+            result: groupLabor
+        };
+        if (isRental) {
+            worksheet.getCell(`I${subtotalRow}`).value = {
+                formula: `SUM(I${groupStartRow}:I${groupEndRow})`,
+                result: groupRental
+            };
+        } else {
+            worksheet.getCell(`H${subtotalRow}`).value = {
+                formula: `SUM(H${groupStartRow}:H${groupEndRow})`,
+                result: groupInstall
+            };
+            worksheet.getCell(`I${subtotalRow}`).value = {
+                formula: `SUM(I${groupStartRow}:I${groupEndRow})`,
+                result: groupRemove
+            };
+        }
+        ['E', 'F', 'G', 'H', 'I'].forEach(col => {
+            const cell = worksheet.getCell(`${col}${subtotalRow}`);
+            cell.numFmt = '#,##0';
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+        });
+        currentRow++;
+    });
+
+    // 총 합계
+    const grandTotalRow = currentRow;
+    worksheet.getRow(grandTotalRow).height = 30;
+    worksheet.mergeCells(`B${grandTotalRow}:D${grandTotalRow}`);
+    worksheet.mergeCells(`J${grandTotalRow}:K${grandTotalRow}`);
+    styleTableRow(grandTotalRow, {
+        fill: headerFill,
+        bold: true,
+        size: 10,
+        bottomStyle: 'thin'
+    });
+    worksheet.getCell(`B${grandTotalRow}`).value = '총 합계';
+    const sumFormula = (col: string) => subtotalRows.length === 1
+        ? `${col}${subtotalRows[0]}`
+        : `SUM(${subtotalRows.map(row => `${col}${row}`).join(',')})`;
+    worksheet.getCell(`E${grandTotalRow}`).value = {
+        formula: sumFormula('E'),
+        result: totalQuantity
+    };
+    worksheet.getCell(`G${grandTotalRow}`).value = {
+        formula: sumFormula('G'),
+        result: isRental ? totalLabor : subtotal
+    };
+    if (isRental) {
+        worksheet.getCell(`I${grandTotalRow}`).value = {
+            formula: sumFormula('I'),
+            result: totalRental
+        };
+    } else {
+        worksheet.getCell(`H${grandTotalRow}`).value = {
+            formula: sumFormula('H'),
+            result: totalInstall
+        };
+        worksheet.getCell(`I${grandTotalRow}`).value = {
+            formula: sumFormula('I'),
+            result: totalRemove
+        };
+    }
+    ['E', 'F', 'G', 'H', 'I'].forEach(col => {
+        const cell = worksheet.getCell(`${col}${grandTotalRow}`);
+        cell.numFmt = '#,##0';
+        cell.alignment = { horizontal: 'right', vertical: 'middle' };
+    });
+
+    // 특약 사항
+    const spacerRow = grandTotalRow + 1;
+    const scopeTitleRow = grandTotalRow + 2;
+    const scopeBodyRow = grandTotalRow + 3;
+    worksheet.getRow(spacerRow).height = 20.1;
+    worksheet.getRow(scopeTitleRow).height = 30;
+    worksheet.mergeCells(`B${scopeTitleRow}:K${scopeTitleRow}`);
+    const scopeTitleCell = worksheet.getCell(`B${scopeTitleRow}`);
+    scopeTitleCell.value = '◈ 특 약 사 항 (Special Terms)';
+    setTextStyle(scopeTitleCell, {
+        size: 10,
+        bold: true,
+        horizontal: 'left',
+        fill: headerFill
+    });
+    setCellBorder(scopeTitleCell);
+
+    const scopeNotes = formatReferenceScopeNotes(draft.scopeNotes, draft.includeVat !== false);
+    worksheet.mergeCells(`B${scopeBodyRow}:K${scopeBodyRow}`);
+    const scopeCell = worksheet.getCell(`B${scopeBodyRow}`);
+    setTextCellValue(scopeCell, scopeNotes);
+    setTextStyle(scopeCell, {
+        size: 9,
+        horizontal: 'left',
+        vertical: 'top',
+        wrapText: true,
+        fill: colorWhite
+    });
+    setCellBorder(scopeCell);
+    const lineCount = Math.max(1, scopeNotes.split(/\r?\n/).length);
+    const wrappedLineEstimate = Math.ceil(scopeNotes.length / 120);
+    worksheet.getRow(scopeBodyRow).height = Math.max(80, lineCount * 13.35, wrappedLineEstimate * 15);
+
+    worksheet.pageSetup.fitToPage = true;
+    worksheet.pageSetup.fitToWidth = 1;
+    worksheet.pageSetup.fitToHeight = 0;
+    worksheet.pageSetup.horizontalCentered = true;
+    worksheet.pageSetup.paperSize = 9;
+    worksheet.pageSetup.orientation = 'landscape';
+    worksheet.pageSetup.margins = {
+        left: 0.25,
+        right: 0.25,
+        top: 0.35,
+        bottom: 0.35,
+        header: 0.15,
+        footer: 0.15
+    };
+    worksheet.views = options.freezePanes !== false
+        ? [{ state: 'frozen', ySplit: 15, showGridLines: false }]
+        : [{ showGridLines: false }];
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveAs(
+        new Blob([buffer]),
+        `${draft.clientCompany || '업체'}_견적서_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
+};
+
+/**
+ * 거래명세표와 임대거래명세표를 첨부 샘플의 공통 B~K 양식으로 출력합니다.
+ */
+const downloadReferenceTransactionExcel = async (
+    draft: EstimateDraft,
+    items: any[],
+    total: number,
+    options: DownloadEstimateExcelOptions,
+    mode: 'standard' | 'rental'
+) => {
+    const isRental = mode === 'rental';
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = '청연ENG ERP';
+    workbook.created = new Date();
+    workbook.modified = new Date();
+
+    const worksheet = workbook.addWorksheet(isRental ? '임대거래명세표' : '거래명세표');
+    worksheet.properties.defaultRowHeight = 21.95;
+    worksheet.columns = [
+        { width: 3 },
+        { width: 13.125 },
+        { width: 20.625 },
+        { width: 5.625 },
+        { width: 13.125 },
+        { width: 13.125 },
+        { width: 13.125 },
+        { width: 13.125 },
+        { width: 13.125 },
+        { width: 13.125 },
+        { width: 13.125 },
+        { width: 3.625 },
+    ];
+
+    const fontName = '맑은 고딕';
+    const colorText = 'FF111827';
+    const colorBorder = 'FF111827';
+    const colorLabel = 'FFF4F2F8';
+    const colorWhite = 'FFFFFFFF';
+    const colorStripe = 'FFF2F2F2';
+    const headerFill = {
+        type: 'gradient',
+        gradient: 'angle',
+        degree: 90,
+        stops: [
+            { position: 0, color: { theme: 0 } },
+            { position: 1, color: { theme: 7, tint: 0.5999938962981048 } }
+        ]
+    } as unknown as ExcelJS.Fill;
+    const labelFill = {
+        type: 'gradient',
+        gradient: 'angle',
+        degree: 0,
+        stops: [
+            { position: 0, color: { theme: 0 } },
+            { position: 1, color: { theme: 7, tint: 0.8000122074037904 } }
+        ]
+    } as unknown as ExcelJS.Fill;
+    const amountFill = {
+        type: 'gradient',
+        gradient: 'angle',
+        degree: 90,
+        stops: [
+            { position: 0, color: { theme: 0 } },
+            { position: 1, color: { theme: 0, tint: -0.1490218817712943 } }
+        ]
+    } as unknown as ExcelJS.Fill;
+    const outputColumns = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'];
+    const vatRate = draft.vatRate || 10;
+    const vatInclusionLabel = draft.includeVat === false ? 'VAT 별도' : 'VAT 포함';
+    const { bank, account } = splitBankAccount(draft.supplierAccount);
+
+    const border = (style: ExcelJS.BorderStyle = 'thin'): ExcelJS.Border => ({
+        style,
+        color: { argb: colorBorder }
+    });
+
+    const setCellBorder = (cell: ExcelJS.Cell) => {
+        cell.border = {
+            top: border(),
+            bottom: border(),
+            left: border(),
+            right: border()
+        };
+    };
+
+    const setTextStyle = (
+        cell: ExcelJS.Cell,
+        {
+            size = 9,
+            bold = false,
+            horizontal = 'center',
+            vertical = 'middle',
+            wrapText = false,
+            shrinkToFit = false,
+            fill
+        }: {
+            size?: number;
+            bold?: boolean;
+            horizontal?: ExcelJS.Alignment['horizontal'];
+            vertical?: ExcelJS.Alignment['vertical'];
+            wrapText?: boolean;
+            shrinkToFit?: boolean;
+            fill?: string | ExcelJS.Fill;
+        } = {}
+    ) => {
+        cell.font = { name: fontName, size, bold, color: { argb: colorText } };
+        cell.alignment = { horizontal, vertical, wrapText, shrinkToFit };
+        if (fill) {
+            cell.fill = typeof fill === 'string'
+                ? { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } }
+                : fill;
+        }
+    };
+
+    const styleBlock = (startRow: number, endRow: number, startCol: number, endCol: number, fill?: string | ExcelJS.Fill) => {
+        for (let row = startRow; row <= endRow; row++) {
+            for (let col = startCol; col <= endCol; col++) {
+                const cell = worksheet.getCell(row, col);
+                setCellBorder(cell);
+                if (fill) {
+                    cell.fill = typeof fill === 'string'
+                        ? { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } }
+                        : fill;
+                }
+            }
+        }
+    };
+
+    // 제목: 첨부 샘플과 동일한 B~K 전체 폭을 사용합니다.
+    [1, 2, 3, 4].forEach(row => { worksheet.getRow(row).height = 30; });
+    worksheet.mergeCells('B2:K3');
+    const titleCell = worksheet.getCell('B2');
+    titleCell.value = isRental ? '임 대 거 래 명 세 표' : '거 래 명 세 표';
+    setTextStyle(titleCell, { size: 28, bold: true, shrinkToFit: true });
+
+    // 공급받는자 / 공급자: 견적서 참고 양식과 같은 좌우 배치입니다.
+    for (let row = 5; row <= 10; row++) worksheet.getRow(row).height = 30;
+    worksheet.mergeCells('B5:D5');
+    worksheet.mergeCells('F5:K5');
+    for (let row = 6; row <= 10; row++) worksheet.mergeCells(`C${row}:D${row}`);
+    worksheet.mergeCells('G6:K6');
+    worksheet.mergeCells('G7:H7');
+    worksheet.mergeCells('J7:K7');
+    worksheet.mergeCells('G8:K8');
+    worksheet.mergeCells('G9:H9');
+    worksheet.mergeCells('J9:K9');
+    worksheet.mergeCells('G10:H10');
+    worksheet.mergeCells('J10:K10');
+
+    styleBlock(5, 10, 2, 4);
+    styleBlock(5, 10, 6, 11);
+
+    worksheet.getCell('B5').value = '공 급 받 는 자';
+    worksheet.getCell('F5').value = '공  급  자';
+    ['B5', 'F5'].forEach(address => setTextStyle(worksheet.getCell(address), { size: 10, bold: true, fill: headerFill }));
+
+    const infoLabels: Array<[string, string]> = [
+        ['B6', '업 체 명'],
+        ['B7', '현 장 명'],
+        ['B8', '결제조건'],
+        ['B9', '비     고'],
+        ['B10', '견적일자'],
+        ['F6', '상     호'],
+        ['F7', '등록번호'],
+        ['I7', '대     표'],
+        ['F8', '주     소'],
+        ['F9', '전     화'],
+        ['I9', '팩     스'],
+        ['F10', '은     행'],
+        ['I10', '계     좌'],
+    ];
+    infoLabels.forEach(([address, value]) => {
+        const cell = worksheet.getCell(address);
+        cell.value = value;
+        setTextStyle(cell, { bold: true, fill: labelFill, shrinkToFit: true });
+    });
+
+    const infoValues: Array<[string, unknown]> = [
+        ['C6', draft.clientCompany],
+        ['C7', draft.projectName],
+        ['C8', draft.paymentTerms],
+        ['C9', draft.notes],
+        ['C10', draft.issueDate],
+        ['G7', draft.supplierBizNo],
+        ['J7', draft.supplierName],
+        ['G8', draft.supplierAddress],
+        ['G9', draft.supplierContact],
+        ['J9', draft.supplierFax],
+        ['G10', bank],
+        ['J10', account],
+    ];
+    infoValues.forEach(([address, value]) => {
+        const cell = worksheet.getCell(address);
+        setCellValue(cell, value);
+        setTextStyle(cell, { shrinkToFit: true });
+    });
+
+    try {
+        const [logo, stamp] = await Promise.all([
+            getImageDataUrl(REFERENCE_ESTIMATE_LOGO_URL),
+            getImageDataUrl(REFERENCE_ESTIMATE_STAMP_URL)
+        ]);
+        const logoId = workbook.addImage({ base64: logo.base64, extension: logo.extension });
+        const stampId = workbook.addImage({ base64: stamp.base64, extension: stamp.extension });
+        worksheet.addImage(logoId, {
+            tl: {
+                nativeCol: 6,
+                nativeRow: 5,
+                nativeColOff: 64350,
+                nativeRowOff: 60000
+            },
+            ext: { width: 157, height: 28 }
+        } as any);
+        worksheet.addImage(stampId, {
+            tl: {
+                nativeCol: 10,
+                nativeRow: 5,
+                nativeColOff: 266700,
+                nativeRowOff: 85725
+            },
+            ext: { width: 70, height: 63 }
+        } as any);
+    } catch (error) {
+        console.warn('Reference transaction images could not be embedded.', error);
+        const supplierCell = worksheet.getCell('G6');
+        setTextCellValue(supplierCell, draft.supplierCompany);
+        setTextStyle(supplierCell, { size: 10, bold: true });
+    }
+
+    // 합계 금액
+    worksheet.getRow(11).height = 20.1;
+    worksheet.getRow(12).height = 30;
+    worksheet.getRow(13).height = 20.1;
+    worksheet.mergeCells('B12:D12');
+    worksheet.mergeCells('E12:K12');
+    const amountLabel = worksheet.getCell('B12');
+    amountLabel.value = `합계 금액 (${vatInclusionLabel})`;
+    setTextStyle(amountLabel, { size: 10, bold: true, fill: headerFill });
+    setCellBorder(amountLabel);
+    const amountValue = worksheet.getCell('E12');
+    setTextCellValue(amountValue, `일금 ${numberToKorean(total)}원 정  ( ￦ ${formatCurrency(total)} )`);
+    setTextStyle(amountValue, { size: 11, bold: true, fill: amountFill, shrinkToFit: true });
+    setCellBorder(amountValue);
+
+    // 거래 품목: 원본과 동일한 B~K 폭과 10개 기본 입력행을 만듭니다.
+    worksheet.getRow(14).height = 30;
+    styleBlock(14, 14, 2, 11, headerFill);
+    if (isRental) {
+        const headers = ['날     짜', '품     목', '단 위', '수     량', '기 본 료', '사용 일수', '단     가', '공급 가액', '부 가 세', '합     계'];
+        outputColumns.forEach((column, index) => {
+            const cell = worksheet.getCell(`${column}14`);
+            cell.value = headers[index];
+            setTextStyle(cell, { size: 10, bold: true, fill: headerFill, shrinkToFit: true });
+            setCellBorder(cell);
+        });
+    } else {
+        worksheet.mergeCells('J14:K14');
+        const headers: Array<[string, string]> = [
+            ['B', '날     짜'], ['C', '품     목'], ['D', '단 위'], ['E', '수     량'],
+            ['F', '단     가'], ['G', '공급가액'], ['H', '부 가 세'], ['I', '합     계'], ['J', '비     고']
+        ];
+        headers.forEach(([column, value]) => {
+            const cell = worksheet.getCell(`${column}14`);
+            cell.value = value;
+            setTextStyle(cell, { size: 10, bold: true, fill: headerFill, shrinkToFit: true });
+            setCellBorder(cell);
+        });
+    }
+
+    const firstItemRow = 15;
+    const itemRowCount = Math.max(10, items.length);
+    let totalSupply = 0;
+    let totalTax = 0;
+    let totalAmount = 0;
+
+    for (let itemIndex = 0; itemIndex < itemRowCount; itemIndex++) {
+        const item = items[itemIndex];
+        const currentRow = firstItemRow + itemIndex;
+        const hasItem = Boolean(item);
+        const quantity = normalizeNumber(item?.quantity);
+        const baseFee = normalizeNumber(item?.finalUnitPrice || item?.unitPrice);
+        const usageDays = hasItem ? Math.max(1, normalizeNumber(item?.period || 1)) : 0;
+        const dailyFee = normalizeNumber(item?.rentalUnitPrice);
+        const supplyAmount = isRental
+            ? Math.round(quantity * (baseFee + (usageDays * dailyFee)))
+            : Math.round(normalizeNumber(item?.amount || quantity * baseFee));
+        const taxAmount = draft.includeVat === false ? 0 : Math.round(supplyAmount * vatRate / 100);
+        const lineTotal = supplyAmount + taxAmount;
+        const rentalInputValues = [
+            item?.itemDate || '',
+            item?.section || item?.label || item?.category || '',
+            item?.unit || '',
+            hasItem ? (quantity || null) : null,
+            hasItem ? (baseFee || null) : null,
+            hasItem ? (usageDays || null) : null,
+            hasItem ? (dailyFee || null) : null,
+        ];
+
+        worksheet.getRow(currentRow).height = 22.5;
+        if (!isRental) worksheet.mergeCells(`J${currentRow}:K${currentRow}`);
+        outputColumns.forEach((column, index) => {
+            const cell = worksheet.getCell(`${column}${currentRow}`);
+            if (isRental && index < rentalInputValues.length) {
+                setCellValue(cell, rentalInputValues[index]);
+            } else if (!isRental) {
+                const standardValues = [
+                    item?.itemDate || '',
+                    item?.section || item?.label || item?.category || '',
+                    item?.unit || '',
+                    hasItem ? (quantity || null) : null,
+                    hasItem ? (baseFee || null) : null,
+                ];
+                if (index < standardValues.length) setCellValue(cell, standardValues[index]);
+                if (column === 'J') setCellValue(cell, item?.note || '');
+            }
+            setTextStyle(cell, {
+                horizontal: index === 1 ? 'left' : ((!isRental && index >= 8) ? 'center' : (index >= 3 ? 'right' : 'center')),
+                wrapText: !isRental && column === 'J',
+                shrinkToFit: true,
+                fill: (currentRow - firstItemRow) % 2 === 0 ? colorWhite : colorStripe
+            });
+            setCellBorder(cell);
+            if (isRental && (index === 3 || index === 5)) cell.numFmt = '#,##0.##';
+            if (isRental && [4, 6, 7, 8, 9].includes(index)) cell.numFmt = '#,##0';
+            if (!isRental && [3, 4, 5, 6, 7].includes(index)) cell.numFmt = '#,##0';
+        });
+
+        if (isRental) {
+            worksheet.getCell(`I${currentRow}`).value = {
+                formula: `IF(COUNTA(E${currentRow}:H${currentRow})=0,"",ROUND(E${currentRow}*(F${currentRow}+(G${currentRow}*H${currentRow})),0))`,
+                result: hasItem ? supplyAmount : undefined
+            };
+            worksheet.getCell(`J${currentRow}`).value = {
+                formula: draft.includeVat === false
+                    ? `IF(I${currentRow}="","",0)`
+                    : `IF(I${currentRow}="","",ROUND(I${currentRow}*${vatRate / 100},0))`,
+                result: hasItem ? taxAmount : undefined
+            };
+            worksheet.getCell(`K${currentRow}`).value = {
+                formula: `IF(I${currentRow}="","",I${currentRow}+J${currentRow})`,
+                result: hasItem ? lineTotal : undefined
+            };
+        } else {
+            worksheet.getCell(`G${currentRow}`).value = {
+                formula: `IF(COUNTA(E${currentRow}:F${currentRow})=0,"",ROUND(E${currentRow}*F${currentRow},0))`,
+                result: hasItem ? supplyAmount : undefined
+            };
+            worksheet.getCell(`H${currentRow}`).value = {
+                formula: draft.includeVat === false
+                    ? `IF(G${currentRow}="","",0)`
+                    : `IF(G${currentRow}="","",ROUND(G${currentRow}*${vatRate / 100},0))`,
+                result: hasItem ? taxAmount : undefined
+            };
+            worksheet.getCell(`I${currentRow}`).value = {
+                formula: `IF(G${currentRow}="","",G${currentRow}+H${currentRow})`,
+                result: hasItem ? lineTotal : undefined
+            };
+        }
+
+        if (hasItem) {
+            totalSupply += supplyAmount;
+            totalTax += taxAmount;
+            totalAmount += lineTotal;
+        }
+    }
+
+    const totalRow = firstItemRow + itemRowCount;
+    worksheet.getRow(totalRow).height = 30;
+    worksheet.mergeCells(isRental ? `B${totalRow}:H${totalRow}` : `B${totalRow}:F${totalRow}`);
+    if (!isRental) worksheet.mergeCells(`J${totalRow}:K${totalRow}`);
+    outputColumns.forEach(column => {
+        const cell = worksheet.getCell(`${column}${totalRow}`);
+        setTextStyle(cell, { size: 10, bold: true, fill: headerFill, shrinkToFit: true });
+        setCellBorder(cell);
+    });
+    worksheet.getCell(`B${totalRow}`).value = '합     계';
+    const totalColumns = isRental ? ['I', 'J', 'K'] : ['G', 'H', 'I'];
+    worksheet.getCell(`${totalColumns[0]}${totalRow}`).value = { formula: `SUM(${totalColumns[0]}${firstItemRow}:${totalColumns[0]}${totalRow - 1})`, result: totalSupply };
+    worksheet.getCell(`${totalColumns[1]}${totalRow}`).value = { formula: `SUM(${totalColumns[1]}${firstItemRow}:${totalColumns[1]}${totalRow - 1})`, result: totalTax };
+    worksheet.getCell(`${totalColumns[2]}${totalRow}`).value = { formula: `SUM(${totalColumns[2]}${firstItemRow}:${totalColumns[2]}${totalRow - 1})`, result: totalAmount };
+    totalColumns.forEach(column => {
+        const cell = worksheet.getCell(`${column}${totalRow}`);
+        cell.numFmt = '#,##0';
+        cell.alignment = { horizontal: 'right', vertical: 'middle', shrinkToFit: true };
+    });
+
+    worksheet.pageSetup.fitToPage = true;
+    worksheet.pageSetup.fitToWidth = 1;
+    worksheet.pageSetup.fitToHeight = 0;
+    worksheet.pageSetup.horizontalCentered = true;
+    worksheet.pageSetup.paperSize = 9;
+    worksheet.pageSetup.orientation = 'landscape';
+    worksheet.pageSetup.margins = {
+        left: 0.25,
+        right: 0.25,
+        top: 0.35,
+        bottom: 0.35,
+        header: 0.15,
+        footer: 0.15
+    };
+    worksheet.views = options.freezePanes !== false
+        ? [{ state: 'frozen', ySplit: 14, showGridLines: false }]
+        : [{ showGridLines: false }];
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveAs(
+        new Blob([buffer]),
+        `${draft.clientCompany || '업체'}_${isRental ? '임대거래명세표' : '거래명세표'}_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
 };
 
 /**
@@ -112,6 +1108,21 @@ export const downloadEstimateExcel = async (
     type: 'estimate' | 'transaction' = 'estimate',
     options: DownloadEstimateExcelOptions = {}
 ) => {
+    if ((type as string) === 'estimate') {
+        await downloadReferenceEstimateExcel(draft, items, subtotal, total, options);
+        return;
+    }
+
+    if (type === 'transaction' && draft.estimateMode === 'rental') {
+        await downloadReferenceTransactionExcel(draft, items, total, options, 'rental');
+        return;
+    }
+
+    if (type === 'transaction') {
+        await downloadReferenceTransactionExcel(draft, items, total, options, 'standard');
+        return;
+    }
+
     const workbook = new ExcelJS.Workbook();
     workbook.creator = '청연ENG ERP';
     workbook.created = new Date();

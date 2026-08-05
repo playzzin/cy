@@ -30,6 +30,7 @@ const MASTER_COLLECTION = 'materials';
 const INBOUND_COLLECTION = 'materialInbounds';
 const OUTBOUND_COLLECTION = 'materialOutbounds';
 const PHOTO_BATCH_COLLECTION = 'materialPhotoBatches';
+const MAX_BATCH_WRITES = 450;
 
 /**
  * MaterialFirestoreService
@@ -71,20 +72,48 @@ export const materialFirestoreService = {
     },
 
     saveInboundsBatch: async (transactions: MaterialInboundZod[], photoBatch?: MaterialPhotoBatchZod) => {
-        const batch = writeBatch(db);
+        let batch = writeBatch(db);
+        let writeCount = 0;
+        const commits: Array<Promise<void>> = [];
+
+        const commitCurrentBatch = () => {
+            if (writeCount === 0) return;
+            commits.push(batch.commit());
+            batch = writeBatch(db);
+            writeCount = 0;
+        };
+
         if (photoBatch) {
             const photoRef = doc(db, PHOTO_BATCH_COLLECTION, photoBatch.id).withConverter(createConverter(MaterialPhotoBatchSchema));
             batch.set(photoRef, photoBatch, { merge: true });
+            writeCount += 1;
         }
         transactions.forEach(t => {
+            if (writeCount >= MAX_BATCH_WRITES) {
+                commitCurrentBatch();
+            }
             const ref = doc(db, INBOUND_COLLECTION, t.id).withConverter(createConverter(MaterialInboundSchema));
             batch.set(ref, t, { merge: true });
+            writeCount += 1;
         });
-        await batch.commit();
+        commitCurrentBatch();
+        await Promise.all(commits);
     },
 
-    getInboundsByRange: async (startDate: string, endDate: string, siteId?: string) => {
+    getInboundsByRange: async (startDate: string, endDate: string, siteId?: string, rentalCompanyId?: string) => {
         const ref = collection(db, INBOUND_COLLECTION).withConverter(createConverter(MaterialInboundSchema));
+        if (rentalCompanyId) {
+            const rentalQuery = query(ref, where('rentalCompanyId', '==', rentalCompanyId));
+            const snap = await getDocs(rentalQuery);
+            return snap.docs
+                .map(d => d.data())
+                .filter(row => (
+                    row.transactionDate >= startDate &&
+                    row.transactionDate <= endDate &&
+                    (!siteId || row.siteId === siteId)
+                ))
+                .sort((left, right) => String(right.transactionDate || '').localeCompare(String(left.transactionDate || '')));
+        }
         if (siteId) {
             const siteQuery = query(ref, where('siteId', '==', siteId));
             const snap = await getDocs(siteQuery);
@@ -116,20 +145,48 @@ export const materialFirestoreService = {
     },
 
     saveOutboundsBatch: async (transactions: MaterialOutboundZod[], photoBatch?: MaterialPhotoBatchZod) => {
-        const batch = writeBatch(db);
+        let batch = writeBatch(db);
+        let writeCount = 0;
+        const commits: Array<Promise<void>> = [];
+
+        const commitCurrentBatch = () => {
+            if (writeCount === 0) return;
+            commits.push(batch.commit());
+            batch = writeBatch(db);
+            writeCount = 0;
+        };
+
         if (photoBatch) {
             const photoRef = doc(db, PHOTO_BATCH_COLLECTION, photoBatch.id).withConverter(createConverter(MaterialPhotoBatchSchema));
             batch.set(photoRef, photoBatch, { merge: true });
+            writeCount += 1;
         }
         transactions.forEach(t => {
+            if (writeCount >= MAX_BATCH_WRITES) {
+                commitCurrentBatch();
+            }
             const ref = doc(db, OUTBOUND_COLLECTION, t.id).withConverter(createConverter(MaterialOutboundSchema));
             batch.set(ref, t, { merge: true });
+            writeCount += 1;
         });
-        await batch.commit();
+        commitCurrentBatch();
+        await Promise.all(commits);
     },
 
-    getOutboundsByRange: async (startDate: string, endDate: string, siteId?: string) => {
+    getOutboundsByRange: async (startDate: string, endDate: string, siteId?: string, rentalCompanyId?: string) => {
         const ref = collection(db, OUTBOUND_COLLECTION).withConverter(createConverter(MaterialOutboundSchema));
+        if (rentalCompanyId) {
+            const rentalQuery = query(ref, where('rentalCompanyId', '==', rentalCompanyId));
+            const snap = await getDocs(rentalQuery);
+            return snap.docs
+                .map(d => d.data())
+                .filter(row => (
+                    row.transactionDate >= startDate &&
+                    row.transactionDate <= endDate &&
+                    (!siteId || row.siteId === siteId)
+                ))
+                .sort((left, right) => String(right.transactionDate || '').localeCompare(String(left.transactionDate || '')));
+        }
         if (siteId) {
             const siteQuery = query(ref, where('siteId', '==', siteId));
             const snap = await getDocs(siteQuery);

@@ -4,10 +4,9 @@ import { siteService, Site } from '../../services/siteService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faBuilding, faPlus, faEdit, faTrash, faSearch, faFilter,
-    faIndustry, faHardHat, faMapMarkerAlt, faPhone, faEnvelope,
-    faIdCard, faCalendar, faDollarSign, faCheckCircle, faTimesCircle,
-    faChevronDown, faChevronUp, faSave, faUndo, faExclamationTriangle
-} from '@fortawesome/free-solid-svg-icons';
+    faIndustry, faHardHat, faMapMarkerAlt,
+    faCheckCircle, faTimesCircle,
+    faSave, faUndo} from '@fortawesome/free-solid-svg-icons';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import MultiSelectPopover from '../../components/common/MultiSelectPopover';
 import { InputPopover } from '../../components/common/SingleSelectPopover';

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Camera, Images, Paperclip, X } from 'lucide-react';
 import { storageService } from '../../services/storageService';
 
@@ -24,9 +24,25 @@ export interface MaterialPhotoUpload {
 
 export type MaterialPhotoTone = 'blue' | 'red';
 
-const MAX_MATERIAL_PHOTOS = 20;
+const DEFAULT_MAX_MATERIAL_PHOTOS = 20;
 const MAX_MATERIAL_PHOTO_DIMENSION = 1600;
 const MATERIAL_PHOTO_QUALITY = 0.78;
+const MATERIAL_PHOTO_UPLOAD_CONCURRENCY = 4;
+const MATERIAL_PHOTO_CONTENT_TYPES: Record<string, string> = {
+    avif: 'image/avif',
+    bmp: 'image/bmp',
+    gif: 'image/gif',
+    heic: 'image/heic',
+    heif: 'image/heif',
+    jfif: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    jpg: 'image/jpeg',
+    png: 'image/png',
+    svg: 'image/svg+xml',
+    tif: 'image/tiff',
+    tiff: 'image/tiff',
+    webp: 'image/webp',
+};
 
 const toneClasses = {
     blue: {
@@ -52,11 +68,26 @@ const sanitizePathPart = (value: unknown): string =>
         .replace(/\s+/g, '_')
         .slice(0, 80) || 'none';
 
-const getFileExtension = (file: File): string => {
+const getFileNameExtension = (file: File): string => {
     const fromName = file.name.split('.').pop();
     if (fromName && fromName !== file.name) return fromName.toLowerCase();
+    return '';
+};
+
+const getFileExtension = (file: File): string => {
+    const fromName = getFileNameExtension(file);
+    if (fromName) return fromName;
     const fromType = file.type.split('/').pop();
     return fromType ? fromType.toLowerCase() : 'jpg';
+};
+
+const isMaterialPhotoFile = (file: File): boolean =>
+    file.type.startsWith('image/')
+    || (!file.type && Boolean(MATERIAL_PHOTO_CONTENT_TYPES[getFileNameExtension(file)]));
+
+const getMaterialPhotoContentType = (file: File): string => {
+    if (file.type) return file.type;
+    return MATERIAL_PHOTO_CONTENT_TYPES[getFileExtension(file)] || 'image/jpeg';
 };
 
 const loadImageFromFile = (file: File): Promise<HTMLImageElement> =>
@@ -136,7 +167,7 @@ const makeStorageFile = async (
     const extension = getFileExtension(file);
     const fileName = `${Date.now()}-${index + 1}-${sanitizePathPart(attachment.file.name.replace(/\.[^.]+$/, ''))}.${extension}`;
     return {
-        file: new File([file], fileName, { type: file.type || attachment.file.type || 'image/jpeg' }),
+        file: new File([file], fileName, { type: getMaterialPhotoContentType(file) }),
         originalSize: attachment.file.size,
         compressed: file.size < attachment.file.size,
     };
@@ -182,41 +213,74 @@ export const uploadMaterialPhotoAttachments = async (options: {
         sanitizePathPart(siteId),
     ].join('/');
 
-    return Promise.all(
-        photos.map(async (photo, index) => {
-            const storageFile = await makeStorageFile(photo, index);
-            const uploadResult = await storageService.uploadFileInfo(
-                basePath,
-                storageFile.file,
-                (progress) => updateProgress(photo.id, progress),
-                {
-                    includeDownloadUrl: false,
-                    metadata: {
-                        contentType: storageFile.file.type || 'image/jpeg',
-                        customMetadata: {
-                            source: photo.source,
-                            originalSize: String(storageFile.originalSize),
-                            compressedSize: String(storageFile.file.size),
-                            compressed: String(storageFile.compressed),
-                            maxDimension: String(MAX_MATERIAL_PHOTO_DIMENSION),
-                            quality: String(MATERIAL_PHOTO_QUALITY),
-                        },
-                    },
-                }
-            );
+    const uploadedPhotos: Array<MaterialPhotoUpload | undefined> = new Array(photos.length);
+    let nextPhotoIndex = 0;
+    let hasFailure = false;
+    let firstError: unknown;
 
-            return {
-                path: uploadResult.fullPath,
-                name: uploadResult.name,
-                contentType: uploadResult.contentType || storageFile.file.type,
-                size: uploadResult.size || storageFile.file.size,
-                originalSize: storageFile.originalSize,
-                compressedSize: storageFile.file.size,
-                compressed: storageFile.compressed,
-                source: photo.source,
-            };
-        })
+    const uploadNext = async (): Promise<void> => {
+        while (!hasFailure) {
+            const index = nextPhotoIndex;
+            nextPhotoIndex += 1;
+            if (index >= photos.length) return;
+
+            const photo = photos[index];
+            try {
+                const storageFile = await makeStorageFile(photo, index);
+                const uploadResult = await storageService.uploadFileInfo(
+                    basePath,
+                    storageFile.file,
+                    (progress) => updateProgress(photo.id, progress),
+                    {
+                        includeDownloadUrl: false,
+                        metadata: {
+                            contentType: storageFile.file.type || 'image/jpeg',
+                            customMetadata: {
+                                source: photo.source,
+                                originalSize: String(storageFile.originalSize),
+                                compressedSize: String(storageFile.file.size),
+                                compressed: String(storageFile.compressed),
+                                maxDimension: String(MAX_MATERIAL_PHOTO_DIMENSION),
+                                quality: String(MATERIAL_PHOTO_QUALITY),
+                            },
+                        },
+                    }
+                );
+
+                uploadedPhotos[index] = {
+                    path: uploadResult.fullPath,
+                    name: uploadResult.name,
+                    contentType: uploadResult.contentType || storageFile.file.type,
+                    size: uploadResult.size || storageFile.file.size,
+                    originalSize: storageFile.originalSize,
+                    compressedSize: storageFile.file.size,
+                    compressed: storageFile.compressed,
+                    source: photo.source,
+                };
+            } catch (error) {
+                if (!hasFailure) {
+                    hasFailure = true;
+                    firstError = error;
+                }
+                return;
+            }
+        }
+    };
+
+    const workerCount = Math.min(MATERIAL_PHOTO_UPLOAD_CONCURRENCY, photos.length);
+    await Promise.all(
+        Array.from({ length: workerCount }, () => uploadNext())
     );
+
+    const successfulUploads = uploadedPhotos.filter(
+        (photo): photo is MaterialPhotoUpload => Boolean(photo)
+    );
+    if (hasFailure) {
+        await deleteUploadedMaterialPhotos(successfulUploads);
+        throw firstError;
+    }
+
+    return successfulUploads;
 };
 
 interface MaterialPhotoPickerProps {
@@ -225,6 +289,7 @@ interface MaterialPhotoPickerProps {
     tone: MaterialPhotoTone;
     disabled?: boolean;
     uploadProgress?: number | null;
+    maxPhotos?: number;
 }
 
 const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
@@ -233,11 +298,16 @@ const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
     tone,
     disabled = false,
     uploadProgress = null,
+    maxPhotos = DEFAULT_MAX_MATERIAL_PHOTOS,
 }) => {
     const cameraInputRef = useRef<HTMLInputElement | null>(null);
     const galleryInputRef = useRef<HTMLInputElement | null>(null);
     const latestPhotosRef = useRef(photos);
+    const [limitMessage, setLimitMessage] = useState<string | null>(null);
     const classes = toneClasses[tone];
+    const photoLimit = Number.isFinite(maxPhotos)
+        ? Math.max(0, Math.floor(maxPhotos))
+        : DEFAULT_MAX_MATERIAL_PHOTOS;
 
     useEffect(() => {
         latestPhotosRef.current = photos;
@@ -250,14 +320,20 @@ const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
     const appendFiles = (fileList: FileList | null, source: MaterialPhotoSource) => {
         if (!fileList || disabled) return;
 
-        const imageFiles = Array.from(fileList).filter((file) => file.type.startsWith('image/'));
-        const capacity = Math.max(0, MAX_MATERIAL_PHOTOS - photos.length);
-        const nextPhotos = imageFiles.slice(0, capacity).map((file) => ({
+        const imageFiles = Array.from(fileList).filter(isMaterialPhotoFile);
+        const capacity = Math.max(0, photoLimit - photos.length);
+        const acceptedFiles = imageFiles.slice(0, capacity);
+        const excludedCount = imageFiles.length - acceptedFiles.length;
+        const nextPhotos = acceptedFiles.map((file) => ({
             id: `${source}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
             file,
             previewUrl: URL.createObjectURL(file),
             source,
         }));
+
+        setLimitMessage(excludedCount > 0
+            ? `최대 ${photoLimit}장까지 첨부할 수 있어 ${excludedCount}장은 제외했습니다.`
+            : null);
 
         if (nextPhotos.length > 0) {
             onPhotosChange([...photos, ...nextPhotos]);
@@ -275,11 +351,13 @@ const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
     const removePhoto = (id: string) => {
         const target = photos.find((photo) => photo.id === id);
         if (target) URL.revokeObjectURL(target.previewUrl);
+        setLimitMessage(null);
         onPhotosChange(photos.filter((photo) => photo.id !== id));
     };
 
     const clearPhotos = () => {
         revokeMaterialPhotoAttachments(photos);
+        setLimitMessage(null);
         onPhotosChange([]);
     };
 
@@ -288,7 +366,7 @@ const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
             <input
                 ref={cameraInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,.heic,.heif"
                 capture="environment"
                 className="hidden"
                 onChange={(event) => handleInputChange(event, 'camera')}
@@ -296,7 +374,7 @@ const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
             <input
                 ref={galleryInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,.heic,.heif"
                 multiple
                 className="hidden"
                 onChange={(event) => handleInputChange(event, 'gallery')}
@@ -309,7 +387,7 @@ const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
                         사진 첨부
                     </div>
                     <div className="mt-0.5 text-xs font-semibold text-slate-500">
-                        촬영 또는 갤러리 선택, 최대 {MAX_MATERIAL_PHOTOS}장
+                        촬영 또는 갤러리 선택, 최대 {photoLimit}장
                     </div>
                 </div>
                 {photos.length > 0 ? (
@@ -328,7 +406,7 @@ const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
                 <button
                     type="button"
                     onClick={() => cameraInputRef.current?.click()}
-                    disabled={disabled || photos.length >= MAX_MATERIAL_PHOTOS}
+                    disabled={disabled || photos.length >= photoLimit}
                     className={`flex h-11 items-center justify-center gap-2 rounded-lg text-sm font-black transition disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 ${classes.primary}`}
                 >
                     <Camera size={17} />
@@ -337,13 +415,23 @@ const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
                 <button
                     type="button"
                     onClick={() => galleryInputRef.current?.click()}
-                    disabled={disabled || photos.length >= MAX_MATERIAL_PHOTOS}
+                    disabled={disabled || photos.length >= photoLimit}
                     className={`flex h-11 items-center justify-center gap-2 rounded-lg border text-sm font-black transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 ${classes.button}`}
                 >
                     <Images size={17} />
                     갤러리 선택
                 </button>
             </div>
+
+            {limitMessage ? (
+                <div
+                    role="status"
+                    aria-live="polite"
+                    className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800"
+                >
+                    {limitMessage}
+                </div>
+            ) : null}
 
             {uploadProgress !== null ? (
                 <div className="mt-3">

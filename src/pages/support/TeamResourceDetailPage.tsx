@@ -9,6 +9,7 @@ import {
     CreditCard,
     Download,
     FileText,
+    ListFilter,
     Printer,
     ReceiptText,
     RefreshCw,
@@ -297,6 +298,8 @@ const TeamResourceDetailPage: React.FC = () => {
     const [selectedTeamId, setSelectedTeamId] = useState('');
     const [mobileView, setMobileView] = useState<MobileView>('list');
     const [isTeamPickerOpen, setIsTeamPickerOpen] = useState(false);
+    const [isMobileTeamPickerOpen, setIsMobileTeamPickerOpen] = useState(false);
+    const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [detailView, setDetailView] = useState<DetailView>('summary');
     const [billingScope, setBillingScope] = useState<BillingScope>('all');
@@ -877,6 +880,7 @@ const TeamResourceDetailPage: React.FC = () => {
     const handleTeamSelect = (teamId: string) => {
         setSelectedTeamId(teamId);
         setIsTeamPickerOpen(false);
+        setIsMobileTeamPickerOpen(false);
         setMobileView('detail');
     };
 
@@ -1073,7 +1077,7 @@ const TeamResourceDetailPage: React.FC = () => {
                 </div>
             </header>
 
-            <section className="tw-toolbar">
+            <section className="tw-toolbar trd-toolbar">
                 <label className="tw-control">
                     <span>조회월</span>
                     <input
@@ -1095,22 +1099,66 @@ const TeamResourceDetailPage: React.FC = () => {
                     </div>
                 </label>
 
-                <label className="tw-control">
-                    <span>표시 조건</span>
-                    <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ResourceStatusFilter)}>
-                        <option value="all">전체</option>
-                        <option value="assigned">배정 있음</option>
-                        <option value="billed">금액 있음</option>
-                    </select>
-                </label>
+                <button
+                    type="button"
+                    className={isMobileFilterOpen ? 'trd-mobile-filter-toggle trd-mobile-filter-toggle--open' : 'trd-mobile-filter-toggle'}
+                    onClick={() => setIsMobileFilterOpen(prev => !prev)}
+                    aria-expanded={isMobileFilterOpen}
+                    aria-controls="team-resource-mobile-filters"
+                >
+                    <span><ListFilter size={17} /> 세부 필터</span>
+                    <small>{statusFilter === 'all' ? '전체' : statusFilter === 'assigned' ? '배정 있음' : '금액 있음'} · {billingScope === 'all' ? '작성중 포함' : '확정/정산만'}</small>
+                    <ChevronDown size={16} />
+                </button>
 
-                <label className="tw-control">
-                    <span>정산 범위</span>
-                    <select value={billingScope} onChange={(event) => setBillingScope(event.target.value as BillingScope)}>
-                        <option value="all">작성중 포함</option>
-                        <option value="posted">확정/정산만</option>
-                    </select>
-                </label>
+                <div
+                    id="team-resource-mobile-filters"
+                    className={isMobileFilterOpen ? 'trd-optional-filters trd-optional-filters--open' : 'trd-optional-filters'}
+                >
+                    <label className="tw-control">
+                        <span>표시 조건</span>
+                        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ResourceStatusFilter)}>
+                            <option value="all">전체</option>
+                            <option value="assigned">배정 있음</option>
+                            <option value="billed">금액 있음</option>
+                        </select>
+                    </label>
+
+                    <label className="tw-control">
+                        <span>정산 범위</span>
+                        <select value={billingScope} onChange={(event) => setBillingScope(event.target.value as BillingScope)}>
+                            <option value="all">작성중 포함</option>
+                            <option value="posted">확정/정산만</option>
+                        </select>
+                    </label>
+                </div>
+            </section>
+
+            <section className={isMobileTeamPickerOpen ? 'trd-mobile-team-navigator trd-mobile-team-navigator--open' : 'trd-mobile-team-navigator'} aria-label="빠른 팀 선택">
+                <button
+                    type="button"
+                    className="trd-mobile-team-navigator__button"
+                    onClick={() => setIsMobileTeamPickerOpen(prev => !prev)}
+                    aria-expanded={isMobileTeamPickerOpen}
+                    disabled={isBusy || filteredTeamRows.length === 0}
+                >
+                    <span className="tw-team-item__color" style={{ background: teamColor }} />
+                    <span className="trd-mobile-team-navigator__body">
+                        <small>선택 팀 · {filteredTeamRows.length.toLocaleString('ko-KR')}팀</small>
+                        <strong>{selectedTeam?.name || '팀을 선택하세요'}</strong>
+                    </span>
+                    <span className="trd-mobile-team-navigator__total">{formatCurrency(selectedStats.total)}</span>
+                    <ChevronDown size={18} />
+                </button>
+                {isBusy ? (
+                    <div className="trd-mobile-team-navigator__notice">팀별 지원 데이터를 불러오는 중입니다.</div>
+                ) : filteredTeamRows.length === 0 ? (
+                    <div className="trd-mobile-team-navigator__notice">조건에 맞는 팀이 없습니다.</div>
+                ) : isMobileTeamPickerOpen && (
+                    <div className="trd-mobile-team-navigator__menu">
+                        {filteredTeamRows.map(renderTeamItem)}
+                    </div>
+                )}
             </section>
 
             <section className="tw-kpi-grid" aria-label="선택 팀 지원 요약">
@@ -1146,7 +1194,7 @@ const TeamResourceDetailPage: React.FC = () => {
                     className={mobileView === 'list' ? 'tw-mobile-switch__button tw-mobile-switch__button--active' : 'tw-mobile-switch__button'}
                     onClick={() => setMobileView('list')}
                 >
-                    목록
+                    팀 선택
                 </button>
                 <button
                     type="button"
@@ -1232,8 +1280,26 @@ const TeamResourceDetailPage: React.FC = () => {
                         className="tw-mobile-back"
                         onClick={() => setMobileView('list')}
                     >
-                        목록으로
+                        팀 선택
                     </button>
+                    {selectedTeam && (
+                        <div className="trd-mobile-detail-tabs" role="tablist" aria-label="팀 지원 상세 선택">
+                            {detailMenuItems.map(item => (
+                                <button
+                                    key={item.id}
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={detailView === item.id}
+                                    className={detailView === item.id ? 'trd-mobile-detail-tabs__item trd-mobile-detail-tabs__item--active' : 'trd-mobile-detail-tabs__item'}
+                                    style={{ '--team-color': teamColor } as React.CSSProperties}
+                                    onClick={() => setDetailView(item.id)}
+                                >
+                                    {item.icon}
+                                    <span>{item.label}</span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     {!selectedTeam ? (
                         <div className="tw-empty-detail">
                             <Building2 size={44} />

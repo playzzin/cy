@@ -16,6 +16,7 @@ import { Timestamp } from '../../types/timestamp';
 import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
 
 type DraftStatus = 'DRAFT' | 'CONFIRMED' | 'PAID' | 'OVERDUE';
+const POSTED_STATUSES = new Set<VehicleBillingDocument['status']>(['CONFIRMED', 'PAID', 'OVERDUE']);
 
 const createEmptyLineItem = () => {
     return {
@@ -298,7 +299,7 @@ export const VehicleBillingManager: React.FC = () => {
         return computeTotals(draft);
     }, [draft]);
 
-    const canEdit = draft?.status !== 'CONFIRMED';
+    const canEdit = draft ? !POSTED_STATUSES.has(draft.status) : false;
 
     const totals = useMemo(() => {
         return documents.reduce(
@@ -576,18 +577,15 @@ export const VehicleBillingManager: React.FC = () => {
             '확정 취소'
         );
         if (!result.isConfirmed) return;
+        const reason = window.prompt('확정 취소 사유를 입력해주세요.');
+        if (!reason?.trim()) return;
 
         setSaving(true);
         try {
-            const next = {
-                ...draft,
-                status: 'DRAFT',
-                confirmedAt: null
-            } as unknown as VehicleBillingDocument;
-            await vehicleBillingService.saveBilling(next);
+            await vehicleBillingService.cancelConfirmation(draft.id, { reason: reason.trim() });
             toast.success('확정이 취소되었습니다.');
             await loadBillings();
-            setSelectedDocumentId(next.id);
+            setSelectedDocumentId(draft.id);
         } catch (e) {
             console.error(e);
             if (isDeadlineExceededError(e)) {

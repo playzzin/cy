@@ -11,13 +11,19 @@ export interface TaskComment {
 }
 
 export interface TaskAutomationInfo {
-    status: 'in_progress' | 'completed' | 'failed';
+    status?: 'in_progress' | 'completed' | 'failed';
     source?: 'browser' | 'codex_cli';
+    mode?: 'manual' | 'auto';
+    autoRun?: boolean;
     startedAt?: string;
     completedAt?: string;
     originalTitle?: string;
     updatedTitle?: string;
     feedback?: string;
+    changedFiles?: string[];
+    verification?: string[];
+    reviewRequired?: boolean;
+    reviewReason?: string;
     error?: string;
     runId?: string;
     workerHost?: string;

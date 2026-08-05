@@ -1,7 +1,7 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faLayerGroup, faCode, faDatabase, faRobot, faWind, faCheckCircle, faBolt, faRocket
+    faLayerGroup, faDatabase, faRobot, faWind, faCheckCircle, faBolt, faRocket
 } from '@fortawesome/free-solid-svg-icons';
 import { faReact, faGoogle } from '@fortawesome/free-brands-svg-icons';
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCoins, faFileInvoiceDollar, faHandHoldingDollar, faMoneyBillWave, faReceipt, faWallet } from '@fortawesome/free-solid-svg-icons';
+import { faHandHoldingDollar, faReceipt } from '@fortawesome/free-solid-svg-icons';
 
 type SummaryProps = {
     sales: {

@@ -17,7 +17,7 @@ export const TitleComponent = React.memo(({ text, logoUrl }: { text: string; log
             )}
         </div>
         <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'flex-end', paddingBottom: '10px' }}>
-            <span style={{ fontSize: '28pt', fontWeight: 900, fontFamily: EXCEL_FONT, letterSpacing: '0.5em', color: '#000', textAlign: 'center' }}>
+            <span style={{ fontSize: 'calc(28pt + var(--estimate-font-size-offset, 0pt))', fontWeight: 900, fontFamily: EXCEL_FONT, letterSpacing: '0.5em', color: '#000', textAlign: 'center' }}>
                 {text}
             </span>
         </div>
@@ -26,7 +26,7 @@ export const TitleComponent = React.memo(({ text, logoUrl }: { text: string; log
 ));
 
 export const InfoTableComponent = React.memo(({ draft, isEdit, updateDraft }: any) => {
-    const inputStyle: React.CSSProperties = { width: '100%', border: 'none', outline: 'none', background: 'transparent', fontFamily: EXCEL_FONT, fontSize: '10pt', padding: '0 2px' };
+    const inputStyle: React.CSSProperties = { width: '100%', border: 'none', outline: 'none', background: 'transparent', fontFamily: EXCEL_FONT, fontSize: 'calc(10pt + var(--estimate-font-size-offset, 0pt))', padding: '0 2px' };
     const wrapInput = (field: keyof EstimateDraft, placeholder = '') =>
         isEdit ? <input value={(draft[field] as string) || ''} onChange={e => updateDraft(field, e.target.value)} style={inputStyle} placeholder={placeholder} />
             : <span>{(draft[field] as string) || placeholder || ''}</span>;
@@ -41,10 +41,10 @@ export const InfoTableComponent = React.memo(({ draft, isEdit, updateDraft }: an
         <div style={{ display: 'flex', gap: '20px', marginBottom: '5px', alignItems: 'stretch' }}>
             <div style={{ ...tableWrapperStyle, flex: 1, marginBottom: 0 }}>
                 <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-                    <colgroup><col style={{ width: '80px' }} /><col style={{ width: 'auto' }} /></colgroup>
+                    <colgroup><col style={{ width: '105px' }} /><col style={{ width: 'auto' }} /></colgroup>
                     <tbody>
                         <tr>
-                            <td colSpan={2} style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, height: '28px', fontSize: '10pt', fontWeight: 900 }}>공 급 받 는 자</td>
+                            <td colSpan={2} style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, height: 'calc(28px + var(--estimate-table-row-offset, 0px))', fontSize: 'calc(10pt + var(--estimate-font-size-offset, 0pt))', fontWeight: 900 }}>공 급 받 는 자</td>
                         </tr>
                         <tr>
                             <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>업 체 명</td>
@@ -82,10 +82,10 @@ export const InfoTableComponent = React.memo(({ draft, isEdit, updateDraft }: an
 
             <div style={{ ...tableWrapperStyle, flex: 1.3, marginBottom: 0 }}>
                 <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-                    <colgroup><col style={{ width: '85px' }} /><col style={{ width: 'auto' }} /><col style={{ width: '75px' }} /><col style={{ width: 'auto' }} /></colgroup>
+                    <colgroup><col style={{ width: '105px' }} /><col style={{ width: 'auto' }} /><col style={{ width: '100px' }} /><col style={{ width: 'auto' }} /></colgroup>
                     <tbody>
                         <tr>
-                            <td colSpan={4} style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, height: '28px', fontSize: '10pt', fontWeight: 900 }}>공 급 자</td>
+                            <td colSpan={4} style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, height: 'calc(28px + var(--estimate-table-row-offset, 0px))', fontSize: 'calc(10pt + var(--estimate-font-size-offset, 0pt))', fontWeight: 900 }}>공 급 자</td>
                         </tr>
                         <tr>
                             <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>상&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;호</td>
@@ -122,7 +122,7 @@ export const InfoTableComponent = React.memo(({ draft, isEdit, updateDraft }: an
                                 <tr>
                                     <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>은&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;행</td>
                                     <td style={{ ...cellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN }}>{bank}</td>
-                                    <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, fontSize: '9pt', padding: '0 2px' }}>계좌번호</td>
+                                    <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, fontSize: 'calc(9pt + var(--estimate-font-size-offset, 0pt))', padding: '0 2px' }}>계좌번호</td>
                                     <td style={{ ...cellStyle(), borderBottom: BORDER_THIN }}>{accNo}</td>
                                 </tr>
                                 <tr>
@@ -163,14 +163,14 @@ export const AmountBarComponent = React.memo(({ subtotal, totalAmt, taxAmt, labe
                     <col style={{ width: '180px' }} />
                 </colgroup>
                 <tbody>
-                    <tr style={{ height: '36px' }}>
+                    <tr style={{ height: 'calc(36px + var(--estimate-table-row-offset, 0px))' }}>
                         <td style={{ ...labelCellStyle(), borderRight: BORDER_THIN }}>{label || (isTransaction ? '합계금액' : '금      액')}</td>
                         <td style={{ ...labelCellStyle(), borderRight: BORDER_THIN }}>일 금</td>
-                        <td style={{ ...cellStyle(), fontWeight: 700, fontSize: '9.5pt', textAlign: 'center', borderRight: BORDER_THIN }}>일금 {numberToKorean(totalAmt)}원 정</td>
-                        <td style={{ ...cellStyle(), fontSize: '9pt', textAlign: 'right', paddingRight: '8px', borderRight: BORDER_THIN }}>공급가액: {formatCurrency(subtotal)}</td>
-                        <td style={{ ...cellStyle(), fontSize: '9pt', textAlign: 'right', paddingRight: '8px', borderRight: BORDER_THIN }}>부가세: {formatCurrency(currentTaxAmt)}</td>
+                        <td style={{ ...cellStyle(), fontWeight: 700, fontSize: 'calc(9.5pt + var(--estimate-font-size-offset, 0pt))', textAlign: 'center', borderRight: BORDER_THIN }}>일금 {numberToKorean(totalAmt)}원 정</td>
+                        <td style={{ ...cellStyle(), fontSize: 'calc(9pt + var(--estimate-font-size-offset, 0pt))', textAlign: 'right', paddingRight: '8px', borderRight: BORDER_THIN }}>공급가액: {formatCurrency(subtotal)}</td>
+                        <td style={{ ...cellStyle(), fontSize: 'calc(9pt + var(--estimate-font-size-offset, 0pt))', textAlign: 'right', paddingRight: '8px', borderRight: BORDER_THIN }}>부가세: {formatCurrency(currentTaxAmt)}</td>
                         <td style={{ ...labelCellStyle(), borderRight: BORDER_THIN }}>총액</td>
-                        <td style={{ ...cellStyle(), fontWeight: 900, fontSize: '9.5pt', textAlign: 'right', paddingRight: '12px', color: '#0056b3' }}>{formatCurrency(totalAmt)} 원</td>
+                        <td style={{ ...cellStyle(), fontWeight: 900, fontSize: 'calc(9.5pt + var(--estimate-font-size-offset, 0pt))', textAlign: 'right', paddingRight: '12px', color: '#0056b3' }}>{formatCurrency(totalAmt)} 원</td>
                     </tr>
                 </tbody>
             </table>

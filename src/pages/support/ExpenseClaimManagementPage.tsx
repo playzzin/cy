@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Image as ImageIcon,
+  Loader2,
   Paperclip,
   Pencil,
   Plus,
@@ -11,6 +12,7 @@ import {
   RotateCcw,
   Save,
   Search,
+  Sparkles,
   Trash2,
   UploadCloud,
   WalletCards,
@@ -18,6 +20,7 @@ import {
 } from 'lucide-react';
 import { CurrencyInput } from '../../components/common/CurrencyInput';
 import { YearMonthPicker } from '../../components/common/YearMonthPicker';
+import { geminiService } from '../../services/geminiService';
 import { officeFixedExpenseService } from '../../services/officeFixedExpenseService';
 import { storageService } from '../../services/storageService';
 import { teamExpenseCategoryService } from '../../services/teamExpenseCategoryService';
@@ -73,6 +76,13 @@ type PendingExpenseAttachment = {
   id: string;
   file: File;
   previewUrl: string;
+};
+
+type ReceiptAnalysisSummary = {
+  totalAmount: number;
+  receiptCount: number;
+  analyzedImageCount: number;
+  needsReview: boolean;
 };
 
 type CategoryFormState = {
@@ -267,6 +277,9 @@ const ExpenseClaimManagementPage: React.FC = () => {
   const [pendingAttachments, setPendingAttachments] = useState<PendingExpenseAttachment[]>([]);
   const [removedAttachmentPaths, setRemovedAttachmentPaths] = useState<string[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [analyzingReceipts, setAnalyzingReceipts] = useState(false);
+  const [receiptAnalysisProgress, setReceiptAnalysisProgress] = useState({ current: 0, total: 0 });
+  const [receiptAnalysisSummary, setReceiptAnalysisSummary] = useState<ReceiptAnalysisSummary | null>(null);
   const [categorySaving, setCategorySaving] = useState(false);
   const [selectedTeamId, setSelectedTeamId] = useState('all');
   const [typeFilter, setTypeFilter] = useState<TeamExpenseClaimType | 'all'>('all');
@@ -574,6 +587,8 @@ const ExpenseClaimManagementPage: React.FC = () => {
       current.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
       return [];
     });
+    setReceiptAnalysisSummary(null);
+    setReceiptAnalysisProgress({ current: 0, total: 0 });
     if (attachmentInputRef.current) attachmentInputRef.current.value = '';
   }, []);
 
@@ -615,6 +630,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
     }));
 
     if (nextAttachments.length === 0) return;
+    setReceiptAnalysisSummary(null);
     setPendingAttachments((current) => [...current, ...nextAttachments]);
   };
 
@@ -624,11 +640,62 @@ const ExpenseClaimManagementPage: React.FC = () => {
   };
 
   const removePendingAttachment = (attachmentId: string) => {
+    setReceiptAnalysisSummary(null);
     setPendingAttachments((current) => {
       const target = current.find((attachment) => attachment.id === attachmentId);
       if (target) URL.revokeObjectURL(target.previewUrl);
       return current.filter((attachment) => attachment.id !== attachmentId);
     });
+  };
+
+  const handleAnalyzeReceiptAmounts = async () => {
+    const attachmentsToAnalyze = [...pendingAttachments];
+    if (attachmentsToAnalyze.length === 0) {
+      toast.warning('먼저 인식할 영수증 사진을 선택해주세요.');
+      return;
+    }
+
+    setAnalyzingReceipts(true);
+    setReceiptAnalysisSummary(null);
+    setReceiptAnalysisProgress({ current: 0, total: attachmentsToAnalyze.length });
+
+    try {
+      const analyses: Awaited<ReturnType<typeof geminiService.analyzeReceiptImage>>[] = [];
+      for (let index = 0; index < attachmentsToAnalyze.length; index += 1) {
+        const analysis = await geminiService.analyzeReceiptImage(attachmentsToAnalyze[index].file);
+        analyses.push(analysis);
+        setReceiptAnalysisProgress({ current: index + 1, total: attachmentsToAnalyze.length });
+      }
+
+      const recognizedReceipts = analyses.filter((analysis) => analysis.isReceipt && analysis.totalAmount > 0);
+      const totalAmount = recognizedReceipts.reduce((sum, analysis) => sum + analysis.totalAmount, 0);
+
+      if (totalAmount <= 0) {
+        toast.warning('영수증의 최종 결제금액을 확인하지 못했습니다. 사진 상태를 확인하거나 금액을 직접 입력해주세요.');
+        return;
+      }
+
+      const needsReview = recognizedReceipts.length !== attachmentsToAnalyze.length
+        || recognizedReceipts.some((analysis) => analysis.confidence < 0.75 || Boolean(analysis.warning));
+
+      setForm((current) => ({ ...current, amount: totalAmount }));
+      setReceiptAnalysisSummary({
+        totalAmount,
+        receiptCount: recognizedReceipts.length,
+        analyzedImageCount: attachmentsToAnalyze.length,
+        needsReview
+      });
+
+      const successMessage = `영수증 ${recognizedReceipts.length}건의 총 ${formatCurrency(totalAmount)}원을 금액에 입력했습니다.`;
+      if (needsReview) toast.warning(`${successMessage} 저장 전에 원본과 대조해주세요.`);
+      else toast.success(successMessage);
+    } catch (error) {
+      console.error('[ExpenseClaimManagementPage] receipt analysis failed', error);
+      toast.error(error instanceof Error ? error.message : '영수증 총금액 인식에 실패했습니다.');
+    } finally {
+      setAnalyzingReceipts(false);
+      setReceiptAnalysisProgress({ current: 0, total: 0 });
+    }
   };
 
   const removeSavedAttachment = (attachment: TeamExpenseClaimAttachment) => {
@@ -1638,7 +1705,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5 text-xs font-black text-slate-700">
                       <Paperclip size={14} />
@@ -1648,18 +1715,31 @@ const ExpenseClaimManagementPage: React.FC = () => {
                       </span>
                     </div>
                     <div className="mt-0.5 text-[11px] font-bold text-slate-500">
-                      영수증, 현장 사진 등 10MB 이하 이미지를 첨부할 수 있습니다.
+                      영수증 사진을 선택한 뒤 Gemini 총금액 인식을 실행할 수 있습니다.
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => attachmentInputRef.current?.click()}
-                    disabled={saving || form.attachments.length + pendingAttachments.length >= MAX_EXPENSE_ATTACHMENTS}
-                    className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-black text-blue-700 hover:bg-blue-100 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
-                  >
-                    <UploadCloud size={14} />
-                    사진 선택
-                  </button>
+                  <div className="flex w-full shrink-0 flex-wrap gap-2 sm:w-auto sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleAnalyzeReceiptAmounts()}
+                      disabled={saving || analyzingReceipts || pendingAttachments.length === 0}
+                      className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-black text-violet-700 hover:bg-violet-100 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none"
+                    >
+                      {analyzingReceipts ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                      {analyzingReceipts
+                        ? `인식 중 ${receiptAnalysisProgress.current}/${receiptAnalysisProgress.total}`
+                        : '총금액 인식'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => attachmentInputRef.current?.click()}
+                      disabled={saving || analyzingReceipts || form.attachments.length + pendingAttachments.length >= MAX_EXPENSE_ATTACHMENTS}
+                      className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-black text-blue-700 hover:bg-blue-100 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none"
+                    >
+                      <UploadCloud size={14} />
+                      사진 선택
+                    </button>
+                  </div>
                 </div>
 
                 {uploadProgress !== null && (
@@ -1671,6 +1751,26 @@ const ExpenseClaimManagementPage: React.FC = () => {
                     <div className="h-2 overflow-hidden rounded-full bg-white">
                       <div className="h-full rounded-full bg-blue-600" style={{ width: `${uploadProgress}%` }} />
                     </div>
+                  </div>
+                )}
+
+                {receiptAnalysisSummary && (
+                  <div
+                    className={`mt-3 flex items-start gap-2 rounded-lg border px-3 py-2 text-[11px] font-bold ${
+                      receiptAnalysisSummary.needsReview || form.amount !== receiptAnalysisSummary.totalAmount
+                        ? 'border-amber-200 bg-amber-50 text-amber-800'
+                        : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                    }`}
+                  >
+                    {receiptAnalysisSummary.needsReview || form.amount !== receiptAnalysisSummary.totalAmount
+                      ? <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                      : <CheckCircle2 size={14} className="mt-0.5 shrink-0" />}
+                    <span>
+                      Gemini가 사진 {receiptAnalysisSummary.analyzedImageCount}장 중 영수증 {receiptAnalysisSummary.receiptCount}건을 인식해 총 {formatCurrency(receiptAnalysisSummary.totalAmount)}원을 입력했습니다.
+                      {form.amount !== receiptAnalysisSummary.totalAmount
+                        ? ' 현재 금액은 인식 결과에서 직접 수정되었습니다.'
+                        : ' 저장 전에 원본 영수증과 금액을 확인해주세요.'}
+                    </span>
                   </div>
                 )}
 
@@ -1694,7 +1794,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => removeSavedAttachment(attachment)}
-                          disabled={saving}
+                          disabled={saving || analyzingReceipts}
                           className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-slate-950/75 text-white disabled:bg-slate-400"
                           aria-label="첨부 사진 삭제"
                         >
@@ -1714,7 +1814,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => removePendingAttachment(attachment.id)}
-                          disabled={saving}
+                          disabled={saving || analyzingReceipts}
                           className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-slate-950/75 text-white disabled:bg-slate-400"
                           aria-label="첨부 예정 사진 삭제"
                         >
@@ -1751,6 +1851,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => resetForm(false)}
+                  disabled={analyzingReceipts}
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-600 hover:bg-slate-50"
                 >
                   <RotateCcw size={16} />
@@ -1758,7 +1859,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={saving}
+                  disabled={saving || analyzingReceipts}
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-6 text-sm font-black text-white shadow-sm hover:bg-slate-800 disabled:opacity-50"
                 >
                   <Save size={16} />

@@ -5,6 +5,7 @@ import { requireCallableAdmin } from './auth';
 export interface ServerGeminiSettings {
     apiKey?: string;
     model: string;
+    documentModel: string;
     batchModel: string;
     updatedAt?: FirebaseFirestore.Timestamp;
     updatedByUid?: string;
@@ -13,6 +14,7 @@ export interface ServerGeminiSettings {
 const SETTINGS_COLLECTION = 'server_settings';
 const AI_SETTINGS_DOC = 'ai';
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const DEFAULT_DOCUMENT_MODEL = 'gemini-2.5-flash';
 
 const db = admin.firestore();
 
@@ -30,6 +32,15 @@ const normalizeModel = (value: unknown, fallback = DEFAULT_GEMINI_MODEL): string
     return model || fallback;
 };
 
+// Gemini 2.5 Pro is no longer available for new Gemini API users. Keep saved
+// server settings from breaking document imports after the provider retirement.
+const normalizeDocumentModel = (value: unknown): string => {
+    const model = normalizeModel(value, DEFAULT_DOCUMENT_MODEL);
+    return /^gemini-2\.5-pro(?:$|[-._:])/i.test(model)
+        ? DEFAULT_DOCUMENT_MODEL
+        : model;
+};
+
 const settingsRef = () => db.collection(SETTINGS_COLLECTION).doc(AI_SETTINGS_DOC);
 
 export const getServerGeminiSettings = async (): Promise<ServerGeminiSettings> => {
@@ -42,11 +53,15 @@ export const getServerGeminiSettings = async (): Promise<ServerGeminiSettings> =
     );
     const apiKey = asString(data.apiKey) || envApiKey;
     const model = normalizeModel(data.model || process.env.GEMINI_MODEL);
+    const documentModel = normalizeDocumentModel(
+        data.documentModel || process.env.GEMINI_DOCUMENT_MODEL,
+    );
     const batchModel = normalizeModel(data.batchModel || process.env.GEMINI_BATCH_MODEL || model, model);
 
     return {
         apiKey,
         model,
+        documentModel,
         batchModel,
         updatedAt: data.updatedAt,
         updatedByUid: asString(data.updatedByUid),
@@ -64,6 +79,7 @@ export const getServerAiSettingsStatus = functions
             configured: Boolean(settings.apiKey),
             maskedApiKey: maskApiKey(settings.apiKey || ''),
             model: settings.model,
+            documentModel: settings.documentModel,
             batchModel: settings.batchModel,
             updatedAt: settings.updatedAt?.toDate?.().toISOString?.() || '',
             updatedByUid: settings.updatedByUid || '',
@@ -77,6 +93,7 @@ export const saveServerAiSettings = functions
         const auth = await requireCallableAdmin(context);
         const patch: Record<string, unknown> = {
             model: normalizeModel(data?.model),
+            documentModel: normalizeDocumentModel(data?.documentModel),
             batchModel: normalizeModel(data?.batchModel || data?.model),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             updatedByUid: auth.uid,
@@ -97,6 +114,7 @@ export const saveServerAiSettings = functions
             configured: Boolean(settings.apiKey),
             maskedApiKey: maskApiKey(settings.apiKey || ''),
             model: settings.model,
+            documentModel: settings.documentModel,
             batchModel: settings.batchModel,
             updatedAt: new Date().toISOString(),
             updatedByUid: auth.uid,

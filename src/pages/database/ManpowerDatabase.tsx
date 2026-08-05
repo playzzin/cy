@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { manpowerService, Worker } from '../../services/manpowerService';
-import { teamService, Team } from '../../services/teamService';
-import { siteService, Site } from '../../services/siteService';
-import { companyService, Company } from '../../services/companyService';
-import { officeStaffService, OfficeStaff } from '../../services/officeStaffService';
-import { dailyReportService, DailyReport } from '../../services/dailyReportService';
+import type { Worker } from '../../services/manpowerService';
+import type { Team } from '../../services/teamService';
+import type { Site } from '../../services/siteService';
+import type { Company } from '../../services/companyService';
+import type { DailyReport } from '../../services/dailyReportService';
 import { statisticsService } from '../../services/statisticsService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -22,8 +21,20 @@ import CompanyDatabase from './CompanyDatabase';
 import OfficeStaffDatabase from './OfficeStaffDatabase';
 import AccountManagementPage from './AccountManagementPage';
 import SettlementTargetDatabase from './SettlementTargetDatabase';
+import { useIntegratedDatabaseOverview } from './useIntegratedDatabaseOverview';
 
-type IntegratedDatabaseTab = 'overview' | 'workers' | 'offices' | 'settlementTargets' | 'teams' | 'sites' | 'companies' | 'accounts' | 'reports';
+type IntegratedDatabaseTab = 'overview' | 'workers' | 'offices' | 'settlementTargets' | 'teams' | 'sites' | 'companies' | 'accounts';
+
+const TAB_QUERY_VALUES: Record<IntegratedDatabaseTab, string> = {
+    overview: 'overview',
+    workers: 'workers',
+    offices: 'offices',
+    settlementTargets: 'settlement-targets',
+    teams: 'teams',
+    sites: 'sites',
+    companies: 'companies',
+    accounts: 'accounts',
+};
 
 const parseIntegratedDatabaseTab = (value: string | null): IntegratedDatabaseTab | null => {
     const normalized = String(value || '').trim().toLowerCase();
@@ -34,7 +45,6 @@ const parseIntegratedDatabaseTab = (value: string | null): IntegratedDatabaseTab
     if (normalized === 'sites') return 'sites';
     if (normalized === 'companies') return 'companies';
     if (normalized === 'accounts') return 'accounts';
-    if (normalized === 'reports') return 'reports';
     if (normalized === 'overview') return 'overview';
     return null;
 };
@@ -44,47 +54,10 @@ const isDatabaseLogTabValue = (value: string | null): boolean => {
     return normalized === 'logs' || normalized === 'database-logs' || normalized === 'db-logs';
 };
 
-interface DatabaseStats {
-    workers: {
-        total: number;
-        active: number;
-        inactive: number;
-        unassigned: number;
-    };
-    offices: {
-        total: number;
-        active: number;
-        pending: number;
-        linked: number;
-    };
-    teams: {
-        total: number;
-        active: number;
-        inactive: number;
-    };
-    sites: {
-        total: number;
-        active: number;
-        completed: number;
-    };
-    companies: {
-        total: number;
-        contractor: number; // 시공팀
-        partner: number;
-        builder: number; // 건설사
-        rental: number; // 임대사
-    };
-    accounts: {
-        workerMissing: number;
-        teamMissing: number;
-        companyMissing: number;
-    };
-    reports: {
-        total: number;
-        thisMonth: number;
-        today: number;
-    };
-}
+const isDailyReportTabValue = (value: string | null): boolean => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === 'reports' || normalized === 'daily-reports' || normalized === 'dailyreports';
+};
 
 interface IssueStats {
     unassignedWorkers: Worker[];
@@ -209,19 +182,8 @@ const isTeamBackedReportWorker = (worker: DailyReport['workers'][number], teamId
 function IntegratedDatabase() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
-    const [loading, setLoading] = useState(false);
+    const { loading, loadWarning, snapshot, stats, reload: loadStats } = useIntegratedDatabaseOverview();
     const [activeTab, setActiveTab] = useState<IntegratedDatabaseTab>(() => parseIntegratedDatabaseTab(searchParams.get('tab')) || 'overview');
-
-    // Stats State
-    const [stats, setStats] = useState<DatabaseStats>({
-        workers: { total: 0, active: 0, inactive: 0, unassigned: 0 },
-        offices: { total: 0, active: 0, pending: 0, linked: 0 },
-        teams: { total: 0, active: 0, inactive: 0 },
-        sites: { total: 0, active: 0, completed: 0 },
-        companies: { total: 0, contractor: 0, partner: 0, builder: 0, rental: 0 },
-        accounts: { workerMissing: 0, teamMissing: 0, companyMissing: 0 },
-        reports: { total: 0, thisMonth: 0, today: 0 }
-    });
 
     // Issue State
     const [issues, setIssues] = useState<IssueStats>({
@@ -248,40 +210,37 @@ function IntegratedDatabase() {
     const [highlightedId, setHighlightedId] = useState<string | null>(null);
     const [isRebuildingManDay, setIsRebuildingManDay] = useState(false);
 
-    const loadStats = async () => {
-        setLoading(true);
-        try {
-            // Calculate date range for Ghost Worker check (last 30 days)
-            const endDate = new Date();
-            const startDate = new Date();
-            startDate.setDate(startDate.getDate() - 30);
-
-            const startDateStr = startDate.toISOString().split('T')[0];
-            const endDateStr = endDate.toISOString().split('T')[0];
-
-            const [workersData, officeStaffData, teamsData, sitesData, companiesData, reportStats, recentReports, allReports] = await Promise.all([
-                manpowerService.getWorkers(),
-                officeStaffService.getOfficeStaff(),
-                teamService.getTeams(),
-                siteService.getSites(),
-                companyService.getCompanies(),
-                dailyReportService.getDBStats(), // Optimized: Count only
-                dailyReportService.getReports({ startDate: startDateStr, endDate: endDateStr }),
-                dailyReportService.getAllReports()
-            ]);
-
-            calculateStats(workersData, officeStaffData, teamsData, sitesData, companiesData, reportStats);
-            calculateIssues(workersData, teamsData, sitesData, companiesData, recentReports, allReports);
-        } catch (error) {
-            console.error('Failed to load stats:', error);
-        } finally {
-            setLoading(false);
+    const selectTab = (tab: IntegratedDatabaseTab, nextHighlightedId: string | null = null) => {
+        const nextParams = new URLSearchParams(searchParams);
+        if (tab === 'overview') {
+            nextParams.delete('tab');
+        } else {
+            nextParams.set('tab', TAB_QUERY_VALUES[tab]);
         }
+
+        const nextSearch = nextParams.toString();
+        if (nextSearch !== searchParams.toString()) {
+            navigate({
+                pathname: '/database/manpower-db',
+                search: nextSearch ? `?${nextSearch}` : ''
+            });
+        }
+        setActiveTab(tab);
+        setHighlightedId(nextHighlightedId);
+        if (tab !== 'overview') setExpandedIssue(null);
     };
 
     useEffect(() => {
-        loadStats();
-    }, []);
+        if (!snapshot) return;
+        calculateIssues(
+            snapshot.workers,
+            snapshot.teams,
+            snapshot.sites,
+            snapshot.companies,
+            snapshot.recentReports,
+            snapshot.allReports
+        );
+    }, [snapshot]);
 
     useEffect(() => {
         const tabParam = searchParams.get('tab');
@@ -289,8 +248,13 @@ function IntegratedDatabase() {
             navigate('/database/logs', { replace: true });
             return;
         }
+        if (isDailyReportTabValue(tabParam)) {
+            navigate('/reports/daily?tab=list-v2', { replace: true });
+            return;
+        }
         const requestedTab = parseIntegratedDatabaseTab(tabParam);
-        if (requestedTab) setActiveTab(requestedTab);
+        setActiveTab(requestedTab || 'overview');
+        if (!requestedTab) setHighlightedId(null);
     }, [navigate, searchParams]);
 
     const handleRebuildManDays = async () => {
@@ -315,54 +279,6 @@ function IntegratedDatabase() {
         } finally {
             setIsRebuildingManDay(false);
         }
-    };
-
-
-    const calculateStats = (
-        workers: Worker[],
-        officeStaff: OfficeStaff[],
-        teams: Team[],
-        sites: Site[],
-        companies: Company[],
-        reportStats: { total: number; thisMonth: number; today: number }
-    ) => {
-        setStats({
-            workers: {
-                total: workers.length,
-                active: workers.filter(w => w.status === '재직').length,
-                inactive: workers.filter(w => w.status === '퇴사' || w.status === '휴직').length,
-                unassigned: workers.filter(w => !w.teamId).length
-            },
-            offices: {
-                total: officeStaff.length,
-                active: officeStaff.filter((staff) => (staff.status || '재직') !== '퇴사').length,
-                pending: officeStaff.filter((staff) => staff.status === '승인대기').length,
-                linked: officeStaff.filter((staff) => !!staff.uid).length,
-            },
-            teams: {
-                total: teams.length,
-                active: teams.filter(t => t.status === 'active' || !t.status).length,
-                inactive: teams.filter(t => t.status === 'waiting' || t.status === 'closed').length
-            },
-            sites: {
-                total: sites.length,
-                active: sites.filter(s => s.status === 'active').length,
-                completed: sites.filter(s => s.status === 'completed').length
-            },
-            companies: {
-                total: companies.length,
-                contractor: companies.filter(c => c.type === '시공사').length,
-                partner: companies.filter(c => c.type === '협력사').length,
-                builder: companies.filter(c => c.type === '건설사').length,
-                rental: companies.filter(c => c.type === '임대사').length
-            },
-            accounts: {
-                workerMissing: workers.filter(w => !w.accountNumber).length,
-                teamMissing: teams.filter(t => !t.accountNumber).length,
-                companyMissing: companies.filter(c => !c.accountNumber).length,
-            },
-            reports: reportStats // Use pre-calculated stats directly
-        });
     };
 
     const calculateIssues = (
@@ -442,7 +358,7 @@ function IntegratedDatabase() {
         // Sites Checks
         newIssues.unassignedSites = sites.filter(s => !s.responsibleTeamId);
 
-        // Company Checks (Builders without any assigned sites via Site.companyId)
+        // Company Checks (client/orderer companies without any assigned sites via Site.companyId)
         newIssues.unassignedBuilders = companies.filter(c => {
             if (c.type !== '건설사') return false;
             const hasSite = sites.some(s => s.companyId === c.id);
@@ -666,206 +582,245 @@ function IntegratedDatabase() {
         );
     };
 
+    const missingAccountCount = stats.accounts.workerMissing + stats.accounts.teamMissing + stats.accounts.companyMissing;
+    const databaseTabs: Array<{
+        id: IntegratedDatabaseTab;
+        label: string;
+        description: string;
+        badge: string;
+        icon: any;
+        iconClassName: string;
+    }> = [
+        {
+            id: 'overview',
+            label: '데이터베이스 현황',
+            description: '전체 기준정보와 데이터 무결성 상태를 한눈에 확인합니다.',
+            badge: '전체 요약',
+            icon: faDatabase,
+            iconClassName: 'bg-indigo-50 text-indigo-600',
+        },
+        {
+            id: 'workers',
+            label: '작업자 목록',
+            description: '작업자 인적사항, 재직 상태와 소속 팀 정보를 관리합니다.',
+            badge: `${stats.workers.total}명`,
+            icon: faHardHat,
+            iconClassName: 'bg-blue-50 text-blue-600',
+        },
+        {
+            id: 'offices',
+            label: '사무실 목록',
+            description: '사무실 직원의 직무, 재직 상태와 계정 연결을 관리합니다.',
+            badge: `${stats.offices.total}명`,
+            icon: faIdBadge,
+            iconClassName: 'bg-violet-50 text-violet-600',
+        },
+        {
+            id: 'settlementTargets',
+            label: '정산 대상자',
+            description: '바이백과 정산에 사용할 대상자 및 연결 회사를 관리합니다.',
+            badge: '정산 관리',
+            icon: faCalendar,
+            iconClassName: 'bg-amber-50 text-amber-600',
+        },
+        {
+            id: 'teams',
+            label: '팀 목록',
+            description: '팀 구성, 팀장과 운영 상태를 체계적으로 관리합니다.',
+            badge: `${stats.teams.total}팀`,
+            icon: faUsers,
+            iconClassName: 'bg-fuchsia-50 text-fuchsia-600',
+        },
+        {
+            id: 'sites',
+            label: '현장 목록',
+            description: '공사 현장과 담당 팀, 진행 상태를 확인하고 관리합니다.',
+            badge: `${stats.sites.total}곳`,
+            icon: faBuilding,
+            iconClassName: 'bg-emerald-50 text-emerald-600',
+        },
+        {
+            id: 'companies',
+            label: '회사 목록',
+            description: '시공사, 협력사, 발주사와 임대사 정보를 통합 관리합니다.',
+            badge: `${stats.companies.total}개사`,
+            icon: faBuilding,
+            iconClassName: 'bg-orange-50 text-orange-600',
+        },
+        {
+            id: 'accounts',
+            label: '계좌 관리',
+            description: '작업자, 팀과 회사의 지급 계좌 등록 상태를 점검합니다.',
+            badge: missingAccountCount > 0 ? `${missingAccountCount}건 누락` : '등록 완료',
+            icon: faCreditCard,
+            iconClassName: missingAccountCount > 0 ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600',
+        },
+    ];
+    const databaseSummaryCards = [
+        {
+            label: '작업자',
+            value: stats.workers.total,
+            unit: '명',
+            detail: `재직 ${stats.workers.active} · 미배정 ${stats.workers.unassigned}`,
+            icon: faHardHat,
+            iconClassName: 'bg-blue-50 text-blue-600',
+            onClick: () => selectTab('workers'),
+        },
+        {
+            label: '사무실',
+            value: stats.offices.total,
+            unit: '명',
+            detail: `재직 ${stats.offices.active} · 연동 ${stats.offices.linked}`,
+            icon: faIdBadge,
+            iconClassName: 'bg-violet-50 text-violet-600',
+            onClick: () => selectTab('offices'),
+        },
+        {
+            label: '팀',
+            value: stats.teams.total,
+            unit: '팀',
+            detail: `운영 ${stats.teams.active} · 대기/폐업 ${stats.teams.inactive}`,
+            icon: faUsers,
+            iconClassName: 'bg-fuchsia-50 text-fuchsia-600',
+            onClick: () => selectTab('teams'),
+        },
+        {
+            label: '현장',
+            value: stats.sites.total,
+            unit: '곳',
+            detail: `진행 ${stats.sites.active} · 종료 ${stats.sites.completed}`,
+            icon: faBuilding,
+            iconClassName: 'bg-emerald-50 text-emerald-600',
+            onClick: () => selectTab('sites'),
+        },
+        {
+            label: '회사',
+            value: stats.companies.total,
+            unit: '개사',
+            detail: `협력 ${stats.companies.partner} · 발주 ${stats.companies.builder}`,
+            icon: faBuilding,
+            iconClassName: 'bg-orange-50 text-orange-600',
+            onClick: () => selectTab('companies'),
+        },
+        {
+            label: '계좌 누락',
+            value: missingAccountCount,
+            unit: '건',
+            detail: `작업자 ${stats.accounts.workerMissing} · 팀 ${stats.accounts.teamMissing} · 회사 ${stats.accounts.companyMissing}`,
+            icon: faCreditCard,
+            iconClassName: missingAccountCount > 0 ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600',
+            onClick: () => selectTab('accounts'),
+        },
+        {
+            label: '일일 보고서',
+            value: stats.reports.total,
+            unit: '건',
+            detail: `금일 ${stats.reports.today} · 이번달 ${stats.reports.thisMonth}`,
+            icon: faCalendar,
+            iconClassName: 'bg-indigo-50 text-indigo-600',
+            onClick: () => navigate('/reports/daily?tab=list-v2'),
+        },
+    ];
+
     return (
         <div className="bg-slate-50 min-h-screen pb-20">
             <div className="bg-white border-b border-slate-200">
-                <div className="p-6">
-                    <div className="flex justify-between items-center mb-6">
+                <div className="p-4 sm:p-5">
+                    <div className="mb-3 flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3">
-                            <div className="bg-indigo-600 p-2 rounded-lg">
-                                <FontAwesomeIcon icon={faDatabase} className="text-white text-xl" />
+                            <div className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-600 shadow-sm shadow-indigo-200">
+                                <FontAwesomeIcon icon={faDatabase} className="text-white" />
                             </div>
-                            <h1 className="text-2xl font-bold text-slate-800">통합 데이터베이스</h1>
+                            <div>
+                                <h1 className="whitespace-nowrap text-lg font-bold text-slate-800 sm:text-xl">통합 데이터베이스</h1>
+                                <p className="hidden text-xs text-slate-400 sm:block">기준정보를 빠르게 조회하고 관리하세요.</p>
+                            </div>
                         </div>
-                    </div>
-
-                    <div className="mb-4 flex justify-end">
                         <button
                             type="button"
                             onClick={handleRebuildManDays}
                             disabled={isRebuildingManDay || loading}
-                            className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-bold shadow-sm transition-colors ${
+                            aria-label={isRebuildingManDay ? '누적공수 재계산 중' : '누적공수 재계산'}
+                            className={`inline-flex h-9 w-9 shrink-0 items-center justify-center gap-2 rounded-lg border text-xs font-bold shadow-sm transition-colors sm:w-auto sm:px-3 ${
                                 isRebuildingManDay
                                     ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
                                     : 'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
                             }`}
                         >
                             <FontAwesomeIcon icon={faChartBar} />
-                            {isRebuildingManDay ? '누적공수 재계산 중...' : '누적공수 재계산'}
+                            <span className="hidden sm:inline">{isRebuildingManDay ? '누적공수 재계산 중...' : '누적공수 재계산'}</span>
                         </button>
                     </div>
 
-                    {/* Main Stats Cards */}
-                    <div className="flex flex-wrap gap-4 mb-4">
-                        <div className="flex-1 min-w-[200px] bg-white p-4 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-indigo-300 transition-colors" onClick={() => setActiveTab('workers')}>
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-slate-500 font-medium text-sm">총 작업자</span>
-                                <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs">
-                                    <FontAwesomeIcon icon={faHardHat} />
-                                </div>
-                            </div>
-                            <div className="flex items-end gap-2">
-                                <h3 className="text-2xl font-bold text-slate-800">{stats.workers.total}</h3>
-                                <span className="text-xs text-slate-500 mb-1">명</span>
-                            </div>
-                            <div className="mt-2 text-xs text-slate-400 flex justify-between">
-                                <span>재직 {stats.workers.active}</span>
-                                <span>미배정 {stats.workers.unassigned}</span>
-                            </div>
-                        </div>
-
-                        <div className="flex-1 min-w-[200px] bg-white p-4 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-indigo-300 transition-colors" onClick={() => setActiveTab('offices')}>
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-slate-500 font-medium text-sm">사무실 직원</span>
-                                <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-xs">
-                                    <FontAwesomeIcon icon={faIdBadge} />
-                                </div>
-                            </div>
-                            <div className="flex items-end gap-2">
-                                <h3 className="text-2xl font-bold text-slate-800">{stats.offices.total}</h3>
-                                <span className="text-xs text-slate-500 mb-1">명</span>
-                            </div>
-                            <div className="mt-2 text-xs text-slate-400 flex justify-between">
-                                <span>재직 {stats.offices.active}</span>
-                                <span>연동 {stats.offices.linked}</span>
+                    {/* Compact database navigation */}
+                    <nav aria-label="통합 데이터베이스 메뉴">
+                        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-slate-100/80 p-1 shadow-inner">
+                            <div role="tablist" aria-label="데이터베이스 관리 영역" className="grid min-w-[900px] grid-cols-8 gap-1">
+                                {databaseTabs.map((tab) => {
+                                    const isActive = activeTab === tab.id;
+                                    return (
+                                        <button
+                                            key={tab.id}
+                                            type="button"
+                                            role="tab"
+                                            aria-selected={isActive}
+                                            aria-controls={`database-panel-${tab.id}`}
+                                            onClick={() => selectTab(tab.id)}
+                                            className={`group relative flex h-12 items-center justify-center gap-1.5 rounded-lg border px-3 text-sm font-bold whitespace-nowrap transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                                                isActive
+                                                    ? 'border-indigo-200 bg-white text-indigo-700 shadow-sm'
+                                                    : 'border-transparent text-slate-500 hover:bg-white/80 hover:text-slate-800'
+                                            }`}
+                                        >
+                                            <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-md text-xs ${tab.iconClassName}`}>
+                                                <FontAwesomeIcon icon={tab.icon} />
+                                            </span>
+                                            <span>{tab.label}</span>
+                                            {isActive && <span aria-hidden="true" className="absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-indigo-500" />}
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </div>
+                    </nav>
 
-                        <div className="flex-1 min-w-[200px] bg-white p-4 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-indigo-300 transition-colors" onClick={() => setActiveTab('teams')}>
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-slate-500 font-medium text-sm">등록 팀</span>
-                                <div className="p-1.5 bg-purple-50 text-purple-600 rounded-lg text-xs">
-                                    <FontAwesomeIcon icon={faUsers} />
-                                </div>
+                    {/* Compact status summary: overview only */}
+                    {activeTab === 'overview' && (
+                        <section aria-label="데이터베이스 요약" className="mt-3 overflow-x-auto">
+                            <div className="grid min-w-[840px] grid-cols-7 gap-2">
+                                {databaseSummaryCards.map((card) => (
+                                    <button
+                                        key={card.label}
+                                        type="button"
+                                        onClick={card.onClick}
+                                        className="flex min-h-[66px] items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md"
+                                    >
+                                        <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg text-[11px] ${card.iconClassName}`}>
+                                            <FontAwesomeIcon icon={card.icon} />
+                                        </span>
+                                        <span className="min-w-0">
+                                            <span className="block truncate text-[10px] font-bold text-slate-500">{card.label}</span>
+                                            <span className="mt-0.5 flex items-baseline gap-1">
+                                                <strong className="text-lg leading-none text-slate-800">{card.value}</strong>
+                                                <span className="text-[10px] font-medium text-slate-400">{card.unit}</span>
+                                            </span>
+                                            <span className="mt-1 block truncate text-[9px] text-slate-400">{card.detail}</span>
+                                        </span>
+                                    </button>
+                                ))}
                             </div>
-                            <div className="flex items-end gap-2">
-                                <h3 className="text-2xl font-bold text-slate-800">{stats.teams.total}</h3>
-                                <span className="text-xs text-slate-500 mb-1">팀</span>
-                            </div>
-                            <div className="mt-2 text-xs text-slate-400">
-                                <span>협업 {stats.teams.active} · 대기/폐업 {stats.teams.inactive}</span>
-                            </div>
+                        </section>
+                    )}
+
+                    {loadWarning && (
+                        <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                            <FontAwesomeIcon icon={faExclamationTriangle} className="text-amber-500" />
+                            <span>{loadWarning}</span>
                         </div>
-
-                        <div className="flex-1 min-w-[200px] bg-white p-4 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-indigo-300 transition-colors" onClick={() => setActiveTab('sites')}>
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-slate-500 font-medium text-sm">현장 현황</span>
-                                <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-xs">
-                                    <FontAwesomeIcon icon={faBuilding} />
-                                </div>
-                            </div>
-                            <div className="flex items-end gap-2">
-                                <h3 className="text-2xl font-bold text-slate-800">{stats.sites.total}</h3>
-                                <span className="text-xs text-slate-500 mb-1">곳</span>
-                            </div>
-                            <div className="mt-2 text-xs text-slate-400">
-                                <span>진행중 {stats.sites.active} · 종료 {stats.sites.completed}</span>
-                            </div>
-                        </div>
-
-                        <div className="flex-1 min-w-[200px] bg-white p-4 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-indigo-300 transition-colors" onClick={() => setActiveTab('companies')}>
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-slate-500 font-medium text-sm">거래처</span>
-                                <div className="p-1.5 bg-orange-50 text-orange-600 rounded-lg text-xs">
-                                    <FontAwesomeIcon icon={faBuilding} />
-                                </div>
-                            </div>
-                            <div className="flex items-end gap-2">
-                                <h3 className="text-2xl font-bold text-slate-800">{stats.companies.total}</h3>
-                                <span className="text-xs text-slate-500 mb-1">개사</span>
-                            </div>
-                            <div className="mt-2 text-xs text-slate-400">
-                                <span>시공사 {stats.companies.contractor} · 협력사 {stats.companies.partner} · 건설사 {stats.companies.builder} · 임대사 {stats.companies.rental}</span>
-                            </div>
-                        </div>
-
-                        <div className="flex-1 min-w-[200px] bg-white p-4 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-indigo-300 transition-colors" onClick={() => setActiveTab('accounts')}>
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-slate-500 font-medium text-sm">계좌 관리</span>
-                                <div className="p-1.5 bg-rose-50 text-rose-600 rounded-lg text-xs">
-                                    <FontAwesomeIcon icon={faCreditCard} />
-                                </div>
-                            </div>
-                            <div className="flex items-end gap-2">
-                                <h3 className="text-2xl font-bold text-slate-800">{stats.accounts.workerMissing + stats.accounts.teamMissing + stats.accounts.companyMissing}</h3>
-                                <span className="text-xs text-slate-500 mb-1">건 누락</span>
-                            </div>
-                            <div className="mt-2 text-xs text-slate-400">
-                                <span>작업자 {stats.accounts.workerMissing} · 팀 {stats.accounts.teamMissing} · 회사 {stats.accounts.companyMissing}</span>
-                            </div>
-                        </div>
-
-                        <div className="flex-1 min-w-[200px] bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-slate-500 font-medium text-sm">일일 보고서</span>
-                                <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-xs">
-                                    <FontAwesomeIcon icon={faCalendar} />
-                                </div>
-                            </div>
-                            <div className="flex items-end gap-2">
-                                <h3 className="text-2xl font-bold text-slate-800">{stats.reports.total}</h3>
-                                <span className="text-xs text-slate-500 mb-1">건</span>
-                            </div>
-                            <div className="mt-2 text-xs text-slate-400">
-                                <span>금일 {stats.reports.today} · 이번달 {stats.reports.thisMonth}</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Tabs */}
-                    <div className="flex border-b border-slate-200 mt-8 overflow-x-auto">
-                        <button
-                            onClick={() => setActiveTab('overview')}
-                            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'overview' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
-                        >
-                            데이터베이스 현황
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('workers')}
-                            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'workers' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
-                        >
-                            작업자 목록
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('offices')}
-                            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'offices' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
-                        >
-                            사무실 목록
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('settlementTargets')}
-                            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'settlementTargets' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
-                        >
-                            정산 대상자
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('teams')}
-                            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'teams' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
-                        >
-                            팀 목록
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('sites')}
-                            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'sites' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
-                        >
-                            현장 목록
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('companies')}
-                            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'companies' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
-                        >
-                            회사 목록
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('accounts')}
-                            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'accounts' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
-                        >
-                            계좌 관리
-                        </button>
-                    </div>
+                    )}
                 </div>
 
-                <div className="p-6">
+                <div id={`database-panel-${activeTab}`} role="tabpanel" className="p-4 sm:p-5">
                     {activeTab === 'overview' && (
                         <div className="space-y-6">
                             {/* Data Integrity Board */}
@@ -879,7 +834,7 @@ function IntegratedDatabase() {
                                     {renderIssueCard('noIdCardWorkers', '신분증 미등록', issues.noIdCardWorkers.length, faIdBadge, 'text-orange-500')}
                                     {renderIssueCard('noAccountWorkers', '계좌 미등록', issues.noAccountWorkers.length, faCreditCard, 'text-amber-600')}
                                     {renderIssueCard('unassignedSites', '미배정 현장', issues.unassignedSites.length, faBuilding, 'text-rose-500', '곳')}
-                                    {renderIssueCard('unassignedBuilders', '미배정 건설사', issues.unassignedBuilders.length, faBuilding, 'text-orange-500', '개')}
+                                    {renderIssueCard('unassignedBuilders', '미배정 발주사', issues.unassignedBuilders.length, faBuilding, 'text-orange-500', '개')}
                                     {renderIssueCard('unassignedTeamLeaders', '미배정 팀장', issues.unassignedTeamLeaders.length, faUserSlash, 'text-rose-600')}
                                     {renderIssueCard('isolatedWorkers', '고립된 작업자', issues.isolatedWorkers.length, faLink, 'text-slate-600')}
                                     {renderIssueCard('duplicateWorkers', '중복 데이터', issues.duplicateWorkers.length, faUsers, 'text-purple-600', '건')}
@@ -912,7 +867,7 @@ function IntegratedDatabase() {
                                                 {expandedIssue === 'noIdCardWorkers' && '신분증 미등록 작업자 목록'}
                                                 {expandedIssue === 'noAccountWorkers' && '계좌번호 누락 작업자 목록'}
                                                 {expandedIssue === 'unassignedSites' && '담당 팀이 없는 현장 목록'}
-                                                {expandedIssue === 'unassignedBuilders' && '담당 현장이 없는 건설사 목록'}
+                                                {expandedIssue === 'unassignedBuilders' && '담당 현장이 없는 발주사 목록'}
                                                 {expandedIssue === 'unassignedTeamLeaders' && '직책이 팀장이지만 팀을 맡고 있지 않은 인원'}
                                                 {expandedIssue === 'isolatedWorkers' && '팀, 현장, 회사 어디에도 소속되지 않은 작업자'}
                                                 {expandedIssue === 'duplicateWorkers' && '중복 의심 데이터 (주민번호/연락처)'}
@@ -941,10 +896,7 @@ function IntegratedDatabase() {
                                                                 <div className="text-xs text-slate-500">{worker.idNumber} / {worker.role}</div>
                                                             </div>
                                                             <button
-                                                                onClick={() => {
-                                                                    setActiveTab('workers');
-                                                                    setHighlightedId(worker.id || null);
-                                                                }}
+                                                                onClick={() => selectTab('workers', worker.id || null)}
                                                                 className="text-xs text-indigo-600 hover:underline"
                                                             >
                                                                 관리
@@ -963,7 +915,7 @@ function IntegratedDatabase() {
                                                                 <div className="font-bold text-slate-800">{site.name}</div>
                                                                 <div className="text-xs text-slate-500">{site.code}</div>
                                                             </div>
-                                                            <button onClick={() => { setActiveTab('sites'); setHighlightedId(site.id || null); }} className="text-xs text-indigo-600 hover:underline">관리</button>
+                                                            <button onClick={() => selectTab('sites', site.id || null)} className="text-xs text-indigo-600 hover:underline">관리</button>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -978,7 +930,7 @@ function IntegratedDatabase() {
                                                                 <div className="font-bold text-slate-800">{comp.name}</div>
                                                                 <div className="text-xs text-slate-500">{comp.ceoName}</div>
                                                             </div>
-                                                            <button onClick={() => { setActiveTab('companies'); setHighlightedId(comp.id || null); }} className="text-xs text-indigo-600 hover:underline">관리</button>
+                                                            <button onClick={() => selectTab('companies', comp.id || null)} className="text-xs text-indigo-600 hover:underline">관리</button>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -993,7 +945,7 @@ function IntegratedDatabase() {
                                                                 <div className="font-bold text-slate-800">{team.name}</div>
                                                                 <div className="text-xs text-slate-500">{team.leaderName} / {team.status === 'closed' ? '폐업' : '대기'}</div>
                                                             </div>
-                                                            <button onClick={() => { setActiveTab('teams'); setHighlightedId(team.id || null); }} className="text-xs text-indigo-600 hover:underline">관리</button>
+                                                            <button onClick={() => selectTab('teams', team.id || null)} className="text-xs text-indigo-600 hover:underline">관리</button>
                                                         </div>
                                                     ))}
                                                 </div>

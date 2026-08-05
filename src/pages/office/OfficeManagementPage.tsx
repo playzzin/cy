@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -85,6 +85,18 @@ const buildYearMonthValue = (year: number, month: number): string => {
   const safeYear = Number.isFinite(year) ? year : now.getFullYear();
   const safeMonth = Number.isFinite(month) && month >= 1 && month <= 12 ? month : now.getMonth() + 1;
   return `${safeYear}-${String(safeMonth).padStart(2, '0')}`;
+};
+
+const isYearMonth = (value: unknown): value is string => {
+  const matched = /^(\d{4})-(\d{2})$/.exec(String(value ?? '').trim());
+  if (!matched) return false;
+  const month = Number(matched[2]);
+  return Number.isFinite(month) && month >= 1 && month <= 12;
+};
+
+const getYearMonthFromSearchParams = (params: URLSearchParams): string | null => {
+  const value = params.get('yearMonth') || params.get('month');
+  return isYearMonth(value) ? value : null;
 };
 
 const getMonthPeriod = (yearMonth: string) => {
@@ -619,7 +631,8 @@ const buildTeamSettlementRows = (
   });
 
 const OfficeManagementPage: React.FC = () => {
-  const [yearMonth, setYearMonth] = useState(getCurrentYearMonth);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [yearMonth, setYearMonth] = useState(() => getYearMonthFromSearchParams(searchParams) ?? getCurrentYearMonth());
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamSettlementDocs, setTeamSettlementDocs] = useState<Array<TeamSettlementDocument | null>>([]);
   const [settlementErrors, setSettlementErrors] = useState<Record<string, string>>({});
@@ -636,6 +649,28 @@ const OfficeManagementPage: React.FC = () => {
     selectedRawDocs: officeLedgerRawDocs,
     loadData: loadOfficeExpenseLedgerData
   } = useExpenseLedgerData(yearMonth, OFFICE_ASSIGNMENT_TEAM_ID, 'posted');
+
+  useEffect(() => {
+    const nextYearMonth = getYearMonthFromSearchParams(searchParams) ?? getCurrentYearMonth();
+    setYearMonth((prev) => (prev === nextYearMonth ? prev : nextYearMonth));
+  }, [searchParams]);
+
+  useEffect(() => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      const shouldKeepYearMonth =
+        yearMonth !== getCurrentYearMonth() || prev.has('yearMonth') || prev.has('month');
+
+      if (shouldKeepYearMonth) {
+        next.set('yearMonth', yearMonth);
+      } else {
+        next.delete('yearMonth');
+      }
+      next.delete('month');
+
+      return next.toString() === prev.toString() ? prev : next;
+    }, { replace: true });
+  }, [setSearchParams, yearMonth]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -1114,8 +1149,8 @@ const OfficeManagementPage: React.FC = () => {
           })}
         </section>
 
-        <section className="grid gap-4 xl:grid-cols-2">
-          <div className="border border-slate-200 bg-white shadow-sm">
+        <section className="grid min-w-0 gap-4 xl:grid-cols-2">
+          <div className="min-w-0 overflow-hidden border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <h2 className="flex items-center gap-2 text-base font-black text-slate-950">
                 <ArrowUpRight size={18} className="text-emerald-600" />
@@ -1142,7 +1177,7 @@ const OfficeManagementPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="border border-slate-200 bg-white shadow-sm">
+          <div className="min-w-0 overflow-hidden border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <h2 className="flex items-center gap-2 text-base font-black text-slate-950">
                 <ArrowDownRight size={18} className="text-red-600" />
@@ -1174,8 +1209,8 @@ const OfficeManagementPage: React.FC = () => {
           </div>
         </section>
 
-        <section className="grid gap-4 xl:grid-cols-2">
-          <div className="border border-slate-200 bg-white shadow-sm">
+        <section className="grid min-w-0 gap-4 xl:grid-cols-2">
+          <div className="min-w-0 overflow-hidden border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <h2 className="flex items-center gap-2 text-base font-black text-slate-950">
                 <ReceiptText size={18} className="text-slate-600" />
@@ -1186,7 +1221,7 @@ const OfficeManagementPage: React.FC = () => {
                 <ExternalLink size={13} />
               </Link>
             </div>
-            <div className="overflow-auto">
+            <div className="max-w-full overflow-x-auto">
               <table className="w-full min-w-[680px] text-sm">
                 <thead>
                   <tr className="bg-slate-50 text-xs text-slate-600">
@@ -1222,7 +1257,7 @@ const OfficeManagementPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="border border-slate-200 bg-white shadow-sm">
+          <div className="min-w-0 overflow-hidden border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <h2 className="flex items-center gap-2 text-base font-black text-slate-950">
                 <ReceiptText size={18} className="text-slate-600" />
@@ -1255,7 +1290,7 @@ const OfficeManagementPage: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <div className="max-h-72 overflow-auto">
+              <div className="max-h-72 max-w-full overflow-auto">
                 {officeLedgerExpenseRows.length > 0 ? (
                   <table className="w-full text-sm">
                     <tbody>
@@ -1305,7 +1340,7 @@ const OfficeManagementPage: React.FC = () => {
                 <X size={18} />
               </button>
             </div>
-            <div className="max-h-[68vh] overflow-auto">
+            <div className="max-h-[68vh] max-w-full overflow-auto">
               <table className="w-full min-w-[760px] text-sm">
                 <thead className="sticky top-0 bg-slate-50 text-xs font-black text-slate-500">
                   <tr>

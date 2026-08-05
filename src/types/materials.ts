@@ -34,6 +34,8 @@ export interface MaterialPhotoBatch {
     transactionType: 'inbound' | 'outbound';
     transactionDate: string;
     siteId: string;
+    rentalCompanyId?: string;
+    rentalCompanyName?: string;
     photoCount: number;
     photos: MaterialPhotoFile[];
     createdBy?: string;
@@ -56,6 +58,9 @@ export interface InboundTransaction {
     quantity: number;
     unit: string;
     supplier?: string;
+    /** 임대사 포털 범위 판정에 사용하는 정규 회사 ID */
+    rentalCompanyId?: string;
+    rentalCompanyName?: string;
     invoiceNumber?: string;
     notes?: string;
     photoUrls?: string[];
@@ -118,10 +123,13 @@ export interface TransactionFilters {
     startDate?: string;
     endDate?: string;
     siteId?: string;
+    siteIds?: string[];
     materialId?: string;
     category?: string;
     transactionType?: 'inbound' | 'outbound' | 'all';
     vehicleNumber?: string;
+    /** 외부 임대사 계정은 이 ID로 서버 조회부터 제한한다. */
+    rentalCompanyIds?: string[];
 }
 
 export interface InventoryStatistics {

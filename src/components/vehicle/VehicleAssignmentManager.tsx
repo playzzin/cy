@@ -41,11 +41,21 @@ interface VehicleAssignmentManagerProps {
 
 const toDateInputValue = (d: Date): string => format(d, 'yyyy-MM-dd');
 const toShortDateInputValue = (d: Date): string => toShortYearDateInputValue(toDateInputValue(d));
+const DEFAULT_BILLING_START_DATE = '2026-01-01';
 
 const buildEndDateAsDayBefore = (startDate: string): string => {
     const d = new Date(startDate);
     if (Number.isNaN(d.getTime())) return toDateInputValue(new Date());
     return toDateInputValue(subDays(d, 1));
+};
+
+const buildBillingEndDateAsDayBefore = (value: string): string => {
+    const parsed = normalizeTypedDateInput(value);
+    if (!parsed) return '';
+    const [year, month, day] = parsed.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    date.setDate(date.getDate() - 1);
+    return toDateInputValue(date);
 };
 
 const assignmentLabel = (vehicle: Vehicle): string => {
@@ -85,6 +95,7 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
     const [startDate, setStartDate] = useState(today);
     const [endDate, setEndDate] = useState('');
     const [autoUnassignExisting, setAutoUnassignExisting] = useState(true);
+    const [syncBillingWithAssignee, setSyncBillingWithAssignee] = useState(true);
     const [saving, setSaving] = useState(false);
     const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
     const [assignmentRecords, setAssignmentRecords] = useState<VehicleAssignmentRecord[]>([]);
@@ -330,6 +341,9 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
                     startDate: normalizedStartDate,
                     endDate: normalizedEndDate || undefined
                 });
+                if (syncBillingWithAssignee) {
+                    await syncVehicleBillingWithAssignee(selectedVehicle.id, normalizedStartDate);
+                }
                 toast.success('차량 배정 이력이 수정되었습니다.');
                 setEditingAssignmentId(null);
                 setEndDate('');
@@ -376,6 +390,9 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
                 selectedTarget.name,
                 normalizedStartDate
             );
+            if (syncBillingWithAssignee) {
+                await syncVehicleBillingWithAssignee(selectedVehicle.id, normalizedStartDate);
+            }
             toast.success('차량 배정이 완료되었습니다.');
             await loadAssignmentRecords();
             onRefresh();
@@ -392,6 +409,32 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
         } finally {
             setSaving(false);
         }
+    };
+
+    const syncVehicleBillingWithAssignee = async (vehicleId: string, effectiveDate: string) => {
+        const normalizedEffectiveDate = normalizeTypedDateInput(effectiveDate) ?? DEFAULT_BILLING_START_DATE;
+        const previousEndDate = buildBillingEndDateAsDayBefore(normalizedEffectiveDate);
+        const records = await vehicleService.listAllVehicleBillingTargets(vehicleId);
+        const deleteIds = records
+            .filter((record) => normalizeKey(record.startDate) >= normalizedEffectiveDate)
+            .map((record) => record.id)
+            .filter(Boolean);
+        const closeRecords = records
+            .filter((record) => {
+                const start = normalizeKey(record.startDate);
+                if (!start || start >= normalizedEffectiveDate) return false;
+                const end = normalizeKey(record.endDate);
+                return !end || end >= normalizedEffectiveDate;
+            })
+            .map((record) => ({ id: record.id, endDate: previousEndDate }))
+            .filter((record) => Boolean(record.id && record.endDate));
+
+        await vehicleService.applyVehicleBillingTargetChanges({
+            vehicleId,
+            deleteIds,
+            closeRecords,
+            clearSnapshot: true
+        });
     };
 
     const handleDeleteAssignment = async (assignment: VehicleAssignmentRecord) => {
@@ -491,6 +534,28 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
 
                 <div className="mt-6 grid grid-cols-1 xl:grid-cols-12 gap-4">
                     <div className="xl:col-span-12 space-y-3">
+                        {selectedVehicle && (
+                            <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="min-w-0">
+                                        <div className="text-xs font-extrabold text-indigo-500">선택 차량</div>
+                                        <div className="mt-1 truncate text-lg font-black text-slate-900">{selectedVehicle.licensePlate}</div>
+                                        <div className="mt-1 truncate text-sm font-semibold text-slate-600">{selectedVehicle.model || '모델 미입력'} · {selectedVehicle.type || '유형 미입력'}</div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 text-xs font-bold sm:min-w-[360px]">
+                                        <div className="rounded-xl bg-white/80 px-3 py-2">
+                                            <div className="text-slate-400">현재 배정</div>
+                                            <div className="mt-1 truncate text-slate-800">{assignmentLabel(selectedVehicle)}</div>
+                                        </div>
+                                        <div className="rounded-xl bg-white/80 px-3 py-2">
+                                            <div className="text-slate-400">저장 후</div>
+                                            <div className="mt-1 truncate text-indigo-700">{selectedTarget ? `${selectedTarget.type === 'TEAM' ? '팀' : '운전자'} · ${selectedTarget.name}` : '대상 선택 필요'}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="flex bg-slate-100 p-1 rounded-xl">
                             <button
                                 onClick={() => setMode('TEAM')}
@@ -511,24 +576,26 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
                         </div>
 
                         <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-600 mb-1">차량 선택</label>
-                                <select
-                                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
-                                    value={selectedVehicleId}
-                                    onChange={(event) => pickVehicleById(event.target.value)}
-                                >
-                                    <option value="">차량을 선택하세요</option>
-                                    {vehicles
-                                        .slice()
-                                        .sort((a, b) => String(a.licensePlate).localeCompare(String(b.licensePlate), 'ko-KR'))
-                                        .map((vehicle) => (
-                                            <option key={vehicle.id} value={vehicle.id}>
-                                                {vehicle.licensePlate} · {vehicle.model} · {assignmentLabel(vehicle)}
-                                            </option>
-                                        ))}
-                                </select>
-                            </div>
+                            {!initialVehicleId && (
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-1">차량 선택</label>
+                                    <select
+                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
+                                        value={selectedVehicleId}
+                                        onChange={(event) => pickVehicleById(event.target.value)}
+                                    >
+                                        <option value="">차량을 선택하세요</option>
+                                        {vehicles
+                                            .slice()
+                                            .sort((a, b) => String(a.licensePlate).localeCompare(String(b.licensePlate), 'ko-KR'))
+                                            .map((vehicle) => (
+                                                <option key={vehicle.id} value={vehicle.id}>
+                                                    {vehicle.licensePlate} · {vehicle.model} · {assignmentLabel(vehicle)}
+                                                </option>
+                                            ))}
+                                    </select>
+                                </div>
+                            )}
 
                             {mode === 'TEAM' && (
                                 <div className="relative">
@@ -635,6 +702,21 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
                                     기존 배정 자동 해제
                                 </label>
                             )}
+
+                            <label className="flex items-start gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2.5 text-sm font-bold text-emerald-800">
+                                <input
+                                    type="checkbox"
+                                    className="mt-1"
+                                    checked={syncBillingWithAssignee}
+                                    onChange={(event) => setSyncBillingWithAssignee(event.target.checked)}
+                                />
+                                <span>
+                                    <span className="block">청구도 배정 대상과 동일하게 변경</span>
+                                    <span className="mt-0.5 block text-xs font-semibold text-emerald-700/80">
+                                        별도 청구대상이 있으면 배정 시작일 이후는 새 배정자를 따라가도록 정리합니다.
+                                    </span>
+                                </span>
+                            </label>
                         </div>
 
                         {selectedVehicle && (

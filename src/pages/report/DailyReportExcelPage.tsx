@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { HotTable } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSave, faRobot, faPaste, faFileExcel, faExclamationTriangle, faSpinner, faCheck, faTrash } from '@fortawesome/free-solid-svg-icons';
+import { faRobot, faFileExcel, faSpinner, faCheck } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
@@ -324,7 +324,7 @@ const DailyReportExcelPage: React.FC = () => {
                     licenseKey="non-commercial-and-evaluation"
                     minSpareRows={1}
                     // Renderer for validation styling
-                    cells={(row, col, prop) => {
+                    cells={(row, _col, prop) => {
                         const cellProps: any = {};
                         if (row < data.length) {
                             const rowData = data[row];

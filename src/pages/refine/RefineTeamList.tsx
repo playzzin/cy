@@ -2,9 +2,7 @@ import React, { useState, useMemo, useCallback } from "react";
 import { AgGridReact } from "ag-grid-react";
 import {
     ColDef,
-    ICellRendererParams,
-    GridReadyEvent
-} from "ag-grid-community";
+    ICellRendererParams} from "ag-grid-community";
 // import "ag-grid-community/styles/ag-grid.css"; // Removed for AG Grid v33+ Theming API compatibility
 import "ag-grid-community/styles/ag-theme-quartz.css";
 import { useMasterData } from "../../contexts/MasterDataContext";

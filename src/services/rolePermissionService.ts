@@ -3,6 +3,7 @@ import { createSystemConfig, listSystemConfigs, listAllSystemConfigs, updateSyst
 import { UserRole, PermissionConfig, DEFAULT_PERMISSIONS } from '../types/roles';
 import { Position, positionService } from './positionService';
 import { menuServiceV11 } from './menuServiceV11';
+import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 
 const PERMISSION_DOC_ID = 'permissions';
 
@@ -51,6 +52,13 @@ const getSystemRole = (role: unknown): UserRole.ADMIN | UserRole.MANAGER | UserR
 
 const uniqueKeys = (keys: string[]): string[] => Array.from(new Set(keys.filter(Boolean)));
 
+export interface PermissionKeyRenameResult {
+    renamed: boolean;
+    oldKey: string;
+    newKey: string;
+    menuRules: number;
+}
+
 class RolePermissionService {
     private permissions: PermissionConfig = {};
     private listeners: ((permissions: PermissionConfig) => void)[] = [];
@@ -64,7 +72,7 @@ class RolePermissionService {
         await this.refreshPermissions();
 
         if (typeof window !== 'undefined' && this.menuUnsubscribe == null) {
-            // Follow the active menu document instead of the legacy hardcoded menus_v11 doc.
+            // Follow the canonical menus_v12 document through the menu service.
             this.menuUnsubscribe = menuServiceV11.subscribe(() => {
                 console.log("[rolePermissionService] Menu settings updated, refreshing permissions...");
                 void this.refreshPermissions();
@@ -159,6 +167,14 @@ class RolePermissionService {
                 return merged;
             };
 
+            const positions = await positionService.getPositions();
+
+            if (isDevAdminSessionEnabled()) {
+                this.permissions = mergeWithPositionKeys(DEFAULT_PERMISSIONS, positions);
+                this.notifyListeners();
+                return;
+            }
+
             const findRowInList = (rows: any[]): any | null => {
                 if (!Array.isArray(rows)) return null;
                 return rows.find((r: any) => String(r?.id ?? '') === String(PERMISSION_DOC_ID)) ?? null;
@@ -192,8 +208,6 @@ class RolePermissionService {
                 }
             }
 
-            const positions = await positionService.getPositions();
-
             if (row?.data) {
                 const parsed = JSON.parse(String(row.data));
                 this.permissions = mergeWithPositionKeys(parsed as PermissionConfig, positions);
@@ -223,7 +237,47 @@ class RolePermissionService {
         await this.savePermissions(newPermissions);
     }
 
+    public async renamePositionKey(oldName: string, newName: string): Promise<PermissionKeyRenameResult> {
+        const oldKey = normalizeRole(oldName);
+        const newKey = normalizeRole(newName);
+        const result: PermissionKeyRenameResult = {
+            renamed: false,
+            oldKey,
+            newKey,
+            menuRules: 0
+        };
+
+        if (!oldKey || !newKey || oldKey === newKey) return result;
+
+        await this.refreshPermissions();
+
+        const oldPermissions = this.permissions[oldKey];
+        if (!oldPermissions) return result;
+
+        const nextPermissions: PermissionConfig = {
+            ...this.permissions,
+            [newKey]: {
+                ...(this.permissions[newKey] || {}),
+                ...oldPermissions
+            }
+        };
+        delete nextPermissions[oldKey];
+
+        result.renamed = true;
+        result.menuRules = Object.keys(oldPermissions).length;
+
+        await this.savePermissions(nextPermissions);
+        this.notifyListeners();
+        return result;
+    }
+
     private async savePermissions(permissions: PermissionConfig): Promise<void> {
+        if (isDevAdminSessionEnabled()) {
+            this.permissions = permissions;
+            this.notifyListeners();
+            return;
+        }
+
         const payload = JSON.stringify(permissions);
 
         try {

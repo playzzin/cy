@@ -1,9 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faGear, faInbox, faPaperPlane } from '@fortawesome/free-solid-svg-icons';
+import { faClockRotateLeft, faGear, faInbox, faPaperPlane } from '@fortawesome/free-solid-svg-icons';
 
-type MessagePageTab = 'view' | 'compose' | 'settings';
+type MessagePageTab = 'view' | 'compose' | 'settings' | 'logs';
 
 interface MessagePageTabsProps {
   active: MessagePageTab;
@@ -12,7 +12,8 @@ interface MessagePageTabsProps {
 const tabs: Array<{ key: MessagePageTab; label: string; path: string; icon: typeof faInbox }> = [
   { key: 'view', label: '메시지 보기', path: '/messages', icon: faInbox },
   { key: 'compose', label: '메시지 보내기', path: '/messages/compose', icon: faPaperPlane },
-  { key: 'settings', label: '자동 메시지 설정', path: '/messages/settings', icon: faGear }
+  { key: 'settings', label: '자동 메시지 설정', path: '/messages/settings', icon: faGear },
+  { key: 'logs', label: '자동 발송 로그', path: '/messages/automation-logs', icon: faClockRotateLeft }
 ];
 
 const MessagePageTabs: React.FC<MessagePageTabsProps> = ({ active }) => {

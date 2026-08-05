@@ -11,14 +11,38 @@ import {
     faFileLines,
     faArrowUpRightFromSquare,
     faEye,
-    faEyeSlash
+    faEyeSlash,
+    faPen,
+    faCheck,
+    faXmark,
+    faPlus
 } from '@fortawesome/free-solid-svg-icons';
 import { MENU_PATHS } from '../../../../constants/menuPaths';
 
 interface ToolboxPanelProps {
     isOpen: boolean;
     toggle: () => void;
+    systemPageLabels?: Record<string, string>;
+    onRenameSystemPage: (path: string, name: string) => void;
+    targetMenuName: string;
+    isSystemPageAdded: (path: string) => boolean;
+    onAddSystemPage: (page: { name: string; path: string }) => void;
 }
+
+interface SystemPageSource {
+    defaultName: string;
+    name: string;
+    path: string;
+    aliases: string[];
+}
+
+// Keep frequently used pages discoverable by the names people use in the
+// menu editor, even when the same route has legacy aliases in MENU_PATHS.
+const SYSTEM_PAGE_DEFAULT_LABELS: Record<string, string> = {
+    '/database/partner-photo-registration': '명함관리 페이지',
+    '/payroll/field-buyback': '바이백',
+    '/payroll/progress-claims?tab=buyback': '관계자 배분 (기성관리)',
+};
 
 interface DraggableItemProps {
     id: string;
@@ -79,9 +103,19 @@ const DraggableItem = ({ id, label, icon, color, type = 'new-item', payload = {}
     );
 };
 
-const ToolboxPanel: React.FC<ToolboxPanelProps> = ({ isOpen, toggle }) => {
+const ToolboxPanel: React.FC<ToolboxPanelProps> = ({
+    isOpen,
+    toggle,
+    systemPageLabels = {},
+    onRenameSystemPage,
+    targetMenuName,
+    isSystemPageAdded,
+    onAddSystemPage
+}) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [showHidden, setShowHidden] = useState(false);
+    const [editingPagePath, setEditingPagePath] = useState<string | null>(null);
+    const [editingPageName, setEditingPageName] = useState('');
     const { setNodeRef: setTrashNodeRef, isOver: isTrashOver } = useDroppable({
         id: 'trash-zone',
     });
@@ -92,24 +126,71 @@ const ToolboxPanel: React.FC<ToolboxPanelProps> = ({ isOpen, toggle }) => {
         return saved ? JSON.parse(saved) : [];
     });
 
-    const toggleHide = (pageName: string) => {
+    const toggleHide = (pageKey: string) => {
         setHiddenPages(prev => {
-            const next = prev.includes(pageName)
-                ? prev.filter(p => p !== pageName)
-                : [...prev, pageName];
+            const next = prev.includes(pageKey)
+                ? prev.filter(p => p !== pageKey)
+                : [...prev, pageKey];
             localStorage.setItem('menu_manager_hidden_pages', JSON.stringify(next));
             return next;
         });
     };
 
-    const systemPages = useMemo(() => {
-        return Object.entries(MENU_PATHS)
-            .map(([name, path]) => ({ name, path }))
-            .filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()));
-    }, [searchTerm, Object.keys(MENU_PATHS).length]);
+    const sourcePageSummary = useMemo(() => {
+        const rawPages = Object.entries(MENU_PATHS);
+        const pagesByPath = new Map<string, Omit<SystemPageSource, 'name'>>();
+
+        rawPages.forEach(([name, rawPath]) => {
+            const path = String(rawPath || '').trim();
+            if (!path) return;
+
+            const existing = pagesByPath.get(path);
+            if (existing) {
+                existing.aliases.push(name);
+                return;
+            }
+
+            pagesByPath.set(path, {
+                defaultName: name,
+                path,
+                aliases: [name]
+            });
+        });
+
+        const query = searchTerm.trim().toLowerCase();
+        const uniquePages = Array.from(pagesByPath.values()).map((page) => ({
+            ...page,
+            name: String(
+                systemPageLabels[page.path]
+                || SYSTEM_PAGE_DEFAULT_LABELS[page.path]
+                || page.defaultName
+            ).trim() || page.defaultName
+        }));
+        const filteredPages = query
+            ? uniquePages.filter((page) => (
+                page.name.toLowerCase().includes(query)
+                || page.path.toLowerCase().includes(query)
+                || page.aliases.some((alias) => alias.toLowerCase().includes(query))
+            ))
+            : uniquePages;
+
+        return {
+            pages: filteredPages,
+            uniqueCount: uniquePages.length,
+            duplicateCount: rawPages.length - uniquePages.length
+        };
+    }, [searchTerm, systemPageLabels]);
+
+    const savePageName = (page: SystemPageSource) => {
+        const nextName = editingPageName.trim();
+        if (!nextName) return;
+        onRenameSystemPage(page.path, nextName);
+        setEditingPagePath(null);
+        setEditingPageName('');
+    };
 
     return (
-        <div className={`relative bg-gray-800 border-r border-gray-700 shadow-xl transition-all duration-300 ease-in-out flex flex-col ${isOpen ? 'w-80' : 'w-0'}`}>
+        <div className={`relative flex flex-shrink-0 flex-col border-r border-gray-700 bg-gray-800 shadow-xl transition-all duration-300 ease-in-out ${isOpen ? 'w-[420px] max-w-[45vw]' : 'w-0'}`}>
             <button
                 onClick={toggle}
                 className="absolute -right-4 top-1/2 -translate-y-1/2 bg-gray-700 text-gray-400 hover:text-white p-1 rounded-r-md border border-l-0 border-gray-600 shadow-md z-20 w-4 h-12 flex items-center justify-center text-xs"
@@ -155,8 +236,17 @@ const ToolboxPanel: React.FC<ToolboxPanelProps> = ({ isOpen, toggle }) => {
                     {/* 2. System Pages (Import) */}
                     <div className="space-y-3">
                         <div className="flex items-center justify-between">
-                            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider pl-1">시스템 페이지 ({systemPages.length})</label>
+                            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider pl-1">원본 메뉴 ({sourcePageSummary.uniqueCount})</label>
+                            {sourcePageSummary.duplicateCount > 0 && (
+                                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
+                                    중복 {sourcePageSummary.duplicateCount}개 정리됨
+                                </span>
+                            )}
                         </div>
+
+                        <p className="px-1 text-[10px] leading-relaxed text-gray-500">
+                            같은 이동 경로는 하나만 표시합니다. 연필 버튼으로 원본 메뉴 이름을 바꿀 수 있습니다.
+                        </p>
 
                         {/* Search Input */}
                         <div className="relative">
@@ -182,39 +272,115 @@ const ToolboxPanel: React.FC<ToolboxPanelProps> = ({ isOpen, toggle }) => {
                         </div>
 
                         <div className="grid gap-2">
-                            {systemPages.map((page) => {
-                                const isHidden = hiddenPages.includes(page.name);
+                            {sourcePageSummary.pages.map((page) => {
+                                const isHidden = hiddenPages.includes(page.path) || hiddenPages.includes(page.defaultName);
+                                const isAdded = isSystemPageAdded(page.path);
                                 if (isHidden && !showHidden) return null;
 
+                                if (editingPagePath === page.path) {
+                                    return (
+                                        <form
+                                            key={page.path}
+                                            onSubmit={(event) => {
+                                                event.preventDefault();
+                                                savePageName(page);
+                                            }}
+                                            className="rounded-lg border border-blue-500/40 bg-gray-900 p-3 shadow-lg"
+                                        >
+                                            <label className="mb-1.5 block text-[10px] font-bold text-blue-300">원본 메뉴 이름</label>
+                                            <div className="flex items-center gap-1.5">
+                                                <input
+                                                    autoFocus
+                                                    aria-label={`${page.defaultName} 원본 메뉴 이름`}
+                                                    value={editingPageName}
+                                                    onChange={(event) => setEditingPageName(event.target.value)}
+                                                    className="min-w-0 flex-1 rounded border border-gray-600 bg-gray-800 px-2 py-1.5 text-sm text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                                />
+                                                <button type="submit" disabled={!editingPageName.trim()} title="원본 메뉴 이름 저장" className="flex h-8 w-8 items-center justify-center rounded bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40">
+                                                    <FontAwesomeIcon icon={faCheck} size="xs" />
+                                                </button>
+                                                <button type="button" onClick={() => setEditingPagePath(null)} title="이름 수정 취소" className="flex h-8 w-8 items-center justify-center rounded bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white">
+                                                    <FontAwesomeIcon icon={faXmark} size="xs" />
+                                                </button>
+                                            </div>
+                                            <span className="mt-1.5 block truncate text-[10px] text-gray-500">{page.path}</span>
+                                        </form>
+                                    );
+                                }
+
                                 return (
-                                    <div key={page.name} className="relative group/item">
+                                    <div key={page.path} data-system-page-path={page.path} className="relative group/item">
                                         <DraggableItem
-                                            id={`sys-${page.name}`}
+                                            id={`sys-${page.path}`}
                                             label={page.name}
                                             icon={faFileLines}
                                             color={isHidden ? "bg-gray-600 grayscale opacity-50" : "bg-emerald-600"}
                                             type="system-page"
                                             payload={{ text: page.name, path: page.path }}
-                                            showPreview={!isHidden}
                                             path={page.path}
                                         />
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                toggleHide(page.name);
-                                            }}
-                                            className={`absolute top-1/2 -translate-y-1/2 right-9 w-6 h-6 rounded flex items-center justify-center transition-colors z-20
-                                                ${isHidden
-                                                    ? 'text-blue-400 hover:bg-gray-600 hover:text-white'
-                                                    : 'text-gray-500 hover:text-red-400 hover:bg-gray-700 opacity-0 group-hover/item:opacity-100'}`}
-                                            title={isHidden ? "보이기" : "숨기기 (안전한 삭제)"}
-                                        >
-                                            <FontAwesomeIcon icon={isHidden ? faEye : faEyeSlash} size="xs" />
-                                        </button>
+                                        <div className="mt-1 flex w-full items-stretch gap-1">
+                                            <button
+                                                type="button"
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    setEditingPagePath(page.path);
+                                                    setEditingPageName(page.name);
+                                                }}
+                                                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-gray-700 bg-gray-800 text-gray-400 transition-colors hover:border-blue-500/50 hover:bg-gray-700 hover:text-blue-300"
+                                                title={`${page.name} 원본 메뉴 이름 수정`}
+                                            >
+                                                <FontAwesomeIcon icon={faPen} size="xs" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    toggleHide(page.path);
+                                                }}
+                                                className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border transition-colors ${isHidden
+                                                    ? 'border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20'
+                                                    : 'border-gray-700 bg-gray-800 text-gray-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-300'
+                                                    }`}
+                                                title={isHidden ? '보이기' : '숨기기 (안전한 삭제)'}
+                                            >
+                                                <FontAwesomeIcon icon={isHidden ? faEye : faEyeSlash} size="xs" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    window.open(page.path, '_blank', 'noopener,noreferrer');
+                                                }}
+                                                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-gray-700 bg-gray-800 text-gray-400 transition-colors hover:border-blue-500/50 hover:bg-gray-700 hover:text-blue-300"
+                                                title="새 창에서 미리보기"
+                                                aria-label={`${page.name} 새 창에서 미리보기`}
+                                            >
+                                                <FontAwesomeIcon icon={faArrowUpRightFromSquare} size="xs" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    onAddSystemPage({ name: page.name, path: page.path });
+                                                }}
+                                                disabled={isAdded}
+                                                className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-bold transition-colors ${isAdded
+                                                    ? 'cursor-default border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
+                                                    : 'border-blue-500/30 bg-blue-500/10 text-blue-300 hover:border-blue-400 hover:bg-blue-500/20 hover:text-white'
+                                                    }`}
+                                                title={isAdded
+                                                    ? `${targetMenuName} 좌측 메뉴에 이미 추가됨`
+                                                    : `${targetMenuName} 좌측 메뉴에 바로 추가`}
+                                            >
+                                                <FontAwesomeIcon icon={isAdded ? faCheck : faPlus} size="xs" />
+                                                <span className="truncate">{isAdded ? '추가됨' : `${targetMenuName}에 바로 추가`}</span>
+                                            </button>
+                                        </div>
                                     </div>
                                 );
                             })}
-                            {systemPages.length === 0 && (
+                            {sourcePageSummary.pages.length === 0 && (
                                 <div className="text-center py-4 text-xs text-gray-600 italic">
                                     검색 결과가 없습니다.
                                 </div>

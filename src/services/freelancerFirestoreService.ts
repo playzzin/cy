@@ -111,8 +111,18 @@ export const freelancerFirestoreService = {
         //Note: This expects freelancerId to be the new random ID from Firestore
 
         for (const row of modifiedData) {
+            const yearlyInfo = {
+                performanceBonus: Number(row.performanceBonus || 0),
+                reportingBalance: Number(row.reportingBalance || 0),
+                reportableAmount: Number(row.reportableAmount || 0),
+                depositDate: row.depositDate || null,
+                memo: row.paymentMemo || '',
+                dailyRate: Number(row.monthlyRate || 0),
+            };
+            let createdM12Override = false;
+
             // 1. ?꾨━?쒖꽌 ?뺣낫 ?낅뜲?댄듃 (?꾩슂??寃쎌슦)
-            if (row.id && !row.id.startsWith('temp_')) {
+            if (row.id && !row.id.startsWith('temp_') && !row.isSettlementOnly) {
                 const freelancerRef = doc(db, FREELANCERS_COLLECTION, row.id);
                 batch.update(freelancerRef, {
                     unitPrice: Number(row.monthlyRate || 0),
@@ -124,51 +134,49 @@ export const freelancerFirestoreService = {
             for (let m = 1; m <= 12; m++) {
                 const mk = `m${String(m).padStart(2, '0')}`;
                 const amount = Number(row[mk] || 0);
+                const sourceAmount = Number(row[`${mk}_sourceAmount`] || 0);
                 const paymentId = row[`${mk}_id`];
+                const isManualTaxOverride = amount !== sourceAmount;
 
                 if (paymentId) {
                     const paymentRef = doc(db, PAYMENTS_COLLECTION, paymentId);
                     batch.update(paymentRef, {
                         amount,
+                        isManualTaxOverride,
                         updatedAt: serverTimestamp(),
                     });
-                } else if (amount > 0 && row.id) {
+                } else if (isManualTaxOverride && row.id) {
                     const newPaymentRef = doc(collection(db, PAYMENTS_COLLECTION));
                     batch.set(newPaymentRef, {
                         freelancerId: row.id,
                         year,
                         month: m,
                         amount,
+                        isManualTaxOverride: true,
+                        ...(m === 12 ? yearlyInfo : {}),
                         createdAt: serverTimestamp(),
                         updatedAt: serverTimestamp(),
                     });
+                    if (m === 12) createdM12Override = true;
                 }
             }
 
             // 3. ?곌컙 ?붿빟 ?뺣낫 (12??湲곗?)
-            const yearlyInfo = {
-                performanceBonus: Number(row.performanceBonus || 0),
-                reportingBalance: Number(row.reportingBalance || 0),
-                reportableAmount: Number(row.reportableAmount || 0),
-                depositDate: row.depositDate || null,
-                memo: row.paymentMemo || '',
-                dailyRate: Number(row.monthlyRate || 0),
-            };
-
-            const m12Id = row.m12_id;
+            const m12Id = row.latestPaymentId || row.m12_id;
             if (m12Id) {
                 const m12Ref = doc(db, PAYMENTS_COLLECTION, m12Id);
                 batch.update(m12Ref, {
                     ...yearlyInfo,
                     updatedAt: serverTimestamp(),
                 });
-            } else if (row.id) {
+            } else if (row.id && !createdM12Override) {
                 const newM12Ref = doc(collection(db, PAYMENTS_COLLECTION));
                 batch.set(newM12Ref, {
                     freelancerId: row.id,
                     year,
                     month: 12,
                     amount: 0,
+                    isManualTaxOverride: false,
                     ...yearlyInfo,
                     createdAt: serverTimestamp(),
                     updatedAt: serverTimestamp(),

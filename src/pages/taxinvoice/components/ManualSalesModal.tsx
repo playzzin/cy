@@ -3,6 +3,10 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTimes, faSave } from '@fortawesome/free-solid-svg-icons';
 import { taxInvoiceFirestoreService } from '../../../services/taxInvoiceFirestoreService';
 import { siteService } from '../../../services/siteService';
+import { companyService } from '../../../services/companyService';
+import { getCompanyTaxSetting } from '../../../services/taxInvoiceApiService';
+import COMPANY_INFO from '../../../config/company';
+import { calculateVatAmount } from '../../../utils/vatAmounts';
 
 interface ManualSalesModalProps {
     isOpen: boolean;
@@ -12,6 +16,46 @@ interface ManualSalesModalProps {
     initialCompanyName?: string;
     initialBusinessNumber?: string;
 }
+
+interface InvoicerInfo {
+    corpNum: string;
+    corpName: string;
+    ceoName: string;
+    addr: string;
+}
+
+interface InvoicerSource {
+    corpNum?: string | null;
+    businessNumber?: string | null;
+    corpName?: string | null;
+    name?: string | null;
+    ceoName?: string | null;
+    addr?: string | null;
+    address?: string | null;
+}
+
+const normalizeText = (value: unknown): string => String(value ?? '').trim();
+
+const resolveInvoicerInfo = (
+    savedInfo?: InvoicerSource | null,
+    backendSetting?: InvoicerSource | null
+): InvoicerInfo => ({
+    corpNum: normalizeText(savedInfo?.corpNum)
+        || normalizeText(savedInfo?.businessNumber)
+        || normalizeText(backendSetting?.corpNum)
+        || COMPANY_INFO.corpNum,
+    corpName: normalizeText(savedInfo?.corpName)
+        || normalizeText(savedInfo?.name)
+        || normalizeText(backendSetting?.corpName)
+        || COMPANY_INFO.corpName,
+    ceoName: normalizeText(savedInfo?.ceoName)
+        || normalizeText(backendSetting?.ceoName)
+        || COMPANY_INFO.ceoName,
+    addr: normalizeText(savedInfo?.addr)
+        || normalizeText(savedInfo?.address)
+        || normalizeText(backendSetting?.addr)
+        || COMPANY_INFO.addr,
+});
 
 const ManualSalesModal: React.FC<ManualSalesModalProps> = ({
     isOpen,
@@ -25,6 +69,7 @@ const ManualSalesModal: React.FC<ManualSalesModalProps> = ({
     const [companyName, setCompanyName] = useState('');
     const [businessNumber, setBusinessNumber] = useState('');
     const [itemName, setItemName] = useState('');
+    const [invoicer, setInvoicer] = useState<InvoicerInfo>(() => resolveInvoicerInfo());
 
     // 금액
     const [supplyAmount, setSupplyAmount] = useState('');
@@ -47,12 +92,53 @@ const ManualSalesModal: React.FC<ManualSalesModalProps> = ({
             setSupplyAmount('');
             setTaxAmount('');
             setTotalAmount(0);
+            setSiteName('');
+            setTeamName('');
             setMemo('');
+            setInvoicer(resolveInvoicerInfo());
 
-            // Load sites
-            siteService.getSites().then(data => {
-                setSites(data.map((s: any) => s.name).sort());
-            });
+            let cancelled = false;
+
+            const loadModalData = async () => {
+                const [sitesResult, companyResult, taxSettingResult] = await Promise.allSettled([
+                    siteService.getSites(),
+                    companyService.getMyCompanyInfo(),
+                    getCompanyTaxSetting()
+                ]);
+
+                if (cancelled) return;
+
+                if (sitesResult.status === 'fulfilled') {
+                    setSites(
+                        sitesResult.value
+                            .map((site) => normalizeText(site.name))
+                            .filter(Boolean)
+                            .sort()
+                    );
+                } else {
+                    console.error('[ManualSalesModal] Failed to load sites:', sitesResult.reason);
+                    setSites([]);
+                }
+
+                if (companyResult.status === 'rejected') {
+                    console.error('[ManualSalesModal] Failed to load company settings:', companyResult.reason);
+                }
+
+                if (taxSettingResult.status === 'rejected') {
+                    console.error('[ManualSalesModal] Failed to load tax settings:', taxSettingResult.reason);
+                }
+
+                setInvoicer(resolveInvoicerInfo(
+                    companyResult.status === 'fulfilled' ? companyResult.value : null,
+                    taxSettingResult.status === 'fulfilled' ? taxSettingResult.value : null
+                ));
+            };
+
+            void loadModalData();
+
+            return () => {
+                cancelled = true;
+            };
         }
     }, [isOpen, initialCompanyName, initialBusinessNumber]);
 
@@ -69,7 +155,7 @@ const ManualSalesModal: React.FC<ManualSalesModalProps> = ({
         // 세액 자동 계산 (10%)
         if (val) {
             const supply = Number(val);
-            setTaxAmount(Math.floor(supply * 0.1).toString());
+            setTaxAmount(calculateVatAmount(supply).toString());
         } else {
             setTaxAmount('');
         }
@@ -79,6 +165,11 @@ const ManualSalesModal: React.FC<ManualSalesModalProps> = ({
         e.preventDefault();
         if (!companyName || !supplyAmount) {
             alert('거래처명과 공급가액은 필수입니다.');
+            return;
+        }
+
+        if (!invoicer.corpNum || !invoicer.corpName) {
+            alert('공급자 사업자번호와 상호를 확인해 주세요.');
             return;
         }
 
@@ -93,9 +184,11 @@ const ManualSalesModal: React.FC<ManualSalesModalProps> = ({
                 type: 'sales',
                 status: 'issued', // 수기 등록은 이미 발행된 것으로 간주
 
-                // 공급자 (우리 회사 - 하드코딩 또는 설정에서 가져오기)
-                invoicerCorpNum: '123-45-67890', // TODO: Fetch from settings
-                invoicerCorpName: '(주)스마트건설',
+                // 공급자
+                invoicerCorpNum: invoicer.corpNum,
+                invoicerCorpName: invoicer.corpName,
+                invoicerCeoName: invoicer.ceoName || undefined,
+                invoicerAddr: invoicer.addr || undefined,
 
                 // 공급받는자
                 invoiceeCorpNum: businessNumber,

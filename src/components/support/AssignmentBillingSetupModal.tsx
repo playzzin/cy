@@ -45,6 +45,8 @@ export const AssignmentBillingSetupModal: React.FC<AssignmentBillingSetupModalPr
 }) => {
     const hasAssignment = Boolean(assignmentContent);
     const hasBilling = Boolean(billingContent);
+    const titleId = React.useId();
+    const panelId = React.useId();
     const [activeSection, setActiveSection] = React.useState<AssignmentBillingSection>(
         initialSection === 'billing' && hasBilling ? 'billing' : 'assignment'
     );
@@ -75,15 +77,15 @@ export const AssignmentBillingSetupModal: React.FC<AssignmentBillingSetupModalPr
     }> = [
         {
             key: 'assignment',
-            label: '배정',
-            description: `${resourceLabel} 배정 변경`,
+            label: '배정 대상',
+            description: `${resourceLabel} 사용자 변경`,
             icon: faUsers,
             enabled: hasAssignment
         },
         {
             key: 'billing',
-            label: '청구',
-            description: '청구대상 설정',
+            label: '청구 방식',
+            description: '누구에게 청구할지 선택',
             icon: faFileInvoiceDollar,
             enabled: hasBilling
         }
@@ -93,7 +95,33 @@ export const AssignmentBillingSetupModal: React.FC<AssignmentBillingSetupModalPr
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-3 backdrop-blur-sm sm:p-4">
-            <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl animate-fade-in-up">
+            <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={titleId}
+                className="assignment-billing-modal flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white text-slate-800 shadow-2xl animate-fade-in-up"
+            >
+                <style>{`
+                    .assignment-billing-modal input,
+                    .assignment-billing-modal select,
+                    .assignment-billing-modal textarea {
+                        background-color: #ffffff;
+                        color: #1f2937;
+                        caret-color: #1f2937;
+                    }
+                    .assignment-billing-modal input::placeholder,
+                    .assignment-billing-modal textarea::placeholder {
+                        color: #94a3b8;
+                    }
+                    .assignment-billing-modal option {
+                        background-color: #ffffff;
+                        color: #1f2937;
+                    }
+                    .assignment-billing-modal input[type="checkbox"],
+                    .assignment-billing-modal input[type="radio"] {
+                        background-color: initial;
+                    }
+                `}</style>
                 <div className="border-b border-slate-100 bg-white px-5 py-4 sm:px-6">
                     <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0">
@@ -102,8 +130,8 @@ export const AssignmentBillingSetupModal: React.FC<AssignmentBillingSetupModalPr
                                     <FontAwesomeIcon icon={activeSection === 'billing' ? faFileInvoiceDollar : faUsers} />
                                 </span>
                                 <div className="min-w-0">
-                                    <p className="text-xs font-extrabold text-indigo-500">배정과 청구를 한 번에 정리</p>
-                                    <h2 className="truncate text-lg font-black text-slate-900 sm:text-xl">{title}</h2>
+                                    <p className="text-xs font-extrabold text-indigo-500">빠른 배정/청구 설정</p>
+                                    <h2 id={titleId} className="truncate text-lg font-black text-slate-900 sm:text-xl">{title}</h2>
                                 </div>
                             </div>
                             {subtitle && (
@@ -113,7 +141,7 @@ export const AssignmentBillingSetupModal: React.FC<AssignmentBillingSetupModalPr
                         <button
                             type="button"
                             onClick={onClose}
-                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-700"
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                             aria-label="닫기"
                         >
                             <FontAwesomeIcon icon={faTimes} />
@@ -150,14 +178,18 @@ export const AssignmentBillingSetupModal: React.FC<AssignmentBillingSetupModalPr
                     )}
 
                     {hasAssignment && hasBilling && (
-                        <div className="mt-4 grid grid-cols-2 rounded-lg bg-slate-100 p-1">
+                        <div className="mt-4 grid grid-cols-2 rounded-lg bg-slate-100 p-1" role="tablist" aria-label="배정 및 청구 설정 단계">
                             {tabs.map((tab, index) => (
                                 <button
                                     key={tab.key}
                                     type="button"
+                                    role="tab"
+                                    id={`${panelId}-${tab.key}-tab`}
+                                    aria-controls={`${panelId}-${tab.key}`}
+                                    aria-selected={activeSection === tab.key}
                                     onClick={() => tab.enabled && setActiveSection(tab.key)}
                                     disabled={!tab.enabled}
-                                    className={`min-w-0 rounded-md px-3 py-2 text-left transition-all ${
+                                    className={`min-w-0 rounded-md px-3 py-2 text-left transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
                                         activeSection === tab.key
                                             ? 'bg-white text-indigo-700 shadow-sm'
                                             : 'text-slate-500 hover:bg-white/60 hover:text-slate-800'
@@ -181,7 +213,12 @@ export const AssignmentBillingSetupModal: React.FC<AssignmentBillingSetupModalPr
                     )}
                 </div>
 
-                <div className="flex-1 overflow-y-auto bg-slate-50/50 p-4 sm:p-6">
+                <div
+                    id={`${panelId}-${activeSection}`}
+                    role="tabpanel"
+                    aria-labelledby={`${panelId}-${activeSection}-tab`}
+                    className="flex-1 overflow-y-auto bg-slate-50/50 p-4 sm:p-6"
+                >
                     {activeContent}
                 </div>
             </div>

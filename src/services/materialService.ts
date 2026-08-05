@@ -473,9 +473,9 @@ export const addInboundTransactionsBatch = async (
         data,
         photoBatch ? { ...photoBatch, createdAt: now, updatedAt: now } as any : undefined
     );
-    for (const row of data) {
-        await logMaterialChange('created', 'inbound', null, row as any, 'materialInboundBatch');
-    }
+    data.forEach((row) => {
+        void logMaterialChange('created', 'inbound', null, row as any, 'materialInboundBatch');
+    });
 };
 
 export const getInboundTransactions = async (filters?: TransactionFilters): Promise<InboundTransaction[]> => {
@@ -486,7 +486,22 @@ export const getInboundTransactions = async (filters?: TransactionFilters): Prom
     const materialById = await normalizeMaterialSnapshot();
     const materialFilterKey = getMaterialFilterKey(filters?.materialId, materialById);
 
-    let rows = await materialFirestoreService.getInboundsByRange(start, end, filters?.siteId);
+    const rentalCompanyIds = Array.from(new Set((filters?.rentalCompanyIds || [])
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)));
+    const siteIds = Array.from(new Set((filters?.siteIds || [])
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)));
+    const inboundBatches = rentalCompanyIds.length > 0
+        ? await Promise.all(rentalCompanyIds.map((companyId) =>
+            materialFirestoreService.getInboundsByRange(start, end, filters?.siteId, companyId)
+        ))
+        : siteIds.length > 0
+            ? await Promise.all(siteIds.map((allowedSiteId) =>
+                materialFirestoreService.getInboundsByRange(start, end, allowedSiteId)
+            ))
+        : [await materialFirestoreService.getInboundsByRange(start, end, filters?.siteId)];
+    let rows = Array.from(new Map(inboundBatches.flat().map((row) => [row.id, row])).values());
     let normalizedRows = rows.map((row) => normalizeTransactionWithMaster(row, materialById)) as any[];
 
     if (filters?.materialId) {
@@ -567,9 +582,9 @@ export const addOutboundTransactionsBatch = async (
         data,
         photoBatch ? { ...photoBatch, createdAt: now, updatedAt: now } as any : undefined
     );
-    for (const row of data) {
-        await logMaterialChange('created', 'outbound', null, row as any, 'materialOutboundBatch');
-    }
+    data.forEach((row) => {
+        void logMaterialChange('created', 'outbound', null, row as any, 'materialOutboundBatch');
+    });
 };
 
 export const getOutboundTransactions = async (filters?: TransactionFilters): Promise<OutboundTransaction[]> => {
@@ -579,7 +594,22 @@ export const getOutboundTransactions = async (filters?: TransactionFilters): Pro
     const materialById = await normalizeMaterialSnapshot();
     const materialFilterKey = getMaterialFilterKey(filters?.materialId, materialById);
 
-    let rows = await materialFirestoreService.getOutboundsByRange(start, end, filters?.siteId);
+    const rentalCompanyIds = Array.from(new Set((filters?.rentalCompanyIds || [])
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)));
+    const siteIds = Array.from(new Set((filters?.siteIds || [])
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)));
+    const outboundBatches = rentalCompanyIds.length > 0
+        ? await Promise.all(rentalCompanyIds.map((companyId) =>
+            materialFirestoreService.getOutboundsByRange(start, end, filters?.siteId, companyId)
+        ))
+        : siteIds.length > 0
+            ? await Promise.all(siteIds.map((allowedSiteId) =>
+                materialFirestoreService.getOutboundsByRange(start, end, allowedSiteId)
+            ))
+        : [await materialFirestoreService.getOutboundsByRange(start, end, filters?.siteId)];
+    let rows = Array.from(new Map(outboundBatches.flat().map((row) => [row.id, row])).values());
     let normalizedRows = rows.map((row) => normalizeTransactionWithMaster(row, materialById)) as any[];
 
     if (filters?.materialId) {

@@ -1,9 +1,9 @@
 
 /**
- * 세금계산서 발행 페이지
- * 
- * 바로빌 API를 통해 전자세금계산서를 발행합니다.
- * Firestore 연동: 거래처(협력사/건설사), 현장 자동 연동
+ * Tax invoice issue page.
+ *
+ * External issuing providers are not wired here. The page keeps local entry,
+ * Firestore history, and company/site lookups available.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -32,8 +32,8 @@ import {
     TaxInvoiceListItem,
     calculateTax,
     formatDateForTaxInvoice,
-    getBarobillSetting
-} from '../../services/barobillService';
+    getCompanyTaxSetting
+} from '../../services/taxInvoiceApiService';
 import { companyService, Company } from '../../services/companyService';
 import { siteService, Site } from '../../services/siteService';
 import COMPANY_INFO from '../../config/company';
@@ -112,7 +112,7 @@ const TaxInvoicePage: React.FC = () => {
                 const savedInfo = await companyService.getMyCompanyInfo();
 
                 // 백엔드 설정(환경변수) 가져오기
-                const backendSetting = await getBarobillSetting();
+                const taxSetting = await getCompanyTaxSetting();
 
                 if (savedInfo) {
                     // 저장된 정보가 있으면 우선 사용 + 백엔드에서 강제 동기화해야 할 설정이 있다면 여기서 병합 가능
@@ -120,20 +120,20 @@ const TaxInvoicePage: React.FC = () => {
                     setInvoicer(prev => ({
                         ...prev,
                         ...savedInfo,
-                        corpNum: savedInfo.corpNum || backendSetting.corpNum || prev.corpNum
+                        corpNum: savedInfo.corpNum || taxSetting.corpNum || prev.corpNum
                     }));
                 } else {
                     // 저장된 정보가 없으면 백엔드 설정으로 초기화
-                    if (backendSetting.corpNum) {
+                    if (taxSetting.corpNum) {
                         setInvoicer(prev => ({
                             ...prev,
-                            corpNum: backendSetting.corpNum,
-                            corpName: backendSetting.corpName || prev.corpName,
-                            ceoName: backendSetting.ceoName || prev.ceoName,
-                            addr: backendSetting.addr || prev.addr,
-                            bizType: backendSetting.bizType || prev.bizType,
-                            bizClass: backendSetting.bizClass || prev.bizClass,
-                            email: backendSetting.email || prev.email
+                            corpNum: taxSetting.corpNum,
+                            corpName: taxSetting.corpName || prev.corpName,
+                            ceoName: taxSetting.ceoName || prev.ceoName,
+                            addr: taxSetting.addr || prev.addr,
+                            bizType: taxSetting.bizType || prev.bizType,
+                            bizClass: taxSetting.bizClass || prev.bizClass,
+                            email: taxSetting.email || prev.email
                         }));
                     }
                 }
@@ -215,7 +215,7 @@ const TaxInvoicePage: React.FC = () => {
             // 품목 및 금액 설정
             if (itemName || amount) {
                 const supplyCost = amount || 0;
-                const tax = Math.floor(supplyCost * 0.1);
+                const tax = calculateTax(supplyCost);
 
                 setItems([{
                     ...emptyItem,
@@ -422,7 +422,7 @@ const TaxInvoicePage: React.FC = () => {
                         <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-3xl" />
                         <div>
                             <h1 className="text-2xl font-bold">전자세금계산서</h1>
-                            <p className="text-blue-100">바로빌 API 연동</p>
+                            <p className="text-blue-100">전자세금계산서 발행 관리</p>
                         </div>
                     </div>
                 </div>

@@ -174,9 +174,9 @@ export const PRINT_STYLES = `
 
 export const cellStyle = (overrides: React.CSSProperties = {}): React.CSSProperties => ({
     border: BORDER_THIN,
-    padding: '8px 10px',
+    padding: 'calc(8px + var(--estimate-table-padding-offset, 0px)) calc(10px + var(--estimate-table-padding-offset, 0px))',
     fontFamily: EXCEL_FONT,
-    fontSize: '9.5pt',
+    fontSize: 'calc(9.5pt + var(--estimate-font-size-offset, 0pt))',
     verticalAlign: 'middle',
     textAlign: 'center',
     backgroundColor: '#fff',

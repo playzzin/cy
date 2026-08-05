@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faSearch, faPenToSquare, faPlus, faTable, faTrash,
-    faChevronDown, faChevronRight, faBuilding, faUserGroup,
+    faChevronDown, faChevronRight, faBuilding,
     faList, faHandshake, faIndustry, faTimes
 } from '@fortawesome/free-solid-svg-icons';
 import { companyService, Company } from '../../services/companyService';
@@ -13,12 +14,14 @@ import { statisticsService } from '../../services/statisticsService';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import CompanyForm from '../../components/company/CompanyForm';
+import { getCompanyTypeLabel } from '../../utils/companyTypeLabel';
 import { InputPopover } from '../../components/common/SingleSelectPopover';
 import { partnerRecognitionService } from '../../services/partnerRecognitionService';
 import type { BusinessCardImage, BusinessContact, CompanyRelationship } from '../../types/partnerRecognition';
 
 const COMPANY_COLUMNS = [
     { key: 'name', label: '회사명' },
+    { key: 'type', label: '구분' },
     { key: 'ceoName', label: '대표자' },
     { key: 'phone', label: '연락처' },
     { key: 'address', label: '주소' },
@@ -47,6 +50,16 @@ interface CompanyDatabaseProps {
 
 type TabType = 'all' | 'company' | 'partner' | 'client' | 'rental';
 
+const parseCompanyDatabaseTab = (value: string | null): TabType | null => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'all') return 'all';
+    if (normalized === 'company' || normalized === 'contractor' || normalized === '시공사') return 'company';
+    if (normalized === 'partner' || normalized === '협력사') return 'partner';
+    if (normalized === 'client' || normalized === 'builder' || normalized === '발주사' || normalized === '건설사' || normalized === '원청') return 'client';
+    if (normalized === 'rental' || normalized === '임대사') return 'rental';
+    return null;
+};
+
 const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
     hideHeader = false,
     highlightedId,
@@ -56,6 +69,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
     showAddButton = true,
     defaultType
 }) => {
+    const [searchParams, setSearchParams] = useSearchParams();
     // Data State
     const [companies, setCompanies] = useState<Company[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
@@ -67,7 +81,9 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
     const [loading, setLoading] = useState(false);
 
     // View State
-    const [activeTab, setActiveTab] = useState<TabType>('all');
+    const [activeTab, setActiveTab] = useState<TabType>(
+        () => parseCompanyDatabaseTab(searchParams.get('companyTab') || searchParams.get('companyType')) || 'all'
+    );
     const [searchTerm, setSearchTerm] = useState('');
     const [isStickyHeader, setIsStickyHeader] = useState(false); // Sticky header toggle
 
@@ -93,6 +109,24 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
     useEffect(() => {
         loadData();
     }, []);
+
+    useEffect(() => {
+        const requestedTab = parseCompanyDatabaseTab(searchParams.get('companyTab') || searchParams.get('companyType'));
+        if (requestedTab && requestedTab !== activeTab) {
+            setActiveTab(requestedTab);
+        }
+    }, [activeTab, searchParams]);
+
+    const selectCompanyTab = (tab: TabType) => {
+        setActiveTab(tab);
+        const nextParams = new URLSearchParams(searchParams);
+        if (tab === 'all') {
+            nextParams.delete('companyTab');
+        } else {
+            nextParams.set('companyTab', tab);
+        }
+        setSearchParams(nextParams, { replace: true });
+    };
 
     // Load Data
     const loadData = async () => {
@@ -247,6 +281,9 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
     };
 
     const renderCellValue = (company: Company, key: string) => {
+        if (key === 'type') {
+            return getCompanyTypeLabel(company.type);
+        }
         if (key === 'totalManDay' || key === 'totalGongsu') {
             const gongsu = getCompanyManDay(company, companyStats, 'totalManDay');
             return <span className="font-bold text-blue-600">{gongsu.toFixed(1)}공수</span>;
@@ -289,7 +326,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
 
     const TabButton = ({ id, label, icon }: { id: TabType, label: string, icon: any }) => (
         <button
-            onClick={() => setActiveTab(id)}
+            onClick={() => selectCompanyTab(id)}
             className={`px-4 py-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors ${activeTab === id
                 ? 'border-indigo-600 text-indigo-600'
                 : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
@@ -308,10 +345,10 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                     <div className="flex justify-between items-end">
                         <div className="flex space-x-2">
                             <TabButton id="all" label="전체" icon={faList} />
-                            <TabButton id="company" label="시공사" icon={faBuilding} />
-                            <TabButton id="partner" label="협력사" icon={faHandshake} />
-                            <TabButton id="client" label="건설사(원청)" icon={faIndustry} />
-                            <TabButton id="rental" label="임대사" icon={faIndustry} />
+                            <TabButton id="company" label="시공" icon={faBuilding} />
+                            <TabButton id="partner" label="협력" icon={faHandshake} />
+                            <TabButton id="client" label="건설" icon={faIndustry} />
+                            <TabButton id="rental" label="임대" icon={faIndustry} />
                         </div>
                     </div>
                 </div>
@@ -324,10 +361,10 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                         <FontAwesomeIcon icon={faBuilding} className="text-indigo-600" />
                         <span>
                             {activeTab === 'all' && '전체 회사 목록'}
-                            {activeTab === 'company' && '시공사 관리'}
-                            {activeTab === 'partner' && '협력사 관리'}
-                            {activeTab === 'client' && '건설사(원청) 관리'}
-                            {activeTab === 'rental' && '임대사 관리'}
+                            {activeTab === 'company' && '시공 관리'}
+                            {activeTab === 'partner' && '협력 관리'}
+                            {activeTab === 'client' && '건설 관리'}
+                            {activeTab === 'rental' && '임대 관리'}
                         </span>
                         <span className="text-sm font-normal text-slate-500 ml-2">({filteredCompanies.length})</span>
                     </h2>
@@ -535,7 +572,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                                                                 <div className="bg-white p-4 rounded-lg border border-slate-200">
                                                                     <h4 className="font-bold text-slate-700 mb-2 border-b pb-2">기본 정보</h4>
                                                                     <div className="grid grid-cols-2 gap-2 text-sm">
-                                                                        <div className="text-slate-500">구분</div><div className="font-medium text-slate-800">{company.type}</div>
+                                                                        <div className="text-slate-500">구분</div><div className="font-medium text-slate-800">{getCompanyTypeLabel(company.type)}</div>
                                                                         <div className="text-slate-500">사업자번호</div><div>{company.businessNumber || '-'}</div>
                                                                         <div className="text-slate-500">대표자 (주민번호)</div><div>{company.ceoName} {company.ceoResidentNumber ? `(${company.ceoResidentNumber})` : ''}</div>
                                                                         <div className="text-slate-500">연락처</div><div>{company.phone || '-'}</div>

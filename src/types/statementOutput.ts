@@ -25,6 +25,8 @@ export interface StatementOutputRecord {
     documentId?: string;
     documentNo?: string;
     documentTitle?: string;
+    /** 확정된 월급제 실행본(월·팀) ID. 명세서의 급여 원본을 추적한다. */
+    payrollRunId?: string;
     amountSummary?: StatementOutputAmountSummary;
     optionPreset?: StatementOutputStatus;
     optionSnapshot?: Record<string, unknown>;

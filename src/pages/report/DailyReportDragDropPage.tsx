@@ -15,7 +15,6 @@ import {
     SortableContext,
     sortableKeyboardCoordinates,
     verticalListSortingStrategy,
-    rectSortingStrategy,
     useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -29,12 +28,9 @@ import {
     faCheckSquare,
     faSquare,
     faCopy,
-    faSearch,
-    faArrowRight,
     faUndo,
     faCheckDouble,
     faChevronDown,
-    faTimes,
     faTrash
 } from '@fortawesome/free-solid-svg-icons';
 import { teamService, Team } from '../../services/teamService';
@@ -149,7 +145,7 @@ const WorkerCard = ({
                 ${!worker.teamColor && companyStatus === 'external' ? 'border-l-[8px] border-l-orange-400' : ''}
     `}
             // Remove click/doubleClick propagation handled by parent mostly? isOverlay checks?
-            onClick={(e) => {
+            onClick={(_e) => {
                 // If clicking dropdown, dont toggle (handled in select)
                 onToggleSelect && onToggleSelect(worker.tempId);
             }}
@@ -384,7 +380,7 @@ const SiteColumn = ({
                     borderColor: isConfirmedView ? undefined : hexToRgba(responsibleTeamColor || siteColor || '#059669', 0.3),
                     borderLeftColor: (site && responsibleTeamColor) ? responsibleTeamColor : undefined
                 }}
-                onClick={(e) => {
+                onClick={(_e) => {
                     // Primary Click: Select Site as Target AND Toggle Expansion
                     if (isAccordion && site) {
                         if (onSiteSelect) onSiteSelect(site.id || '');
@@ -604,86 +600,6 @@ interface MultiSelectProps {
     label?: string;
 }
 
-const MultiSelect = ({ options, selectedIds, onChange, placeholder = 'Select...', label }: MultiSelectProps) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const containerRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-                setIsOpen(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
-    const toggleOption = (id: string) => {
-        const newSelected = selectedIds.includes(id)
-            ? selectedIds.filter(item => item !== id)
-            : [...selectedIds, id];
-        onChange(newSelected);
-    };
-
-    const handleSelectAll = () => {
-        if (selectedIds.length === options.length) {
-            onChange([]);
-        } else {
-            onChange(options.map(o => o.id));
-        }
-    };
-
-    return (
-        <div className="relative" ref={containerRef}>
-            {label && <label className="block text-xs font-bold text-slate-500 mb-1">{label}</label>}
-            <div
-                className="flex items-center justify-between w-full min-w-[200px] bg-white border border-slate-300 hover:border-blue-400 rounded-lg px-3 py-1.5 cursor-pointer text-sm shadow-sm transition-colors"
-                onClick={() => setIsOpen(!isOpen)}
-            >
-                <div className="flex flex-wrap gap-1 items-center overflow-hidden">
-                    <span className="text-slate-700 truncate max-w-[150px] font-medium">
-                        {selectedIds.length === 0
-                            ? placeholder
-                            : selectedIds.length === options.length
-                                ? '전체 선택됨'
-                                : `${selectedIds.length}개 선택됨`}
-                    </span>
-                </div>
-                <FontAwesomeIcon icon={faChevronDown} className={`text-slate-400 text-xs transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-            </div>
-
-            {isOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-50 max-h-[300px] overflow-y-auto flex flex-col">
-                    <div
-                        className="p-2 border-b border-slate-100 hover:bg-slate-50 cursor-pointer flex items-center gap-2 text-sm font-bold text-slate-600 sticky top-0 bg-white"
-                        onClick={handleSelectAll}
-                    >
-                        <FontAwesomeIcon
-                            icon={selectedIds.length === options.length ? faCheckSquare : faSquare}
-                            className={selectedIds.length === options.length ? "text-blue-500" : "text-slate-300"}
-                        />
-                        <span>전체 {selectedIds.length === options.length ? '해제' : '선택'}</span>
-                    </div>
-                    {options.map(option => (
-                        <div
-                            key={option.id}
-                            className="p-2 hover:bg-slate-50 cursor-pointer flex items-center gap-2 text-sm border-b border-slate-50 last:border-none"
-                            onClick={() => toggleOption(option.id)}
-                        >
-                            <FontAwesomeIcon
-                                icon={selectedIds.includes(option.id) ? faCheckSquare : faSquare}
-                                className={selectedIds.includes(option.id) ? "text-blue-500" : "text-slate-300"}
-                            />
-                            <span className={selectedIds.includes(option.id) ? "text-slate-800 font-medium" : "text-slate-500"}>
-                                {option.name}
-                            </span>
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-};
 
 
 // --- Main Page ---
@@ -1078,9 +994,6 @@ const DailyReportDragDropPage = () => {
         }
     };
 
-    const handleClearSelection = () => {
-        setSelectedWorkerIds(new Set());
-    };
 
     // --- Enhanced Features Logic ---
 

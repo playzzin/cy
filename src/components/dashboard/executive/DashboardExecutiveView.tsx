@@ -9,33 +9,10 @@ import { TeamPerformance } from './TeamPerformance';
 import { SiteStatus } from './SiteStatus';
 import { formatDate } from '../../../utils/dashboard/formatters';
 import { Download } from 'lucide-react';
-import { motion } from 'framer-motion';
 
 export const DashboardExecutiveView: React.FC = () => {
     const { period, dateRange, handlePeriodChange } = usePeriodSelector();
     const { data, loading, error } = useDashboardData(dateRange.start, dateRange.end);
-
-    const containerVariants: any = {
-        hidden: { opacity: 0 },
-        visible: {
-            opacity: 1,
-            transition: {
-                staggerChildren: 0.1
-            }
-        }
-    };
-
-    const itemVariants: any = {
-        hidden: { y: 20, opacity: 0 },
-        visible: {
-            y: 0,
-            opacity: 1,
-            transition: {
-                type: 'spring',
-                stiffness: 100
-            }
-        }
-    };
 
     if (error) {
         return (
@@ -67,50 +44,45 @@ export const DashboardExecutiveView: React.FC = () => {
             </div>
 
             {/* Content */}
-            <motion.div
-                variants={containerVariants}
-                initial="hidden"
-                animate="visible"
-                className="space-y-6"
-            >
+            <div className="space-y-6 motion-safe:animate-fadeInUp">
                 {/* KPI Row */}
-                <motion.div variants={itemVariants}>
+                <div>
                     <KPISummary
                         items={data?.kpis || []}
                         loading={loading}
                     />
-                </motion.div>
+                </div>
 
                 {/* Main Charts Row */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <motion.div variants={itemVariants} className="lg:col-span-2">
+                    <div className="lg:col-span-2">
                         <ManDayTrend
                             data={data?.dailyTrend || []}
                             loading={loading}
                         />
-                    </motion.div>
-                    <motion.div variants={itemVariants}>
+                    </div>
+                    <div>
                         <SiteStatus
                             data={data?.siteStatus || []}
                             loading={loading}
                         />
-                    </motion.div>
+                    </div>
                 </div>
 
                 {/* Secondary Charts Row */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <motion.div variants={itemVariants}>
+                    <div>
                         <TeamPerformance
                             data={data?.teamPerformance || []}
                             loading={loading}
                         />
-                    </motion.div>
+                    </div>
                     {/* Placeholder for SupportFlow or other charts */}
-                    <motion.div variants={itemVariants} className="bg-white dark:bg-slate-800 rounded-xl border border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-400 text-sm h-[400px]">
+                    <div className="bg-white dark:bg-slate-800 rounded-xl border border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-400 text-sm h-[400px]">
                         추가 위젯 (재무/지원현황) 준비 중
-                    </motion.div>
+                    </div>
                 </div>
-            </motion.div>
+            </div>
         </div>
     );
 };

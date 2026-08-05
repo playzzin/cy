@@ -84,6 +84,23 @@ const getDayBefore = (dateText: string): string => {
     return `${outputYear}-${outputMonth}-${outputDay}`;
 };
 
+const parseYmdDate = (value?: unknown): Date | null => {
+    const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').trim());
+    if (!matched) return null;
+    const year = Number(matched[1]);
+    const month = Number(matched[2]);
+    const day = Number(matched[3]);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+    return date;
+};
+
+const shouldDeleteZeroLengthAssignment = (assignment: Record<string, unknown>, endDateText: string): boolean => {
+    const start = parseYmdDate(assignment.startDate);
+    const end = parseYmdDate(endDateText);
+    return Boolean(start && end && end.getTime() < start.getTime());
+};
+
 export const cardFirestoreService = {
     // --- Cards ---
     async getCards(): Promise<Card[]> {
@@ -165,6 +182,10 @@ export const cardFirestoreService = {
             const assignmentRef = doc(collection(db, ASSIGNMENTS_COLLECTION));
 
             activeAssignments.forEach((assignmentDoc) => {
+                if (shouldDeleteZeroLengthAssignment(assignmentDoc.data(), previousEndDate)) {
+                    transaction.delete(assignmentDoc.ref);
+                    return;
+                }
                 transaction.update(assignmentDoc.ref, {
                     endDate: previousEndDate,
                     updatedAt: serverTimestamp(),
@@ -203,6 +224,10 @@ export const cardFirestoreService = {
             const cardRef = doc(db, CARDS_COLLECTION, cardId);
 
             activeAssignments.forEach((assignmentDoc) => {
+                if (shouldDeleteZeroLengthAssignment(assignmentDoc.data(), endDate)) {
+                    transaction.delete(assignmentDoc.ref);
+                    return;
+                }
                 transaction.update(assignmentDoc.ref, {
                     endDate,
                     updatedAt: serverTimestamp(),
@@ -303,6 +328,7 @@ export const cardFirestoreService = {
         const snapshot = await getDocs(q);
         return snapshot.docs
             .map(doc => ({ id: doc.id, ...doc.data() } as CardTransaction))
+            .filter((transaction) => transaction.status !== 'CANCELLED' && !transaction.cancelledAt)
             .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')));
     },
 
@@ -312,9 +338,46 @@ export const cardFirestoreService = {
         const docRef = doc(collection(db, TRANSACTIONS_COLLECTION));
         await setDoc(docRef, {
             ...cleanedData,
+            status: cleanedData.status ?? 'ACTIVE',
             createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
         });
         return docRef.id;
+    },
+
+    async applyCardTransactionChanges(params: {
+        upserts?: Array<Partial<CardTransaction> & { id: string }>;
+        cancelIds?: string[];
+        operationId?: string;
+    }): Promise<void> {
+        const batch = writeBatch(db);
+        const now = serverTimestamp();
+
+        (params.upserts ?? []).forEach((transaction) => {
+            if (!transaction.id) return;
+            const { id, createdAt, updatedAt, cancelledAt, ...payload } = transaction;
+            const validated = CardTransactionSchema.parse(payload);
+            batch.set(doc(db, TRANSACTIONS_COLLECTION, id), cleanForFirestore({
+                ...validated,
+                status: validated.status ?? 'ACTIVE',
+                cancelledAt: null,
+                lastOperationId: params.operationId,
+                ...(createdAt ? { createdAt } : { createdAt: now }),
+                updatedAt: now
+            }) as Record<string, unknown>, { merge: true });
+        });
+
+        (params.cancelIds ?? []).forEach((id) => {
+            if (!id) return;
+            batch.set(doc(db, TRANSACTIONS_COLLECTION, id), cleanForFirestore({
+                status: 'CANCELLED',
+                cancelledAt: now,
+                lastOperationId: params.operationId,
+                updatedAt: now
+            }) as Record<string, unknown>, { merge: true });
+        });
+
+        await batch.commit();
     },
 
     async deleteTransaction(id: string): Promise<void> {

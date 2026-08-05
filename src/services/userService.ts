@@ -8,6 +8,9 @@ import {
     resolveAccountTypeFromCompanyType,
     resolveEntitySubTypeFromCompanyType,
 } from '../types/accountLink';
+import { findBusinessPartnerPositionDefinition } from '../constants/businessPartnerPositions';
+import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
+import { devUsers, updateDevUser } from '../utils/devAdminFixtures';
 
 // In-memory cache for user data
 const userCache = new Map<string, { data: UserData; timestamp: number }>();
@@ -122,6 +125,10 @@ const resolveOfficeStaffForLinking = async (staffId: string) => {
 export const userService = {
     // Save or update user on login
     saveUser: async (user: User): Promise<void> => {
+        if (isDevAdminSessionEnabled()) {
+            return;
+        }
+
         try {
             const existing = await userFirestoreService.getUser(user.uid);
             const now = new Date();
@@ -154,6 +161,10 @@ export const userService = {
 
     // Get a single user by UID
     getUser: async (uid: string): Promise<UserData | null> => {
+        if (isDevAdminSessionEnabled()) {
+            return devUsers.find((user) => user.uid === uid) || null;
+        }
+
         const now = Date.now();
         const cached = userCache.get(uid);
         if (cached && (now - cached.timestamp < CACHE_TTL)) {
@@ -169,6 +180,10 @@ export const userService = {
 
     // Get all users
     getAllUsers: async (): Promise<UserData[]> => {
+        if (isDevAdminSessionEnabled()) {
+            return [...devUsers].sort((a, b) => (a.displayName || a.email || '').localeCompare(b.displayName || b.email || ''));
+        }
+
         return userFirestoreService.getAllUsers();
     },
 
@@ -212,6 +227,11 @@ export const userService = {
                 entitySubType: '작업자',
                 relationRole: 'staff',
                 status: 'active',
+                requestedEntity: {
+                    name: worker.name,
+                    role: worker.role,
+                    department: worker.teamName,
+                },
             });
 
             const nextUserData: Partial<UserData> = {
@@ -325,12 +345,22 @@ export const userService = {
 
     // Update user role
     updateUserRole: async (uid: string, role: string): Promise<void> => {
+        if (isDevAdminSessionEnabled()) {
+            updateDevUser(uid, { role });
+            return;
+        }
+
         await userFirestoreService.updateUser(uid, { role } as any);
         userCache.delete(uid); // Invalidate cache
     },
 
     // Update user profile
     updateUserProfile: async (uid: string, updates: Partial<UserData>): Promise<void> => {
+        if (isDevAdminSessionEnabled()) {
+            updateDevUser(uid, updates);
+            return;
+        }
+
         await userFirestoreService.updateUser(uid, updates);
         userCache.delete(uid); // Invalidate cache
     },
@@ -380,6 +410,11 @@ export const userService = {
             entitySubType: '사무실',
             relationRole,
             status,
+            requestedEntity: {
+                name: staff.name,
+                role: staff.role,
+                department: staff.department,
+            },
         });
 
         const userPatch: Partial<UserData> = {
@@ -487,6 +522,7 @@ export const userService = {
             companyId,
         ]);
         const accountType = resolveAccountTypeFromCompanyType(company.type);
+        const linkedPosition = findBusinessPartnerPositionDefinition(company.type, company.type)?.name;
 
         const { accountLinkService } = await import('./accountLinkService');
         const linkId = await accountLinkService.upsertLink({
@@ -500,6 +536,10 @@ export const userService = {
             entitySubType: resolveEntitySubTypeFromCompanyType(company.type),
             relationRole,
             status,
+            requestedEntity: {
+                name: company.name ?? undefined,
+                role: linkedPosition,
+            },
         });
 
         const userPatch: Partial<UserData> = {
@@ -507,6 +547,7 @@ export const userService = {
             accountType,
             status: status === 'active' ? 'active' : (existing?.status || 'pending'),
             primaryLinkId: existing?.primaryLinkId || linkId,
+            position: linkedPosition || existing?.position,
         };
 
         if (existing) {

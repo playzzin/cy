@@ -1580,6 +1580,7 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                                 type="button"
                                 onClick={registerActiveSection}
                                 disabled={isSaving}
+                                aria-label="현재 섹션 등록"
                                 className="px-3 py-1.5 rounded-md text-sm font-bold flex items-center gap-2 transition-all hover:brightness-110 active:scale-95"
                                 style={{
                                     background: isSaving ? 'rgba(148,163,184,0.35)' : 'rgba(59,130,246,0.95)',
@@ -1594,6 +1595,7 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                         <button
                             type="button"
                             onClick={() => togglePanel('bottom')}
+                            aria-label="빠른 실행 패널 닫기"
                             className="w-8 h-8 rounded-md flex items-center justify-center transition-all hover:bg-white/10 active:scale-95"
                             style={{
                                 border: '1px solid rgba(255,255,255,0.12)',

@@ -26,6 +26,7 @@ export const SiteDataSchema = z.object({
     headerActions: z.array(MenuItemSchema).optional(),
     trash: z.array(MenuItemSchema).optional(),
     deletedItems: z.array(z.string()).optional(),
+    systemPageLabels: z.record(z.string(), z.string().min(1)).optional(),
     positionConfig: z.array(z.object({
         id: z.string(),
         name: z.string(),

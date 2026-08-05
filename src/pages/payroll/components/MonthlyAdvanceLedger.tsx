@@ -4,6 +4,11 @@ import {
     AdvanceItemLabelsConfig,
     DEFAULT_ADVANCE_ITEM_LABELS
 } from '../../../services/payrollConfigService';
+import {
+    allocateMonthlyAdvanceTotals,
+    resolveDefaultMonthlyAdvanceAssignment,
+    type MonthlyAdvanceAllocationMode,
+} from '../utils/monthlyAdvanceAllocation';
 
 export interface MonthlyAdvanceLedgerHandle {
     downloadExcel: (label?: string) => void;
@@ -44,27 +49,10 @@ interface LedgerManualInput {
     labor: LedgerSideInput;
     personalMemo: string;
     assignmentType?: 'corporate' | 'labor'; // Legacy row-level field
+    allocationMode?: MonthlyAdvanceAllocationMode;
     itemAssignments?: Record<string, 'corporate' | 'labor'>; // 추가: 개별 항목 분류
 }
 
-interface PayrollConfigLike {
-    insuranceConfig?: {
-        thresholdDays?: number;
-        pensionRate?: number;
-        healthRate?: number;
-        careRateOfHealth?: number;
-        employmentRate?: number;
-        dailyWorkerFeePerManDay?: number;
-        withholdingBaseDeduction?: number;
-        withholdingIncomeBaseMultiplier?: number;
-        withholdingIncomeTaxRate?: number;
-        withholdingResidentTaxRate?: number;
-        withholdingApplyAllLabor?: boolean;
-        employmentApplyBelowThreshold?: boolean;
-    };
-    incomeTaxRate?: number;
-    residentTaxRate?: number;
-}
 
 interface MonthlyAdvanceLedgerWorkEntry {
     date?: string;
@@ -109,8 +97,22 @@ export interface MonthlyAdvanceLedgerRow {
     assignmentType?: 'corporate' | 'labor'; // 추가
 }
 
+export interface MonthlyAdvanceLedgerComputedAmount {
+    rowKey: string;
+    month: string;
+    teamId: string;
+    workerId: string;
+    salaryModel?: string;
+    allocationMode: MonthlyAdvanceAllocationMode;
+    invoiceGrossAmount: number;
+    laborGrossAmount: number;
+    corporateNet: number;
+    personalNet: number;
+}
+
 interface ComputedLedgerRow extends MonthlyAdvanceLedgerRow {
     manual: LedgerManualInput;
+    allocationMode: MonthlyAdvanceAllocationMode;
     invoiceDeductionTotal: number;
     laborDeductionTotal: number;
     utilityTotal: number;
@@ -147,6 +149,7 @@ interface Props {
     isInsuranceEligibleEntry?: (entry: MonthlyAdvanceLedgerWorkEntry, row: MonthlyAdvanceLedgerRow) => boolean;
     clientCompanyNameById?: Record<string, string>;
     onInputsChange?: (inputs: Record<string, LedgerManualInput>) => void;
+    onComputedAmountsChange?: (rows: MonthlyAdvanceLedgerComputedAmount[]) => void;
     initialInputs?: Record<string, LedgerManualInput>;
     visibleSections?: {
         utilities?: boolean;
@@ -186,6 +189,7 @@ const createEmptyManualInput = (defaultAssignment?: 'corporate' | 'labor'): Ledg
     labor: createEmptySideInput(),
     personalMemo: '',
     assignmentType: defaultAssignment ?? 'corporate',
+    allocationMode: 'split',
     itemAssignments: {},
 });
 
@@ -248,6 +252,7 @@ const normalizeManualInput = (
     labor: { ...createEmptySideInput(), ...(input?.labor ?? {}) },
     personalMemo: input?.personalMemo ?? '',
     assignmentType: input?.assignmentType ?? defaultAssignment ?? 'corporate',
+    allocationMode: input?.allocationMode ?? 'split',
     itemAssignments: input?.itemAssignments ?? {},
 });
 
@@ -268,12 +273,18 @@ const isManualInputEffectivelyEmpty = (
         return (value === 'corporate' || value === 'labor') && String(key).trim().length > 0;
     });
 
-    const hasAnyValue = !isSideInputEmpty(input.invoice) || !isSideInputEmpty(input.labor) || memo.length > 0 || hasAssignment;
-    if (!hasAnyValue) return true;
-
     const baselineAssignment = resolveAssignmentType(defaultAssignment, 'corporate');
     const currentAssignment = resolveAssignmentType(input.assignmentType, baselineAssignment);
     const hasCustomAssignment = currentAssignment !== baselineAssignment;
+    const hasCustomAllocationMode = (input.allocationMode ?? 'split') !== 'split';
+    const hasAnyValue =
+        !isSideInputEmpty(input.invoice)
+        || !isSideInputEmpty(input.labor)
+        || memo.length > 0
+        || hasAssignment
+        || hasCustomAssignment
+        || hasCustomAllocationMode;
+    if (!hasAnyValue) return true;
 
     return (
         isSideInputEmpty(input.invoice)
@@ -281,6 +292,7 @@ const isManualInputEffectivelyEmpty = (
         && memo.length === 0
         && !hasAssignment
         && !hasCustomAssignment
+        && !hasCustomAllocationMode
     );
 };
 
@@ -296,6 +308,13 @@ const formatAmount = (value: number): string => (value > 0 ? value.toLocaleStrin
 const formatInputAmount = (value: number): string => (value > 0 ? value.toLocaleString('ko-KR') : '');
 const formatNetAmount = (value: number): string => (Number.isFinite(value) ? value.toLocaleString('ko-KR') : '-');
 const formatManDay = (value: number): string => (value > 0 ? value.toFixed(1) : '-');
+const getWorkerNameTextClassName = (name: string): string => {
+    const length = Array.from(String(name ?? '').trim()).length;
+    if (length >= 9) return 'text-[9px]';
+    if (length >= 7) return 'text-[10px]';
+    if (length >= 5) return 'text-[11px]';
+    return 'text-[13px]';
+};
 const getSalaryModelOrder = (salaryModel?: string): number => {
     const normalized = (salaryModel ?? '').trim();
     if (normalized === '월급제') return 0;
@@ -373,6 +392,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     isInsuranceEligibleEntry,
     clientCompanyNameById = {},
     onInputsChange,
+    onComputedAmountsChange,
     initialInputs,
     visibleSections,
 }: Props, ref: React.ForwardedRef<MonthlyAdvanceLedgerHandle>) {
@@ -381,6 +401,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     const showTaxes = visibleSections?.taxes ?? true;
     const [inputsByRowKey, setInputsByRowKey] = useState<Record<string, LedgerManualInput>>({});
     const [showLaborGroupBasis, setShowLaborGroupBasis] = useState<boolean>(false);
+    const [showRateGuide, setShowRateGuide] = useState<boolean>(false);
     const touchedRowKeysRef = React.useRef<Set<string>>(new Set());
     const resolvedAdvanceItemLabels = useMemo<AdvanceItemLabelsConfig>(() => {
         const next: AdvanceItemLabelsConfig = { ...DEFAULT_ADVANCE_ITEM_LABELS };
@@ -393,7 +414,11 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
         return next;
     }, [advanceItemLabels]);
     const totalColumnCount = 10 + (showUtilities ? 5 : 0) + (showAdvances ? 5 : 0) + (showTaxes ? 7 : 0);
-    const tableMinWidth = Math.floor((708 + (showUtilities ? 392 : 0) + (showAdvances ? 432 : 0) + (showTaxes ? 590 : 0)) * 1.38);
+    const tableMinWidth =
+        848
+        + (showUtilities ? 484 : 0)
+        + (showAdvances ? 674 : 0)
+        + (showTaxes ? 712 : 0);
 
     useEffect(() => {
         setInputsByRowKey((prev) => {
@@ -401,18 +426,19 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
             let changed = false;
 
             rows.forEach((row) => {
+                const defaultAssignment = resolveDefaultMonthlyAdvanceAssignment(row);
                 const prevInput = prev[row.rowKey];
                 const initialInput = initialInputs?.[row.rowKey];
                 const isTouchedRow = touchedRowKeysRef.current.has(row.rowKey);
-                const shouldAdoptInitial = Boolean(initialInput) && !isTouchedRow && isManualInputEffectivelyEmpty(prevInput, row.assignmentType);
+                const shouldAdoptInitial = Boolean(initialInput) && !isTouchedRow && isManualInputEffectivelyEmpty(prevInput, defaultAssignment);
                 const existing = shouldAdoptInitial ? initialInput : (prevInput ?? initialInput);
                 if (!existing) {
                     changed = true;
-                    next[row.rowKey] = createEmptyManualInput(row.assignmentType);
+                    next[row.rowKey] = createEmptyManualInput(defaultAssignment);
                     return;
                 }
 
-                const normalized = normalizeManualInput(existing, row.assignmentType);
+                const normalized = normalizeManualInput(existing, defaultAssignment);
 
                 const isSameInvoice =
                     existing.invoice?.carry === normalized.invoice.carry
@@ -455,7 +481,8 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                     isSameInvoice
                     && isSameLabor
                     && (existing.personalMemo ?? '') === normalized.personalMemo
-                    && (existing.assignmentType ?? row.assignmentType ?? 'corporate') === normalized.assignmentType
+                    && (existing.assignmentType ?? defaultAssignment) === normalized.assignmentType
+                    && (existing.allocationMode ?? 'split') === normalized.allocationMode
                     && isSameAssignments;
 
                 if (!isSame) {
@@ -547,19 +574,41 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
         });
     }, []);
 
-    const updateAssignmentType = useCallback((rowKey: string, value: 'corporate' | 'labor') => {
+    const updateAllocationMode = useCallback((rowKey: string, value: MonthlyAdvanceAllocationMode) => {
         touchedRowKeysRef.current.add(rowKey);
         setInputsByRowKey((prev) => {
-            const base = prev[rowKey] ?? createEmptyManualInput();
+            const sourceRow = rows.find((row) => row.rowKey === rowKey);
+            const defaultAssignment = sourceRow
+                ? resolveDefaultMonthlyAdvanceAssignment(sourceRow)
+                : 'corporate';
+            const base = prev[rowKey] ?? createEmptyManualInput(defaultAssignment);
             return {
                 ...prev,
                 [rowKey]: {
                     ...base,
-                    assignmentType: value,
+                    allocationMode: value,
+                    assignmentType: value === 'split' ? base.assignmentType : value,
                 },
             };
         });
-    }, []);
+    }, [rows]);
+
+    const updateAllAllocationModes = useCallback((value: MonthlyAdvanceAllocationMode) => {
+        rows.forEach((row) => touchedRowKeysRef.current.add(row.rowKey));
+        setInputsByRowKey((prev) => {
+            const next = { ...prev };
+            rows.forEach((row) => {
+                const defaultAssignment = resolveDefaultMonthlyAdvanceAssignment(row);
+                const base = prev[row.rowKey] ?? createEmptyManualInput(defaultAssignment);
+                next[row.rowKey] = {
+                    ...base,
+                    allocationMode: value,
+                    assignmentType: value === 'split' ? base.assignmentType : value,
+                };
+            });
+            return next;
+        });
+    }, [rows]);
 
     const updateItemAssignment = useCallback((rowKey: string, itemKey: string, value: 'corporate' | 'labor') => {
         touchedRowKeysRef.current.add(rowKey);
@@ -788,16 +837,39 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
 
         return rows
             .map((row) => {
-                const baseManual = inputsByRowKey[row.rowKey] ?? createEmptyManualInput();
+                const baseManual = inputsByRowKey[row.rowKey]
+                    ?? createEmptyManualInput(resolveDefaultMonthlyAdvanceAssignment(row));
                 const manual = applyUtilities ? baseManual : maskUtilitiesInManualInput(baseManual);
+                const assignmentType = manual.assignmentType ?? resolveDefaultMonthlyAdvanceAssignment(row);
+                const allocationMode = manual.allocationMode ?? 'split';
+                const allocatedTotals = allocateMonthlyAdvanceTotals(row, allocationMode);
+                const invoiceManDay = allocatedTotals.invoiceManDay;
+                const laborManDay = allocatedTotals.laborManDay;
+                const invoiceGrossAmount = allocatedTotals.invoiceGrossAmount;
+                const laborGrossAmount = allocatedTotals.laborGrossAmount;
+                const allocationChanged =
+                    allocationMode !== 'split'
+                    && (
+                        (allocationMode === 'corporate' && (toNumber(row.laborManDay) > 0 || toNumber(row.laborGrossAmount) > 0))
+                        || (allocationMode === 'labor' && (toNumber(row.invoiceManDay) > 0 || toNumber(row.invoiceGrossAmount) > 0))
+                    );
+                const allocatedWorkEntries = allocationMode === 'split'
+                    ? [...(row.workEntries ?? [])]
+                    : (row.workEntries ?? []).map((entry) => ({
+                        ...entry,
+                        paymentMethod: allocationMode === 'labor' ? '노무' : '계산서',
+                        isLaborSite: allocationMode === 'labor',
+                    }));
                 const invoiceDeductionTotal = sumSideDeductions(manual.invoice);
                 const laborDeductionTotal = sumSideDeductions(manual.labor);
                 const utilityTotal = invoiceDeductionTotal + laborDeductionTotal;
-                const invoiceAdvanceTotal = sumSideAdvances(manual.invoice);
-                const laborAdvanceTotal = sumSideAdvances(manual.labor);
-
-                const laborGrossAmount = Math.max(0, row.laborGrossAmount);
-                const invoiceGrossAmount = Math.max(0, row.invoiceGrossAmount);
+                const totalAdvance = sumSideAdvances(manual.invoice) + sumSideAdvances(manual.labor);
+                const invoiceAdvanceTotal = allocationMode === 'split'
+                    ? sumSideAdvances(manual.invoice)
+                    : allocationMode === 'corporate' ? totalAdvance : 0;
+                const laborAdvanceTotal = allocationMode === 'split'
+                    ? sumSideAdvances(manual.labor)
+                    : allocationMode === 'labor' ? totalAdvance : 0;
 
                 let pension = 0;
                 let health = 0;
@@ -811,7 +883,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 let isWithholdingTarget = false;
                 const isDailyWageWorker = (row.salaryModel ?? '').trim() === '일급제';
 
-                if (row.statementTaxAmounts) {
+                if (row.statementTaxAmounts && !allocationChanged) {
                     pension = floorWon(row.statementTaxAmounts.pension);
                     health = floorWon(row.statementTaxAmounts.health);
                     care = floorWon(row.statementTaxAmounts.care);
@@ -825,7 +897,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                     if (stmtDailyFee > 0) {
                         dailyFee = stmtDailyFee;
                     } else if (applyDailyFee && isDailyWageWorker && dailyWorkerFeePerManDay > 0) {
-                        const totalManDay = toNumber(row.invoiceManDay) + toNumber(row.laborManDay);
+                        const totalManDay = invoiceManDay + laborManDay;
                         dailyFee = floorWon(totalManDay * dailyWorkerFeePerManDay);
                     }
                 } else {
@@ -838,24 +910,24 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                     };
 
                     const defaultEntries: MonthlyAdvanceLedgerWorkEntry[] = [];
-                    if (invoiceGrossAmount > 0 || row.invoiceManDay > 0) {
+                    if (invoiceGrossAmount > 0 || invoiceManDay > 0) {
                         defaultEntries.push({
                             date: row.month,
                             siteId: '__invoice',
                             siteName: '계산서',
-                            manDay: row.invoiceManDay,
+                            manDay: invoiceManDay,
                             unitPrice: row.unitPrice,
                             amount: invoiceGrossAmount,
                             paymentMethod: '계산서',
                             isLaborSite: false,
                         });
                     }
-                    if (laborGrossAmount > 0 || row.laborManDay > 0) {
+                    if (laborGrossAmount > 0 || laborManDay > 0) {
                         defaultEntries.push({
                             date: row.month,
                             siteId: '__labor',
                             siteName: '노무',
-                            manDay: row.laborManDay,
+                            manDay: laborManDay,
                             unitPrice: row.unitPrice,
                             amount: laborGrossAmount,
                             paymentMethod: '노무',
@@ -863,7 +935,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                         });
                     }
 
-                    const sourceEntries = (row.workEntries ?? []).length > 0 ? row.workEntries ?? [] : defaultEntries;
+                    const sourceEntries = allocatedWorkEntries.length > 0 ? allocatedWorkEntries : defaultEntries;
                     const allEntries = sourceEntries.filter((entry) => toNumber(entry.manDay) > 0 || toNumber(entry.amount) > 0);
 
                     const isLaborEntry = (entry: MonthlyAdvanceLedgerWorkEntry): boolean =>
@@ -994,14 +1066,22 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 }
                 const insuranceTotal = pension + health + care + employment;
                 const businessTotal = businessIncomeTax + businessResidentTax;
-                const dailyFeeAssignment: 'corporate' | 'labor' = (manual.itemAssignments?.['dailyFee'] ?? 'labor') as 'corporate' | 'labor';
+                const dailyFeeAssignment: 'corporate' | 'labor' = (manual.itemAssignments?.['dailyFee'] ?? assignmentType) as 'corporate' | 'labor';
                 const dailyFeeForCorporate = dailyFeeAssignment === 'corporate' ? dailyFee : 0;
                 const dailyFeeForPersonal = dailyFeeAssignment === 'labor' ? dailyFee : 0;
-                const corporateBaseBeforeUtility = floorWon(invoiceGrossAmount - invoiceAdvanceTotal - businessTotal - dailyFeeForCorporate);
-                const personalBaseBeforeUtility = floorWon(laborGrossAmount - laborAdvanceTotal - insuranceTotal - incomeTax - residentTax - dailyFeeForPersonal);
+                const businessTaxForCorporate = allocationMode === 'labor' ? 0 : businessTotal;
+                const businessTaxForPersonal = allocationMode === 'labor' ? businessTotal : 0;
+                const corporateBaseBeforeUtility = floorWon(invoiceGrossAmount - invoiceAdvanceTotal - businessTaxForCorporate - dailyFeeForCorporate);
+                const personalBaseBeforeUtility = floorWon(
+                    laborGrossAmount
+                    - laborAdvanceTotal
+                    - insuranceTotal
+                    - incomeTax
+                    - residentTax
+                    - businessTaxForPersonal
+                    - dailyFeeForPersonal
+                );
 
-                const assignmentType = manual.assignmentType ?? row.assignmentType ?? 'corporate';
-                
                 const utilityFields: Array<{ key: LedgerSideNumberField }> = [
                     { key: 'lodging' },
                     { key: 'electricity' },
@@ -1035,9 +1115,16 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
 
                 return {
                     ...row,
+                    assignmentType,
+                    allocationMode,
+                    invoiceManDay,
+                    laborManDay,
+                    invoiceGrossAmount,
+                    laborGrossAmount,
+                    workEntries: allocatedWorkEntries,
                     manual,
-                    invoiceDeductionTotal,
-                    laborDeductionTotal,
+                    invoiceDeductionTotal: utilityAppliedToCorporate,
+                    laborDeductionTotal: utilityShiftedToPersonal,
                     utilityTotal,
                     utilityAppliedToCorporate,
                     utilityShiftedToPersonal,
@@ -1078,6 +1165,21 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
         withholdingThreshold,
     ]);
 
+    useEffect(() => {
+        onComputedAmountsChange?.(computedRows.map((row) => ({
+            rowKey: row.rowKey,
+            month: row.month,
+            teamId: row.teamId,
+            workerId: row.workerId,
+            salaryModel: row.salaryModel,
+            allocationMode: row.allocationMode,
+            invoiceGrossAmount: row.invoiceGrossAmount,
+            laborGrossAmount: row.laborGrossAmount,
+            corporateNet: row.corporateNet,
+            personalNet: row.personalNet,
+        })));
+    }, [computedRows, onComputedAmountsChange]);
+
     const groupedRows = useMemo(() => {
         const map = new Map<string, ComputedLedgerRow[]>();
         computedRows.forEach((row) => {
@@ -1094,6 +1196,12 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     const totals = useMemo(() => {
         return computedRows.reduce(
             (acc, row) => {
+                const isSplitAllocation = row.allocationMode === 'split';
+                const assignedToCorporate = row.allocationMode === 'corporate';
+                const carryTotal = row.manual.invoice.carry + row.manual.labor.carry;
+                const carrySecondTotal = row.manual.invoice.carrySecond + row.manual.labor.carrySecond;
+                const currentAdvanceTotal = row.manual.invoice.currentAdvance + row.manual.labor.currentAdvance;
+                const currentAdvanceSecondTotal = row.manual.invoice.currentAdvanceSecond + row.manual.labor.currentAdvanceSecond;
                 acc.workerCount += 1;
                 acc.invoiceManDay += row.invoiceManDay;
                 acc.laborManDay += row.laborManDay;
@@ -1101,14 +1209,14 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 acc.laborGrossAmount += row.laborGrossAmount;
                 acc.invoiceDeductionTotal += row.invoiceDeductionTotal;
                 acc.laborDeductionTotal += row.laborDeductionTotal;
-                acc.invoiceAdvanceCarry += row.manual.invoice.carry;
-                acc.laborAdvanceCarry += row.manual.labor.carry;
-                acc.invoiceAdvanceCarrySecond += row.manual.invoice.carrySecond;
-                acc.laborAdvanceCarrySecond += row.manual.labor.carrySecond;
-                acc.invoiceAdvanceCurrent += row.manual.invoice.currentAdvance;
-                acc.laborAdvanceCurrent += row.manual.labor.currentAdvance;
-                acc.invoiceAdvanceCurrentSecond += row.manual.invoice.currentAdvanceSecond;
-                acc.laborAdvanceCurrentSecond += row.manual.labor.currentAdvanceSecond;
+                acc.invoiceAdvanceCarry += isSplitAllocation ? row.manual.invoice.carry : assignedToCorporate ? carryTotal : 0;
+                acc.laborAdvanceCarry += isSplitAllocation ? row.manual.labor.carry : assignedToCorporate ? 0 : carryTotal;
+                acc.invoiceAdvanceCarrySecond += isSplitAllocation ? row.manual.invoice.carrySecond : assignedToCorporate ? carrySecondTotal : 0;
+                acc.laborAdvanceCarrySecond += isSplitAllocation ? row.manual.labor.carrySecond : assignedToCorporate ? 0 : carrySecondTotal;
+                acc.invoiceAdvanceCurrent += isSplitAllocation ? row.manual.invoice.currentAdvance : assignedToCorporate ? currentAdvanceTotal : 0;
+                acc.laborAdvanceCurrent += isSplitAllocation ? row.manual.labor.currentAdvance : assignedToCorporate ? 0 : currentAdvanceTotal;
+                acc.invoiceAdvanceCurrentSecond += isSplitAllocation ? row.manual.invoice.currentAdvanceSecond : assignedToCorporate ? currentAdvanceSecondTotal : 0;
+                acc.laborAdvanceCurrentSecond += isSplitAllocation ? row.manual.labor.currentAdvanceSecond : assignedToCorporate ? 0 : currentAdvanceSecondTotal;
                 acc.invoiceAdvanceTotal += row.invoiceAdvanceTotal;
                 acc.laborAdvanceTotal += row.laborAdvanceTotal;
                 acc.pension += row.pension;
@@ -1282,6 +1390,12 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
 
             const aggregateRows = (targetRows: ComputedLedgerRow[]): Aggregate => targetRows.reduce(
                 (acc, row) => {
+                    const isSplitAllocation = row.allocationMode === 'split';
+                    const assignedToCorporate = row.allocationMode === 'corporate';
+                    const carryTotal = row.manual.invoice.carry + row.manual.labor.carry;
+                    const carrySecondTotal = row.manual.invoice.carrySecond + row.manual.labor.carrySecond;
+                    const currentAdvanceTotal = row.manual.invoice.currentAdvance + row.manual.labor.currentAdvance;
+                    const currentAdvanceSecondTotal = row.manual.invoice.currentAdvanceSecond + row.manual.labor.currentAdvanceSecond;
                     acc.invoiceManDay += row.invoiceManDay;
                     acc.laborManDay += row.laborManDay;
                     acc.invoiceGrossAmount += row.invoiceGrossAmount;
@@ -1296,15 +1410,15 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                     acc.laborOther += row.manual.labor.other;
                     acc.invoiceDeductionTotal += row.invoiceDeductionTotal;
                     acc.laborDeductionTotal += row.laborDeductionTotal;
-                    acc.invoiceAdvanceCarry += row.manual.invoice.carry;
-                    acc.invoiceAdvanceCarrySecond += row.manual.invoice.carrySecond;
-                    acc.invoiceAdvanceCurrent += row.manual.invoice.currentAdvance;
-                    acc.invoiceAdvanceCurrentSecond += row.manual.invoice.currentAdvanceSecond;
+                    acc.invoiceAdvanceCarry += isSplitAllocation ? row.manual.invoice.carry : assignedToCorporate ? carryTotal : 0;
+                    acc.invoiceAdvanceCarrySecond += isSplitAllocation ? row.manual.invoice.carrySecond : assignedToCorporate ? carrySecondTotal : 0;
+                    acc.invoiceAdvanceCurrent += isSplitAllocation ? row.manual.invoice.currentAdvance : assignedToCorporate ? currentAdvanceTotal : 0;
+                    acc.invoiceAdvanceCurrentSecond += isSplitAllocation ? row.manual.invoice.currentAdvanceSecond : assignedToCorporate ? currentAdvanceSecondTotal : 0;
                     acc.invoiceAdvanceTotal += row.invoiceAdvanceTotal;
-                    acc.laborAdvanceCarry += row.manual.labor.carry;
-                    acc.laborAdvanceCarrySecond += row.manual.labor.carrySecond;
-                    acc.laborAdvanceCurrent += row.manual.labor.currentAdvance;
-                    acc.laborAdvanceCurrentSecond += row.manual.labor.currentAdvanceSecond;
+                    acc.laborAdvanceCarry += isSplitAllocation ? row.manual.labor.carry : assignedToCorporate ? 0 : carryTotal;
+                    acc.laborAdvanceCarrySecond += isSplitAllocation ? row.manual.labor.carrySecond : assignedToCorporate ? 0 : carrySecondTotal;
+                    acc.laborAdvanceCurrent += isSplitAllocation ? row.manual.labor.currentAdvance : assignedToCorporate ? 0 : currentAdvanceTotal;
+                    acc.laborAdvanceCurrentSecond += isSplitAllocation ? row.manual.labor.currentAdvanceSecond : assignedToCorporate ? 0 : currentAdvanceSecondTotal;
                     acc.laborAdvanceTotal += row.laborAdvanceTotal;
                     acc.pension += row.pension;
                     acc.health += row.health;
@@ -1365,6 +1479,12 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
             );
 
             const buildDataRow = (row: ComputedLedgerRow, no: number): Array<string | number | null> => {
+                const isSplitAllocation = row.allocationMode === 'split';
+                const assignedToCorporate = row.allocationMode === 'corporate';
+                const carryTotal = row.manual.invoice.carry + row.manual.labor.carry;
+                const carrySecondTotal = row.manual.invoice.carrySecond + row.manual.labor.carrySecond;
+                const currentAdvanceTotal = row.manual.invoice.currentAdvance + row.manual.labor.currentAdvance;
+                const currentAdvanceSecondTotal = row.manual.invoice.currentAdvanceSecond + row.manual.labor.currentAdvanceSecond;
                 const out: Array<string | number | null> = [
                     no,
                     row.teamName || '',
@@ -1394,15 +1514,15 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
 
                 if (showAdvances) {
                     out.push(
-                        row.manual.invoice.carry,
-                        row.manual.invoice.carrySecond,
-                        row.manual.invoice.currentAdvance,
-                        row.manual.invoice.currentAdvanceSecond,
+                        isSplitAllocation ? row.manual.invoice.carry : assignedToCorporate ? carryTotal : 0,
+                        isSplitAllocation ? row.manual.invoice.carrySecond : assignedToCorporate ? carrySecondTotal : 0,
+                        isSplitAllocation ? row.manual.invoice.currentAdvance : assignedToCorporate ? currentAdvanceTotal : 0,
+                        isSplitAllocation ? row.manual.invoice.currentAdvanceSecond : assignedToCorporate ? currentAdvanceSecondTotal : 0,
                         row.invoiceAdvanceTotal,
-                        row.manual.labor.carry,
-                        row.manual.labor.carrySecond,
-                        row.manual.labor.currentAdvance,
-                        row.manual.labor.currentAdvanceSecond,
+                        isSplitAllocation ? row.manual.labor.carry : assignedToCorporate ? 0 : carryTotal,
+                        isSplitAllocation ? row.manual.labor.carrySecond : assignedToCorporate ? 0 : carrySecondTotal,
+                        isSplitAllocation ? row.manual.labor.currentAdvance : assignedToCorporate ? 0 : currentAdvanceTotal,
+                        isSplitAllocation ? row.manual.labor.currentAdvanceSecond : assignedToCorporate ? 0 : currentAdvanceSecondTotal,
                         row.laborAdvanceTotal,
                     );
                 }
@@ -1704,107 +1824,217 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
             dailyWorkerFeePerManDay,
         };
     }, [payrollConfig]);
+    const activeRuleCount = [applyInsurance, applyBusinessIncome, applyUtilities, applyDailyFee].filter(Boolean).length;
+    const allAssignedToSplit = computedRows.length > 0
+        && computedRows.every((row) => row.allocationMode === 'split');
+    const allAssignedToCorporate = computedRows.length > 0
+        && computedRows.every((row) => row.allocationMode === 'corporate');
+    const allAssignedToLabor = computedRows.length > 0
+        && computedRows.every((row) => row.allocationMode === 'labor');
 
     return (
-        <div className="flex-1 min-h-0 bg-white rounded-2xl border border-slate-300 shadow-sm flex flex-col overflow-hidden">
-            <div className="px-3 py-2 border-b border-slate-200 bg-gradient-to-r from-slate-100 to-blue-50">
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-                    <div>
-                        <h3 className="text-lg font-bold text-slate-800">팀별 가불대장</h3>
-                        <p className="text-[14px] text-slate-600 mt-0.5">
-                            팀 소속 작업자의 계산서/노무 공수 분리, 공제 직접 입력, 법인/개인 가불 공제, 세금 계산을 한 화면에서 처리합니다.
-                        </p>
-                        <p className="text-[14px] text-slate-500 mt-1">
-                            적용 상태: 4대보험 {applyInsurance ? '적용' : '미적용'} / 사업소득 {applyBusinessIncome ? '적용' : '미적용'} / 일급제 수수료 {applyDailyFee ? '적용' : '미적용'}
-                        </p>
+        <div className="monthly-advance-ledger-font flex-1 min-h-0 bg-white rounded-2xl border border-slate-300 shadow-sm flex flex-col overflow-hidden">
+            <div className="border-b border-slate-200 bg-slate-50/80 px-3 py-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="mr-auto">
+                        <div className="flex items-center gap-2">
+                            <h3 className="text-[15px] font-bold text-slate-900">팀별 정산 내역</h3>
+                            <span className="rounded-md bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 ring-1 ring-slate-200">
+                                {computedRows.length}명
+                            </span>
+                            <span className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${
+                                activeRuleCount > 0 ? 'bg-blue-50 text-blue-700' : 'bg-slate-200 text-slate-500'
+                            }`}>
+                                자동 공제 {activeRuleCount}개
+                            </span>
+                        </div>
                     </div>
-                    <div className="flex flex-col items-start lg:items-end gap-2">
-                        <div className="text-[13px] text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2 font-medium">
-                            4대보험: 국민연금 {rateText.pensionRate}% / 건강보험 {rateText.healthRate}% / 장기요양(건강보험) {rateText.careRate}% / 고용보험 {rateText.employmentRate}%<br />
-                            원천세: ((단가 - {rateText.withholdingBaseDeduction}원) × 노무공수 × 갑근세 {rateText.incomeRate}%) × (1 - 세액공제율 {rateText.withholdingTaxCreditRate}%) / 지방세(소득세의 {rateText.residentRate}%) | 사업소득: 3.0% + 0.3% | 일급제 수수료: 공수 × {rateText.dailyWorkerFeePerManDay}원
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        <div className="flex items-center rounded-lg bg-white p-1 ring-1 ring-slate-200">
+                            <button
+                                type="button"
+                                disabled={computedRows.length === 0}
+                                onClick={() => updateAllAllocationModes('split')}
+                                className={`h-7 rounded-md px-3 text-[12px] font-bold transition-colors ${
+                                    allAssignedToSplit
+                                        ? 'bg-slate-700 text-white shadow-sm'
+                                        : 'text-slate-600 hover:bg-slate-100'
+                                } disabled:cursor-not-allowed disabled:opacity-40`}
+                            >
+                                전체 분리
+                            </button>
+                            <button
+                                type="button"
+                                disabled={computedRows.length === 0}
+                                onClick={() => updateAllAllocationModes('corporate')}
+                                className={`h-7 rounded-md px-3 text-[12px] font-bold transition-colors ${
+                                    allAssignedToCorporate
+                                        ? 'bg-blue-600 text-white shadow-sm'
+                                        : 'text-blue-700 hover:bg-blue-50'
+                                } disabled:cursor-not-allowed disabled:opacity-40`}
+                            >
+                                전체 법인
+                            </button>
+                            <button
+                                type="button"
+                                disabled={computedRows.length === 0}
+                                onClick={() => updateAllAllocationModes('labor')}
+                                className={`h-7 rounded-md px-3 text-[12px] font-bold transition-colors ${
+                                    allAssignedToLabor
+                                        ? 'bg-amber-500 text-white shadow-sm'
+                                        : 'text-amber-700 hover:bg-amber-50'
+                                } disabled:cursor-not-allowed disabled:opacity-40`}
+                            >
+                                전체 노무
+                            </button>
                         </div>
                         <button
                             type="button"
-                            onClick={() => setShowLaborGroupBasis((prev) => !prev)}
-                            className={`text-[13px] px-3 py-1.5 rounded-md border font-semibold transition-colors ${
-                                showLaborGroupBasis
-                                    ? 'bg-slate-700 text-white border-slate-700'
-                                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                            onClick={() => setShowRateGuide((prev) => !prev)}
+                            className={`rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition-colors ${
+                                showRateGuide
+                                    ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                             }`}
                         >
-                            {showLaborGroupBasis ? '기준그룹 숨기기' : '기준그룹 보기'}
+                            {showRateGuide ? '계산 기준 닫기' : '계산 기준'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setShowLaborGroupBasis((prev) => !prev)}
+                            className={`rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition-colors ${
+                                showLaborGroupBasis
+                                    ? 'border-slate-700 bg-slate-700 text-white'
+                                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                            }`}
+                        >
+                            {showLaborGroupBasis ? '판정 근거 숨기기' : '판정 근거'}
                         </button>
                     </div>
                 </div>
+                {showRateGuide && (
+                    <div className="mt-2 grid gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] leading-5 text-slate-600 md:grid-cols-2">
+                        <div>
+                            <span className="font-bold text-slate-800">4대보험</span>
+                            {' '}국민연금 {rateText.pensionRate}% · 건강보험 {rateText.healthRate}% · 장기요양 {rateText.careRate}% · 고용보험 {rateText.employmentRate}%
+                        </div>
+                        <div>
+                            <span className="font-bold text-slate-800">세금·수수료</span>
+                            {' '}기본공제 {rateText.withholdingBaseDeduction}원 · 갑근세 {rateText.incomeRate}% · 세액공제 {rateText.withholdingTaxCreditRate}% · 지방세 {rateText.residentRate}% · 일급 수수료 {rateText.dailyWorkerFeePerManDay}원
+                        </div>
+                    </div>
+                )}
             </div>
 
-            <div className="flex-1 min-h-0 overflow-auto bg-white custom-scrollbar">
+            <div className="relative isolate flex-1 min-h-0 overflow-auto bg-white custom-scrollbar">
+                {groupedRows.length === 0 ? (
+                    <div className="flex h-full min-h-[240px] items-center justify-center px-6 text-center">
+                        <div>
+                            <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-lg text-slate-400">
+                                ···
+                            </div>
+                            <p className="text-[15px] font-bold text-slate-700">조회 결과가 없습니다</p>
+                            <p className="mt-1 text-[13px] text-slate-500">기간이나 대상을 변경한 뒤 조회해 주세요.</p>
+                        </div>
+                    </div>
+                ) : (
                 <table className="w-full border-separate border-spacing-0 text-[13px] leading-tight" style={{ minWidth: `${tableMinWidth}px` }}>
                     <thead>
-                        <tr className="bg-slate-200 text-slate-800">
-                            <th className="sticky top-0 left-0 z-[60] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1 whitespace-nowrap w-10 shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">No</th>
-                            <th className="sticky top-0 left-[40px] z-[60] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1 whitespace-nowrap w-20 shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">이름</th>
-                            <th className="sticky top-0 left-[120px] z-[60] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1 whitespace-nowrap w-14 shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">구분</th>
-                            <th className="sticky top-0 z-[50] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap w-[88px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">공제 분류</th>
-                            <th className="sticky top-0 z-[50] bg-sky-100 border-b border-r border-slate-400 px-1.5 py-1 whitespace-nowrap w-16 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">공수</th>
-                            <th className="sticky top-0 z-[50] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1 whitespace-nowrap w-[80px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">단가</th>
-                            <th className="sticky top-0 z-[50] bg-yellow-100 border-b border-r border-slate-400 px-1.5 py-1 whitespace-nowrap w-[92px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">세전 금액</th>
+                        <tr className="h-[27px] text-slate-800">
+                            <th rowSpan={2} className="sticky top-0 left-0 z-[60] w-10 min-w-10 max-w-10 bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">No</th>
+                            <th rowSpan={2} className="sticky top-0 left-[40px] z-[60] w-20 min-w-20 max-w-20 bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">이름</th>
+                            <th rowSpan={2} className="sticky top-0 left-[120px] z-[60] w-14 min-w-14 max-w-14 bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">구분</th>
+                            <th rowSpan={2} className="sticky top-0 left-[176px] z-[60] w-[112px] min-w-[112px] max-w-[112px] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">공제 분류</th>
+                            <th rowSpan={2} className="sticky top-0 left-[288px] z-[60] w-16 min-w-16 max-w-16 bg-sky-100 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">공수</th>
+                            <th rowSpan={2} className="sticky top-0 left-[352px] z-[60] w-[80px] min-w-[80px] max-w-[80px] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">단가</th>
+                            <th rowSpan={2} className="sticky top-0 left-[432px] z-[60] w-[92px] min-w-[92px] max-w-[92px] bg-yellow-100 border-b border-r border-slate-500 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[2px_0_0_rgba(15,23,42,0.25),inset_0_-1px_0_rgba(0,0,0,0.1)]">세전 금액</th>
+                            {showUtilities && (
+                                <th colSpan={5} className="sticky top-0 z-[50] bg-slate-300 border-b border-r border-slate-400 px-2 py-1 text-center text-[11px] font-bold tracking-wide shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                    공과금 공제 <span className="font-normal text-slate-600">(위: 법인 · 아래: 노무)</span>
+                                </th>
+                            )}
+                            {showAdvances && (
+                                <th colSpan={5} className="sticky top-0 z-[50] bg-yellow-300 border-b border-r border-slate-400 px-2 py-1 text-center text-[11px] font-bold tracking-wide shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                    가불 <span className="font-normal text-yellow-800">(위: 법인 · 아래: 노무)</span>
+                                </th>
+                            )}
+                            {showTaxes && (
+                                <th colSpan={7} className="sticky top-0 z-[50] bg-amber-200 border-b border-r border-slate-400 px-2 py-1 text-center text-[11px] font-bold tracking-wide shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">자동 공제</th>
+                            )}
+                            <th colSpan={3} className="sticky top-0 z-[50] bg-emerald-300 border-b border-r border-slate-400 px-2 py-1 text-center text-[11px] font-bold tracking-wide shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">실지급액</th>
+                        </tr>
+                        <tr className="h-[43px] text-slate-800">
                             {showUtilities && (
                                 <>
-                                    <th className="sticky top-0 z-[50] bg-slate-200 border-b border-r border-slate-400 px-1 py-1.5 w-[98px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
-                                        <span className="block text-[13px]">숙소비</span>
-                                        <span className="block text-[13px]">인터넷</span>
+                                    <th className="sticky top-[27px] z-[50] w-[98px] bg-slate-200 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                        <span className="flex min-h-[21px] items-center justify-center border-b border-slate-300 px-1 whitespace-nowrap">숙소비</span>
+                                        <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">인터넷</span>
                                     </th>
-                                    <th className="sticky top-0 z-[50] bg-slate-200 border-b border-r border-slate-400 px-1 py-1.5 w-[98px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
-                                        <span className="block text-[13px]">전기료</span>
-                                        <span className="block text-[13px]">관리비</span>
+                                    <th className="sticky top-[27px] z-[50] w-[98px] bg-slate-200 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                        <span className="flex min-h-[21px] items-center justify-center border-b border-slate-300 px-1 whitespace-nowrap">전기료</span>
+                                        <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">관리비</span>
                                     </th>
-                                    <th className="sticky top-0 z-[50] bg-slate-200 border-b border-r border-slate-400 px-1 py-1.5 w-[98px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
-                                        <span className="block text-[13px]">가스비</span>
-                                        <span className="block text-[13px]">과태료</span>
+                                    <th className="sticky top-[27px] z-[50] w-[98px] bg-slate-200 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                        <span className="flex min-h-[21px] items-center justify-center border-b border-slate-300 px-1 whitespace-nowrap">가스비</span>
+                                        <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">과태료</span>
                                     </th>
-                                    <th className="sticky top-0 z-[50] bg-slate-200 border-b border-r border-slate-400 px-1 py-1.5 w-[98px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
-                                        <span className="block text-[13px]">수도세</span>
-                                        <span className="block text-[13px]">기타</span>
+                                    <th className="sticky top-[27px] z-[50] w-[98px] bg-slate-200 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                        <span className="flex min-h-[21px] items-center justify-center border-b border-slate-300 px-1 whitespace-nowrap">수도세</span>
+                                        <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">기타</span>
                                     </th>
-                                    <th className="sticky top-0 z-[50] bg-slate-300 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">합계</th>
+                                    <th className="sticky top-[27px] z-[50] w-[92px] bg-slate-300 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                        <span className="flex min-h-[21px] items-center justify-center border-b border-slate-400/70 px-1 whitespace-nowrap">법인 합계</span>
+                                        <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">노무 합계</span>
+                                    </th>
                                 </>
                             )}
                             {showAdvances && (
                                 <>
-                                    <th className="sticky top-0 z-[50] bg-yellow-200 border-b border-r border-slate-400 px-1 py-1.5 w-[112px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
-                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance1}</span>
-                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance1}</span>
+                                    <th className="sticky top-[27px] z-[50] w-[144px] min-w-[144px] bg-yellow-200 border-b border-r border-slate-400 p-0 text-[10px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                        <span className="flex min-h-[21px] items-center justify-center border-b border-yellow-400/70 px-1 whitespace-nowrap">{resolvedAdvanceItemLabels.corporateAdvance1}</span>
+                                        <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">{resolvedAdvanceItemLabels.laborAdvance1}</span>
                                     </th>
-                                    <th className="sticky top-0 z-[50] bg-yellow-200 border-b border-r border-slate-400 px-1 py-1.5 w-[112px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
-                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance2}</span>
-                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance2}</span>
+                                    <th className="sticky top-[27px] z-[50] w-[144px] min-w-[144px] bg-yellow-200 border-b border-r border-slate-400 p-0 text-[10px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                        <span className="flex min-h-[21px] items-center justify-center border-b border-yellow-400/70 px-1 whitespace-nowrap">{resolvedAdvanceItemLabels.corporateAdvance2}</span>
+                                        <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">{resolvedAdvanceItemLabels.laborAdvance2}</span>
                                     </th>
-                                    <th className="sticky top-0 z-[50] bg-yellow-200 border-b border-r border-slate-400 px-1 py-1.5 w-[112px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
-                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance3}</span>
-                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance3}</span>
+                                    <th className="sticky top-[27px] z-[50] w-[144px] min-w-[144px] bg-yellow-200 border-b border-r border-slate-400 p-0 text-[10px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                        <span className="flex min-h-[21px] items-center justify-center border-b border-yellow-400/70 px-1 whitespace-nowrap">{resolvedAdvanceItemLabels.corporateAdvance3}</span>
+                                        <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">{resolvedAdvanceItemLabels.laborAdvance3}</span>
                                     </th>
-                                    <th className="sticky top-0 z-[50] bg-yellow-200 border-b border-r border-slate-400 px-1 py-1.5 w-[112px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
-                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance4}</span>
-                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance4}</span>
+                                    <th className="sticky top-[27px] z-[50] w-[144px] min-w-[144px] bg-yellow-200 border-b border-r border-slate-400 p-0 text-[10px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                        <span className="flex min-h-[21px] items-center justify-center border-b border-yellow-400/70 px-1 whitespace-nowrap">{resolvedAdvanceItemLabels.corporateAdvance4}</span>
+                                        <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">{resolvedAdvanceItemLabels.laborAdvance4}</span>
                                     </th>
-                                    <th className="sticky top-0 z-[50] bg-emerald-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[98px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">가불 합계</th>
+                                    <th className="sticky top-[27px] z-[50] w-[98px] bg-emerald-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap text-[11px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">가불 합계</th>
                                 </>
                             )}
                             {showTaxes && (
                                 <>
-                                    <th className="sticky top-0 z-[50] bg-yellow-100 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[104px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">국민연금/장기요양</th>
-                                    <th className="sticky top-0 z-[50] bg-yellow-100 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[104px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">건강보험/+고용보험</th>
-                                    <th className="sticky top-0 z-[50] bg-amber-100 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[96px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">갑근세/지방세</th>
-                                    <th className="sticky top-0 z-[50] bg-green-100 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[116px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">사업소득세/지방소득세</th>
-                                    <th className="sticky top-0 z-[50] bg-fuchsia-100 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[94px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">일급제 수수료</th>
-                                    <th className="sticky top-0 z-[50] bg-yellow-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[106px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">4대 보험 합계</th>
-                                    <th className="sticky top-0 z-[50] bg-green-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">3.3% 합계</th>
+                                    <th className="sticky top-[27px] z-[50] w-[104px] bg-yellow-100 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                        <span className="flex min-h-[21px] items-center justify-center border-b border-yellow-300 px-1 whitespace-nowrap">국민연금</span>
+                                        <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">장기요양</span>
+                                    </th>
+                                    <th className="sticky top-[27px] z-[50] w-[104px] bg-yellow-100 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                        <span className="flex min-h-[21px] items-center justify-center border-b border-yellow-300 px-1 whitespace-nowrap">건강보험</span>
+                                        <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">고용보험</span>
+                                    </th>
+                                    <th className="sticky top-[27px] z-[50] w-[96px] bg-amber-100 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                        <span className="flex min-h-[21px] items-center justify-center border-b border-amber-300 px-1 whitespace-nowrap">갑근세</span>
+                                        <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">지방세</span>
+                                    </th>
+                                    <th className="sticky top-[27px] z-[50] w-[116px] bg-green-100 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                        <span className="flex min-h-[21px] items-center justify-center border-b border-green-300 px-1 whitespace-nowrap">사업소득세</span>
+                                        <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">지방소득세</span>
+                                    </th>
+                                    <th className="sticky top-[27px] z-[50] w-[94px] bg-fuchsia-100 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap text-[11px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">일급 수수료</th>
+                                    <th className="sticky top-[27px] z-[50] w-[106px] bg-yellow-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap text-[11px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">4대보험 합계</th>
+                                    <th className="sticky top-[27px] z-[50] w-[92px] bg-green-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap text-[11px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">3.3% 합계</th>
                                 </>
                             )}
-                            <th className="sticky top-0 z-[50] bg-emerald-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">법 인</th>
-                            <th className="sticky top-0 z-[50] bg-lime-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">개 인</th>
-                            <th className="sticky top-0 z-[50] bg-lime-100 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[140px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">메모</th>
+                            <th className="sticky top-[27px] z-[50] w-[92px] bg-emerald-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap text-[11px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">법인 실수령</th>
+                            <th className="sticky top-[27px] z-[50] w-[92px] bg-lime-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap text-[11px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">개인 실수령</th>
+                            <th className="sticky top-[27px] z-[50] w-[140px] bg-lime-100 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap text-[11px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">메모</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1818,7 +2048,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                         {groupedRows.map((group) => (
                             <React.Fragment key={group.teamName}>
                                 <tr className="bg-slate-700 text-white">
-                                    <td colSpan={totalColumnCount} className="sticky top-[46px] z-30 border border-slate-600 px-3 py-1.5 text-xs font-bold shadow-md">
+                                    <td colSpan={totalColumnCount} className="sticky top-[70px] z-40 border border-slate-600 px-3 py-1.5 text-xs font-bold shadow-md">
                                         <div className="sticky left-3 inline-block">
                                             {group.teamName} · {group.rows.length}명
                                         </div>
@@ -1838,24 +2068,37 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                         <React.Fragment key={row.rowKey}>
                                             {/* 윗칸(법인) 행: 파란색 계열 배경 + 상단/좌/우 굵은 검정 테두리 */}
                                             <tr className="bg-blue-50/40">
-                                                <td rowSpan={2} className="sticky left-0 z-20 bg-white border-b border-r border-slate-300 px-1 text-center font-semibold shadow-[1px_0_0_rgba(0,0,0,0.1)]">{runningNo}</td>
-                                                <td rowSpan={2} className="sticky left-[40px] z-20 bg-white border-b border-r border-slate-300 px-2 text-center font-semibold shadow-[1px_0_0_rgba(0,0,0,0.1)]">{row.workerName}</td>
-                                                <td rowSpan={2} className={`sticky left-[120px] z-20 border-b border-r border-slate-300 px-1 text-center font-semibold shadow-[1px_0_0_rgba(0,0,0,0.1)] ${getSalaryModelLabelClassName(row.salaryModel)}`}>{row.salaryModel || '월급제'}</td>
-                                                <td className="border-b border-r border-slate-300 px-1.5 py-1 text-center bg-blue-50/20">
-                                                    <label className="flex items-center justify-center gap-1.5 cursor-pointer h-full">
-                                                        <input 
-                                                            type="radio" 
-                                                            name={`assign-${row.rowKey}`}
-                                                            checked={(row.manual.assignmentType ?? row.assignmentType ?? 'corporate') === 'corporate'}
-                                                            onChange={() => updateAssignmentType(row.rowKey, 'corporate')}
-                                                            className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                                        />
-                                                        <span className="text-[14px] font-bold text-blue-800 tracking-wide">법인</span>
-                                                    </label>
+                                                <td rowSpan={2} className="sticky left-0 z-30 w-10 min-w-10 max-w-10 bg-white border-b border-r border-slate-300 px-1 text-center font-semibold shadow-[1px_0_0_rgba(0,0,0,0.1)]">{runningNo}</td>
+                                                <td rowSpan={2} title={row.workerName} className="sticky left-[40px] z-30 w-20 min-w-20 max-w-20 break-all bg-white border-b border-r border-slate-300 px-2 text-center align-middle font-semibold leading-tight shadow-[1px_0_0_rgba(0,0,0,0.1)]">
+                                                    <span title={row.workerName} className={`block w-full break-all ${getWorkerNameTextClassName(row.workerName)}`}>
+                                                        {row.workerName}
+                                                    </span>
                                                 </td>
-                                                <td className="border border-slate-300 px-2 text-right bg-lime-300 font-bold">{formatManDay(row.invoiceManDay)}</td>
-                                                <td rowSpan={2} className="border border-slate-300 px-2 text-right font-mono">{formatAmount(row.unitPrice)}</td>
-                                                <td className="border border-slate-300 px-2 text-right bg-yellow-200 font-bold">{formatAmount(row.invoiceGrossAmount)}</td>
+                                                <td rowSpan={2} className={`sticky left-[120px] z-30 w-14 min-w-14 max-w-14 whitespace-nowrap border-b border-r border-slate-300 px-1 text-center font-semibold shadow-[1px_0_0_rgba(0,0,0,0.1)] ${getSalaryModelLabelClassName(row.salaryModel)}`}>{row.salaryModel || '월급제'}</td>
+                                                <td rowSpan={2} className="sticky left-[176px] z-30 w-[112px] min-w-[112px] max-w-[112px] border-b border-r border-slate-300 bg-slate-50 px-1.5 py-1 text-center align-middle shadow-[1px_0_0_rgba(0,0,0,0.1)]">
+                                                    <select
+                                                        aria-label={`${row.workerName} 공제 분류`}
+                                                        value={row.allocationMode}
+                                                        onChange={(event) => updateAllocationMode(
+                                                            row.rowKey,
+                                                            event.target.value as MonthlyAdvanceAllocationMode
+                                                        )}
+                                                        className={`h-8 w-full rounded-md border px-1 text-[11px] font-bold outline-none transition-colors ${
+                                                            row.allocationMode === 'corporate'
+                                                                ? 'border-blue-300 bg-blue-50 text-blue-800'
+                                                                : row.allocationMode === 'labor'
+                                                                    ? 'border-amber-300 bg-amber-50 text-amber-800'
+                                                                    : 'border-slate-300 bg-white text-slate-700'
+                                                        }`}
+                                                    >
+                                                        <option value="split">법인·노무 분리</option>
+                                                        <option value="corporate">전체 법인</option>
+                                                        <option value="labor">전체 노무</option>
+                                                    </select>
+                                                </td>
+                                                <td className="sticky left-[288px] z-30 w-16 min-w-16 max-w-16 border border-slate-300 bg-blue-100 px-2 text-right font-bold text-blue-900">{formatManDay(row.invoiceManDay)}</td>
+                                                <td rowSpan={2} className="sticky left-[352px] z-30 w-[80px] min-w-[80px] max-w-[80px] border border-slate-300 bg-white px-2 text-right font-mono">{formatAmount(row.unitPrice)}</td>
+                                                <td className="sticky left-[432px] z-30 w-[92px] min-w-[92px] max-w-[92px] border border-slate-400 bg-blue-50 px-2 text-right font-bold text-blue-900 shadow-[2px_0_0_rgba(15,23,42,0.18)]">{formatAmount(row.invoiceGrossAmount)}</td>
                                                 {showUtilities && (
                                                     <>
                                                         <td className="border border-slate-300 px-1 bg-blue-100">
@@ -1926,15 +2169,15 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                                 {row.dailyFee > 0 && (
                                                                     <button
                                                                         onClick={() => updateItemAssignment(row.rowKey, 'dailyFee',
-                                                                            (row.manual.itemAssignments?.['dailyFee'] ?? 'labor') === 'corporate' ? 'labor' : 'corporate'
+                                                                            (row.manual.itemAssignments?.['dailyFee'] ?? row.assignmentType ?? 'labor') === 'corporate' ? 'labor' : 'corporate'
                                                                         )}
                                                                         className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                                                                            (row.manual.itemAssignments?.['dailyFee'] ?? 'labor') === 'corporate'
+                                                                            (row.manual.itemAssignments?.['dailyFee'] ?? row.assignmentType ?? 'labor') === 'corporate'
                                                                                 ? 'bg-blue-200 text-blue-800'
                                                                                 : 'bg-emerald-200 text-emerald-800'
                                                                         }`}
                                                                     >
-                                                                        {(row.manual.itemAssignments?.['dailyFee'] ?? 'labor') === 'corporate' ? '법인' : '노무'}
+                                                                        {(row.manual.itemAssignments?.['dailyFee'] ?? row.assignmentType ?? 'labor') === 'corporate' ? '법인' : '노무'}
                                                                     </button>
                                                                 )}
                                                             </div>
@@ -1958,20 +2201,8 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                             </tr>
                                             {/* 아랫칸(노무) 행: 초록색 계열 배경 + 하단/좌/우 굵은 검정 테두리 */}
                                             <tr className="odd:bg-white even:bg-slate-50/60 border-b-2 border-l-2 border-r-2 border-black">
-                                                <td className="border border-slate-300 px-1.5 py-1 text-center bg-emerald-50/20">
-                                                    <label className="flex items-center justify-center gap-1.5 cursor-pointer h-full">
-                                                        <input 
-                                                            type="radio" 
-                                                            name={`assign-${row.rowKey}`}
-                                                            checked={(row.manual.assignmentType ?? row.assignmentType ?? 'corporate') === 'labor'}
-                                                            onChange={() => updateAssignmentType(row.rowKey, 'labor')}
-                                                            className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                                                        />
-                                                        <span className="text-[14px] font-bold text-emerald-800 tracking-wide">노무</span>
-                                                    </label>
-                                                </td>
-                                                <td className="border border-slate-300 px-2 text-right bg-yellow-300 font-bold">{formatManDay(row.laborManDay)}</td>
-                                                <td className="border border-slate-300 px-2 text-right bg-yellow-100 font-bold">{formatAmount(row.laborGrossAmount)}</td>
+                                                <td className="sticky left-[288px] z-30 w-16 min-w-16 max-w-16 border border-slate-300 bg-amber-100 px-2 text-right font-bold text-amber-900">{formatManDay(row.laborManDay)}</td>
+                                                <td className="sticky left-[432px] z-30 w-[92px] min-w-[92px] max-w-[92px] border border-slate-400 bg-amber-50 px-2 text-right font-bold text-amber-900 shadow-[2px_0_0_rgba(15,23,42,0.18)]">{formatAmount(row.laborGrossAmount)}</td>
                                                 {showUtilities && (
                                                     <>
                                                         <td className="border border-slate-300 px-1 bg-emerald-100">
@@ -2068,17 +2299,17 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                     </tbody>
                     <tfoot>
                         <tr className="bg-blue-100 font-bold text-slate-900">
-                            <td colSpan={4} className="sticky left-0 z-20 bg-blue-100 border border-slate-400 px-2 py-2 text-center text-base">합 계</td>
-                            <td className="border border-slate-400 px-2 py-2 text-right">
+                            <td colSpan={4} className="sticky left-0 z-30 bg-blue-100 border border-slate-400 px-2 py-2 text-center text-base">합 계</td>
+                            <td className="sticky left-[288px] z-30 w-16 min-w-16 max-w-16 border border-slate-400 bg-blue-100 px-2 py-2 text-right">
                                 <div className="text-sky-700">{totals.invoiceManDay.toFixed(1)}</div>
                                 <div className="text-amber-700">{totals.laborManDay.toFixed(1)}</div>
                             </td>
-                            <td className="border border-slate-400 px-2 py-2 text-right font-mono">
+                            <td className="sticky left-[352px] z-30 w-[80px] min-w-[80px] max-w-[80px] border border-slate-400 bg-blue-100 px-2 py-2 text-right font-mono">
                                 {totals.workerCount > 0
                                     ? formatAmount(Math.round((totals.invoiceGrossAmount + totals.laborGrossAmount) / Math.max(1, totals.invoiceManDay + totals.laborManDay)))
                                     : '-'}
                             </td>
-                            <td className="border border-slate-400 px-2 py-2 text-right text-red-600">{formatAmount(totals.invoiceGrossAmount + totals.laborGrossAmount)}</td>
+                            <td className="sticky left-[432px] z-30 w-[92px] min-w-[92px] max-w-[92px] border border-slate-500 bg-blue-100 px-2 py-2 text-right text-red-600 shadow-[2px_0_0_rgba(15,23,42,0.2)]">{formatAmount(totals.invoiceGrossAmount + totals.laborGrossAmount)}</td>
                             {showUtilities && (
                                 <>
                                     <td className="border border-slate-400 px-2 py-2 text-right">
@@ -2146,6 +2377,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                         </tr>
                     </tfoot>
                 </table>
+                )}
             </div>
         </div>
     );

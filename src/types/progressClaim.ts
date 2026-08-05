@@ -3,6 +3,21 @@ import type { Site } from '../services/siteService';
 export type ProgressClaimStatus = 'draft' | 'review' | 'confirmed' | 'billed' | 'paid';
 export type ProgressVatMode = 'none' | 'separate' | 'included';
 export type ProgressAllocationMethod = 'fixed' | 'percent' | 'perManDay' | 'manual';
+export type ProgressSettlementMode = 'rate' | 'taxInvoice' | 'manual';
+export type ProgressPaymentStatus =
+    | 'pending'
+    | 'needs_review'
+    | 'calculating'
+    | 'retention'
+    | 'scheduled'
+    | 'in_progress'
+    | 'partial'
+    | 'paid'
+    | 'hold'
+    | 'overpaid'
+    | 'no_buyback'
+    | 'cancelled';
+export type ProgressEvidenceStatus = 'not_required' | 'pending' | 'received';
 export type ProgressAttachmentScope = 'site' | 'claim';
 export type ProgressTeamPositionMode = 'currentAmount' | 'manual';
 export type ProgressClaimLineSource = 'contract' | 'extra';
@@ -78,6 +93,8 @@ export interface ProgressClaimLine {
 
 export interface ProgressAllocation {
     id: string;
+    /** Canonical settlement-target reference. `targetId` remains for legacy UI/data compatibility. */
+    settlementTargetId?: string;
     targetId?: string;
     targetName: string;
     targetType?: string;
@@ -88,13 +105,30 @@ export interface ProgressAllocation {
     amountPerManDay?: number;
     manualAmount?: number;
     memo?: string;
+    settlementMode?: ProgressSettlementMode;
+    /** Decimal rate in the inclusive 0..1 range. Legacy percentage inputs are normalized by the service. */
+    afterTaxRate?: number;
+    manualAfterTaxAmount?: number;
+    paymentStatus?: ProgressPaymentStatus;
+    /** Cumulative amount actually paid for partial/overpayment reconciliation. */
+    paidAmount?: number;
+    paymentDueDate?: string;
+    paidAt?: string;
+    /** Evidence policy captured when the financial terms were confirmed. */
+    evidenceRequired?: boolean;
+    evidenceStatus?: ProgressEvidenceStatus;
+    paymentMemo?: string;
 }
 
 export interface ProgressClaimSnapshot {
     site: ProgressSiteSnapshot;
     contractItems: ProgressContractItem[];
     progressLines: ProgressClaimLine[];
+    /** Optional for backward compatibility with snapshots created before allocation snapshots were introduced. */
+    allocations?: ProgressAllocation[];
     totalManDay: number;
+    dailyAmount?: number;
+    dailyRowCount?: number;
     contractAmount: number;
     previousAmount: number;
     currentAmount: number;
