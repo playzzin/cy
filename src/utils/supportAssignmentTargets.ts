@@ -1,5 +1,6 @@
 import type { Team } from '../services/teamService';
 import type { OfficeStaff } from '../services/officeStaffService';
+import type { AccommodationBillingTargetType } from '../types/accommodationBillingTarget';
 
 export const OFFICE_ASSIGNMENT_TEAM_ID = '__office__';
 export const OFFICE_ASSIGNMENT_TEAM_NAME = '사무실';
@@ -26,6 +27,25 @@ export const isOfficeAssignmentReference = (
 ): boolean => (
     normalizeTargetText(teamId) === normalizeTargetText(OFFICE_ASSIGNMENT_TEAM_ID) ||
     normalizeTargetText(teamName) === normalizeTargetText(OFFICE_ASSIGNMENT_TEAM_NAME)
+);
+
+export const officeAssignmentReferencesMatch = (
+    leftTeamId: unknown,
+    leftTeamName: unknown,
+    rightTeamId: unknown,
+    rightTeamName: unknown
+): boolean => (
+    isOfficeAssignmentReference(leftTeamId, leftTeamName) &&
+    isOfficeAssignmentReference(rightTeamId, rightTeamName)
+);
+
+export const isOfficeBillingTargetForSelectedTeam = (
+    selectedTeamId: unknown,
+    selectedTeamName: unknown,
+    targetType: AccommodationBillingTargetType
+): boolean => (
+    isOfficeAssignmentReference(selectedTeamId, selectedTeamName) &&
+    (targetType === 'office' || targetType === 'office_staff')
 );
 
 export const isOfficeAssignmentTeam = (

@@ -4,74 +4,128 @@ import { VehicleManagerPage } from './VehicleManagerPage';
 import { CardManagerPage } from './CardManagerPage';
 import AccommodationManager from './AccommodationManager';
 import ExpenseLedgerPage from './ExpenseLedgerPage';
+import ExpenseClaimManagementPage from './ExpenseClaimManagementPage';
 import { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBuilding, faCar, faCreditCard, faFileInvoiceDollar, faLifeRing } from '@fortawesome/free-solid-svg-icons';
+import { faBuilding, faCar, faCreditCard, faFileCirclePlus, faFileInvoiceDollar, faLayerGroup } from '@fortawesome/free-solid-svg-icons';
 import { hexToRgba } from '../../utils/color';
+import MonthNavigator from '../../components/common/MonthNavigator';
+import {
+  getSupportManagementYearMonth,
+  parseSupportManagementView,
+  rememberSupportManagementYearMonth,
+  subscribeSupportManagementYearMonth,
+  type SupportManagementView,
+} from '../../utils/supportManagementState';
 
-type SupportTabId = 'vehicle' | 'card' | 'accommodation' | 'expense';
+type SupportTabId = 'vehicle' | 'card' | 'accommodation' | 'expense' | 'claim';
 
 const tabs: Array<{ id: SupportTabId; label: string; icon: IconDefinition; color: string }> = [
-  { id: 'vehicle', label: '차량 지원', icon: faCar, color: '#2563eb' },
-  { id: 'card', label: '카드 지원', icon: faCreditCard, color: '#7c3aed' },
-  { id: 'accommodation', label: '숙소 관리', icon: faBuilding, color: '#059669' },
-  { id: 'expense', label: '경비 정산', icon: faFileInvoiceDollar, color: '#d97706' }
+  { id: 'expense', label: '통합현황', icon: faFileInvoiceDollar, color: '#d97706' },
+  { id: 'claim', label: '경비입력', icon: faFileCirclePlus, color: '#ea580c' },
+  { id: 'vehicle', label: '차량', icon: faCar, color: '#2563eb' },
+  { id: 'accommodation', label: '숙소', icon: faBuilding, color: '#059669' },
+  { id: 'card', label: '카드', icon: faCreditCard, color: '#7c3aed' }
 ];
 
 const SupportManagerPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const initialTab = useMemo<SupportTabId>(() => {
+    if (location.pathname.includes('/support/expense-claims') || location.pathname.includes('/support/expense-claim-input')) return 'claim';
     if (location.pathname.includes('/support/expense-ledger')) return 'expense';
     if (location.pathname.includes('/support/cards')) return 'card';
     if (location.pathname.includes('/support/accommodation')) return 'accommodation';
     return 'vehicle';
   }, [location.pathname]);
   const [activeTab, setActiveTab] = useState<SupportTabId>(initialTab);
+  const initialView = useMemo(
+    () => parseSupportManagementView(new URLSearchParams(location.search).get('view')),
+    [location.search]
+  );
+  const [activeView, setActiveView] = useState<SupportManagementView>(initialView);
+  const [yearMonth, setYearMonth] = useState(getSupportManagementYearMonth);
+  const [claimFormDirty, setClaimFormDirty] = useState(false);
 
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
 
+  useEffect(() => {
+    setActiveView(initialView);
+  }, [initialView]);
+
+  useEffect(() => subscribeSupportManagementYearMonth(setYearMonth), []);
+
+  const buildSearch = (view: SupportManagementView) => {
+    const params = new URLSearchParams(location.search);
+    params.set('view', view);
+    return `?${params.toString()}`;
+  };
+
   const handleTabChange = (tabId: SupportTabId) => {
+    if (
+      activeTab === 'claim'
+      && tabId !== 'claim'
+      && claimFormDirty
+      && !window.confirm('작성 중인 경비입력 내용이 있습니다. 저장하지 않고 이동할까요?')
+    ) {
+      return;
+    }
+
     setActiveTab(tabId);
     const pathMap = {
       vehicle: '/support/vehicles',
       card: '/support/cards',
       accommodation: '/support/accommodation',
       expense: '/support/expense-ledger',
+      claim: '/support/expense-claims',
     };
-    navigate(pathMap[tabId], { replace: true });
+    navigate(`${pathMap[tabId]}${buildSearch(activeView)}`, { replace: true });
   };
 
-  const currentTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
+  const handleViewChange = (view: SupportManagementView) => {
+    setActiveView(view);
+    navigate(`${location.pathname}${buildSearch(view)}`, { replace: true });
+  };
+
+  const handleYearMonthChange = (nextYearMonth: string) => {
+    if (
+      activeTab === 'claim'
+      && claimFormDirty
+      && !window.confirm('작성 중인 경비입력 내용이 있습니다. 저장하지 않고 조회월을 바꿀까요?')
+    ) {
+      return;
+    }
+
+    setYearMonth(nextYearMonth);
+    rememberSupportManagementYearMonth(nextYearMonth);
+  };
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 px-3 py-4 sm:p-6 xl:p-8">
-      <div className="w-full max-w-none min-w-0 space-y-5 sm:space-y-6">
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm md:p-5">
-          <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-            <div className="flex min-w-0 items-center gap-3">
-              <div
-                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-white shadow-lg"
-                style={{ backgroundColor: currentTab.color, boxShadow: `0 12px 28px -18px ${currentTab.color}` }}
-              >
-                <FontAwesomeIcon icon={faLifeRing} className="text-lg" />
-              </div>
-              <div className="min-w-0">
-                <div className="mb-1 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-500">
-                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: currentTab.color }} />
-                  {currentTab.label}
-                </div>
-                <h1 className="truncate text-xl font-black tracking-tight text-slate-950 sm:text-2xl">지원관리 통합센터</h1>
-                <p className="mt-1 text-sm font-semibold text-slate-500">
-                  차량, 카드, 숙소의 배정 현황과 청구 업무를 같은 흐름으로 관리합니다.
-                </p>
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 px-3 pb-6 pt-0 sm:px-5 xl:px-6">
+      <div className="w-full max-w-none min-w-0 space-y-3">
+        <header className="sticky top-0 z-30 rounded-b-xl border border-t-0 border-slate-200/90 bg-white/95 shadow-lg shadow-slate-200/50 backdrop-blur">
+          <div className="flex h-[52px] min-w-0 items-center gap-2 px-2 sm:px-3">
+            <div className="flex shrink-0 items-center gap-2 border-r border-slate-200 pr-2 sm:pr-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white shadow-sm">
+                <FontAwesomeIcon icon={faLayerGroup} className="text-sm" />
+              </span>
+              <div className="hidden whitespace-nowrap text-sm font-black text-slate-950 sm:block">
+                배정·경비 통합관리
               </div>
             </div>
 
-            <div className="support-scroll-x w-full lg:w-auto">
-              <div className="support-scroll-inner inline-flex rounded-lg bg-slate-100 p-1" role="tablist" aria-label="지원관리 업무 선택">
+            <div className="w-[148px] shrink-0 sm:w-[168px]">
+              <MonthNavigator
+                value={yearMonth}
+                onChange={handleYearMonthChange}
+                ariaLabel="통합관리 조회월"
+              />
+            </div>
+
+            <div className="support-scroll-x min-w-0 flex-1">
+              <div className="support-scroll-inner inline-flex min-w-max items-center gap-1 rounded-lg bg-slate-100 p-1" role="tablist" aria-label="통합관리 업무 선택">
                 {tabs.map((tab) => {
                   const isActive = activeTab === tab.id;
                   return (
@@ -82,7 +136,7 @@ const SupportManagerPage: React.FC = () => {
                       aria-selected={isActive}
                       aria-current={isActive ? 'page' : undefined}
                       onClick={() => handleTabChange(tab.id)}
-                      className={`flex h-10 items-center gap-2.5 whitespace-nowrap rounded-md border px-4 text-sm font-extrabold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 sm:px-5 ${
+                      className={`flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md border px-2.5 text-xs font-extrabold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 sm:px-3 sm:text-sm ${
                         isActive ? 'bg-white shadow-sm' : 'border-transparent text-slate-500 hover:bg-white/70 hover:text-slate-700'
                       }`}
                       style={isActive ? {
@@ -91,7 +145,6 @@ const SupportManagerPage: React.FC = () => {
                         boxShadow: `0 4px 12px -8px ${tab.color}`
                       } : undefined}
                     >
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: tab.color }} />
                       <FontAwesomeIcon icon={tab.icon} className={isActive ? '' : 'text-slate-400'} />
                       {tab.label}
                     </button>
@@ -99,14 +152,16 @@ const SupportManagerPage: React.FC = () => {
                 })}
               </div>
             </div>
+
           </div>
-        </div>
+        </header>
 
         <div className="w-full min-w-0">
-          {activeTab === 'vehicle' && <VehicleManagerPage embedded />}
-          {activeTab === 'card' && <CardManagerPage embedded />}
-          {activeTab === 'accommodation' && <AccommodationManager embedded />}
+          {activeTab === 'vehicle' && <VehicleManagerPage embedded initialTab={activeView} onTabChange={handleViewChange} />}
+          {activeTab === 'card' && <CardManagerPage embedded initialTab={activeView} onTabChange={handleViewChange} />}
+          {activeTab === 'accommodation' && <AccommodationManager embedded initialTab={activeView} onTabChange={handleViewChange} />}
           {activeTab === 'expense' && <ExpenseLedgerPage embedded />}
+          {activeTab === 'claim' && <ExpenseClaimManagementPage embedded onDirtyChange={setClaimFormDirty} />}
         </div>
       </div>
     </div>

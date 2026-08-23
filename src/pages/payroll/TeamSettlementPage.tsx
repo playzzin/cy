@@ -1,5 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Swal from 'sweetalert2';
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  type DragEndEvent,
+  useSensor,
+  useSensors
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  horizontalListSortingStrategy,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS as DndCss } from '@dnd-kit/utilities';
 import { CurrencyInput } from '../../components/common/CurrencyInput';
 import {
   TeamSettlementWorkspaceHeader,
@@ -22,11 +39,15 @@ import { vehicleService } from '../../services/vehicleService';
 import { officeService } from '../../services/officeService';
 import { supportRateService, type SupportRate } from '../../services/supportRateService';
 import { toast } from '../../utils/swal';
-import { selectPreferredSettlementBillings } from '../../utils/supportSettlementBilling';
+import {
+  getSettlementBillingRowScopeKey,
+  selectPreferredSettlementBillings
+} from '../../utils/supportSettlementBilling';
 import {
   createTeamSettlementDraftFingerprint,
   getTeamSettlementConfirmationIssues
 } from '../../utils/teamSettlementDraft';
+import { DEFAULT_SUPPORT_UNIT_PRICE } from '../../utils/teamSettlementSupportRateOverrides';
 import type { UtilityRecord } from '../../types/accommodation';
 import type { AccommodationAssignment } from '../../types/accommodationAssignment';
 import type { AccommodationBillingDocument } from '../../types/accommodationBilling';
@@ -57,6 +78,7 @@ const buildDefaultYearMonth = (): string => {
 };
 
 const MONTH_BUTTON_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1);
+const TEAM_SETTLEMENT_TEAM_ORDER_STORAGE_KEY = 'team-settlement:team-order:v1';
 
 const parseYearMonthValue = (value: string): { year: number; month: number } => {
   const now = new Date();
@@ -133,6 +155,117 @@ const getTeamButtonStyle = (color: string | null | undefined, selected: boolean)
     backgroundColor: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.12)`,
     borderColor: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.45)`,
     color: 'var(--team-settlement-team-chip-text, #1f2937)'
+  };
+};
+
+const getTeamOrderId = (team: Team): string => String(team.id ?? team.legacyId ?? team.name).trim();
+
+const readTeamOrderPreference = (): string[] => {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(TEAM_SETTLEMENT_TEAM_ORDER_STORAGE_KEY) ?? '[]');
+    if (!Array.isArray(parsed)) return [];
+    return Array.from(new Set(parsed.map((value) => String(value).trim()).filter(Boolean)));
+  } catch {
+    return [];
+  }
+};
+
+const applyTeamOrderPreference = (rows: Team[], preferredOrder: string[] = readTeamOrderPreference()): Team[] => {
+  const order = preferredOrder;
+  if (order.length === 0) return rows;
+
+  const rankById = new Map(order.map((id, index) => [id, index]));
+  return rows
+    .map((team, sourceIndex) => ({ team, sourceIndex, rank: rankById.get(getTeamOrderId(team)) }))
+    .sort((a, b) => {
+      const aRank = a.rank ?? Number.MAX_SAFE_INTEGER;
+      const bRank = b.rank ?? Number.MAX_SAFE_INTEGER;
+      return aRank - bRank || a.sourceIndex - b.sourceIndex;
+    })
+    .map(({ team }) => team);
+};
+
+const saveTeamOrderPreference = (rows: Team[]): void => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(
+      TEAM_SETTLEMENT_TEAM_ORDER_STORAGE_KEY,
+      JSON.stringify(rows.map(getTeamOrderId).filter(Boolean))
+    );
+  } catch {
+    // localStorage가 차단된 환경에서는 현재 세션의 순서만 유지한다.
+  }
+};
+
+interface SortableTeamButtonProps {
+  team: Team;
+  isSelected: boolean;
+  isOrderEditing: boolean;
+  onSelect: (teamId: string) => void;
+}
+
+const SortableTeamButton: React.FC<SortableTeamButtonProps> = ({
+  team,
+  isSelected,
+  isOrderEditing,
+  onSelect
+}) => {
+  const teamId = String(team.id ?? '');
+  const sortableId = getTeamOrderId(team);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: sortableId,
+    disabled: !isOrderEditing
+  });
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      className={`relative inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border px-4 text-sm font-black tracking-tight transition hover:brightness-95 ${isSelected
+        ? 'shadow-md ring-2 ring-slate-900/20 ring-offset-1'
+        : 'shadow-sm'
+        } ${isOrderEditing ? 'cursor-grab touch-none active:cursor-grabbing' : ''} ${isDragging ? 'z-30 opacity-70 shadow-xl' : ''}`}
+      style={{
+        ...getTeamButtonStyle(team.color, isSelected),
+        transform: DndCss.Transform.toString(transform),
+        transition
+      }}
+      {...(isOrderEditing ? attributes : {})}
+      {...(isOrderEditing ? listeners : {})}
+      aria-pressed={!isOrderEditing ? isSelected : undefined}
+      aria-label={isOrderEditing ? `${team.name} 순서 변경` : `${team.name} 선택`}
+      title={isOrderEditing ? '드래그해서 순서를 변경하세요' : `${team.name} 정산 보기`}
+      onClick={() => {
+        if (!isOrderEditing) onSelect(teamId);
+      }}
+    >
+      {isOrderEditing && <span className="text-base leading-none opacity-70" aria-hidden="true">⠿</span>}
+      <span className="whitespace-nowrap">{team.name}</span>
+    </button>
+  );
+};
+
+type TeamSettlementAccentStyle = React.CSSProperties & {
+  '--team-settlement-accent': string;
+  '--team-settlement-accent-contrast': string;
+  '--team-settlement-accent-soft': string;
+  '--team-settlement-accent-soft-strong': string;
+  '--team-settlement-accent-border': string;
+};
+
+const getTeamSettlementAccentStyle = (color: string | null | undefined): TeamSettlementAccentStyle => {
+  const accent = normalizeHexColor(color) ?? DEFAULT_TEAM_BUTTON_COLOR;
+  const rgb = hexToRgb(accent) ?? { r: 79, g: 70, b: 229 };
+
+  return {
+    '--team-settlement-accent': accent,
+    '--team-settlement-accent-contrast': getReadableTextColor(accent),
+    '--team-settlement-accent-soft': `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.07)`,
+    '--team-settlement-accent-soft-strong': `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.14)`,
+    '--team-settlement-accent-border': `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.38)`,
   };
 };
 
@@ -229,8 +362,76 @@ const calculateOverlapDays = (params: {
 
 const selectPreferredTeamBillings = <T extends { status?: unknown }>(
   docs: T[],
-  additionalPosted?: (doc: T) => boolean
-): T[] => selectPreferredSettlementBillings(docs, additionalPosted);
+  additionalPosted?: (doc: T) => boolean,
+  getGroupKey?: (doc: T) => unknown,
+  getScopeKey?: (doc: T) => unknown
+): T[] => selectPreferredSettlementBillings(docs, additionalPosted, getGroupKey, getScopeKey);
+
+const normalizeBillingIdentityPart = (value: unknown): string => (
+  String(value ?? '').trim().toLowerCase().replace(/\s+/g, '')
+);
+
+const firstBillingIdentityPart = (...values: unknown[]): string => {
+  for (const value of values) {
+    const normalized = normalizeBillingIdentityPart(value);
+    if (normalized) return normalized;
+  }
+  return '';
+};
+
+const getBillingRecipientIdentity = (doc: {
+  teamId?: unknown;
+  assignedTeamId?: unknown;
+  teamName?: unknown;
+  assignedTeamName?: unknown;
+  issuedToType?: unknown;
+  issuedToWorkerId?: unknown;
+  issuedToWorkerName?: unknown;
+}): string => [
+  firstBillingIdentityPart(doc.teamName, doc.assignedTeamName, doc.teamId, doc.assignedTeamId),
+  normalizeBillingIdentityPart(doc.issuedToType),
+  firstBillingIdentityPart(doc.issuedToWorkerName, doc.issuedToWorkerId)
+].join('|');
+
+const getAccommodationSettlementBillingGroupKey = (doc: {
+  teamId?: unknown;
+  teamName?: unknown;
+  issuedToType?: unknown;
+  issuedToWorkerId?: unknown;
+  issuedToWorkerName?: unknown;
+}): string => `accommodation|${getBillingRecipientIdentity(doc)}`;
+
+const getVehicleSettlementBillingGroupKey = (doc: {
+  vehicleId?: unknown;
+  vehiclePlate?: unknown;
+  teamId?: unknown;
+  assignedTeamId?: unknown;
+  teamName?: unknown;
+  assignedTeamName?: unknown;
+  issuedToType?: unknown;
+  issuedToWorkerId?: unknown;
+  issuedToWorkerName?: unknown;
+}): string => [
+  'vehicle',
+  firstBillingIdentityPart(doc.vehiclePlate, doc.vehicleId),
+  getBillingRecipientIdentity(doc)
+].join('|');
+
+const getCardSettlementBillingGroupKey = (doc: {
+  cardId?: unknown;
+  cardLabel?: unknown;
+  teamId?: unknown;
+  assignedTeamId?: unknown;
+  teamName?: unknown;
+  assignedTeamName?: unknown;
+  issuedToType?: unknown;
+  issuedToWorkerId?: unknown;
+  issuedToWorkerName?: unknown;
+}): string => [
+  'card',
+  firstBillingIdentityPart(doc.cardLabel, doc.cardId),
+  getBillingRecipientIdentity(doc)
+].join('|');
 
 const hasBillingLineSource = (
   doc: { lineItems?: Array<{ sourceType?: unknown }> },
@@ -702,6 +903,13 @@ type SettlementAmountMissingRow = {
   reason: string;
 };
 
+type SourceDataValidationIssue = {
+  code: string;
+  message: string;
+  severity: 'error' | 'warning';
+  targetId: string;
+};
+
 type DeductionSourceData = {
   accommodationDocs: AccommodationBillingDocument[];
   accommodationAssignments: AccommodationAssignment[];
@@ -753,6 +961,10 @@ const buildMonthRange = (yearMonth: string): { startDate: string; endDate: strin
 export const TeamSettlementPage: React.FC = () => {
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string>('');
+  const [isTeamOrderEditing, setIsTeamOrderEditing] = useState<boolean>(false);
+  const [isTeamOrderSaving, setIsTeamOrderSaving] = useState<boolean>(false);
+  const [isTeamOrderDirty, setIsTeamOrderDirty] = useState<boolean>(false);
+  const [defaultTeamOrderIds, setDefaultTeamOrderIds] = useState<string[]>([]);
   const [yearMonth, setYearMonth] = useState<string>(buildDefaultYearMonth());
   const [doc, setDoc] = useState<TeamSettlementDocument | null>(null);
   const [savedDocumentFingerprint, setSavedDocumentFingerprint] = useState<string>('');
@@ -768,7 +980,11 @@ export const TeamSettlementPage: React.FC = () => {
   const [deductionSourceData, setDeductionSourceData] = useState<DeductionSourceData>(() => createEmptyDeductionSourceData());
   const [supportRates, setSupportRates] = useState<SupportRate[]>([]);
   const [supportRatesLoaded, setSupportRatesLoaded] = useState<boolean>(false);
-  const [bulkSupportRateInput, setBulkSupportRateInput] = useState<string>('');
+  const [bulkSupportRateInput, setBulkSupportRateInput] = useState<string>(() => formatCurrency(DEFAULT_SUPPORT_UNIT_PRICE));
+  const teamOrderSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
   const currentDocumentFingerprint = useMemo(
     () => createTeamSettlementDraftFingerprint(doc),
@@ -779,7 +995,7 @@ export const TeamSettlementPage: React.FC = () => {
     savedDocumentFingerprint &&
     currentDocumentFingerprint !== savedDocumentFingerprint
   );
-  const confirmationIssues = useMemo(
+  const documentConfirmationIssues = useMemo(
     () => getTeamSettlementConfirmationIssues(doc),
     [doc]
   );
@@ -800,9 +1016,10 @@ export const TeamSettlementPage: React.FC = () => {
     let cancelled = false;
     const loadTeams = async () => {
       try {
-        const [teamList, constructionCompanies] = await Promise.all([
+        const [teamList, constructionCompanies, serverTeamOrder] = await Promise.all([
           teamService.getTeams(),
-          companyService.getCompaniesByType('시공사')
+          companyService.getCompaniesByType('시공사'),
+          teamSettlementService.getTeamDisplayOrder().catch(() => [] as string[])
         ]);
 
         if (cancelled) return;
@@ -826,7 +1043,10 @@ export const TeamSettlementPage: React.FC = () => {
         });
 
         const rows = siteConstructionTeams.length > 0 ? siteConstructionTeams : constructionCompanyTeams;
-        setTeams(rows);
+        const baseOrderIds = rows.map(getTeamOrderId).filter(Boolean);
+        const preferredOrder = serverTeamOrder.length > 0 ? serverTeamOrder : readTeamOrderPreference();
+        setDefaultTeamOrderIds(baseOrderIds);
+        setTeams(applyTeamOrderPreference(rows, preferredOrder));
       } catch (error) {
         console.error(error);
         toast.error('팀 목록 로드 실패');
@@ -860,8 +1080,25 @@ export const TeamSettlementPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const overrides = loadRateOverrides(yearMonth);
-    setBulkSupportRateInput(overrides.bulkSupportRate ? formatCurrency(overrides.bulkSupportRate) : '');
+    let cancelled = false;
+    const localOverrides = loadRateOverrides(yearMonth);
+    setBulkSupportRateInput(formatCurrency(localOverrides.bulkSupportRate ?? DEFAULT_SUPPORT_UNIT_PRICE));
+
+    const loadServerOverrides = async () => {
+      try {
+        const serverOverrides = await teamSettlementService.getSupportRateOverrides(yearMonth);
+        if (cancelled) return;
+        saveRateOverrides(yearMonth, serverOverrides);
+        setBulkSupportRateInput(formatCurrency(serverOverrides.bulkSupportRate ?? DEFAULT_SUPPORT_UNIT_PRICE));
+      } catch (error) {
+        console.warn('[TeamSettlementPage] support rate server load failed:', error);
+      }
+    };
+
+    void loadServerOverrides();
+    return () => {
+      cancelled = true;
+    };
   }, [yearMonth]);
 
   // Set default selected team when teams are loaded
@@ -1034,10 +1271,16 @@ export const TeamSettlementPage: React.FC = () => {
     void loadSettlement();
   }, [loadSettlement]);
 
-  const selectedTeamName = useMemo(() => {
-    const t = teams.find((x) => String(x.id ?? '') === String(selectedTeamId));
-    return t?.name ?? '';
-  }, [selectedTeamId, teams]);
+  const selectedTeam = useMemo(
+    () => teams.find((team) => String(team.id ?? '') === String(selectedTeamId)),
+    [selectedTeamId, teams]
+  );
+
+  const selectedTeamName = selectedTeam?.name ?? '';
+  const teamSettlementAccentStyle = useMemo(
+    () => getTeamSettlementAccentStyle(selectedTeam?.color),
+    [selectedTeam?.color]
+  );
 
   const teamIdVariants = useMemo(() => {
     const variants = new Set<string>();
@@ -1320,6 +1563,108 @@ export const TeamSettlementPage: React.FC = () => {
       });
   }, [doc, laborExchangeSummary, supportRates, supportRatesLoaded]);
 
+  const sourceDataValidationIssues = useMemo<SourceDataValidationIssue[]>(() => {
+    if (!doc) return [];
+
+    const issues: SourceDataValidationIssue[] = [];
+    const seen = new Set<string>();
+    const addIssue = (issue: SourceDataValidationIssue) => {
+      if (seen.has(issue.code)) return;
+      seen.add(issue.code);
+      issues.push(issue);
+    };
+
+    if (doc.sourceSnapshot) {
+      doc.sourceSnapshot.dailyReports.forEach((report) => {
+        const reportLabel = `${report.date} ${report.siteName || '현장 미지정'}`.trim();
+        if (!String(report.siteId ?? '').trim() || !String(report.siteName ?? '').trim()) {
+          addIssue({
+            code: `source-site:${report.reportId}`,
+            message: `${reportLabel} 출력일보의 현장 연결 정보가 없습니다.`,
+            severity: 'error',
+            targetId: 'settlement-source-validation'
+          });
+        }
+        if (
+          report.teamAssignmentMissing || (
+            !String(report.responsibleTeamId ?? '').trim() &&
+            !String(report.responsibleTeamName ?? '').trim() &&
+            !String(report.reportTeamId ?? '').trim() &&
+            !String(report.reportTeamName ?? '').trim()
+          )
+        ) {
+          addIssue({
+            code: `source-team:${report.reportId}`,
+            message: `${reportLabel} 출력일보에 담당팀이 지정되지 않았습니다.`,
+            severity: 'error',
+            targetId: 'settlement-source-validation'
+          });
+        }
+      });
+    } else {
+      const rowsByReportId = new Map<string, DailyReportWorkerRow>();
+      detailRows.forEach((row) => {
+        const reportId = String(row.reportId ?? '').trim() || `${row.date}:${row.siteId}:${row.teamId}`;
+        if (!rowsByReportId.has(reportId)) rowsByReportId.set(reportId, row);
+      });
+      rowsByReportId.forEach((row, reportId) => {
+        const reportLabel = `${row.date} ${row.siteName || '현장 미지정'}`.trim();
+        if (!String(row.siteId ?? '').trim() || !String(row.siteName ?? '').trim()) {
+          addIssue({
+            code: `source-site:${reportId}`,
+            message: `${reportLabel} 출력일보의 현장 연결 정보가 없습니다.`,
+            severity: 'error',
+            targetId: 'settlement-source-validation'
+          });
+        }
+        if (
+          !String(row.responsibleTeamId ?? '').trim() &&
+          !String(row.responsibleTeamName ?? '').trim() &&
+          !String(row.teamId ?? '').trim() &&
+          !String(row.teamName ?? '').trim()
+        ) {
+          addIssue({
+            code: `source-team:${reportId}`,
+            message: `${reportLabel} 출력일보에 담당팀이 지정되지 않았습니다.`,
+            severity: 'error',
+            targetId: 'settlement-source-validation'
+          });
+        }
+      });
+    }
+
+    return issues;
+  }, [detailRows, doc]);
+
+  const confirmationIssues = useMemo(() => {
+    const supportIssues: SourceDataValidationIssue[] = supportRateMissingRows.map((row) => ({
+      code: `support-rate:${row.key}`,
+      message: `${row.siteName} ${row.directionLabel} 지원단가가 등록되지 않았습니다.`,
+      severity: 'error',
+      targetId: 'settlement-rate-validation'
+    }));
+    const byCode = new Map<string, SourceDataValidationIssue>();
+    [...documentConfirmationIssues, ...sourceDataValidationIssues, ...supportIssues].forEach((issue) => {
+      byCode.set(issue.code, {
+        ...issue,
+        severity: issue.severity ?? 'error',
+        targetId: issue.targetId ?? 'settlement-validation'
+      });
+    });
+    return Array.from(byCode.values());
+  }, [documentConfirmationIssues, sourceDataValidationIssues, supportRateMissingRows]);
+
+  const handleValidationIssueClick = useCallback((targetId?: string) => {
+    if (!targetId) return;
+    const target = document.getElementById(targetId);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target.classList.add('ring-2', 'ring-rose-400', 'ring-offset-2');
+    window.setTimeout(() => {
+      target.classList.remove('ring-2', 'ring-rose-400', 'ring-offset-2');
+    }, 1800);
+  }, []);
+
   const deductionGroups = useMemo<DeductionGroup[]>(() => {
     const deductionItems = doc?.deductions ?? [];
     const assignedIds = new Set<string>();
@@ -1536,8 +1881,9 @@ export const TeamSettlementPage: React.FC = () => {
           .map((issue) => `• ${issue.message}`)
           .join('\n')}${confirmationIssues.length > 6 ? `\n외 ${confirmationIssues.length - 6}건` : ''}`,
         icon: 'error',
-        confirmButtonText: '확인'
+        confirmButtonText: '첫 오류로 이동'
       });
+      handleValidationIssueClick(confirmationIssues[0]?.targetId);
       return;
     }
 
@@ -1580,7 +1926,7 @@ export const TeamSettlementPage: React.FC = () => {
       setSaveState('error');
       toast.error('확정 실패');
     }
-  }, [confirmationIssues, doc, isDirty, loadSettlement, selectedTeamName]);
+  }, [confirmationIssues, doc, handleValidationIssueClick, isDirty, loadSettlement, selectedTeamName]);
 
   const handleUnconfirm = useCallback(async () => {
     if (!doc) return;
@@ -1648,6 +1994,75 @@ export const TeamSettlementPage: React.FC = () => {
       setSelectedTeamId(teamId);
     })();
   }, [confirmBeforeDiscard, selectedTeamId]);
+
+  const handleTeamOrderDragEnd = useCallback(({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+
+    setTeams((currentTeams) => {
+      const oldIndex = currentTeams.findIndex((team) => getTeamOrderId(team) === String(active.id));
+      const newIndex = currentTeams.findIndex((team) => getTeamOrderId(team) === String(over.id));
+      if (oldIndex < 0 || newIndex < 0) return currentTeams;
+
+      const reorderedTeams = arrayMove(currentTeams, oldIndex, newIndex);
+      saveTeamOrderPreference(reorderedTeams);
+      setIsTeamOrderDirty(true);
+      return reorderedTeams;
+    });
+  }, []);
+
+  const handleTeamOrderEditingToggle = useCallback(() => {
+    if (isTeamOrderSaving) return;
+
+    if (!isTeamOrderEditing) {
+      setIsTeamOrderEditing(true);
+      setIsTeamOrderDirty(false);
+      return;
+    }
+
+    if (!isTeamOrderDirty) {
+      setIsTeamOrderEditing(false);
+      return;
+    }
+
+    void (async () => {
+      setIsTeamOrderSaving(true);
+      try {
+        const orderedTeamIds = teams.map(getTeamOrderId).filter(Boolean);
+        await teamSettlementService.saveTeamDisplayOrder(orderedTeamIds);
+        saveTeamOrderPreference(teams);
+        setIsTeamOrderDirty(false);
+        setIsTeamOrderEditing(false);
+        toast.success('회사 공통 팀 순서를 저장했습니다.');
+      } catch (error) {
+        console.error(error);
+        toast.error('팀 순서를 서버에 저장하지 못했습니다.');
+      } finally {
+        setIsTeamOrderSaving(false);
+      }
+    })();
+  }, [isTeamOrderDirty, isTeamOrderEditing, isTeamOrderSaving, teams]);
+
+  const handleResetTeamOrder = useCallback(() => {
+    if (isTeamOrderSaving || defaultTeamOrderIds.length === 0) return;
+
+    void (async () => {
+      setIsTeamOrderSaving(true);
+      try {
+        const resetTeams = applyTeamOrderPreference(teams, defaultTeamOrderIds);
+        await teamSettlementService.resetTeamDisplayOrder();
+        saveTeamOrderPreference(resetTeams);
+        setTeams(resetTeams);
+        setIsTeamOrderDirty(false);
+        setIsTeamOrderEditing(false);
+        toast.success('회사 공통 팀 순서를 기본값으로 초기화했습니다.');
+      } catch (error) {
+        console.error(error);
+        toast.error('팀 순서를 초기화하지 못했습니다.');
+      } finally {
+        setIsTeamOrderSaving(false);
+      }
+    })();
+  }, [defaultTeamOrderIds, isTeamOrderSaving, teams]);
 
   const toggleLineExpanded = useCallback((id: string) => {
     setExpandedLineIds((prev) => {
@@ -1926,7 +2341,9 @@ export const TeamSettlementPage: React.FC = () => {
               }) &&
               matchesTeamByIdOrName(row.teamId ?? row.assignedTeamId, row.teamName ?? row.assignedTeamName)
             ),
-            (doc) => hasBillingLineSource(doc, 'vehicle_ledger')
+            (doc) => hasBillingLineSource(doc, 'vehicle_ledger'),
+            getVehicleSettlementBillingGroupKey,
+            getSettlementBillingRowScopeKey
           );
           const isLedgerVehicleItem = deductionIdText.endsWith(':ledger');
           const matchedDocs = selectedDocs.filter((row) => {
@@ -2051,7 +2468,8 @@ export const TeamSettlementPage: React.FC = () => {
                 issuedToWorkerName: row.issuedToWorkerName
               }) && matchesTeamByIdOrName(row.teamId, row.teamName)
             ),
-            (doc) => hasBillingLineSource(doc, 'utility_ledger')
+            (doc) => hasBillingLineSource(doc, 'utility_ledger'),
+            getAccommodationSettlementBillingGroupKey
           );
 
           const docChildren: ChildWithSubject[] = selectedDocs
@@ -2319,7 +2737,8 @@ export const TeamSettlementPage: React.FC = () => {
               issuedToWorkerName: row.issuedToWorkerName
             }) && matchesTeamByIdOrName(row.teamId, row.teamName)
           ),
-          (doc) => hasBillingLineSource(doc, 'utility_ledger')
+          (doc) => hasBillingLineSource(doc, 'utility_ledger'),
+          getAccommodationSettlementBillingGroupKey
         );
 
         const itemIdParts = itemIdText.split(':');
@@ -2464,7 +2883,9 @@ export const TeamSettlementPage: React.FC = () => {
             }) &&
             matchesTeamByIdOrName(row.teamId ?? row.assignedTeamId, row.teamName ?? row.assignedTeamName)
           ),
-          (doc) => hasBillingLineSource(doc, 'vehicle_ledger')
+          (doc) => hasBillingLineSource(doc, 'vehicle_ledger'),
+          getVehicleSettlementBillingGroupKey,
+          getSettlementBillingRowScopeKey
         );
         const isLedgerVehicleItem = !isAggregateDetailItem && itemIdText.endsWith(':ledger');
         const targetPlate = extractBracketValue(deductionCategory, '차량비');
@@ -2587,7 +3008,9 @@ export const TeamSettlementPage: React.FC = () => {
             }) &&
             matchesTeamByIdOrName(row.teamId ?? row.assignedTeamId, row.teamName ?? row.assignedTeamName)
           ),
-          (doc) => hasBillingLineSource(doc, 'card_ledger')
+          (doc) => hasBillingLineSource(doc, 'card_ledger'),
+          getCardSettlementBillingGroupKey,
+          getSettlementBillingRowScopeKey
         );
         const isLedgerCardItem = !isAggregateDetailItem && itemIdText.endsWith(':ledger');
         const targetCardLabel = extractBracketValue(deductionCategory, '카드비');
@@ -3001,7 +3424,10 @@ export const TeamSettlementPage: React.FC = () => {
     return getSupportRateOverrideKeysForContexts(buildSupportRateOverrideContextsForLine(line));
   }, [buildSupportRateOverrideContextsForLine, getSupportRateOverrideKeysForContexts]);
 
-  const saveSupportRateOverridesForLines = useCallback((lines: SettlementUnifiedLine[], unitPrice: number): boolean => {
+  const saveSupportRateOverridesForLines = useCallback(async (
+    lines: SettlementUnifiedLine[],
+    unitPrice: number
+  ): Promise<boolean> => {
     const normalizedRate = toPositiveRate(unitPrice);
     if (!normalizedRate) return false;
 
@@ -3024,10 +3450,9 @@ export const TeamSettlementPage: React.FC = () => {
       return false;
     }
 
-    const base = loadRateOverrides(yearMonth);
-    const supportTeamRates = { ...base.supportTeamRates };
-    const supportAggregateRates = { ...base.supportAggregateRates };
-    const supportSiteRates = { ...base.supportSiteRates };
+    const supportTeamRates: Record<string, number> = {};
+    const supportAggregateRates: Record<string, number> = {};
+    const supportSiteRates: Record<string, number> = {};
 
     targetKeys.teamRateKeys.forEach((key) => {
       supportTeamRates[key] = normalizedRate;
@@ -3039,32 +3464,34 @@ export const TeamSettlementPage: React.FC = () => {
       supportSiteRates[key] = normalizedRate;
     });
 
-    saveRateOverrides(yearMonth, normalizeRateOverrides({
-      ...base,
+    const savedOverrides = await teamSettlementService.saveSupportRateOverridePatch(yearMonth, {
       supportTeamRates,
       supportAggregateRates,
       supportSiteRates
-    }));
+    });
+    saveRateOverrides(yearMonth, savedOverrides);
     return true;
   }, [getSupportRateOverrideKeysForLine, yearMonth]);
 
-  const saveSupportSiteRateOverridesForContexts = useCallback((contexts: SupportRateOverrideContext[], unitPrice: number): boolean => {
+  const saveSupportSiteRateOverridesForContexts = useCallback(async (
+    contexts: SupportRateOverrideContext[],
+    unitPrice: number
+  ): Promise<boolean> => {
     const normalizedRate = toPositiveRate(unitPrice);
     if (!normalizedRate) return false;
 
     const { siteRateKeys } = getSupportRateOverrideKeysForContexts(contexts);
     if (siteRateKeys.length === 0) return false;
 
-    const base = loadRateOverrides(yearMonth);
-    const supportSiteRates = { ...base.supportSiteRates };
+    const supportSiteRates: Record<string, number> = {};
     siteRateKeys.forEach((key) => {
       supportSiteRates[key] = normalizedRate;
     });
 
-    saveRateOverrides(yearMonth, normalizeRateOverrides({
-      ...base,
+    const savedOverrides = await teamSettlementService.saveSupportRateOverridePatch(yearMonth, {
       supportSiteRates
-    }));
+    });
+    saveRateOverrides(yearMonth, savedOverrides);
     return true;
   }, [getSupportRateOverrideKeysForContexts, yearMonth]);
 
@@ -3109,7 +3536,14 @@ export const TeamSettlementPage: React.FC = () => {
       return;
     }
 
-    const saved = saveSupportRateOverridesForLines([line], unitPrice);
+    let saved = false;
+    try {
+      saved = await saveSupportRateOverridesForLines([line], unitPrice);
+    } catch (error) {
+      console.error(error);
+      toast.error('지원단가를 서버에 저장하지 못했습니다.');
+      return;
+    }
     if (!saved) {
       toast.error('지원단가 적용 대상이 없습니다.');
       return;
@@ -3132,7 +3566,14 @@ export const TeamSettlementPage: React.FC = () => {
       return;
     }
 
-    const saved = saveSupportSiteRateOverridesForContexts(contexts, unitPrice);
+    let saved = false;
+    try {
+      saved = await saveSupportSiteRateOverridesForContexts(contexts, unitPrice);
+    } catch (error) {
+      console.error(error);
+      toast.error('현장별 지원단가를 서버에 저장하지 못했습니다.');
+      return;
+    }
     if (!saved) {
       toast.error('현장별 지원단가 적용 대상이 없습니다.');
       return;
@@ -3161,7 +3602,14 @@ export const TeamSettlementPage: React.FC = () => {
       return;
     }
 
-    const saved = saveSupportRateOverridesForLines(autoSupportLines, unitPrice);
+    let saved = false;
+    try {
+      saved = await saveSupportRateOverridesForLines(autoSupportLines, unitPrice);
+    } catch (error) {
+      console.error(error);
+      toast.error('일괄 지원단가를 서버에 저장하지 못했습니다.');
+      return;
+    }
     if (!saved) {
       toast.error('지원단가 적용 대상이 없습니다.');
       return;
@@ -3182,19 +3630,17 @@ export const TeamSettlementPage: React.FC = () => {
 
   const renderTransactionLineRows = (
     lines: SettlementUnifiedLine[],
-    options?: { showKindColumn?: boolean; originDisplay?: 'origin' | 'kind'; showSupportRateColumn?: boolean }
+    options?: { showKindColumn?: boolean; showSupportRateColumn?: boolean }
   ) => {
     const showKindColumn = options?.showKindColumn ?? true;
-    const originDisplay = options?.originDisplay ?? 'origin';
     const showSupportRateColumn = options?.showSupportRateColumn ?? false;
-    const detailColSpan = (showKindColumn ? 7 : 6) + (showSupportRateColumn ? 1 : 0);
+    const detailColSpan = (showKindColumn ? 6 : 5) + (showSupportRateColumn ? 1 : 0);
 
     return lines.map((line) => {
       const isExpanded = expandedLineIds.has(line.id);
       const editableManual = canEdit && line.source === 'manual';
       const isMergedSupportLine = line.source === 'auto' && line.id.startsWith('merged_support:');
       const showSiteInsteadOfCounterTeam = line.kind === '도급' || line.kind === '직영';
-      const showSupportCounterAndSite = line.kind === '지원' && line.source === 'auto' && !isMergedSupportLine;
       const editableAmount =
         canEdit && (line.source === 'manual' || (line.direction === 'sales' && (line.kind === '도급' || line.kind === '직영')));
 
@@ -3252,17 +3698,8 @@ export const TeamSettlementPage: React.FC = () => {
                 </span>
               </td>
             )}
-            <td className="px-2 py-2 border text-center align-middle text-slate-700 whitespace-nowrap">
-              {originDisplay === 'kind' ? line.kind : line.originLabel}
-            </td>
             <td className="px-2 py-2 border text-center align-middle whitespace-nowrap">
-              {showSupportCounterAndSite ? (
-                <div className="space-y-0.5 text-center">
-                  <div className="text-[11px] font-medium text-slate-500">해당 {selectedTeamName || '-'}</div>
-                  <div className="text-slate-800 font-medium">상대 {String(line.counterTeamName ?? '').trim() || '-'}</div>
-                  <div className="text-[11px] text-slate-500">현장 {String(line.siteName ?? '').trim() || '현장 미지정'}</div>
-                </div>
-              ) : showSiteInsteadOfCounterTeam ? (
+              {showSiteInsteadOfCounterTeam ? (
                 editableManual ? (
                   <input
                     className="mx-auto block w-full border rounded px-2 py-1 text-center"
@@ -3305,7 +3742,7 @@ export const TeamSettlementPage: React.FC = () => {
                   }}
                 />
               ) : (
-                <div className="text-center text-slate-700">{line.counterTeamName ?? '-'}</div>
+                <div className="text-center font-bold text-slate-900">{line.counterTeamName ?? '-'}</div>
               )}
             </td>
             <td className="px-1 py-2 border text-center align-middle whitespace-nowrap">
@@ -3381,25 +3818,27 @@ export const TeamSettlementPage: React.FC = () => {
               />
             </td>
             <td className="px-2 py-2 border text-center align-middle">
-              <input
-                className="w-full border rounded px-2 py-1 text-center"
-                value={line.memo ?? ''}
-                disabled={!canEdit || isMergedSupportLine}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  if (line.direction === 'sales') {
-                    updateDoc((prev) => ({
-                      ...prev,
-                      sales: prev.sales.map((x) => (x.id === line.id ? { ...x, memo: next } : x))
-                    }));
-                  } else {
-                    updateDoc((prev) => ({
-                      ...prev,
-                      purchases: prev.purchases.map((x) => (x.id === line.id ? { ...x, memo: next } : x))
-                    }));
-                  }
-                }}
-              />
+              <div className="flex min-w-[220px] items-center gap-2">
+                <input
+                  className="min-w-0 flex-1 border rounded px-2 py-1 text-center"
+                  value={line.memo ?? ''}
+                  disabled={!canEdit || isMergedSupportLine}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (line.direction === 'sales') {
+                      updateDoc((prev) => ({
+                        ...prev,
+                        sales: prev.sales.map((x) => (x.id === line.id ? { ...x, memo: next } : x))
+                      }));
+                    } else {
+                      updateDoc((prev) => ({
+                        ...prev,
+                        purchases: prev.purchases.map((x) => (x.id === line.id ? { ...x, memo: next } : x))
+                      }));
+                    }
+                  }}
+                />
+              </div>
             </td>
             <td className="px-2 py-2 border text-center">
               <div className="flex items-center justify-center gap-1">
@@ -3419,7 +3858,7 @@ export const TeamSettlementPage: React.FC = () => {
               <td className="px-3 py-3 border" colSpan={detailColSpan}>
                 <div className="rounded-lg border bg-white p-3">
                   <div className="text-sm font-semibold text-slate-800">{lineIsSupportOrigin ? '인력교류 상세' : '출력 상세'}</div>
-                  <div className="text-xs text-slate-500 mt-1">
+                  <div className="text-sm text-slate-500 mt-1">
                     {detail.length > 0
                       ? `총 ${detail.length}건 / ${siteSummaries.length}개 현장`
                       : '상세 데이터 없음 (수기 항목이거나 필터 조건에 해당 없음)'}
@@ -3454,13 +3893,13 @@ export const TeamSettlementPage: React.FC = () => {
                   )}
 
                   {isSupportFeeLine && (
-                    <div className="text-xs text-slate-500 mt-1">평균 지원단가: {formatAverageCurrency(supportRateAvg)}</div>
+                    <div className="text-sm text-slate-500 mt-1">평균 지원단가: {formatAverageCurrency(supportRateAvg)}</div>
                   )}
 
                   {detail.length > 0 && (
                     <div className="mt-3 space-y-3">
                       <div className="overflow-auto">
-                        <table className="w-full text-xs border-collapse">
+                        <table className="w-full text-sm border-collapse">
                           <thead>
                             <tr className="bg-slate-50 text-slate-600">
                               <th className="text-left px-2 py-2 border">현장</th>
@@ -3549,9 +3988,9 @@ export const TeamSettlementPage: React.FC = () => {
                                     <tr className="bg-white">
                                       <td className="px-3 py-3 border" colSpan={siteDetailColSpan}>
                                         <div className="rounded-lg border bg-slate-50 p-3">
-                                          <div className="text-xs font-semibold text-slate-700">작업자 상세 ({site.siteName})</div>
+                                          <div className="text-sm font-semibold text-slate-700">작업자 상세 ({site.siteName})</div>
                                           <div className="mt-2 overflow-auto">
-                                            <table className="w-full text-xs border-collapse">
+                                            <table className="w-full text-sm border-collapse">
                                               <thead>
                                                 <tr className="bg-white text-slate-600">
                                                   <th className="text-left px-2 py-2 border">작업자</th>
@@ -3599,7 +4038,7 @@ export const TeamSettlementPage: React.FC = () => {
   };
 
   return (
-    <div className="team-settlement-page w-full p-3 sm:p-4 lg:p-6">
+    <div className="team-settlement-page w-full p-3 sm:p-4 lg:p-6" style={teamSettlementAccentStyle}>
       <style>{`
         .team-settlement-page {
           color: #0f172a;
@@ -3609,8 +4048,52 @@ export const TeamSettlementPage: React.FC = () => {
           position: sticky;
           top: 0;
           z-index: 20;
-          background: #f8fafc;
-          box-shadow: 0 1px 0 rgba(148, 163, 184, 0.45);
+          background: var(--team-settlement-accent-soft-strong);
+          box-shadow: 0 1px 0 var(--team-settlement-accent-border);
+        }
+
+        .team-settlement-page .overflow-auto > table > thead > tr {
+          background-color: var(--team-settlement-accent-soft-strong) !important;
+          color: #334155;
+        }
+
+        .team-settlement-page .overflow-auto > table > thead > tr > th {
+          border-color: var(--team-settlement-accent-border) !important;
+        }
+
+        .team-settlement-page__workspace-bar {
+          border-color: var(--team-settlement-accent-border);
+          background: linear-gradient(90deg, var(--team-settlement-accent-soft-strong), rgba(255, 255, 255, 0.96));
+        }
+
+        .team-settlement-page__current-team {
+          border-color: var(--team-settlement-accent);
+          background: var(--team-settlement-accent);
+          color: var(--team-settlement-accent-contrast);
+        }
+
+        .team-settlement-page__summary-card,
+        .team-settlement-page__transaction-card,
+        #settlement-deductions {
+          border-color: var(--team-settlement-accent-border);
+          background: linear-gradient(145deg, var(--team-settlement-accent-soft), #ffffff 48%);
+        }
+
+        .team-settlement-page__final-card {
+          border-color: var(--team-settlement-accent);
+          background: var(--team-settlement-accent);
+          color: var(--team-settlement-accent-contrast);
+        }
+
+        .team-settlement-page__expense-expanded-detail .text-xs,
+        .team-settlement-page__expense-expanded-detail table.text-xs {
+          font-size: 0.875rem;
+          line-height: 1.25rem;
+        }
+
+        .team-settlement-page__expense-expanded-detail .text-sm {
+          font-size: 1rem;
+          line-height: 1.5rem;
         }
 
         .team-settlement-page__team-list {
@@ -3673,7 +4156,7 @@ export const TeamSettlementPage: React.FC = () => {
         onUnconfirm={handleUnconfirm}
       />
 
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:mt-6 sm:gap-4 lg:grid-cols-2">
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:mt-6 sm:gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <div className="team-settlement-page__selector-card rounded-xl border bg-white p-3 sm:p-2.5">
           <div className="text-sm font-semibold text-slate-700">정산월</div>
           <div className="mt-2 flex flex-col gap-2 lg:flex-row lg:items-center">
@@ -3720,7 +4203,45 @@ export const TeamSettlementPage: React.FC = () => {
         </div>
 
         <div className="team-settlement-page__selector-card rounded-xl border bg-white p-3 sm:p-4">
-          <div className="text-sm font-semibold text-slate-700">팀</div>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="text-base font-black text-slate-900">팀</div>
+                <span className="hidden rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-600 sm:inline-flex">
+                  회사 공통 순서
+                </span>
+              </div>
+              {isTeamOrderEditing && (
+                <div className="mt-0.5 hidden text-xs font-semibold text-blue-600 sm:block">
+                  팀 버튼을 드래그해 순서를 바꾸세요.
+                </div>
+              )}
+            </div>
+            <div className="hidden items-center gap-1.5 sm:flex">
+              {isTeamOrderEditing && (
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                  disabled={isTeamOrderSaving}
+                  onClick={handleResetTeamOrder}
+                >
+                  기본 순서
+                </button>
+              )}
+              <button
+                type="button"
+                className={`inline-flex h-8 items-center justify-center rounded-lg border px-3 text-xs font-black transition disabled:opacity-50 ${isTeamOrderEditing
+                  ? 'border-blue-600 bg-blue-600 text-white shadow-sm hover:bg-blue-700'
+                  : 'border-slate-300 bg-white text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700'
+                  }`}
+                aria-pressed={isTeamOrderEditing}
+                disabled={isTeamOrderSaving}
+                onClick={handleTeamOrderEditingToggle}
+              >
+                {isTeamOrderSaving ? '저장 중...' : isTeamOrderEditing ? '순서 변경 완료' : '순서 변경'}
+              </button>
+            </div>
+          </div>
           <label className="sr-only" htmlFor="team-settlement-team-select">정산 팀 선택</label>
           <select
             id="team-settlement-team-select"
@@ -3732,75 +4253,154 @@ export const TeamSettlementPage: React.FC = () => {
               <option key={String(team.id ?? '')} value={String(team.id ?? '')}>{team.name}</option>
             ))}
           </select>
-          <div className="team-settlement-page__team-list mt-2 hidden gap-2 sm:flex" role="group" aria-label="팀 선택">
-            {teams.map((t) => {
-              const teamId = String(t.id ?? '');
-              const isSelected = teamId === String(selectedTeamId);
-              return (
-                <button
-                  key={teamId}
-                  type="button"
-                  className={`h-11 rounded-md border px-3 text-sm font-semibold transition hover:brightness-95 sm:h-8 sm:px-2 sm:text-xs ${isSelected ? 'shadow-sm ring-1 ring-slate-900/10' : ''
-                    }`}
-                  style={getTeamButtonStyle(t.color, isSelected)}
-                  aria-pressed={isSelected}
-                  onClick={() => handleTeamSelect(teamId)}
-                >
-                  {t.name}
-                </button>
-              );
-            })}
-          </div>
+          <DndContext
+            sensors={teamOrderSensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleTeamOrderDragEnd}
+          >
+            <SortableContext
+              items={teams.map(getTeamOrderId)}
+              strategy={horizontalListSortingStrategy}
+            >
+              <div
+                className="team-settlement-page__team-list mt-2 hidden gap-2.5 sm:flex"
+                role="group"
+                aria-label={isTeamOrderEditing ? '팀 순서 변경' : '팀 선택'}
+              >
+                {teams.map((team) => {
+                  const teamId = String(team.id ?? '');
+                  return (
+                    <SortableTeamButton
+                      key={getTeamOrderId(team)}
+                      team={team}
+                      isSelected={teamId === String(selectedTeamId)}
+                      isOrderEditing={isTeamOrderEditing}
+                      onSelect={handleTeamSelect}
+                    />
+                  );
+                })}
+              </div>
+            </SortableContext>
+          </DndContext>
         </div>
       </div>
 
       {doc && (
         <div className="mt-4 space-y-4">
-          <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-6" aria-label="정산 요약">
-            <div className="col-span-2 rounded-2xl border border-slate-900 bg-slate-950 p-4 text-white shadow-lg sm:p-5 lg:col-span-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-300">최종 정산 잔액</div>
-                <div
-                  className={`rounded-full border px-2 py-1 text-xs font-semibold ${doc.confirmedAt ? 'border-emerald-400 text-emerald-300' : 'border-amber-400 text-amber-300'}`}
-                >
+          <section className="grid grid-cols-2 gap-2 lg:grid-cols-5" aria-label="정산 요약">
+            <div className="team-settlement-page__final-card col-span-2 flex min-h-[76px] flex-col justify-between rounded-xl border px-3 py-2.5 shadow-md lg:col-span-1">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-black">최종 정산</div>
+                <div className="rounded-full border border-current/30 bg-white/15 px-2 py-0.5 text-[11px] font-black">
                   {doc.confirmedAt ? '확정' : '미확정'}
                 </div>
               </div>
-              <div className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">{formatCurrency(totals.net)}원</div>
-              <div className="mt-3 text-xs text-slate-300">매출 - 매입 - 공제 + 추가 + 전월이월 + 입금조정</div>
-              <div className="mt-1 font-mono text-xs text-slate-400">
-                {formatCurrency(totals.salesTotal)} - {formatCurrency(totals.purchasesTotal)} - {formatCurrency(totals.deductionsTotal)} +
-                {formatCurrency(totals.additionsTotal)} + {formatCurrency(totals.prevCarryover)} + {formatCurrency(totals.deposit)}
-              </div>
+              <div className="mt-1 truncate text-xl font-black tracking-tight sm:text-2xl">{formatCurrency(totals.net)}원</div>
             </div>
 
-            <div className="team-settlement-page__summary-card rounded-2xl border bg-white p-3 shadow-sm sm:p-5">
-              <div className="text-xs text-slate-500">매출 합계</div>
-              <div className="mt-1 text-xl font-extrabold text-slate-900 sm:text-2xl">{formatCurrency(totals.salesTotal)}원</div>
-              <div className="mt-2 text-xs text-slate-500">도급/직영/지원 + 지원비 포함</div>
+            <div className="team-settlement-page__summary-card flex min-h-[76px] flex-col justify-between rounded-xl border px-3 py-2.5 shadow-sm">
+              <div className="text-xs font-bold text-slate-600">매출 합계</div>
+              <div className="mt-1 truncate text-lg font-black text-slate-950 sm:text-xl">{formatCurrency(totals.salesTotal)}원</div>
             </div>
 
-            <div className="team-settlement-page__summary-card rounded-2xl border bg-white p-3 shadow-sm sm:p-5">
-              <div className="text-xs text-slate-500">매입 합계</div>
-              <div className="mt-1 text-xl font-extrabold text-slate-900 sm:text-2xl">{formatCurrency(totals.purchasesTotal)}원</div>
-              <div className="mt-2 text-xs text-slate-500">지원(받음) + 지원비 포함</div>
+            <div className="team-settlement-page__summary-card flex min-h-[76px] flex-col justify-between rounded-xl border px-3 py-2.5 shadow-sm">
+              <div className="text-xs font-bold text-slate-600">매입 합계</div>
+              <div className="mt-1 truncate text-lg font-black text-slate-950 sm:text-xl">{formatCurrency(totals.purchasesTotal)}원</div>
             </div>
 
-            <div className="team-settlement-page__summary-card rounded-2xl border bg-white p-3 shadow-sm sm:p-5">
-              <div className="text-xs text-slate-500">공제 합계</div>
-              <div className="mt-1 text-xl font-extrabold text-slate-900 sm:text-2xl">{formatCurrency(totals.deductionsTotal)}원</div>
-              <div className="mt-2 text-xs text-slate-500">사무실비/급여/차량/숙소/카드/경비</div>
+            <div className="team-settlement-page__summary-card flex min-h-[76px] flex-col justify-between rounded-xl border px-3 py-2.5 shadow-sm">
+              <div className="text-xs font-bold text-slate-600">공제 합계</div>
+              <div className="mt-1 truncate text-lg font-black text-slate-950 sm:text-xl">{formatCurrency(totals.deductionsTotal)}원</div>
             </div>
 
-            <div className="team-settlement-page__summary-card rounded-2xl border bg-white p-3 shadow-sm sm:p-5">
-              <div className="text-xs text-slate-500">추가 합계</div>
-              <div className="mt-1 text-xl font-extrabold text-slate-900 sm:text-2xl">{formatCurrency(totals.additionsTotal)}원</div>
-              <div className="mt-2 text-xs text-slate-500">수기 추가</div>
+            <div className="team-settlement-page__summary-card flex min-h-[76px] flex-col justify-between rounded-xl border px-3 py-2.5 shadow-sm">
+              <div className="text-xs font-bold text-slate-600">추가 합계</div>
+              <div className="mt-1 truncate text-lg font-black text-slate-950 sm:text-xl">{formatCurrency(totals.additionsTotal)}원</div>
             </div>
           </section>
 
+          <section
+            id="settlement-validation"
+            className={`scroll-mt-36 rounded-2xl border p-4 transition ${confirmationIssues.length > 0
+              ? 'border-rose-200 bg-rose-50'
+              : 'border-emerald-200 bg-emerald-50'
+              }`}
+            aria-label="정산 검증"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className={`text-sm font-black ${confirmationIssues.length > 0 ? 'text-rose-900' : 'text-emerald-900'}`}>
+                  정산 검증 {confirmationIssues.length > 0 ? `${confirmationIssues.length}건 확인 필요` : '완료'}
+                </div>
+                <div id="settlement-source-validation" className={`mt-1 text-xs font-semibold ${confirmationIssues.length > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                  {doc.sourceSnapshot
+                    ? `원천 고정 ${new Date(doc.sourceSnapshot.capturedAt).toLocaleString('ko-KR')} · 출력일보 ${doc.sourceSnapshot.dailyReports.length}건`
+                    : '저장 또는 재집계 시 현재 월의 원천 스냅샷이 고정됩니다.'}
+                </div>
+              </div>
+              <span className={`rounded-full px-3 py-1 text-xs font-black ${confirmationIssues.length > 0
+                ? 'bg-rose-100 text-rose-800'
+                : 'bg-emerald-100 text-emerald-800'
+                }`}>
+                {confirmationIssues.length > 0 ? '확정 전 수정 필요' : '확정 가능'}
+              </span>
+            </div>
+
+            {confirmationIssues.length > 0 && (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {confirmationIssues.map((issue, index) => (
+                  <button
+                    key={issue.code}
+                    type="button"
+                    className="flex items-start gap-2 rounded-xl border border-rose-200 bg-white px-3 py-2 text-left text-xs font-semibold text-rose-900 transition hover:border-rose-400 hover:bg-rose-100"
+                    onClick={() => handleValidationIssueClick(issue.targetId)}
+                  >
+                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white">
+                      {index + 1}
+                    </span>
+                    <span>{issue.message}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {doc.sourceSnapshot && doc.sourceSnapshot.dailyReports.length > 0 && (
+              <details className="mt-3 rounded-xl border border-slate-200 bg-white/80">
+                <summary className="cursor-pointer select-none px-3 py-2 text-xs font-black text-slate-800">
+                  고정된 출력일보 팀·현장 보기 ({doc.sourceSnapshot.dailyReports.length}건)
+                </summary>
+                <div className="max-h-64 overflow-auto border-t border-slate-200">
+                  <table className="w-full min-w-[680px] border-collapse text-xs">
+                    <thead className="sticky top-0 bg-slate-100 text-slate-700">
+                      <tr>
+                        <th className="border-b border-slate-200 px-3 py-2 text-left">출력일</th>
+                        <th className="border-b border-slate-200 px-3 py-2 text-left">현장</th>
+                        <th className="border-b border-slate-200 px-3 py-2 text-left">당시 담당팀</th>
+                        <th className="border-b border-slate-200 px-3 py-2 text-left">출력일보 작성팀</th>
+                        <th className="border-b border-slate-200 px-3 py-2 text-left">작업팀</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {doc.sourceSnapshot.dailyReports.map((report) => (
+                        <tr key={report.reportId} className="text-slate-800 odd:bg-white even:bg-slate-50/70">
+                          <td className="border-b border-slate-100 px-3 py-2 whitespace-nowrap">{report.date}</td>
+                          <td className="border-b border-slate-100 px-3 py-2 font-bold">{report.siteName || '현장 미연결'}</td>
+                          <td className="border-b border-slate-100 px-3 py-2 font-bold">{report.responsibleTeamName || '담당팀 없음'}</td>
+                          <td className="border-b border-slate-100 px-3 py-2">{report.reportTeamName || '작성팀 없음'}</td>
+                          <td className="border-b border-slate-100 px-3 py-2">
+                            {report.workerTeamNames.length > 0 ? report.workerTeamNames.join(', ') : '작업팀 없음'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            )}
+          </section>
+
           {supportRateMissingRows.length > 0 && (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <div id="settlement-rate-validation" className="scroll-mt-36 rounded-2xl border border-amber-200 bg-amber-50 p-4 transition">
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div>
                   <div className="text-sm font-bold text-amber-900">지원단가 누락</div>
@@ -3946,8 +4546,7 @@ export const TeamSettlementPage: React.FC = () => {
                     <table className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
-                          <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">원천</th>
-                          <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">해당/상대/현장</th>
+                          <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">상대팀</th>
                           <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
                           <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">지원단가</th>
                           <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">노임총액</th>
@@ -3957,7 +4556,7 @@ export const TeamSettlementPage: React.FC = () => {
                       </thead>
                       <tbody>
                         {salesSupportLinesMerged.length === 0
-                          ? <EmptySettlementTableRow colSpan={7} message="지원 매출 내역이 없습니다. 재집계하거나 수기로 추가해 주세요." />
+                          ? <EmptySettlementTableRow colSpan={6} message="지원 매출 내역이 없습니다. 재집계하거나 수기로 추가해 주세요." />
                           : renderTransactionLineRows(salesSupportLinesMerged, { showKindColumn: false, showSupportRateColumn: true })}
                       </tbody>
                     </table>
@@ -3982,7 +4581,6 @@ export const TeamSettlementPage: React.FC = () => {
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
                           <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">구분</th>
-                          <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">원천</th>
                           <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">현장</th>
                           <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
                           <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">금액</th>
@@ -3992,8 +4590,8 @@ export const TeamSettlementPage: React.FC = () => {
                       </thead>
                       <tbody>
                         {salesContractDirectLines.length === 0
-                          ? <EmptySettlementTableRow colSpan={7} message="도급·직영 매출 내역이 없습니다. 재집계하거나 수기로 추가해 주세요." />
-                          : renderTransactionLineRows(salesContractDirectLines, { originDisplay: 'kind' })}
+                          ? <EmptySettlementTableRow colSpan={6} message="도급·직영 매출 내역이 없습니다. 재집계하거나 수기로 추가해 주세요." />
+                          : renderTransactionLineRows(salesContractDirectLines)}
                       </tbody>
                     </table>
                   </div>
@@ -4030,7 +4628,6 @@ export const TeamSettlementPage: React.FC = () => {
                     <table className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
-                          <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">원천</th>
                           <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">상대팀</th>
                           <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
                           <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">지원단가</th>
@@ -4041,7 +4638,7 @@ export const TeamSettlementPage: React.FC = () => {
                       </thead>
                       <tbody>
                         {purchaseSupportLinesMerged.length === 0
-                          ? <EmptySettlementTableRow colSpan={7} message="지원 매입 내역이 없습니다. 재집계하거나 수기로 추가해 주세요." />
+                          ? <EmptySettlementTableRow colSpan={6} message="지원 매입 내역이 없습니다. 재집계하거나 수기로 추가해 주세요." />
                           : renderTransactionLineRows(purchaseSupportLinesMerged, { showKindColumn: false, showSupportRateColumn: true })}
                       </tbody>
                     </table>
@@ -4177,18 +4774,20 @@ export const TeamSettlementPage: React.FC = () => {
                             />
                           </td>
                           <td className="px-2 py-2 border">
-                            <input
-                              className="w-full border rounded px-2 py-1"
-                              value={item.memo ?? ''}
-                              disabled={!editableRow}
-                              onChange={(e) => {
-                                const next = e.target.value;
-                                updateDoc((prev) => ({
-                                  ...prev,
-                                  deductions: prev.deductions.map((x) => (x.id === item.id ? { ...x, memo: next } : x))
-                                }));
-                              }}
-                            />
+                            <div className="flex min-w-[220px] items-center gap-2">
+                              <input
+                                className="min-w-0 flex-1 border rounded px-2 py-1"
+                                value={item.memo ?? ''}
+                                disabled={!editableRow}
+                                onChange={(e) => {
+                                  const next = e.target.value;
+                                  updateDoc((prev) => ({
+                                    ...prev,
+                                    deductions: prev.deductions.map((x) => (x.id === item.id ? { ...x, memo: next } : x))
+                                  }));
+                                }}
+                              />
+                            </div>
                           </td>
                           <td className="px-2 py-2 border text-center">
                             <div className="flex items-center justify-center gap-1">
@@ -4221,7 +4820,7 @@ export const TeamSettlementPage: React.FC = () => {
                         {isExpanded && detail && (
                           <tr className={item.source === 'auto' ? 'bg-white' : 'bg-amber-50'}>
                             <td className="px-3 py-3 border" colSpan={5}>
-                              <div className="rounded-lg border bg-white p-3">
+                              <div className={`rounded-lg border bg-white p-3 ${group.key === 'expense' ? 'team-settlement-page__expense-expanded-detail' : ''}`}>
                                 {detail.kind === 'office_expense' && (
                                   <div>
                                     <div className="text-sm font-semibold text-slate-800">사무실비 상세</div>
@@ -4702,18 +5301,20 @@ export const TeamSettlementPage: React.FC = () => {
                             />
                           </td>
                           <td className="px-2 py-2 border">
-                            <input
-                              className="w-full border rounded px-2 py-1"
-                              value={item.memo ?? ''}
-                              disabled={!editableRow}
-                              onChange={(e) => {
-                                const next = e.target.value;
-                                updateDoc((prev) => ({
-                                  ...prev,
-                                  additions: (prev.additions ?? []).map((x) => (x.id === item.id ? { ...x, memo: next } : x))
-                                }));
-                              }}
-                            />
+                            <div className="flex min-w-[220px] items-center gap-2">
+                              <input
+                                className="min-w-0 flex-1 border rounded px-2 py-1"
+                                value={item.memo ?? ''}
+                                disabled={!editableRow}
+                                onChange={(e) => {
+                                  const next = e.target.value;
+                                  updateDoc((prev) => ({
+                                    ...prev,
+                                    additions: (prev.additions ?? []).map((x) => (x.id === item.id ? { ...x, memo: next } : x))
+                                  }));
+                                }}
+                              />
+                            </div>
                           </td>
                           <td className="px-2 py-2 border text-center">
                             <div className="flex items-center justify-center gap-1">

@@ -68,6 +68,45 @@ const isCheongyeonEngCompany = (company: Company): boolean => (
     ['cy', 'cyeng'].includes(normalizeCompanyKey(company.code))
 );
 
+export const buildTeamIdsByAffiliation = (
+    teamList: Team[],
+    companyList: Company[],
+    affiliation: Exclude<WorkerAffiliationCategory, 'unassigned'>
+): Set<string> => {
+    const companyById = new Map<string, Company>();
+    const cheongyeonCompanyIds = new Set<string>();
+
+    companyList.forEach((company) => {
+        const ids = [company.id, company.legacyId]
+            .map((id) => String(id ?? '').trim())
+            .filter(Boolean);
+
+        ids.forEach((id) => companyById.set(id, company));
+        if (isCheongyeonEngCompany(company)) {
+            ids.forEach((id) => cheongyeonCompanyIds.add(id));
+        }
+    });
+
+    const teamIds = new Set<string>();
+    teamList.forEach((team) => {
+        const companyId = String(team.companyId ?? '').trim();
+        const company = companyId ? companyById.get(companyId) : undefined;
+        const category = classifyWorkerAffiliation({
+            companyId,
+            companyName: team.companyName || company?.name,
+            teamType: team.type
+        }, cheongyeonCompanyIds);
+
+        if (category !== affiliation) return;
+        [team.id, team.legacyId]
+            .map((id) => String(id ?? '').trim())
+            .filter(Boolean)
+            .forEach((id) => teamIds.add(id));
+    });
+
+    return teamIds;
+};
+
 export const buildCheongyeonEngTeams = (teamList: Team[], companyList: Company[]): Team[] => {
     const cheongyeonCompanies = companyList.filter(isCheongyeonEngCompany);
     const companyIds = new Set(

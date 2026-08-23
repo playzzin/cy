@@ -1,7 +1,11 @@
 import { cardService } from './cardService';
-import { cardBillingService, isPostedCardBillingStatus } from './cardBillingService';
+import { isPostedCardBillingStatus } from './cardBillingService';
 import { supportWriteOperationLogService } from './supportWriteOperationLogService';
 import { getErrorMessage, reportSupportWriteError, SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../utils/supportWriteErrorReporting';
+import {
+  getCardStatementSourceIdentities,
+  isCardStatementImportTransaction
+} from '../utils/cardStatementDeduplication';
 import type { Card, CardTransaction, CardTransactionCategory } from '../types/card';
 import type { CardBillingDocument } from '../types/cardBilling';
 import type { CreateSupportWriteOperationLogInput } from '../types/supportWriteOperation';
@@ -36,6 +40,7 @@ export interface CardMonthlyLedgerMutationRow {
   segment: CardMonthlyLedgerMutationSegment;
   amounts: Partial<Record<CardTransactionCategory, number>>;
   memo?: string;
+  statementAttachmentPaths?: string[];
 }
 
 export interface CardMonthlyLedgerVisibleRow<TRow extends CardMonthlyLedgerMutationRow> {
@@ -48,7 +53,6 @@ export interface CardMonthlyLedgerMutationDependencies {
     cancelIds: string[];
     operationId?: string;
   }) => Promise<void>;
-  saveBilling: (billing: CardBillingDocument) => Promise<void>;
   recordOperation: (input: CreateSupportWriteOperationLogInput) => Promise<unknown>;
 }
 
@@ -58,10 +62,6 @@ export interface CardMonthlyLedgerSaveInput<TRow extends CardMonthlyLedgerMutati
   originalTransactions: CardTransaction[];
   categories: CardTransactionCategory[];
   getBillingDocumentsForRow: (row: TRow) => CardBillingDocument[];
-  buildBillingDocumentForRow: (
-    row: TRow,
-    existing?: CardBillingDocument
-  ) => CardBillingDocument | null;
   operationId?: string;
   dependencies?: Partial<CardMonthlyLedgerMutationDependencies>;
 }
@@ -91,7 +91,6 @@ export interface CardMonthlyLedgerSaveResult {
 
 const defaultDependencies: CardMonthlyLedgerMutationDependencies = {
   applyTransactionChanges: (params) => cardService.applyCardTransactionChanges(params),
-  saveBilling: (billing) => cardBillingService.saveBilling(billing),
   recordOperation: (input) => supportWriteOperationLogService.recordOperation(input)
 };
 
@@ -178,24 +177,12 @@ const getCardLabel = (row: CardMonthlyLedgerMutationRow): string => (
   `${row.card.name}${row.card.last4 ? `(${row.card.last4})` : ''}`
 );
 
-const buildCancelledBillingDocument = (billing: CardBillingDocument): CardBillingDocument => ({
-  ...billing,
-  status: 'CANCELLED',
-  variableCost: 0,
-  totalAmount: 0,
-  lineItems: [],
-  memo: billing.memo
-    ? `${billing.memo}\nCancelled by monthly ledger save`
-    : 'Cancelled by monthly ledger save'
-});
-
 export const saveCardMonthlyLedgerMutation = async <TRow extends CardMonthlyLedgerMutationRow>({
   yearMonth,
   visibleRows,
   originalTransactions,
   categories,
   getBillingDocumentsForRow,
-  buildBillingDocumentForRow,
   operationId,
   dependencies
 }: CardMonthlyLedgerSaveInput<TRow>): Promise<CardMonthlyLedgerSaveResult> => {
@@ -228,17 +215,29 @@ export const saveCardMonthlyLedgerMutation = async <TRow extends CardMonthlyLedg
   const visibleScopes = rowsToProcess.map(({ row }) => ({
     cardId: normalizeKey(row.card.id),
     start: parseYmdDate(row.segment.startDate),
-    end: parseYmdDate(row.segment.endDate)
+    end: parseYmdDate(row.segment.endDate),
+    statementSourceIdentities: new Set(getCardStatementSourceIdentities({
+      statementAttachmentPaths: row.statementAttachmentPaths ?? []
+    }))
   }));
 
   const isVisibleTransaction = (transaction: CardTransaction) => {
     const transactionCardId = normalizeKey(transaction.cardId);
     const transactionDate = parseYmdDate(transaction.date);
-    return visibleScopes.some((scope) => {
-      if (!scope.cardId || scope.cardId !== transactionCardId) return false;
-      if (!transactionDate || !scope.start || !scope.end) return true;
-      return transactionDate.getTime() >= scope.start.getTime() && transactionDate.getTime() <= scope.end.getTime();
-    });
+    const cardScopes = visibleScopes.filter((scope) => scope.cardId && scope.cardId === transactionCardId);
+    if (cardScopes.length === 0) return false;
+    if (!transactionDate) return true;
+    if (cardScopes.some((scope) => (
+      scope.start && scope.end &&
+      transactionDate.getTime() >= scope.start.getTime() &&
+      transactionDate.getTime() <= scope.end.getTime()
+    ))) return true;
+
+    if (!isCardStatementImportTransaction(transaction)) return false;
+    const transactionSourceIdentities = getCardStatementSourceIdentities(transaction);
+    return transactionSourceIdentities.some((identity) => (
+      cardScopes.some((scope) => scope.statementSourceIdentities.has(identity))
+    ));
   };
 
   const transactionUpserts: Array<Partial<CardTransaction> & { id: string }> = [];
@@ -246,6 +245,13 @@ export const saveCardMonthlyLedgerMutation = async <TRow extends CardMonthlyLedg
 
   rowsToProcess.forEach(({ row }) => {
     const memoText = normalizeKey(row.memo);
+    const statementAttachmentPaths = uniqueIds(row.statementAttachmentPaths ?? []);
+    const statementAttachmentPatch = statementAttachmentPaths.length > 0
+      ? {
+          evidenceUrl: statementAttachmentPaths[0],
+          statementAttachmentPaths
+        }
+      : {};
     let hasAmount = false;
 
     categories.forEach((category) => {
@@ -264,6 +270,7 @@ export const saveCardMonthlyLedgerMutation = async <TRow extends CardMonthlyLedg
         category,
         amount,
         memo: memoText || undefined,
+        ...statementAttachmentPatch,
         status: 'ACTIVE',
         operationId: resolvedOperationId,
         lastOperationId: resolvedOperationId
@@ -283,6 +290,7 @@ export const saveCardMonthlyLedgerMutation = async <TRow extends CardMonthlyLedg
         category: 'OTHER',
         amount: 0,
         memo: memoText,
+        ...statementAttachmentPatch,
         status: 'ACTIVE',
         operationId: resolvedOperationId,
         lastOperationId: resolvedOperationId
@@ -308,52 +316,20 @@ export const saveCardMonthlyLedgerMutation = async <TRow extends CardMonthlyLedg
     operationId: resolvedOperationId
   });
 
-  const billingSaveTasks: Array<Promise<void>> = [];
-  const billingCancelDocuments = new Map<string, CardBillingDocument>();
-  const billingSaveIds = new Set<string>();
-
-  rowsToProcess.forEach(({ row, documents }) => {
-    if (documents.length === 0) return;
-
-    const nextDocument = buildBillingDocumentForRow(row, documents[0]);
-    if (!nextDocument) {
-      documents.forEach((doc) => {
-        if (doc.id) billingCancelDocuments.set(doc.id, buildCancelledBillingDocument(doc));
-      });
-      return;
-    }
-
-    billingSaveIds.add(nextDocument.id);
-    billingSaveTasks.push(deps.saveBilling(nextDocument));
-    documents.forEach((doc) => {
-      if (doc.id && doc.id !== nextDocument.id) {
-        billingCancelDocuments.set(doc.id, buildCancelledBillingDocument(doc));
-      }
-    });
-  });
-
-  billingSaveIds.forEach((id) => billingCancelDocuments.delete(id));
-  const billingCancelDocs = Array.from(billingCancelDocuments.values());
-  attemptedAffectedDocumentIds = uniqueIds([
-    ...attemptedAffectedDocumentIds,
-    ...billingSaveIds,
-    ...billingCancelDocs.map((doc) => doc.id)
-  ]);
-
-  await Promise.all(billingSaveTasks);
-  await Promise.all(billingCancelDocs.map((doc) => deps.saveBilling(doc)));
-
+  // Ledger save and billing are intentionally separate operations. A save
+  // persists only cardTransactions; the explicit billing/rebilling action then
+  // reads those saved amounts and replaces a DRAFT billing document.
   const result = {
     operationId: resolvedOperationId,
     upsertedTransactionCount: transactionUpserts.length,
     cancelledTransactionCount: transactionCancelIds.length,
-    savedBillingCount: billingSaveIds.size,
-    cancelledBillingCount: billingCancelDocs.length,
+    savedBillingCount: 0,
+    cancelledBillingCount: 0,
     skippedBillingCount: skippedBillingRows.length,
     transactionUpsertIds: Array.from(transactionUpsertIds),
     transactionCancelIds,
-    billingSaveIds: Array.from(billingSaveIds),
-    billingCancelIds: billingCancelDocs.map((doc) => doc.id),
+    billingSaveIds: [] as string[],
+    billingCancelIds: [] as string[],
     skippedBillingRows
   };
 

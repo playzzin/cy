@@ -1,6 +1,4 @@
 import {
-    createVehicleBillingDocument,
-    deleteVehicleBillingDocument,
     listAllVehicleBillingDocuments,
     listTeams,
     listAllVehicles,
@@ -10,6 +8,7 @@ import {
 import { Vehicle, VehicleAssignmentRecord, VehicleBillingTargetRecord, VehicleBillingTargetType, VehicleExpenseRecord } from '../types/vehicle';
 import { VehicleBillingDocument, VehicleBillingCostItem, VehicleBillingIssuedToType } from '../types/vehicleBilling';
 import { vehicleService } from './vehicleService';
+import { vehicleFirestoreService } from './vehicleFirestoreService';
 import { Timestamp } from 'firebase/firestore';
 import { DEFAULT_SUPPORT_BILLING_START_DATE, isSupportBillingMonthEnabled, maxIsoDate, minIsoDate } from '../utils/supportBillingPeriod';
 import { normalizeVehicleExpenseType } from '../utils/vehicleExpenseType';
@@ -63,12 +62,23 @@ export interface VehicleBillingCancelConfirmationInput {
     actorName?: string;
 }
 
+export interface ReplaceVehicleMonthlyLedgerDraftsInput {
+    existingDocuments: VehicleBillingDocument[];
+    desiredDocuments: VehicleBillingDocument[];
+}
+
+export interface ReplaceVehicleMonthlyLedgerDraftsResult {
+    savedIds: string[];
+    deletedDraftIds: string[];
+}
+
 const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
 let dcTeamsLoaded = false;
 let dcWorkersLoaded = false;
 
 const dcTeamLegacyIdToUuid = new Map<string, string>();
+const dcTeamNameToUuid = new Map<string, string>();
 const dcWorkerLegacyIdToUuid = new Map<string, string>();
 
 const loadDcTeams = async (): Promise<void> => {
@@ -76,11 +86,14 @@ const loadDcTeams = async (): Promise<void> => {
     const res = await listTeams();
     const rows = (res as any)?.data?.teams ?? [];
     dcTeamLegacyIdToUuid.clear();
+    dcTeamNameToUuid.clear();
     for (const row of rows) {
         const uuid = row?.id ? String(row.id) : '';
         const legacyId = row?.legacyId ? String(row.legacyId) : '';
+        const name = normalizeKey(row?.name).replace(/\s+/g, '').toLowerCase();
         if (uuid) dcTeamLegacyIdToUuid.set(uuid, uuid);
         if (legacyId && uuid) dcTeamLegacyIdToUuid.set(legacyId, uuid);
+        if (name && uuid) dcTeamNameToUuid.set(name, uuid);
     }
     dcTeamsLoaded = true;
 };
@@ -132,6 +145,17 @@ const resolveVehicleUuid = async (id: string): Promise<string | null> => {
         ? rows.find((r: any) => String(r?.id ?? '') === String(id) || String(r?.legacyId ?? '') === String(id))
         : null;
     return hit?.id ? String(hit.id) : null;
+};
+
+const resolveTeamUuidByName = async (name: string | undefined): Promise<string | null> => {
+    const key = normalizeKey(name).replace(/\s+/g, '').toLowerCase();
+    if (!key) return null;
+    await loadDcTeams();
+    const found = dcTeamNameToUuid.get(key);
+    if (found) return found;
+    dcTeamsLoaded = false;
+    await loadDcTeams();
+    return dcTeamNameToUuid.get(key) ?? null;
 };
 
 const findWorkerRow = async (id: string | undefined | null): Promise<any | null> => {
@@ -353,7 +377,7 @@ const normalizeVehicleBillingDocument = (d: any): VehicleBillingDocument => {
 
 const findBillingDocumentById = async (id: string): Promise<VehicleBillingDocument | null> => {
     if (!id) return null;
-    const res = await listAllVehicleBillingDocuments();
+    const res = await listAllVehicleBillingDocuments({ limit: 100_000, offset: 0 });
     const rows = (res as any)?.data?.vehicleBillingDocuments ?? [];
     const docs = Array.isArray(rows) ? rows : [];
     const row = docs.find((d: any) => String(d?.id ?? '') === String(id));
@@ -792,13 +816,125 @@ export const vehicleBillingService = {
         return Array.from(grouped.values());
     },
 
+    /**
+     * Automatic monthly-ledger reconciliation only. Every desired split DRAFT
+     * and every stale DRAFT are committed by one Firestore transaction after
+     * status and team-settlement guards are read in that same transaction.
+     */
+    replaceMonthlyLedgerDrafts: async ({
+        existingDocuments,
+        desiredDocuments
+    }: ReplaceVehicleMonthlyLedgerDraftsInput): Promise<ReplaceVehicleMonthlyLedgerDraftsResult> => {
+        const settlementTargets: Array<{ yearMonth: string; teamId?: string | null }> = [];
+        const preparedDocuments = await Promise.all(desiredDocuments.map(async (billing) => {
+            const vehicleId = await resolveVehicleUuid(billing.vehicleId);
+            if (!vehicleId) throw new Error('Vehicle not found');
+
+            const rawTeamId = normalizeKey(billing.teamId);
+            const teamUuid = await resolveTeamUuid(rawTeamId || undefined)
+                ?? await resolveTeamUuidByName(billing.teamName);
+            const issuedToTypeRaw = normalizeKey(billing.issuedToType);
+            const issuedToType = issuedToTypeRaw === 'team_leader' ? 'team' : issuedToTypeRaw;
+            if (issuedToType !== 'team' && issuedToType !== 'worker') {
+                throw new Error('vehicle-billing-target-type-required');
+            }
+
+            const rawWorkerId = normalizeKey(billing.issuedToWorkerId);
+            const workerUuid = issuedToType === 'worker'
+                ? await resolveWorkerUuid(rawWorkerId || undefined)
+                : null;
+            const resolvedTeamId = teamUuid ?? rawTeamId;
+            const resolvedWorkerId = issuedToType === 'worker' ? (workerUuid ?? rawWorkerId) : '';
+            if (!resolvedTeamId || (issuedToType === 'worker' && !resolvedWorkerId)) {
+                throw new Error('vehicle-billing-target-required');
+            }
+
+            const ledgerRowIdSuffix = getLedgerRowIdSuffix(billing.id);
+            const canonicalId = `${vehicleBillingService.buildBillingDocumentId({
+                vehicleId,
+                teamId: resolvedTeamId,
+                issuedToType,
+                workerId: resolvedWorkerId || undefined,
+                yearMonth: billing.yearMonth
+            })}${ledgerRowIdSuffix}`;
+            settlementTargets.push(
+                { yearMonth: billing.yearMonth, teamId: rawTeamId || undefined },
+                { yearMonth: billing.yearMonth, teamId: resolvedTeamId }
+            );
+            return {
+                ...billing,
+                id: canonicalId,
+                vehicleId,
+                teamId: resolvedTeamId,
+                issuedToType: issuedToType as VehicleBillingIssuedToType,
+                issuedToWorkerId: resolvedWorkerId || undefined,
+                issuedToWorkerName: issuedToType === 'team'
+                    ? (billing.teamName ?? undefined)
+                    : billing.issuedToWorkerName,
+                status: 'DRAFT' as const,
+                lineItems: billing.lineItems ?? [],
+                confirmedAt: undefined
+            };
+        }));
+
+        const preparedIds = preparedDocuments.map((billing) => billing.id);
+        if (new Set(preparedIds).size !== preparedIds.length) {
+            throw new Error('vehicle-billing-deterministic-id-required');
+        }
+        await Promise.all(existingDocuments.map(async (billing) => {
+            const resolvedExistingTeamId = await resolveTeamUuid(billing.teamId)
+                ?? await resolveTeamUuidByName(billing.teamName);
+            settlementTargets.push({
+                yearMonth: billing.yearMonth,
+                teamId: billing.teamId
+            });
+            if (resolvedExistingTeamId) {
+                settlementTargets.push({
+                    yearMonth: billing.yearMonth,
+                    teamId: resolvedExistingTeamId
+                });
+            }
+        }));
+
+        const result = await vehicleFirestoreService.replaceVehicleBillingDrafts({
+            desiredDocuments: preparedDocuments,
+            existingDocumentIds: existingDocuments.map((billing) => billing.id),
+            settlementTargets
+        });
+
+        try {
+            const { vehicleBillingLogService } = await import('./vehicleBillingLogService');
+            const existingById = new Map(existingDocuments.map((billing) => [billing.id, billing] as const));
+            await Promise.all([
+                ...preparedDocuments.map((billing) => vehicleBillingLogService.createLog({
+                    action: existingById.has(billing.id) ? 'updated' : 'created',
+                    before: existingById.get(billing.id) ?? null,
+                    after: { ...billing, updatedAt: Timestamp.now() },
+                    source: 'vehicleBillingService.replaceMonthlyLedgerDrafts'
+                })),
+                ...result.deletedDraftIds.map((id) => vehicleBillingLogService.createLog({
+                    action: 'deleted',
+                    before: existingById.get(id) ?? null,
+                    after: null,
+                    source: 'vehicleBillingService.replaceMonthlyLedgerDrafts'
+                }))
+            ]);
+        } catch (logError) {
+            console.warn('[vehicleBillingService] vehicle billing replacement log failed:', logError);
+        }
+
+        return result;
+    },
+
     // Save Billing Document
     saveBilling: async (billing: VehicleBillingDocument) => {
         try {
             const vehicleId = await resolveVehicleUuid(billing.vehicleId);
             if (!vehicleId) throw new Error('Vehicle not found');
 
-            const teamUuid = await resolveTeamUuid(billing.teamId);
+            const teamUuid = await resolveTeamUuid(billing.teamId)
+                ?? await resolveTeamUuidByName(billing.teamName);
+            const resolvedTeamId = teamUuid ?? (normalizeKey(billing.teamId) || undefined);
             const issuedToTypeRaw = billing.issuedToType ? String(billing.issuedToType) : '';
             const issuedToType = issuedToTypeRaw === 'team_leader' ? 'team' : issuedToTypeRaw;
             const shouldRequireWorker = issuedToType === 'worker';
@@ -816,12 +952,15 @@ export const vehicleBillingService = {
                     })}${ledgerRowIdSuffix}`
                     : billing.id;
 
-            const beforeBilling = await findBillingDocumentById(canonicalId).catch(() => null);
+            // Protection reads are fail-closed. A transient list/read error
+            // must never be treated as "document not found", otherwise the
+            // create-conflict fallback could overwrite a posted document.
+            const beforeBilling = await findBillingDocumentById(canonicalId);
             const candidateBilling: VehicleBillingDocument = {
                 ...billing,
                 id: canonicalId,
                 vehicleId,
-                teamId: teamUuid ?? undefined,
+                teamId: resolvedTeamId,
                 issuedToType: issuedToType ? issuedToType as VehicleBillingIssuedToType : undefined,
                 issuedToWorkerId: issuedToWorkerUuid ?? undefined,
                 issuedToWorkerName: issuedToType === 'team' ? (billing.teamName ?? undefined) : billing.issuedToWorkerName,
@@ -832,89 +971,19 @@ export const vehicleBillingService = {
                 throw new Error('vehicle-billing-posted-modification-blocked');
             }
 
-            const payloadV2 = {
-                id: canonicalId,
-                yearMonth: billing.yearMonth,
-                vehicleId,
-                vehiclePlate: billing.vehiclePlate,
-                assignedTeamId: billing.assignedTeamId ?? null,
-                assignedTeamName: billing.assignedTeamName ?? null,
-                teamId: teamUuid,
-                teamName: billing.teamName ?? null,
-                issuedToType: issuedToType || null,
-                issuedToWorkerId: issuedToWorkerUuid,
-                issuedToWorkerName: issuedToType === 'team' ? (billing.teamName ?? null) : (billing.issuedToWorkerName ?? null),
-                fixedCost: billing.fixedCost,
-                variableCost: billing.variableCost,
-                totalAmount: billing.totalAmount,
-                status: billing.status,
-                lineItems: JSON.stringify(billing.lineItems ?? []),
-                memo: billing.memo ?? null,
-                confirmedAt: billing.confirmedAt ? billing.confirmedAt.toDate().toISOString() : null
-            };
-
-            const payloadV1 = {
-                id: canonicalId,
-                yearMonth: billing.yearMonth,
-                vehicleId,
-                vehiclePlate: billing.vehiclePlate,
-                assignedTeamId: billing.assignedTeamId ?? null,
-                assignedTeamName: billing.assignedTeamName ?? null,
-                fixedCost: billing.fixedCost,
-                variableCost: billing.variableCost,
-                totalAmount: billing.totalAmount,
-                status: billing.status,
-                lineItems: JSON.stringify(billing.lineItems ?? []),
-                memo: billing.memo ?? null
-            };
-
-            try {
-                try {
-                    await createVehicleBillingDocument(payloadV2 as any);
-                } catch {
-                    await createVehicleBillingDocument(payloadV1 as any);
-                }
-
-                if (billing.confirmedAt) {
-                    try {
-                        await updateVehicleBillingDocument({
-                            id: canonicalId,
-                            status: billing.status,
-                            confirmedAt: billing.confirmedAt.toDate().toISOString()
-                        } as any);
-                    } catch {
-                        await updateVehicleBillingDocument({
-                            id: canonicalId,
-                            yearMonth: billing.yearMonth,
-                            vehiclePlate: billing.vehiclePlate,
-                            assignedTeamId: billing.assignedTeamId ?? null,
-                            assignedTeamName: billing.assignedTeamName ?? null,
-                            fixedCost: billing.fixedCost,
-                            variableCost: billing.variableCost,
-                            totalAmount: billing.totalAmount,
-                            status: billing.status,
-                            lineItems: JSON.stringify(billing.lineItems ?? []),
-                            memo: billing.memo ?? null,
-                            confirmedAt: billing.confirmedAt.toDate().toISOString()
-                        } as any);
-                    }
-                }
-            } catch {
-                try {
-                    await updateVehicleBillingDocument(payloadV2 as any);
-                } catch {
-                    await updateVehicleBillingDocument({
-                        ...payloadV1,
-                        confirmedAt: billing.confirmedAt ? billing.confirmedAt.toDate().toISOString() : null
-                    } as any);
-                }
-            }
+            await vehicleFirestoreService.saveVehicleBillingDocumentProtected({
+                billing: candidateBilling,
+                settlementTargets: [
+                    { yearMonth: billing.yearMonth, teamId: billing.teamId },
+                    { yearMonth: billing.yearMonth, teamId: resolvedTeamId }
+                ]
+            });
 
             const savedBilling: VehicleBillingDocument = {
                 ...billing,
                 id: canonicalId,
                 vehicleId,
-                teamId: teamUuid ?? undefined,
+                teamId: resolvedTeamId,
                 issuedToType: issuedToType ? issuedToType as VehicleBillingIssuedToType : undefined,
                 issuedToWorkerId: issuedToWorkerUuid ?? undefined,
                 issuedToWorkerName: issuedToType === 'team' ? (billing.teamName ?? undefined) : billing.issuedToWorkerName,
@@ -933,6 +1002,7 @@ export const vehicleBillingService = {
             } catch (logError) {
                 console.warn('[vehicleBillingService] vehicle billing log failed:', logError);
             }
+            return canonicalId;
         } catch (error) {
             console.error("Error saving billing:", error);
             throw error;
@@ -940,9 +1010,9 @@ export const vehicleBillingService = {
     },
 
     // Get Billings for a Month
-    getBillingsByMonth: async (yearMonth: string) => {
+    getBillingsByMonth: async (yearMonth: string, options?: { throwOnError?: boolean }) => {
         try {
-            const res = await listAllVehicleBillingDocuments();
+            const res = await listAllVehicleBillingDocuments({ limit: 100_000, offset: 0 });
             const rows = (res as any)?.data?.vehicleBillingDocuments ?? [];
             const docs = Array.isArray(rows) ? rows : [];
 
@@ -952,6 +1022,7 @@ export const vehicleBillingService = {
                 .map(normalizeVehicleBillingDocument);
         } catch (error) {
             console.error("Error fetching billings:", error);
+            if (options?.throwOnError) throw error;
             return [];
         }
     },
@@ -966,11 +1037,18 @@ export const vehicleBillingService = {
     },
 
     deleteBilling: async (id: string): Promise<void> => {
-        const beforeBilling = await findBillingDocumentById(id).catch(() => null);
+        const beforeBilling = await findBillingDocumentById(id);
         if (isPostedVehicleBillingStatus(beforeBilling?.status)) {
             throw new Error('vehicle-billing-posted-delete-blocked');
         }
-        await deleteVehicleBillingDocument({ id } as any);
+        const resolvedBeforeTeamId = beforeBilling
+            ? (await resolveTeamUuid(beforeBilling.teamId) ?? await resolveTeamUuidByName(beforeBilling.teamName))
+            : null;
+        const beforeSettlementTargets = beforeBilling
+            ? Array.from(new Set([beforeBilling.teamId, resolvedBeforeTeamId].map(normalizeKey).filter(Boolean)))
+                .map((teamId) => ({ yearMonth: beforeBilling.yearMonth, teamId }))
+            : [];
+        await vehicleFirestoreService.deleteVehicleBillingDocumentProtected(id, beforeSettlementTargets);
         if (beforeBilling) {
             try {
                 const { vehicleBillingLogService } = await import('./vehicleBillingLogService');
@@ -993,7 +1071,7 @@ export const vehicleBillingService = {
         const reason = String(input.reason ?? '').trim();
         if (!reason) throw new Error('vehicle-billing-cancel-reason-required');
 
-        const beforeBilling = await findBillingDocumentById(id).catch(() => null);
+        const beforeBilling = await findBillingDocumentById(id);
         if (!beforeBilling) throw new Error('vehicle-billing-not-found');
         if (!isPostedVehicleBillingStatus(beforeBilling.status)) return;
 

@@ -19,7 +19,8 @@ import {
   X
 } from 'lucide-react';
 import { CurrencyInput } from '../../components/common/CurrencyInput';
-import { YearMonthPicker } from '../../components/common/YearMonthPicker';
+import MonthNavigator from '../../components/common/MonthNavigator';
+import SupportTeamFilterTabs from '../../components/support/SupportTeamFilterTabs';
 import { geminiService } from '../../services/geminiService';
 import { officeFixedExpenseService } from '../../services/officeFixedExpenseService';
 import { storageService } from '../../services/storageService';
@@ -29,7 +30,6 @@ import { toast } from '../../utils/swal';
 import { OFFICE_ASSIGNMENT_TEAM_ID, OFFICE_ASSIGNMENT_TEAM_NAME, isOfficeAssignmentReference } from '../../utils/supportAssignmentTargets';
 import {
   buildDefaultDate,
-  buildDefaultYearMonth,
   formatCurrency,
   getAttendedSiteOptions,
   getCategoryLabel,
@@ -51,6 +51,11 @@ import type {
   TeamExpenseClaimStatus,
   TeamExpenseClaimType
 } from '../../types/teamExpenseLedger';
+import {
+  getSupportManagementYearMonth,
+  rememberSupportManagementYearMonth,
+  subscribeSupportManagementYearMonth,
+} from '../../utils/supportManagementState';
 
 type ClaimFormState = {
   id?: string;
@@ -102,6 +107,11 @@ type FixedExpenseFormState = {
   memo: string;
   isActive: boolean;
 };
+
+interface ExpenseClaimManagementPageProps {
+  embedded?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
+}
 
 const inputClass = 'h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100 disabled:text-slate-400';
 const labelClass = 'mb-1.5 block text-xs font-black text-slate-600';
@@ -270,9 +280,12 @@ const matchesTeam = (claim: TeamExpenseClaim, team: Team | undefined) => {
   ].some((value) => keys.has(normalizeKey(value)));
 };
 
-const ExpenseClaimManagementPage: React.FC = () => {
-  const [yearMonth, setYearMonth] = useState(buildDefaultYearMonth());
-  const [form, setForm] = useState<ClaimFormState>(() => createDefaultForm(buildDefaultYearMonth()));
+const ExpenseClaimManagementPage: React.FC<ExpenseClaimManagementPageProps> = ({
+  embedded = false,
+  onDirtyChange,
+}) => {
+  const [yearMonth, setYearMonth] = useState(getSupportManagementYearMonth);
+  const [form, setForm] = useState<ClaimFormState>(() => createDefaultForm(getSupportManagementYearMonth()));
   const [saving, setSaving] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingExpenseAttachment[]>([]);
   const [removedAttachmentPaths, setRemovedAttachmentPaths] = useState<string[]>([]);
@@ -286,13 +299,67 @@ const ExpenseClaimManagementPage: React.FC = () => {
   const [searchText, setSearchText] = useState('');
   const [categoryForm, setCategoryForm] = useState<CategoryFormState>({ label: '', scope: 'teamCharge' });
   const [fixedExpenses, setFixedExpenses] = useState<OfficeFixedExpense[]>([]);
-  const [fixedExpenseForm, setFixedExpenseForm] = useState<FixedExpenseFormState>(() => createDefaultFixedExpenseForm(buildDefaultYearMonth()));
+  const [fixedExpenseForm, setFixedExpenseForm] = useState<FixedExpenseFormState>(() => createDefaultFixedExpenseForm(getSupportManagementYearMonth()));
   const [fixedExpenseLoading, setFixedExpenseLoading] = useState(false);
   const [fixedExpenseSaving, setFixedExpenseSaving] = useState(false);
   const [fixedExpenseGenerating, setFixedExpenseGenerating] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const pendingAttachmentsRef = useRef<PendingExpenseAttachment[]>([]);
+
+  const hasUnsavedChanges = useMemo(() => {
+    const defaultClaim = createDefaultForm(yearMonth);
+    const defaultFixedExpense = createDefaultFixedExpenseForm(yearMonth);
+    const hasClaimDraft = Boolean(
+      form.id
+      || form.date !== defaultClaim.date
+      || form.description.trim()
+      || form.amount > 0
+      || form.memo.trim()
+      || form.attachments.length > 0
+      || pendingAttachments.length > 0
+      || removedAttachmentPaths.length > 0
+    );
+    const hasCategoryDraft = Boolean(
+      categoryForm.id
+      || categoryForm.label.trim()
+      || categoryForm.scope !== 'teamCharge'
+    );
+    const hasFixedExpenseDraft = Boolean(
+      fixedExpenseForm.id
+      || fixedExpenseForm.name.trim()
+      || fixedExpenseForm.amount > 0
+      || fixedExpenseForm.dayOfMonth !== defaultFixedExpense.dayOfMonth
+      || fixedExpenseForm.startYearMonth !== defaultFixedExpense.startYearMonth
+      || fixedExpenseForm.endYearMonth
+      || fixedExpenseForm.memo.trim()
+      || fixedExpenseForm.isActive !== defaultFixedExpense.isActive
+    );
+
+    return hasClaimDraft || hasCategoryDraft || hasFixedExpenseDraft;
+  }, [categoryForm, fixedExpenseForm, form, pendingAttachments.length, removedAttachmentPaths.length, yearMonth]);
+
+  useEffect(() => {
+    onDirtyChange?.(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onDirtyChange]);
+
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return undefined;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    rememberSupportManagementYearMonth(yearMonth);
+  }, [yearMonth]);
+
+  useEffect(() => subscribeSupportManagementYearMonth(setYearMonth), []);
 
   const {
     loading,
@@ -1157,22 +1224,37 @@ const ExpenseClaimManagementPage: React.FC = () => {
     };
   }, [rawDocs.claims, selectedFilterTeam, selectedTeamId]);
 
+  const handleStandaloneYearMonthChange = (nextYearMonth: string) => {
+    if (
+      hasUnsavedChanges
+      && !window.confirm('작성 중인 경비입력 내용이 있습니다. 저장하지 않고 조회월을 바꿀까요?')
+    ) {
+      return;
+    }
+    setYearMonth(nextYearMonth);
+  };
+
   return (
-    <div className="min-h-screen bg-slate-100 p-4 xl:p-6">
-      <div className="mx-auto max-w-[1900px] space-y-4">
-        <div className="flex flex-col gap-3 border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+    <div className={embedded ? 'min-h-0 w-full' : 'min-h-screen bg-slate-100 p-4 xl:p-6'}>
+      <div className={embedded ? 'w-full min-w-0 space-y-3' : 'mx-auto max-w-[1900px] space-y-4'}>
+        <div className={`flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm lg:flex-row lg:items-center lg:justify-between ${embedded ? 'gap-2 px-3 py-2' : 'gap-3 p-4'}`}>
           <div>
-            <h1 className="text-xl font-black text-slate-950">후청구 입력 관리</h1>
-            <p className="mt-1 text-sm font-medium text-slate-500">
+            <h1 className={embedded ? 'text-sm font-black text-slate-950' : 'text-xl font-black text-slate-950'}>경비 직접입력</h1>
+            <p className={embedded ? 'hidden' : 'mt-1 text-sm font-medium text-slate-500'}>
               경비내역 원장과 분리된 후청구 등록, 수정, 목록, 삭제 화면입니다.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <YearMonthPicker
-              value={yearMonth}
-              onChange={setYearMonth}
-              inputClassName="h-10 w-36 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none focus:border-blue-500"
-            />
+            {!embedded && (
+              <div className="w-full min-w-[180px] sm:w-[180px]">
+                <MonthNavigator
+                  value={yearMonth}
+                  onChange={handleStandaloneYearMonthChange}
+                  disabled={loading}
+                  ariaLabel="경비입력 조회월"
+                />
+              </div>
+            )}
             <button
               type="button"
               onClick={loadData}
@@ -1193,7 +1275,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
             ['기타청구', quickTotals.other, 'bg-amber-500 text-white'],
             ['사무실경비', quickTotals.office, 'bg-sky-600 text-white']
           ].map(([label, value, tone]) => (
-            <div key={String(label)} className={`border border-slate-200 px-4 py-3 shadow-sm ${tone}`}>
+            <div key={String(label)} className={`rounded-xl border border-slate-200 px-4 py-3 shadow-sm ${tone}`}>
               <div className="text-xs font-black opacity-80">{label}</div>
               <div className="mt-1 text-xl font-black tabular-nums">
                 {typeof value === 'number' ? formatCurrency(value) : value}
@@ -1882,14 +1964,6 @@ const ExpenseClaimManagementPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <select value={selectedTeamId} onChange={(event) => setSelectedTeamId(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 outline-none focus:border-blue-500">
-                    <option value="all">전체 팀</option>
-                    {teamOptions.map((team) => (
-                      <option key={`filter-${getTeamId(team) || getTeamName(team)}`} value={getTeamId(team)}>
-                        {getTeamName(team)}
-                      </option>
-                    ))}
-                  </select>
                   <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as TeamExpenseClaimType | 'all')} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 outline-none focus:border-blue-500">
                     <option value="all">전체 구분</option>
                     <option value="teamCharge">후청구</option>
@@ -1898,6 +1972,14 @@ const ExpenseClaimManagementPage: React.FC = () => {
                   </select>
                 </div>
               </div>
+              <SupportTeamFilterTabs
+                teams={teamOptions}
+                selectedTeamId={selectedTeamId === 'all' ? '' : selectedTeamId}
+                onChange={(teamId) => setSelectedTeamId(teamId || 'all')}
+                disabled={loading}
+                allLabel="전체 팀"
+                className="mt-3"
+              />
               <div className="relative mt-3">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input

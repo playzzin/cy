@@ -3,12 +3,13 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronDown, faDownload, faFileInvoiceDollar, faSearch, faSync, faTimes, faUser } from '@fortawesome/free-solid-svg-icons';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx-js-style';
-import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyReportService';
+import { dailyReportService } from '../../services/dailyReportService';
 import { companyService, Company } from '../../services/companyService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typedDateInput';
 import { resolveReportPayType, resolveWorkerPayType } from '../../utils/payType';
+import { buildTeamIdsByAffiliation } from '../../utils/cheongyeonTeams';
 import OutputManagementTabs from '../../components/common/OutputManagementTabs';
 import { useSearchParams } from 'react-router-dom';
 
@@ -61,6 +62,19 @@ const resolveSnapshotSalaryModel = (params: {
     if (payType === '지원팀') return '지원팀';
     if (payType === '용역팀') return '용역팀';
     return '전체';
+};
+
+const matchesSalaryModelFilter = (
+    model: SalaryModelFilter,
+    filter: SalaryModelFilter
+): boolean => {
+    if (filter === '전체') {
+        return model === '일급제'
+            || model === '월급제'
+            || model === '지원팀'
+            || model === '용역팀';
+    }
+    return model === filter;
 };
 
 const normalizeCategoryKey = (value: unknown): string => {
@@ -174,7 +188,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     const initialStartDate = normalizeDateParam(searchParams.get('startDate')) ?? formatDate(firstDay);
     const initialEndDate = normalizeDateParam(searchParams.get('endDate')) ?? formatDate(lastDay);
     const initialCompanyType = parseCompanyTypeParam(searchParams.get('companyType')) ?? 'construction';
-    const initialSalaryModel = parseSalaryModelParam(searchParams.get('salaryModel')) ?? (initialCompanyType === 'partner' ? '지원팀' : '전체');
+    const initialSalaryModel = parseSalaryModelParam(searchParams.get('salaryModel')) ?? '전체';
     const initialSortOrder = parseSortOrderParam(searchParams.get('sortOrder') ?? searchParams.get('sort')) ?? 'asc';
 
     const [startDate, setStartDate] = useState(initialStartDate);
@@ -192,7 +206,6 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     const [activeIndex, setActiveIndex] = useState(0);
 
     const [historyData, setHistoryData] = useState<PersonnelHistoryRow[]>([]);
-    const [teamScopeRows, setTeamScopeRows] = useState<DailyReportWorkerRow[]>([]);
     const [companies, setCompanies] = useState<Company[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [allWorkers, setAllWorkers] = useState<Worker[]>([]);
@@ -307,24 +320,10 @@ const TotalPersonnelHistoryInner: React.FC = () => {
             return;
         }
 
-        if (companyType === 'partner') {
-            setSalaryModel('지원팀');
-        } else {
-            if (salaryModel === '지원팀') setSalaryModel('전체');
-        }
         setSelectedTeamId('');
         setSelectedWorkerId('');
         setWorkerSearchTerm('');
     }, [companyType]);
-
-    const companyById = useMemo(() => {
-        const map = new Map<string, Company>();
-        companies.forEach((company) => {
-            if (!company.id) return;
-            map.set(company.id, company);
-        });
-        return map;
-    }, [companies]);
 
     const teamById = useMemo(() => {
         const map = new Map<string, Team>();
@@ -346,66 +345,20 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         return map;
     }, [teams]);
 
-    const workerByAnyId = useMemo(() => {
-        const map = new Map<string, Worker>();
-        allWorkers.forEach((worker) => {
-            const id = String(worker.id ?? '').trim();
-            const legacyId = String((worker as any).legacyId ?? '').trim();
-            if (id) map.set(id, worker);
-            if (legacyId) map.set(legacyId, worker);
-        });
-        return map;
-    }, [allWorkers]);
-
     const allowedTeamIds = useMemo(() => {
-        const ids = new Set<string>();
-        teams.forEach((team) => {
-            if (!team.id) return;
-            const companyId = String(team.companyId ?? '').trim();
-            if (!companyId) return;
-            const company = companyById.get(companyId);
-            if (!company) return;
-
-            const teamId = String(team.id).trim();
-            const teamLegacyId = String((team as any).legacyId ?? '').trim();
-            const isAllowed =
-                (companyType === 'construction' && company.type === '시공사')
-                || (companyType === 'partner' && company.type === '협력사');
-            if (!isAllowed) return;
-
-            if (teamId) ids.add(teamId);
-            if (teamLegacyId) ids.add(teamLegacyId);
-        });
-        return ids;
-    }, [companyById, companyType, teams]);
+        return buildTeamIdsByAffiliation(
+            teams,
+            companies,
+            companyType === 'construction' ? 'cheongyeon' : 'external'
+        );
+    }, [companies, companyType, teams]);
 
     const teamOptions = useMemo(() => {
-        const scopedSupportTeamIds =
-            companyType === 'partner'
-                ? new Set(
-                    teamScopeRows
-                        .map((row) => {
-                            const rowWorkerId = String(row.workerId ?? '').trim();
-                            const worker = rowWorkerId ? workerByAnyId.get(rowWorkerId) : undefined;
-                            const rawTeamId = String(row.workerTeamId ?? worker?.teamId ?? '').trim();
-                            if (rawTeamId) return String(teamById.get(rawTeamId)?.id ?? rawTeamId).trim();
-                            const rawTeamName = String(row.workerTeamName ?? '').replace(/\s+/g, '').trim();
-                            return String(teamByName.get(rawTeamName)?.id ?? '').trim();
-                        })
-                        .filter((id) => Boolean(id) && allowedTeamIds.has(id))
-                )
-                : null;
-
         return teams
             .filter((team) => Boolean(team.id) && team.id && allowedTeamIds.has(team.id))
-            .filter((team) => {
-                if (companyType !== 'partner') return true;
-                const canonicalTeamId = String(team.id ?? '').trim();
-                return scopedSupportTeamIds ? scopedSupportTeamIds.has(canonicalTeamId) : false;
-            })
             .slice()
             .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko'));
-    }, [allowedTeamIds, companyType, teamById, teamByName, teamScopeRows, teams, workerByAnyId]);
+    }, [allowedTeamIds, teams]);
 
     const workerOptions = useMemo(() => {
         const filtered = allWorkers
@@ -417,26 +370,21 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                 return nameMatch || idMatch;
             })
             .filter((worker) => {
-                const teamId = String(worker.teamId ?? '').trim();
-                if (!teamId) return false;
-                if (!allowedTeamIds.has(teamId)) return false;
+                const rawTeamId = String(worker.teamId ?? '').trim();
+                const teamId = String(teamById.get(rawTeamId)?.id ?? rawTeamId).trim();
+                if (!teamId || (!allowedTeamIds.has(teamId) && !allowedTeamIds.has(rawTeamId))) return false;
                 if (selectedTeamId && teamId !== selectedTeamId) return false;
-
-                const model = resolveWorkerSalaryModel(worker);
-                if (companyType === 'partner') return model === '지원팀';
-                return model === '일급제' || model === '월급제' || model === '용역팀';
+                return true;
             })
             .filter((worker) => {
                 const model = resolveWorkerSalaryModel(worker);
-                if (companyType === 'partner') return model === '지원팀';
-                if (salaryModel === '전체') return model === '일급제' || model === '월급제' || model === '용역팀';
-                return model === salaryModel;
+                return matchesSalaryModelFilter(model, salaryModel);
             })
             .slice()
             .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko'));
 
         return filtered;
-    }, [allWorkers, allowedTeamIds, companyType, salaryModel, selectedTeamId, workerSearchTerm]);
+    }, [allWorkers, allowedTeamIds, salaryModel, selectedTeamId, teamById, workerSearchTerm]);
 
     // Reset active index when search term changes or dropdown opens
     useEffect(() => {
@@ -516,39 +464,6 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         }
     }, [selectedTeamId, selectedWorkerId, teamOptions, workerOptions]);
 
-    useEffect(() => {
-        let cancelled = false;
-
-        const loadTeamScopeRows = async () => {
-            if (companyType !== 'partner') {
-                setTeamScopeRows([]);
-                return;
-            }
-
-            try {
-                const rows = await dailyReportService.getReportWorkerRowsByRange({
-                    startDate,
-                    endDate
-                });
-                if (!cancelled) {
-                    setTeamScopeRows(rows);
-                }
-            } catch (error) {
-                console.error('Error fetching support team options:', error);
-                if (!cancelled) {
-                    setTeamScopeRows([]);
-                    setErrorMessage('지원팀 팀 목록을 불러오지 못했습니다. 기간을 확인한 뒤 다시 시도해주세요.');
-                }
-            }
-        };
-
-        void loadTeamScopeRows();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [companyType, endDate, startDate]);
-
     const validateDateRange = (nextStartDate: string, nextEndDate: string): string => {
         if (nextStartDate > nextEndDate) {
             return '시작일은 종료일보다 늦을 수 없습니다.';
@@ -623,7 +538,6 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                 dailyReportService.getReportWorkerRowsByRange({ startDate: effectiveStartDate, endDate: effectiveEndDate })
             ]);
             setAllWorkers(workers);
-            setTeamScopeRows(reportRows);
             const workerById = new Map<string, Worker>();
             workers.forEach((w) => {
                 const id = String(w.id ?? '').trim();
@@ -728,70 +642,60 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                     reportPayType: row.payType
                 });
 
-                    if (companyType === 'partner') {
-                        if (model !== '지원팀') return;
-                    } else {
-                        if (model !== '일급제' && model !== '월급제' && model !== '지원팀' && model !== '용역팀') return;
+                if (!matchesSalaryModelFilter(model, salaryModel)) return;
 
-                        if (salaryModel === '전체') {
-                            if (model !== '일급제' && model !== '월급제' && model !== '용역팀') return;
-                        } else {
-                            if (model !== salaryModel) return;
-                        }
-                    }
+                const prevModel = salaryByWorkerTeam.get(statsKey);
+                if (!prevModel) salaryByWorkerTeam.set(statsKey, model);
 
-                    const prevModel = salaryByWorkerTeam.get(statsKey);
-                    if (!prevModel) salaryByWorkerTeam.set(statsKey, model);
+                const manDay = typeof rw.manDay === 'number' ? rw.manDay : 0;
+                const snapshotUnitPrice = typeof rw.unitPrice === 'number' ? rw.unitPrice : null;
+                const fallbackUnitPrice = typeof worker?.unitPrice === 'number' ? worker.unitPrice : 0;
+                const unitPrice = snapshotUnitPrice ?? fallbackUnitPrice;
+                const amount = typeof rw.amount === 'number' ? rw.amount : (manDay * unitPrice);
 
-                    const manDay = typeof rw.manDay === 'number' ? rw.manDay : 0;
-                    const snapshotUnitPrice = typeof rw.unitPrice === 'number' ? rw.unitPrice : null;
-                    const fallbackUnitPrice = typeof worker?.unitPrice === 'number' ? worker.unitPrice : 0;
-                    const unitPrice = snapshotUnitPrice ?? fallbackUnitPrice;
-                    const amount = typeof rw.amount === 'number' ? rw.amount : (manDay * unitPrice);
+                const current = statsByWorkerTeam.get(statsKey) ?? {
+                    workerId,
+                    name: workerName,
+                    idNumber,
+                    salaryModel: model,
+                    teamId: workerTeamId,
+                    teamName: workerTeamName,
+                    laborManDay: 0,
+                    invoiceManDay: 0,
+                    laborAmount: 0,
+                    invoiceAmount: 0,
+                    unitPriceBreakdown: new Map<number, { manDay: number; amount: number }>()
+                };
+                if (!current.name && workerName) current.name = workerName;
+                if (!current.idNumber && idNumber) current.idNumber = idNumber;
+                if (!current.teamId && workerTeamId) current.teamId = workerTeamId;
+                if (!current.teamName) {
+                    current.teamName = workerTeamName;
+                }
+                // 2024-05-22 Separate Labor/Invoice based on siteType & paymentType
+                const site = siteById.get(String(report.siteId ?? '').trim());
+                const siteType = rw.siteType ?? report.siteType ?? site?.siteType;
+                const paymentType = rw.paymentType ?? report.paymentType ?? site?.paymentMethod;
+                const isInvoice = classifyInvoiceBySiteContext({
+                    paymentType,
+                    siteType,
+                    salaryModel: model
+                });
 
-                    const current = statsByWorkerTeam.get(statsKey) ?? {
-                        workerId,
-                        name: workerName,
-                        idNumber,
-                        salaryModel: model,
-                        teamId: workerTeamId,
-                        teamName: workerTeamName,
-                        laborManDay: 0,
-                        invoiceManDay: 0,
-                        laborAmount: 0,
-                        invoiceAmount: 0,
-                        unitPriceBreakdown: new Map<number, { manDay: number; amount: number }>()
-                    };
-                    if (!current.name && workerName) current.name = workerName;
-                    if (!current.idNumber && idNumber) current.idNumber = idNumber;
-                    if (!current.teamId && workerTeamId) current.teamId = workerTeamId;
-                    if (!current.teamName) {
-                        current.teamName = workerTeamName;
-                    }
-                    // 2024-05-22 Separate Labor/Invoice based on siteType & paymentType
-                    const site = siteById.get(String(report.siteId ?? '').trim());
-                    const siteType = rw.siteType ?? report.siteType ?? site?.siteType;
-                    const paymentType = rw.paymentType ?? report.paymentType ?? site?.paymentMethod;
-                    const isInvoice = classifyInvoiceBySiteContext({
-                        paymentType,
-                        siteType,
-                        salaryModel: model
-                    });
+                if (isInvoice) {
+                    current.invoiceManDay += manDay;
+                    current.invoiceAmount += amount;
+                } else {
+                    current.laborManDay += manDay;
+                    current.laborAmount += amount;
+                }
 
-                    if (isInvoice) {
-                        current.invoiceManDay += manDay;
-                        current.invoiceAmount += amount;
-                    } else {
-                        current.laborManDay += manDay;
-                        current.laborAmount += amount;
-                    }
+                const unitPriceStats = current.unitPriceBreakdown.get(unitPrice) ?? { manDay: 0, amount: 0 };
+                unitPriceStats.manDay += manDay;
+                unitPriceStats.amount += amount;
+                current.unitPriceBreakdown.set(unitPrice, unitPriceStats);
 
-                    const unitPriceStats = current.unitPriceBreakdown.get(unitPrice) ?? { manDay: 0, amount: 0 };
-                    unitPriceStats.manDay += manDay;
-                    unitPriceStats.amount += amount;
-                    current.unitPriceBreakdown.set(unitPrice, unitPriceStats);
-
-                    statsByWorkerTeam.set(statsKey, current);
+                statsByWorkerTeam.set(statsKey, current);
             });
 
             const result: PersonnelHistoryRow[] = [];
@@ -1059,7 +963,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                 className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm min-w-32"
                             >
                                 <option value="construction">청연이엔지</option>
-                                <option value="partner">지원팀(현재협력사)</option>
+                                <option value="partner">외부팀</option>
                             </select>
                         </div>
 
@@ -1069,18 +973,12 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                 value={salaryModel}
                                 onChange={(e) => setSalaryModel(e.target.value as SalaryModelFilter)}
                                 className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm min-w-32"
-                                disabled={companyType === 'partner'}
                             >
-                                {companyType === 'partner' ? (
-                                    <option value="지원팀">지원팀</option>
-                                ) : (
-                                    <>
-                                        <option value="전체">전체</option>
-                                        <option value="일급제">일급제</option>
-                                        <option value="월급제">월급제</option>
-                                        <option value="용역팀">용역팀</option>
-                                    </>
-                                )}
+                                <option value="전체">전체</option>
+                                <option value="일급제">일급제</option>
+                                <option value="월급제">월급제</option>
+                                <option value="지원팀">지원팀</option>
+                                <option value="용역팀">용역팀</option>
                             </select>
                         </div>
 

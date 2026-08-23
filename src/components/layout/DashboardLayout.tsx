@@ -678,9 +678,23 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         '/payroll/workbook-ledger',
         '/payroll/workbook-ledger-dawon',
     ].includes(location.pathname);
+    const dailyReportTab = location.pathname === '/reports/daily'
+        ? new URLSearchParams(location.search).get('tab')
+        : null;
+    const isDailyReportListPage = dailyReportTab === 'list' || dailyReportTab === 'list-v2';
+    const isSupportManagementHubPage = [
+        '/support/expense-ledger',
+        '/support/expense-claims',
+        '/support/expense-claim-input',
+        '/support/vehicles',
+        '/support/accommodation',
+        '/support/cards',
+    ].includes(location.pathname);
     const mainContentClassName = [
         location.pathname === siteModeDashboardPath ? 'cheongyeon-main' : '',
-        isMemoFullBleedPage || isWorkbookLedgerFullBleedPage ? 'page-full-bleed' : ''
+        isMemoFullBleedPage || isWorkbookLedgerFullBleedPage ? 'page-full-bleed' : '',
+        isDailyReportListPage ? 'page-contained-scroll' : '',
+        isSupportManagementHubPage ? 'page-support-management' : '',
     ].filter(Boolean).join(' ');
 
     if (!siteData) {

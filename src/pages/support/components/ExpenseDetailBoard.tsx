@@ -3,6 +3,7 @@ import type { AccommodationBillingDocument } from '../../../types/accommodationB
 import type { VehicleBillingDocument } from '../../../types/vehicleBilling';
 import type { CardBillingDocument } from '../../../types/cardBilling';
 import type { TeamExpenseClaim } from '../../../types/teamExpenseLedger';
+import { getAccommodationExpenseBucket } from '../../../utils/accommodationExpenseClassification';
 import {
   formatCurrency,
   getBillingStatusLabel,
@@ -41,11 +42,12 @@ export const ExpenseDetailBoard: React.FC<Props> = ({
       let rent = 0, electricity = 0, gas = 0, water = 0, internet = 0, other = 0;
       (doc.lineItems || []).forEach(item => {
         const amt = Number(item.amount) || 0;
-        if (item.targetField === 'accommodation' || item.targetField === 'privateRoom') rent += amt;
-        else if (item.targetField === 'electricity') electricity += amt;
-        else if (item.targetField === 'gas') gas += amt;
-        else if (item.targetField === 'water') water += amt;
-        else if (item.targetField === 'internet') internet += amt;
+        const expenseBucket = getAccommodationExpenseBucket(item);
+        if (expenseBucket === 'accommodation' || expenseBucket === 'privateRoom') rent += amt;
+        else if (expenseBucket === 'electricity') electricity += amt;
+        else if (expenseBucket === 'gas') gas += amt;
+        else if (expenseBucket === 'water') water += amt;
+        else if (expenseBucket === 'internet') internet += amt;
         else other += amt;
       });
 

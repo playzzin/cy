@@ -87,6 +87,8 @@ export interface UtilityRecord {
     electricityBillImport?: UtilityElectricityBillImportMeta;
     gasBillImport?: UtilityGasBillImportMeta;
     waterBillImport?: UtilityWaterBillImportMeta;
+    /** Persisted retry marker for ledger-save -> draft-billing synchronization. */
+    billingSyncPending?: boolean;
     isAnomaly?: boolean; // If true, flagged as suspicious
     createdAt?: Timestamp | FieldValue | null;
     updatedAt?: Timestamp | FieldValue | null;

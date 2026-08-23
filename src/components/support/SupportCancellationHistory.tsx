@@ -55,6 +55,12 @@ const formatAmount = (value?: number): string => {
 
 const normalizeText = (value: unknown): string => String(value ?? '').toLowerCase();
 
+const getCardNumberLabel = (log: SupportCancellationLog): string => {
+  if (log.resourceType !== 'card') return '';
+  const snapshot = (log.snapshot || {}) as Record<string, unknown>;
+  return String(snapshot.maskedNumber || snapshot.last4 || '').trim();
+};
+
 const buildSearchText = (log: SupportCancellationLog): string => [
   log.resourceLabel,
   log.reasonLabel,
@@ -67,6 +73,7 @@ const buildSearchText = (log: SupportCancellationLog): string => [
   log.note,
   log.actor?.name,
   log.actor?.email,
+  getCardNumberLabel(log),
 ].join(' ');
 
 const filterLogs = (
@@ -285,6 +292,7 @@ export const SupportCancellationHistory: React.FC<SupportCancellationHistoryProp
                       <td className="px-4 py-4">
                         <div className="font-black text-slate-900">{log.resourceLabel || '-'}</div>
                         <div className="mt-1 flex flex-wrap gap-2 text-xs font-semibold text-slate-500">
+                          {getCardNumberLabel(log) && <span>카드번호: {getCardNumberLabel(log)}</span>}
                           {log.assigneeName && <span>사용자: {log.assigneeName}</span>}
                           {log.teamName && <span>팀: {log.teamName}</span>}
                           {log.billingTargetName && <span>청구: {log.billingTargetName}</span>}

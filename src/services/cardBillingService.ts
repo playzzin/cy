@@ -417,6 +417,87 @@ export const cardBillingService = {
         }
     },
 
+    replaceDraftBilling: async (
+        billing: CardBillingDocument,
+        staleBillingIds: string[] = []
+    ): Promise<void> => {
+        const billingIds = Array.from(new Set([
+            billing.id,
+            ...staleBillingIds
+        ].map((id) => String(id ?? '').trim()).filter(Boolean)));
+        const beforeDocuments = await Promise.all(
+            billingIds.map((id) => cardFirestoreService.getBillingById(id).catch(() => null))
+        );
+        if (beforeDocuments.some((document) => isPostedCardBillingStatus(document?.status))) {
+            throw new Error('card-billing-posted-replace-blocked');
+        }
+
+        await cardFirestoreService.replaceDraftBilling(
+            billing,
+            billingIds.filter((id) => id !== billing.id)
+        );
+
+        try {
+            const { cardBillingLogService } = await import('./cardBillingLogService');
+            const beforeNext = beforeDocuments.find((document) => document?.id === billing.id) ?? null;
+            await cardBillingLogService.createLog({
+                action: beforeNext ? 'updated' : 'created',
+                before: beforeNext,
+                after: {
+                    ...billing,
+                    lineItems: billing.lineItems ?? [],
+                    statementAttachmentPaths: billing.statementAttachmentPaths ?? [],
+                    updatedAt: Timestamp.now()
+                },
+                source: 'cardBillingService.replaceDraftBilling'
+            });
+            await Promise.all(beforeDocuments
+                .filter((document): document is CardBillingDocument => Boolean(
+                    document && document.id !== billing.id
+                ))
+                .map((document) => cardBillingLogService.createLog({
+                    action: 'deleted',
+                    before: document,
+                    after: null,
+                    source: 'cardBillingService.replaceDraftBilling'
+                }))
+            );
+        } catch (logError) {
+            console.warn('[cardBillingService] card billing replacement log failed:', logError);
+        }
+    },
+
+    deleteDraftBillings: async (billingIds: string[]): Promise<void> => {
+        const uniqueBillingIds = Array.from(new Set(
+            billingIds.map((id) => String(id ?? '').trim()).filter(Boolean)
+        ));
+        if (uniqueBillingIds.length === 0) return;
+
+        const beforeDocuments = await Promise.all(
+            uniqueBillingIds.map((id) => cardFirestoreService.getBillingById(id).catch(() => null))
+        );
+        if (beforeDocuments.some((document) => isPostedCardBillingStatus(document?.status))) {
+            throw new Error('card-billing-posted-delete-blocked');
+        }
+
+        const draftDocuments = beforeDocuments.filter((document): document is CardBillingDocument => (
+            Boolean(document) && document?.status === 'DRAFT'
+        ));
+        await cardFirestoreService.deleteDraftBillings(uniqueBillingIds);
+
+        try {
+            const { cardBillingLogService } = await import('./cardBillingLogService');
+            await Promise.all(draftDocuments.map((document) => cardBillingLogService.createLog({
+                action: 'deleted',
+                before: document,
+                after: null,
+                source: 'cardBillingService.deleteDraftBillings'
+            })));
+        } catch (logError) {
+            console.warn('[cardBillingService] card billing draft deletion log failed:', logError);
+        }
+    },
+
     deleteBilling: async (id: string): Promise<void> => {
         const beforeBilling = await cardFirestoreService.getBillingById(id).catch(() => null);
         if (isPostedCardBillingStatus(beforeBilling?.status)) {

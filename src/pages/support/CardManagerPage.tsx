@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '../../types/card';
 import { cardService } from '../../services/cardService';
@@ -17,37 +17,37 @@ import { SupportCancellationHistory } from '../../components/support/SupportCanc
 import { SupportCancellationModal, type SupportCancellationFormValue } from '../../components/support/SupportCancellationModal';
 import { SupportPageHeader } from '../../components/support/SupportPageHeader';
 import { SupportSegmentedTabs, type SupportSegmentedTabOption } from '../../components/support/SupportSegmentedTabs';
-import { supportCancellationLogService } from '../../services/supportCancellationLogService';
+import {
+    createCardLifecycleOperationId,
+    formatKoreanBusinessDate,
+    isInactiveCardStatus,
+} from '../../services/cardLifecyclePolicy';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faCreditCard, faChartPie, faTable, faRotateRight, faCircleExclamation, faHistory, faSearch } from '@fortawesome/free-solid-svg-icons';
+import { faPlus, faCreditCard, faChartPie, faTable, faRotateLeft, faRotateRight, faCircleExclamation, faHistory, faSearch } from '@fortawesome/free-solid-svg-icons';
 import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
 import { appendOfficeAssignmentTeam, isOfficeAssignmentReference, isOfficeAssignmentTeam, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
 
 interface CardManagerPageProps {
     embedded?: boolean;
+    initialTab?: CardTabId;
+    onTabChange?: (tab: CardTabId) => void;
 }
 
 type CardTabId = 'status' | 'ledger' | 'history';
 
 const cardTabs: SupportSegmentedTabOption<CardTabId>[] = [
-    { id: 'status', label: '배정 및 청구현황', icon: faChartPie },
-    { id: 'ledger', label: '카드 통합관리대장', icon: faTable },
+    { id: 'status', label: '배정·경비현황', icon: faChartPie },
+    { id: 'ledger', label: '통합관리대장', icon: faTable },
     { id: 'history', label: '처리내역', icon: faHistory }
 ];
 
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
-const CARD_SUPPORT_TEAM_COLOR_OVERRIDES: Record<string, string> = {
-    김동혁팀: '#854d0e',
-};
 
-const applyCardSupportTeamColorOverrides = (teamList: Team[]): Team[] => (
-    teamList.map((team) => {
-        const overrideColor = CARD_SUPPORT_TEAM_COLOR_OVERRIDES[normalizeKey(team.name)];
-        return overrideColor ? { ...team, color: overrideColor } : team;
-    })
-);
-
-export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = false }) => {
+export const CardManagerPage: React.FC<CardManagerPageProps> = ({
+    embedded = false,
+    initialTab = 'status',
+    onTabChange,
+}) => {
     const navigate = useNavigate();
     // Data State
     const [cards, setCards] = useState<Card[]>([]);
@@ -65,17 +65,28 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
     const [searchTerm, setSearchTerm] = useState('');
 
     // Tab State
-    const [activeTab, setActiveTab] = useState<CardTabId>('status');
+    const [activeTab, setActiveTab] = useState<CardTabId>(initialTab);
+
+    useEffect(() => {
+        setActiveTab(initialTab);
+    }, [initialTab]);
+
+    const handleTabChange = (tab: CardTabId) => {
+        setActiveTab(tab);
+        onTabChange?.(tab);
+    };
 
     // Modal State
     const [isCardFormOpen, setIsCardFormOpen] = useState(false);
     const [editingCard, setEditingCard] = useState<Card | null>(null);
     const [isSetupModalOpen, setIsSetupModalOpen] = useState(false);
+    const [restoringCardId, setRestoringCardId] = useState<string | null>(null);
     const [setupInitialCardId, setSetupInitialCardId] = useState<string | null>(null);
     const [setupInitialSection, setSetupInitialSection] = useState<AssignmentBillingSection>('assignment');
     const [billingTargetInitialSplitMode, setBillingTargetInitialSplitMode] = useState(false);
     const [cancellationTarget, setCancellationTarget] = useState<Card | null>(null);
     const [savingCancellation, setSavingCancellation] = useState(false);
+    const lifecycleInFlightRef = useRef<Set<string>>(new Set());
 
     // 데이터 로드 함수
     const loadData = async () => {
@@ -89,9 +100,8 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                 officeStaffService.getOfficeStaff().catch(() => [] as OfficeStaff[]),
                 manpowerService.getWorkers().catch(() => [] as Worker[])
             ]);
-            const displayTeams = applyCardSupportTeamColorOverrides(teamList);
-            const allowedTeams = buildCheongyeonEngTeams(displayTeams, companies);
-            const sortedTeams = displayTeams
+            const allowedTeams = buildCheongyeonEngTeams(teamList, companies);
+            const sortedTeams = teamList
                 .slice()
                 .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko-KR'));
             setCards(cardList);
@@ -254,6 +264,22 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
         });
     }, [cards, selectedTeamId, selectedTeamIdentity, teamByAnyId, teamByName, workerByAnyId, workerByName, searchTerm, officeStaffRows]);
 
+    const inactiveCards = React.useMemo(() => {
+        const query = searchTerm.trim().toLowerCase();
+        return cards.filter((card) => {
+            if (card.status !== 'SUSPENDED' && card.status !== 'CLOSED') return false;
+            if (!query) return true;
+            return [
+                card.name,
+                card.issuer,
+                card.maskedNumber,
+                card.last4,
+                card.currentAssigneeName,
+                card.memo,
+            ].some((value) => String(value ?? '').toLowerCase().includes(query));
+        });
+    }, [cards, searchTerm]);
+
     // 핸들러 함수들
     const handleRefresh = () => {
         setRefreshKey(prev => prev + 1);
@@ -270,6 +296,10 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
     };
 
     const openAssignCard = (card: Card) => {
+        if (isInactiveCardStatus(card.status)) {
+            window.alert('정지·해지 카드는 배정할 수 없습니다. 정지 카드라면 먼저 카드 정지를 해제해주세요.');
+            return;
+        }
         setSetupInitialCardId(String(card.id));
         setSetupInitialSection('assignment');
         setBillingTargetInitialSplitMode(false);
@@ -277,6 +307,10 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
     };
 
     const openBillingTargetCard = (card: Card, options?: { split?: boolean }) => {
+        if (isInactiveCardStatus(card.status)) {
+            window.alert('정지·해지 카드는 청구대상을 변경할 수 없습니다.');
+            return;
+        }
         setSetupInitialCardId(String(card.id));
         setSetupInitialSection('billing');
         setBillingTargetInitialSplitMode(Boolean(options?.split));
@@ -284,10 +318,13 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
     };
 
     const openCancellationModal = (card: Card) => {
+        if (isInactiveCardStatus(card.status)) return;
         setCancellationTarget(card);
     };
 
-    const getCancellationStatusAfter = (reason: SupportCancellationFormValue['reason']): Card['status'] => {
+    const getCancellationStatusAfter = (
+        reason: SupportCancellationFormValue['reason']
+    ): Extract<Card['status'], 'SUSPENDED' | 'CLOSED'> => {
         if (reason === 'CARD_SUSPENDED' || reason === 'CARD_LOST') return 'SUSPENDED';
         return 'CLOSED';
     };
@@ -295,61 +332,45 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
     const handleCancellationSubmit = async (form: SupportCancellationFormValue) => {
         if (!cancellationTarget) return;
         const card = cancellationTarget;
+        if (isInactiveCardStatus(card.status)) return;
+        const inFlightKey = `cancel:${card.id}`;
+        if (lifecycleInFlightRef.current.has(inFlightKey)) return;
         const statusAfter = getCancellationStatusAfter(form.reason);
+        const operationId = createCardLifecycleOperationId('cancel', card.id);
+        lifecycleInFlightRef.current.add(inFlightKey);
         setSavingCancellation(true);
 
         try {
-            const activeBillingTargets = (await cardService.listAllCardBillingTargets(card.id))
-                .filter((target) => !String(target.endDate ?? '').trim());
-
-            if (card.currentAssigneeId || card.currentAssigneeName) {
-                await cardService.unassignCard(card.id, form.processedDate);
-            }
-
-            if (activeBillingTargets.length > 0) {
-                await cardService.applyCardBillingTargetChanges({
-                    cardId: card.id,
-                    closeRecords: activeBillingTargets.map((target) => ({ id: target.id, endDate: form.processedDate })),
-                    clearSnapshot: true
-                });
-            }
-
-            await cardService.updateCard(card.id, {
-                status: statusAfter,
-                currentAssigneeId: null,
-                currentAssigneeType: null,
-                currentAssigneeName: null,
-                billingTargetId: null,
-                billingTargetType: null,
-                billingTargetName: null,
-                billingTargetStartDate: null,
-                billingTargetEndDate: null
-            });
-
-            await supportCancellationLogService.createLog({
-                resourceType: 'card',
-                resourceId: card.id,
-                resourceLabel: card.name || card.maskedNumber || '카드',
-                reason: form.reason,
-                reasonLabel: form.reasonLabel,
-                processedDate: form.processedDate,
-                statusBefore: card.status,
-                statusAfter,
-                assigneeName: card.currentAssigneeName ?? undefined,
-                billingTargetName: card.billingTargetName || undefined,
-                settlementAmount: form.settlementAmount,
-                note: form.note,
-                snapshot: {
-                    name: card.name,
-                    issuer: card.issuer,
-                    cardType: card.cardType,
-                    maskedNumber: card.maskedNumber,
-                    last4: card.last4,
-                    expiry: card.expiry,
-                    status: card.status,
-                    assigneeName: card.currentAssigneeName,
-                    billingTargetName: card.billingTargetName
-                }
+            await cardService.cancelCardUse({
+                cardId: card.id,
+                effectiveDate: form.processedDate,
+                targetStatus: statusAfter,
+                operationId,
+                auditLog: {
+                    resourceType: 'card',
+                    resourceId: card.id,
+                    resourceLabel: card.name || card.maskedNumber || '카드',
+                    reason: form.reason,
+                    reasonLabel: form.reasonLabel,
+                    processedDate: form.processedDate,
+                    statusBefore: card.status,
+                    statusAfter,
+                    assigneeName: card.currentAssigneeName ?? undefined,
+                    billingTargetName: card.billingTargetName || undefined,
+                    settlementAmount: form.settlementAmount,
+                    note: form.note,
+                    snapshot: {
+                        name: card.name,
+                        issuer: card.issuer,
+                        cardType: card.cardType,
+                        maskedNumber: card.maskedNumber,
+                        last4: card.last4,
+                        expiry: card.expiry,
+                        status: card.status,
+                        assigneeName: card.currentAssigneeName,
+                        billingTargetName: card.billingTargetName
+                    }
+                },
             });
 
             if (editingCard?.id === card.id) {
@@ -362,47 +383,61 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                 setIsSetupModalOpen(false);
             }
             setCancellationTarget(null);
-            setActiveTab('history');
+            handleTabChange('history');
             handleRefresh();
         } catch (error) {
             console.error('Failed to process card cancellation', error);
             window.alert('카드 사용취소 처리 중 오류가 발생했습니다.');
         } finally {
+            lifecycleInFlightRef.current.delete(inFlightKey);
             setSavingCancellation(false);
         }
     };
 
     const handleRestoreUse = async (card: Card) => {
-        if (card.status !== 'SUSPENDED' && card.status !== 'CLOSED') return;
-        const ok = window.confirm(`${card.name || card.maskedNumber || '카드'} 처리 상태를 취소하고 다시 사용 가능으로 변경할까요?`);
+        if (card.status !== 'SUSPENDED') return;
+        const inFlightKey = `restore:${card.id}`;
+        if (lifecycleInFlightRef.current.has(inFlightKey)) return;
+        const ok = window.confirm(`${card.name || card.maskedNumber || '카드'}의 카드 정지를 해제하고 다시 사용 가능으로 변경할까요?`);
         if (!ok) return;
 
+        const operationId = createCardLifecycleOperationId('restore', card.id);
+        lifecycleInFlightRef.current.add(inFlightKey);
+        setRestoringCardId(card.id);
         try {
-            await cardService.updateCard(card.id, { status: 'AVAILABLE' });
-            await supportCancellationLogService.createLog({
-                resourceType: 'card',
-                resourceId: card.id,
-                resourceLabel: card.name || card.maskedNumber || '카드',
-                reason: 'OTHER',
-                reasonLabel: '처리취소',
-                processedDate: new Date().toISOString().slice(0, 10),
-                statusBefore: card.status,
-                statusAfter: 'AVAILABLE',
-                assigneeName: card.currentAssigneeName ?? undefined,
-                billingTargetName: card.billingTargetName || undefined,
-                note: '사용취소/정지 처리 번복',
-                snapshot: {
-                    name: card.name,
-                    issuer: card.issuer,
-                    maskedNumber: card.maskedNumber,
-                    last4: card.last4,
-                    status: card.status
-                }
+            const processedDate = formatKoreanBusinessDate();
+            await cardService.restoreSuspendedCard({
+                cardId: card.id,
+                effectiveDate: processedDate,
+                operationId,
+                auditLog: {
+                    resourceType: 'card',
+                    resourceId: card.id,
+                    resourceLabel: card.name || card.maskedNumber || '카드',
+                    reason: 'OTHER',
+                    reasonLabel: '카드 정지 해제',
+                    processedDate,
+                    statusBefore: card.status,
+                    statusAfter: 'AVAILABLE',
+                    assigneeName: card.currentAssigneeName ?? undefined,
+                    billingTargetName: card.billingTargetName || undefined,
+                    note: '분실·정지 카드를 다시 사용 가능 상태로 전환',
+                    snapshot: {
+                        name: card.name,
+                        issuer: card.issuer,
+                        maskedNumber: card.maskedNumber,
+                        last4: card.last4,
+                        status: card.status
+                    }
+                },
             });
             handleRefresh();
         } catch (error) {
             console.error('Failed to restore card status', error);
-            window.alert('카드 처리취소 중 오류가 발생했습니다.');
+            window.alert('카드 정지 해제 중 오류가 발생했습니다.');
+        } finally {
+            lifecycleInFlightRef.current.delete(inFlightKey);
+            setRestoringCardId(null);
         }
     };
 
@@ -448,12 +483,13 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
     }, [setupCard]);
 
     return (
-        <div className={`${embedded ? 'space-y-5 sm:space-y-6 bg-transparent min-h-full w-full min-w-0 max-w-full overflow-x-hidden' : 'p-3 sm:p-6 space-y-5 sm:space-y-6 bg-slate-50 min-h-full w-full max-w-[calc(100vw-30px)] sm:max-w-full min-w-0 overflow-x-hidden'}`}>
+        <div className={`${embedded ? 'space-y-3 bg-transparent min-h-full w-full min-w-0 max-w-full overflow-x-hidden' : 'p-3 sm:p-6 space-y-5 sm:space-y-6 bg-slate-50 min-h-full w-full max-w-[calc(100vw-30px)] sm:max-w-full min-w-0 overflow-x-hidden'}`}>
             <SupportPageHeader
                 icon={faCreditCard}
                 title="카드 통합관리"
                 description="카드 배정 현황 및 카드값 내역을 관리합니다."
                 tone="violet"
+                compact={embedded}
                 actions={(
                     <>
                     <button
@@ -491,7 +527,7 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                     <SupportSegmentedTabs
                         options={cardTabs}
                         activeId={activeTab}
-                        onChange={setActiveTab}
+                        onChange={handleTabChange}
                         ariaLabel="카드 관리 보기"
                     />
 
@@ -540,6 +576,7 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                         onBillingTargetAssign={openBillingTargetCard}
                         onCancelUse={openCancellationModal}
                         onRestoreUse={handleRestoreUse}
+                        restoringCardId={restoringCardId}
                     />
                 ) : activeTab === 'ledger' ? (
                     <CardMonthlyLedger
@@ -550,10 +587,63 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                         onOpenBillingTarget={(card) => openBillingTargetCard(card, { split: true })}
                     />
                 ) : (
-                    <SupportCancellationHistory
-                        resourceType="card"
-                        title="카드 사용취소 처리내역"
-                    />
+                    <div className="space-y-5">
+                        <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-5 shadow-sm">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                    <h2 className="text-base font-black text-amber-950">정지·해지 카드</h2>
+                                    <p className="mt-1 text-sm font-semibold text-amber-800">
+                                        분실 카드를 다시 찾은 경우 정지 카드만 해제할 수 있습니다. 해지 카드는 복구할 수 없습니다.
+                                    </p>
+                                </div>
+                                <span className="inline-flex w-fit rounded-full bg-white px-3 py-1 text-xs font-black text-amber-800 shadow-sm">
+                                    {inactiveCards.length.toLocaleString('ko-KR')}장
+                                </span>
+                            </div>
+
+                            {inactiveCards.length > 0 ? (
+                                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                                    {inactiveCards.map((card) => {
+                                        const isRestoring = restoringCardId === card.id;
+                                        return (
+                                            <div key={card.id} className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                                                <div className="min-w-0">
+                                                    <div className="truncate font-black text-slate-900">{card.name || '카드명 미입력'}</div>
+                                                    <div className="mt-1 text-xs font-semibold text-slate-500">
+                                                        {card.issuer || '발급사 미지정'} · {card.maskedNumber || card.last4 || '카드번호 미입력'} · {card.status === 'SUSPENDED' ? '정지' : '해지'}
+                                                    </div>
+                                                </div>
+                                                {card.status === 'SUSPENDED' ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleRestoreUse(card)}
+                                                        disabled={Boolean(restoringCardId)}
+                                                        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        <FontAwesomeIcon icon={faRotateLeft} spin={isRestoring} />
+                                                        {isRestoring ? '해제 중...' : '카드 정지 해제'}
+                                                    </button>
+                                                ) : (
+                                                    <span className="inline-flex shrink-0 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-black text-slate-500">
+                                                        해지 카드 · 복구 불가
+                                                    </span>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <div className="mt-4 rounded-xl border border-dashed border-amber-200 bg-white/70 px-4 py-6 text-center text-sm font-bold text-amber-700">
+                                    현재 정지·해지된 카드가 없습니다.
+                                </div>
+                            )}
+                        </section>
+
+                        <SupportCancellationHistory
+                            resourceType="card"
+                            title="카드 사용취소 처리내역"
+                        />
+                    </div>
                 )}
             </div>
 

@@ -1,6 +1,5 @@
 import React, { Suspense, useMemo } from 'react';
 import { DashboardHeader } from '../components/dashboard/DashboardHeader';
-import { RoleFocusPanel } from '../components/dashboard/RoleFocusPanel';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
 import { useSiteMode } from '../contexts/SiteModeContext';
@@ -146,9 +145,6 @@ const DashboardPage: React.FC = () => {
                     </Suspense>
                 ) : (
                     <>
-                <div className="mb-6">
-                    <RoleFocusPanel modeConfig={modeConfig} />
-                </div>
                 <Suspense fallback={<DashboardSectionFallback minHeight="min-h-[128px]" label="메시지 위젯을 준비하는 중입니다." />}>
                     <DashboardMessageWidget />
                 </Suspense>

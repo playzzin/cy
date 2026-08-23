@@ -1,18 +1,16 @@
-import { isPostedVehicleBillingStatus, vehicleBillingService } from './vehicleBillingService';
 import { vehicleService } from './vehicleService';
 import { supportWriteOperationLogService } from './supportWriteOperationLogService';
 import { getErrorMessage, reportSupportWriteError, SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../utils/supportWriteErrorReporting';
-import type { Vehicle, VehicleExpenseRecord, VehicleExpenseType, VehicleFineChargeTarget } from '../types/vehicle';
-import type { VehicleBillingDocument } from '../types/vehicleBilling';
+import type {
+  Vehicle,
+  VehicleExpenseRecord,
+  VehicleExpenseType,
+  VehicleFineChargeTarget,
+  VehicleFineDriverBillingTarget
+} from '../types/vehicle';
 import type { CreateSupportWriteOperationLogInput } from '../types/supportWriteOperation';
 
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
-const POSTED_BILLING_STATUSES = new Set(['CONFIRMED', 'PAID', 'OVERDUE']);
-
-const isPostedBillingDocument = (billing: VehicleBillingDocument): boolean => (
-  isPostedVehicleBillingStatus(billing.status) ||
-  POSTED_BILLING_STATUSES.has(String(billing.status ?? '').trim().toUpperCase())
-);
 
 const parseYmdDate = (value?: string | null): Date | null => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').trim());
@@ -36,6 +34,7 @@ export interface VehicleMonthlyLedgerMutationRow {
   segment: VehicleMonthlyLedgerMutationSegment;
   amounts: Partial<Record<VehicleExpenseType, number>>;
   fineChargeTarget: VehicleFineChargeTarget;
+  fineDriverBillingTarget?: VehicleFineDriverBillingTarget;
   note?: string;
 }
 
@@ -49,7 +48,6 @@ export interface VehicleMonthlyLedgerMutationDependencies {
     cancelIds: string[];
     operationId?: string;
   }) => Promise<void>;
-  saveBilling: (billing: VehicleBillingDocument) => Promise<void>;
   recordOperation: (input: CreateSupportWriteOperationLogInput) => Promise<unknown>;
 }
 
@@ -58,11 +56,6 @@ export interface VehicleMonthlyLedgerSaveInput<TRow extends VehicleMonthlyLedger
   visibleRows: Array<VehicleMonthlyLedgerVisibleRow<TRow>>;
   originalExpenses: VehicleExpenseRecord[];
   expenseTypes: VehicleExpenseType[];
-  getBillingDocumentsForRow: (row: TRow) => VehicleBillingDocument[];
-  buildBillingDocumentsForRow: (
-    row: TRow,
-    documents: VehicleBillingDocument[]
-  ) => VehicleBillingDocument[];
   operationId?: string;
   dependencies?: Partial<VehicleMonthlyLedgerMutationDependencies>;
 }
@@ -71,28 +64,12 @@ export interface VehicleMonthlyLedgerSaveResult {
   operationId: string;
   upsertedExpenseCount: number;
   cancelledExpenseCount: number;
-  savedBillingCount: number;
-  cancelledBillingCount: number;
-  skippedBillingCount: number;
   expenseUpsertIds: string[];
   expenseCancelIds: string[];
-  billingSaveIds: string[];
-  billingCancelIds: string[];
-  skippedBillingRows: VehicleMonthlyLedgerSkippedBillingRow[];
-}
-
-export interface VehicleMonthlyLedgerSkippedBillingRow {
-  rowId: string;
-  vehicleId: string;
-  vehiclePlate: string;
-  reason: 'posted-billing-protected';
-  billingIds: string[];
-  statuses: string[];
 }
 
 const defaultDependencies: VehicleMonthlyLedgerMutationDependencies = {
   applyExpenseChanges: (params) => vehicleService.applyVehicleExpenseChanges(params),
-  saveBilling: (billing) => vehicleBillingService.saveBilling(billing),
   recordOperation: (input) => supportWriteOperationLogService.recordOperation(input)
 };
 
@@ -176,23 +153,11 @@ const validateSaveInput = <TRow extends VehicleMonthlyLedgerMutationRow>(
   });
 };
 
-const buildCancelledBillingDocument = (billing: VehicleBillingDocument): VehicleBillingDocument => ({
-  ...billing,
-  status: 'CANCELLED',
-  fixedCost: 0,
-  variableCost: 0,
-  totalAmount: 0,
-  lineItems: [],
-  memo: billing.memo ? `${billing.memo}\n취소 처리됨` : '취소 처리됨'
-});
-
 export const saveVehicleMonthlyLedgerMutation = async <TRow extends VehicleMonthlyLedgerMutationRow>({
   yearMonth,
   visibleRows,
   originalExpenses,
   expenseTypes,
-  getBillingDocumentsForRow,
-  buildBillingDocumentsForRow,
   operationId,
   dependencies
 }: VehicleMonthlyLedgerSaveInput<TRow>): Promise<VehicleMonthlyLedgerSaveResult> => {
@@ -203,24 +168,10 @@ export const saveVehicleMonthlyLedgerMutation = async <TRow extends VehicleMonth
   try {
   validateSaveInput({ yearMonth, visibleRows, expenseTypes });
 
-  const preparedRows = visibleRows.map(({ row }) => {
-    const documents = getBillingDocumentsForRow(row);
-    const postedDocuments = documents.filter(isPostedBillingDocument);
-    return { row, documents, postedDocuments };
-  });
-
-  const skippedBillingRows = preparedRows
-    .filter((item) => item.postedDocuments.length > 0)
-    .map((item): VehicleMonthlyLedgerSkippedBillingRow => ({
-      rowId: item.row.id,
-      vehicleId: item.row.vehicle.id,
-      vehiclePlate: item.row.vehicle.licensePlate,
-      reason: 'posted-billing-protected',
-      billingIds: item.postedDocuments.map((doc) => doc.id).filter(Boolean),
-      statuses: Array.from(new Set(item.postedDocuments.map((doc) => String(doc.status ?? '')).filter(Boolean)))
-    }));
-
-  const rowsToProcess = preparedRows.filter((item) => item.postedDocuments.length === 0);
+  // Persist the source ledger first so automatic billing can be rebuilt from
+  // the committed records instead of the editable screen snapshot. The caller
+  // must complete settlement/billing protection checks before invoking this.
+  const rowsToProcess = visibleRows;
 
   const visibleScopes = rowsToProcess.map(({ row }) => ({
     vehicleId: normalizeKey(row.vehicle.id),
@@ -255,6 +206,9 @@ export const saveVehicleMonthlyLedgerMutation = async <TRow extends VehicleMonth
         amount,
         payer: 'COMPANY',
         fineChargeTarget: type === 'FINE' ? row.fineChargeTarget : undefined,
+        fineDriverBillingTarget: type === 'FINE' && row.fineChargeTarget === 'DRIVER'
+          ? row.fineDriverBillingTarget
+          : undefined,
         note: row.note || undefined,
         status: 'ACTIVE',
         operationId: resolvedOperationId,
@@ -281,55 +235,12 @@ export const saveVehicleMonthlyLedgerMutation = async <TRow extends VehicleMonth
     operationId: resolvedOperationId
   });
 
-  const billingSaveTasks: Array<Promise<void>> = [];
-  const billingCancelDocuments = new Map<string, VehicleBillingDocument>();
-  const billingSaveIds = new Set<string>();
-
-  rowsToProcess.forEach(({ row, documents }) => {
-    if (documents.length === 0) return;
-
-    const nextDocuments = buildBillingDocumentsForRow(row, documents);
-    if (nextDocuments.length === 0) {
-      const documentIds = Array.from(new Set(documents.map((doc) => doc.id).filter(Boolean)));
-      documents.forEach((doc) => {
-        if (documentIds.includes(doc.id)) billingCancelDocuments.set(doc.id, buildCancelledBillingDocument(doc));
-      });
-      return;
-    }
-
-    const nextIds = new Set(nextDocuments.map((doc) => doc.id).filter(Boolean));
-    nextIds.forEach((id) => billingSaveIds.add(id));
-    billingSaveTasks.push(...nextDocuments.map((doc) => deps.saveBilling(doc)));
-    documents.forEach((doc) => {
-      if (doc.id && !nextIds.has(doc.id)) {
-        billingCancelDocuments.set(doc.id, buildCancelledBillingDocument(doc));
-      }
-    });
-  });
-
-  billingSaveIds.forEach((id) => billingCancelDocuments.delete(id));
-  const billingCancelDocs = Array.from(billingCancelDocuments.values());
-  attemptedAffectedDocumentIds = uniqueIds([
-    ...attemptedAffectedDocumentIds,
-    ...billingSaveIds,
-    ...billingCancelDocs.map((doc) => doc.id)
-  ]);
-
-  await Promise.all(billingSaveTasks);
-  await Promise.all(billingCancelDocs.map((doc) => deps.saveBilling(doc)));
-
   const result = {
     operationId: resolvedOperationId,
     upsertedExpenseCount: expenseUpserts.length,
     cancelledExpenseCount: expenseCancelIds.length,
-    savedBillingCount: billingSaveIds.size,
-    cancelledBillingCount: billingCancelDocs.length,
-    skippedBillingCount: skippedBillingRows.length,
     expenseUpsertIds: Array.from(expenseUpsertIds),
-    expenseCancelIds,
-    billingSaveIds: Array.from(billingSaveIds),
-    billingCancelIds: billingCancelDocs.map((doc) => doc.id),
-    skippedBillingRows
+    expenseCancelIds
   };
 
   await recordOperationSafely(deps.recordOperation, {
@@ -339,17 +250,12 @@ export const saveVehicleMonthlyLedgerMutation = async <TRow extends VehicleMonth
     status: 'success',
     affectedDocumentIds: uniqueIds([
       ...result.expenseUpsertIds,
-      ...result.expenseCancelIds,
-      ...result.billingSaveIds,
-      ...result.billingCancelIds
+      ...result.expenseCancelIds
     ]),
     metadata: {
       upsertedExpenseCount: result.upsertedExpenseCount,
       cancelledExpenseCount: result.cancelledExpenseCount,
-      savedBillingCount: result.savedBillingCount,
-      cancelledBillingCount: result.cancelledBillingCount,
-      skippedBillingCount: result.skippedBillingCount,
-      skippedBillingRows: result.skippedBillingRows
+      billingMutation: 'automatic-after-save'
     }
   });
 

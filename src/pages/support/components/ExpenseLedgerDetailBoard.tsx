@@ -3,6 +3,7 @@ import { Image as ImageIcon } from 'lucide-react';
 import type { AccommodationBillingDocument } from '../../../types/accommodationBilling';
 import type { CardBillingDocument } from '../../../types/cardBilling';
 import type { TeamExpenseClaim } from '../../../types/teamExpenseLedger';
+import { getAccommodationExpenseBucket } from '../../../utils/accommodationExpenseClassification';
 import type { VehicleBillingDocument } from '../../../types/vehicleBilling';
 import {
   formatCurrency,
@@ -141,13 +142,14 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
           statusSet: new Set<string>()
         };
 
-        const rent = item.targetField === 'accommodation' ? amount : 0;
-        const privateRoom = item.targetField === 'privateRoom' ? amount : 0;
-        const electricity = item.targetField === 'electricity' ? amount : 0;
-        const gas = item.targetField === 'gas' ? amount : 0;
-        const water = item.targetField === 'water' ? amount : 0;
-        const internet = item.targetField === 'internet' ? amount : 0;
-        const other = rent || privateRoom || electricity || gas || water || internet ? 0 : amount;
+        const expenseBucket = getAccommodationExpenseBucket(item);
+        const rent = expenseBucket === 'accommodation' ? amount : 0;
+        const privateRoom = expenseBucket === 'privateRoom' ? amount : 0;
+        const electricity = expenseBucket === 'electricity' ? amount : 0;
+        const gas = expenseBucket === 'gas' ? amount : 0;
+        const water = expenseBucket === 'water' ? amount : 0;
+        const internet = expenseBucket === 'internet' ? amount : 0;
+        const other = expenseBucket === 'other' ? amount : 0;
 
         row.rent += rent;
         row.privateRoom += privateRoom;

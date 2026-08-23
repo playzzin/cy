@@ -3,6 +3,7 @@ import {
     ref,
     uploadBytesResumable,
     getDownloadURL,
+    getBlob,
     listAll,
     deleteObject,
     ListResult,
@@ -22,6 +23,8 @@ export interface StorageItem {
 export interface StorageUploadResult {
     name: string;
     fullPath: string;
+    /** Immutable Firebase Storage object generation assigned at upload time. */
+    generation?: string;
     size?: number;
     contentType?: string;
     url?: string;
@@ -61,6 +64,7 @@ export const storageService = {
                         resolve({
                             name: uploadTask.snapshot.ref.name,
                             fullPath: uploadTask.snapshot.ref.fullPath,
+                            generation: uploadTask.snapshot.metadata.generation,
                             size: uploadTask.snapshot.metadata.size,
                             contentType: uploadTask.snapshot.metadata.contentType,
                             url: downloadURL,
@@ -164,6 +168,23 @@ export const storageService = {
             return await getDownloadURL(fileRef);
         } catch (error) {
             console.error('Get URL failed:', error);
+            throw error;
+        }
+    },
+
+    /**
+     * Read a private object through the authenticated Storage SDK and expose it
+     * only as a tab-local blob URL. Unlike getDownloadURL(), this does not mint
+     * a long-lived bearer token that can accidentally be persisted in a plan.
+     * Callers must revoke the returned URL when it is no longer needed.
+     */
+    getAuthorizedObjectUrl: async (fullPath: string): Promise<string> => {
+        try {
+            const fileRef = ref(storage, fullPath);
+            const blob = await getBlob(fileRef);
+            return URL.createObjectURL(blob);
+        } catch (error) {
+            console.error('Get private object failed:', error);
             throw error;
         }
     },

@@ -55,8 +55,14 @@ output/
 
 # One-off local analysis and Codex attachment artifacts
 /.codex-remote-attachments/
+/.codex-artifacts/
+/.codex-tools/
 /.tmp_buyback_audit/
 /outputs/
+
+# Local construction-plan deployment snapshots
+/.deploy_construction_plan_*/
+/.deploy_construction_plan_*.tar
 
 # Root-level screenshots and diagnostic exports
 /*.png

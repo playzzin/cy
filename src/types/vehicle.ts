@@ -115,6 +115,7 @@ export type VehicleExpenseStatus = 'ACTIVE' | 'CANCELLED';
 
 export interface VehicleFineNoticeMeta {
     sourceFileName: string;
+    sourceSha256?: string;
     issuer: string;
     noticeType: 'PARKING_FINE' | 'TRAFFIC_FINE' | 'OTHER';
     extractedLicensePlate: string;
@@ -129,6 +130,31 @@ export interface VehicleFineNoticeMeta {
     payableAmount: number;
     driverPenaltyAmount: number;
     ownerFineAmount: number;
+    confidence: number;
+    warnings: string[];
+    dedupeKey: string;
+    manualMatch: boolean;
+}
+
+export interface VehicleTollUsageMeta {
+    sourceFileName: string;
+    sourceSha256?: string;
+    fileNameVehicleSuffix: string;
+    provider: string;
+    extractedLicensePlate: string;
+    licensePlateCandidates: string[];
+    transactionDate: string;
+    transactionTime: string;
+    transactionDateTime: string;
+    entryTollgate: string;
+    exitTollgate: string;
+    routeName: string;
+    transactionNumber: string;
+    approvalNumber: string;
+    statementPeriod: string;
+    totalCount: number;
+    cardNumber: string;
+    amount: number;
     confidence: number;
     warnings: string[];
     dedupeKey: string;
@@ -150,8 +176,9 @@ export interface VehicleExpenseRecord {
 
     note?: string;
     evidenceUrl?: string; // Receipt Image
-    importSource?: 'GEMINI_FINE_NOTICE';
+    importSource?: 'GEMINI_FINE_NOTICE' | 'GEMINI_TOLL_USAGE';
     fineNotice?: VehicleFineNoticeMeta;
+    tollUsage?: VehicleTollUsageMeta;
     operationId?: string;
     lastOperationId?: string;
 

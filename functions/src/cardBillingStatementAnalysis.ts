@@ -2,6 +2,12 @@ import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { requireCallableAuth } from './auth';
 import { getServerGeminiSettings } from './serverAiSettings';
+import {
+    buildCardStatementSourceClaimDocumentId,
+    buildCardStatementTransactionDocumentId,
+    hashCardStatementSource,
+    normalizeCardStatementSourceSha256,
+} from './cardStatementImportIdentity';
 
 declare const fetch: any;
 const { PDFParse } = require('pdf-parse');
@@ -122,6 +128,7 @@ interface DownloadedStatementFile {
     buffer: Buffer;
     mimeType: string;
     size: number;
+    sha256: string;
 }
 
 type CardStatementAnalysisSource = 'fast_text' | 'gemini';
@@ -171,6 +178,8 @@ interface CardStatementImportResultCommitMarker {
     transactionIds: string[];
     lineItemIds: string[];
     statementPath: string;
+    sourceSha256: string;
+    sourceFileId: string;
 }
 
 interface CardStatementImportBillingGroup {
@@ -269,6 +278,7 @@ const COLLECTIONS = {
     jobs: 'cardStatementImportJobs',
     files: 'cardStatementImportFiles',
     results: 'cardStatementImportResults',
+    sourceClaims: 'cardStatementImportSourceClaims',
     supportWriteOperations: 'support_write_operations',
 } as const;
 const POSTED_BILLING_STATUSES = new Set(['CONFIRMED', 'PAID', 'OVERDUE']);
@@ -783,15 +793,16 @@ const validateMimeType = (mimeType: string): void => {
 };
 
 const downloadStorageFileAsBase64 = async (
-    storagePath: string
+    storagePath: string,
+    maxSizeBytes = MAX_INLINE_FILE_SIZE_BYTES,
 ): Promise<DownloadedStatementFile> => {
     const file = admin.storage().bucket().file(storagePath);
     const [metadata] = await file.getMetadata();
     const size = asFiniteNumber(metadata.size, 0);
-    if (size > MAX_INLINE_FILE_SIZE_BYTES) {
+    if (size > maxSizeBytes) {
         throw new functions.https.HttpsError(
             'failed-precondition',
-            'PDF 파일이 너무 큽니다. 18MB 이하 파일만 바로 분석할 수 있습니다.'
+            `PDF 파일이 너무 큽니다. ${Math.floor(maxSizeBytes / 1024 / 1024)}MB 이하 파일만 처리할 수 있습니다.`
         );
     }
 
@@ -804,7 +815,61 @@ const downloadStorageFileAsBase64 = async (
         buffer,
         mimeType,
         size: buffer.length,
+        sha256: hashCardStatementSource(buffer),
     };
+};
+
+const requireCardStatementSourceSha256 = (value: unknown, message: string): string => {
+    const normalized = normalizeCardStatementSourceSha256(value);
+    if (normalized) return normalized;
+    throw new functions.https.HttpsError('failed-precondition', message);
+};
+
+const assertDownloadedCardStatementSource = (
+    file: DownloadedStatementFile,
+    expectedSha256: unknown,
+    mismatchMessage: string,
+): string => {
+    const expected = requireCardStatementSourceSha256(
+        expectedSha256,
+        '원본 SHA-256 정보가 없습니다. PDF를 다시 업로드한 뒤 재분석해 주세요.',
+    );
+    if (file.sha256 !== expected) {
+        throw new functions.https.HttpsError('failed-precondition', mismatchMessage);
+    }
+    return expected;
+};
+
+const verifyDownloadedCardStatementForAnalysis = async (
+    fileRef: FirebaseFirestore.DocumentReference,
+    fileData: Record<string, unknown>,
+    file: DownloadedStatementFile,
+): Promise<string> => {
+    const expectedSha256 = normalizeCardStatementSourceSha256(fileData.sha256);
+    if (!expectedSha256) {
+        await fileRef.set({
+            sha256: file.sha256,
+            sourceHashVerificationStatus: 'recovered_requires_reanalysis',
+            sourceHashVerifiedAt: safeTimestamp(),
+            updatedAt: safeTimestamp(),
+        }, { merge: true });
+        throw new functions.https.HttpsError(
+            'failed-precondition',
+            '원본 SHA-256이 누락되어 서버 값으로 복구했습니다. 중복 방지를 위해 재분석해 주세요.',
+        );
+    }
+    if (file.sha256 !== expectedSha256) {
+        await fileRef.set({
+            sourceHashVerificationStatus: 'mismatch',
+            sourceHashObservedSha256: file.sha256,
+            updatedAt: safeTimestamp(),
+        }, { merge: true });
+        throw new functions.https.HttpsError(
+            'failed-precondition',
+            'PDF 원본이 분석 준비 이후 변경되었습니다. 파일을 다시 업로드해 주세요.',
+        );
+    }
+    return expectedSha256;
 };
 
 const normalizeExtractedPdfText = (text: unknown): string =>
@@ -1316,14 +1381,41 @@ const buildTransactionId = (
     result: Record<string, unknown>,
     transaction: Record<string, unknown>,
     transactionIndex: number
-): string => [
-    'card-statement',
-    yearMonth,
-    cardId,
-    result.fileId,
-    result.resultIndex,
-    transaction.id || transactionIndex,
-].map(sanitizeIdPart).join('__');
+): string => {
+    const sourceSha256 = normalizeCardStatementSourceSha256(result.sourceSha256);
+    if (sourceSha256) {
+        const analyzedTransactions = Array.isArray(result.transactions)
+            ? result.transactions as Array<Record<string, unknown>>
+            : [];
+        const identityTransactions = analyzedTransactions.length > 0
+            ? analyzedTransactions
+            : [transaction];
+        const deterministicId = buildCardStatementTransactionDocumentId({
+            yearMonth,
+            cardId,
+            sourceSha256,
+            result: {
+                cardLast4: result.cardLast4,
+                cardName: result.cardName,
+                holderName: result.holderName,
+                subtotalAmount: result.subtotalAmount,
+                transactions: identityTransactions,
+            },
+            transactionIndex: analyzedTransactions.length > 0 ? transactionIndex : 0,
+        });
+        if (deterministicId) return deterministicId;
+    }
+
+    // Preserve the legacy id shape only for already-created hash-less results.
+    return [
+        'card-statement',
+        yearMonth,
+        cardId,
+        result.fileId,
+        Math.max(0, Math.round(asFiniteNumber(result.resultIndex, 0))),
+        transaction.id || transactionIndex,
+    ].map(sanitizeIdPart).join('__');
+};
 
 const buildCardStatementImportBillingLogId = (operationId: string, billingId: string): string =>
     ['card-statement-import-billing-log', operationId, billingId].map(sanitizeIdPart).join('__');
@@ -1382,6 +1474,8 @@ const buildPreparedCommit = async (
     });
     const transactions = Array.isArray(result.transactions) ? result.transactions as Array<Record<string, unknown>> : [];
     const sourcePath = asString(result.sourceStoragePath);
+    const sourceSha256 = normalizeCardStatementSourceSha256(result.sourceSha256);
+    const originalFileName = asString(result.originalFileName);
 
     const transactionUpserts = transactions.map((transaction, index) => {
         const id = buildTransactionId(yearMonth, card.id, result, transaction, index);
@@ -1395,8 +1489,11 @@ const buildPreparedCommit = async (
             merchant: asString(transaction.merchant) || asString(result.originalFileName) || 'KB card statement',
             category: normalizeCategory(transaction.category),
             amount: Math.round(asFiniteNumber(transaction.amount, 0)),
-            memo: asString(transaction.memo) || `KB PDF import ${asString(result.originalFileName)}`,
+            memo: asString(transaction.memo) || `PDF로 가져옴 · ${asString(result.originalFileName)}`,
             evidenceUrl: sourcePath || null,
+            statementAttachmentPaths: sourcePath ? [sourcePath] : [],
+            statementSourceSha256: sourceSha256 || undefined,
+            statementOriginalFileName: originalFileName || undefined,
             status: 'ACTIVE',
             operationId: `card-statement-import:${result.jobId}`,
             lastOperationId: `card-statement-import:${result.jobId}`,
@@ -1429,8 +1526,11 @@ const buildPreparedCommit = async (
             merchant: asString(result.originalFileName) || 'KB card statement total',
             category: 'OTHER',
             amount,
-            memo: 'KB PDF import total',
+            memo: 'PDF로 가져옴 · 청구서 총액',
             evidenceUrl: sourcePath || null,
+            statementAttachmentPaths: sourcePath ? [sourcePath] : [],
+            statementSourceSha256: sourceSha256 || undefined,
+            statementOriginalFileName: originalFileName || undefined,
             status: 'ACTIVE',
             operationId: `card-statement-import:${result.jobId}`,
             lastOperationId: `card-statement-import:${result.jobId}`,
@@ -1471,10 +1571,6 @@ const commitCardStatementBillingGroupTransaction = async (params: {
 }): Promise<CommitCardStatementBillingGroupResult> => {
     const { db, billingId, group, jobId, yearMonth, operationId, actor } = params;
     const billingRef = db.collection(COLLECTIONS.billings).doc(billingId);
-    const billingLogRef = db
-        .collection(COLLECTIONS.billingLogs)
-        .doc(buildCardStatementImportBillingLogId(operationId, billingId));
-
     return db.runTransaction(async (transaction) => {
         const existingSnap = await transaction.get(billingRef);
         const existing = existingSnap.data() || {};
@@ -1485,6 +1581,8 @@ const commitCardStatementBillingGroupTransaction = async (params: {
                 transactionIds: [],
                 lineItemIds: [],
                 statementPath: '',
+                sourceSha256: '',
+                sourceFileId: '',
             },
         }));
         const resultSnaps = await Promise.all(resultEntries.map((entry) => transaction.get(entry.ref)));
@@ -1514,6 +1612,48 @@ const commitCardStatementBillingGroupTransaction = async (params: {
             };
         }
 
+        const claimEntries = Array.from(pendingResultStates.reduce((bySha256, resultState) => {
+            const sourceSha256 = normalizeCardStatementSourceSha256(resultState.marker.sourceSha256);
+            if (!sourceSha256) {
+                throw new functions.https.HttpsError(
+                    'failed-precondition',
+                    '저장할 분석 결과의 원본 SHA-256이 없습니다. 재분석해 주세요.',
+                );
+            }
+            if (!bySha256.has(sourceSha256)) {
+                bySha256.set(sourceSha256, {
+                    sourceSha256,
+                    ref: db.collection(COLLECTIONS.sourceClaims).doc(
+                        buildCardStatementSourceClaimDocumentId(sourceSha256),
+                    ),
+                    resultStates: [] as typeof pendingResultStates,
+                });
+            }
+            bySha256.get(sourceSha256)!.resultStates.push(resultState);
+            return bySha256;
+        }, new Map<string, {
+            sourceSha256: string;
+            ref: FirebaseFirestore.DocumentReference;
+            resultStates: typeof pendingResultStates;
+        }>()).values());
+        const claimSnapshots = await Promise.all(claimEntries.map((entry) => transaction.get(entry.ref)));
+        claimEntries.forEach((entry, index) => {
+            const claim = claimSnapshots[index].data() || {};
+            if (!claimSnapshots[index].exists || asString(claim.ownerJobId) !== jobId) {
+                throw new functions.https.HttpsError(
+                    'already-exists',
+                    '같은 원본 PDF를 다른 가져오기 작업이 이미 저장했습니다.',
+                );
+            }
+            const ownerFileId = asString(claim.ownerFileId);
+            if (ownerFileId && entry.resultStates.some(({ marker }) => marker.sourceFileId !== ownerFileId)) {
+                throw new functions.https.HttpsError(
+                    'already-exists',
+                    '같은 작업 안에 중복 PDF가 있어 대표 원본만 저장할 수 있습니다.',
+                );
+            }
+        });
+
         if (existingSnap.exists && isPostedBillingStatus(existing.status)) {
             pendingResultStates.forEach(({ ref }) => {
                 transaction.set(ref, {
@@ -1532,98 +1672,47 @@ const commitCardStatementBillingGroupTransaction = async (params: {
             };
         }
 
-        const pendingLineItemIds = new Set(
-            pendingResultStates.flatMap(({ marker }) => marker.lineItemIds).filter(Boolean)
-        );
         const pendingTransactionIds = new Set(
             pendingResultStates.flatMap(({ marker }) => marker.transactionIds).filter(Boolean)
         );
-        const pendingLineItems = group.lineItems.filter((item) => pendingLineItemIds.has(asString(item.id)));
-        const pendingTransactionUpserts = group.transactionUpserts.filter((item) => pendingTransactionIds.has(asString(item.id)));
-        const pendingStatementPaths = pendingResultStates
-            .map(({ marker }) => marker.statementPath)
-            .filter(Boolean);
-
-        const beforeBillingForLog = existingSnap.exists ? { id: billingId, ...existing } : null;
-        const existingLineItems = Array.isArray(existing.lineItems) ? existing.lineItems : [];
-        const nextLineItemIds = new Set(pendingLineItems.map((item) => asString(item.id)).filter(Boolean));
-        const retainedLineItems = existingLineItems.filter((item: any) => !nextLineItemIds.has(asString(item.id)));
-        const lineItems = [...retainedLineItems, ...pendingLineItems];
-        const variableCost = lineItems.reduce((sum, item: any) => sum + Math.round(asFiniteNumber(item.amount, 0)), 0);
-        const statementAttachmentPaths = Array.from(new Set([
-            ...((Array.isArray(existing.statementAttachmentPaths) ? existing.statementAttachmentPaths : []).map(asString).filter(Boolean)),
-            ...pendingStatementPaths,
-        ]));
-
-        const billingPayload = {
-            yearMonth,
-            cardId: group.card.id,
-            cardLabel: getCardLabel(group.card),
-            assignedTeamId: group.target.billingTarget.assignedTeamId || undefined,
-            assignedTeamName: group.target.billingTarget.assignedTeamName || undefined,
-            teamId: group.target.billingTarget.teamId,
-            teamName: group.target.billingTarget.teamName,
-            issuedToType: group.target.billingTarget.issuedToType,
-            issuedToWorkerId: group.target.billingTarget.issuedToType === 'worker'
-                ? group.target.billingTarget.issuedToWorkerId
-                : undefined,
-            issuedToWorkerName: group.target.billingTarget.issuedToType === 'worker'
-                ? group.target.billingTarget.issuedToWorkerName
-                : group.target.billingTarget.teamName,
-            variableCost,
-            totalAmount: variableCost,
-            status: asString(existing.status) || 'DRAFT',
-            lineItems,
-            statementAttachmentPaths,
-            memo: asString(existing.memo) || `KB PDF import ${jobId}`,
-            createdAt: existing.createdAt || safeTimestamp(),
-            updatedAt: safeTimestamp(),
-        };
-        const logTimestamp = admin.firestore.Timestamp.now();
-        const afterBillingForLog = {
-            id: billingId,
-            ...billingPayload,
-            createdAt: existing.createdAt || logTimestamp,
-            updatedAt: logTimestamp,
-        };
-        const billingLogPayload = buildCardBillingLogPayload(
-            existingSnap.exists ? 'updated' : 'created',
-            beforeBillingForLog,
-            afterBillingForLog,
-            actor,
-            logTimestamp
-        );
+        const pendingTransactionUpserts = Array.from(group.transactionUpserts.reduce((byId, item) => {
+            const id = asString(item.id);
+            if (id && pendingTransactionIds.has(id)) byId.set(id, item);
+            return byId;
+        }, new Map<string, Record<string, unknown>>()).values());
 
         pendingTransactionUpserts.forEach((transactionPayload) => {
             transaction.set(
-                db.collection(COLLECTIONS.transactions).doc(transactionPayload.id),
+                db.collection(COLLECTIONS.transactions).doc(asString(transactionPayload.id)),
                 transactionPayload,
                 { merge: true }
             );
         });
-        transaction.set(
-            billingRef,
-            stripUndefinedDeep(billingPayload) as Record<string, unknown>,
-            { merge: true }
-        );
-        transaction.set(billingLogRef, stripUndefinedDeep({
-            ...billingLogPayload,
-            id: billingLogRef.id,
-            operationId,
-            importJobId: jobId,
-            importResultIds: pendingResultStates.map(({ resultId }) => resultId),
-        }) as Record<string, unknown>, { merge: true });
         pendingResultStates.forEach(({ resultId, ref, marker }) => {
             transaction.set(ref, {
                 status: 'committed',
                 commitOperationId: operationId,
-                committedBillingId: billingId,
-                committedBillingLogId: billingLogRef.id,
                 committedTransactionIds: marker.transactionIds,
-                committedLineItemIds: marker.lineItemIds,
+                committedBillingId: admin.firestore.FieldValue.delete(),
+                committedBillingLogId: admin.firestore.FieldValue.delete(),
+                committedLineItemIds: admin.firestore.FieldValue.delete(),
                 committedAt: safeTimestamp(),
                 updatedAt: safeTimestamp(),
                 errorMessage: admin.firestore.FieldValue.delete(),
+            }, { merge: true });
+        });
+        claimEntries.forEach((entry, index) => {
+            const claim = claimSnapshots[index].data() || {};
+            const committedTransactionIds = uniqueStrings([
+                ...asStringList(claim.committedTransactionIds),
+                ...entry.resultStates.flatMap(({ marker }) => marker.transactionIds),
+            ]);
+            transaction.set(entry.ref, {
+                state: 'committing',
+                committedTransactionIds,
+                lastCommitJobId: jobId,
+                lastCommitOperationId: operationId,
+                updatedAt: safeTimestamp(),
             }, { merge: true });
         });
 
@@ -1631,11 +1720,9 @@ const commitCardStatementBillingGroupTransaction = async (params: {
             committedResults: pendingResultStates.length,
             committedTransactions: pendingTransactionUpserts.length,
             skippedResults: 0,
-            committedBillingDocumentCount: 1,
+            committedBillingDocumentCount: 0,
             protectedBillingIds: [],
             affectedDocumentIds: [
-                billingId,
-                billingLogRef.id,
                 ...pendingResultStates.map(({ resultId }) => resultId),
                 ...pendingTransactionUpserts.map((transactionPayload) => transactionPayload.id),
             ],
@@ -1949,6 +2036,9 @@ const assertImportUploadFile = (file: CreateCardStatementImportUploadSessionFile
     if (size >= MAX_STORAGE_IMPORT_FILE_SIZE_BYTES) {
         throw new functions.https.HttpsError('failed-precondition', 'PDF 파일은 25MB 미만만 업로드할 수 있습니다.');
     }
+    if (file.sha256 && !normalizeCardStatementSourceSha256(file.sha256)) {
+        throw new functions.https.HttpsError('invalid-argument', '원본 SHA-256 형식이 올바르지 않습니다.');
+    }
 };
 
 const buildImportUploadStoragePath = (params: {
@@ -2064,7 +2154,7 @@ export const createCardStatementImportUploadSession = functions
                     originalFileName: asString(inputFile.originalFileName) || storagePath.split('/').pop() || 'statement.pdf',
                     mimeType: asString(inputFile.mimeType) || 'application/pdf',
                     size: asFiniteNumber(inputFile.size, 0),
-                    sha256: asString(inputFile.sha256) || undefined,
+                    sha256: normalizeCardStatementSourceSha256(inputFile.sha256) || undefined,
                     status: 'uploading',
                     cardCount: 0,
                     transactionCount: 0,
@@ -2091,7 +2181,7 @@ export const createCardStatementImportUploadSession = functions
     });
 
 export const completeCardStatementImportUpload = functions
-    .runWith({ timeoutSeconds: 120, memory: '256MB', maxInstances: 10 })
+    .runWith({ timeoutSeconds: 300, memory: '512MB', maxInstances: 10 })
     .region('asia-northeast3')
     .https.onCall(async (data: CompleteCardStatementImportUploadRequest, context) => {
         try {
@@ -2128,7 +2218,6 @@ export const completeCardStatementImportUpload = functions
 
             const uploadedByPath = new Map(uploadedFiles.map((file) => [asString(file.storagePath), file]));
             const batch = db.batch();
-            const bucket = admin.storage().bucket();
             for (const fileDoc of fileDocs) {
                 const expected = fileDoc.data() || {};
                 const storagePath = asString(expected.storagePath);
@@ -2137,15 +2226,35 @@ export const completeCardStatementImportUpload = functions
                 if (!uploaded) {
                     throw new functions.https.HttpsError('failed-precondition', '업로드 완료 정보에 누락된 파일이 있습니다.');
                 }
-                const [metadata] = await bucket.file(storagePath).getMetadata().catch((error) => {
+                const uploadedSha256 = requireCardStatementSourceSha256(
+                    uploaded.sha256,
+                    '업로드 완료 정보에 원본 SHA-256이 없습니다. PDF를 다시 선택해 업로드해 주세요.',
+                );
+                const sessionSha256 = normalizeCardStatementSourceSha256(expected.sha256);
+                if (sessionSha256 && sessionSha256 !== uploadedSha256) {
+                    throw new functions.https.HttpsError(
+                        'failed-precondition',
+                        '업로드 전후 원본 SHA-256이 다릅니다. PDF를 다시 선택해 업로드해 주세요.',
+                    );
+                }
+                const serverFile = await downloadStorageFileAsBase64(
+                    storagePath,
+                    MAX_STORAGE_IMPORT_FILE_SIZE_BYTES,
+                ).catch((error) => {
+                    if (error instanceof functions.https.HttpsError) throw error;
                     throw new functions.https.HttpsError(
                         'failed-precondition',
                         `Storage에 업로드된 PDF를 확인할 수 없습니다: ${storagePath}`,
-                        error
+                        error,
                     );
                 });
-                const mimeType = asString(uploaded.mimeType || metadata.contentType) || 'application/pdf';
-                const size = asFiniteNumber(uploaded.size || metadata.size, 0);
+                assertDownloadedCardStatementSource(
+                    serverFile,
+                    uploadedSha256,
+                    '업로드된 PDF 바이트와 원본 SHA-256이 일치하지 않습니다. PDF를 다시 업로드해 주세요.',
+                );
+                const mimeType = serverFile.mimeType;
+                const size = serverFile.size;
                 if (mimeType !== 'application/pdf') {
                     throw new functions.https.HttpsError('failed-precondition', '업로드된 파일이 PDF가 아닙니다.');
                 }
@@ -2155,7 +2264,9 @@ export const completeCardStatementImportUpload = functions
                 batch.set(fileDoc.ref, stripUndefinedDeep({
                     mimeType,
                     size,
-                    sha256: asString(uploaded.sha256) || asString(expected.sha256) || undefined,
+                    sha256: serverFile.sha256,
+                    sourceHashVerificationStatus: 'verified',
+                    sourceHashVerifiedAt: safeTimestamp(),
                     status: 'uploaded',
                     updatedAt: safeTimestamp(),
                     errorMessage: admin.firestore.FieldValue.delete(),
@@ -2277,7 +2388,7 @@ export const cancelCardStatementImportUploadSession = functions
     });
 
 export const createCardStatementImportJob = functions
-    .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 10 })
+    .runWith({ timeoutSeconds: 300, memory: '512MB', maxInstances: 10 })
     .region('asia-northeast3')
     .https.onCall(async (data: CreateCardStatementImportJobRequest, context) => {
         try {
@@ -2298,6 +2409,38 @@ export const createCardStatementImportJob = functions
                 );
             }
 
+            const verifiedFiles: CreateCardStatementImportFileInput[] = [];
+            for (const inputFile of files) {
+                const storagePath = asString(inputFile.storagePath);
+                validateStoragePath(storagePath);
+                const declaredSha256 = requireCardStatementSourceSha256(
+                    inputFile.sha256,
+                    '원본 SHA-256 정보가 없습니다. PDF를 다시 업로드해 주세요.',
+                );
+                const serverFile = await downloadStorageFileAsBase64(
+                    storagePath,
+                    MAX_STORAGE_IMPORT_FILE_SIZE_BYTES,
+                );
+                assertDownloadedCardStatementSource(
+                    serverFile,
+                    declaredSha256,
+                    'Storage의 PDF 바이트와 원본 SHA-256이 일치하지 않습니다. PDF를 다시 업로드해 주세요.',
+                );
+                if (serverFile.mimeType !== 'application/pdf') {
+                    throw new functions.https.HttpsError('failed-precondition', '업로드된 파일이 PDF가 아닙니다.');
+                }
+                if (serverFile.size <= 0 || serverFile.size >= MAX_STORAGE_IMPORT_FILE_SIZE_BYTES) {
+                    throw new functions.https.HttpsError('failed-precondition', '업로드된 PDF 크기가 허용 범위를 벗어났습니다.');
+                }
+                verifiedFiles.push({
+                    ...inputFile,
+                    storagePath,
+                    mimeType: serverFile.mimeType,
+                    size: serverFile.size,
+                    sha256: serverFile.sha256,
+                });
+            }
+
             const db = admin.firestore();
             const jobRef = db.collection(COLLECTIONS.jobs).doc();
             const batch = db.batch();
@@ -2309,8 +2452,8 @@ export const createCardStatementImportJob = functions
                 yearMonth,
                 status: 'queued',
                 bankName: asString(data?.bankName) || 'KB국민은행',
-                totalFiles: files.length,
-                uploadedFiles: files.length,
+                totalFiles: verifiedFiles.length,
+                uploadedFiles: verifiedFiles.length,
                 analyzedFiles: 0,
                 totalCards: 0,
                 matchedCards: 0,
@@ -2328,7 +2471,7 @@ export const createCardStatementImportJob = functions
                 updatedAt: now,
             }) as Record<string, unknown>);
 
-            files.forEach((inputFile, fileIndex) => {
+            verifiedFiles.forEach((inputFile, fileIndex) => {
                 const storagePath = asString(inputFile.storagePath);
                 validateStoragePath(storagePath);
                 const fileRef = db.collection(COLLECTIONS.files).doc();
@@ -2341,7 +2484,9 @@ export const createCardStatementImportJob = functions
                     originalFileName: asString(inputFile.originalFileName) || storagePath.split('/').pop() || 'statement.pdf',
                     mimeType: asString(inputFile.mimeType) || 'application/pdf',
                     size: asFiniteNumber(inputFile.size, 0),
-                    sha256: asString(inputFile.sha256) || undefined,
+                    sha256: inputFile.sha256,
+                    sourceHashVerificationStatus: 'verified',
+                    sourceHashVerifiedAt: now,
                     status: 'uploaded',
                     cardCount: 0,
                     transactionCount: 0,
@@ -2432,6 +2577,11 @@ const legacyAnalyzeCardStatementImportJob = functions
                     }, { merge: true });
 
                     const file = await downloadStorageFileAsBase64(storagePath);
+                    const verifiedSourceSha256 = await verifyDownloadedCardStatementForAnalysis(
+                        fileDoc.ref,
+                        fileData,
+                        file,
+                    );
                     const analysis = await analyzeCardStatementImportFile({
                         statementPath: storagePath,
                         yearMonth,
@@ -2451,11 +2601,15 @@ const legacyAnalyzeCardStatementImportJob = functions
                         transactionCount: fileTransactionCount,
                         warnings: fileWarnings,
                         analysisSource: analysis.source,
+                        sha256: verifiedSourceSha256,
+                        sourceHashVerificationStatus: 'verified',
+                        sourceHashVerifiedAt: safeTimestamp(),
                         mimeType: file.mimeType,
                         size: file.size,
                         updatedAt: safeTimestamp(),
                     }, { merge: true });
 
+                    let sourceBlockIndex = 0;
                     for (const statementCard of statementCards) {
                         const match = matchStatementCard(statementCard, cards);
                     const warnings = Array.from(new Set([
@@ -2480,6 +2634,7 @@ const legacyAnalyzeCardStatementImportJob = functions
                             fileId: fileDoc.id,
                             fileIndex: Number(fileData.fileIndex ?? 0),
                             resultIndex,
+                            sourceBlockIndex,
                             yearMonth,
                             statementMonth: parsed.statementMonth || '',
                             cardLast4: statementCard.cardLast4 || '',
@@ -2498,6 +2653,7 @@ const legacyAnalyzeCardStatementImportJob = functions
                             warnings,
                             analysisSource: analysis.source,
                             sourceStoragePath: storagePath,
+                            sourceSha256: verifiedSourceSha256,
                             originalFileName: asString(fileData.originalFileName),
                             createdAt: safeTimestamp(),
                             updatedAt: safeTimestamp(),
@@ -2510,6 +2666,7 @@ const legacyAnalyzeCardStatementImportJob = functions
                             warningCount: warnings.length,
                         });
                         resultIndex += 1;
+                        sourceBlockIndex += 1;
                     }
 
                     analyzedFiles += 1;
@@ -2604,6 +2761,299 @@ const getSortedImportFileDocs = async (jobId: string) => {
     return filesSnap.docs
         .map((doc) => ({ ref: doc.ref, id: doc.id, data: doc.data() }))
         .sort((a, b) => Number(a.data.fileIndex ?? 0) - Number(b.data.fileIndex ?? 0));
+};
+
+interface VerifiedCardStatementSourceFile {
+    id: string;
+    ref: FirebaseFirestore.DocumentReference;
+    data: Record<string, unknown>;
+    fileIndex: number;
+    sourceSha256: string;
+    storagePath: string;
+}
+
+interface CardStatementSourceClaimOwner {
+    sourceSha256: string;
+    ownerJobId: string;
+    ownerFileId: string;
+    state: string;
+    committedTransactionIds: string[];
+    legacy: boolean;
+}
+
+interface CardStatementSourceClaimResolution {
+    ownedFileBySha256: Map<string, string>;
+    ownerBySha256: Map<string, CardStatementSourceClaimOwner>;
+}
+
+const verifyCardStatementImportSourcesBeforeCommit = async (
+    fileDocs: Array<{ ref: FirebaseFirestore.DocumentReference; id: string; data: Record<string, unknown> }>,
+): Promise<VerifiedCardStatementSourceFile[]> => {
+    const verified: VerifiedCardStatementSourceFile[] = [];
+    for (const fileDoc of fileDocs) {
+        const storagePath = asString(fileDoc.data.storagePath);
+        validateStoragePath(storagePath);
+        const expectedSha256 = requireCardStatementSourceSha256(
+            fileDoc.data.sha256,
+            '가져오기 파일의 원본 SHA-256이 없습니다. 이 작업을 재분석한 뒤 다시 저장해 주세요.',
+        );
+        const file = await downloadStorageFileAsBase64(storagePath);
+        assertDownloadedCardStatementSource(
+            file,
+            expectedSha256,
+            '분석 이후 PDF 원본이 변경되었습니다. 파일을 다시 업로드하고 재분석해 주세요.',
+        );
+        verified.push({
+            id: fileDoc.id,
+            ref: fileDoc.ref,
+            data: fileDoc.data,
+            fileIndex: Math.max(0, Math.round(asFiniteNumber(fileDoc.data.fileIndex, 0))),
+            sourceSha256: expectedSha256,
+            storagePath,
+        });
+    }
+    return verified;
+};
+
+const parseImportJobIdFromOperation = (value: unknown): string => {
+    const match = /^card-statement-import:([^:]+)(?::|$)/.exec(asString(value));
+    return match?.[1] || '';
+};
+
+const findLegacyCardStatementSourceOwner = async (
+    db: FirebaseFirestore.Firestore,
+    sourceSha256: string,
+    currentJobId: string,
+): Promise<CardStatementSourceClaimOwner | null> => {
+    const transactionSnap = await db.collection(COLLECTIONS.transactions)
+        .where('statementSourceSha256', '==', sourceSha256)
+        .limit(10)
+        .get();
+    for (const transactionDoc of transactionSnap.docs) {
+        const data = transactionDoc.data() || {};
+        const ownerJobId = parseImportJobIdFromOperation(data.operationId || data.lastOperationId);
+        if (ownerJobId === currentJobId) continue;
+        return {
+            sourceSha256,
+            ownerJobId: ownerJobId || `legacy-transaction-${transactionDoc.id}`,
+            ownerFileId: '',
+            state: 'committed',
+            committedTransactionIds: [transactionDoc.id],
+            legacy: true,
+        };
+    }
+
+    const hashVariants = Array.from(new Set([sourceSha256, sourceSha256.toUpperCase()]));
+    const filesQuery = hashVariants.length === 1
+        ? db.collection(COLLECTIONS.files).where('sha256', '==', hashVariants[0])
+        : db.collection(COLLECTIONS.files).where('sha256', 'in', hashVariants);
+    const legacyFilesSnap = await filesQuery.limit(20).get();
+    const legacyFiles = legacyFilesSnap.docs
+        .filter((fileDoc) => asString(fileDoc.data().jobId) !== currentJobId)
+        .sort((left, right) => left.id.localeCompare(right.id));
+
+    for (const fileDoc of legacyFiles) {
+        const resultSnap = await db.collection(COLLECTIONS.results)
+            .where('fileId', '==', fileDoc.id)
+            .get();
+        const committedResults = resultSnap.docs.filter((resultDoc) => (
+            asString(resultDoc.data().status) === 'committed'
+        ));
+        if (committedResults.length === 0) continue;
+        return {
+            sourceSha256,
+            ownerJobId: asString(fileDoc.data().jobId) || `legacy-file-${fileDoc.id}`,
+            ownerFileId: fileDoc.id,
+            state: 'committed',
+            committedTransactionIds: uniqueStrings(committedResults.flatMap((resultDoc) => (
+                asStringList(resultDoc.data().committedTransactionIds)
+            ))),
+            legacy: true,
+        };
+    }
+
+    for (const fileDoc of legacyFiles) {
+        const legacyJobId = asString(fileDoc.data().jobId);
+        const storagePath = asString(fileDoc.data().storagePath);
+        if (!legacyJobId || !storagePath) continue;
+        const legacyTransactionsSnap = await db.collection(COLLECTIONS.transactions)
+            .where('operationId', '==', `card-statement-import:${legacyJobId}`)
+            .get();
+        const sourceTransactions = legacyTransactionsSnap.docs.filter((transactionDoc) => {
+            const data = transactionDoc.data() || {};
+            return asString(data.evidenceUrl) === storagePath ||
+                asStringList(data.statementAttachmentPaths).includes(storagePath);
+        });
+        if (sourceTransactions.length === 0) continue;
+        return {
+            sourceSha256,
+            ownerJobId: legacyJobId,
+            ownerFileId: fileDoc.id,
+            state: 'committed',
+            committedTransactionIds: sourceTransactions.map((transactionDoc) => transactionDoc.id),
+            legacy: true,
+        };
+    }
+    return null;
+};
+
+const claimCardStatementImportSources = async (params: {
+    db: FirebaseFirestore.Firestore;
+    jobId: string;
+    yearMonth: string;
+    files: VerifiedCardStatementSourceFile[];
+    actor: { uid: string; name: string; email: string | null };
+}): Promise<CardStatementSourceClaimResolution> => {
+    const { db, jobId, yearMonth, actor } = params;
+    const canonicalFiles = Array.from(params.files.reduce((bySha256, file) => {
+        const existing = bySha256.get(file.sourceSha256);
+        if (!existing || file.fileIndex < existing.fileIndex || (
+            file.fileIndex === existing.fileIndex && file.id.localeCompare(existing.id) < 0
+        )) {
+            bySha256.set(file.sourceSha256, file);
+        }
+        return bySha256;
+    }, new Map<string, VerifiedCardStatementSourceFile>()).values())
+        .sort((left, right) => left.sourceSha256.localeCompare(right.sourceSha256));
+
+    const legacyOwners = new Map<string, CardStatementSourceClaimOwner | null>();
+    for (const file of canonicalFiles) {
+        legacyOwners.set(
+            file.sourceSha256,
+            await findLegacyCardStatementSourceOwner(db, file.sourceSha256, jobId),
+        );
+    }
+
+    const owners = await db.runTransaction(async (transaction) => {
+        const entries = canonicalFiles.map((file) => ({
+            file,
+            ref: db.collection(COLLECTIONS.sourceClaims).doc(
+                buildCardStatementSourceClaimDocumentId(file.sourceSha256),
+            ),
+        }));
+        const snapshots: FirebaseFirestore.DocumentSnapshot[] = [];
+        for (const entry of entries) snapshots.push(await transaction.get(entry.ref));
+
+        return entries.map((entry, index): CardStatementSourceClaimOwner => {
+            const snapshot = snapshots[index];
+            const existing = snapshot.data() || {};
+            if (snapshot.exists) {
+                const existingOwnerJobId = asString(existing.ownerJobId);
+                const existingOwnerFileId = asString(existing.ownerFileId);
+                const owner: CardStatementSourceClaimOwner = {
+                    sourceSha256: entry.file.sourceSha256,
+                    ownerJobId: existingOwnerJobId || 'unknown-existing-claim',
+                    ownerFileId: existingOwnerFileId,
+                    state: asString(existing.state) || 'claimed',
+                    committedTransactionIds: asStringList(existing.committedTransactionIds),
+                    legacy: Boolean(existing.legacy),
+                };
+                if (owner.ownerJobId === jobId) {
+                    owner.ownerFileId = params.files.some((file) => file.id === owner.ownerFileId)
+                        ? owner.ownerFileId
+                        : entry.file.id;
+                    transaction.set(entry.ref, {
+                        ownerFileId: owner.ownerFileId,
+                        lastSeenAt: safeTimestamp(),
+                        updatedAt: safeTimestamp(),
+                    }, { merge: true });
+                }
+                return owner;
+            }
+
+            const legacyOwner = legacyOwners.get(entry.file.sourceSha256);
+            const owner: CardStatementSourceClaimOwner = legacyOwner || {
+                sourceSha256: entry.file.sourceSha256,
+                ownerJobId: jobId,
+                ownerFileId: entry.file.id,
+                state: 'claimed',
+                committedTransactionIds: [],
+                legacy: false,
+            };
+            transaction.set(entry.ref, stripUndefinedDeep({
+                id: entry.ref.id,
+                sourceSha256: entry.file.sourceSha256,
+                ownerJobId: owner.ownerJobId,
+                ownerFileId: owner.ownerFileId || undefined,
+                ownerYearMonth: yearMonth,
+                ownerStoragePath: entry.file.storagePath,
+                ownerOriginalFileName: asString(entry.file.data.originalFileName) || undefined,
+                ownerActorUid: actor.uid,
+                ownerActorName: actor.name,
+                state: owner.state,
+                committedTransactionIds: owner.committedTransactionIds,
+                legacy: owner.legacy,
+                claimedAt: safeTimestamp(),
+                updatedAt: safeTimestamp(),
+            }) as Record<string, unknown>);
+            return owner;
+        });
+    });
+
+    const ownerBySha256 = new Map(owners.map((owner) => [owner.sourceSha256, owner]));
+    const ownedFileBySha256 = new Map(
+        owners
+            .filter((owner) => owner.ownerJobId === jobId)
+            .map((owner) => [owner.sourceSha256, owner.ownerFileId]),
+    );
+    return { ownerBySha256, ownedFileBySha256 };
+};
+
+const validateResultSourceHashes = (
+    results: Array<{ id: string; data: Record<string, unknown> }>,
+    files: VerifiedCardStatementSourceFile[],
+): void => {
+    const fileById = new Map(files.map((file) => [file.id, file]));
+    results.forEach(({ data }) => {
+        if (asString(data.status) === 'excluded') return;
+        const file = fileById.get(asString(data.fileId));
+        const resultSha256 = normalizeCardStatementSourceSha256(data.sourceSha256);
+        if (!file || !resultSha256 || resultSha256 !== file.sourceSha256) {
+            throw new functions.https.HttpsError(
+                'failed-precondition',
+                '분석 결과의 원본 SHA-256을 확인할 수 없습니다. 작업을 재분석한 뒤 다시 저장해 주세요.',
+            );
+        }
+    });
+};
+
+const excludeDuplicateSourceResults = async (params: {
+    db: FirebaseFirestore.Firestore;
+    jobId: string;
+    results: Array<{ id: string; ref: FirebaseFirestore.DocumentReference; data: Record<string, unknown> }>;
+    claims: CardStatementSourceClaimResolution;
+}): Promise<number> => {
+    let batch = params.db.batch();
+    let writes = 0;
+    let excluded = 0;
+    for (const result of params.results) {
+        if (['committed', 'excluded'].includes(asString(result.data.status))) continue;
+        const sourceSha256 = normalizeCardStatementSourceSha256(result.data.sourceSha256);
+        const owner = params.claims.ownerBySha256.get(sourceSha256);
+        const ownedFileId = params.claims.ownedFileBySha256.get(sourceSha256);
+        if (owner?.ownerJobId === params.jobId && ownedFileId === asString(result.data.fileId)) continue;
+
+        batch.set(result.ref, stripUndefinedDeep({
+            status: 'excluded',
+            exclusionReason: '같은 원본 PDF가 이미 저장되어 중복 반영을 건너뛰었습니다.',
+            duplicateSourceSha256: sourceSha256,
+            duplicateSourceOwnerJobId: owner?.ownerJobId || undefined,
+            duplicateSourceOwnerFileId: owner?.ownerFileId || undefined,
+            analysisReviewRequired: false,
+            updatedAt: safeTimestamp(),
+            errorMessage: admin.firestore.FieldValue.delete(),
+        }) as Record<string, unknown>, { merge: true });
+        result.data.status = 'excluded';
+        excluded += 1;
+        writes += 1;
+        if (writes === 400) {
+            await batch.commit();
+            batch = params.db.batch();
+            writes = 0;
+        }
+    }
+    if (writes > 0) await batch.commit();
+    return excluded;
 };
 
 const startCardStatementImportAnalysis = async (jobId: string): Promise<Record<string, unknown>> => {
@@ -2734,6 +3184,11 @@ const runCardStatementImportJobAnalysis = async (jobId: string, expectedRunId?: 
                 }, { merge: true });
 
                 const file = await downloadStorageFileAsBase64(storagePath);
+                const verifiedSourceSha256 = await verifyDownloadedCardStatementForAnalysis(
+                    fileDoc.ref,
+                    fileData,
+                    file,
+                );
                 const analysis = await analyzeCardStatementImportFile({
                     statementPath: storagePath,
                     yearMonth,
@@ -2754,6 +3209,9 @@ const runCardStatementImportJobAnalysis = async (jobId: string, expectedRunId?: 
                     transactionCount: fileTransactionCount,
                     warnings: fileWarnings,
                     analysisSource: analysis.source,
+                    sha256: verifiedSourceSha256,
+                    sourceHashVerificationStatus: 'verified',
+                    sourceHashVerifiedAt: safeTimestamp(),
                     mimeType: file.mimeType,
                     size: file.size,
                     updatedAt: safeTimestamp(),
@@ -2771,6 +3229,7 @@ const runCardStatementImportJobAnalysis = async (jobId: string, expectedRunId?: 
                     totalAmount: fileTotalAmount,
                 });
 
+                let sourceBlockIndex = 0;
                 for (const statementCard of statementCards) {
                     const match = matchStatementCard(statementCard, cards);
                     const warnings = Array.from(new Set([
@@ -2795,6 +3254,7 @@ const runCardStatementImportJobAnalysis = async (jobId: string, expectedRunId?: 
                         fileId: fileDoc.id,
                         fileIndex: Number(fileData.fileIndex ?? 0),
                         resultIndex,
+                        sourceBlockIndex,
                         analysisRunId,
                         yearMonth,
                         statementMonth: parsed.statementMonth || '',
@@ -2814,6 +3274,7 @@ const runCardStatementImportJobAnalysis = async (jobId: string, expectedRunId?: 
                         warnings,
                         analysisSource: analysis.source,
                         sourceStoragePath: storagePath,
+                        sourceSha256: verifiedSourceSha256,
                         originalFileName: asString(fileData.originalFileName),
                         createdAt: safeTimestamp(),
                         updatedAt: safeTimestamp(),
@@ -2826,6 +3287,7 @@ const runCardStatementImportJobAnalysis = async (jobId: string, expectedRunId?: 
                         warningCount: warnings.length,
                     });
                     resultIndex += 1;
+                    sourceBlockIndex += 1;
                 }
             } catch (fileError) {
                 failedFiles += 1;
@@ -3181,18 +3643,38 @@ export const commitCardStatementImportJob = functions
                 throw new functions.https.HttpsError('failed-precondition', '가져오기 작업의 월 정보가 올바르지 않습니다.');
             }
 
-            await jobRef.set({
-                status: 'committing',
-                updatedAt: safeTimestamp(),
-                errorMessage: admin.firestore.FieldValue.delete(),
-            }, { merge: true });
-
+            const fileDocs = await getSortedImportFileDocs(jobId);
+            if (fileDocs.length === 0) {
+                throw new functions.https.HttpsError('failed-precondition', '저장할 PDF 원본 파일이 없습니다.');
+            }
+            const verifiedSourceFiles = await verifyCardStatementImportSourcesBeforeCommit(fileDocs);
             const resultsSnap = await db.collection(COLLECTIONS.results).where('jobId', '==', jobId).get();
             const resultDocs = resultsSnap.docs.map((docSnap) => ({
                 id: docSnap.id,
                 ref: docSnap.ref,
                 data: docSnap.data(),
             }));
+            validateResultSourceHashes(resultDocs, verifiedSourceFiles);
+            const sourceClaims = await claimCardStatementImportSources({
+                db,
+                jobId,
+                yearMonth,
+                files: verifiedSourceFiles,
+                actor: actorForOperationLog,
+            });
+            const duplicateSourceResultCount = await excludeDuplicateSourceResults({
+                db,
+                jobId,
+                results: resultDocs,
+                claims: sourceClaims,
+            });
+
+            await jobRef.set({
+                status: 'committing',
+                updatedAt: safeTimestamp(),
+                errorMessage: admin.firestore.FieldValue.delete(),
+            }, { merge: true });
+
             const candidates = resultDocs.filter(({ data: result }) => (
                 asString(result.status) === 'matched' &&
                 asString(result.matchedCardId) &&
@@ -3203,7 +3685,7 @@ export const commitCardStatementImportJob = functions
             const billingGroups = new Map<string, CardStatementImportBillingGroup>();
             let committedResults = 0;
             let committedTransactions = 0;
-            let skippedResults = 0;
+            let skippedResults = duplicateSourceResultCount;
             let committedBillingDocumentCount = 0;
             const protectedBillingIds: string[] = [];
             const affectedDocumentIds: string[] = [];
@@ -3253,6 +3735,8 @@ export const commitCardStatementImportJob = functions
                     transactionIds: prepared.transactionUpserts.map((transactionPayload) => transactionPayload.id),
                     lineItemIds: prepared.lineItems.map((lineItem) => asString(lineItem.id)).filter(Boolean),
                     statementPath: prepared.statementPath,
+                    sourceSha256: normalizeCardStatementSourceSha256(result.sourceSha256),
+                    sourceFileId: asString(result.fileId),
                 });
                 if (prepared.statementPath) group.statementPaths.add(prepared.statementPath);
                 group.lineItems.push(...prepared.lineItems);
@@ -3260,7 +3744,7 @@ export const commitCardStatementImportJob = functions
                 billingGroups.set(prepared.billingId, group);
             }
 
-            attemptedBillingDocumentCountForOperationLog = billingGroups.size;
+            attemptedBillingDocumentCountForOperationLog = 0;
             for (const [billingId, group] of billingGroups.entries()) {
                 const groupResult = await commitCardStatementBillingGroupTransaction({
                     db,
@@ -3301,13 +3785,14 @@ export const commitCardStatementImportJob = functions
             )).length;
             const failedResults = remainingDocs.filter(({ data: result }) => asString(result.status) === 'failed').length;
             const committedSummary = summarizeCommittedImportResults(remainingDocs);
-            const finalStatus = needsReview > 0 || skippedResults > 0 ? 'reviewing' : 'completed';
+            const finalStatus = needsReview > 0 || skippedResults > duplicateSourceResultCount ? 'reviewing' : 'completed';
             const finalAffectedDocumentIds = collectCommitAffectedDocumentIds(
                 jobId,
                 remainingDocs,
                 [
                     ...affectedDocumentIds,
                     ...protectedBillingIds,
+                    ...Array.from(sourceClaims.ownerBySha256.keys()).map(buildCardStatementSourceClaimDocumentId),
                     buildSupportWriteOperationId(SUPPORT_WRITE_OPERATION_DOMAIN, operationId),
                 ]
             );
@@ -3317,7 +3802,9 @@ export const commitCardStatementImportJob = functions
                 status: 'success',
                 actor: actorForOperationLog,
                 affectedDocumentIds: finalAffectedDocumentIds,
-                userMessage: `카드 청구 PDF 일괄등록 반영 ${committedSummary.committedResults}건 완료`,
+                userMessage: duplicateSourceResultCount > 0
+                    ? `카드 PDF 금액·증빙 ${committedSummary.committedResults}건 저장, 중복 원본 ${duplicateSourceResultCount}건 제외`
+                    : `카드 PDF 금액·증빙 임시저장 ${committedSummary.committedResults}건 완료`,
                 metadata: {
                     jobId,
                     committedResults: committedSummary.committedResults,
@@ -3325,7 +3812,9 @@ export const commitCardStatementImportJob = functions
                     newlyCommittedResults: committedResults,
                     newlyCommittedTransactions: committedTransactions,
                     skippedResults,
-                    attemptedBillingDocumentCount: billingGroups.size,
+                    duplicateSourceResults: duplicateSourceResultCount,
+                    attemptedBillingDocumentCount: 0,
+                    ledgerGroupCount: billingGroups.size,
                     committedBillingDocumentCount,
                     protectedBillingIds: uniqueStrings(protectedBillingIds),
                     needsReview,
@@ -3339,8 +3828,35 @@ export const commitCardStatementImportJob = functions
                 committedTransactions: committedSummary.committedTransactions,
                 errorCount: failedResults,
                 updatedAt: safeTimestamp(),
-                ...(needsReview === 0 && skippedResults === 0 ? { completedAt: safeTimestamp() } : {}),
+                ...(finalStatus === 'completed' ? { completedAt: safeTimestamp() } : {}),
             }, { merge: true });
+            sourceClaims.ownedFileBySha256.forEach((ownerFileId, sourceSha256) => {
+                const sourceResults = remainingDocs.filter(({ data: result }) => (
+                    normalizeCardStatementSourceSha256(result.sourceSha256) === sourceSha256 &&
+                    asString(result.fileId) === ownerFileId
+                ));
+                const committedSourceResults = sourceResults.filter(({ data: result }) => (
+                    asString(result.status) === 'committed'
+                ));
+                const committedTransactionIds = uniqueStrings(committedSourceResults.flatMap(({ data: result }) => (
+                    asStringList(result.committedTransactionIds)
+                )));
+                finalBatch.set(
+                    db.collection(COLLECTIONS.sourceClaims).doc(
+                        buildCardStatementSourceClaimDocumentId(sourceSha256),
+                    ),
+                    {
+                        state: committedSourceResults.length > 0 ? 'committed' : 'claimed',
+                        committedResultIds: committedSourceResults.map(({ id }) => id),
+                        committedTransactionIds,
+                        completedAt: committedSourceResults.length > 0
+                            ? safeTimestamp()
+                            : admin.firestore.FieldValue.delete(),
+                        updatedAt: safeTimestamp(),
+                    },
+                    { merge: true },
+                );
+            });
             finalBatch.set(
                 db.collection(COLLECTIONS.supportWriteOperations).doc(asString(operationLogPayload.id)),
                 {

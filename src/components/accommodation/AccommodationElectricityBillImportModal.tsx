@@ -26,6 +26,7 @@ import {
     findDuplicateAccommodationSelections,
     matchElectricityBillToAccommodation,
 } from '../../utils/accommodationElectricityBillMatching';
+import { hasAccommodationUtilityBillSource } from '../../utils/accommodationUtilityDeduplication';
 import AiDocumentDropzone from '../common/AiDocumentDropzone';
 
 interface AccommodationUtilityBillImportModalProps {
@@ -42,6 +43,7 @@ interface AccommodationUtilityBillImportModalProps {
 interface ReviewAnalysis {
     fileIndex: number;
     originalFileName: string;
+    sourceFileSha256?: string;
     provider: string;
     customerName: string;
     accountNumber: string;
@@ -255,6 +257,14 @@ const AccommodationUtilityBillImportModal: React.FC<AccommodationUtilityBillImpo
         .filter((row) => row.selected)
         .map((row) => row.selectedAccommodationId);
     const duplicateAccommodationIds = findDuplicateAccommodationSelections(selectedAccommodationIds);
+    const duplicateSourceFileHashes = new Set<string>();
+    const seenSourceFileHashes = new Set<string>();
+    rows.filter((row) => row.selected).forEach((row) => {
+        const sha256 = String(row.analysis.sourceFileSha256 || '').trim().toLowerCase();
+        if (!sha256) return;
+        if (seenSourceFileHashes.has(sha256)) duplicateSourceFileHashes.add(sha256);
+        seenSourceFileHashes.add(sha256);
+    });
 
     const getRowIssues = useCallback((row: ReviewRow): string[] => {
         if (!row.selected) return [];
@@ -272,6 +282,18 @@ const AccommodationUtilityBillImportModal: React.FC<AccommodationUtilityBillImpo
         if (duplicateAccommodationIds.has(row.selectedAccommodationId)) {
             issues.push('같은 숙소가 두 번 선택되었습니다.');
         }
+        const sourceFileSha256 = String(row.analysis.sourceFileSha256 || '').trim().toLowerCase();
+        if (sourceFileSha256 && duplicateSourceFileHashes.has(sourceFileSha256)) {
+            issues.push('동일한 청구서 파일이 두 번 첨부되었습니다.');
+        }
+        if (hasAccommodationUtilityBillSource(records, utilityType, row.selectedAccommodationId, {
+            sourceFileName: row.analysis.originalFileName,
+            sourceFileSha256,
+            billingYearMonth: row.billingYearMonth,
+            provider: row.analysis.provider,
+        })) {
+            issues.push('이미 대장에 반영된 동일 청구서 파일입니다.');
+        }
         if (blockedAccommodationIds.has(row.selectedAccommodationId)) {
             issues.push('이미 청구 처리된 숙소입니다. 먼저 미청구로 변경해 주세요.');
         }
@@ -282,7 +304,7 @@ const AccommodationUtilityBillImportModal: React.FC<AccommodationUtilityBillImpo
             issues.push(`${costLabel} 고정 숙소입니다. 숙소 비용 설정을 먼저 확인해 주세요.`);
         }
         return issues;
-    }, [availableAccommodations, blockedAccommodationIds, costLabel, duplicateAccommodationIds, recordByAccommodationId, utilityType, yearMonth]);
+    }, [availableAccommodations, blockedAccommodationIds, costLabel, duplicateAccommodationIds, duplicateSourceFileHashes, recordByAccommodationId, records, utilityType, yearMonth]);
 
     const selectedRows = rows.filter((row) => row.selected);
     const allRowsSelected = rows.length > 0 && selectedRows.length === rows.length;
@@ -303,6 +325,7 @@ const AccommodationUtilityBillImportModal: React.FC<AccommodationUtilityBillImpo
             };
             const commonMeta = {
                 sourceFileName: row.analysis.originalFileName,
+                sourceFileSha256: row.analysis.sourceFileSha256,
                 provider: row.analysis.provider,
                 billingYearMonth: row.billingYearMonth,
                 dueDate: row.analysis.dueDate,

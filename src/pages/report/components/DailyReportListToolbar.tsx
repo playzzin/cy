@@ -1,19 +1,27 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import type { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import {
     faCalendarAlt,
+    faChevronLeft,
+    faChevronRight,
     faDownload,
     faFilter,
+    faLocationDot,
     faPenToSquare,
     faSave,
     faSearch,
+    faSliders,
     faSortAmountDown,
     faSortAmountUp,
     faSpinner,
     faTrash,
+    faUser,
+    faUserGroup,
 } from '@fortawesome/free-solid-svg-icons';
 
 export type DailyReportDatePresetKey = 'prevMonth' | 'thisMonth' | 'yesterday' | 'today';
+export type DailyReportDateQueryMode = 'range' | 'month';
 export type DailyReportSortMode = 'date' | 'name' | 'site';
 export type DailyReportSortOrder = 'asc' | 'desc';
 
@@ -31,6 +39,7 @@ export interface DailyReportToolbarPreset {
 }
 
 interface DailyReportListToolbarProps {
+    dateQueryMode: DailyReportDateQueryMode;
     startDateInput: string;
     endDateInput: string;
     presets: DailyReportToolbarPreset[];
@@ -53,6 +62,9 @@ interface DailyReportListToolbarProps {
     isSearchDisabled: boolean;
     isTransferBusy: boolean;
     isDownloadingExcel: boolean;
+    onDateQueryModeChange: (mode: DailyReportDateQueryMode) => void;
+    onMonthChange: (value: string) => void;
+    onMonthNavigate: (offset: -1 | 1) => void;
     onStartDateChange: (value: string) => void;
     onEndDateChange: (value: string) => void;
     onDateBlur: (field: 'start' | 'end') => void;
@@ -73,6 +85,7 @@ interface DailyReportListToolbarProps {
 }
 
 const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
+    dateQueryMode,
     startDateInput,
     endDateInput,
     presets,
@@ -95,6 +108,9 @@ const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
     isSearchDisabled,
     isTransferBusy,
     isDownloadingExcel,
+    onDateQueryModeChange,
+    onMonthChange,
+    onMonthNavigate,
     onStartDateChange,
     onEndDateChange,
     onDateBlur,
@@ -123,35 +139,87 @@ const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
         <div className="daily-report-v2-toolbar flex-shrink-0 bg-white px-3 py-2.5 rounded-xl shadow-sm border border-slate-200">
             <div className="daily-report-v2-toolbar-main">
                 <section className="daily-report-v2-toolbar-section daily-report-v2-date-section" aria-label="조회 기간">
-                    <span className="daily-report-v2-section-label">조회 기간</span>
-                    <div className="daily-report-v2-date-inputs">
-                        <div className="relative">
-                            <FontAwesomeIcon icon={faCalendarAlt} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <span className="daily-report-v2-section-label">조회 기준</span>
+                    <div className="daily-report-v2-date-mode-group" role="group" aria-label="조회 기준 선택">
+                        <button
+                            type="button"
+                            onClick={() => onDateQueryModeChange('range')}
+                            aria-pressed={dateQueryMode === 'range'}
+                            className={`daily-report-v2-date-mode-btn ${dateQueryMode === 'range' ? 'is-active' : ''}`}
+                        >
+                            기간별
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => onDateQueryModeChange('month')}
+                            aria-pressed={dateQueryMode === 'month'}
+                            className={`daily-report-v2-date-mode-btn ${dateQueryMode === 'month' ? 'is-active' : ''}`}
+                        >
+                            달별
+                        </button>
+                    </div>
+                    {dateQueryMode === 'month' ? (
+                        <div className="daily-report-v2-month-navigator">
+                            <button
+                                type="button"
+                                onClick={() => onMonthNavigate(-1)}
+                                className="daily-report-v2-month-nav-btn"
+                                aria-label="이전 달 조회"
+                                title="이전 달 조회"
+                            >
+                                <FontAwesomeIcon icon={faChevronLeft} />
+                            </button>
+                            <label className="daily-report-v2-month-input-wrap">
+                                <FontAwesomeIcon icon={faCalendarAlt} />
+                                <input
+                                    type="month"
+                                    value={startDateInput.slice(0, 7)}
+                                    onChange={(event) => onMonthChange(event.target.value)}
+                                    onKeyDown={handleDateKeyDown}
+                                    aria-label="조회 월"
+                                    className="daily-report-v2-month-input"
+                                />
+                            </label>
+                            <button
+                                type="button"
+                                onClick={() => onMonthNavigate(1)}
+                                className="daily-report-v2-month-nav-btn"
+                                aria-label="다음 달 조회"
+                                title="다음 달 조회"
+                            >
+                                <FontAwesomeIcon icon={faChevronRight} />
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="daily-report-v2-date-inputs">
+                            <div className="relative">
+                                <FontAwesomeIcon icon={faCalendarAlt} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={startDateInput}
+                                    onChange={(event) => onStartDateChange(event.target.value)}
+                                    onBlur={() => onDateBlur('start')}
+                                    onKeyDown={handleDateKeyDown}
+                                    aria-label="조회 시작일"
+                                    placeholder="YYYY-MM-DD"
+                                    className="pl-10 pr-3 py-2 border-slate-300 rounded-lg text-sm w-[130px]"
+                                />
+                            </div>
+                            <span className="text-slate-400">~</span>
                             <input
                                 type="text"
                                 inputMode="numeric"
-                                value={startDateInput}
-                                onChange={(event) => onStartDateChange(event.target.value)}
-                                onBlur={() => onDateBlur('start')}
+                                value={endDateInput}
+                                onChange={(event) => onEndDateChange(event.target.value)}
+                                onBlur={() => onDateBlur('end')}
                                 onKeyDown={handleDateKeyDown}
-                                aria-label="조회 시작일"
+                                aria-label="조회 종료일"
                                 placeholder="YYYY-MM-DD"
-                                className="pl-10 pr-3 py-2 border-slate-300 rounded-lg text-sm w-[130px]"
+                                className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[130px]"
                             />
                         </div>
-                        <span className="text-slate-400">~</span>
-                        <input
-                            type="text"
-                            inputMode="numeric"
-                            value={endDateInput}
-                            onChange={(event) => onEndDateChange(event.target.value)}
-                            onBlur={() => onDateBlur('end')}
-                            onKeyDown={handleDateKeyDown}
-                            aria-label="조회 종료일"
-                            placeholder="YYYY-MM-DD"
-                            className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[130px]"
-                        />
-                    </div>
+                    )}
                     <div className="daily-report-v2-preset-group" role="group" aria-label="빠른 날짜 선택">
                         {presets.map((preset) => (
                             <button
@@ -171,21 +239,26 @@ const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
                 </section>
 
                 <section className="daily-report-v2-toolbar-section daily-report-v2-filter-section" aria-label="목록 필터">
-                    <span className="daily-report-v2-section-label">상세 필터</span>
-                    <ToolbarSelect label="현장" value={selectedSiteId} options={siteOptions} onChange={onSiteChange} />
-                    <ToolbarSelect label="현장소속팀" value={selectedTeamId} options={reportTeamOptions} onChange={onReportTeamChange} />
-                    <ToolbarSelect label="작업자 소속팀" value={selectedWorkerTeamId} options={workerTeamOptions} onChange={onWorkerTeamChange} />
-                    <label className="daily-report-v2-field daily-report-v2-worker-search-field">
-                        <span>작업자</span>
-                        <div className="relative daily-report-v2-worker-search">
-                            <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <span className="daily-report-v2-filter-title">
+                        <FontAwesomeIcon icon={faSliders} />
+                        <span>상세 필터</span>
+                    </span>
+                    <ToolbarSelect label="현장" icon={faLocationDot} tone="sky" value={selectedSiteId} options={siteOptions} onChange={onSiteChange} />
+                    <ToolbarSelect label="현장소속팀" icon={faUserGroup} tone="indigo" value={selectedTeamId} options={reportTeamOptions} onChange={onReportTeamChange} />
+                    <ToolbarSelect label="작업자 소속팀" icon={faUserGroup} tone="emerald" value={selectedWorkerTeamId} options={workerTeamOptions} onChange={onWorkerTeamChange} />
+                    <label className="daily-report-v2-field daily-report-v2-filter-control daily-report-v2-filter-control--amber daily-report-v2-worker-search-field">
+                        <span className="daily-report-v2-filter-control-label">
+                            <FontAwesomeIcon icon={faUser} />
+                            <b>작업자</b>
+                        </span>
+                        <div className="daily-report-v2-worker-search">
                             <input
                                 type="text"
                                 value={workerSearch}
                                 onChange={(event) => onWorkerSearchChange(event.target.value)}
                                 aria-label="작업자 이름 검색"
-                                placeholder="작업자 검색"
-                                className="w-full pl-10 pr-4 py-2 border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all"
+                                placeholder="이름 검색"
+                                className="daily-report-v2-filter-input"
                             />
                         </div>
                     </label>
@@ -305,19 +378,24 @@ const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
 
 interface ToolbarSelectProps {
     label: string;
+    icon: IconDefinition;
+    tone: 'sky' | 'indigo' | 'emerald';
     value: string;
     options: DailyReportToolbarOption[];
     onChange: (value: string) => void;
 }
 
-const ToolbarSelect: React.FC<ToolbarSelectProps> = ({ label, value, options, onChange }) => (
-    <label className="daily-report-v2-field">
-        <span>{label}</span>
+const ToolbarSelect: React.FC<ToolbarSelectProps> = ({ label, icon, tone, value, options, onChange }) => (
+    <label className={`daily-report-v2-field daily-report-v2-filter-control daily-report-v2-filter-control--${tone}`}>
+        <span className="daily-report-v2-filter-control-label">
+            <FontAwesomeIcon icon={icon} />
+            <b>{label}</b>
+        </span>
         <select
             value={value}
             onChange={(event) => onChange(event.target.value)}
             aria-label={`${label} 필터`}
-            className="daily-report-v2-select px-3 py-2 border-slate-300 rounded-lg text-sm"
+            className="daily-report-v2-select"
         >
             {options.map((option) => <option key={option.value || `all-${label}`} value={option.value}>{option.label}</option>)}
         </select>

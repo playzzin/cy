@@ -24,6 +24,9 @@ export interface Card {
     billingTargetName?: string | null;
     billingTargetStartDate?: string | null;
     billingTargetEndDate?: string | null;
+    lastLifecycleOperationId?: string | null;
+    lastLifecycleOperationType?: 'CANCEL' | 'RESTORE' | null;
+    lastLifecycleOperationAt?: Timestamp | null;
     memo?: string;
     legacyId?: string;
     createdAt?: Timestamp | null;
@@ -71,6 +74,9 @@ export interface CardTransaction {
     amount: number;
     memo?: string;
     evidenceUrl?: string;
+    statementAttachmentPaths?: string[];
+    statementSourceSha256?: string;
+    statementOriginalFileName?: string;
     legacyId?: string;
     status?: CardTransactionStatus;
     operationId?: string;

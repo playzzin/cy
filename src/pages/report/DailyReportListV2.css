@@ -120,8 +120,89 @@
     min-width: 0;
 }
 
+.daily-report-v2-date-mode-group {
+    display: inline-flex;
+    flex: 0 0 auto;
+    overflow: hidden;
+    border: 1px solid #cbd5e1;
+    border-radius: 9px;
+    background: #f8fafc;
+}
+
+.daily-report-v2-date-mode-btn {
+    min-height: 36px;
+    padding: 0 12px;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 800;
+    transition: background-color 150ms ease, color 150ms ease;
+}
+
+.daily-report-v2-date-mode-btn + .daily-report-v2-date-mode-btn {
+    border-left: 1px solid #cbd5e1;
+}
+
+.daily-report-v2-date-mode-btn.is-active {
+    background: #2563eb;
+    color: #ffffff;
+}
+
+.daily-report-v2-month-input-wrap {
+    display: inline-flex;
+    min-height: 38px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 9px;
+    background: #ffffff;
+    color: #94a3b8;
+}
+
+.daily-report-v2-month-navigator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.daily-report-v2-month-nav-btn {
+    display: inline-flex;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #cbd5e1;
+    border-radius: 9px;
+    background: #ffffff;
+    color: #475569;
+    transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease, transform 100ms ease;
+}
+
+.daily-report-v2-month-nav-btn:hover {
+    border-color: #93c5fd;
+    background: #eff6ff;
+    color: #2563eb;
+}
+
+.daily-report-v2-month-nav-btn:active {
+    transform: scale(0.94);
+}
+
+.daily-report-v2-month-input {
+    width: 140px;
+    border: 0;
+    padding: 0;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 700;
+    outline: none;
+}
+
 .daily-report-v2-filter-section {
     grid-area: filters;
+    flex-wrap: nowrap;
+    align-items: center;
     padding-top: 11px;
     border-top: 1px solid #eef2f7;
 }
@@ -159,14 +240,86 @@
     display: flex;
     flex: 1 1 168px;
     min-width: 140px;
-    flex-direction: column;
-    gap: 4px;
 }
 
-.daily-report-v2-field > span {
-    color: #64748b;
+.daily-report-v2-filter-title,
+.daily-report-v2-filter-control {
+    min-height: 40px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #ffffff;
+}
+
+.daily-report-v2-filter-title {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 7px;
+    padding: 0 12px;
+    border-color: #ddd6fe;
+    background: #f5f3ff;
+    color: #6d28d9;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.daily-report-v2-filter-control {
+    --filter-accent: #475569;
+    --filter-soft: #f8fafc;
+    align-items: stretch;
+    overflow: hidden;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.daily-report-v2-filter-control:focus-within {
+    border-color: var(--filter-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--filter-accent) 16%, transparent);
+}
+
+.daily-report-v2-filter-control--sky {
+    --filter-accent: #0284c7;
+    --filter-soft: #f0f9ff;
+    flex: 0.8 1 150px;
+}
+
+.daily-report-v2-filter-control--indigo {
+    --filter-accent: #4f46e5;
+    --filter-soft: #eef2ff;
+    flex: 1.15 1 215px;
+}
+
+.daily-report-v2-filter-control--emerald {
+    --filter-accent: #059669;
+    --filter-soft: #ecfdf5;
+    flex: 1.15 1 215px;
+}
+
+.daily-report-v2-filter-control--amber {
+    --filter-accent: #d97706;
+    --filter-soft: #fffbeb;
+    flex: 1 1 190px;
+}
+
+.daily-report-v2-filter-control-label {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    background: var(--filter-soft);
+    color: var(--filter-accent);
     font-size: 10px;
-    font-weight: 700;
+    white-space: nowrap;
+}
+
+.daily-report-v2-filter-control-label svg {
+    width: 12px;
+}
+
+.daily-report-v2-filter-control-label b {
+    font-weight: 900;
 }
 
 .daily-report-v2-worker-search-field {
@@ -239,13 +392,41 @@
 }
 
 .daily-report-v2-select {
-    width: 100%;
+    width: auto;
     min-width: 0;
+    flex: 1 1 0;
+    min-height: 38px;
+    padding: 0 28px 0 10px;
+    border: 0;
+    background-color: transparent;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 700;
+    outline: none;
 }
 
 .daily-report-v2-worker-search {
+    display: flex;
+    width: auto;
+    min-width: 0;
+    flex: 1 1 0;
+}
+
+.daily-report-v2-filter-input {
     width: 100%;
     min-width: 0;
+    padding: 0 10px;
+    border: 0;
+    background: transparent;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 700;
+    outline: none;
+}
+
+.daily-report-v2-filter-input::placeholder {
+    color: #94a3b8;
+    font-weight: 600;
 }
 
 .daily-report-v2-summary {
@@ -696,20 +877,65 @@
     max-height: none;
     overflow-x: auto;
     overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
     background: #ffffff;
     padding-bottom: 10px;
-    scrollbar-gutter: stable both-edges;
+    scrollbar-gutter: stable;
 }
 
 .sheet-table-wrapper.workbook-frozen-table-wrapper.daily-report-v2-wrapper {
     max-height: none;
     overflow-y: auto !important;
+    overscroll-behavior-x: contain;
+    overscroll-behavior-y: auto;
+    scrollbar-gutter: stable;
 }
 
 /* 테이블의 바닥 여백 제거 및 레이아웃 최적화 */
 .daily-report-workbook-table {
     width: 100%;
     table-layout: fixed;
+}
+
+.daily-report-v2-column-filter-button {
+    display: inline-flex;
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.daily-report-v2-column-filter-button:hover,
+.daily-report-v2-column-filter-button.is-open:not(.is-active) {
+    border-color: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+}
+
+/* 적용된 열 필터는 헤더의 파란 배경에서도 바로 보이도록 노란색으로 표시한다. */
+.daily-report-v2-column-filter-button.is-active {
+    border-color: #fde68a;
+    background: rgba(120, 53, 15, 0.46);
+    color: #fcd34d;
+    box-shadow: 0 0 0 1px rgba(252, 211, 77, 0.22), 0 2px 5px rgba(15, 23, 42, 0.2);
+}
+
+.daily-report-v2-column-filter-button.is-active:hover,
+.daily-report-v2-column-filter-button.is-active.is-open {
+    border-color: #fef3c7;
+    background: rgba(120, 53, 15, 0.64);
+    color: #fef08a;
+}
+
+.daily-report-v2-column-filter-button:focus-visible {
+    outline: 3px solid rgba(253, 224, 71, 0.55);
+    outline-offset: 2px;
 }
 
 
@@ -736,18 +962,6 @@
 }
 .daily-report-workbook-table tbody tr:hover {
     background: #e0e7ef !important;
-}
-
-.daily-report-workbook-table tbody tr.daily-report-v2-virtual-spacer,
-.daily-report-workbook-table tbody tr.daily-report-v2-virtual-spacer:hover {
-    background: transparent !important;
-}
-
-.daily-report-workbook-table tbody tr.daily-report-v2-virtual-spacer td {
-    border: 0 !important;
-    padding: 0 !important;
-    font-size: 0;
-    line-height: 0;
 }
 
 /* 헤더와 sticky 컬럼의 폰트 강조 */
@@ -1003,20 +1217,27 @@
     }
 
     .daily-report-v2-filter-section {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        align-items: end;
-    }
-
-    .daily-report-v2-filter-section > .daily-report-v2-section-label,
-    .daily-report-v2-filter-section > .daily-report-v2-field:first-of-type,
-    .daily-report-v2-filter-section > .daily-report-v2-worker-search-field,
-    .daily-report-v2-filter-section > .daily-report-v2-filter-reset {
-        grid-column: 1 / -1;
+        display: flex;
+        flex-wrap: nowrap;
+        align-items: center;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        padding-bottom: 2px;
     }
 
     .daily-report-v2-field {
-        min-width: 0;
+        flex: 0 0 230px;
+        min-width: 230px;
+    }
+
+    .daily-report-v2-worker-search-field {
+        flex-basis: 220px;
+        min-width: 220px;
+    }
+
+    .daily-report-v2-filter-reset {
+        flex: 0 0 auto;
+        align-self: center;
     }
 
     .daily-report-v2-date-inputs {
@@ -1065,7 +1286,7 @@
 
     .daily-report-v2-select,
     .daily-report-v2-worker-search {
-        width: 100%;
+        width: auto;
         min-width: 0;
     }
 

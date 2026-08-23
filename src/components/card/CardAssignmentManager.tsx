@@ -13,6 +13,7 @@ import { hexToRgba, normalizeHexColor } from '../../utils/color';
 import { formatTypedDateInput, normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
 import { buildOfficeStaffAssignmentOptions, isOfficeAssignmentTeam } from '../../utils/supportAssignmentTargets';
 import { getFriendlyErrorMessage, isDeadlineExceededError } from '../../utils/firebaseError';
+import { isInactiveCardStatus } from '../../services/cardLifecyclePolicy';
 
 type AssigneeMode = CardAssigneeType;
 
@@ -171,8 +172,17 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
         return cards.filter((c) => !hasActiveCardAssignment(c) && !['SUSPENDED', 'CLOSED'].includes(c.status ?? 'AVAILABLE'));
     }, [cards]);
 
+    const activeCards = useMemo(
+        () => cards.filter((card) => !isInactiveCardStatus(card.status)),
+        [cards]
+    );
+
     const assignedCards = useMemo(() => {
-        return cards.filter(hasActiveCardAssignment);
+        return cards.filter((card) => (
+            hasActiveCardAssignment(card)
+            && card.status !== 'SUSPENDED'
+            && card.status !== 'CLOSED'
+        ));
     }, [cards]);
 
     const selectedCard = useMemo(() => {
@@ -277,6 +287,10 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
             toast.error('배정 시작일을 입력해주세요.');
             return;
         }
+        if (isInactiveCardStatus(selectedCard.status)) {
+            toast.error('정지·해지 카드는 배정할 수 없습니다.');
+            return;
+        }
         const normalizedStartDate = normalizeTypedDateInput(startDate);
         if (!normalizedStartDate) {
             toast.error('배정 시작일을 올바른 날짜로 입력해주세요.');
@@ -338,6 +352,10 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
     };
 
     const handleUnassign = async (card: Card) => {
+        if (isInactiveCardStatus(card.status)) {
+            toast.error('정지·해지 카드의 배정은 변경할 수 없습니다.');
+            return;
+        }
         const result = await showConfirmAlert('카드 배정 해제', `${card.name} 카드 배정을 해제할까요?`);
         if (!result.isConfirmed) return;
 
@@ -364,6 +382,11 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
     };
 
     const handleQuickPick = (card: Card) => {
+        if (isInactiveCardStatus(card.status)) {
+            toast.error('정지·해지 카드는 배정 대상으로 선택할 수 없습니다.');
+            setSelectedCardId('');
+            return;
+        }
         setSelectedCardId(card.id);
         setEditingAssignmentId(null);
         const latestAssignment = assignmentRecords
@@ -428,6 +451,10 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
         if (!initialCardId) return;
         const initialCard = cardsById.get(String(initialCardId));
         if (initialCard) {
+            if (isInactiveCardStatus(initialCard.status)) {
+                setSelectedCardId('');
+                return;
+            }
             handleQuickPick(initialCard);
             return;
         }
@@ -435,6 +462,11 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
     }, [initialCardId, cardsById, workers, assignmentRecords]);
 
     const handleEditAssignment = (assignment: CardAssignmentRecord) => {
+        const card = cardsById.get(String(assignment.cardId));
+        if (card && isInactiveCardStatus(card.status)) {
+            toast.error('정지·해지 카드의 배정 이력은 이 화면에서 변경할 수 없습니다.');
+            return;
+        }
         setSelectedCardId(assignment.cardId);
         setEditingAssignmentId(assignment.id);
         selectTargetFromAssignment(assignment);
@@ -478,8 +510,8 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                     <div className="flex flex-wrap items-center gap-2">
                         <button
                             onClick={handleAssign}
-                            disabled={saving}
-                            className={`px-5 py-2.5 rounded-xl font-bold text-sm text-white shadow-lg shadow-indigo-200 transition-all active:scale-95 flex items-center gap-2 ${saving ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:-translate-y-0.5'
+                            disabled={saving || Boolean(selectedCard && isInactiveCardStatus(selectedCard.status))}
+                            className={`px-5 py-2.5 rounded-xl font-bold text-sm text-white shadow-lg shadow-indigo-200 transition-all active:scale-95 flex items-center gap-2 ${saving || Boolean(selectedCard && isInactiveCardStatus(selectedCard.status)) ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 hover:-translate-y-0.5'
                                 }`}
                         >
                             <FontAwesomeIcon icon={faCreditCard} />
@@ -550,7 +582,7 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                                         onChange={(e) => handleCardSelect(e.target.value)}
                                     >
                                         <option value="">카드를 선택하세요</option>
-                                        {cards
+                                        {activeCards
                                             .slice()
                                             .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko-KR'))
                                             .map((c) => (

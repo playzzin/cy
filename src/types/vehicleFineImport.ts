@@ -4,6 +4,7 @@ export type VehicleFinePlateSource = 'VIOLATION_VEHICLE' | 'CHARGED_VEHICLE' | '
 export interface VehicleFineNoticeAnalysis {
     fileIndex: number;
     originalFileName: string;
+    sourceSha256?: string;
     issuer: string;
     noticeType: VehicleFineNoticeType;
     violationVehiclePlate?: string;

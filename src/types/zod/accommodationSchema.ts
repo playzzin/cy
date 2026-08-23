@@ -71,6 +71,7 @@ export const UtilityCostsSchema = z.object({
 
 export const UtilityElectricityBillImportSchema = z.object({
     sourceFileName: z.string(),
+    sourceFileSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
     provider: z.string().default(''),
     customerNumber: z.string().default(''),
     billingYearMonth: z.string(),
@@ -86,6 +87,7 @@ export const UtilityElectricityBillImportSchema = z.object({
 
 export const UtilityGasBillImportSchema = z.object({
     sourceFileName: z.string(),
+    sourceFileSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
     provider: z.string().default(''),
     payerNumber: z.string().default(''),
     billingYearMonth: z.string(),
@@ -101,6 +103,7 @@ export const UtilityGasBillImportSchema = z.object({
 
 export const UtilityWaterBillImportSchema = z.object({
     sourceFileName: z.string(),
+    sourceFileSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
     provider: z.string().default(''),
     consumerNumber: z.string().default(''),
     billingYearMonth: z.string(),
@@ -127,6 +130,7 @@ export const utilityRecordSchema = z.object({
     electricityBillImport: UtilityElectricityBillImportSchema.optional(),
     gasBillImport: UtilityGasBillImportSchema.optional(),
     waterBillImport: UtilityWaterBillImportSchema.optional(),
+    billingSyncPending: z.boolean().optional(),
     isAnomaly: z.boolean().default(false),
     createdAt: z.any().optional(),
     updatedAt: z.any().optional(),

@@ -32,6 +32,7 @@ import {
 import { getDownloadURL, ref } from 'firebase/storage';
 
 import SignatureGeneratorModal from '../../components/signatures/SignatureGeneratorModal';
+import MonthNavigator from '../../components/common/MonthNavigator';
 import { storage } from '../../config/firebase';
 import { PayslipTemplate } from '../payroll/components/PayslipTemplate';
 import type { PaymentData } from '../payroll/components/PayslipTemplate';
@@ -1098,14 +1099,13 @@ const TeamWorkerDetailPage: React.FC = () => {
             </section>
 
             <section id="team-worker-filter-controls" className={isMobileFilterOpen ? 'tw-toolbar tw-toolbar--mobile-expanded' : 'tw-toolbar'}>
-                <label className="tw-control tw-control--month">
+                <div className="tw-control tw-control--month">
                     <span>조회월</span>
-                    <input
-                        type="month"
+                    <MonthNavigator
                         value={selectedMonth}
-                        onChange={(event) => setSelectedMonth(event.target.value)}
+                        onChange={setSelectedMonth}
                     />
-                </label>
+                </div>
 
                 <label className="tw-control tw-control--search">
                     <span>작업자 검색</span>

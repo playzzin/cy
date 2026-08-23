@@ -20,12 +20,24 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                 path: "/notices"
             },
             {
+                text: "시공계획서",
+                icon: "fa-file-circle-check",
+                path: "/construction-plans"
+            },
+            { text: "현장 실행기록", icon: "fa-clipboard-list", path: "/construction-plan-records" },
+            { text: "검토·승인함", icon: "fa-clipboard-check", path: "/construction-plan-approvals" },
+            { text: "PDF 발행이력", icon: "fa-file-pdf", path: "/construction-plan-exports" },
+            { text: "표준 템플릿 관리", icon: "fa-layer-group", path: "/construction-plan-templates" },
+            {
                 text: "현황관리",
                 icon: "fa-chart-simple",
                 sub: ["통합 현황판", "인원전체내역조회"]
             },
             {
                 text: "통합DB", icon: "fa-circle-info", path: "/database/manpower-db"
+            },
+            {
+                text: "신분증 묶음사진", icon: "fa-id-card", path: "/database/identity-bundle"
             },
             {
                 text: "통합DB 로그", icon: "fa-clock-rotate-left", path: "/database/logs"
@@ -75,7 +87,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "서명관리",
                 icon: "fa-pen-nib",
-                sub: ["서명등록", "서명위임장", "위임장v2", "위임장v5"]
+                sub: ["서명등록", "서명위임장", "위임장v2", "현금수령확인서", "급여계좌 변경 신청서", "위임장v5"]
             },
             {
                 text: "자재관리",
@@ -198,6 +210,11 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
+            { text: "시공계획서", icon: "fa-file-circle-check", path: "/construction-plans" },
+            { text: "현장 실행기록", icon: "fa-clipboard-list", path: "/construction-plan-records" },
+            { text: "검토·승인함", icon: "fa-clipboard-check", path: "/construction-plan-approvals" },
+            { text: "PDF 발행이력", icon: "fa-file-pdf", path: "/construction-plan-exports" },
+            { text: "표준 템플릿 관리", icon: "fa-layer-group", path: "/construction-plan-templates" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
             {
                 text: "급여관리",
@@ -232,6 +249,10 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
+            { text: "시공계획서", icon: "fa-file-circle-check", path: "/construction-plans" },
+            { text: "현장 실행기록", icon: "fa-clipboard-list", path: "/construction-plan-records" },
+            { text: "검토·승인함", icon: "fa-clipboard-check", path: "/construction-plan-approvals" },
+            { text: "PDF 발행이력", icon: "fa-file-pdf", path: "/construction-plan-exports" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
             {
                 text: "급여관리",
@@ -246,6 +267,10 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
+            { text: "시공계획서", icon: "fa-file-circle-check", path: "/construction-plans" },
+            { text: "현장 실행기록", icon: "fa-clipboard-list", path: "/construction-plan-records" },
+            { text: "검토·승인함", icon: "fa-clipboard-check", path: "/construction-plan-approvals" },
+            { text: "PDF 발행이력", icon: "fa-file-pdf", path: "/construction-plan-exports" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
             {
                 text: "급여관리",
@@ -260,6 +285,10 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
+            { text: "시공계획서", icon: "fa-file-circle-check", path: "/construction-plans" },
+            { text: "현장 실행기록", icon: "fa-clipboard-list", path: "/construction-plan-records" },
+            { text: "검토·승인함", icon: "fa-clipboard-check", path: "/construction-plan-approvals" },
+            { text: "PDF 발행이력", icon: "fa-file-pdf", path: "/construction-plan-exports" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
             {
                 text: "급여관리",

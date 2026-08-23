@@ -3,7 +3,8 @@ import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faSpinner, faFileAlt, faBuilding, faUsers, faCalendarAlt,
-    faCheckSquare, faSquare, faUserTie, faCopy, faEdit, faListAlt, faPrint, faSignature
+    faCheckSquare, faSquare, faUserTie, faCopy, faEdit, faListAlt, faPrint, faSignature,
+    faChevronDown, faChevronLeft, faChevronRight, faSearch
 } from '@fortawesome/free-solid-svg-icons';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
@@ -31,11 +32,24 @@ const DELEGATION_BODY_STORAGE_KEY = 'delegationLetterV2:bodyText';
 
 const MAX_WORKERS_PER_PAGE = 24;
 const DEFAULT_WORKERS_PER_PAGE = 24;
-const FIRST_PAGE_RESERVED_ROWS = 7;
+// The first page includes the mandatary block and the delegation text.  Reserve
+// enough room for those sections plus the physical A4 bottom margin. This
+// keeps the next worker row entirely on page 2 instead of clipping it at the
+// bottom edge of page 1.
+const FIRST_PAGE_RESERVED_ROWS = 10;
 
 const clampWorkersPerPage = (value: number): number => {
     if (!Number.isFinite(value) || value <= 0) return 1;
     return Math.min(Math.floor(value), MAX_WORKERS_PER_PAGE);
+};
+
+const shiftYearMonth = (yearMonth: string, offset: number): string => {
+    const matched = String(yearMonth ?? '').match(/^(\d{4})-(\d{2})$/);
+    const baseDate = matched
+        ? new Date(Number(matched[1]), Number(matched[2]) - 1 + offset, 1)
+        : new Date();
+
+    return `${baseDate.getFullYear()}-${String(baseDate.getMonth() + 1).padStart(2, '0')}`;
 };
 
 const DelegationLetterV2Page: React.FC = () => {
@@ -44,6 +58,8 @@ const DelegationLetterV2Page: React.FC = () => {
     const [selectedSiteId, setSelectedSiteId] = useState<string>('');
     const [selectedTeamId, setSelectedTeamId] = useState<string>('');
     const [selectedLeaderId, setSelectedLeaderId] = useState<string>('');
+    const [siteSearchQuery, setSiteSearchQuery] = useState<string>('');
+    const [isSitePickerOpen, setIsSitePickerOpen] = useState(false);
 
     // --- State: Document Settings ---
     const [delegationText, setDelegationText] = useState<string>(() => {
@@ -72,6 +88,8 @@ const DelegationLetterV2Page: React.FC = () => {
     // --- State: UI ---
     const printRef = useRef<HTMLDivElement>(null);
     const publicTemplateLoadedRef = useRef(false);
+    const sitePickerRef = useRef<HTMLDivElement>(null);
+    const siteSearchInputRef = useRef<HTMLInputElement>(null);
     const [activeTab, setActiveTab] = useState<'filter' | 'document' | 'workers' | 'signature'>('filter');
 
     // --- State: Custom Mandatary ---
@@ -192,6 +210,30 @@ const DelegationLetterV2Page: React.FC = () => {
             .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko-KR', { numeric: true, sensitivity: 'base' }));
     }, [allReports, sites]);
 
+    const filteredActiveSites = useMemo(() => {
+        const query = siteSearchQuery.trim().toLocaleLowerCase('ko-KR');
+        if (!query) return activeSites;
+
+        return activeSites.filter((site) => [site.name, site.partnerName, site.siteType]
+            .some((value) => String(value ?? '').toLocaleLowerCase('ko-KR').includes(query)));
+    }, [activeSites, siteSearchQuery]);
+
+    useEffect(() => {
+        if (!isSitePickerOpen) return;
+
+        const closeSitePicker = (event: MouseEvent) => {
+            if (!sitePickerRef.current?.contains(event.target as Node)) {
+                setIsSitePickerOpen(false);
+                setSiteSearchQuery('');
+            }
+        };
+
+        document.addEventListener('mousedown', closeSitePicker);
+        siteSearchInputRef.current?.focus();
+
+        return () => document.removeEventListener('mousedown', closeSitePicker);
+    }, [isSitePickerOpen]);
+
     // --- 4. Derived Logic: Active Teams (Dependent on Site) ---
     const activeTeams = useMemo(() => {
         if (!selectedSiteId) return [];
@@ -276,6 +318,17 @@ const DelegationLetterV2Page: React.FC = () => {
             unitPrice: price,
             amount: w.manDays * price
         })));
+    };
+
+    const selectSite = (siteId: string) => {
+        setSelectedSiteId(siteId);
+        setSelectedTeamId('');
+        setSiteSearchQuery('');
+        setIsSitePickerOpen(false);
+    };
+
+    const navigateMonth = (offset: number) => {
+        setSelectedMonth((currentMonth) => shiftYearMonth(currentMonth, offset));
     };
 
     const handleSignatureSaved = (workerId: string, newUrl: string) => {
@@ -836,7 +889,7 @@ const DelegationLetterV2Page: React.FC = () => {
                 </div>
 
                 {/* Content Card */}
-                <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl border border-white/10 p-5 shadow-2xl flex-1 min-h-0 overflow-hidden flex flex-col">
+                <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl border border-white/10 p-5 shadow-2xl flex-1 min-h-0 overflow-visible flex flex-col">
                     {/* Filter Tab */}
                     {activeTab === 'filter' && (
                         <div className="space-y-5 h-full min-h-0 flex flex-col">
@@ -848,35 +901,101 @@ const DelegationLetterV2Page: React.FC = () => {
                             {/* Month */}
                             <div>
                                 <label className="block text-sm font-medium text-slate-300 mb-2">근무 월</label>
-                                <div className="relative">
-                                    <FontAwesomeIcon icon={faCalendarAlt} className="absolute left-4 top-3 text-slate-500" />
-                                    <YearMonthPicker
-                                        value={selectedMonth}
-                                        onChange={setSelectedMonth}
-                                        inputClassName="w-full pl-11 bg-slate-700/50 border border-slate-600/50 rounded-xl px-4 py-2.5 text-white placeholder-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
-                                    />
+                                <div className="flex items-center overflow-hidden rounded-xl border border-slate-600/50 bg-slate-700/50 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">
+                                    <button
+                                        type="button"
+                                        onClick={() => navigateMonth(-1)}
+                                        aria-label="이전 달"
+                                        title="이전 달"
+                                        className="px-4 py-2.5 text-slate-300 hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-300 transition-colors"
+                                    >
+                                        <FontAwesomeIcon icon={faChevronLeft} />
+                                    </button>
+                                    <div className="relative flex-1 min-w-0 border-x border-slate-600/50">
+                                        <FontAwesomeIcon icon={faCalendarAlt} className="pointer-events-none absolute left-3 top-3 text-slate-500" />
+                                        <YearMonthPicker
+                                            value={selectedMonth}
+                                            onChange={setSelectedMonth}
+                                            ariaLabel="근무 월 선택"
+                                            inputClassName="w-full border-0 bg-transparent py-2.5 pl-9 pr-3 text-center font-semibold text-white placeholder-slate-500 outline-none"
+                                        />
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => navigateMonth(1)}
+                                        aria-label="다음 달"
+                                        title="다음 달"
+                                        className="px-4 py-2.5 text-slate-300 hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-300 transition-colors"
+                                    >
+                                        <FontAwesomeIcon icon={faChevronRight} />
+                                    </button>
                                 </div>
                             </div>
 
                             {/* Site */}
                             <div>
                                 <label className="block text-sm font-medium text-slate-300 mb-2">현장 선택</label>
-                                <div className="relative">
-                                    <FontAwesomeIcon icon={faBuilding} className="absolute left-4 top-3 text-slate-500" />
-                                    <select
-                                        value={selectedSiteId}
-                                        onChange={(e) => {
-                                            setSelectedSiteId(e.target.value);
-                                            setSelectedTeamId('');
-                                        }}
+                                <div ref={sitePickerRef} className="relative">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsSitePickerOpen((isOpen) => !isOpen)}
                                         disabled={loading || activeSites.length === 0}
-                                        className="w-full pl-11 bg-slate-700/50 border border-slate-600/50 rounded-xl px-4 py-2.5 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all disabled:opacity-50 appearance-none cursor-pointer"
+                                        aria-haspopup="listbox"
+                                        aria-expanded={isSitePickerOpen}
+                                        className="flex w-full items-center gap-3 rounded-xl border border-slate-600/50 bg-slate-700/50 px-4 py-2.5 text-left text-white outline-none transition-all hover:border-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
-                                        <option value="">{loading ? '데이터 조회 중...' : '현장 선택'}</option>
-                                        {activeSites.map(site => (
-                                            <option key={site.id} value={site.id}>{site.name}</option>
-                                        ))}
-                                    </select>
+                                        <FontAwesomeIcon icon={faBuilding} className="text-slate-500" />
+                                        <span className={`min-w-0 flex-1 truncate ${selectedSiteName ? 'text-white' : 'text-slate-400'}`}>
+                                            {selectedSiteName || (loading ? '데이터 조회 중...' : '현장 선택')}
+                                        </span>
+                                        <FontAwesomeIcon icon={faChevronDown} className={`text-xs text-slate-400 transition-transform ${isSitePickerOpen ? 'rotate-180' : ''}`} />
+                                    </button>
+
+                                    {isSitePickerOpen && (
+                                        <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-xl border border-slate-600 bg-slate-800 shadow-2xl">
+                                            <div className="border-b border-slate-700 p-2">
+                                                <label className="relative block">
+                                                    <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                                                    <input
+                                                        ref={siteSearchInputRef}
+                                                        type="search"
+                                                        value={siteSearchQuery}
+                                                        onChange={(event) => setSiteSearchQuery(event.target.value)}
+                                                        onKeyDown={(event) => {
+                                                            if (event.key === 'Escape') {
+                                                                setIsSitePickerOpen(false);
+                                                                setSiteSearchQuery('');
+                                                            }
+                                                        }}
+                                                        placeholder="현장명으로 검색"
+                                                        aria-label="현장 검색"
+                                                        className="w-full rounded-lg border border-slate-600 bg-slate-900/70 py-2 pl-9 pr-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                                                    />
+                                                </label>
+                                            </div>
+                                            <div className="max-h-56 overflow-y-auto p-1.5" role="listbox" aria-label="현장 목록">
+                                                {filteredActiveSites.length > 0 ? filteredActiveSites.map((site) => (
+                                                    <button
+                                                        key={site.id}
+                                                        type="button"
+                                                        role="option"
+                                                        aria-selected={site.id === selectedSiteId}
+                                                        onClick={() => selectSite(site.id || '')}
+                                                        className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${site.id === selectedSiteId
+                                                            ? 'bg-blue-600 text-white'
+                                                            : 'text-slate-200 hover:bg-slate-700 hover:text-white'
+                                                            }`}
+                                                    >
+                                                        <FontAwesomeIcon icon={faBuilding} className="text-xs opacity-70" />
+                                                        <span className="min-w-0 flex-1 truncate">{site.name}</span>
+                                                        {site.partnerName && <span className="truncate text-xs opacity-60">{site.partnerName}</span>}
+                                                    </button>
+                                                )) : (
+                                                    <p className="px-3 py-5 text-center text-sm text-slate-400">검색 결과가 없습니다.</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 

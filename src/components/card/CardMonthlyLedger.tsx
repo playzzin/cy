@@ -4,7 +4,6 @@ import {
     faBuilding,
     faChevronLeft,
     faChevronRight,
-    faFilePdf,
     faReceipt,
     faSave,
     faExclamationTriangle,
@@ -12,6 +11,7 @@ import {
     faUser,
     faUpload
 } from '@fortawesome/free-solid-svg-icons';
+import { FileText, Sparkles } from 'lucide-react';
 import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 import {
     Card,
@@ -25,19 +25,36 @@ import { CardBillingCostItem, CardBillingDocument } from '../../types/cardBillin
 import { cardService } from '../../services/cardService';
 import { cardBillingService } from '../../services/cardBillingService';
 import { cardMonthlyLedgerMutationService } from '../../services/cardMonthlyLedgerMutationService';
+import {
+    assignCardLedgerOrphanDrafts,
+    cardMonthlyLedgerAutoBillingService,
+    excludeProtectedOrphanCardRows,
+    getCardIdsWithProtectedOrphanBillings,
+    mergeCardLedgerWithPreservedManualLineItems
+} from '../../services/cardMonthlyLedgerAutoBillingService';
+import { teamSettlementProtectionService } from '../../services/teamSettlementProtectionService';
 import { Team } from '../../services/teamService';
 import { Worker, manpowerService } from '../../services/manpowerService';
 import { OfficeStaff, officeStaffService } from '../../services/officeStaffService';
 import { iconMap } from '../../constants/iconMap';
 import { Timestamp } from '../../types/timestamp';
 import { storage } from '../../config/firebase';
-import LedgerBillingEditorModal from '../support/LedgerBillingEditorModal';
 import CardStatementImportModal from './CardStatementImportModal';
 import SupportSaveFeedback, { SupportSaveFeedbackState } from '../support/SupportSaveFeedback';
 import { OFFICE_ASSIGNMENT_TEAM_ID, OFFICE_ASSIGNMENT_TEAM_NAME, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
 import { DEFAULT_SUPPORT_BILLING_START_DATE, isSupportBillingMonthEnabled, maxIsoDate, minIsoDate } from '../../utils/supportBillingPeriod';
 import { getContrastingTextColor } from '../../utils/color';
+import {
+    getSupportManagementMonthDate,
+    rememberSupportManagementYearMonth,
+    subscribeSupportManagementYearMonth,
+} from '../../utils/supportManagementState';
 import { SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../../utils/supportWriteErrorReporting';
+import {
+    dedupeImportedStatementTransactions,
+    dedupeStatementPaths,
+    isLegacyCardStatementImportBillingDocument
+} from '../../utils/cardStatementDeduplication';
 
 interface EditableCellProps {
     value: number;
@@ -103,7 +120,6 @@ const EditableCell = memo<EditableCellProps>(({ value, onCommit, className, plac
 EditableCell.displayName = 'EditableCell';
 
 const CATEGORIES: CardTransactionCategory[] = ['FUEL', 'TOLL', 'MEAL', 'MATERIAL', 'OTHER'];
-const POSTED_CARD_BILLING_STATUSES = new Set<CardBillingDocument['status']>(['CONFIRMED', 'PAID', 'OVERDUE']);
 const CATEGORY_LABELS: Record<CardTransactionCategory, string> = {
     FUEL: '유류비',
     TOLL: '통행료',
@@ -159,9 +175,13 @@ const minDate = (...dates: Date[]): Date => dates.reduce((min, date) => date.get
 const maxDate = (...dates: Date[]): Date => dates.reduce((max, date) => date.getTime() > max.getTime() ? date : max);
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
 const isPostedCardBillingDocument = (document: CardBillingDocument): boolean => (
-    POSTED_CARD_BILLING_STATUSES.has(document.status)
+    ['CONFIRMED', 'PAID', 'OVERDUE'].includes(normalizeKey(document.status).toUpperCase())
 );
-
+const isPdfImportMemo = (value: unknown): boolean => /\bpdf\b.*(?:import|가져)/i.test(normalizeKey(value));
+const getTransactionStatementPaths = (transaction: CardTransaction): string[] => dedupeStatementPaths([
+    transaction.evidenceUrl,
+    ...(transaction.statementAttachmentPaths ?? [])
+]);
 const sanitizeBillingIdPart = (value: unknown): string => {
     const text = String(value ?? '').trim();
     return ['/', '#', '[', ']', '?'].reduce((safe, char) => safe.split(char).join('_'), text || 'row');
@@ -248,6 +268,7 @@ interface CardLedgerRow {
     amounts: CategoryAmounts;
     total: number;
     memo: string;
+    statementAttachmentPaths: string[];
 }
 
 const getCardBillingTargetSortInfo = (row: CardLedgerRow) => {
@@ -283,6 +304,20 @@ const compareCardLedgerRowsByBillingTarget = (a: CardLedgerRow, b: CardLedgerRow
     return left.startDate.localeCompare(right.startDate);
 };
 
+const getCardLedgerStructureFingerprint = (row: CardLedgerRow): string => JSON.stringify({
+    id: normalizeKey(row.id),
+    cardId: normalizeKey(row.card.id),
+    segmentId: normalizeKey(row.segment.id),
+    startDate: normalizeKey(row.segment.startDate),
+    endDate: normalizeKey(row.segment.endDate),
+    assigneeId: normalizeKey(row.segment.assigneeId),
+    assigneeType: normalizeKey(row.segment.assigneeType),
+    teamId: normalizeKey(row.segment.teamId),
+    billingTargetId: normalizeKey(row.segment.billingTargetId),
+    billingTargetType: normalizeKey(row.segment.billingTargetType),
+    billingTeamId: normalizeKey(row.segment.billingTeamId)
+});
+
 interface CardMonthlyLedgerProps {
     cards: Card[];
     teams?: Team[];
@@ -290,22 +325,6 @@ interface CardMonthlyLedgerProps {
     onOpenSetup?: (card: Card) => void;
     onOpenBillingTarget?: (card: Card) => void;
 }
-
-type BillingFilter = 'all' | 'billed' | 'unbilled';
-type BillingRowStatus = 'unbilled' | 'billed' | 'blocked';
-
-const BILLING_FILTERS: Array<{ value: BillingFilter; label: string }> = [
-    { value: 'all', label: '전체' },
-    { value: 'billed', label: '청구' },
-    { value: 'unbilled', label: '미청구' }
-];
-
-const getBillingStatusBadge = (status: BillingRowStatus) => {
-    if (status === 'billed') {
-        return { label: '청구', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
-    }
-    return { label: '미청구', className: 'bg-rose-50 text-rose-700 border-rose-200' };
-};
 
 const hexToRgba = (hex: string, alpha: number) => {
     const normalized = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '#94a3b8';
@@ -316,7 +335,7 @@ const hexToRgba = (hex: string, alpha: number) => {
 };
 
 export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, teams = [], loadingCards, onOpenSetup, onOpenBillingTarget }) => {
-    const [currentDate, setCurrentDate] = useState(new Date());
+    const [currentDate, setCurrentDate] = useState(getSupportManagementMonthDate);
     const [yearMonth, setYearMonth] = useState('');
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -328,12 +347,8 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
     const [billingDocuments, setBillingDocuments] = useState<CardBillingDocument[]>([]);
-    const [billingFilter, setBillingFilter] = useState<BillingFilter>('all');
-    const [billingProcessingId, setBillingProcessingId] = useState('');
     const [statementUploadingRowId, setStatementUploadingRowId] = useState('');
     const [isStatementImportOpen, setIsStatementImportOpen] = useState(false);
-    const [bulkBillingAction, setBulkBillingAction] = useState<'bill' | 'unbill' | ''>('');
-    const [billingEditor, setBillingEditor] = useState<{ row: CardLedgerRow; document: CardBillingDocument } | null>(null);
     const originalTxsRef = useRef<CardTransaction[]>([]);
 
     const teamInfoMap = useMemo(() => {
@@ -402,8 +417,19 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
     useEffect(() => {
         const y = currentDate.getFullYear();
         const m = String(currentDate.getMonth() + 1).padStart(2, '0');
-        setYearMonth(`${y}-${m}`);
+        const nextYearMonth = `${y}-${m}`;
+        setYearMonth(nextYearMonth);
+        rememberSupportManagementYearMonth(nextYearMonth);
     }, [currentDate]);
+
+    useEffect(() => subscribeSupportManagementYearMonth((nextYearMonth) => {
+        const [year, month] = nextYearMonth.split('-').map(Number);
+        setCurrentDate((previous) => (
+            previous.getFullYear() === year && previous.getMonth() === month - 1
+                ? previous
+                : new Date(year, month - 1, 1)
+        ));
+    }), []);
 
     const monthRange = useMemo(() => {
         const [y, m] = yearMonth.split('-').map(Number);
@@ -710,16 +736,28 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         }];
     }, [monthRange, resolveAssigneeTeam, teamByAnyId, teamByName, workerByAnyId, workerByName, yearMonth]);
 
-    const loadData = useCallback(async () => {
-        if (!yearMonth) return;
+    const loadData = useCallback(async (options?: {
+        strictBillingRead?: boolean;
+    }): Promise<{
+        rows: CardLedgerRow[];
+        billings: CardBillingDocument[];
+    } | null> => {
+        if (!yearMonth) return null;
         setLoading(true);
         try {
+            const billingPromise = options?.strictBillingRead
+                ? cardBillingService.getBillingsByMonth(yearMonth)
+                : cardBillingService.getBillingsByMonth(yearMonth).catch(() => [] as CardBillingDocument[]);
             const [txs, assignmentList, billingTargetList, billings] = await Promise.all([
                 cardService.getTransactionsByMonth(yearMonth),
-                cardService.listAllCardAssignments().catch(() => [] as CardAssignmentRecord[]),
-                cardService.listAllCardBillingTargets().catch(() => [] as CardBillingTargetRecord[]),
-                cardBillingService.getBillingsByMonth(yearMonth).catch(() => [] as CardBillingDocument[])
+                cardService.listAllCardAssignments(),
+                cardService.listAllCardBillingTargets(),
+                billingPromise
             ]);
+            const dedupedTransactions = dedupeImportedStatementTransactions(txs);
+            // Keep every physical document for the next save/cancel pass. Only the
+            // displayed totals are deduplicated; otherwise a hidden duplicate can
+            // survive forever because its document id is no longer available here.
             originalTxsRef.current = txs;
             setBillingDocuments(billings);
 
@@ -731,11 +769,12 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                     segment,
                     amounts: emptyCategoryAmounts(),
                     total: 0,
-                    memo: ''
+                    memo: '',
+                    statementAttachmentPaths: []
                 }));
             });
 
-            txs.forEach((tx) => {
+            dedupedTransactions.forEach((tx) => {
                 const cardRows = newRows.filter((row) => normalizeKey(row.card.id) === normalizeKey(tx.cardId));
                 if (cardRows.length === 0 || !CATEGORIES.includes(tx.category as CardTransactionCategory)) return;
 
@@ -753,7 +792,18 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                     ...row.amounts,
                     [category]: (row.amounts[category] ?? 0) + tx.amount
                 };
-                if (tx.memo) row.memo = tx.memo;
+                const transactionMemo = normalizeKey(tx.memo);
+                if (transactionMemo && (
+                    !row.memo ||
+                    isPdfImportMemo(row.memo) ||
+                    !isPdfImportMemo(transactionMemo)
+                )) {
+                    row.memo = transactionMemo;
+                }
+                row.statementAttachmentPaths = dedupeStatementPaths([
+                    ...row.statementAttachmentPaths,
+                    ...getTransactionStatementPaths(tx)
+                ]);
             });
 
             newRows.forEach((row) => {
@@ -763,9 +813,11 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             newRows.sort(compareCardLedgerRowsByBillingTarget);
             setRows(newRows);
             setIsDirty(false);
+            return { rows: newRows, billings };
         } catch (e) {
             console.error('카드 월별대장 로드 실패:', e);
-            setRows([]);
+            if (!options?.strictBillingRead) setRows([]);
+            return null;
         } finally {
             setLoading(false);
         }
@@ -1109,6 +1161,11 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             if (!teamMatches) return false;
         }
 
+        // Posted legacy documents may predate deterministic row markers and
+        // may carry an older amount. Protect the whole matching card/target
+        // scope rather than allowing an edited ledger row to bypass them.
+        if (isPostedCardBillingDocument(doc)) return true;
+
         const hasLedgerMarkers = normalizeKey(doc.id).includes('__row_') || (doc.lineItems ?? []).some((item) => (
             item.sourceType === 'card_ledger' ||
             Boolean(item.sourceLedgerRowId) ||
@@ -1116,64 +1173,51 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         ));
 
         if (hasLedgerMarkers) {
-            return hasCardLedgerRowMarker(doc, row);
+            if (hasCardLedgerRowMarker(doc, row)) return true;
+
+            // Older PDF imports wrote a base cardBillings document whose
+            // sourceLedgerRowId was the imported transaction id, not this
+            // ledger row id. Treat the matching amount as already billed so
+            // bulk billing cannot create a second __row_ document.
+            return isLegacyCardStatementImportBillingDocument(doc);
         }
 
-        return Number(doc.totalAmount ?? 0) === Number(row.total ?? 0);
+        // A deterministic base id or amount equality is not an ownership
+        // marker. The manual billing editor uses the same base envelope, so an
+        // unmarked DRAFT must be preserved instead of being replaced by Save.
+        return false;
     }, [resolveCardBillingIdentity, yearMonth, hasCardLedgerRowMarker]);
 
-    const getBillingDocumentsForRow = useCallback((row: CardLedgerRow) => {
-        return billingDocuments.filter((doc) => matchesCardBillingDocument(doc, row));
+    const getBillingDocumentsForRow = useCallback((
+        row: CardLedgerRow,
+        documents: CardBillingDocument[] = billingDocuments
+    ) => {
+        return documents.filter((doc) => matchesCardBillingDocument(doc, row));
     }, [billingDocuments, matchesCardBillingDocument]);
 
-    const getMarkedBillingDocumentsForRow = useCallback((row: CardLedgerRow) => {
-        return billingDocuments.filter((doc) => (
+    const getMarkedBillingDocumentsForRow = useCallback((
+        row: CardLedgerRow,
+        documents: CardBillingDocument[] = billingDocuments
+    ) => {
+        return documents.filter((doc) => (
             normalizeKey(doc.cardId) === normalizeKey(row.card.id) &&
             normalizeKey(doc.yearMonth) === normalizeKey(yearMonth) &&
             hasCardLedgerRowMarker(doc, row)
         ));
     }, [billingDocuments, hasCardLedgerRowMarker, yearMonth]);
 
-    const getAllBillingDocumentsForRow = useCallback((row: CardLedgerRow) => {
-        const documents = [
-            ...getBillingDocumentsForRow(row),
-            ...getMarkedBillingDocumentsForRow(row)
+    const getAllBillingDocumentsForRow = useCallback((
+        row: CardLedgerRow,
+        documents: CardBillingDocument[] = billingDocuments
+    ) => {
+        const candidates = [
+            ...getBillingDocumentsForRow(row, documents),
+            ...getMarkedBillingDocumentsForRow(row, documents)
         ];
-        return documents.filter((doc, index, list) => (
+        return candidates.filter((doc, index, list) => (
             Boolean(doc.id) && list.findIndex((item) => item.id === doc.id) === index
         ));
-    }, [getBillingDocumentsForRow, getMarkedBillingDocumentsForRow]);
-
-    const getRowBillingState = useCallback((row: CardLedgerRow): {
-        status: BillingRowStatus;
-        documents: CardBillingDocument[];
-        reason?: string;
-    } => {
-        const identity = resolveCardBillingIdentity(row);
-        if (!identity || (
-            identity.teamIds.size === 0 &&
-            identity.teamNames.size === 0 &&
-            identity.workerIds.size === 0 &&
-            identity.workerNames.size === 0
-        )) {
-            return { status: 'blocked', documents: [], reason: '청구대상 없음' };
-        }
-        if (row.total <= 0) return { status: 'blocked', documents: [], reason: '금액 없음' };
-
-        const documents = getAllBillingDocumentsForRow(row);
-        if (documents.length === 0) return { status: 'unbilled', documents };
-        return { status: 'billed', documents };
-    }, [getAllBillingDocumentsForRow, resolveCardBillingIdentity]);
-
-    const billingRows = useMemo(() => {
-        return rows
-            .map((row, index) => ({ row, index, billingState: getRowBillingState(row) }))
-            .filter(({ billingState }) => {
-                if (billingFilter === 'all') return true;
-                if (billingFilter === 'unbilled') return billingState.status === 'unbilled' || billingState.status === 'blocked';
-                return billingState.status === billingFilter;
-            });
-    }, [rows, billingFilter, getRowBillingState]);
+    }, [billingDocuments, getBillingDocumentsForRow, getMarkedBillingDocumentsForRow]);
 
     const cardRowCountById = useMemo(() => {
         const map = new Map<string, number>();
@@ -1184,16 +1228,6 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         });
         return map;
     }, [rows]);
-
-    const bulkBillableCount = useMemo(
-        () => billingRows.filter(({ billingState }) => billingState.status === 'unbilled').length,
-        [billingRows]
-    );
-
-    const bulkUnbillableCount = useMemo(
-        () => billingRows.filter(({ billingState }) => billingState.documents.length > 0).length,
-        [billingRows]
-    );
 
     useEffect(() => {
         if (yearMonth) loadData();
@@ -1237,23 +1271,273 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
     const handleSave = async () => {
         setSaving(true);
         try {
+            // Saving is safety-sensitive: unlike the normal screen load, this
+            // read must never degrade to an empty billing list. A failed read
+            // aborts before any ledger transaction is written.
+            const [freshBillingDocuments, confirmedSettlementKeys] = await Promise.all([
+                cardBillingService.getBillingsByMonth(yearMonth),
+                teamSettlementProtectionService.getConfirmedTeamSettlementKeys(yearMonth)
+            ]);
+            // A positive row without a resolvable billing target must not be
+            // persisted by itself: that would make the ledger and team expense
+            // disagree. Zero rows remain eligible so their saved transactions
+            // and associated DRAFT billing can be cleared.
+            const resolvedTargetsByRowId = new Map(
+                rows.map((row) => [row.id, resolveCardBillingTarget(row)] as const)
+            );
+            const missingTargetRows = rows.filter((row) => (
+                row.total > 0 && !resolvedTargetsByRowId.get(row.id)
+            ));
+            const missingTargetRowIds = new Set(missingTargetRows.map((row) => row.id));
+            const settlementProtectedRows = rows.filter((row) => {
+                const target = resolvedTargetsByRowId.get(row.id);
+                return Boolean(target && teamSettlementProtectionService.isConfirmedTarget(
+                    confirmedSettlementKeys,
+                    { teamId: target.teamId, teamName: target.teamName }
+                ));
+            });
+            const settlementProtectedRowIds = new Set(settlementProtectedRows.map((row) => row.id));
+            const postedBillingProtectedRows = rows.filter((row) => (
+                getAllBillingDocumentsForRow(row, freshBillingDocuments)
+                    .some(isPostedCardBillingDocument)
+            ));
+            const postedBillingProtectedRowIds = new Set(
+                postedBillingProtectedRows.map((row) => row.id)
+            );
+            const preflightClaimedBillingIds = new Set(
+                rows.flatMap((row) => (
+                    getAllBillingDocumentsForRow(row, freshBillingDocuments)
+                        .map((document) => document.id)
+                        .filter(Boolean)
+                ))
+            );
+            const protectedOrphanCardIds = getCardIdsWithProtectedOrphanBillings({
+                yearMonth,
+                billings: freshBillingDocuments,
+                claimedBillingIds: preflightClaimedBillingIds,
+                currentCardIds: new Set(rows.map((row) => normalizeKey(row.card.id)).filter(Boolean)),
+                isProtectedTarget: (document) => teamSettlementProtectionService.isConfirmedTarget(
+                    confirmedSettlementKeys,
+                    { teamId: document.teamId, teamName: document.teamName }
+                )
+            });
+            const rowsWithoutDirectProtection = rows.filter((row) => (
+                !missingTargetRowIds.has(row.id) &&
+                !settlementProtectedRowIds.has(row.id) &&
+                !postedBillingProtectedRowIds.has(row.id)
+            ));
+            const eligibleRows = excludeProtectedOrphanCardRows(
+                rowsWithoutDirectProtection,
+                protectedOrphanCardIds,
+                (row) => row.card.id
+            );
+            const eligibleRowIds = new Set(eligibleRows.map((row) => row.id));
+            const eligibleRowsByCardId = new Map<string, CardLedgerRow[]>();
+            eligibleRows.forEach((row) => {
+                const cardId = normalizeKey(row.card.id);
+                const cardRows = eligibleRowsByCardId.get(cardId) ?? [];
+                cardRows.push(row);
+                eligibleRowsByCardId.set(cardId, cardRows);
+            });
+            const sourceFullyEligibleCardIds = new Set<string>();
+            const allRowsByCardId = new Map<string, CardLedgerRow[]>();
+            rows.forEach((row) => {
+                const cardId = normalizeKey(row.card.id);
+                const cardRows = allRowsByCardId.get(cardId) ?? [];
+                cardRows.push(row);
+                allRowsByCardId.set(cardId, cardRows);
+            });
+            allRowsByCardId.forEach((cardRows, cardId) => {
+                if (cardRows.length === (eligibleRowsByCardId.get(cardId)?.length ?? 0)) {
+                    sourceFullyEligibleCardIds.add(cardId);
+                }
+            });
+
             const result = await cardMonthlyLedgerMutationService.saveMonthlyLedger({
                 yearMonth,
-                visibleRows: rows.map((row) => ({ row })),
+                visibleRows: eligibleRows.map((row) => ({ row })),
                 originalTransactions: originalTxsRef.current,
                 categories: CATEGORIES,
-                getBillingDocumentsForRow: getAllBillingDocumentsForRow,
-                buildBillingDocumentForRow
+                getBillingDocumentsForRow: (row) => (
+                    getAllBillingDocumentsForRow(row, freshBillingDocuments)
+                )
             });
 
             setIsDirty(false);
-            await loadData();
+            const persistedSnapshot = await loadData({ strictBillingRead: true });
+            if (!persistedSnapshot) {
+                setSaveFeedback({
+                    status: 'warning',
+                    title: '대장은 저장됐지만 자동 반영을 확인하지 못했습니다.',
+                    message: '저장된 데이터를 다시 불러오지 못해 팀별 경비 자동 반영을 중단했습니다. 잠시 후 저장을 다시 누르면 중복 없이 재시도됩니다.',
+                    operationId: result.operationId
+                });
+                return;
+            }
+
+            const postSaveRowsByCardId = new Map<string, CardLedgerRow[]>();
+            persistedSnapshot.rows.forEach((row) => {
+                const cardId = normalizeKey(row.card.id);
+                const cardRows = postSaveRowsByCardId.get(cardId) ?? [];
+                cardRows.push(row);
+                postSaveRowsByCardId.set(cardId, cardRows);
+            });
+            const postSaveStructureChangedCardIds = new Set<string>();
+            sourceFullyEligibleCardIds.forEach((cardId) => {
+                const beforeFingerprints = (allRowsByCardId.get(cardId) ?? [])
+                    .map(getCardLedgerStructureFingerprint)
+                    .sort();
+                const afterFingerprints = (postSaveRowsByCardId.get(cardId) ?? [])
+                    .map(getCardLedgerStructureFingerprint)
+                    .sort();
+                if (JSON.stringify(beforeFingerprints) !== JSON.stringify(afterFingerprints)) {
+                    postSaveStructureChangedCardIds.add(cardId);
+                }
+            });
+            const persistedEligibleRows = persistedSnapshot.rows.filter((row) => (
+                eligibleRowIds.has(row.id) &&
+                !postSaveStructureChangedCardIds.has(normalizeKey(row.card.id))
+            ));
+            let postSaveConfirmedSettlementKeys: Awaited<ReturnType<
+                typeof teamSettlementProtectionService.getConfirmedTeamSettlementKeys
+            >>;
+            try {
+                // Re-read immediately after the ledger commit. If a team was
+                // confirmed between preflight and commit, do not create a new
+                // DRAFT billing for that now-protected settlement.
+                postSaveConfirmedSettlementKeys = await teamSettlementProtectionService
+                    .getConfirmedTeamSettlementKeys(yearMonth);
+            } catch (error) {
+                console.error('[CardMonthlyLedger] post-save settlement protection read failed', { yearMonth }, error);
+                setSaveFeedback({
+                    status: 'warning',
+                    title: '대장은 저장됐지만 팀별 경비 반영을 중단했습니다.',
+                    message: '팀정산 확정 상태를 다시 확인하지 못해 새 경비를 만들지 않았습니다. 상태를 확인한 뒤 저장을 다시 눌러주세요.',
+                    operationId: result.operationId
+                });
+                return;
+            }
+            const postSaveSettlementProtectedRowIds = new Set(
+                persistedEligibleRows
+                    .filter((row) => {
+                        const target = resolveCardBillingTarget(row);
+                        return Boolean(target && teamSettlementProtectionService.isConfirmedTarget(
+                            postSaveConfirmedSettlementKeys,
+                            { teamId: target.teamId, teamName: target.teamName }
+                        ));
+                    })
+                    .map((row) => row.id)
+            );
+            const candidateAutoBillingRows = persistedEligibleRows.filter((row) => (
+                !postSaveSettlementProtectedRowIds.has(row.id)
+            ));
+            const claimedBillingIds = new Set(
+                persistedSnapshot.rows.flatMap((row) => (
+                    getAllBillingDocumentsForRow(row, persistedSnapshot.billings)
+                        .map((document) => document.id)
+                        .filter(Boolean)
+                ))
+            );
+            const postSaveProtectedOrphanCardIds = getCardIdsWithProtectedOrphanBillings({
+                yearMonth,
+                billings: persistedSnapshot.billings,
+                claimedBillingIds,
+                currentCardIds: new Set(
+                    candidateAutoBillingRows.map((row) => normalizeKey(row.card.id)).filter(Boolean)
+                ),
+                isProtectedTarget: (document) => teamSettlementProtectionService.isConfirmedTarget(
+                    postSaveConfirmedSettlementKeys,
+                    { teamId: document.teamId, teamName: document.teamName }
+                )
+            });
+            const autoBillingRows = candidateAutoBillingRows.filter((row) => (
+                !postSaveProtectedOrphanCardIds.has(normalizeKey(row.card.id))
+            ));
+            const autoBillingRowIds = new Set(autoBillingRows.map((row) => row.id));
+            const persistedRowsByCardId = new Map<string, CardLedgerRow[]>();
+            persistedSnapshot.rows.forEach((row) => {
+                const cardId = normalizeKey(row.card.id);
+                const cardRows = persistedRowsByCardId.get(cardId) ?? [];
+                cardRows.push(row);
+                persistedRowsByCardId.set(cardId, cardRows);
+            });
+            const fullyEligibleCardIds = new Set<string>();
+            persistedRowsByCardId.forEach((cardRows, cardId) => {
+                if (cardRows.length > 0 && cardRows.every((row) => autoBillingRowIds.has(row.id))) {
+                    fullyEligibleCardIds.add(cardId);
+                }
+            });
+            const orphanDraftsByOwnerRowId = assignCardLedgerOrphanDrafts({
+                yearMonth,
+                rows: autoBillingRows.map((row) => ({
+                    id: row.id,
+                    cardId: row.card.id,
+                    total: row.total
+                })),
+                billings: persistedSnapshot.billings,
+                claimedBillingIds,
+                fullyEligibleCardIds,
+                isProtectedTarget: (document) => teamSettlementProtectionService.isConfirmedTarget(
+                    postSaveConfirmedSettlementKeys,
+                    { teamId: document.teamId, teamName: document.teamName }
+                )
+            });
+            const autoBillingResult = await cardMonthlyLedgerAutoBillingService.reconcileSavedBillings(
+                autoBillingRows,
+                {
+                    getAtomicScopeKey: (row) => normalizeKey(row.card.id),
+                    getBillingDocumentsForRow: (row) => {
+                        const documents = [
+                            ...getAllBillingDocumentsForRow(row, persistedSnapshot.billings),
+                            ...(orphanDraftsByOwnerRowId.get(row.id) ?? [])
+                        ];
+                        return documents.filter((document, index, list) => (
+                            Boolean(document.id) && list.findIndex((item) => item.id === document.id) === index
+                        ));
+                    },
+                    buildBillingDocumentForRow
+                }
+            );
+
+            // Reflect the billing documents actually committed by reconciliation.
+            const finalSnapshot = await loadData({ strictBillingRead: true });
+            const protectedCount = Math.max(
+                result.skippedBillingCount,
+                autoBillingResult.protectedCount,
+                postedBillingProtectedRows.length
+            );
+            const missingTargetCount = Math.max(
+                missingTargetRows.length,
+                autoBillingResult.missingTargetCount
+            );
+            const atomicSettlementRaceCount = autoBillingResult.failures.filter((failure) => (
+                failure.message === 'team-settlement-confirmed-card-billing-blocked'
+            )).length;
+            const failedCount = autoBillingResult.failures.length - atomicSettlementRaceCount;
+            const settlementProtectedCount = settlementProtectedRows.length;
+            const protectedOrphanCardCount = protectedOrphanCardIds.size;
+            const postSaveSettlementProtectedCount = postSaveSettlementProtectedRowIds.size;
+            const postSaveProtectedOrphanCardCount = postSaveProtectedOrphanCardIds.size;
+            const postSaveStructureChangedCardCount = postSaveStructureChangedCardIds.size;
+            const hasWarning = !finalSnapshot || protectedCount > 0 || settlementProtectedCount > 0 || protectedOrphanCardCount > 0 || postSaveSettlementProtectedCount > 0 || postSaveProtectedOrphanCardCount > 0 || postSaveStructureChangedCardCount > 0 || atomicSettlementRaceCount > 0 || missingTargetCount > 0 || failedCount > 0;
+            const messages = [
+                `팀별 경비 자동 반영 ${autoBillingResult.upsertedCount}건`,
+                autoBillingResult.deletedCount > 0 ? `0원 경비 정리 ${autoBillingResult.deletedCount}건` : '',
+                protectedCount > 0 ? `확정된 원본 경비 보호로 변경하지 않은 행 ${protectedCount}건` : '',
+                settlementProtectedCount > 0 ? `팀정산 확정 보호로 저장하지 않은 행 ${settlementProtectedCount}건` : '',
+                protectedOrphanCardCount > 0 ? `이전 대상의 확정 경비가 남아 저장하지 않은 카드 ${protectedOrphanCardCount}개(이전 팀 확정 취소 후 다시 저장 필요)` : '',
+                postSaveSettlementProtectedCount > 0 ? `저장 중 팀정산 확정 감지로 경비 반영을 중단한 행 ${postSaveSettlementProtectedCount}건(확정 취소 후 다시 저장 필요)` : '',
+                postSaveProtectedOrphanCardCount > 0 ? `저장 중 이전 대상 경비 확정 감지로 새 경비 반영을 중단한 카드 ${postSaveProtectedOrphanCardCount}개(대장은 저장됨)` : '',
+                postSaveStructureChangedCardCount > 0 ? `저장 중 대상/분할 변경 감지로 경비 반영을 중단한 카드 ${postSaveStructureChangedCardCount}개(새 목록 확인 후 다시 저장)` : '',
+                atomicSettlementRaceCount > 0 ? `경비 반영 직전 팀정산 확정 감지 ${atomicSettlementRaceCount}건(대장은 저장됨 · 확정 취소 후 다시 저장 필요)` : '',
+                missingTargetCount > 0 ? `청구대상이 없어 저장하지 않은 행 ${missingTargetCount}건` : '',
+                failedCount > 0 ? `자동 반영 실패 ${failedCount}건(저장을 다시 누르면 중복 없이 재시도)` : '',
+                !finalSnapshot ? '최종 저장 결과를 다시 불러오지 못함(저장 재시도로 중복 없이 확인 가능)' : ''
+            ].filter(Boolean);
             setSaveFeedback({
-                status: result.skippedBillingCount > 0 ? 'warning' : 'success',
-                title: result.skippedBillingCount > 0 ? '일부 행을 제외하고 저장했습니다.' : '저장 완료',
-                message: result.skippedBillingCount > 0
-                    ? `확정/정산 청구서가 있는 ${result.skippedBillingCount}개 행은 건너뛰었습니다. 나머지 변경사항은 반영됐습니다.`
-                    : '변경사항이 반영됐습니다.',
+                status: hasWarning ? 'warning' : 'success',
+                title: hasWarning ? '저장 완료 · 일부 행 확인 필요' : '저장 및 팀별 경비 반영 완료',
+                message: messages.join(' · '),
                 operationId: result.operationId
             });
         } catch (e) {
@@ -1302,7 +1586,10 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         const target = resolveCardBillingTarget(row);
         if (!target) return null;
 
-        const lineItems = buildLineItemsForRow(row);
+        const lineItems = mergeCardLedgerWithPreservedManualLineItems(
+            buildLineItemsForRow(row),
+            existing?.lineItems ?? []
+        );
         if (lineItems.length === 0) return null;
 
         const variableCost = lineItems.reduce((sum, item) => sum + item.amount, 0);
@@ -1331,27 +1618,15 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             totalAmount: variableCost,
             status: existing?.status ?? 'DRAFT',
             lineItems,
-            statementAttachmentPaths: existing?.statementAttachmentPaths ?? [],
+            statementAttachmentPaths: dedupeStatementPaths([
+                ...(existing?.statementAttachmentPaths ?? []),
+                ...row.statementAttachmentPaths
+            ]),
             memo: row.memo || undefined,
             createdAt: existing?.createdAt ?? Timestamp.now(),
             updatedAt: Timestamp.now(),
             confirmedAt: existing?.confirmedAt
         };
-    };
-
-    const saveCardLedgerBillingDocument = async (
-        row: CardLedgerRow,
-        next: CardBillingDocument,
-        existing?: CardBillingDocument
-    ) => {
-        const staleDocumentIds = new Set<string>();
-        if (existing?.id && existing.id !== next.id) staleDocumentIds.add(existing.id);
-        getMarkedBillingDocumentsForRow(row).forEach((doc) => {
-            if (doc.id && doc.id !== next.id) staleDocumentIds.add(doc.id);
-        });
-
-        await cardBillingService.saveBilling(next);
-        await Promise.all(Array.from(staleDocumentIds).map((id) => cardBillingService.deleteBilling(id)));
     };
 
     const sanitizeStatementFileName = (name: string): string => {
@@ -1362,28 +1637,12 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
 
     const getStatementPathsForDocuments = (documents: CardBillingDocument[]): string[] => {
         const paths = documents.flatMap((document) => document.statementAttachmentPaths ?? []);
-        return Array.from(new Set(paths.map((path) => String(path ?? '').trim()).filter(Boolean)));
-    };
-
-    const ensureBillingDocumentForStatement = async (
-        row: CardLedgerRow,
-        billingState: ReturnType<typeof getRowBillingState>
-    ): Promise<CardBillingDocument> => {
-        const existing = billingState.documents[0];
-        if (existing) return existing;
-
-        const next = buildBillingDocumentForRow(row);
-        if (!next) {
-            throw new Error('청구대상과 금액을 먼저 확인해주세요.');
-        }
-
-        await saveCardLedgerBillingDocument(row, next);
-        return next;
+        return dedupeStatementPaths(paths);
     };
 
     const handleUploadStatement = async (
         row: CardLedgerRow,
-        billingState: ReturnType<typeof getRowBillingState>,
+        rowBillingDocuments: CardBillingDocument[],
         file: File
     ) => {
         if (!file) return;
@@ -1394,20 +1653,53 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
 
         setStatementUploadingRowId(row.id);
         try {
-            const document = await ensureBillingDocumentForStatement(row, billingState);
+            const rowStart = parseYmdDate(row.segment.startDate);
+            const rowEnd = parseYmdDate(row.segment.endDate);
+            const rowTransactions = originalTxsRef.current.filter((transaction) => {
+                if (transaction.status === 'CANCELLED') return false;
+                if (normalizeKey(transaction.cardId) !== normalizeKey(row.card.id)) return false;
+                const transactionDate = parseYmdDate(transaction.date);
+                if (!transactionDate || !rowStart || !rowEnd) return true;
+                return transactionDate.getTime() >= rowStart.getTime() && transactionDate.getTime() <= rowEnd.getTime();
+            });
+            if (rowTransactions.length === 0) {
+                throw new Error('파일을 연결할 카드 금액을 먼저 저장해주세요.');
+            }
+
             const safeName = sanitizeStatementFileName(file.name);
-            const objectPath = `card-billing-statements/${document.yearMonth}/${document.id}/${Date.now()}_${safeName}`;
+            const objectPath = `card-ledger-statements/${yearMonth}/${sanitizeBillingIdPart(row.card.id)}/${sanitizeBillingIdPart(row.id)}/${Date.now()}_${safeName}`;
             await uploadBytes(storageRef(storage, objectPath), file, file.type ? { contentType: file.type } : undefined);
 
-            const nextPaths = Array.from(new Set([...(document.statementAttachmentPaths ?? []), objectPath]));
-            await cardBillingService.saveBilling({
-                ...document,
-                statementAttachmentPaths: nextPaths,
-                updatedAt: Timestamp.now()
+            const operationId = `card-statement-attachment:${yearMonth}:${row.id}:${Date.now()}`;
+            await cardService.applyCardTransactionChanges({
+                operationId,
+                upserts: rowTransactions.map((transaction) => {
+                    const nextPaths = dedupeStatementPaths([
+                        ...getTransactionStatementPaths(transaction),
+                        objectPath
+                    ]);
+                    return {
+                        ...transaction,
+                        id: transaction.id,
+                        evidenceUrl: transaction.evidenceUrl || objectPath,
+                        statementAttachmentPaths: nextPaths,
+                        lastOperationId: operationId,
+                        updatedAt: Timestamp.now()
+                    };
+                })
             });
 
+            await Promise.all(rowBillingDocuments.map((document) => cardBillingService.saveBilling({
+                ...document,
+                statementAttachmentPaths: dedupeStatementPaths([
+                    ...(document.statementAttachmentPaths ?? []),
+                    objectPath
+                ]),
+                updatedAt: Timestamp.now()
+            })));
+
             await loadData();
-            alert('청구서 파일이 등록되었습니다.');
+            alert('PDF 파일이 카드 금액과 팀별 경비 자료에 연결되었습니다.');
         } catch (error) {
             console.error(error);
             alert(error instanceof Error ? error.message : '청구서 파일 등록에 실패했습니다.');
@@ -1424,241 +1716,6 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         } catch (error) {
             console.error(error);
             alert('청구서 파일을 열 수 없습니다.');
-        }
-    };
-
-    const handleCreateOrRecalculateBilling = async (row: CardLedgerRow, mode: 'create' | 'recalculate') => {
-        const state = getRowBillingState(row);
-        const existing = state.documents[0];
-        if (isDirty) {
-            alert('청구 전 변경사항을 먼저 전체 저장해주세요.');
-            return;
-        }
-        if (state.status === 'blocked') {
-            alert(state.reason || '청구할 수 없는 행입니다.');
-            return;
-        }
-
-        setBillingProcessingId(row.id);
-        try {
-            const next = buildBillingDocumentForRow(row, existing);
-            if (!next) {
-                alert('배정 이력과 금액 기준으로 생성할 청구 문서를 찾지 못했습니다.');
-                return;
-            }
-
-            await saveCardLedgerBillingDocument(row, next, existing);
-            await loadData();
-            alert(mode === 'recalculate' ? '청구가 다시 처리되었습니다.' : '청구 처리되었습니다.');
-        } catch (error) {
-            console.error(error);
-            alert('청구 처리에 실패했습니다.');
-        } finally {
-            setBillingProcessingId('');
-        }
-    };
-
-    const handleCreateSplitBilling = async (row: CardLedgerRow) => {
-        if (isDirty) {
-            alert('청구 전 변경사항을 먼저 전체 저장해주세요.');
-            return;
-        }
-
-        const targetRows = rows.filter((item) => normalizeKey(item.card.id) === normalizeKey(row.card.id));
-        if (targetRows.length <= 1) {
-            alert('분할청구할 기간이 없습니다.');
-            return;
-        }
-
-        const targets = targetRows
-            .map((item) => ({ row: item, billingState: getRowBillingState(item) }))
-            .filter(({ billingState }) => billingState.status === 'unbilled');
-
-        if (targets.length === 0) {
-            alert('분할청구할 미청구 행이 없습니다.');
-            return;
-        }
-
-        setBillingProcessingId(row.id);
-        let processed = 0;
-        let skipped = 0;
-
-        try {
-            for (const target of targets) {
-                try {
-                    const next = buildBillingDocumentForRow(target.row, target.billingState.documents[0]);
-                    if (!next) {
-                        skipped += 1;
-                        continue;
-                    }
-
-                    await saveCardLedgerBillingDocument(target.row, next, target.billingState.documents[0]);
-                    processed += 1;
-                } catch (error) {
-                    console.error(error);
-                    skipped += 1;
-                }
-            }
-
-            await loadData();
-            alert(`분할청구 처리 ${processed}건 완료${skipped > 0 ? `, ${skipped}건 제외` : ''}`);
-        } finally {
-            setBillingProcessingId('');
-        }
-    };
-
-    const handleSplitBillingClick = (row: CardLedgerRow, hasSplitRows: boolean) => {
-        if (hasSplitRows) {
-            void handleCreateSplitBilling(row);
-            return;
-        }
-
-        if (onOpenBillingTarget) {
-            onOpenBillingTarget(row.card);
-            return;
-        }
-
-        alert('분할청구 대상 기간을 먼저 카드 청구대상 설정에서 추가해주세요.');
-    };
-
-    const buildCardDocumentWithItems = (
-        document: CardBillingDocument,
-        lineItems: CardBillingCostItem[],
-        memo: string,
-        status: CardBillingDocument['status']
-    ): CardBillingDocument => {
-        const variableCost = lineItems.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0);
-        return {
-            ...document,
-            lineItems,
-            memo,
-            status,
-            variableCost,
-            totalAmount: variableCost,
-            updatedAt: Timestamp.now(),
-            confirmedAt: status === 'CONFIRMED' ? Timestamp.now() : document.confirmedAt
-        };
-    };
-
-    const handleSaveBillingEditor = async (
-        lineItems: CardBillingCostItem[],
-        memo: string,
-        status: CardBillingDocument['status'] = billingEditor?.document.status ?? 'DRAFT'
-    ) => {
-        if (!billingEditor) return;
-        setBillingProcessingId(billingEditor.row.id);
-        try {
-            const next = buildCardDocumentWithItems(billingEditor.document, lineItems, memo, status);
-            await cardBillingService.saveBilling(next);
-            await loadData();
-            setBillingEditor(null);
-            alert(status === 'CONFIRMED' ? '청구서가 확정되었습니다.' : '청구서가 저장되었습니다.');
-        } catch (error) {
-            console.error(error);
-            alert('청구서 저장에 실패했습니다.');
-        } finally {
-            setBillingProcessingId('');
-        }
-    };
-
-    const handleCancelBillingConfirmation = async () => {
-        if (!billingEditor || billingEditor.document.status !== 'CONFIRMED') return;
-        if (!window.confirm('카드 청구서 확정을 취소하고 다시 수정 가능하게 변경할까요?')) return;
-        const reason = window.prompt('확정 취소 사유를 입력해주세요.');
-        if (!reason?.trim()) return;
-
-        setBillingProcessingId(billingEditor.row.id);
-        try {
-            await cardBillingService.cancelConfirmation(billingEditor.document.id, {
-                reason: reason.trim()
-            });
-            await loadData();
-            setBillingEditor(null);
-            alert('청구서 확정이 취소되었습니다.');
-        } catch (error) {
-            console.error(error);
-            alert('청구서 확정 취소에 실패했습니다.');
-        } finally {
-            setBillingProcessingId('');
-        }
-    };
-
-    const handleCancelBilling = async (row: CardLedgerRow, document?: CardBillingDocument) => {
-        const documents = document ? [document] : getRowBillingState(row).documents;
-        const documentIds = Array.from(new Set(documents.map((item) => item.id).filter(Boolean)));
-        if (documentIds.length === 0) return;
-        if (!window.confirm('청구 상태를 미청구로 변경할까요?')) return;
-
-        setBillingProcessingId(row.id);
-        try {
-            await Promise.all(documentIds.map((id) => cardBillingService.deleteBilling(id)));
-            await loadData();
-            alert('미청구 처리되었습니다.');
-        } catch (error) {
-            console.error(error);
-            alert('미청구 처리에 실패했습니다.');
-        } finally {
-            setBillingProcessingId('');
-        }
-    };
-
-    const handleBulkBilling = async (action: 'bill' | 'unbill') => {
-        if (isDirty) {
-            alert('청구 전 변경사항을 먼저 전체 저장해주세요.');
-            return;
-        }
-
-        const targets = billingRows.filter(({ billingState }) => (
-            action === 'bill'
-                ? billingState.status === 'unbilled'
-                : billingState.documents.length > 0
-        ));
-
-        if (targets.length === 0) {
-            alert(action === 'bill' ? '일괄 청구할 행이 없습니다.' : '일괄 미청구 처리할 행이 없습니다.');
-            return;
-        }
-
-        const actionLabel = action === 'bill' ? '청구' : '미청구';
-        if (!window.confirm(`현재 필터 목록의 ${targets.length}건을 일괄 ${actionLabel} 처리합니다.\n저장하지 않은 셀 변경사항은 반영되지 않습니다.\n계속할까요?`)) return;
-
-        setBulkBillingAction(action);
-        setBillingProcessingId('__bulk__');
-        let processed = 0;
-        let skipped = 0;
-
-        try {
-            for (const { row, billingState } of targets) {
-                try {
-                    if (action === 'bill') {
-                        const next = buildBillingDocumentForRow(row);
-                        if (!next) {
-                            skipped += 1;
-                            continue;
-                        }
-                        await saveCardLedgerBillingDocument(row, next, billingState.documents[0]);
-                    } else {
-                        const documentIds = Array.from(new Set(
-                            billingState.documents.map((item) => item.id).filter(Boolean)
-                        ));
-                        if (documentIds.length === 0) {
-                            skipped += 1;
-                            continue;
-                        }
-                        await Promise.all(documentIds.map((id) => cardBillingService.deleteBilling(id)));
-                    }
-                    processed += 1;
-                } catch (error) {
-                    console.error(error);
-                    skipped += 1;
-                }
-            }
-
-            await loadData();
-            alert(`${actionLabel} 처리 ${processed}건 완료${skipped > 0 ? `, ${skipped}건 제외` : ''}`);
-        } finally {
-            setBulkBillingAction('');
-            setBillingProcessingId('');
         }
     };
 
@@ -1717,50 +1774,21 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                         <div className="text-xs text-slate-500 font-bold uppercase">총 합계</div>
                         <div className="text-2xl font-extrabold text-indigo-700 font-mono">{totals.total.toLocaleString()}</div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-1 rounded-xl bg-slate-100 p-1">
-                        {BILLING_FILTERS.map((filter) => (
-                            <button
-                                key={filter.value}
-                                type="button"
-                                onClick={() => setBillingFilter(filter.value)}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${
-                                    billingFilter === filter.value
-                                        ? 'bg-white text-indigo-700 shadow-sm'
-                                        : 'text-slate-500 hover:text-slate-700'
-                                }`}
-                            >
-                                {filter.label}
-                            </button>
-                        ))}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex w-full items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm sm:w-auto" aria-label="카드 PDF AI 등록">
+                        <span className="hidden items-center gap-1.5 whitespace-nowrap px-2 text-[11px] font-extrabold text-slate-500 xl:inline-flex">
+                            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                            AI 명세서
+                        </span>
                         <button
                             type="button"
                             onClick={() => setIsStatementImportOpen(true)}
                             disabled={isDirty || saving || loading}
                             title={isDirty ? '변경사항을 먼저 저장한 뒤 PDF를 일괄등록하세요.' : '국민은행 카드 청구 PDF 여러 장을 한 번에 분석'}
-                            className="px-4 py-2 rounded-xl bg-white text-indigo-700 text-xs font-extrabold border border-indigo-200 hover:bg-indigo-50 disabled:bg-slate-50 disabled:text-slate-300 disabled:border-slate-100 disabled:cursor-not-allowed whitespace-nowrap inline-flex items-center gap-2"
+                            aria-label="카드 PDF AI 등록"
+                            className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-indigo-200 bg-white px-2.5 text-xs font-extrabold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300 sm:flex-none"
                         >
-                            <FontAwesomeIcon icon={faFilePdf} />
-                            PDF 일괄등록
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => handleBulkBilling('bill')}
-                            disabled={isDirty || bulkBillingAction !== '' || bulkBillableCount === 0}
-                            title="현재 필터 목록의 미청구 행을 청구 처리"
-                            className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-extrabold shadow-sm hover:bg-indigo-700 disabled:bg-indigo-200 disabled:cursor-not-allowed whitespace-nowrap"
-                        >
-                            {bulkBillingAction === 'bill' ? '처리중...' : `일괄 청구 (${bulkBillableCount})`}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => handleBulkBilling('unbill')}
-                            disabled={isDirty || bulkBillingAction !== '' || bulkUnbillableCount === 0}
-                            title="현재 필터 목록의 청구 행을 미청구 처리"
-                            className="px-4 py-2 rounded-xl bg-rose-50 text-rose-700 text-xs font-extrabold border border-rose-100 hover:bg-rose-100 disabled:bg-slate-50 disabled:text-slate-300 disabled:border-slate-100 disabled:cursor-not-allowed whitespace-nowrap"
-                        >
-                            {bulkBillingAction === 'unbill' ? '처리중...' : `일괄 미청구 (${bulkUnbillableCount})`}
+                            <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
+                            카드 PDF
                         </button>
                     </div>
                     <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border border-indigo-100 hover:bg-gray-50 h-[46px] shadow-sm whitespace-nowrap">
@@ -1780,11 +1808,8 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                         `}
                     >
                         <FontAwesomeIcon icon={faSave} />
-                        {saving ? '저장 중...' : isDirty ? '변경사항 저장' : '전체 저장'}
+                        {saving ? '저장 및 반영 중...' : '저장'}
                     </button>
-                </div>
-                <div className="w-full text-xs font-medium text-slate-400">
-                    변경한 셀은 <span className="font-bold text-slate-600">변경사항 저장</span> 후 청구할 수 있습니다. 일괄 작업은 현재 필터 목록에만 적용됩니다.
                 </div>
             </div>
 
@@ -1792,7 +1817,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 <SupportSaveFeedback
                     feedback={saveFeedback}
                     retryDisabled={saving}
-                    onRetry={saveFeedback.status === 'error' ? () => void handleSave() : undefined}
+                    onRetry={saveFeedback.status !== 'success' ? () => void handleSave() : undefined}
                     onDismiss={() => setSaveFeedback(null)}
                 />
             )}
@@ -1807,14 +1832,13 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                     ) : (
                         <table className="support-compact-table support-compact-ledger w-full table-fixed text-[11px] lg:text-xs">
                             <colgroup>
+                                <col style={{ width: '15%' }} />
                                 <col style={{ width: '12%' }} />
-                                <col style={{ width: '10%' }} />
+                                <col style={{ width: '16%' }} />
+                                <col style={{ width: '17%' }} />
+                                <col style={{ width: '13%' }} />
                                 <col style={{ width: '12%' }} />
                                 <col style={{ width: '15%' }} />
-                                <col style={{ width: '11%' }} />
-                                <col style={{ width: '8%' }} />
-                                <col style={{ width: '8%' }} />
-                                <col style={{ width: '14%' }} />
                             </colgroup>
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
@@ -1823,22 +1847,22 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                     <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">청구대상</th>
                                     <th className="px-4 py-4 text-left w-48 tracking-wider bg-indigo-700">카드</th>
                                     <th className="px-2 py-4 text-center w-40 border-l border-indigo-400 bg-indigo-500">총금액</th>
-                                    <th className="px-2 py-4 text-center w-28 border-l border-indigo-500">청구상태</th>
-                                    <th className="px-2 py-4 text-center w-44 border-l border-indigo-500">청구작업</th>
-                                    <th className="px-2 py-4 text-center w-40 border-l border-indigo-500">청구서</th>
+                                    <th className="px-2 py-4 text-center w-40 border-l border-indigo-500">사용내역서</th>
                                     <th className="px-4 py-4 text-left border-l border-indigo-500">메모</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-indigo-50">
-                                {billingRows.map(({ row, index: idx, billingState }) => {
+                                {rows.map((row, idx) => {
                                     const assignmentSummary = getAssignmentSummary(row);
                                     const visibleAssignedWorkers = assignmentSummary.assignedWorkers.slice(0, 3);
-                                    const billingBadge = getBillingStatusBadge(billingState.status);
-                                    const isProcessing = billingProcessingId === row.id || bulkBillingAction !== '';
+                                    const rowBillingDocuments = getAllBillingDocumentsForRow(row);
                                     const hasSplitRows = (cardRowCountById.get(normalizeKey(row.card.id)) ?? 0) > 1;
                                     const hasPartialMonthPeriod = row.segment.overlapDays < (monthRange?.daysInMonth ?? row.segment.overlapDays);
                                     const shouldShowPeriod = hasSplitRows || hasPartialMonthPeriod;
-                                    const statementPaths = getStatementPathsForDocuments(billingState.documents);
+                                    const statementPaths = dedupeStatementPaths([
+                                        ...row.statementAttachmentPaths,
+                                        ...getStatementPathsForDocuments(rowBillingDocuments)
+                                    ]);
                                     const latestStatementPath = statementPaths[statementPaths.length - 1] ?? '';
                                     const isUploadingStatement = statementUploadingRowId === row.id;
 
@@ -1939,7 +1963,19 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                         ))}
                                                     </div>
                                                 ) : (
-                                                    <span className="text-slate-300 text-xs">-</span>
+                                                    <div className="flex flex-col items-start gap-1.5">
+                                                        <span className="text-rose-500 text-[11px] font-bold">대상 설정 필요</span>
+                                                        {onOpenBillingTarget && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => onOpenBillingTarget(row.card)}
+                                                                className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700 hover:bg-amber-100"
+                                                                title="팀별 경비에 반영할 대상을 설정"
+                                                            >
+                                                                대상 설정
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 )}
                                             </td>
 
@@ -1966,64 +2002,6 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                             />
 
                                             <td className="px-2 py-3 border-l border-indigo-50 bg-white text-center">
-                                                <span className={`inline-flex items-center justify-center min-w-[72px] rounded-lg border px-2 py-1 text-[11px] font-extrabold ${billingBadge.className}`}>
-                                                    {billingBadge.label}
-                                                </span>
-                                                {billingState.documents.length > 1 && (
-                                                    <div className="mt-1 text-[10px] font-bold text-slate-400">{billingState.documents.length}건</div>
-                                                )}
-                                            </td>
-
-                                            <td className="px-2 py-3 border-l border-indigo-50 bg-white">
-                                                <div className="flex items-center justify-center gap-1.5">
-                                                    {billingState.status === 'blocked' ? (
-                                                        <>
-                                                            <span className="text-[11px] font-bold text-slate-400">{billingState.reason}</span>
-                                                            <button
-                                                                type="button"
-                                                                disabled={isProcessing}
-                                                                onClick={() => handleSplitBillingClick(row, false)}
-                                                                className="px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200 hover:bg-amber-100 disabled:text-amber-300 disabled:bg-amber-50 whitespace-nowrap"
-                                                                title="분할청구 대상 기간 만들기"
-                                                            >
-                                                                분할청구
-                                                            </button>
-                                                        </>
-                                                    ) : billingState.status === 'unbilled' ? (
-                                                        <>
-                                                            <button
-                                                                type="button"
-                                                                disabled={isProcessing}
-                                                                onClick={() => handleCreateOrRecalculateBilling(row, 'create')}
-                                                                className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 disabled:bg-indigo-300 whitespace-nowrap"
-                                                            >
-                                                                {isProcessing ? '처리중' : '청구'}
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                disabled={isProcessing}
-                                                                onClick={() => handleSplitBillingClick(row, hasSplitRows)}
-                                                                className="px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200 hover:bg-amber-100 disabled:text-amber-300 disabled:bg-amber-50 whitespace-nowrap"
-                                                                title={hasSplitRows ? '분할된 미청구 기간을 한 번에 청구' : '분할청구 대상 기간 만들기'}
-                                                            >
-                                                                분할청구
-                                                            </button>
-                                                        </>
-                                                    ) : (
-                                                        <button
-                                                            type="button"
-                                                            disabled={isProcessing}
-                                                            onClick={() => handleCancelBilling(row)}
-                                                            className="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 text-xs font-bold hover:bg-rose-100 disabled:text-rose-300"
-                                                            title="미청구"
-                                                        >
-                                                            미청구
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </td>
-
-                                            <td className="px-2 py-3 border-l border-indigo-50 bg-white text-center">
                                                 <div className="flex items-center justify-center gap-1">
                                                     <label
                                                         className={`inline-flex h-8 items-center justify-center gap-1 rounded-lg px-2 text-[11px] font-bold text-white transition-colors ${
@@ -2043,7 +2021,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                             onChange={(event) => {
                                                                 const file = event.target.files?.[0] ?? null;
                                                                 event.target.value = '';
-                                                                if (file) void handleUploadStatement(row, billingState, file);
+                                                                if (file) void handleUploadStatement(row, rowBillingDocuments, file);
                                                             }}
                                                         />
                                                     </label>
@@ -2056,7 +2034,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                                 ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                                                                 : 'border-slate-100 bg-slate-50 text-slate-300 cursor-not-allowed'
                                                         }`}
-                                                        title="청구서 파일 열기"
+                                                        title="카드 사용내역서 파일 열기"
                                                     >
                                                         열기
                                                     </button>
@@ -2071,19 +2049,25 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                     type="text"
                                                     value={row.memo}
                                                     onChange={(e) => handleMemoChange(idx, e.target.value)}
-                                                    className={`w-full p-2 focus:outline-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-200 rounded-lg text-xs bg-transparent ${row.memo ? 'text-red-600 font-extrabold' : 'text-slate-600'}`}
+                                                    className={`w-full rounded-lg p-2 text-xs focus:outline-none focus:ring-2 ${
+                                                        isPdfImportMemo(row.memo)
+                                                            ? 'bg-blue-50/80 text-blue-700 font-extrabold focus:bg-blue-50 focus:ring-blue-200'
+                                                            : row.memo
+                                                                ? 'bg-amber-50 text-rose-700 font-black ring-1 ring-amber-200 focus:bg-amber-50 focus:ring-rose-200'
+                                                                : 'bg-transparent text-slate-600 focus:bg-indigo-50 focus:ring-indigo-200'
+                                                    }`}
                                                     placeholder=""
                                                 />
                                             </td>
                                         </tr>
                                     );
                                 })}
-                                {billingRows.length === 0 && (
+                                {rows.length === 0 && (
                                     <tr>
-                                        <td colSpan={9} className="p-20 text-center text-slate-400 bg-slate-50/50">
+                                        <td colSpan={7} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">
                                                 <FontAwesomeIcon icon={faReceipt} className="text-4xl text-slate-300" />
-                                                <p>조건에 맞는 카드 대장 행이 없습니다.</p>
+                                                <p>카드 대장 행이 없습니다.</p>
                                             </div>
                                         </td>
                                     </tr>
@@ -2095,7 +2079,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                     <td className="p-4 border-r border-slate-600 text-right font-mono text-amber-300 text-lg">
                                         {totals.total.toLocaleString()}
                                     </td>
-                                    <td colSpan={3} className="bg-slate-900 border-l border-slate-700"></td>
+                                    <td colSpan={2} className="bg-slate-900 border-l border-slate-700"></td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -2111,28 +2095,13 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                     <h4 className="font-bold text-amber-800 text-sm mb-1">입력 가이드</h4>
                     <p className="text-xs text-amber-700 leading-relaxed">
                         * 카드 금액은 청구대상 기간별 행에 입력합니다.<br />
-                        * 같은 달에 청구대상이 바뀌면 거래일 또는 입력 행의 시작일 기준으로 나뉘어 청구됩니다.<br />
-                        * 분할된 카드는 <strong>[분할청구]</strong>로 미청구 기간을 한 번에 처리합니다.<br />
-                        * 모든 변경사항은 <strong>[전체 저장]</strong> 버튼을 눌러야 반영됩니다.
+                        * 같은 달에 청구대상이 바뀌면 거래일 또는 입력 행의 시작일 기준으로 기간별 저장됩니다.<br />
+                        * <strong>[저장]</strong>하면 DB에 저장된 금액으로 팀별 경비가 바로 갱신됩니다.<br />
+                        * 반복 저장은 기존 초안을 교체하며, 0원은 관련 초안만 정리합니다.<br />
+                        * 확정·정산된 경비는 자동 변경하지 않고 결과에서 안내합니다.
                     </p>
                 </div>
             </div>
-
-            {billingEditor && (
-                <LedgerBillingEditorModal<CardBillingCostItem>
-                    title={`${billingEditor.document.cardLabel} 카드 청구서`}
-                    subtitle={`${billingEditor.document.yearMonth} · ${billingEditor.document.teamName || billingEditor.document.issuedToWorkerName || '청구대상'}`}
-                    statusLabel={isPostedCardBillingDocument(billingEditor.document) ? '확정' : '작성중'}
-                    readOnly={isPostedCardBillingDocument(billingEditor.document)}
-                    lineItems={billingEditor.document.lineItems ?? []}
-                    memo={billingEditor.document.memo ?? ''}
-                    saving={billingProcessingId === billingEditor.row.id}
-                    onClose={() => setBillingEditor(null)}
-                    onSave={(lineItems, memo) => handleSaveBillingEditor(lineItems, memo)}
-                    onConfirm={(lineItems, memo) => handleSaveBillingEditor(lineItems, memo, 'CONFIRMED')}
-                    onCancelConfirm={handleCancelBillingConfirmation}
-                />
-            )}
 
             <CardStatementImportModal
                 isOpen={isStatementImportOpen}

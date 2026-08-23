@@ -23,6 +23,7 @@ import { useAccommodationQuickAssignment } from './useAccommodationQuickAssignme
 interface Props {
     accommodation: Accommodation;
     activeAssignments: AccommodationAssignment[];
+    assignmentHistory?: AccommodationAssignment[];
     isOpen: boolean;
     initialBillingSplitMode?: boolean;
     onClose: () => void;
@@ -32,6 +33,7 @@ interface Props {
 const AccommodationQuickAssignmentModal: React.FC<Props> = ({
     accommodation,
     activeAssignments,
+    assignmentHistory,
     isOpen,
     initialBillingSplitMode = false,
     onClose,
@@ -69,6 +71,7 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
     } = useAccommodationQuickAssignment({
         accommodation,
         activeAssignments,
+        assignmentHistory,
         isOpen,
         initialBillingSplitMode,
         onSuccess

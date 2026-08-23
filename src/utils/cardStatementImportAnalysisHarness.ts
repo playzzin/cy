@@ -48,6 +48,8 @@ export interface CardStatementHarnessResult {
   fileId: string;
   fileIndex: number;
   resultIndex: number;
+  sourceBlockIndex: number;
+  sourceSha256?: string;
   yearMonth: string;
   statementMonth: string;
   cardLast4: string;
@@ -72,6 +74,7 @@ export interface BuildHarnessResultsInput {
   jobId: string;
   fileId: string;
   fileIndex?: number;
+  sourceSha256?: string;
   yearMonth: string;
   gemini: CardStatementHarnessGeminiResponse;
   cards: CardStatementHarnessCardMaster[];
@@ -79,8 +82,6 @@ export interface BuildHarnessResultsInput {
 
 export interface CommitHarnessState {
   transactionIds: string[];
-  billingLineItemIds: Record<string, string[]>;
-  billingLogIds: string[];
   results: CardStatementHarnessResult[];
 }
 
@@ -110,19 +111,23 @@ const buildTransactionId = (
   result: CardStatementHarnessResult,
   transaction: Pick<CardStatementHarnessTransaction, 'id'>,
   transactionIndex: number,
-): string => [
-  'card-statement',
-  yearMonth,
-  cardId,
-  result.fileId,
-  result.resultIndex,
-  transaction.id || transactionIndex,
-].map(sanitizeIdPart).join('__');
+): string => {
+  const sourceSha256 = String(result.sourceSha256 ?? '').trim().toLowerCase();
+  return [
+    'card-statement',
+    yearMonth,
+    cardId,
+    sourceSha256 || result.fileId,
+    sourceSha256 ? result.sourceBlockIndex : result.resultIndex,
+    transaction.id || transactionIndex,
+  ].map(sanitizeIdPart).join('__');
+};
 
 export const buildCardStatementHarnessResults = ({
   jobId,
   fileId,
   fileIndex = 0,
+  sourceSha256,
   yearMonth,
   gemini,
   cards,
@@ -160,6 +165,8 @@ export const buildCardStatementHarnessResults = ({
       fileId,
       fileIndex,
       resultIndex,
+      sourceBlockIndex: resultIndex,
+      sourceSha256: sourceSha256 || undefined,
       yearMonth,
       statementMonth: gemini.statementMonth,
       cardLast4: last4,
@@ -222,45 +229,25 @@ export const commitCardStatementHarnessResults = (
   previousState?: CommitHarnessState,
 ): CommitHarnessState => {
   const transactionIds = new Set(previousState?.transactionIds || []);
-  const billingLogIds = new Set(previousState?.billingLogIds || []);
-  const billingLineItemIds = new Map<string, Set<string>>(
-    Object.entries(previousState?.billingLineItemIds || {}).map(([billingId, ids]) => [billingId, new Set(ids)]),
-  );
 
   const nextResults = input.results.map((result) => {
     if (result.status === 'excluded' || result.status === 'failed' || !result.matchedCardId) return result;
 
-    const billingId = ['card-billing', input.yearMonth, result.matchedCardId].map(sanitizeIdPart).join('__');
-    const billingLogId = ['card-statement-import-billing-log', input.operationId, billingId].map(sanitizeIdPart).join('__');
     const committedTransactionIds = result.transactions.map((transaction, index) => (
       buildTransactionId(input.yearMonth, result.matchedCardId || 'unmatched', result, transaction, index)
     ));
-    const committedLineItemIds = [...committedTransactionIds];
 
     committedTransactionIds.forEach((id) => transactionIds.add(id));
-    billingLogIds.add(billingLogId);
-    const existingLineItems = billingLineItemIds.get(billingId) || new Set<string>();
-    committedLineItemIds.forEach((id) => existingLineItems.add(id));
-    billingLineItemIds.set(billingId, existingLineItems);
 
     return {
       ...result,
       status: 'committed' as const,
-      committedBillingId: billingId,
-      committedBillingLogId: billingLogId,
       committedTransactionIds,
-      committedLineItemIds,
     };
   });
 
-  const sortedBillingLineItems: Array<[string, string[]]> = Array.from(billingLineItemIds.entries())
-    .map(([billingId, ids]): [string, string[]] => [billingId, Array.from(ids).sort()])
-    .sort(([left], [right]) => left.localeCompare(right));
-
   return {
     transactionIds: Array.from(transactionIds).sort(),
-    billingLogIds: Array.from(billingLogIds).sort(),
-    billingLineItemIds: Object.fromEntries(sortedBillingLineItems),
     results: nextResults,
   };
 };

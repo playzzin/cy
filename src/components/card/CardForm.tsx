@@ -9,7 +9,7 @@ import {
     faXmark
 } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
-import { Card, CardStatus, CardType } from '../../types/card';
+import { Card, CardType } from '../../types/card';
 import { cardService } from '../../services/cardService';
 
 interface CardFormProps {
@@ -34,12 +34,12 @@ const cardTypes: Array<{ value: CardType; label: string; helper: string }> = [
     { value: 'CHECK', label: '체크', helper: '즉시 출금 카드' }
 ];
 
-const statusOptions: Array<{ value: CardStatus; label: string }> = [
-    { value: 'AVAILABLE', label: '대기' },
-    { value: 'ASSIGNED', label: '배정' },
-    { value: 'SUSPENDED', label: '정지' },
-    { value: 'CLOSED', label: '해지' }
-];
+const statusLabels: Record<Card['status'], string> = {
+    AVAILABLE: '대기',
+    ASSIGNED: '배정',
+    SUSPENDED: '정지',
+    CLOSED: '해지',
+};
 
 const isValidLast4 = (value: string): boolean => {
     const v = String(value).trim();
@@ -126,7 +126,6 @@ export const CardForm: React.FC<CardFormProps> = ({ initialData, onClose, onSucc
                 maskedNumber,
                 last4,
                 expiry: formData.expiry?.trim() ?? '',
-                status: formData.status,
                 memo: formData.memo?.trim() || ''
             };
 
@@ -134,7 +133,7 @@ export const CardForm: React.FC<CardFormProps> = ({ initialData, onClose, onSucc
                 await cardService.updateCard(initialData.id, payload);
                 await Swal.fire('수정 완료', '카드 정보가 수정되었습니다.', 'success');
             } else {
-                await cardService.createCard(payload);
+                await cardService.createCard({ ...payload, status: 'AVAILABLE' });
                 await Swal.fire('등록 완료', '새 카드가 등록되었습니다.', 'success');
             }
 
@@ -246,15 +245,10 @@ export const CardForm: React.FC<CardFormProps> = ({ initialData, onClose, onSucc
                                     </div>
                                     <div>
                                         <label className={labelClassName}>상태</label>
-                                        <select
-                                            className={fieldClassName}
-                                            value={formData.status}
-                                            onChange={(e) => setFormData((prev) => ({ ...prev, status: e.target.value as CardStatus }))}
-                                        >
-                                            {statusOptions.map((option) => (
-                                                <option key={option.value} value={option.value}>{option.label}</option>
-                                            ))}
-                                        </select>
+                                        <div className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-bold text-slate-600">
+                                            {statusLabels[initialData?.status ?? 'AVAILABLE']}
+                                            <span className="ml-2 text-xs font-semibold text-slate-400">상태 변경은 배정·정지 처리 화면에서 합니다.</span>
+                                        </div>
                                     </div>
                                     <div>
                                         <label className={labelClassName}>카드 종류</label>

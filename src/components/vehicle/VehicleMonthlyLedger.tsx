@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBuilding, faCar, faChevronLeft, faChevronRight, faFileInvoiceDollar, faSave, faExclamationTriangle, faUsers, faUser, faWandMagicSparkles } from '@fortawesome/free-solid-svg-icons';
+import { faBuilding, faCar, faChevronLeft, faChevronRight, faFileInvoiceDollar, faSave, faExclamationTriangle, faUsers, faUser } from '@fortawesome/free-solid-svg-icons';
+import { Route, Sparkles, TriangleAlert } from 'lucide-react';
 import { vehicleService } from '../../services/vehicleService';
 import { isPostedVehicleBillingStatus, vehicleBillingService } from '../../services/vehicleBillingService';
 import { vehicleMonthlyLedgerMutationService } from '../../services/vehicleMonthlyLedgerMutationService';
+import { vehicleMonthlyLedgerBillingService } from '../../services/vehicleMonthlyLedgerBillingService';
+import { teamSettlementProtectionService, type ConfirmedTeamSettlementKeys } from '../../services/teamSettlementProtectionService';
 import { Vehicle, VehicleAssigneeType, VehicleAssignmentRecord, VehicleBillingTargetRecord, VehicleBillingTargetType, VehicleExpenseRecord, VehicleExpenseType, VehicleFineChargeTarget, VehicleFineDriverBillingTarget } from '../../types/vehicle';
 import { VehicleBillingCostItem, VehicleBillingDocument } from '../../types/vehicleBilling';
 import { Team } from '../../services/teamService';
@@ -11,12 +14,17 @@ import { Worker, manpowerService } from '../../services/manpowerService';
 import { OfficeStaff, officeStaffService } from '../../services/officeStaffService';
 import { iconMap } from '../../constants/iconMap';
 import { Timestamp } from 'firebase/firestore';
-import LedgerBillingEditorModal from '../support/LedgerBillingEditorModal';
 import SupportSaveFeedback, { SupportSaveFeedbackState } from '../support/SupportSaveFeedback';
 import VehicleFineImportModal from './VehicleFineImportModal';
+import VehicleTollImportModal from './VehicleTollImportModal';
 import { OFFICE_ASSIGNMENT_TEAM_ID, OFFICE_ASSIGNMENT_TEAM_NAME, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
 import { DEFAULT_SUPPORT_BILLING_START_DATE, isSupportBillingMonthEnabled, maxIsoDate, minIsoDate } from '../../utils/supportBillingPeriod';
 import { getContrastingTextColor } from '../../utils/color';
+import {
+    getSupportManagementMonthDate,
+    rememberSupportManagementYearMonth,
+    subscribeSupportManagementYearMonth,
+} from '../../utils/supportManagementState';
 import { normalizeVehicleExpenseType } from '../../utils/vehicleExpenseType';
 import { SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../../utils/supportWriteErrorReporting';
 
@@ -318,25 +326,9 @@ interface VehicleMonthlyLedgerProps {
     onOpenSetup?: (vehicle: Vehicle) => void;
 }
 
-type BillingFilter = 'all' | 'billed' | 'unbilled';
-type BillingRowStatus = 'unbilled' | 'billed' | 'blocked';
-
 const sanitizeBillingIdPart = (value: unknown): string => {
     const text = String(value ?? '').trim();
     return ['/', '#', '[', ']', '?'].reduce((safe, char) => safe.split(char).join('_'), text || 'row');
-};
-
-const BILLING_FILTERS: Array<{ value: BillingFilter; label: string }> = [
-    { value: 'all', label: '전체' },
-    { value: 'billed', label: '청구' },
-    { value: 'unbilled', label: '미청구' }
-];
-
-const getBillingStatusBadge = (status: BillingRowStatus) => {
-    if (status === 'billed') {
-        return { label: '청구', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
-    }
-    return { label: '미청구', className: 'bg-rose-50 text-rose-700 border-rose-200' };
 };
 
 export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
@@ -348,25 +340,24 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
     loadingVehicles,
     onOpenSetup
 }) => {
-    const [currentDate, setCurrentDate] = useState(new Date());
+    const [currentDate, setCurrentDate] = useState(getSupportManagementMonthDate);
     const [yearMonth, setYearMonth] = useState('');
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [isDirty, setIsDirty] = useState(false);
     const [saveFeedback, setSaveFeedback] = useState<SupportSaveFeedbackState | null>(null);
     const [fineImportOpen, setFineImportOpen] = useState(false);
+    const [tollImportOpen, setTollImportOpen] = useState(false);
     const [isStickyHeader, setIsStickyHeader] = useState(false); // Sticky header toggle
 
     const [rows, setRows] = useState<VehicleLedgerRow[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
     const [billingDocuments, setBillingDocuments] = useState<VehicleBillingDocument[]>([]);
-    const [billingTargets, setBillingTargets] = useState<VehicleBillingTargetRecord[]>([]);
-    const [billingFilter, setBillingFilter] = useState<BillingFilter>('all');
     const [billingProcessingId, setBillingProcessingId] = useState('');
-    const [bulkBillingAction, setBulkBillingAction] = useState<'bill' | 'unbill' | ''>('');
-    const [billingEditor, setBillingEditor] = useState<{ row: VehicleLedgerRow; document: VehicleBillingDocument } | null>(null);
     const [fineDriverEditor, setFineDriverEditor] = useState<FineDriverEditorState | null>(null);
+    const [dirtyRowIds, setDirtyRowIds] = useState<Set<string>>(() => new Set());
+    const [billingRetryRowIds, setBillingRetryRowIds] = useState<Set<string>>(() => new Set());
     const originalExpensesRef = useRef<VehicleExpenseRecord[]>([]);
 
     const teamByAnyId = useMemo(() => {
@@ -447,8 +438,23 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
     useEffect(() => {
         const y = currentDate.getFullYear();
         const m = String(currentDate.getMonth() + 1).padStart(2, '0');
-        setYearMonth(`${y}-${m}`);
+        const nextYearMonth = `${y}-${m}`;
+        setYearMonth(nextYearMonth);
+        rememberSupportManagementYearMonth(nextYearMonth);
     }, [currentDate]);
+
+    useEffect(() => subscribeSupportManagementYearMonth((nextYearMonth) => {
+        const [year, month] = nextYearMonth.split('-').map(Number);
+        setCurrentDate((previous) => (
+            previous.getFullYear() === year && previous.getMonth() === month - 1
+                ? previous
+                : new Date(year, month - 1, 1)
+        ));
+    }), []);
+
+    useEffect(() => {
+        setBillingRetryRowIds(new Set());
+    }, [yearMonth]);
 
     const monthRange = useMemo(() => {
         const [y, m] = yearMonth.split('-').map(Number);
@@ -789,7 +795,6 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                 vehicleBillingService.getBillingsByMonth(yearMonth).catch(() => [] as VehicleBillingDocument[])
             ]);
             originalExpensesRef.current = expenses;
-            setBillingTargets(billingTargetList);
             setBillingDocuments(billings);
 
             const activeVehicles = vehicles.filter((vehicle) => (vehicle.status || 'AVAILABLE') !== 'DISPOSED');
@@ -856,6 +861,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
             newRows.sort(compareVehicleLedgerRowsByBillingTarget);
             setRows(newRows);
             setIsDirty(false);
+            setDirtyRowIds(new Set());
         } catch (e) {
             console.error(e);
             setRows([]);
@@ -1236,8 +1242,12 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         ));
     }, [getVehicleLedgerRowDocumentSuffix]);
 
+    const matchesVehicleBillingIdentity = useCallback((doc: VehicleBillingDocument, row: VehicleLedgerRow): boolean => {
+        return vehicleMonthlyLedgerBillingService.matchesBillingIdentity(doc, row.vehicle);
+    }, []);
+
     const matchesVehicleBillingDocument = useCallback((doc: VehicleBillingDocument, row: VehicleLedgerRow) => {
-        if (normalizeKey(doc.vehicleId) !== normalizeKey(row.vehicle.id)) return false;
+        if (!matchesVehicleBillingIdentity(doc, row)) return false;
         if (normalizeKey(doc.yearMonth) !== normalizeKey(yearMonth)) return false;
 
         const hasLedgerMarkers = normalizeKey(doc.id).includes('__row_') || (doc.lineItems ?? []).some((item) => (
@@ -1246,6 +1256,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
             Boolean(item.sourceSegmentId)
         ));
 
+        if (!vehicleMonthlyLedgerBillingService.isManagedDocument(doc)) return false;
         if (hasLedgerMarkers && hasVehicleLedgerRowMarker(doc, row)) return true;
 
         const identity = resolveVehicleBillingIdentity(row);
@@ -1265,10 +1276,13 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         }
 
         return true;
-    }, [resolveVehicleBillingIdentity, yearMonth, hasVehicleLedgerRowMarker]);
+    }, [resolveVehicleBillingIdentity, yearMonth, hasVehicleLedgerRowMarker, matchesVehicleBillingIdentity]);
 
-    const getBillingDocumentsForRow = useCallback((row: VehicleLedgerRow) => {
-        return billingDocuments.filter((doc) => matchesVehicleBillingDocument(doc, row));
+    const getBillingDocumentsForRow = useCallback((
+        row: VehicleLedgerRow,
+        documents: VehicleBillingDocument[] = billingDocuments
+    ) => {
+        return documents.filter((doc) => matchesVehicleBillingDocument(doc, row));
     }, [billingDocuments, matchesVehicleBillingDocument]);
 
     const isVehicleLedgerBillingDocument = useCallback((doc: VehicleBillingDocument): boolean => (
@@ -1282,16 +1296,20 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         ))
     ), []);
 
-    const getMarkedBillingDocumentsForRow = useCallback((row: VehicleLedgerRow) => {
-        return billingDocuments.filter((doc) => (
-            normalizeKey(doc.vehicleId) === normalizeKey(row.vehicle.id) &&
+    const getMarkedBillingDocumentsForRow = useCallback((
+        row: VehicleLedgerRow,
+        documents: VehicleBillingDocument[] = billingDocuments
+    ) => {
+        return documents.filter((doc) => (
+            matchesVehicleBillingIdentity(doc, row) &&
             normalizeKey(doc.yearMonth) === normalizeKey(yearMonth) &&
+            vehicleMonthlyLedgerBillingService.isManagedDocument(doc) &&
             hasVehicleLedgerRowMarker(doc, row)
         ));
-    }, [billingDocuments, hasVehicleLedgerRowMarker, yearMonth]);
+    }, [billingDocuments, hasVehicleLedgerRowMarker, matchesVehicleBillingIdentity, yearMonth]);
 
     const doesBillingDocumentOverlapRow = useCallback((doc: VehicleBillingDocument, row: VehicleLedgerRow): boolean => {
-        if (normalizeKey(doc.vehicleId) !== normalizeKey(row.vehicle.id)) return false;
+        if (!matchesVehicleBillingIdentity(doc, row)) return false;
         if (normalizeKey(doc.yearMonth) !== normalizeKey(yearMonth)) return false;
         if (hasVehicleLedgerRowMarker(doc, row)) return true;
 
@@ -1308,32 +1326,48 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
             if (!rowStart || !rowEnd || !itemStart || !itemEnd) return false;
             return itemStart.getTime() <= rowEnd.getTime() && itemEnd.getTime() >= rowStart.getTime();
         });
-    }, [hasVehicleLedgerRowMarker, yearMonth]);
+    }, [hasVehicleLedgerRowMarker, matchesVehicleBillingIdentity, yearMonth]);
 
-    const getStaleBillingDocumentsForRow = useCallback((row: VehicleLedgerRow) => {
+    const getStaleBillingDocumentsForRow = useCallback((
+        row: VehicleLedgerRow,
+        documents: VehicleBillingDocument[] = billingDocuments
+    ) => {
         const alreadyMatchedIds = new Set([
-            ...getBillingDocumentsForRow(row),
-            ...getMarkedBillingDocumentsForRow(row)
+            ...getBillingDocumentsForRow(row, documents),
+            ...getMarkedBillingDocumentsForRow(row, documents)
         ].map((doc) => doc.id).filter(Boolean));
 
-        return billingDocuments.filter((doc) => (
+        return documents.filter((doc) => (
             Boolean(doc.id) &&
             !alreadyMatchedIds.has(doc.id) &&
             isVehicleLedgerBillingDocument(doc) &&
+            vehicleMonthlyLedgerBillingService.isManagedDocument(doc) &&
             doesBillingDocumentOverlapRow(doc, row)
         ));
     }, [billingDocuments, doesBillingDocumentOverlapRow, getBillingDocumentsForRow, getMarkedBillingDocumentsForRow, isVehicleLedgerBillingDocument]);
 
-    const getAllBillingDocumentsForRow = useCallback((row: VehicleLedgerRow) => {
-        const documents = [
-            ...getBillingDocumentsForRow(row),
-            ...getMarkedBillingDocumentsForRow(row),
-            ...getStaleBillingDocumentsForRow(row)
+    const getAllBillingDocumentsForRow = useCallback((
+        row: VehicleLedgerRow,
+        sourceDocuments: VehicleBillingDocument[] = billingDocuments
+    ) => {
+        const matchedDocuments = [
+            ...getBillingDocumentsForRow(row, sourceDocuments),
+            ...getMarkedBillingDocumentsForRow(row, sourceDocuments),
+            ...getStaleBillingDocumentsForRow(row, sourceDocuments),
+            // Old deterministic ledger billings can predate row/period source
+            // markers. Source-less manual DRAFTs are intentionally excluded:
+            // automatic reconciliation must never claim or delete them.
+            ...sourceDocuments.filter((document) => (
+                matchesVehicleBillingIdentity(document, row) &&
+                normalizeKey(document.yearMonth) === normalizeKey(yearMonth) &&
+                !vehicleMonthlyLedgerBillingService.hasRowScope(document) &&
+                vehicleMonthlyLedgerBillingService.isManagedDocument(document)
+            ))
         ];
-        return documents.filter((doc, index, list) => (
+        return matchedDocuments.filter((doc, index, list) => (
             Boolean(doc.id) && list.findIndex((item) => item.id === doc.id) === index
         ));
-    }, [getBillingDocumentsForRow, getMarkedBillingDocumentsForRow, getStaleBillingDocumentsForRow]);
+    }, [getBillingDocumentsForRow, getMarkedBillingDocumentsForRow, getStaleBillingDocumentsForRow, matchesVehicleBillingIdentity, yearMonth]);
 
     const getDefaultTargetAmount = useCallback((row: VehicleLedgerRow) => {
         const variableTotal = EXPENSE_TYPES.reduce((sum, type) => {
@@ -1343,89 +1377,12 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         return row.rentFee + row.leaseFee + variableTotal;
     }, []);
 
-    const isFineDriverBillingDocument = useCallback((doc: VehicleBillingDocument, row: VehicleLedgerRow) => {
-        if (row.fineChargeTarget !== 'DRIVER' || (row.amounts.FINE ?? 0) <= 0) return false;
-        const id = normalizeKey(doc.id);
-        if (id.includes('__fine_driver') || id.includes('fine-driver')) return true;
-        const variableItems = (doc.lineItems ?? []).filter((item) => item.type !== 'FIXED');
-        return variableItems.length > 0 && variableItems.every((item) =>
-            normalizeVehicleExpenseType(item.category, item.label, item.id) === 'FINE'
-        );
-    }, []);
-
-    const getExpectedDocumentTotal = useCallback((doc: VehicleBillingDocument, row: VehicleLedgerRow) => {
-        if (isFineDriverBillingDocument(doc, row)) return row.amounts.FINE ?? 0;
-        return getDefaultTargetAmount(row);
-    }, [getDefaultTargetAmount, isFineDriverBillingDocument]);
-
-    const isVehicleBillingDocumentCurrentForRow = useCallback((doc: VehicleBillingDocument, row: VehicleLedgerRow) => {
-        if (!matchesVehicleBillingDocument(doc, row)) return false;
-
-        const expectedTotal = getExpectedDocumentTotal(doc, row);
-        const documentTotal = Number(doc.totalAmount ?? 0);
-        if (documentTotal !== expectedTotal) return false;
-
-        const lineItems = doc.lineItems ?? [];
-        if (lineItems.length === 0) return true;
-
-        const lineTotal = lineItems.reduce((sum, item) => sum + Number(item.amount ?? 0), 0);
-        return lineTotal === documentTotal;
-    }, [getExpectedDocumentTotal, matchesVehicleBillingDocument]);
-
-    const getRowBillingState = useCallback((row: VehicleLedgerRow): {
-        status: BillingRowStatus;
-        documents: VehicleBillingDocument[];
-        reason?: string;
-    } => {
-        const defaultTargetAmount = getDefaultTargetAmount(row);
-        const shouldBillFineToDriver = row.fineChargeTarget === 'DRIVER' && (row.amounts.FINE ?? 0) > 0;
-        const fineDriverTarget = shouldBillFineToDriver ? resolveFineDriverBillingTarget(row) : null;
-        const documents = getAllBillingDocumentsForRow(row);
-
-        if (shouldBillFineToDriver && !fineDriverTarget) {
-            return { status: 'blocked', documents, reason: '운전자 없음' };
-        }
-
-        const identity = resolveVehicleBillingIdentity(row);
-        if (defaultTargetAmount > 0 && (!identity || (
-            identity.teamIds.size === 0 &&
-            identity.teamNames.size === 0 &&
-            identity.workerIds.size === 0 &&
-            identity.workerNames.size === 0
-        ))) {
-            return { status: 'blocked', documents, reason: '청구대상 없음' };
-        }
-        if (row.total <= 0) {
-            return { status: 'blocked', documents, reason: '금액 없음' };
-        }
-
-        const expectedDocumentCount = (defaultTargetAmount > 0 ? 1 : 0) + (fineDriverTarget ? 1 : 0);
-        if (expectedDocumentCount === 0) return { status: 'blocked', documents, reason: '금액 없음' };
-        if (documents.length < expectedDocumentCount) return { status: 'unbilled', documents };
-        if (documents.length !== expectedDocumentCount) return { status: 'unbilled', documents };
-        if (!documents.every((doc) => isVehicleBillingDocumentCurrentForRow(doc, row))) {
-            return { status: 'unbilled', documents };
-        }
-        if (documents.length === 0) return { status: 'unbilled', documents };
-        return { status: 'billed', documents };
-    }, [getAllBillingDocumentsForRow, getDefaultTargetAmount, isVehicleBillingDocumentCurrentForRow, resolveFineDriverBillingTarget, resolveVehicleBillingIdentity]);
-
     const visibleLedgerRows = useMemo(() => {
         return rows
             .map((row, index) => ({ row, index }))
             .filter(({ row }) => rowMatchesTeamFilter(row, teamFilterId))
             .filter(({ row }) => rowMatchesSearchText(row, searchText));
     }, [rows, rowMatchesSearchText, rowMatchesTeamFilter, searchText, teamFilterId]);
-
-    const billingRows = useMemo(() => {
-        return visibleLedgerRows
-            .map(({ row, index }) => ({ row, index, billingState: getRowBillingState(row) }))
-            .filter(({ billingState }) => {
-                if (billingFilter === 'all') return true;
-                if (billingFilter === 'unbilled') return billingState.status === 'unbilled' || billingState.status === 'blocked';
-                return billingState.status === billingFilter;
-            });
-    }, [visibleLedgerRows, billingFilter, getRowBillingState]);
 
     const vehicleRowCountById = useMemo(() => {
         const map = new Map<string, number>();
@@ -1436,16 +1393,6 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         });
         return map;
     }, [rows]);
-
-    const bulkBillableCount = useMemo(
-        () => billingRows.filter(({ billingState }) => billingState.status === 'unbilled').length,
-        [billingRows]
-    );
-
-    const bulkUnbillableCount = useMemo(
-        () => billingRows.filter(({ billingState }) => billingState.documents.length > 0).length,
-        [billingRows]
-    );
 
     useEffect(() => {
         if (yearMonth) loadData();
@@ -1469,7 +1416,16 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         setFineImportOpen(true);
     };
 
-    const handleCellCommit = useCallback((index: number, type: VehicleExpenseType, numValue: number) => {
+    const handleTollImportOpen = () => {
+        if (isDirty) {
+            window.alert('통행료를 등록하기 전에 변경사항을 먼저 저장해 주세요.');
+            return;
+        }
+        setSaveFeedback(null);
+        setTollImportOpen(true);
+    };
+
+    const handleCellCommit = useCallback((index: number, rowId: string, type: VehicleExpenseType, numValue: number) => {
         setRows(prev => {
             const newRows = [...prev];
             const row = { ...newRows[index] };
@@ -1484,53 +1440,20 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
             return newRows;
         });
         setIsDirty(true);
+        setDirtyRowIds((current) => new Set(current).add(rowId));
         setSaveFeedback(null);
     }, []);
 
-    const handleNoteChange = useCallback((index: number, note: string) => {
+    const handleNoteChange = useCallback((index: number, rowId: string, note: string) => {
         setRows(prev => {
             const newRows = [...prev];
             newRows[index] = { ...newRows[index], note };
             return newRows;
         });
         setIsDirty(true);
+        setDirtyRowIds((current) => new Set(current).add(rowId));
         setSaveFeedback(null);
     }, []);
-
-    const handleSave = async () => {
-        setSaving(true);
-        try {
-            const result = await vehicleMonthlyLedgerMutationService.saveMonthlyLedger({
-                yearMonth,
-                visibleRows: visibleLedgerRows,
-                originalExpenses: originalExpensesRef.current,
-                expenseTypes: EXPENSE_TYPES,
-                getBillingDocumentsForRow: getAllBillingDocumentsForRow,
-                buildBillingDocumentsForRow
-            });
-
-            setIsDirty(false);
-            await loadData();
-            setSaveFeedback({
-                status: result.skippedBillingCount > 0 ? 'warning' : 'success',
-                title: result.skippedBillingCount > 0 ? '일부 행을 제외하고 저장했습니다.' : '저장 완료',
-                message: result.skippedBillingCount > 0
-                    ? `확정/정산 청구서가 있는 ${result.skippedBillingCount}개 행은 건너뛰었습니다. 나머지 변경사항은 반영됐습니다.`
-                    : '변경사항이 반영됐습니다.',
-                operationId: result.operationId
-            });
-        } catch (e) {
-            console.error('[VehicleMonthlyLedger] save failed', { yearMonth }, e);
-            setSaveFeedback({
-                status: 'error',
-                title: '저장 실패',
-                message: SUPPORT_WRITE_RETRY_USER_MESSAGE,
-                operationId: `vehicle-monthly-ledger:${yearMonth}`
-            });
-        } finally {
-            setSaving(false);
-        }
-    };
 
     const buildLineItemsForRow = (
         row: VehicleLedgerRow,
@@ -1636,13 +1559,11 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
             workerId: target.issuedToType === 'worker' ? target.issuedToWorkerId : undefined,
             yearMonth
         });
-        const status = existing?.status ?? 'CONFIRMED';
-        const confirmedAt = ['CONFIRMED', 'PAID', 'OVERDUE'].includes(status)
-            ? (existing?.confirmedAt ?? Timestamp.now())
-            : existing?.confirmedAt;
-
         return {
-            id: existing?.id ?? `${baseId}${suffix}`,
+            // Rebilling always converges on the canonical ledger identity.
+            // A legacy/random DRAFT remains in existingDocuments and is
+            // removed only after this deterministic replacement is saved.
+            id: `${baseId}${suffix}`,
             yearMonth,
             vehicleId: row.vehicle.id,
             vehiclePlate: row.vehicle.licensePlate,
@@ -1656,12 +1577,12 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
             fixedCost,
             variableCost,
             totalAmount: fixedCost + variableCost,
-            status,
+            status: 'DRAFT',
             lineItems,
             memo: existing?.memo ?? row.note,
             createdAt: existing?.createdAt ?? Timestamp.now(),
             updatedAt: Timestamp.now(),
-            confirmedAt
+            confirmedAt: undefined
         };
     };
 
@@ -1697,10 +1618,315 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         return documents;
     };
 
-    const getFineExpensesForRow = (row: VehicleLedgerRow): VehicleExpenseRecord[] => {
+    const getBlockingUnmanagedDocumentsForRow = (
+        row: VehicleLedgerRow,
+        sourceDocuments: VehicleBillingDocument[]
+    ): VehicleBillingDocument[] => {
+        const vehicleMonthDocuments = sourceDocuments.filter((document) => (
+            matchesVehicleBillingIdentity(document, row) &&
+            normalizeKey(document.yearMonth) === normalizeKey(yearMonth)
+        ));
+        const managedDocuments = getAllBillingDocumentsForRow(row, sourceDocuments);
+        const desiredDocuments = buildBillingDocumentsForRow(row, managedDocuments);
+        return vehicleMonthlyLedgerBillingService.getBlockingUnmanagedDocuments(
+            vehicleMonthDocuments,
+            desiredDocuments
+        );
+    };
+
+    const loadStoredBillingRow = async (
+        row: VehicleLedgerRow,
+        storedExpenses?: VehicleExpenseRecord[]
+    ): Promise<VehicleLedgerRow> => {
+        const expenses = storedExpenses ?? await vehicleService.getExpensesByVehicle(row.vehicle.id, yearMonth);
+        return vehicleMonthlyLedgerBillingService.buildRowFromStoredExpenses(row, expenses, EXPENSE_TYPES);
+    };
+
+    const applyDraftBillingForStoredRow = async (
+        row: VehicleLedgerRow,
+        existingDocuments: VehicleBillingDocument[]
+    ) => {
+        const nextDocuments = buildBillingDocumentsForRow(row, existingDocuments);
+        const result = await vehicleMonthlyLedgerBillingService.upsertDrafts({
+            existingDocuments,
+            desiredDocuments: nextDocuments
+        });
+        return { ...result, desiredDocuments: nextDocuments };
+    };
+
+    const getAutoBillingValidationMessage = (row: VehicleLedgerRow): string | null => {
+        const defaultAmount = getDefaultTargetAmount(row);
+        if (defaultAmount > 0 && !resolveVehicleBillingTarget(row)) {
+            return `${row.vehicle.licensePlate}: 청구대상을 먼저 지정해 주세요.`;
+        }
+
+        const driverFineAmount = row.fineChargeTarget === 'DRIVER' ? (row.amounts.FINE ?? 0) : 0;
+        if (driverFineAmount > 0 && !resolveFineDriverBillingTarget(row)) {
+            return `${row.vehicle.licensePlate}: 과태료 운전자를 먼저 지정해 주세요.`;
+        }
+
+        const expectedTotal = defaultAmount + driverFineAmount;
+        if (expectedTotal !== row.total) {
+            return `${row.vehicle.licensePlate}: 저장 금액의 청구대상을 모두 확인해 주세요.`;
+        }
+        return null;
+    };
+
+    const isRowTeamSettlementConfirmed = (
+        row: VehicleLedgerRow,
+        documents: VehicleBillingDocument[],
+        confirmedKeys: ConfirmedTeamSettlementKeys
+    ): boolean => {
+        const settlementTargets = [
+            resolveVehicleBillingTarget(row),
+            row.fineChargeTarget === 'DRIVER' && (row.amounts.FINE ?? 0) > 0
+                ? resolveFineDriverBillingTarget(row)
+                : null,
+            ...documents.map((document) => ({
+                issuedToType: document.issuedToType === 'worker' ? 'worker' as const : 'team' as const,
+                teamId: normalizeKey(document.teamId),
+                teamName: normalizeKey(document.teamName),
+                assignedTeamId: normalizeKey(document.assignedTeamId),
+                assignedTeamName: normalizeKey(document.assignedTeamName),
+                issuedToWorkerId: document.issuedToWorkerId,
+                issuedToWorkerName: document.issuedToWorkerName
+            }))
+        ].filter((target): target is ResolvedVehicleBillingTarget => Boolean(target));
+
+        return settlementTargets.some((target) => (
+            teamSettlementProtectionService.isConfirmedTarget(confirmedKeys, {
+                teamId: target.teamId,
+                teamName: target.teamName
+            })
+        ));
+    };
+
+    const handleSave = async () => {
+        if (!yearMonth || saving) return;
+
+        setSaving(true);
+        setSaveFeedback(null);
+        let ledgerSaved = false;
+        let operationId = `vehicle-monthly-ledger:${yearMonth}`;
+        let attemptedRowIds: string[] = [];
+
+        try {
+            const dirtyScope = dirtyRowIds.size > 0;
+            const candidateRows = vehicleMonthlyLedgerBillingService.selectRowsForSave({
+                allRows: rows.map((row, index) => ({ row, index })),
+                visibleRows: visibleLedgerRows,
+                dirtyRowIds,
+                retryRowIds: billingRetryRowIds
+            });
+
+            if (candidateRows.length === 0) {
+                setSaveFeedback({
+                    status: 'warning',
+                    title: '저장할 차량이 없습니다.',
+                    message: '현재 조회 조건에 맞는 차량 대장 행이 없습니다.',
+                    operationId
+                });
+                return;
+            }
+
+            // A strict billing read is required before writing the source
+            // ledger. Treating a failed read as an empty result could rewrite
+            // an already confirmed settlement.
+            const [latestDocuments, confirmedSettlementKeys] = await Promise.all([
+                vehicleBillingService.getBillingsByMonth(yearMonth, { throwOnError: true }),
+                teamSettlementProtectionService.getConfirmedTeamSettlementKeys(yearMonth)
+            ]);
+            const blockedRows = candidateRows.flatMap(({ row }) => {
+                const documents = getAllBillingDocumentsForRow(row, latestDocuments);
+                const protectedDocuments = vehicleMonthlyLedgerBillingService.getProtectedDocuments(documents);
+                const validationMessage = getAutoBillingValidationMessage(row);
+                const settlementConfirmed = isRowTeamSettlementConfirmed(row, documents, confirmedSettlementKeys);
+                const blockingUnmanagedDocuments = getBlockingUnmanagedDocumentsForRow(row, latestDocuments);
+                if (
+                    protectedDocuments.length === 0 &&
+                    !settlementConfirmed &&
+                    !validationMessage &&
+                    blockingUnmanagedDocuments.length === 0
+                ) return [];
+                return [{
+                    row,
+                    validationMessage,
+                    settlementConfirmed,
+                    blockingUnmanagedDocuments,
+                    protectedStatuses: Array.from(new Set(protectedDocuments.map((document) => normalizeKey(document.status)).filter(Boolean)))
+                }];
+            });
+
+            if (dirtyScope && blockedRows.length > 0) {
+                const first = blockedRows[0];
+                const reason = first.settlementConfirmed
+                    ? `${first.row.vehicle.licensePlate}: 해당 팀의 ${yearMonth} 정산이 이미 확정되어 변경할 수 없습니다.`
+                    : first.protectedStatuses.length > 0
+                    ? `${first.row.vehicle.licensePlate}: 이미 확정·지급·연체된 팀 경비가 있어 변경할 수 없습니다.`
+                    : first.blockingUnmanagedDocuments.length > 0
+                    ? `${first.row.vehicle.licensePlate}: 수기 또는 혼합 작성된 차량 경비가 있어 자동 변경할 수 없습니다.`
+                    : first.validationMessage || '청구대상을 확인해 주세요.';
+                const resolution = first.blockingUnmanagedDocuments.length > 0
+                    ? '해당 차량 경비 문서를 검토·정리한 뒤 다시 저장해 주세요.'
+                    : '팀정산 확정을 취소하거나 청구대상을 지정한 뒤 다시 저장해 주세요.';
+                setSaveFeedback({
+                    status: 'warning',
+                    title: '저장을 중단했습니다.',
+                    message: `${reason} ${resolution}`,
+                    operationId
+                });
+                return;
+            }
+
+            const blockedIds = new Set(blockedRows.map(({ row }) => row.id));
+            const rowsToSave = candidateRows.filter(({ row }) => !blockedIds.has(row.id));
+            if (rowsToSave.length === 0) {
+                setSaveFeedback({
+                    status: 'warning',
+                    title: '변경 가능한 차량이 없습니다.',
+                    message: '확정된 정산은 보호되며, 금액이 있는 차량은 청구대상이 지정되어야 저장할 수 있습니다.',
+                    operationId
+                });
+                return;
+            }
+            attemptedRowIds = rowsToSave.map(({ row }) => row.id);
+
+            const result = await vehicleMonthlyLedgerMutationService.saveMonthlyLedger({
+                yearMonth,
+                visibleRows: rowsToSave,
+                originalExpenses: originalExpensesRef.current,
+                expenseTypes: EXPENSE_TYPES
+            });
+            operationId = result.operationId;
+            ledgerSaved = true;
+
+            // Billing must be derived from the records that actually reached
+            // persistence, never from the editable screen snapshot.
+            const [storedExpenses, storedBillingDocuments, refreshedSettlementKeys] = await Promise.all([
+                vehicleService.getExpensesByMonth(yearMonth),
+                vehicleBillingService.getBillingsByMonth(yearMonth, { throwOnError: true }),
+                teamSettlementProtectionService.getConfirmedTeamSettlementKeys(yearMonth)
+            ]);
+
+            let workingDocuments = storedBillingDocuments;
+            let syncedCount = 0;
+            let zeroAmountCount = 0;
+            const failedRowIds: string[] = [];
+            const newlyProtectedRowIds: string[] = [];
+
+            for (const { row } of rowsToSave) {
+                try {
+                    const storedRow = await loadStoredBillingRow(row, storedExpenses);
+                    const validationMessage = getAutoBillingValidationMessage(storedRow);
+                    if (validationMessage) throw new Error(validationMessage);
+
+                    const existingDocuments = getAllBillingDocumentsForRow(storedRow, workingDocuments);
+                    if (getBlockingUnmanagedDocumentsForRow(storedRow, workingDocuments).length > 0) {
+                        newlyProtectedRowIds.push(row.id);
+                        continue;
+                    }
+                    if (isRowTeamSettlementConfirmed(storedRow, existingDocuments, refreshedSettlementKeys)) {
+                        newlyProtectedRowIds.push(row.id);
+                        continue;
+                    }
+                    const syncResult = await applyDraftBillingForStoredRow(storedRow, existingDocuments);
+                    if (syncResult.status === 'skipped-posted') {
+                        newlyProtectedRowIds.push(row.id);
+                        continue;
+                    }
+
+                    syncedCount += 1;
+                    if (storedRow.total <= 0) zeroAmountCount += 1;
+
+                    const removedIds = new Set(syncResult.deletedDraftIds);
+                    const savedDocuments = syncResult.desiredDocuments.map((document, index) => ({
+                        ...document,
+                        id: syncResult.savedIds[index] || document.id,
+                        status: 'DRAFT' as const,
+                        confirmedAt: undefined
+                    }));
+                    const savedIds = new Set(savedDocuments.map((document) => document.id));
+                    workingDocuments = [
+                        ...workingDocuments.filter((document) => !removedIds.has(document.id) && !savedIds.has(document.id)),
+                        ...savedDocuments
+                    ];
+                } catch (error) {
+                    console.error('[VehicleMonthlyLedger] automatic billing sync failed', {
+                        yearMonth,
+                        rowId: row.id,
+                        vehicleId: row.vehicle.id
+                    }, error);
+                    failedRowIds.push(row.id);
+                }
+            }
+
+            const retryIds = new Set([...failedRowIds, ...newlyProtectedRowIds]);
+            const attemptedIds = new Set(rowsToSave.map(({ row }) => row.id));
+            setBillingRetryRowIds((current) => {
+                const next = new Set(current);
+                attemptedIds.forEach((id) => next.delete(id));
+                retryIds.forEach((id) => next.add(id));
+                return next;
+            });
+            setIsDirty(false);
+            setDirtyRowIds(new Set());
+            await loadData();
+
+            if (failedRowIds.length > 0 || newlyProtectedRowIds.length > 0) {
+                const details = [
+                    failedRowIds.length > 0 ? `반영 실패 ${failedRowIds.length}대` : '',
+                    newlyProtectedRowIds.length > 0 ? `보호·수기 확인 ${newlyProtectedRowIds.length}대` : ''
+                ].filter(Boolean).join(', ');
+                setSaveFeedback({
+                    status: 'error',
+                    title: '대장은 저장됐지만 팀 경비 확인이 필요합니다.',
+                    message: newlyProtectedRowIds.length > 0
+                        ? `${details}. 저장 도중 정산 확정 상태 또는 수기 차량 경비가 확인되어 새 팀 경비는 만들지 않았습니다. 해당 문서를 확인한 뒤 저장을 다시 눌러 주세요.`
+                        : `${details}. 중복 없이 다시 시도할 수 있으니 문제를 확인한 뒤 저장을 다시 눌러 주세요.`,
+                    operationId
+                });
+                return;
+            }
+
+            const skippedMessage = blockedRows.length > 0
+                ? ` 확정된 정산·수기 문서 또는 미지정 대상 ${blockedRows.length}대는 변경하지 않았습니다.`
+                : '';
+            setSaveFeedback({
+                status: blockedRows.length > 0 ? 'warning' : 'success',
+                title: '저장 및 팀 경비 반영 완료',
+                message: `${syncedCount}대의 저장된 금액을 팀별 경비에 반영했습니다.${zeroAmountCount > 0 ? ` 0원 ${zeroAmountCount}대의 작성 중 경비는 제거했습니다.` : ''}${skippedMessage}`,
+                operationId
+            });
+        } catch (error) {
+            console.error('[VehicleMonthlyLedger] save failed', { yearMonth, ledgerSaved }, error);
+            if (ledgerSaved) {
+                if (attemptedRowIds.length > 0) {
+                    setBillingRetryRowIds((current) => new Set([...current, ...attemptedRowIds]));
+                }
+                setIsDirty(false);
+                setDirtyRowIds(new Set());
+                await loadData().catch(() => undefined);
+            }
+            setSaveFeedback({
+                status: 'error',
+                title: ledgerSaved ? '대장은 저장됐지만 팀 경비 반영에 실패했습니다.' : '저장 실패',
+                message: ledgerSaved
+                    ? '대장 금액은 저장되어 있습니다. 중복되지 않으니 저장을 다시 눌러 팀별 경비 반영을 재시도해 주세요.'
+                    : SUPPORT_WRITE_RETRY_USER_MESSAGE,
+                operationId
+            });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const getFineExpensesForRow = (
+        row: VehicleLedgerRow,
+        expenses: VehicleExpenseRecord[] = originalExpensesRef.current
+    ): VehicleExpenseRecord[] => {
         const start = parseYmdDate(row.segment.startDate);
         const end = parseYmdDate(row.segment.endDate);
-        return originalExpensesRef.current.filter((expense) => {
+        return expenses.filter((expense) => {
             if (expense.status === 'CANCELLED') return false;
             if (normalizeKey(expense.vehicleId) !== normalizeKey(row.vehicle.id)) return false;
             if (normalizeVehicleExpenseType(expense.type, expense.note, expense.id) !== 'FINE') return false;
@@ -1712,6 +1938,10 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
 
     const handleSaveFineDriverTarget = async () => {
         if (!fineDriverEditor) return;
+        if (isDirty) {
+            window.alert('과태료 청구대상을 정정하기 전에 대장 변경사항을 먼저 저장해 주세요.');
+            return;
+        }
 
         const selectedTarget = fineDriverOptions.find((option) => option.workerId === fineDriverEditor.selectedWorkerId);
         if (!selectedTarget) {
@@ -1720,22 +1950,42 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         }
 
         const row = fineDriverEditor.row;
-        const fineExpenses = getFineExpensesForRow(row);
-        if (fineExpenses.length === 0) {
-            window.alert('과태료 금액을 먼저 변경사항 저장으로 저장한 후 정정해 주세요.');
-            return;
-        }
-
-        const currentDocuments = getAllBillingDocumentsForRow(row);
-        const correctionReason = `${yearMonth} ${row.vehicle.licensePlate} 과태료 청구대상 정정`;
-        const correctedRow: VehicleLedgerRow = {
-            ...row,
-            fineChargeTarget: 'DRIVER',
-            fineDriverBillingTarget: selectedTarget
-        };
 
         setBillingProcessingId(row.id);
+        let targetStored = false;
         try {
+            const [storedExpenses, latestDocuments, confirmedSettlementKeys] = await Promise.all([
+                vehicleService.getExpensesByVehicle(row.vehicle.id, yearMonth),
+                vehicleBillingService.getBillingsByMonth(yearMonth, { throwOnError: true }),
+                teamSettlementProtectionService.getConfirmedTeamSettlementKeys(yearMonth)
+            ]);
+            const currentDocuments = getAllBillingDocumentsForRow(row, latestDocuments);
+            const protectedDocuments = currentDocuments.filter((document) => isPostedVehicleBillingStatus(document.status));
+            if (protectedDocuments.length > 0) {
+                window.alert('확정·지급·연체 청구서는 자동 정정하지 않습니다. 먼저 해당 청구서의 확정을 명시적으로 취소해 주세요.');
+                return;
+            }
+
+            const correctedPreviewRow: VehicleLedgerRow = {
+                ...row,
+                fineChargeTarget: 'DRIVER',
+                fineDriverBillingTarget: selectedTarget
+            };
+            if (getBlockingUnmanagedDocumentsForRow(correctedPreviewRow, latestDocuments).length > 0) {
+                window.alert('수기 또는 혼합 작성된 차량 경비가 있어 자동 정정할 수 없습니다. 해당 경비 문서를 먼저 확인해 주세요.');
+                return;
+            }
+            if (isRowTeamSettlementConfirmed(correctedPreviewRow, currentDocuments, confirmedSettlementKeys)) {
+                window.alert('해당 팀의 월 정산이 이미 확정되어 과태료 대상을 변경할 수 없습니다. 먼저 팀정산 확정을 취소해 주세요.');
+                return;
+            }
+
+            const fineExpenses = getFineExpensesForRow(row, storedExpenses);
+            if (fineExpenses.length === 0) {
+                window.alert('저장된 과태료가 없습니다. 대장 금액을 먼저 저장해 주세요.');
+                return;
+            }
+
             // This is a period-specific correction.  It never changes the
             // vehicle assignment or the default target used by other months.
             await vehicleService.applyVehicleExpenseChanges({
@@ -1746,333 +1996,51 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                     fineDriverBillingTarget: selectedTarget
                 }))
             });
+            targetStored = true;
 
-            const postedDocuments = currentDocuments.filter((document) => isPostedVehicleBillingStatus(document.status));
-            for (const document of postedDocuments) {
-                await vehicleBillingService.cancelConfirmation(document.id, { reason: correctionReason });
-            }
-
-            const editableDocuments = currentDocuments.map((document) => (
-                isPostedVehicleBillingStatus(document.status)
-                    ? { ...document, status: 'DRAFT' as const, confirmedAt: undefined }
-                    : document
+            const correctedExpenses = storedExpenses.map((expense) => (
+                fineExpenses.some((fine) => fine.id === expense.id)
+                    ? { ...expense, fineChargeTarget: 'DRIVER' as const, fineDriverBillingTarget: selectedTarget }
+                    : expense
             ));
-            const nextDocuments = buildBillingDocumentsForRow(correctedRow, editableDocuments);
-            if (nextDocuments.length === 0) {
-                throw new Error('vehicle-fine-target-correction-build-failed');
-            }
-
-            const reissueAsConfirmed = postedDocuments.length > 0;
-            const nextDocumentIds = new Set(nextDocuments.map((document) => document.id).filter(Boolean));
-            await Promise.all(nextDocuments.map((document) => vehicleBillingService.saveBilling({
-                ...document,
-                status: reissueAsConfirmed ? 'CONFIRMED' : document.status,
-                confirmedAt: reissueAsConfirmed ? Timestamp.now() : document.confirmedAt,
-                memo: document.memo
-                    ? `${document.memo}\n${correctionReason}`
-                    : correctionReason
-            })));
-
-            const obsoleteDocuments = editableDocuments.filter((document) => document.id && !nextDocumentIds.has(document.id));
-            await Promise.all(obsoleteDocuments.map((document) => vehicleBillingService.deleteBilling(document.id)));
-
-            await loadData();
-            setFineDriverEditor(null);
-            window.alert('과태료 청구대상을 정정하고 해당 월 청구서를 다시 반영했습니다.');
-        } catch (error) {
-            console.error('[VehicleMonthlyLedger] fine target correction failed', error);
-            window.alert('과태료 청구대상 정정에 실패했습니다. 잠시 후 다시 시도해 주세요.');
-        } finally {
-            setBillingProcessingId('');
-        }
-    };
-
-    const cancelPostedBillingDocuments = async (
-        documents: VehicleBillingDocument[],
-        reason: string
-    ): Promise<VehicleBillingDocument[]> => {
-        const postedDocuments = documents.filter((document) => isPostedVehicleBillingStatus(document.status));
-        for (const document of postedDocuments) {
-            await vehicleBillingService.cancelConfirmation(document.id, { reason });
-        }
-        return documents.map((document) => (
-            isPostedVehicleBillingStatus(document.status)
-                ? { ...document, status: 'DRAFT' as const, confirmedAt: undefined }
-                : document
-        ));
-    };
-
-    const handleCreateOrRecalculateBilling = async (row: VehicleLedgerRow, mode: 'create' | 'recalculate') => {
-        const state = getRowBillingState(row);
-        if (isDirty) {
-            alert('청구 전 변경사항을 먼저 전체 저장해주세요.');
-            return;
-        }
-        if (state.status === 'blocked') {
-            alert(state.reason || '청구할 수 없는 행입니다.');
-            return;
-        }
-
-        setBillingProcessingId(row.id);
-        try {
-            const previewDocuments = buildBillingDocumentsForRow(row, state.documents);
-            if (previewDocuments.length === 0) {
-                alert('배정 이력과 금액 기준으로 생성할 청구 문서를 찾지 못했습니다.');
-                return;
-            }
-            const hadPostedDocument = state.documents.some((document) => isPostedVehicleBillingStatus(document.status));
-            const editableDocuments = await cancelPostedBillingDocuments(
-                state.documents,
-                `${yearMonth} ${row.vehicle.licensePlate} 청구 재생성`
-            );
-            const nextDocuments = buildBillingDocumentsForRow(row, editableDocuments).map((document) => (
-                hadPostedDocument
-                    ? { ...document, status: 'CONFIRMED' as const, confirmedAt: Timestamp.now() }
-                    : document
-            ));
-            if (nextDocuments.length === 0) {
-                alert('배정 이력과 금액 기준으로 생성할 청구 문서를 찾지 못했습니다.');
-                return;
-            }
-
-            if (editableDocuments.length > 0) {
-                await Promise.all(editableDocuments.map((document) => vehicleBillingService.deleteBilling(document.id)));
-            }
-            await Promise.all(nextDocuments.map((document) => vehicleBillingService.saveBilling(document)));
-            await loadData();
-            alert(mode === 'recalculate' ? '청구가 다시 처리되었습니다.' : '청구 처리되었습니다.');
-        } catch (error) {
-            console.error(error);
-            alert('청구 처리에 실패했습니다.');
-        } finally {
-            setBillingProcessingId('');
-        }
-    };
-
-    const handleCreateSplitBilling = async (row: VehicleLedgerRow) => {
-        if (isDirty) {
-            alert('청구 전 변경사항을 먼저 전체 저장해주세요.');
-            return;
-        }
-
-        const targetRows = rows.filter((item) => normalizeKey(item.vehicle.id) === normalizeKey(row.vehicle.id));
-        if (targetRows.length <= 1) {
-            alert('분할청구할 기간이 없습니다.');
-            return;
-        }
-
-        const targets = targetRows
-            .map((item) => ({ row: item, billingState: getRowBillingState(item) }))
-            .filter(({ billingState }) => billingState.status === 'unbilled');
-
-        if (targets.length === 0) {
-            alert('분할청구할 미청구 행이 없습니다.');
-            return;
-        }
-
-        setBillingProcessingId(row.id);
-        let processed = 0;
-        let skipped = 0;
-
-        try {
-            for (const target of targets) {
-                try {
-                    const nextDocuments = buildBillingDocumentsForRow(target.row, target.billingState.documents);
-                    if (nextDocuments.length === 0) {
-                        skipped += 1;
-                        continue;
-                    }
-
-                    if (target.billingState.documents.length > 0) {
-                        await Promise.all(target.billingState.documents.map((document) => vehicleBillingService.deleteBilling(document.id)));
-                    }
-                    await Promise.all(nextDocuments.map((document) => vehicleBillingService.saveBilling(document)));
-                    processed += 1;
-                } catch (error) {
-                    console.error(error);
-                    skipped += 1;
-                }
-            }
-
-            await loadData();
-            alert(`분할청구 처리 ${processed}건 완료${skipped > 0 ? `, ${skipped}건 제외` : ''}`);
-        } finally {
-            setBillingProcessingId('');
-        }
-    };
-
-    const handleCancelBilling = async (row: VehicleLedgerRow, document?: VehicleBillingDocument) => {
-        const documents = document ? [document] : getRowBillingState(row).documents;
-        const documentIds = Array.from(new Set(documents.map((item) => item.id).filter(Boolean)));
-        if (documentIds.length === 0) return;
-        if (!window.confirm('청구 상태를 미청구로 변경할까요?')) return;
-
-        setBillingProcessingId(row.id);
-        try {
-            await cancelPostedBillingDocuments(
-                documents,
-                `${yearMonth} ${row.vehicle.licensePlate} 청구 미청구 처리`
-            );
-            await Promise.all(documentIds.map((id) => vehicleBillingService.deleteBilling(id)));
-            await loadData();
-            alert('미청구 처리되었습니다.');
-        } catch (error) {
-            console.error(error);
-            alert('미청구 처리에 실패했습니다.');
-        } finally {
-            setBillingProcessingId('');
-        }
-    };
-
-    const handleBulkBilling = async (action: 'bill' | 'unbill') => {
-        if (isDirty) {
-            alert('청구 전 변경사항을 먼저 전체 저장해주세요.');
-            return;
-        }
-
-        const targets = billingRows.filter(({ billingState }) => (
-            action === 'bill'
-                ? billingState.status === 'unbilled'
-                : billingState.documents.length > 0
-        ));
-
-        if (targets.length === 0) {
-            alert(action === 'bill' ? '일괄 청구할 행이 없습니다.' : '일괄 미청구 처리할 행이 없습니다.');
-            return;
-        }
-
-        const actionLabel = action === 'bill' ? '청구' : '미청구';
-        if (!window.confirm(`현재 필터 목록의 ${targets.length}건을 일괄 ${actionLabel} 처리합니다.\n저장하지 않은 셀 변경사항은 반영되지 않습니다.\n계속할까요?`)) return;
-
-        setBulkBillingAction(action);
-        setBillingProcessingId('__bulk__');
-        let processed = 0;
-        let skipped = 0;
-
-        try {
-            if (action === 'unbill') {
-                const documents = targets.flatMap(({ billingState }) => billingState.documents)
-                    .filter((document, index, list) => (
-                        Boolean(document.id) && list.findIndex((item) => item.id === document.id) === index
-                    ));
-                const documentIds = documents.map((document) => document.id);
-                if (documentIds.length === 0) {
-                    alert('일괄 미청구 처리할 청구문서가 없습니다.');
-                    return;
-                }
-                await cancelPostedBillingDocuments(documents, `${yearMonth} 차량 통합관리대장 일괄 미청구 처리`);
-                await Promise.all(documentIds.map((id) => vehicleBillingService.deleteBilling(id)));
-                processed = targets.length;
+            const correctedRow = await loadStoredBillingRow({
+                ...correctedPreviewRow
+            }, correctedExpenses);
+            const refreshedSettlementKeys = await teamSettlementProtectionService.getConfirmedTeamSettlementKeys(yearMonth);
+            if (isRowTeamSettlementConfirmed(correctedRow, currentDocuments, refreshedSettlementKeys)) {
+                setBillingRetryRowIds((current) => new Set(current).add(row.id));
                 await loadData();
-                alert(`${actionLabel} 처리 ${processed}건 완료`);
+                setFineDriverEditor(null);
+                window.alert('과태료 대상은 저장됐지만 저장 도중 팀정산 확정이 확인되어 팀 경비는 변경하지 않았습니다. 확정을 취소한 뒤 저장을 다시 눌러 주세요.');
+                return;
+            }
+            const syncResult = await applyDraftBillingForStoredRow(correctedRow, currentDocuments);
+            if (syncResult.status === 'skipped-posted') {
+                setBillingRetryRowIds((current) => new Set(current).add(row.id));
+                await loadData();
+                setFineDriverEditor(null);
+                window.alert('과태료 대상은 저장됐지만 확정·지급·연체된 팀 경비가 확인되어 자동 반영하지 않았습니다. 확정을 취소한 뒤 [저장]을 다시 눌러 주세요.');
                 return;
             }
 
-            const bulkSaveTasks: Promise<void>[] = [];
-            const bulkDeleteIds = new Set<string>();
-            const bulkSaveIds = new Set<string>();
-            for (const { row, billingState } of targets) {
-                try {
-                    const nextDocuments = buildBillingDocumentsForRow(row, billingState.documents);
-                    if (nextDocuments.length === 0) {
-                        skipped += 1;
-                        continue;
-                    }
-                    const nextDocumentIds = new Set(nextDocuments.map((document) => document.id).filter(Boolean));
-                    const staleDocumentIds = Array.from(new Set(
-                        billingState.documents
-                            .map((item) => item.id)
-                            .filter((id) => Boolean(id) && !nextDocumentIds.has(id))
-                    ));
-
-                    nextDocumentIds.forEach((id) => bulkSaveIds.add(id));
-                    nextDocuments.forEach((document) => bulkSaveTasks.push(vehicleBillingService.saveBilling(document)));
-                    staleDocumentIds.forEach((id) => bulkDeleteIds.add(id));
-                    processed += 1;
-                } catch (error) {
-                    console.error(error);
-                    skipped += 1;
-                }
-            }
-
-            bulkSaveIds.forEach((id) => bulkDeleteIds.delete(id));
-            await Promise.all([
-                ...bulkSaveTasks,
-                ...Array.from(bulkDeleteIds).map((id) => vehicleBillingService.deleteBilling(id))
-            ]);
-
-            await loadData();
-            alert(`${actionLabel} 처리 ${processed}건 완료${skipped > 0 ? `, ${skipped}건 제외` : ''}`);
-        } finally {
-            setBulkBillingAction('');
-            setBillingProcessingId('');
-        }
-    };
-
-    const buildVehicleDocumentWithItems = (
-        document: VehicleBillingDocument,
-        lineItems: VehicleBillingCostItem[],
-        memo: string,
-        status: VehicleBillingDocument['status']
-    ): VehicleBillingDocument => {
-        const fixedCost = lineItems
-            .filter((item) => item.type === 'FIXED')
-            .reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0);
-        const variableCost = lineItems
-            .filter((item) => item.type !== 'FIXED')
-            .reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0);
-
-        return {
-            ...document,
-            lineItems,
-            memo,
-            status,
-            fixedCost,
-            variableCost,
-            totalAmount: fixedCost + variableCost,
-            updatedAt: Timestamp.now(),
-            confirmedAt: status === 'CONFIRMED' ? Timestamp.now() : document.confirmedAt
-        };
-    };
-
-    const handleSaveBillingEditor = async (
-        lineItems: VehicleBillingCostItem[],
-        memo: string,
-        status: VehicleBillingDocument['status'] = billingEditor?.document.status ?? 'DRAFT'
-    ) => {
-        if (!billingEditor) return;
-        setBillingProcessingId(billingEditor.row.id);
-        try {
-            const next = buildVehicleDocumentWithItems(billingEditor.document, lineItems, memo, status);
-            await vehicleBillingService.saveBilling(next);
-            await loadData();
-            setBillingEditor(null);
-            alert(status === 'CONFIRMED' ? '청구서가 확정되었습니다.' : '청구서가 저장되었습니다.');
-        } catch (error) {
-            console.error(error);
-            alert('청구서 저장에 실패했습니다.');
-        } finally {
-            setBillingProcessingId('');
-        }
-    };
-
-    const handleCancelBillingConfirmation = async () => {
-        if (!billingEditor || billingEditor.document.status !== 'CONFIRMED') return;
-        if (!window.confirm('차량 청구서 확정을 취소하고 다시 수정 가능하게 변경할까요?')) return;
-        const reason = window.prompt('확정 취소 사유를 입력해주세요.');
-        if (!reason?.trim()) return;
-
-        setBillingProcessingId(billingEditor.row.id);
-        try {
-            await vehicleBillingService.cancelConfirmation(billingEditor.document.id, {
-                reason: reason.trim()
+            setBillingRetryRowIds((current) => {
+                const next = new Set(current);
+                next.delete(row.id);
+                return next;
             });
             await loadData();
-            setBillingEditor(null);
-            alert('청구서 확정이 취소되었습니다.');
+            setFineDriverEditor(null);
+            window.alert('과태료 청구대상을 정정하고 저장 금액 기준 DRAFT 청구서를 갱신했습니다.');
         } catch (error) {
-            console.error(error);
-            alert('청구서 확정 취소에 실패했습니다.');
+            console.error('[VehicleMonthlyLedger] fine target correction failed', error);
+            if (targetStored) {
+                setBillingRetryRowIds((current) => new Set(current).add(row.id));
+                await loadData().catch(() => undefined);
+                setFineDriverEditor(null);
+                window.alert('과태료 대상은 저장됐지만 팀 경비 반영에 실패했습니다. 중복되지 않으니 [저장]을 다시 눌러 주세요.');
+            } else {
+                window.alert('과태료 청구대상 정정에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+            }
         } finally {
             setBillingProcessingId('');
         }
@@ -2127,6 +2095,11 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                 ● 수정사항 있음
                             </span>
                         )}
+                        {billingRetryRowIds.size > 0 && (
+                            <span className="px-3 py-1 bg-rose-100 text-rose-700 text-xs font-bold rounded-full border border-rose-200">
+                                팀 경비 재시도 {billingRetryRowIds.size}건
+                            </span>
+                        )}
                     </div>
                 </div>
 
@@ -2135,52 +2108,34 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                         <div className="text-xs text-slate-500 font-bold uppercase">총 합계</div>
                         <div className="text-2xl font-extrabold text-indigo-700 font-mono">{totals.total.toLocaleString()}</div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-1 rounded-xl bg-slate-100 p-1">
-                        {BILLING_FILTERS.map((filter) => (
-                            <button
-                                key={filter.value}
-                                type="button"
-                                onClick={() => setBillingFilter(filter.value)}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${
-                                    billingFilter === filter.value
-                                        ? 'bg-white text-indigo-700 shadow-sm'
-                                        : 'text-slate-500 hover:text-slate-700'
-                                }`}
-                            >
-                                {filter.label}
-                            </button>
-                        ))}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex w-full items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm sm:w-auto" aria-label="차량 PDF AI 등록">
+                        <span className="hidden items-center gap-1.5 whitespace-nowrap px-2 text-[11px] font-extrabold text-slate-500 xl:inline-flex">
+                            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                            AI 고지서
+                        </span>
                         <button
                             type="button"
-                            onClick={() => handleBulkBilling('bill')}
-                            disabled={isDirty || bulkBillingAction !== '' || bulkBillableCount === 0}
-                            title="현재 필터 목록의 미청구 행을 청구 처리"
-                            className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-extrabold shadow-sm hover:bg-indigo-700 disabled:bg-indigo-200 disabled:cursor-not-allowed whitespace-nowrap"
+                            onClick={handleTollImportOpen}
+                            disabled={!yearMonth || loading || saving}
+                            title={`${yearMonth || '선택 월'} 차량 통행료 PDF/이미지 일괄 분석`}
+                            aria-label="통행료 AI 등록"
+                            className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-indigo-200 bg-white px-2.5 text-xs font-extrabold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300 sm:flex-none"
                         >
-                            {bulkBillingAction === 'bill' ? '처리중...' : `일괄 청구 (${bulkBillableCount})`}
+                            <Route className="h-4 w-4 shrink-0" aria-hidden="true" />
+                            통행료
                         </button>
                         <button
                             type="button"
-                            onClick={() => handleBulkBilling('unbill')}
-                            disabled={isDirty || bulkBillingAction !== '' || bulkUnbillableCount === 0}
-                            title="현재 필터 목록의 청구 행을 미청구 처리"
-                            className="px-4 py-2 rounded-xl bg-rose-50 text-rose-700 text-xs font-extrabold border border-rose-100 hover:bg-rose-100 disabled:bg-slate-50 disabled:text-slate-300 disabled:border-slate-100 disabled:cursor-not-allowed whitespace-nowrap"
+                            onClick={handleFineImportOpen}
+                            disabled={!yearMonth || loading || saving}
+                            title={`${yearMonth || '선택 월'} 차량 과태료 PDF/이미지 일괄 분석`}
+                            aria-label="과태료 AI 등록"
+                            className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-rose-200 bg-white px-2.5 text-xs font-extrabold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300 sm:flex-none"
                         >
-                            {bulkBillingAction === 'unbill' ? '처리중...' : `일괄 미청구 (${bulkUnbillableCount})`}
+                            <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
+                            과태료
                         </button>
                     </div>
-                    <button
-                        type="button"
-                        onClick={handleFineImportOpen}
-                        disabled={!yearMonth || loading || saving}
-                        title={`${yearMonth || '선택 월'} 차량 과태료 고지서 등록`}
-                        className="inline-flex h-[46px] items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-extrabold text-blue-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
-                    >
-                        <FontAwesomeIcon icon={faWandMagicSparkles} />
-                        <span>{yearMonth} 과태료 AI 등록</span>
-                    </button>
                     <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border border-indigo-100 hover:bg-gray-50 h-[46px] shadow-sm whitespace-nowrap">
                         <input
                             type="checkbox"
@@ -2198,11 +2153,8 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                         `}
                     >
                         <FontAwesomeIcon icon={faSave} />
-                        {saving ? '저장 중...' : isDirty ? '변경사항 저장' : '전체 저장'}
+                        {saving ? '저장 중...' : '저장'}
                     </button>
-                </div>
-                <div className="w-full text-xs font-medium text-slate-400">
-                    변경한 셀은 <span className="font-bold text-slate-600">변경사항 저장</span> 후 청구할 수 있습니다. 일괄 작업은 현재 필터 목록에만 적용됩니다.
                 </div>
             </div>
 
@@ -2237,9 +2189,8 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                     <col key={`vehicle-expense-col-${type}`} style={{ width: '4.2%' }} />
                                 ))}
                                 <col style={{ width: '5.5%' }} />
-                                <col style={{ width: '6.5%' }} />
                                 <col style={{ width: '7%' }} />
-                                <col style={{ width: '8%' }} />
+                                <col style={{ width: '9%' }} />
                             </colgroup>
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
@@ -2256,18 +2207,19 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                         </th>
                                     ))}
                                     <th className="px-2 py-4 text-center w-32 border-l border-indigo-400 bg-indigo-500">합계</th>
-                                    <th className="px-2 py-4 text-center w-28 border-l border-indigo-500">청구상태</th>
-                                    <th className="px-2 py-4 text-center w-44 border-l border-indigo-500">청구작업</th>
+                                    <th className="px-2 py-4 text-center w-36 border-l border-indigo-500">과태료 대상</th>
                                     <th className="px-4 py-4 text-center w-40 border-l border-indigo-500">비고 (메모)</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-indigo-50">
-                                {billingRows.map(({ row, index: idx, billingState }) => {
+                                {visibleLedgerRows.map(({ row, index: idx }) => {
                                     const assignmentSummary = getAssignmentSummary(row);
                                     const visibleAssignedWorkers = assignmentSummary.assignedWorkers.slice(0, 3);
-                                    const billingBadge = getBillingStatusBadge(billingState.status);
-                                    const isProcessing = billingProcessingId === row.id || bulkBillingAction !== '';
+                                    const isProcessing = billingProcessingId === row.id;
                                     const shouldShowPeriod = (vehicleRowCountById.get(normalizeKey(row.vehicle.id)) ?? 0) > 1;
+                                    const hasPostedBilling = vehicleMonthlyLedgerBillingService
+                                        .getProtectedDocuments(getAllBillingDocumentsForRow(row))
+                                        .length > 0;
 
                                     return (
                                     <tr key={row.id} className="group hover:bg-blue-50/40 transition-colors">
@@ -2393,7 +2345,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                             <EditableCell
                                                 key={type}
                                                 value={row.amounts[type]}
-                                                onCommit={(val) => handleCellCommit(idx, type, val)}
+                                                onCommit={(val) => handleCellCommit(idx, row.id, type, val)}
                                                 tdClassName="p-1 border-l border-indigo-50 bg-white"
                                                 className={`w-full text-right p-2 focus:outline-none transition rounded-lg text-sm
                                                     text-slate-700 bg-transparent hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-100
@@ -2407,72 +2359,20 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                             {row.total.toLocaleString()}
                                         </td>
 
-                                        <td className="px-2 py-3 border-l border-indigo-50 bg-white text-center">
-                                            <span className={`inline-flex items-center justify-center min-w-[72px] rounded-lg border px-2 py-1 text-[11px] font-extrabold ${billingBadge.className}`}>
-                                                {billingBadge.label}
-                                            </span>
-                                            {billingState.documents.length > 0 && (
-                                                <div className="mt-1 text-[10px] font-bold text-slate-400">{billingState.documents.length}건</div>
-                                            )}
-                                        </td>
-
                                         <td className="px-2 py-3 border-l border-indigo-50 bg-white">
                                             <div className="flex items-center justify-center gap-1.5">
-                                                {row.amounts.FINE > 0 && (
+                                                {row.amounts.FINE > 0 ? (
                                                     <button
                                                         type="button"
-                                                        disabled={isProcessing}
+                                                        disabled={isProcessing || hasPostedBilling}
                                                         onClick={() => openFineDriverEditor(row)}
                                                         className="px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-800 text-xs font-bold border border-amber-200 hover:bg-amber-100 disabled:text-amber-300 disabled:bg-amber-50 whitespace-nowrap"
-                                                        title="이 월의 과태료만 운전자에게 정정 청구"
+                                                        title={hasPostedBilling ? '확정된 정산은 변경할 수 없습니다.' : '이 월의 과태료 부과 운전자 지정'}
                                                     >
-                                                        과태료 정정
+                                                        {hasPostedBilling ? '정산 보호' : '운전자 지정'}
                                                     </button>
-                                                )}
-                                                {billingState.status === 'blocked' ? (
-                                                    <span className="text-[11px] font-bold text-slate-400">{billingState.reason}</span>
-                                                ) : billingState.status === 'unbilled' ? (
-                                                    <>
-                                                        {billingState.documents.length > 0 && (
-                                                            <button
-                                                                type="button"
-                                                                disabled={isProcessing}
-                                                                onClick={() => handleCancelBilling(row)}
-                                                                className="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 text-xs font-bold hover:bg-rose-100 disabled:text-rose-300 whitespace-nowrap"
-                                                                title="남아 있는 청구 문서 삭제"
-                                                            >
-                                                                미청구
-                                                            </button>
-                                                        )}
-                                                        <button
-                                                            type="button"
-                                                            disabled={isProcessing}
-                                                            onClick={() => handleCreateOrRecalculateBilling(row, 'create')}
-                                                            className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 disabled:bg-indigo-300 whitespace-nowrap"
-                                                        >
-                                                            {isProcessing ? '처리중' : '청구'}
-                                                        </button>
-                                                        {shouldShowPeriod && (
-                                                            <button
-                                                                type="button"
-                                                                disabled={isProcessing}
-                                                                onClick={() => handleCreateSplitBilling(row)}
-                                                                className="px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200 hover:bg-amber-100 disabled:text-amber-300 disabled:bg-amber-50 whitespace-nowrap"
-                                                            >
-                                                                분할청구
-                                                            </button>
-                                                        )}
-                                                    </>
                                                 ) : (
-                                                    <button
-                                                        type="button"
-                                                        disabled={isProcessing}
-                                                        onClick={() => handleCancelBilling(row)}
-                                                        className="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 text-xs font-bold hover:bg-rose-100 disabled:text-rose-300"
-                                                        title="미청구"
-                                                    >
-                                                        미청구
-                                                    </button>
+                                                    <span className="text-slate-300">-</span>
                                                 )}
                                             </div>
                                         </td>
@@ -2482,7 +2382,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                             <input
                                                 type="text"
                                                 value={row.note}
-                                                onChange={(e) => handleNoteChange(idx, e.target.value)}
+                                                onChange={(e) => handleNoteChange(idx, row.id, e.target.value)}
                                                 className={`w-full p-2 focus:outline-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-200 rounded-lg text-xs bg-transparent text-center ${row.note ? 'text-red-600 font-extrabold' : 'text-slate-600'}`}
                                                 placeholder=""
                                             />
@@ -2490,9 +2390,9 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                     </tr>
                                     );
                                 })}
-                                {billingRows.length === 0 && (
+                                {visibleLedgerRows.length === 0 && (
                                     <tr>
-                                        <td colSpan={EXPENSE_TYPES.length + 11} className="p-20 text-center text-slate-400 bg-slate-50/50">
+                                        <td colSpan={EXPENSE_TYPES.length + 10} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">
                                                 <FontAwesomeIcon icon={faCar} className="text-4xl text-slate-300" />
                                                 <p>조건에 맞는 차량 대장 행이 없습니다.</p>
@@ -2514,7 +2414,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                     <td className="p-4 border-r border-slate-600 text-right font-mono text-amber-300 text-lg">
                                         {totals.total.toLocaleString()}
                                     </td>
-                                    <td colSpan={3} className="bg-slate-900 border-l border-slate-700"></td>
+                                    <td colSpan={2} className="bg-slate-900 border-l border-slate-700"></td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -2533,26 +2433,10 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                         * <strong>렌트비/리스비</strong>는 차량 계약 정보에 따라 자동 계산되므로 수정할 수 없습니다.<br />
                         * 그 외 <strong>주유비, 수리비, 과태료</strong> 등은 직접 입력 가능합니다.<br />
                         * 같은 달에 청구대상이 나뉜 차량은 고정비를 청구대상 수로 균등 배분하고, 유동비는 발생일 기준으로 청구합니다.<br />
-                        * 변경 후 반드시 <strong>[전체 저장]</strong> 버튼을 눌러주세요.
+                        * <strong>[저장]</strong>을 누르면 저장된 금액이 팀별 경비에 바로 반영됩니다.
                     </p>
                 </div>
             </div>
-
-            {billingEditor && (
-                <LedgerBillingEditorModal<VehicleBillingCostItem>
-                    title={`${billingEditor.document.vehiclePlate} 차량 청구서`}
-                    subtitle={`${billingEditor.document.yearMonth} · ${billingEditor.document.teamName || billingEditor.document.issuedToWorkerName || '청구대상'}`}
-                    statusLabel={billingEditor.document.status === 'CONFIRMED' ? '확정' : '작성중'}
-                    readOnly={billingEditor.document.status === 'CONFIRMED'}
-                    lineItems={billingEditor.document.lineItems ?? []}
-                    memo={billingEditor.document.memo ?? ''}
-                    saving={billingProcessingId === billingEditor.row.id}
-                    onClose={() => setBillingEditor(null)}
-                    onSave={(lineItems, memo) => handleSaveBillingEditor(lineItems, memo)}
-                    onConfirm={(lineItems, memo) => handleSaveBillingEditor(lineItems, memo, 'CONFIRMED')}
-                    onCancelConfirm={handleCancelBillingConfirmation}
-                />
-            )}
 
             {fineDriverEditor && (
                 <div className="fixed inset-0 z-[85] flex items-center justify-center bg-slate-900/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="vehicle-fine-driver-title">
@@ -2581,7 +2465,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                             </select>
                         </label>
                         <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-800">
-                            확정 청구가 있으면 정정 사유를 남긴 뒤 같은 월의 청구서만 다시 확정합니다.
+                            확정·지급·연체 청구서는 자동 정정하지 않습니다. 필요한 경우 청구서에서 먼저 확정을 명시적으로 취소해 주세요.
                         </p>
                         <div className="mt-6 flex justify-end gap-2">
                             <button
@@ -2617,6 +2501,27 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                         setSaveFeedback({
                             status: result.duplicateCount > 0 ? 'warning' : 'success',
                             title: '과태료 등록 완료',
+                            message: result.duplicateCount > 0
+                                ? `${yearMonth} 대장에 ${result.createdCount}건을 등록했고, 중복 ${result.duplicateCount}건은 제외했습니다.`
+                                : `${yearMonth} 차량 통합관리대장에 ${result.createdCount}건을 등록했습니다.`,
+                            operationId: result.operationId
+                        });
+                    }}
+                />
+            )}
+
+            {tollImportOpen && (
+                <VehicleTollImportModal
+                    yearMonth={yearMonth}
+                    files={[]}
+                    vehicles={fineImportVehicles}
+                    onClose={() => setTollImportOpen(false)}
+                    onCommitted={(result) => {
+                        setTollImportOpen(false);
+                        void loadData();
+                        setSaveFeedback({
+                            status: result.duplicateCount > 0 ? 'warning' : 'success',
+                            title: '통행료 등록 완료',
                             message: result.duplicateCount > 0
                                 ? `${yearMonth} 대장에 ${result.createdCount}건을 등록했고, 중복 ${result.duplicateCount}건은 제외했습니다.`
                                 : `${yearMonth} 차량 통합관리대장에 ${result.createdCount}건을 등록했습니다.`,

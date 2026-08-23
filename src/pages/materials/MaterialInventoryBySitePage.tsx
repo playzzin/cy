@@ -184,23 +184,23 @@ const MaterialInventoryBySitePage: React.FC = () => {
                                     <table className="w-full min-w-[1080px] text-sm">
                                         <thead className="bg-slate-100 border-b border-slate-300 sticky top-0 z-10">
                                             <tr>
-                                                <th className="px-3 py-2 text-left font-bold text-slate-700 sticky left-0 z-10 bg-slate-100 min-w-[220px]">품명</th>
-                                                <th className="px-3 py-2 text-left font-bold text-slate-700 sticky left-[220px] z-10 bg-slate-100 min-w-[180px]">규격</th>
-                                                <th className="px-3 py-2 text-right font-bold text-slate-700">입고</th>
-                                                <th className="px-3 py-2 text-right font-bold text-slate-700">출고</th>
-                                                <th className="px-3 py-2 text-right font-bold text-slate-700 bg-green-50">현재고</th>
-                                                <th className="px-3 py-2 text-center font-bold text-slate-700">단위</th>
+                                                <th className="px-3 py-1.5 text-left font-bold text-slate-700 sticky left-0 z-10 bg-slate-100 min-w-[220px]">품명</th>
+                                                <th className="px-3 py-1.5 text-left font-bold text-slate-700 sticky left-[220px] z-10 bg-slate-100 min-w-[180px]">규격</th>
+                                                <th className="px-3 py-1.5 text-right font-bold text-slate-700">입고</th>
+                                                <th className="px-3 py-1.5 text-right font-bold text-slate-700">출고</th>
+                                                <th className="px-3 py-1.5 text-right font-bold text-slate-700 bg-green-50">현재고</th>
+                                                <th className="px-3 py-1.5 text-center font-bold text-slate-700">단위</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-200">
                                             {categoryInventories.map(inv => (
                                                 <tr key={`${inv.materialKey || inv.materialId}-${inv.siteId}`} className="hover:bg-slate-50">
-                                                    <td className="px-3 py-2 sticky left-0 z-10 bg-white font-semibold">{inv.itemName}</td>
-                                                    <td className="px-3 py-2 sticky left-[220px] z-10 bg-white">{inv.spec}</td>
-                                                    <td className="px-3 py-2 text-right text-blue-600">{inv.totalInbound.toLocaleString()}</td>
-                                                    <td className="px-3 py-2 text-right text-red-600">{inv.totalOutbound.toLocaleString()}</td>
-                                                    <td className="px-3 py-2 text-right font-bold">{inv.currentStock.toLocaleString()}</td>
-                                                    <td className="px-3 py-2 text-center text-slate-500">{inv.unit}</td>
+                                                    <td className="px-3 py-1 sticky left-0 z-10 bg-white font-semibold">{inv.itemName}</td>
+                                                    <td className="px-3 py-1 sticky left-[220px] z-10 bg-white">{inv.spec}</td>
+                                                    <td className="px-3 py-1 text-right text-blue-600">{inv.totalInbound.toLocaleString()}</td>
+                                                    <td className="px-3 py-1 text-right text-red-600">{inv.totalOutbound.toLocaleString()}</td>
+                                                    <td className="px-3 py-1 text-right font-bold">{inv.currentStock.toLocaleString()}</td>
+                                                    <td className="px-3 py-1 text-center text-slate-500">{inv.unit}</td>
                                                 </tr>
                                             ))}
                                         </tbody>

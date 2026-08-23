@@ -2201,7 +2201,7 @@ export const StatementActionButtons: React.FC<{
     rentalTransactionCount = 0,
 }) => {
     const expenseAmount = getExpenseClaimsTotal(target.expenseClaims);
-    const columnClass = expenseAmount > 0 ? 'grid-cols-4' : 'grid-cols-3';
+    const columnClass = expenseAmount > 0 ? 'grid-cols-2' : 'grid-cols-3';
 
     return (
         <div className={`grid gap-1 ${columnClass}`}>
@@ -2214,7 +2214,7 @@ export const StatementActionButtons: React.FC<{
                     event.stopPropagation();
                     onOpenLabor(target);
                 }}
-                className={`inline-flex h-7 items-center justify-center gap-1 rounded px-2 text-[10px] font-black text-white shadow-sm transition focus:outline-none focus:ring-2 focus:ring-emerald-400 ${
+                className={`inline-flex h-7 items-center justify-center gap-1 whitespace-nowrap rounded px-2 text-[10px] font-black text-white shadow-sm transition focus:outline-none focus:ring-2 focus:ring-emerald-400 ${
                     laborOpen ? 'bg-emerald-800 ring-2 ring-emerald-300' : 'bg-emerald-600 hover:bg-emerald-700'
                 }`}
             >
@@ -2230,7 +2230,7 @@ export const StatementActionButtons: React.FC<{
                     event.stopPropagation();
                     onOpenTransaction(target);
                 }}
-                className={`relative inline-flex h-7 items-center justify-center gap-1 rounded px-2 text-[10px] font-black text-white shadow-sm transition focus:outline-none focus:ring-2 focus:ring-teal-400 ${
+                className={`relative inline-flex h-7 items-center justify-center gap-1 whitespace-nowrap rounded px-2 text-[10px] font-black text-white shadow-sm transition focus:outline-none focus:ring-2 focus:ring-teal-400 ${
                     transactionOpen ? 'bg-teal-800 ring-2 ring-teal-300' : 'bg-teal-600 hover:bg-teal-700'
                 }`}
             >
@@ -2251,7 +2251,7 @@ export const StatementActionButtons: React.FC<{
                     event.stopPropagation();
                     onOpenRentalTransaction(target);
                 }}
-                className={`relative inline-flex h-7 items-center justify-center gap-1 rounded px-2 text-[10px] font-black text-white shadow-sm transition focus:outline-none focus:ring-2 focus:ring-amber-400 ${
+                className={`relative inline-flex h-7 items-center justify-center gap-1 whitespace-nowrap rounded px-2 text-[10px] font-black text-white shadow-sm transition focus:outline-none focus:ring-2 focus:ring-amber-400 ${
                     rentalTransactionOpen ? 'bg-amber-800 ring-2 ring-amber-300' : 'bg-amber-600 hover:bg-amber-700'
                 }`}
             >
@@ -2272,7 +2272,7 @@ export const StatementActionButtons: React.FC<{
                         event.stopPropagation();
                         onOpenExpense(target);
                     }}
-                    className="inline-flex h-7 items-center justify-center gap-1 rounded bg-teal-600 px-2 text-[10px] font-black text-white shadow-sm transition hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                    className="inline-flex h-7 items-center justify-center gap-1 whitespace-nowrap rounded bg-teal-600 px-2 text-[10px] font-black text-white shadow-sm transition hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
                 >
                     <FontAwesomeIcon icon={faReceipt} />
                     <span>경비내역</span>
@@ -6203,7 +6203,7 @@ const SupportClientSitePage: React.FC = () => {
                             </div>
                         ) : (
                             <div className="overflow-x-auto">
-                                <table className={`w-full border-collapse text-[13px] ${showAllocationColumns ? 'min-w-[2120px]' : 'min-w-[1460px]'}`}>
+                                <table className={`w-full table-fixed border-collapse text-[13px] ${showAllocationColumns ? 'min-w-[2120px]' : 'min-w-[1460px]'}`}>
                                     <thead>
                                         <tr className="text-center font-black text-slate-950">
                                             <th className="w-14 border border-slate-900 bg-gradient-to-br from-yellow-100 via-yellow-400 to-white p-2"></th>
@@ -6217,8 +6217,8 @@ const SupportClientSitePage: React.FC = () => {
                                             <th className="w-32 border border-slate-900 bg-gradient-to-br from-white via-emerald-100 to-emerald-300 p-2 tracking-[0.05em] text-emerald-950">청구금액</th>
                                                 </>
                                             )}
-                                            <th className="w-32 border border-slate-900 bg-gradient-to-br from-yellow-50 via-yellow-300 to-yellow-500 p-2 tracking-[0.2em] text-slate-950">발행금액</th>
-                                            <th className="w-32 border border-slate-900 bg-gradient-to-br from-amber-100 via-amber-300 to-amber-500 p-2 tracking-[0.2em] text-slate-950">정산금액</th>
+                                            <th className="w-28 border border-slate-900 bg-gradient-to-br from-yellow-50 via-yellow-300 to-yellow-500 p-2 tracking-[0.2em] text-slate-950">발행금액</th>
+                                            <th className="w-28 border border-slate-900 bg-gradient-to-br from-amber-100 via-amber-300 to-amber-500 p-2 tracking-[0.2em] text-slate-950">정산금액</th>
                                             {showAllocationColumns && (
                                                 <>
                                             <th className="w-32 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">차액</th>
@@ -6229,7 +6229,7 @@ const SupportClientSitePage: React.FC = () => {
                                             <th className="w-28 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">쓰꾸미</th>
                                             <th className="w-36 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.2em]">진행구분</th>
                                             <th className="w-72 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">비고</th>
-                                            <th className="w-48 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">기타</th>
+                                            <th className="w-64 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">기타</th>
                                         </tr>
                                     </thead>
                                     <tbody>

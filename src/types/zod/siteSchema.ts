@@ -25,6 +25,18 @@ export const SiteSchema = z.object({
     partnerId: z.string().optional().nullable(),
     partnerName: z.string().optional().nullable(),
     siteType: z.string().optional().nullable(),
+    // Construction scope fields are optional in legacy site documents.  Keep
+    // the known aliases so downstream builders can prefill the plan wizard
+    // instead of asking users to re-enter ERP data that already exists.
+    buildings: z.array(z.string()).optional().default([]),
+    buildingNames: z.array(z.string()).optional().default([]),
+    buildingList: z.array(z.string()).optional().default([]),
+    floors: z.array(z.string()).optional().default([]),
+    floorNames: z.array(z.string()).optional().default([]),
+    floorList: z.array(z.string()).optional().default([]),
+    zones: z.array(z.string()).optional().default([]),
+    zoneNames: z.array(z.string()).optional().default([]),
+    workZones: z.array(z.string()).optional().default([]),
     paymentMethod: z.string().optional().nullable(),
     totalManDay: z.number().optional().default(0),
     color: z.string().optional().nullable(),

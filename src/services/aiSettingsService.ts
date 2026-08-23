@@ -111,6 +111,13 @@ export const AI_MANAGED_PAGES: AiManagedPage[] = [
         modelScope: 'textModel'
     },
     {
+        id: 'identity-bundle',
+        name: '신분증 묶음사진',
+        description: '신분증·교육이수증 문서영역 판독 및 동일인 자동 분류',
+        paths: ['/database/identity-bundle'],
+        modelScope: 'server'
+    },
+    {
         id: 'reports-statistics',
         name: '일보 통계 AI 분석',
         description: '자연어 기반 통계 질의/인사이트 생성',

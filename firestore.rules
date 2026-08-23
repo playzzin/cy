@@ -589,8 +589,6 @@ service cloud.firestore {
         'vehicle_billing_targets',
         'vehicle_billing_documents',
         'vehicle_billing_logs',
-        'cards',
-        'cardAssignments',
         'cardTransactions',
         'cardBillings',
         'card_billing_logs',
@@ -703,7 +701,8 @@ service cloud.firestore {
       return collectionId in [
         'cardStatementImportJobs',
         'cardStatementImportFiles',
-        'cardStatementImportResults'
+        'cardStatementImportResults',
+        'cardStatementImportSourceClaims'
       ];
     }
 
@@ -764,6 +763,8 @@ service cloud.firestore {
         || isIncidentCaseCollection(collectionId)
         || isWelfareCollection(collectionId)
         || isBankNotificationCollection(collectionId)
+        || collectionId in ['cards', 'cardAssignments', 'cardBillingTargets']
+        || collectionId == 'vehicleExpenseImportIdentities'
         || collectionId == 'erp_messages';
     }
 
@@ -951,6 +952,105 @@ service cloud.firestore {
       return value == null || value is string;
     }
 
+    function isCardLifecycleParentTouched(cardId) {
+      return cardId is string
+        && exists(/databases/$(database)/documents/cards/$(cardId))
+        && getAfter(/databases/$(database)/documents/cards/$(cardId)).data.get('updatedAt', null)
+          != get(/databases/$(database)/documents/cards/$(cardId)).data.get('updatedAt', null);
+    }
+
+    function isCardLifecycleParentActiveAfter(cardId) {
+      return cardId is string
+        && existsAfter(/databases/$(database)/documents/cards/$(cardId))
+        && getAfter(/databases/$(database)/documents/cards/$(cardId)).data.status in ['AVAILABLE', 'ASSIGNED'];
+    }
+
+    function isCardLifecycleParentMissing(cardId) {
+      return cardId is string
+        && !exists(/databases/$(database)/documents/cards/$(cardId));
+    }
+
+    function isOpenCardLink(data) {
+      return !(data.get('endDate', null) is string
+        && data.get('endDate', null).matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'));
+    }
+
+    function hasCardLifecycleLog(operationId, cardId, statusAfter) {
+      return operationId is string
+        && existsAfter(/databases/$(database)/documents/support_cancellation_logs/$(operationId))
+        && getAfter(/databases/$(database)/documents/support_cancellation_logs/$(operationId)).data.resourceType == 'card'
+        && getAfter(/databases/$(database)/documents/support_cancellation_logs/$(operationId)).data.resourceId == cardId
+        && getAfter(/databases/$(database)/documents/support_cancellation_logs/$(operationId)).data.statusAfter == statusAfter
+        && getAfter(/databases/$(database)/documents/support_cancellation_logs/$(operationId)).data.createdAt == request.time;
+    }
+
+    function hasEmptyCardOperationalSnapshot(data) {
+      return data.get('currentAssigneeId', null) == null
+        && data.get('currentAssigneeType', null) == null
+        && data.get('currentAssigneeName', null) == null
+        && data.get('billingTargetId', null) == null
+        && data.get('billingTargetType', null) == null
+        && data.get('billingTargetName', null) == null
+        && data.get('billingTargetStartDate', null) == null
+        && data.get('billingTargetEndDate', null) == null;
+    }
+
+    function hasUnchangedCardLifecycleMetadata() {
+      return request.resource.data.get('lastLifecycleOperationId', null)
+          == resource.data.get('lastLifecycleOperationId', null)
+        && request.resource.data.get('lastLifecycleOperationType', null)
+          == resource.data.get('lastLifecycleOperationType', null)
+        && request.resource.data.get('lastLifecycleOperationAt', null)
+          == resource.data.get('lastLifecycleOperationAt', null);
+    }
+
+    function hasValidCardLifecycleMarker(operationId, operationType, cardId, statusAfter) {
+      return request.resource.data.get('lastLifecycleOperationType', null) == operationType
+        && request.resource.data.get('lastLifecycleOperationAt', null) == request.time
+        && operationId != resource.data.get('lastLifecycleOperationId', null)
+        && hasCardLifecycleLog(operationId, cardId, statusAfter);
+    }
+
+    function isValidCardStatusUpdate(cardId) {
+      let beforeStatus = resource.data.status;
+      let afterStatus = request.resource.data.status;
+      let operationId = request.resource.data.get('lastLifecycleOperationId', null);
+      return request.resource.data.get('updatedAt', null) == request.time
+        && (
+        (
+          beforeStatus == afterStatus
+          && afterStatus in ['AVAILABLE', 'ASSIGNED']
+          && hasUnchangedCardLifecycleMetadata()
+        )
+        || (
+          beforeStatus == afterStatus
+          && afterStatus in ['SUSPENDED', 'CLOSED']
+          && hasEmptyCardOperationalSnapshot(request.resource.data)
+          && (
+            hasUnchangedCardLifecycleMetadata()
+            || hasValidCardLifecycleMarker(operationId, 'CANCEL', cardId, afterStatus)
+          )
+        )
+        || (
+          beforeStatus in ['AVAILABLE', 'ASSIGNED']
+          && afterStatus in ['AVAILABLE', 'ASSIGNED']
+          && hasUnchangedCardLifecycleMetadata()
+        )
+        || (
+          beforeStatus in ['AVAILABLE', 'ASSIGNED']
+          && afterStatus in ['SUSPENDED', 'CLOSED']
+          && hasEmptyCardOperationalSnapshot(request.resource.data)
+          && hasValidCardLifecycleMarker(operationId, 'CANCEL', cardId, afterStatus)
+        )
+        || (
+          beforeStatus == 'SUSPENDED'
+          && afterStatus == 'AVAILABLE'
+          && hasEmptyCardOperationalSnapshot(request.resource.data)
+          && hasValidCardLifecycleMarker(operationId, 'RESTORE', cardId, afterStatus)
+        )
+      );
+    }
+
     function isVerifiedRequestDisplayName(value) {
       return value is string
         && (
@@ -1063,19 +1163,22 @@ service cloud.firestore {
 
     function isBankSystemMessage(data) {
       return data is map
-        && (data.senderId == 'system:bank-notification' || 'bankCandidateId' in data);
+        && (
+          ('senderId' in data && data.senderId == 'system:bank-notification')
+          || 'bankCandidateId' in data
+        );
     }
 
     function canReadBankSystemMessage(data) {
       return isAdmin()
-        || (data.recipientIds is list && request.auth.uid in data.recipientIds);
+        || ('recipientIds' in data && data.recipientIds is list && request.auth.uid in data.recipientIds);
     }
 
     function canReadRegularErpMessage(data) {
       return isAdmin()
-        || data.senderId == request.auth.uid
-        || data.recipientScope == 'all'
-        || (data.recipientIds is list && request.auth.uid in data.recipientIds);
+        || ('senderId' in data && data.senderId == request.auth.uid)
+        || ('recipientScope' in data && data.recipientScope == 'all')
+        || ('recipientIds' in data && data.recipientIds is list && request.auth.uid in data.recipientIds);
     }
 
     function isValidErpMessageReadReceiptUpdate() {
@@ -1365,6 +1468,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Exact-source idempotency claims are authored only by trusted Cloud
+    // Functions. Client access would allow a signed-in user to reserve or
+    // redirect a SHA-256 claim and bypass/import-block vehicle expenses.
+    match /vehicleExpenseImportIdentities/{identityId} {
+      allow read, write: if false;
+    }
+
     // General ERP messages retain their existing signed-in behavior, while
     // server-authored bank alerts are visible only to configured recipients
     // and may only receive the current recipient's read receipt.
@@ -1387,14 +1497,14 @@ service cloud.firestore {
             && request.resource.data.type in ['direct', 'broadcast']
             && (
               isAdmin()
-              || resource.data.senderId == request.auth.uid
+              || ('senderId' in resource.data && resource.data.senderId == request.auth.uid)
               || isValidErpMessageReadReceiptUpdate()
             )
           )
         );
       allow delete: if isSignedIn()
         && !isBankSystemMessage(resource.data)
-        && (isAdmin() || resource.data.senderId == request.auth.uid);
+        && (isAdmin() || ('senderId' in resource.data && resource.data.senderId == request.auth.uid));
     }
 
     match /support_shared_data/{dataId} {
@@ -1529,6 +1639,55 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    match /cardAssignments/{assignmentId} {
+      allow read: if canReadSupport();
+      allow create: if canWriteSupport()
+        && isCardLifecycleParentTouched(request.resource.data.cardId)
+        && isCardLifecycleParentActiveAfter(request.resource.data.cardId);
+      allow update: if canWriteSupport()
+        && request.resource.data.cardId == resource.data.cardId
+        && isCardLifecycleParentTouched(request.resource.data.cardId)
+        && (
+          !isOpenCardLink(request.resource.data)
+          || isCardLifecycleParentActiveAfter(request.resource.data.cardId)
+        );
+      allow delete: if canWriteSupport()
+        && (
+          isCardLifecycleParentTouched(resource.data.cardId)
+          || isCardLifecycleParentMissing(resource.data.cardId)
+        );
+    }
+
+    match /cards/{cardId} {
+      allow read: if canReadSupport();
+      allow create: if canWriteSupport()
+        && request.resource.data.status == 'AVAILABLE'
+        && request.resource.data.get('createdAt', null) == request.time
+        && request.resource.data.get('updatedAt', null) == request.time
+        && hasEmptyCardOperationalSnapshot(request.resource.data);
+      allow update: if canWriteSupport() && isValidCardStatusUpdate(cardId);
+      allow delete: if false;
+    }
+
+    match /cardBillingTargets/{targetId} {
+      allow read: if canReadSupport();
+      allow create: if canWriteSupport()
+        && isCardLifecycleParentTouched(request.resource.data.cardId)
+        && isCardLifecycleParentActiveAfter(request.resource.data.cardId);
+      allow update: if canWriteSupport()
+        && request.resource.data.cardId == resource.data.cardId
+        && isCardLifecycleParentTouched(request.resource.data.cardId)
+        && (
+          !isOpenCardLink(request.resource.data)
+          || isCardLifecycleParentActiveAfter(request.resource.data.cardId)
+        );
+      allow delete: if canWriteSupport()
+        && (
+          isCardLifecycleParentTouched(resource.data.cardId)
+          || isCardLifecycleParentMissing(resource.data.cardId)
+        );
+    }
+
     match /{collectionId}/{docId} {
       allow read: if isSupportCollection(collectionId) && canReadSupport();
       allow create, update, delete: if isSupportCollection(collectionId) && canWriteSupport();
@@ -1635,7 +1794,7 @@ service cloud.firestore {
       allow create, update, delete: if isWelfareCollection(collectionId) && isAdmin();
     }
 
-    match /{collectionId}/{docId}/{nested=**} {
+    match /{collectionId}/{docId}/{subcollection}/{nestedDocId}/{nested=**} {
       allow read: if isMasterDataCollection(collectionId) && canReadMasterData();
       allow create, update, delete: if isMasterDataCollection(collectionId) && canWriteMasterData();
 
@@ -1660,7 +1819,7 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && !isLockedCollection(collectionId);
     }
 
-    match /{collectionId}/{docId}/{nested=**} {
+    match /{collectionId}/{docId}/{subcollection}/{nestedDocId}/{nested=**} {
       allow read, write: if isSignedIn() && !isLockedCollection(collectionId);
     }
   }

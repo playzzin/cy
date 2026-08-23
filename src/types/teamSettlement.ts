@@ -106,6 +106,38 @@ export const TeamSettlementSummarySchema = z.object({
 });
 export type TeamSettlementSummary = z.infer<typeof TeamSettlementSummarySchema>;
 
+export const TeamSettlementSourceTotalsSchema = z.object({
+  sales: NonNegativeNumberSchema,
+  purchases: NonNegativeNumberSchema,
+  deductions: NonNegativeNumberSchema,
+  additions: NonNegativeNumberSchema,
+  net: z.number().finite()
+});
+export type TeamSettlementSourceTotals = z.infer<typeof TeamSettlementSourceTotalsSchema>;
+
+export const TeamSettlementDailyReportSnapshotSchema = z.object({
+  reportId: z.string().min(1),
+  date: z.string().min(1),
+  reportTeamId: z.string().default(''),
+  reportTeamName: z.string().default(''),
+  siteId: z.string().default(''),
+  siteName: z.string().default(''),
+  responsibleTeamId: z.string().default(''),
+  responsibleTeamName: z.string().default(''),
+  teamAssignmentMissing: z.boolean().default(false),
+  workerTeamIds: z.array(z.string()).default([]),
+  workerTeamNames: z.array(z.string()).default([])
+});
+export type TeamSettlementDailyReportSnapshot = z.infer<typeof TeamSettlementDailyReportSnapshotSchema>;
+
+export const TeamSettlementSourceSnapshotSchema = z.object({
+  version: z.literal(1),
+  capturedAt: z.string().datetime(),
+  dailyReports: z.array(TeamSettlementDailyReportSnapshotSchema).default([]),
+  totals: TeamSettlementSourceTotalsSchema
+});
+export type TeamSettlementSourceSnapshot = z.infer<typeof TeamSettlementSourceSnapshotSchema>;
+
 export const TeamSettlementDocumentSchema = z.object({
   yearMonth: YearMonthSchema,
   teamId: z.string().min(1),
@@ -115,6 +147,7 @@ export const TeamSettlementDocumentSchema = z.object({
   deductions: z.array(TeamSettlementDeductionItemSchema),
   additions: z.array(TeamSettlementAdditionItemSchema).default([]),
   summary: TeamSettlementSummarySchema,
+  sourceSnapshot: TeamSettlementSourceSnapshotSchema.optional(),
   confirmedAt: z.string().datetime().nullable(),
   updatedAt: z.string().datetime()
 });

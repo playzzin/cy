@@ -25,19 +25,25 @@ import { appendOfficeAssignmentTeam, isOfficeAssignmentReference, isOfficeAssign
 
 interface VehicleManagerPageProps {
     embedded?: boolean;
+    initialTab?: VehicleTabId;
+    onTabChange?: (tab: VehicleTabId) => void;
 }
 
 type VehicleTabId = 'status' | 'ledger' | 'history';
 
 const vehicleTabs: SupportSegmentedTabOption<VehicleTabId>[] = [
-    { id: 'status', label: '배정 및 청구현황', icon: faChartPie },
-    { id: 'ledger', label: '차량 통합관리대장', icon: faTableCellsLarge },
+    { id: 'status', label: '배정·경비현황', icon: faChartPie },
+    { id: 'ledger', label: '통합관리대장', icon: faTableCellsLarge },
     { id: 'history', label: '처리내역', icon: faHistory }
 ];
 
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
 
-export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded = false }) => {
+export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
+    embedded = false,
+    initialTab = 'status',
+    onTabChange,
+}) => {
     const navigate = useNavigate();
     // Data State
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -55,7 +61,16 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
     const [searchTerm, setSearchTerm] = useState('');
 
     // Tab State
-    const [activeTab, setActiveTab] = useState<VehicleTabId>('status');
+    const [activeTab, setActiveTab] = useState<VehicleTabId>(initialTab);
+
+    useEffect(() => {
+        setActiveTab(initialTab);
+    }, [initialTab]);
+
+    const handleTabChange = (tab: VehicleTabId) => {
+        setActiveTab(tab);
+        onTabChange?.(tab);
+    };
 
     // Modal State
     const [isFormOpen, setIsFormOpen] = useState(false);
@@ -338,7 +353,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                 setIsSetupModalOpen(false);
             }
             setCancellationTarget(null);
-            setActiveTab('history');
+            handleTabChange('history');
             handleRefresh();
         } catch (error) {
             console.error('Failed to process vehicle cancellation', error);
@@ -425,12 +440,13 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
     }, [setupVehicle]);
 
     return (
-        <div className={`${embedded ? 'space-y-5 sm:space-y-6 bg-transparent min-h-full w-full min-w-0 max-w-full overflow-x-hidden' : 'p-3 sm:p-6 space-y-5 sm:space-y-6 bg-slate-50 min-h-full w-full max-w-[calc(100vw-30px)] sm:max-w-full min-w-0 overflow-x-hidden'}`}>
+        <div className={`${embedded ? 'space-y-3 bg-transparent min-h-full w-full min-w-0 max-w-full overflow-x-hidden' : 'p-3 sm:p-6 space-y-5 sm:space-y-6 bg-slate-50 min-h-full w-full max-w-[calc(100vw-30px)] sm:max-w-full min-w-0 overflow-x-hidden'}`}>
             <SupportPageHeader
                 icon={faCar}
                 title="차량 통합관리"
                 description="실시간 운전자 현황과 차량 통합관리대장을 관리합니다."
                 tone="blue"
+                compact={embedded}
                 actions={(
                     <>
                     <button
@@ -487,7 +503,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                     <SupportSegmentedTabs
                         options={vehicleTabs}
                         activeId={activeTab}
-                        onChange={setActiveTab}
+                        onChange={handleTabChange}
                         ariaLabel="차량 관리 보기"
                     />
 

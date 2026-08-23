@@ -2022,29 +2022,26 @@ const DailyReportStatisticsPage: React.FC = () => {
     const [aiLoading, setAiLoading] = useState(false);
     const [aiMode, setAiMode] = useState<AiAnalysisMode>('auto');
 
-    // Filter Quick Actions
-    const handleQuickDate = (type: 'thisMonth' | 'lastMonth' | '3months') => {
-        const today = new Date();
-        let start = new Date();
-        let end = new Date();
-
-        if (type === 'thisMonth') {
-            start = startOfMonth(today);
-            end = endOfMonth(today);
-        } else if (type === 'lastMonth') {
-            const lastMonth = subMonths(today, 1);
-            start = startOfMonth(lastMonth);
-            end = endOfMonth(lastMonth);
-        } else if (type === '3months') {
-            start = subMonths(today, 3);
-            end = today;
-        }
-
+    const setMonthRange = useCallback((month: Date) => {
         setDateRange({
-            startDate: format(start, 'yyyy-MM-dd'),
-            endDate: format(end, 'yyyy-MM-dd')
+            startDate: format(startOfMonth(month), 'yyyy-MM-dd'),
+            endDate: format(endOfMonth(month), 'yyyy-MM-dd')
         });
-    };
+    }, []);
+
+    const selectedMonth = useMemo(
+        () => new Date(`${dateRange.startDate}T00:00:00`),
+        [dateRange.startDate]
+    );
+
+    const handleMonthMove = useCallback((offset: number) => {
+        setMonthRange(offset < 0 ? subMonths(selectedMonth, 1) : addMonths(selectedMonth, 1));
+    }, [selectedMonth, setMonthRange]);
+
+    const handleMonthSelect = useCallback((yearMonth: string) => {
+        if (!yearMonth) return;
+        setMonthRange(new Date(`${yearMonth}-01T00:00:00`));
+    }, [setMonthRange]);
 
     // Fetch Data
     useEffect(() => {
@@ -2204,39 +2201,40 @@ const DailyReportStatisticsPage: React.FC = () => {
                         </p>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row gap-3 bg-slate-800/50 p-2 rounded-2xl border border-slate-700/50 backdrop-blur-md">
-                        <div className="flex items-center gap-2 px-2">
-                            <div className="relative">
-                                <FontAwesomeIcon icon={faCalendarAlt} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs" />
-                                <input
-                                    type="date"
-                                    value={dateRange.startDate}
-                                    onChange={(e) => setDateRange({ ...dateRange, startDate: e.target.value })}
-                                    className="pl-8 pr-2 py-1.5 bg-slate-900/50 border border-slate-700 rounded-lg text-sm text-white focus:ring-1 focus:ring-cyan-500 outline-none w-32 transition-all hover:bg-slate-900"
-                                />
-                            </div>
-                            <span className="text-slate-500 font-bold">~</span>
-                            <div className="relative">
-                                <input
-                                    type="date"
-                                    value={dateRange.endDate}
-                                    onChange={(e) => setDateRange({ ...dateRange, endDate: e.target.value })}
-                                    className="pl-3 pr-2 py-1.5 bg-slate-900/50 border border-slate-700 rounded-lg text-sm text-white focus:ring-1 focus:ring-cyan-500 outline-none w-32 transition-all hover:bg-slate-900"
-                                />
-                            </div>
-                        </div>
-                        <div className="h-full w-px bg-slate-700 hidden sm:block" />
-                        <div className="flex gap-1">
-                            {['thisMonth', 'lastMonth', '3months'].map((t) => (
-                                <button
-                                    key={t}
-                                    onClick={() => handleQuickDate(t as any)}
-                                    className="px-3 py-1.5 text-xs font-medium rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors"
-                                >
-                                    {t === 'thisMonth' ? '이번 달' : t === 'lastMonth' ? '지난 달' : '3개월'}
-                                </button>
-                            ))}
-                        </div>
+                    <div className="flex items-center gap-2 bg-slate-800/50 p-2 rounded-2xl border border-slate-700/50 backdrop-blur-md">
+                        <button
+                            type="button"
+                            onClick={() => handleMonthMove(-1)}
+                            aria-label="이전 달 조회"
+                            title="이전 달"
+                            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/50 text-slate-300 transition-all hover:border-cyan-500/50 hover:bg-slate-700/70 hover:text-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                        >
+                            <FontAwesomeIcon icon={faChevronLeft} />
+                        </button>
+
+                        <label className="relative flex h-10 min-w-44 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/50 px-4 transition-all hover:bg-slate-900 focus-within:border-cyan-500/60 focus-within:ring-2 focus-within:ring-cyan-500/30">
+                            <FontAwesomeIcon icon={faCalendarAlt} className="mr-2 text-sm text-cyan-400" />
+                            <span className="text-base font-bold text-white">
+                                {format(selectedMonth, 'yyyy년 M월', { locale: ko })}
+                            </span>
+                            <input
+                                type="month"
+                                value={format(selectedMonth, 'yyyy-MM')}
+                                onChange={(e) => handleMonthSelect(e.target.value)}
+                                aria-label="조회할 월 선택"
+                                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                            />
+                        </label>
+
+                        <button
+                            type="button"
+                            onClick={() => handleMonthMove(1)}
+                            aria-label="다음 달 조회"
+                            title="다음 달"
+                            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/50 text-slate-300 transition-all hover:border-cyan-500/50 hover:bg-slate-700/70 hover:text-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                        >
+                            <FontAwesomeIcon icon={faChevronRight} />
+                        </button>
                     </div>
                 </div>
 

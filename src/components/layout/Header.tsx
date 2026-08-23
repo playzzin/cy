@@ -509,15 +509,16 @@ const Header: React.FC<HeaderProps> = ({
         }
 
         if (isQuickToolAction(action)) {
+            const isActiveQuickTool = isQuickPanelOpen && activeQuickTool === action;
             return (
                 <button
                     key={key}
                     type="button"
-                    className={`header-btn header-tool-btn ${isQuickPanelOpen && activeQuickTool === action ? 'active' : ''}`}
+                    className={`header-btn header-tool-btn ${isActiveQuickTool ? 'active' : ''}`}
                     onClick={() => openQuickTool(action)}
-                    title={label}
-                    aria-label={`${label} 열기`}
-                    aria-pressed={isQuickPanelOpen && activeQuickTool === action}
+                    title={`${label} ${isActiveQuickTool ? '닫기' : '열기'}`}
+                    aria-label={`${label} ${isActiveQuickTool ? '닫기' : '열기'}`}
+                    aria-pressed={isActiveQuickTool}
                 >
                     <FontAwesomeIcon icon={resolveIcon(item.icon, getHeaderActionFallbackIcon(action))} style={iconStyle} />
                 </button>

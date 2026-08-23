@@ -15,6 +15,7 @@ const DailyReportPage: React.FC = () => {
             ? tab
             : 'input';
     const isBoardInputTab = activeTab === 'board-input';
+    const isListTab = activeTab === 'list-v2';
 
     useEffect(() => {
         if (!tab) {
@@ -82,7 +83,7 @@ const DailyReportPage: React.FC = () => {
             className={`flex min-h-0 flex-col bg-[#f1f5f9] font-['Pretendard'] ${
                 isBoardInputTab
                     ? 'h-[calc(100vh_-_var(--header-height)_-_40px)] max-h-[calc(100vh_-_var(--header-height)_-_40px)] overflow-hidden md:h-[calc(100vh_-_var(--header-height)_-_60px)] md:max-h-[calc(100vh_-_var(--header-height)_-_60px)]'
-                    : 'h-full'
+                    : isListTab ? 'h-full overflow-hidden' : 'h-full'
             }`}
         >
             <OutputManagementTabs
@@ -92,7 +93,7 @@ const DailyReportPage: React.FC = () => {
             />
 
             {/* Content Area */}
-            <div className={`flex-1 min-h-0 ${isBoardInputTab ? 'overflow-hidden' : ''}`}>
+            <div className={`flex-1 min-h-0 ${isBoardInputTab || isListTab ? 'overflow-hidden' : ''}`}>
                 {activeTab === 'input' ? (
                     <DailyReportInput />
                 ) : activeTab === 'board-input' ? (

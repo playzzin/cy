@@ -17,6 +17,8 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
 import { siteService, Site } from '../../services/siteService';
 import { companyService, Company } from '../../services/companyService';
+import { primaryAccountService } from '../../services/primaryAccountService';
+import { formatManDayWithDecimal, roundManDay, sumManDays } from '../../utils/manDayMath';
 import {
   getWorkerMasterLaborStatementPayType,
   loadLaborStatementDefaults,
@@ -133,19 +135,11 @@ const monthToPeriod = (month: string): { start: string; end: string } => {
 };
 
 const sumDaysForMonth = (days: string[], lastDay: number): number => {
-  return days.slice(0, Math.max(lastDay, 0)).reduce((acc, raw) => {
-    const v = parseFloat(String(raw).trim());
-    return acc + (Number.isFinite(v) ? v : 0);
-  }, 0);
+  return sumManDays(days.slice(0, Math.max(lastDay, 0)));
 };
 
 const formatManDay = (value: number): string => {
-  if (!Number.isFinite(value)) return '';
-  const normalized = Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
-  if (normalized === 0) return '';
-  return Number.isInteger(normalized)
-    ? normalized.toLocaleString('ko-KR')
-    : normalized.toLocaleString('ko-KR', { maximumFractionDigits: 6 });
+  return formatManDayWithDecimal(value);
 };
 
 const extractDayOfMonth = (dateValue: unknown): number | null => {
@@ -275,9 +269,10 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   const [globalRate, setGlobalRate] = useState(230000);
 
   // --- Master Bank Info ---
-  const [masterBank, setMasterBank] = useState('');
-  const [masterOwner, setMasterOwner] = useState('');
-  const [masterAccount, setMasterAccount] = useState('');
+  const [masterBank, setMasterBank] = useState(() => loadLaborStatementDefaults().delegateBankName);
+  const [masterOwner, setMasterOwner] = useState(() => loadLaborStatementDefaults().delegateAccountHolder);
+  const [masterAccount, setMasterAccount] = useState(() => loadLaborStatementDefaults().delegateAccountNumber);
+  const [isPrimaryAccountDefault, setIsPrimaryAccountDefault] = useState(false);
 
   // --- Data ---
   const [sites, setSites] = useState<Site[]>([]);
@@ -326,21 +321,49 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     manpowerService.getWorkers().then(data => setWorkers(data.map(w => ({ ...w, id: w.id ?? '' }))));
   }, []);
 
-  // Fetch Cheongyeon info on mount
+  // Fetch the representative account on mount, with Cheongyeon company info as a legacy fallback.
   useEffect(() => {
-    const loadCompanyInfo = async () => {
+    let cancelled = false;
+
+    const loadDefaultDelegationAccount = async () => {
+      let primaryAccount: Awaited<ReturnType<typeof primaryAccountService.getPrimaryAccount>> = null;
+      try {
+        primaryAccount = await primaryAccountService.getPrimaryAccount();
+      } catch (err) {
+        console.warn('Failed to load primary account setting:', err);
+      }
+
+      if (cancelled) return;
+
+      if (primaryAccount) {
+        setMasterBank(primaryAccount.bankName);
+        setMasterOwner(primaryAccount.accountHolder);
+        setMasterAccount(primaryAccount.accountNumber);
+        setIsPrimaryAccountDefault(true);
+        saveLaborStatementDefaults({
+          delegateBankName: primaryAccount.bankName,
+          delegateAccountHolder: primaryAccount.accountHolder,
+          delegateAccountNumber: primaryAccount.accountNumber,
+        });
+        return;
+      }
+
       try {
         const company = await companyService.getCompanyByName('청연');
-        if (company) {
+        if (!cancelled && company) {
           if (company.bankName) setMasterBank(company.bankName);
           if (company.accountHolder) setMasterOwner(company.accountHolder);
           if (company.accountNumber) setMasterAccount(company.accountNumber);
         }
       } catch (err) {
-        console.error("Failed to load Cheongyeon info:", err);
+        console.error('Failed to load Cheongyeon fallback account:', err);
       }
     };
-    loadCompanyInfo();
+
+    loadDefaultDelegationAccount();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // --- Memos & Derived State ---
@@ -442,11 +465,6 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         try {
           const comp = await companyService.getCompanyById(selectedSite.companyId);
           setConstructorCompany(comp);
-          if (comp) {
-            setMasterBank(comp.bankName || '');
-            setMasterOwner(comp.accountHolder || '');
-            setMasterAccount(comp.accountNumber || '');
-          }
         } catch (e) {
           console.error("Failed to fetch constructor company", e);
           setConstructorCompany(null);
@@ -912,17 +930,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     const dayStartColumn = fixedInfoColumnCount + 1;
     // 공수는 반드시 숫자로 내보내야 엑셀에서 드래그 합계가 셀 개수로
     // 표시되지 않고 실제 공수 합계로 계산된다.
-    const manDayIntegerCellFormat = '#,##0';
-    const manDayDecimalCellFormat = '#,##0.###';
-    const getManDayCellFormat = (value: unknown) => {
-      const result = typeof value === 'object' && value !== null && 'result' in value
-        ? value.result
-        : value;
-      const numericValue = Number(result);
-      return Number.isFinite(numericValue) && !Number.isInteger(numericValue)
-        ? manDayDecimalCellFormat
-        : manDayIntegerCellFormat;
-    };
+    const manDayCellFormat = '#,##0.0##';
     const moneyNumberFormat = '#,##0';
     const blackArgb = 'FF000000';
     const sundayArgb = 'FFE60012';
@@ -1122,7 +1130,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       const totalDaysVal = sumDaysForMonth(r.days, lastDay);
       const unitPriceVal = parseFloat(String(r.unitPrice).replace(/,/g, '').trim()) || 0;
       const totalAmountVal = Math.round(totalDaysVal * unitPriceVal);
-      grandTotalDays += totalDaysVal;
+      grandTotalDays = roundManDay(grandTotalDays + totalDaysVal);
       grandTotalAmount += totalAmountVal;
 
       const bankCells = showBankDetailsColumn ? [r.bankName, r.bankOwner, r.bankAccount, r.payType === 'delegate' ? '위임' : '직불'] : [r.payType === 'delegate' ? '위임' : '직불'];
@@ -1130,7 +1138,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         const d1: any[] = [idx + 1, formatWorkerNameCell(r, showTeamUnderName, false), r.workerSsn, formatAddressCell(r, showBankUnderAddress)];
         for (let d = 0; d < daySplitPoint; d++) {
           const val = parseFloat(r.days[d] || '');
-          if (Number.isFinite(val)) dailyTotals[d] += val;
+          if (Number.isFinite(val)) dailyTotals[d] = roundManDay(dailyTotals[d] + val);
           d1.push(Number.isFinite(val) ? val : '');
         }
         d1.push(totalDaysVal, unitPriceVal, totalAmountVal, ...bankCells);
@@ -1138,7 +1146,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         const d2: any[] = ['', '', r.workerPhone, ''];
         for (let d = daySplitPoint; d < lastDay; d++) {
           const val = parseFloat(r.days[d] || '');
-          if (Number.isFinite(val)) dailyTotals[d] += val;
+          if (Number.isFinite(val)) dailyTotals[d] = roundManDay(dailyTotals[d] + val);
           d2.push(Number.isFinite(val) ? val : '');
         }
         while (d2.length < fixedInfoColumnCount + dayColCount) d2.push('');
@@ -1182,11 +1190,11 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
             cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
 
             if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
-              cell.numFmt = getManDayCellFormat(cell.value);
+              cell.numFmt = manDayCellFormat;
             }
 
             if (colNum >= summaryStartCol && colNum <= summaryStartCol + 2) {
-              cell.numFmt = colNum === summaryStartCol ? getManDayCellFormat(cell.value) : moneyNumberFormat;
+              cell.numFmt = colNum === summaryStartCol ? manDayCellFormat : moneyNumberFormat;
               cell.alignment = { horizontal: 'right', vertical: 'middle' };
               cell.font = { size: 9, bold: colNum === summaryStartCol + 2, color: { argb: blackArgb } };
             }
@@ -1200,7 +1208,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         const d: any[] = [idx + 1, formatWorkerNameCell(r, showTeamUnderName, false), formatWorkerIdentityCell(r), formatAddressCell(r, showBankUnderAddress)];
         for (let i = 0; i < lastDay; i++) {
           const val = parseFloat(r.days[i] || '');
-          if (Number.isFinite(val)) dailyTotals[i] += val;
+          if (Number.isFinite(val)) dailyTotals[i] = roundManDay(dailyTotals[i] + val);
           d.push(Number.isFinite(val) ? val : '');
         }
         d.push(totalDaysVal, unitPriceVal, totalAmountVal, ...bankCells);
@@ -1229,11 +1237,11 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
           cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
 
           if (colNum >= dayStartColumn && colNum < dayStartColumn + lastDay) {
-            cell.numFmt = getManDayCellFormat(cell.value);
+            cell.numFmt = manDayCellFormat;
           }
 
           if (colNum >= fixedInfoColumnCount + lastDay + 1 && colNum <= fixedInfoColumnCount + lastDay + 3) {
-            cell.numFmt = colNum === fixedInfoColumnCount + lastDay + 1 ? getManDayCellFormat(cell.value) : moneyNumberFormat;
+            cell.numFmt = colNum === fixedInfoColumnCount + lastDay + 1 ? manDayCellFormat : moneyNumberFormat;
             cell.alignment = { horizontal: 'right', vertical: 'middle' };
             cell.font = { size: 9, bold: colNum === fixedInfoColumnCount + lastDay + 3, color: { argb: blackArgb } };
           }
@@ -1301,10 +1309,10 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
           };
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
           if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
-            cell.numFmt = getManDayCellFormat(cell.value);
+            cell.numFmt = manDayCellFormat;
           }
           if (colNum >= summaryStartCol && colNum <= summaryStartCol + 2) {
-            cell.numFmt = colNum === summaryStartCol ? getManDayCellFormat(cell.value) : moneyNumberFormat;
+            cell.numFmt = colNum === summaryStartCol ? manDayCellFormat : moneyNumberFormat;
             cell.alignment = { horizontal: 'right', vertical: 'middle' };
           }
         });
@@ -1344,10 +1352,10 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
         if (colNum >= dayStartColumn && colNum < dayStartColumn + lastDay) {
-          cell.numFmt = getManDayCellFormat(cell.value);
+          cell.numFmt = manDayCellFormat;
         }
         if (colNum >= fixedInfoColumnCount + lastDay + 1 && colNum <= fixedInfoColumnCount + lastDay + 3) {
-          cell.numFmt = colNum === fixedInfoColumnCount + lastDay + 1 ? getManDayCellFormat(cell.value) : moneyNumberFormat;
+          cell.numFmt = colNum === fixedInfoColumnCount + lastDay + 1 ? manDayCellFormat : moneyNumberFormat;
           cell.alignment = { horizontal: 'right', vertical: 'middle' };
         }
       });
@@ -1415,13 +1423,13 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     rows.forEach(r => {
       const d = sumDaysForMonth(r.days, visibleLastDay);
       const p = parseFloat(String(r.unitPrice).replace(/,/g, ''));
-      totalDays += d;
+      totalDays = roundManDay(totalDays + d);
 
       r.days.forEach((val, idx) => {
         if (idx < visibleLastDay) {
           const num = parseFloat(val);
           if (Number.isFinite(num)) {
-            dailyTotals[idx] += num;
+            dailyTotals[idx] = roundManDay(dailyTotals[idx] + num);
           }
         }
       });
@@ -1822,13 +1830,16 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                 <Check className="w-3 h-3" /> 위임 계좌
               </span>
               <div className="flex gap-1.5">
-                <input type="text" value={masterBank} onChange={e => setMasterBank(e.target.value)} placeholder="은행"
+                <input type="text" value={masterBank} onChange={e => { setMasterBank(e.target.value); setIsPrimaryAccountDefault(false); }} placeholder="은행"
                   className="w-[50px] text-xs font-medium p-1 border border-yellow-200 rounded bg-white outline-none focus:border-yellow-500/50 text-center" />
-                <input type="text" value={masterOwner} onChange={e => setMasterOwner(e.target.value)} placeholder="예금주"
+                <input type="text" value={masterOwner} onChange={e => { setMasterOwner(e.target.value); setIsPrimaryAccountDefault(false); }} placeholder="예금주"
                   className="w-[60px] text-xs font-medium p-1 border border-yellow-200 rounded bg-white outline-none focus:border-yellow-500/50 text-center" />
-                <input type="text" value={masterAccount} onChange={e => setMasterAccount(e.target.value)} placeholder="계좌번호"
+                <input type="text" value={masterAccount} onChange={e => { setMasterAccount(e.target.value); setIsPrimaryAccountDefault(false); }} placeholder="계좌번호"
                   className="w-[120px] text-xs font-bold p-1 border border-yellow-200 rounded bg-white outline-none focus:border-yellow-500/50 tracking-tight text-slate-700" />
               </div>
+              {isPrimaryAccountDefault && (
+                <span className="rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-black text-slate-900 whitespace-nowrap">대표계좌</span>
+              )}
             </div>
           </div>
         </div>

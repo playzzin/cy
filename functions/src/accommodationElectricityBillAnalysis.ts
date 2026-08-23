@@ -1,5 +1,6 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
+import { createHash } from 'crypto';
 import { requireCallableAuth } from './auth';
 import { getServerGeminiSettings } from './serverAiSettings';
 
@@ -10,6 +11,7 @@ interface ElectricityBillFileInput {
     originalFileName: string;
     mimeType: string;
     base64: string;
+    sourceFileSha256: string;
 }
 
 interface AnalyzeElectricityBillsRequest {
@@ -20,6 +22,7 @@ interface AnalyzeElectricityBillsRequest {
 interface ElectricityBillAnalysis {
     fileIndex: number;
     originalFileName: string;
+    sourceFileSha256: string;
     provider: string;
     customerName: string;
     customerNumber: string;
@@ -38,6 +41,7 @@ interface ElectricityBillAnalysis {
 interface GasBillAnalysis {
     fileIndex: number;
     originalFileName: string;
+    sourceFileSha256: string;
     provider: string;
     customerName: string;
     payerNumber: string;
@@ -56,6 +60,7 @@ interface GasBillAnalysis {
 interface WaterBillAnalysis {
     fileIndex: number;
     originalFileName: string;
+    sourceFileSha256: string;
     provider: string;
     customerName: string;
     consumerNumber: string;
@@ -293,6 +298,7 @@ const sanitizeFile = (value: unknown): ElectricityBillFileInput => {
     const originalFileName = asString(source.originalFileName).slice(0, 240);
     const mimeType = asString(source.mimeType).toLowerCase();
     const base64 = asString(source.base64).replace(/^data:[^;]+;base64,/, '');
+    const requestedSha256 = asString(source.sourceFileSha256).trim().toLowerCase();
 
     if (fileIndex < 0 || fileIndex > 9999) {
         throw new functions.https.HttpsError('invalid-argument', '첨부파일 순번이 올바르지 않습니다.');
@@ -306,7 +312,27 @@ const sanitizeFile = (value: unknown): ElectricityBillFileInput => {
     if (!base64 || base64.length > MAX_FILE_BASE64_LENGTH || !/^[A-Za-z0-9+/=\r\n]+$/.test(base64)) {
         throw new functions.https.HttpsError('invalid-argument', `${originalFileName}: 파일 데이터가 없거나 너무 큽니다.`);
     }
-    return { fileIndex, originalFileName, mimeType, base64 };
+    if (requestedSha256 && !/^[a-f0-9]{64}$/.test(requestedSha256)) {
+        throw new functions.https.HttpsError('invalid-argument', `${originalFileName}: SHA-256 파일 지문 형식이 올바르지 않습니다.`);
+    }
+    const sourceFileSha256 = createHash('sha256')
+        .update(Buffer.from(base64, 'base64'))
+        .digest('hex');
+    if (requestedSha256 && requestedSha256 !== sourceFileSha256) {
+        throw new functions.https.HttpsError('invalid-argument', `${originalFileName}: 파일 데이터와 SHA-256 지문이 일치하지 않습니다.`);
+    }
+    return { fileIndex, originalFileName, mimeType, base64, sourceFileSha256 };
+};
+
+const assertUniqueFiles = (files: ElectricityBillFileInput[]): void => {
+    const indexes = new Set(files.map((file) => file.fileIndex));
+    if (indexes.size !== files.length) {
+        throw new functions.https.HttpsError('invalid-argument', '첨부파일 순번이 중복되었습니다.');
+    }
+    const hashes = new Set(files.map((file) => file.sourceFileSha256));
+    if (hashes.size !== files.length) {
+        throw new functions.https.HttpsError('already-exists', '동일한 청구서 파일이 두 번 첨부되었습니다. 같은 파일은 한 번만 등록해 주세요.');
+    }
 };
 
 const sanitizeBill = (
@@ -332,6 +358,7 @@ const sanitizeBill = (
     return {
         fileIndex,
         originalFileName: inputFile.originalFileName,
+        sourceFileSha256: inputFile.sourceFileSha256,
         provider: asString(source.provider).slice(0, 80),
         customerName: asString(source.customerName).slice(0, 120),
         customerNumber: asString(source.customerNumber).slice(0, 60),
@@ -372,6 +399,7 @@ const sanitizeGasBill = (
     return {
         fileIndex,
         originalFileName: inputFile.originalFileName,
+        sourceFileSha256: inputFile.sourceFileSha256,
         provider: asString(source.provider).slice(0, 80),
         customerName: asString(source.customerName).slice(0, 120),
         payerNumber: asString(source.payerNumber).slice(0, 60),
@@ -412,6 +440,7 @@ const sanitizeWaterBill = (
     return {
         fileIndex,
         originalFileName: inputFile.originalFileName,
+        sourceFileSha256: inputFile.sourceFileSha256,
         provider: asString(source.provider).slice(0, 80),
         customerName: asString(source.customerName).slice(0, 120),
         consumerNumber: asString(source.consumerNumber).slice(0, 80),
@@ -532,10 +561,7 @@ export const analyzeAccommodationElectricityBills = functions
                 );
             }
             const files = rawFiles.map(sanitizeFile);
-            const indexes = new Set(files.map((file) => file.fileIndex));
-            if (indexes.size !== files.length) {
-                throw new functions.https.HttpsError('invalid-argument', '첨부파일 순번이 중복되었습니다.');
-            }
+            assertUniqueFiles(files);
             const totalBase64Length = files.reduce((sum, file) => sum + file.base64.length, 0);
             if (totalBase64Length > MAX_TOTAL_BASE64_LENGTH) {
                 throw new functions.https.HttpsError('invalid-argument', '분석 요청 파일의 전체 용량이 너무 큽니다.');
@@ -602,6 +628,7 @@ export const analyzeAccommodationElectricityBills = functions
             const bills = files.map((file) => byFileIndex.get(file.fileIndex) || ({
                 fileIndex: file.fileIndex,
                 originalFileName: file.originalFileName,
+                sourceFileSha256: file.sourceFileSha256,
                 provider: '',
                 customerName: '',
                 customerNumber: '',
@@ -647,10 +674,7 @@ export const analyzeAccommodationGasBills = functions
                 );
             }
             const files = rawFiles.map(sanitizeFile);
-            const indexes = new Set(files.map((file) => file.fileIndex));
-            if (indexes.size !== files.length) {
-                throw new functions.https.HttpsError('invalid-argument', '첨부 파일 순번이 중복되었습니다.');
-            }
+            assertUniqueFiles(files);
             const totalBase64Length = files.reduce((sum, file) => sum + file.base64.length, 0);
             if (totalBase64Length > MAX_TOTAL_BASE64_LENGTH) {
                 throw new functions.https.HttpsError('invalid-argument', '분석 요청 파일의 전체 용량이 너무 큽니다.');
@@ -717,6 +741,7 @@ export const analyzeAccommodationGasBills = functions
             const bills = files.map((file) => byFileIndex.get(file.fileIndex) || ({
                 fileIndex: file.fileIndex,
                 originalFileName: file.originalFileName,
+                sourceFileSha256: file.sourceFileSha256,
                 provider: '',
                 customerName: '',
                 payerNumber: '',
@@ -762,10 +787,7 @@ export const analyzeAccommodationWaterBills = functions
                 );
             }
             const files = rawFiles.map(sanitizeFile);
-            const indexes = new Set(files.map((file) => file.fileIndex));
-            if (indexes.size !== files.length) {
-                throw new functions.https.HttpsError('invalid-argument', '첨부 파일 순번이 중복되었습니다.');
-            }
+            assertUniqueFiles(files);
             const totalBase64Length = files.reduce((sum, file) => sum + file.base64.length, 0);
             if (totalBase64Length > MAX_TOTAL_BASE64_LENGTH) {
                 throw new functions.https.HttpsError('invalid-argument', '분석 요청 파일의 전체 용량이 너무 큽니다.');
@@ -832,6 +854,7 @@ export const analyzeAccommodationWaterBills = functions
             const bills = files.map((file) => byFileIndex.get(file.fileIndex) || ({
                 fileIndex: file.fileIndex,
                 originalFileName: file.originalFileName,
+                sourceFileSha256: file.sourceFileSha256,
                 provider: '',
                 customerName: '',
                 consumerNumber: '',

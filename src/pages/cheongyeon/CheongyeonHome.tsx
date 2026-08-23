@@ -982,7 +982,7 @@ const CheongyeonHome: React.FC = () => {
                                 />
                                 <iframe
                                     src={dashboard2HeroVideoUrl}
-                                    title=""
+                                    title="청연 대시보드 소개 영상"
                                     className={`pointer-events-none absolute left-1/2 top-1/2 h-[130%] w-[130%] max-w-none -translate-x-1/2 -translate-y-1/2 border-0 transition-opacity duration-500 ${
                                         isDashboard2HeroVideoVisible ? 'opacity-100' : 'opacity-0'
                                     }`}

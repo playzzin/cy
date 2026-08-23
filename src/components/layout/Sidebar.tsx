@@ -555,7 +555,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                             return (
                                 <li
-                                    key={uniqueKey}
+                                    key={`root-${uniqueKey}-${index}`}
                                     className={`menu-item ${isExpanded ? 'active' : ''}`}
                                     onMouseEnter={(e) => handleItemMouseEnter(item, e)}
                                 >

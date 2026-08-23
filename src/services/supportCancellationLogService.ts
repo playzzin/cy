@@ -102,9 +102,15 @@ const filterResourceType = (
 export const supportCancellationLogService = {
   collectionName: COLLECTION_NAME,
 
-  createLog: async (input: CreateSupportCancellationLogInput): Promise<SupportCancellationLog> => {
+  createLog: async (
+    input: CreateSupportCancellationLogInput,
+    options: { operationId?: string } = {}
+  ): Promise<SupportCancellationLog> => {
     const now = Timestamp.now();
-    const logRef = doc(collection(db, COLLECTION_NAME));
+    const deterministicId = asText(options.operationId).split('/').join('_');
+    const logRef = deterministicId
+      ? doc(db, COLLECTION_NAME, deterministicId)
+      : doc(collection(db, COLLECTION_NAME));
     const reasonLabel = input.reasonLabel || SUPPORT_CANCELLATION_REASON_LABELS[input.reason] || '기타 처리';
     const log: SupportCancellationLog = {
       ...input,

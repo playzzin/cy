@@ -62,4 +62,33 @@ describe('teamSettlementDraft', () => {
       expect.objectContaining({ code: 'manual-addition:addition-1' })
     ]);
   });
+
+  test('저장된 원천 스냅샷 합계와 자동집계 금액이 다르면 오류를 반환한다', () => {
+    const doc = buildDocument();
+    doc.sales = [{
+      id: 'sale-snapshot',
+      source: 'auto',
+      origin: 'daily_report',
+      kind: '직영',
+      siteName: 'A현장',
+      manDay: 1,
+      amount: 100000
+    }];
+    doc.sourceSnapshot = {
+      version: 1,
+      capturedAt: '2026-08-04T00:00:00.000Z',
+      dailyReports: [],
+      totals: {
+        sales: 90000,
+        purchases: 0,
+        deductions: 0,
+        additions: 0,
+        net: 90000
+      }
+    };
+
+    expect(getTeamSettlementConfirmationIssues(doc)).toEqual([
+      expect.objectContaining({ code: 'snapshot-total:sales', targetId: 'settlement-transactions' })
+    ]);
+  });
 });

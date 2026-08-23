@@ -23,6 +23,7 @@ jest.mock('firebase/firestore', () => ({
     where: jest.fn(),
     writeBatch: jest.fn(() => ({
         delete: jest.fn(),
+        set: jest.fn(),
         update: jest.fn(),
         commit: jest.fn()
     }))
@@ -30,6 +31,8 @@ jest.mock('firebase/firestore', () => ({
 
 const memoStorageKey = 'cy-smart-memo-dev-admin-memos';
 const categoryStorageKey = 'cy-smart-memo-dev-admin-categories';
+const viewModeStorageKey = 'cy-smart-memo-view-mode';
+const stickyColumnCountStorageKey = 'cy-smart-memo-sticky-column-count';
 
 const readStoredMemos = () => JSON.parse(window.localStorage.getItem(memoStorageKey) || '[]');
 const readStoredCategories = () => JSON.parse(window.localStorage.getItem(categoryStorageKey) || '[]');
@@ -138,6 +141,27 @@ describe('MemoPage dev-admin local storage mode', () => {
         expect(screen.getAllByText('저장됨').length).toBeGreaterThan(0);
     });
 
+    it('returns to a saved status after hydrating an unchanged memo', async () => {
+        window.localStorage.setItem(memoStorageKey, JSON.stringify([
+            {
+                id: 'unchanged-memo',
+                type: 'text',
+                title: '변경 없는 메모',
+                content: '기존 본문',
+                checklistItems: [],
+                categoryId: null,
+                order: 0
+            }
+        ]));
+
+        render(<MemoPage />);
+
+        await waitFor(() => {
+            expect(screen.queryByText('자동 저장 대기')).toBeNull();
+        });
+        expect(screen.getAllByText('저장됨').length).toBeGreaterThan(0);
+    });
+
     it('switches from the mobile list pane to the editor pane after selecting a memo', async () => {
         window.localStorage.setItem(memoStorageKey, JSON.stringify([
             {
@@ -161,6 +185,68 @@ describe('MemoPage dev-admin local storage mode', () => {
         });
     });
 
+    it('keeps a newly added checklist row while an earlier checklist change auto-saves', async () => {
+        window.localStorage.setItem(memoStorageKey, JSON.stringify([
+            {
+                id: 'checklist-auto-save-memo',
+                type: 'checklist',
+                title: '체크리스트 자동 저장',
+                content: '',
+                checklistItems: [
+                    { id: 'first-check-item', text: '첫 항목', isChecked: false }
+                ],
+                categoryId: null,
+                order: 0
+            }
+        ]));
+
+        render(<MemoPage />);
+
+        const checklistTitleInput = screen.getByRole('textbox', { name: '체크리스트 제목' });
+        expect(checklistTitleInput.className).toContain('h-9');
+        expect(screen.getByLabelText('체크리스트 항목 편집 영역').className).toContain('p-2');
+
+        fireEvent.click(await screen.findByRole('checkbox', { name: '첫 항목 완료 여부' }));
+        fireEvent.click(screen.getByRole('button', { name: '항목 추가' }));
+
+        expect(screen.getAllByPlaceholderText('할 일을 입력하세요')).toHaveLength(2);
+        await waitFor(() => {
+            expect(screen.getAllByPlaceholderText('할 일을 입력하세요')[1].matches(':focus')).toBe(true);
+        });
+
+        await act(async () => {
+            await new Promise(resolve => window.setTimeout(resolve, 900));
+        });
+
+        expect(screen.getAllByPlaceholderText('할 일을 입력하세요')).toHaveLength(2);
+        expect((screen.getByRole('checkbox', { name: '첫 항목 완료 여부' }) as HTMLInputElement).checked).toBe(true);
+    });
+
+    it('saves a dirty memo before creating the next memo', async () => {
+        render(<MemoPage />);
+        createTextMemo();
+
+        await waitFor(() => {
+            expect(readStoredMemos()).toHaveLength(1);
+        });
+        await waitForSavingUnlock();
+
+        fireEvent.change(await screen.findByRole('textbox', { name: '메모 제목과 본문' }), {
+            target: { value: '먼저 저장할 메모\n저장 후 새 메모 생성' }
+        });
+        createTextMemo();
+
+        await waitFor(() => {
+            expect(readStoredMemos()).toHaveLength(2);
+        });
+        expect(readStoredMemos()).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                title: '먼저 저장할 메모',
+                content: '저장 후 새 메모 생성'
+            })
+        ]));
+    });
+
     it('cycles a sticky memo from vertical expansion to a two-by-two size', async () => {
         window.localStorage.setItem(memoStorageKey, JSON.stringify([
             {
@@ -171,24 +257,76 @@ describe('MemoPage dev-admin local storage mode', () => {
                 checklistItems: [],
                 categoryId: null,
                 order: 0
+            },
+            {
+                id: 'top-aligned-sticky-memo',
+                type: 'checklist',
+                title: '상단 정렬 메모',
+                content: '',
+                checklistItems: [
+                    { id: 'top-aligned-item', text: '헤더 바로 아래 항목', isChecked: false }
+                ],
+                categoryId: null,
+                order: 1
             }
         ]));
 
         render(<MemoPage />);
         fireEvent.click(screen.getByRole('button', { name: '스티커 보기' }));
+
+        const stickyBoard = screen.getByLabelText('스티커 메모 목록');
+        expect(stickyBoard.className).toContain('auto-rows-[360px]');
+
+        const stickyMemoBody = await screen.findByRole('button', { name: '크게 볼 메모 내용 열기' });
+        expect(stickyMemoBody.className).toContain('justify-start');
+        expect(stickyMemoBody.className).toContain('items-stretch');
+        expect(stickyMemoBody.className).toContain('p-2');
+
         fireEvent.click(await screen.findByRole('button', { name: '크게 볼 메모 세로로 크게 보기' }));
 
         const stickyMemo = screen.getByLabelText('크게 볼 메모 스티커 메모');
-        expect(stickyMemo.getAttribute('aria-expanded')).toBe('true');
+        const regularStickyMemo = screen.getByLabelText('상단 정렬 메모 스티커 메모');
+        expect(stickyMemo.className).toContain('h-full');
+        expect(regularStickyMemo.className).toContain('h-full');
         expect(stickyMemo.getAttribute('data-expansion-level')).toBe('1');
+        expect(stickyMemo.className).toContain('row-span-2');
         expect(screen.queryByRole('dialog')).toBeNull();
 
         fireEvent.click(screen.getByRole('button', { name: '크게 볼 메모 가로까지 더 크게 보기' }));
         expect(stickyMemo.getAttribute('data-expansion-level')).toBe('2');
 
         fireEvent.click(screen.getByRole('button', { name: '크게 볼 메모 원래 크기로' }));
-        expect(stickyMemo.getAttribute('aria-expanded')).toBe('false');
         expect(stickyMemo.getAttribute('data-expansion-level')).toBe('0');
+    });
+
+    it('persists the selected default view and sticky column count', async () => {
+        window.localStorage.setItem(memoStorageKey, JSON.stringify([
+            {
+                id: 'layout-preference-memo',
+                type: 'text',
+                title: '배치 확인 메모',
+                content: '배치 확인용 본문',
+                checklistItems: [],
+                categoryId: null,
+                order: 0
+            }
+        ]));
+
+        const { unmount } = render(<MemoPage />);
+
+        fireEvent.click(screen.getByRole('button', { name: '스티커 보기' }));
+        fireEvent.click(await screen.findByRole('button', { name: '한 줄에 스티커 4개 보기' }));
+
+        expect(window.localStorage.getItem(viewModeStorageKey)).toBe('sticky');
+        expect(window.localStorage.getItem(stickyColumnCountStorageKey)).toBe('4');
+        expect(screen.getByLabelText('스티커 메모 목록').getAttribute('data-column-count')).toBe('4');
+
+        unmount();
+        render(<MemoPage />);
+
+        expect(screen.getByRole('button', { name: '스티커 보기' }).getAttribute('aria-pressed')).toBe('true');
+        expect(screen.getByRole('button', { name: '한 줄에 스티커 4개 보기' }).getAttribute('aria-pressed')).toBe('true');
+        expect(screen.getByLabelText('스티커 메모 목록').getAttribute('data-column-count')).toBe('4');
     });
 
     it('normalizes legacy category colors and persists a newly selected color', async () => {
@@ -277,5 +415,112 @@ describe('MemoPage dev-admin local storage mode', () => {
         expect(screen.getByRole('button', { name: '분류 없는 메모 분류 없음' })).toBeTruthy();
         expect(screen.getByRole('button', { name: '업무 메모 업무' })).toBeTruthy();
         expect(screen.queryByRole('button', { name: '분류 없음 1' })).toBeNull();
+    });
+
+    it('restores a deleted memo from the undo notification', async () => {
+        window.localStorage.setItem(memoStorageKey, JSON.stringify([
+            {
+                id: 'undo-memo',
+                type: 'text',
+                title: '복구할 메모',
+                content: '삭제 후 다시 돌아와야 합니다.',
+                checklistItems: [],
+                categoryId: null,
+                order: 0
+            }
+        ]));
+
+        const confirmSpy = jest.spyOn(window, 'confirm').mockImplementation(() => true);
+        render(<MemoPage />);
+
+        fireEvent.click(screen.getByRole('button', { name: '선택한 메모 삭제' }));
+
+        await waitFor(() => {
+            expect(readStoredMemos()).toHaveLength(0);
+        });
+        expect(confirmSpy).toHaveBeenCalled();
+        expect(screen.getByText('1개 메모를 삭제했습니다.')).toBeTruthy();
+
+        fireEvent.click(screen.getByRole('button', { name: '실행 취소' }));
+
+        await waitFor(() => {
+            expect(readStoredMemos()).toEqual([
+                expect.objectContaining({ id: 'undo-memo', title: '복구할 메모' })
+            ]);
+        });
+        expect(screen.queryByRole('button', { name: '실행 취소' })).toBeNull();
+    });
+
+    it('pins an important memo above newer memos and persists the state', async () => {
+        window.localStorage.setItem(memoStorageKey, JSON.stringify([
+            {
+                id: 'older-important-memo',
+                type: 'text',
+                title: '중요한 과거 메모',
+                content: '',
+                checklistItems: [],
+                categoryId: null,
+                order: 1,
+                updatedAt: 1
+            },
+            {
+                id: 'newer-memo',
+                type: 'text',
+                title: '최근 메모',
+                content: '',
+                checklistItems: [],
+                categoryId: null,
+                order: 2,
+                updatedAt: 2
+            }
+        ]));
+
+        render(<MemoPage />);
+        expect(screen.getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual([
+            '최근 메모',
+            '중요한 과거 메모'
+        ]);
+
+        fireEvent.click(screen.getByRole('button', { name: '중요한 과거 메모 중요 메모로 고정' }));
+
+        await waitFor(() => {
+            expect(screen.getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual([
+                '중요한 과거 메모',
+                '최근 메모'
+            ]);
+        });
+        expect(readStoredMemos().find((memo: { id: string }) => memo.id === 'older-important-memo').isPinned).toBe(true);
+    });
+
+    it('sorts memos by title and persists the selected sort mode', async () => {
+        window.localStorage.setItem(memoStorageKey, JSON.stringify([
+            {
+                id: 'memo-b',
+                type: 'text',
+                title: '나 메모',
+                content: '',
+                checklistItems: [],
+                categoryId: null,
+                order: 2
+            },
+            {
+                id: 'memo-a',
+                type: 'text',
+                title: '가 메모',
+                content: '',
+                checklistItems: [],
+                categoryId: null,
+                order: 1
+            }
+        ]));
+
+        render(<MemoPage />);
+        fireEvent.change(screen.getByLabelText('메모 정렬'), { target: { value: 'title-asc' } });
+
+        expect(screen.getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual([
+            '가 메모',
+            '나 메모'
+        ]);
+        expect(window.localStorage.getItem('cy-smart-memo-sort-mode')).toBe('title-asc');
     });
 });

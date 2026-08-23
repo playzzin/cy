@@ -415,7 +415,7 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
                                                 <span className="absolute right-3 top-2.5 text-sm text-rose-400">₩</span>
                                             </div>
                                             <p className="mt-1.5 text-[11px] font-medium text-rose-600">
-                                                월세를 제외한 전기·가스·수도·인터넷·관리비·기타 합계가 이 금액 이상이면 과청구 대상으로 표시합니다.
+                                                전기세·가스비·수도세 합계가 이 금액을 초과하면 초과한 차액만 과청구로 표시합니다.
                                             </p>
                                         </div>
                                     )}

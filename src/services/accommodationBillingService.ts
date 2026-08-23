@@ -26,9 +26,27 @@ const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 const OFFICE_BILLING_TEAM_ID = '__office__';
 const OFFICE_BILLING_TEAM_NAME = '사무실';
 
-const isConfirmedBilling = (billing?: Pick<AccommodationBillingDocument, 'status'> | null): boolean => (
-    String(billing?.status ?? '').trim().toLowerCase() === 'confirmed'
+const normalizeAccommodationBillingStatus = (status: unknown): string => (
+    String(status ?? '').trim().toUpperCase()
 );
+
+export const isDraftAccommodationBillingStatus = (status: unknown): boolean => (
+    normalizeAccommodationBillingStatus(status) === 'DRAFT'
+);
+
+export const isProtectedAccommodationBillingStatus = (status: unknown): boolean => (
+    !isDraftAccommodationBillingStatus(status)
+);
+
+const isConfirmedBilling = (billing?: Pick<AccommodationBillingDocument, 'status'> | null): boolean => (
+    normalizeAccommodationBillingStatus(billing?.status) === 'CONFIRMED'
+);
+
+export interface AccommodationDraftBillingUpsertResult {
+    id: string;
+    action: 'created' | 'replaced' | 'skipped-protected';
+    protectedStatus?: string;
+}
 
 const isActiveLineItemRow = (row: any): boolean => (
     String(row?.status ?? 'active').trim().toLowerCase() !== 'cancelled' && !row?.cancelledAt
@@ -454,6 +472,55 @@ export const accommodationBillingService = {
         return `${params.teamId}_${params.workerId}_${params.yearMonth}`;
     },
 
+    async upsertDraftBillingDocument(
+        docData: Omit<AccommodationBillingDocument, 'createdAt' | 'updatedAt'>,
+        options: { operationId?: string } = {}
+    ): Promise<AccommodationDraftBillingUpsertResult> {
+        const issuedToType = docData.issuedToType === 'team_leader' ? 'team' : docData.issuedToType;
+        const id = accommodationBillingService.buildBillingDocumentId({
+            teamId: docData.teamId,
+            issuedToType,
+            workerId: issuedToType === 'worker' ? docData.issuedToWorkerId : undefined,
+            yearMonth: docData.yearMonth
+        });
+        const existing = await findAccommodationBillingDocumentById(id);
+        if (existing && isProtectedAccommodationBillingStatus(existing.status)) {
+            return {
+                id,
+                action: 'skipped-protected',
+                protectedStatus: String(existing.status ?? '')
+            };
+        }
+
+        const draft: Omit<AccommodationBillingDocument, 'createdAt' | 'updatedAt'> = {
+            ...docData,
+            id,
+            issuedToType,
+            status: 'draft',
+            confirmedAt: undefined,
+            postedAdvancePaymentId: undefined
+        };
+
+        try {
+            await accommodationBillingService.upsertBillingDocument(draft, {
+                operationId: options.operationId || `accommodation-billing-draft:${draft.yearMonth}:${id}`
+            });
+        } catch (error) {
+            const message = getErrorMessage(error);
+            if (message.includes('accommodation-billing-protected-modification-blocked')) {
+                const latest = await findAccommodationBillingDocumentById(id);
+                return {
+                    id,
+                    action: 'skipped-protected',
+                    protectedStatus: String(latest?.status ?? '')
+                };
+            }
+            throw error;
+        }
+
+        return { id, action: existing ? 'replaced' : 'created' };
+    },
+
     async getBillingDocuments(params: {
         teamId: string;
         yearMonth: string;
@@ -546,9 +613,9 @@ export const accommodationBillingService = {
         if (!teamUuid && !isOfficeTeam) throw new Error('???李얠쓣 ???놁뒿?덈떎.');
         if (shouldRequireWorker && !workerUuid) throw new Error('?묒뾽?먮? 李얠쓣 ???놁뒿?덈떎.');
 
-        const beforeBilling = await findAccommodationBillingDocumentById(docData.id).catch(() => null);
-        if (isConfirmedBilling(beforeBilling)) {
-            throw new Error('accommodation-billing-confirmed-modification-blocked');
+        const beforeBilling = await findAccommodationBillingDocumentById(docData.id);
+        if (beforeBilling && isProtectedAccommodationBillingStatus(beforeBilling.status)) {
+            throw new Error(`accommodation-billing-protected-modification-blocked:${String(beforeBilling.status ?? '')}`);
         }
 
         const storedTeamId = teamUuid ?? null;
@@ -557,7 +624,7 @@ export const accommodationBillingService = {
             ? (storedTeamName ?? '')
             : (docData.issuedToWorkerName ?? null);
 
-        const updateRes = await updateAccommodationBillingDocument({
+        const updatePayload: Record<string, unknown> = {
             id: docData.id,
             yearMonth: docData.yearMonth ?? null,
             teamId: storedTeamId,
@@ -565,27 +632,39 @@ export const accommodationBillingService = {
             issuedToType: issuedToType ?? null,
             issuedToWorkerId: workerUuid,
             issuedToWorkerName,
-            status: docData.status ?? null,
             memo: docData.memo ?? null,
-            confirmedAt: docData.confirmedAt ? docData.confirmedAt.toDate().toISOString() : null,
-            postedAdvancePaymentId: docData.postedAdvancePaymentId ?? null
-        } as any);
+            lineItemIds: (docData.lineItems ?? []).map((lineItem) => lineItem.id),
+        };
+        const updateRes = await updateAccommodationBillingDocument(updatePayload as any);
 
         const updatedOk = (updateRes as any)?.data?.accommodationBillingDocument_update;
         if (!updatedOk) {
-            await createAccommodationBillingDocument({
-                id: docData.id,
-                yearMonth: docData.yearMonth,
-                teamId: storedTeamId,
-                teamName: storedTeamName,
-                issuedToType: issuedToType ?? null,
-                issuedToWorkerId: workerUuid,
-                issuedToWorkerName,
-                status: docData.status ?? 'draft',
-                memo: docData.memo ?? null,
-                confirmedAt: docData.confirmedAt ? docData.confirmedAt.toDate().toISOString() : null,
-                postedAdvancePaymentId: docData.postedAdvancePaymentId ?? null
-            } as any);
+            try {
+                await createAccommodationBillingDocument({
+                    ...updatePayload,
+                    yearMonth: docData.yearMonth,
+                    status: docData.status ?? 'draft'
+                } as any);
+            } catch (createError) {
+                // A concurrent caller may have created the same deterministic draft id
+                // after our first update miss. Retry the update to make the write an upsert.
+                const concurrentBilling = await findAccommodationBillingDocumentById(docData.id);
+                if (concurrentBilling && isProtectedAccommodationBillingStatus(concurrentBilling.status)) {
+                    throw new Error(`accommodation-billing-protected-modification-blocked:${String(concurrentBilling.status ?? '')}`);
+                }
+                const retryRes = await updateAccommodationBillingDocument(updatePayload as any);
+                const retryOk = (retryRes as any)?.data?.accommodationBillingDocument_update;
+                if (!retryOk) throw createError;
+            }
+        }
+
+        // Existing draft updates intentionally do not write status/confirmation fields.
+        // If another caller confirms between the first read and metadata update, the
+        // confirmation therefore survives and this strict re-read stops line-item writes.
+        const guardedBilling = await findAccommodationBillingDocumentById(docData.id);
+        if (!guardedBilling) throw new Error('accommodation-billing-document-not-visible-after-upsert');
+        if (isProtectedAccommodationBillingStatus(guardedBilling.status)) {
+            throw new Error(`accommodation-billing-protected-modification-blocked:${String(guardedBilling.status ?? '')}`);
         }
 
         await syncAccommodationBillingLineItems(docData.id, docData.lineItems ?? []);
@@ -650,20 +729,24 @@ export const accommodationBillingService = {
     },
 
     async deleteBillingDocument(id: string): Promise<void> {
-        const beforeBilling = await findAccommodationBillingDocumentById(id).catch(() => null);
-        if (isConfirmedBilling(beforeBilling)) {
-            throw new Error('accommodation-billing-confirmed-delete-blocked');
-        }
-        if (beforeBilling) {
-            try {
-                await resetPostedAdvancePayment(beforeBilling);
-            } catch (advanceError) {
-                console.warn('[accommodationBillingService] advance payment reset failed:', advanceError);
-            }
+        const beforeBilling = await findAccommodationBillingDocumentById(id);
+        if (beforeBilling && isProtectedAccommodationBillingStatus(beforeBilling.status)) {
+            throw new Error(`accommodation-billing-protected-delete-blocked:${String(beforeBilling.status ?? '')}`);
         }
         const listItemsRes = await listAllAccommodationBillingLineItems();
         const existingItems = (listItemsRes as any)?.data?.accommodationBillingLineItems ?? [];
         const toDelete = existingItems.filter((li: any) => getLineItemBillingDocumentId(li) === String(id));
+        const guardedBilling = await findAccommodationBillingDocumentById(id);
+        if (guardedBilling && isProtectedAccommodationBillingStatus(guardedBilling.status)) {
+            throw new Error(`accommodation-billing-protected-delete-blocked:${String(guardedBilling.status ?? '')}`);
+        }
+        if (guardedBilling) {
+            try {
+                await resetPostedAdvancePayment(guardedBilling);
+            } catch (advanceError) {
+                console.warn('[accommodationBillingService] advance payment reset failed:', advanceError);
+            }
+        }
         await Promise.all(
             toDelete.map(async (li: any) => {
                 const liId = li?.id ? String(li.id) : '';
@@ -692,10 +775,10 @@ export const accommodationBillingService = {
     },
 
     async cancelConfirmation(billingId: string): Promise<void> {
-        const beforeBilling = await findAccommodationBillingDocumentById(billingId).catch(() => null);
+        const beforeBilling = await findAccommodationBillingDocumentById(billingId);
         if (!beforeBilling) throw new Error('청구서를 찾을 수 없습니다.');
 
-        if (beforeBilling.status !== 'confirmed') return;
+        if (!isConfirmedBilling(beforeBilling)) return;
 
         await resetPostedAdvancePayment(beforeBilling);
         await updateAccommodationBillingDocument({
@@ -724,7 +807,7 @@ export const accommodationBillingService = {
     },
 
     async confirmAndPostToAdvancePayment(billingId: string): Promise<void> {
-        const beforeBilling = await findAccommodationBillingDocumentById(billingId).catch(() => null);
+        const beforeBilling = await findAccommodationBillingDocumentById(billingId);
         const [docsRes, itemsRes] = await Promise.all([
             listAllAccommodationBillingDocuments(),
             listAllAccommodationBillingLineItems()
@@ -734,7 +817,11 @@ export const accommodationBillingService = {
 
         const row = docs.find((d: any) => String(d?.id ?? '') === String(billingId));
         if (!row) throw new Error('泥?뎄?쒕? 李얠쓣 ???놁뒿?덈떎.');
-        if (String(row?.status ?? '') === 'confirmed') return;
+        const storedStatus = normalizeAccommodationBillingStatus(row?.status);
+        if (storedStatus === 'CONFIRMED') return;
+        if (storedStatus !== 'DRAFT') {
+            throw new Error(`accommodation-billing-protected-confirmation-blocked:${String(row?.status ?? '')}`);
+        }
 
         const rawIssuedToType = row?.issuedToType ? String(row.issuedToType) : 'worker';
         const issuedToType = rawIssuedToType === 'team_leader' ? 'team' : rawIssuedToType;

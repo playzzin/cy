@@ -96,7 +96,7 @@ type ScrollCapturePlan = {
     range?: ScrollCaptureRange;
 };
 
-type ScrollSelectionAnchor = {
+export type ScrollSelectionAnchor = {
     point: Point;
     target: HTMLElement | null;
     scrollTop: number;
@@ -104,6 +104,7 @@ type ScrollSelectionAnchor = {
 };
 
 const MIN_SIZE = 12;
+const SCREEN_FRAME_REFRESH_TIMEOUT_MS = 900;
 const CAPTURE_EXCLUDE_SELECTOR = '[data-capture-exclude="true"]';
 const CAPTURE_OVERLAY_SELECTOR = '[data-capture-overlay="true"]';
 const FULL_CONTENT_CAPTURE_SELECTOR = '[data-capture-full-content="true"]';
@@ -1061,18 +1062,25 @@ const forceInstantScrollBehavior = (target: HTMLElement) => {
     };
 };
 
-const getContentYForViewportPoint = (target: HTMLElement, y: number): number => {
+export const getContentYForViewportPoint = (target: HTMLElement, y: number): number => {
     const targetRect = getVisibleRectForScrollableTarget(target);
     const clampedY = Math.min(
         targetRect.top + targetRect.height,
         Math.max(targetRect.top, y)
     );
+    const scrollViewportTop = isDocumentScrollRoot(target)
+        ? 0
+        : target.getBoundingClientRect().top + target.clientTop;
 
-    return getScrollTop(target) + Math.max(0, clampedY - targetRect.top);
+    return getScrollTop(target) + Math.min(
+        target.clientHeight,
+        Math.max(0, clampedY - scrollViewportTop)
+    );
 };
 
-const resolveScrollRangeCapturePlan = (anchor: ScrollSelectionAnchor, endPoint: Point): ScrollCapturePlan => {
-    const target = anchor.target ?? findScrollableTargetFromPoint(endPoint.x, endPoint.y);
+export const resolveScrollRangeCapturePlan = (anchor: ScrollSelectionAnchor, endPoint: Point): ScrollCapturePlan => {
+    const anchoredTarget = anchor.target?.isConnected ? anchor.target : null;
+    const target = anchoredTarget ?? findScrollableTargetFromPoint(endPoint.x, endPoint.y);
 
     if (!target) {
         return resolveScrollCapturePlan(buildRect(anchor.point, endPoint), null);
@@ -1080,18 +1088,20 @@ const resolveScrollRangeCapturePlan = (anchor: ScrollSelectionAnchor, endPoint: 
 
     const targetRect = getVisibleRectForScrollableTarget(target);
     const endScrollTop = getScrollTop(target);
-    const startContentY = anchor.target === target
+    const startContentY = anchoredTarget === target
         ? anchor.contentY
         : getContentYForViewportPoint(target, anchor.point.y);
     const endContentY = getContentYForViewportPoint(target, endPoint.y);
     const topContentY = Math.min(startContentY, endContentY);
     const bottomContentY = Math.max(startContentY, endContentY);
-    const left = Math.max(0, Math.min(anchor.point.x, endPoint.x));
-    const viewport = getViewportMetrics();
-    const right = Math.min(viewport.width, Math.max(anchor.point.x, endPoint.x));
+    const left = Math.max(targetRect.left, Math.min(anchor.point.x, endPoint.x));
+    const right = Math.min(
+        targetRect.left + targetRect.width,
+        Math.max(anchor.point.x, endPoint.x)
+    );
     const width = Math.max(0, right - left);
     const maxScrollTop = getMaxScrollTop(target);
-    const anchorScrollTop = anchor.target === target ? anchor.scrollTop : getScrollTop(target);
+    const anchorScrollTop = anchoredTarget === target ? anchor.scrollTop : getScrollTop(target);
     const initialScrollTop = Math.max(0, Math.min(maxScrollTop, Math.min(anchorScrollTop, endScrollTop, topContentY)));
     const firstVisibleBottom = Math.min(bottomContentY, initialScrollTop + targetRect.height);
     const firstTop = targetRect.top + Math.max(0, topContentY - initialScrollTop);
@@ -1224,6 +1234,8 @@ const hasUsableCapturedFrame = (video: HTMLVideoElement) => (
     && !video.error
 );
 
+const isCaptureTrackEnded = (track: MediaStreamTrack) => track.readyState === 'ended';
+
 export const waitForCapturedFrame = async (
     video: HTMLVideoElement,
     frameTimeoutMs = 5000,
@@ -1304,10 +1316,115 @@ const waitForCursorlessCaptureFrame = async (
     video: HTMLVideoElement,
     allowExistingFrameOnTimeout = false
 ) => {
+    // Give the browser two paints to apply the cursor/panel hiding styles, then
+    // wait for one compositor frame. Waiting for two long frame callbacks made
+    // a healthy existing capture look unresponsive for up to five seconds on
+    // Chromium/extension combinations that stop delivering callbacks.
     await waitNextPaint();
-    const timeoutMs = allowExistingFrameOnTimeout ? 2500 : 5000;
+    const timeoutMs = allowExistingFrameOnTimeout
+        ? SCREEN_FRAME_REFRESH_TIMEOUT_MS
+        : 2500;
     await waitForCapturedFrame(video, timeoutMs, allowExistingFrameOnTimeout);
-    await waitForCapturedFrame(video, timeoutMs, allowExistingFrameOnTimeout);
+};
+
+type DisplayCaptureSupportIssue = 'insecure-context' | 'unsupported' | null;
+
+const getDisplayCaptureSupportIssue = (): DisplayCaptureSupportIssue => {
+    if (window.isSecureContext === false) return 'insecure-context';
+    if (!navigator.mediaDevices?.getDisplayMedia) return 'unsupported';
+    return null;
+};
+
+export const getScreenCaptureFailureMessage = (error: unknown): string => {
+    if (error instanceof Error) {
+        switch (error.message) {
+            case 'screen-browser-only':
+                return '현재 앱 화면을 고정하려면 공유창에서 “현재 탭”을 선택해 주세요. 창 또는 전체 화면은 저장하지 않았습니다.';
+            case 'screen-aspect-mismatch':
+                return '선택한 탭의 화면 비율이 현재 앱과 달라 정확한 픽셀 좌표를 보장할 수 없습니다. 공유창에서 현재 탭을 선택해 주세요.';
+            case 'unsupported':
+                return '이 브라우저는 실제 화면 캡처를 지원하지 않습니다. 최신 Chrome 또는 Edge에서 다시 시도해 주세요.';
+            case 'insecure-context':
+                return '화면 캡처는 보안 연결(HTTPS)에서만 사용할 수 있습니다.';
+            case 'video-load-timeout':
+            case 'video-frame-timeout':
+                return '공유 화면의 영상 프레임이 늦게 도착했습니다. 현재 탭이 보이는 상태에서 다시 시도해 주세요.';
+            case 'no-track':
+            case 'track-ended':
+                return '화면 공유가 종료되었습니다. “새 실제 영역 선택”을 눌러 현재 탭 공유를 다시 허용해 주세요.';
+            default:
+                break;
+        }
+    }
+
+    if (error instanceof DOMException) {
+        switch (error.name) {
+            case 'NotAllowedError':
+            case 'AbortError':
+                return '화면 공유가 취소되었거나 차단되었습니다. 다시 누른 뒤 공유창에서 “현재 탭”을 허용해 주세요.';
+            case 'InvalidStateError':
+                return '브라우저가 화면 공유 요청을 허용하지 않았습니다. 현재 앱 탭을 활성화한 뒤 버튼을 다시 눌러 주세요.';
+            case 'NotFoundError':
+                return '공유할 화면을 찾지 못했습니다. 브라우저를 다시 연 뒤 시도해 주세요.';
+            case 'NotReadableError':
+                return '운영체제 또는 브라우저가 화면 읽기를 막았습니다. 다른 화면 공유 앱을 종료한 뒤 다시 시도해 주세요.';
+            case 'OverconstrainedError':
+                return '선택한 화면을 현재 해상도 조건으로 가져오지 못했습니다. 브라우저 배율을 100%로 맞춘 뒤 다시 시도해 주세요.';
+            default:
+                break;
+        }
+    }
+
+    return '화면 프레임을 고정하지 못했습니다. 현재 탭을 선택해 다시 시도해 주세요.';
+};
+
+export const getScrollCaptureFailureMessage = (error: unknown): string => {
+    if (error instanceof Error) {
+        switch (error.message) {
+            case 'capture-aborted':
+                return '긴 화면 캡처를 취소했습니다.';
+            case 'scroll-browser-only':
+                return '긴 화면 캡처는 공유창에서 반드시 “현재 탭”을 선택해야 합니다.';
+            case 'scroll-tab-hidden':
+                return '현재 탭이 보이는 상태에서만 긴 화면을 캡처할 수 있습니다. 이 탭으로 돌아와 다시 시도해 주세요.';
+            case 'selection-too-small':
+                return '선택 구간이 너무 작습니다. 시작점과 마지막 지점을 더 넓게 지정해 주세요.';
+            case 'empty-scroll-range':
+                return '이어붙일 화면 구간을 찾지 못했습니다. 스크롤 영역 안에서 시작점을 다시 지정해 주세요.';
+            case 'scroll-range-too-long':
+                return '선택한 구간을 끝까지 캡처하지 못했습니다. 구간을 나눠서 다시 시도해 주세요.';
+            case 'scroll-frame-gap':
+                return '스크롤 중 화면 프레임이 건너뛰어 이어붙이기를 중단했습니다. 스크롤이 멈춘 뒤 다시 시도해 주세요.';
+            case 'no-track':
+            case 'track-ended':
+                return '화면 공유가 종료되었습니다. 긴 화면 구간 선택을 다시 시작해 주세요.';
+            case 'video-load-timeout':
+            case 'video-frame-timeout':
+                return '공유 화면이 늦게 도착했습니다. 현재 탭이 보이는 상태에서 다시 시도해 주세요.';
+            case 'unsupported':
+                return '이 브라우저는 긴 화면 캡처를 지원하지 않습니다. 최신 Chrome 또는 Edge에서 다시 시도해 주세요.';
+            default:
+                break;
+        }
+    }
+
+    if (error instanceof DOMException) {
+        switch (error.name) {
+            case 'NotAllowedError':
+            case 'AbortError':
+                return '화면 공유 선택이 취소되었거나 차단되었습니다.';
+            case 'InvalidStateError':
+                return '브라우저가 화면 공유 요청을 허용하지 않았습니다. 현재 앱 탭을 활성화한 뒤 다시 시도해 주세요.';
+            case 'NotFoundError':
+                return '공유할 화면을 찾지 못했습니다. 브라우저를 다시 연 뒤 시도해 주세요.';
+            case 'NotReadableError':
+                return '운영체제 또는 브라우저가 화면 읽기를 막았습니다. 다른 화면 공유 앱을 종료한 뒤 다시 시도해 주세요.';
+            default:
+                break;
+        }
+    }
+
+    return '긴 화면 캡처 중 오류가 발생했습니다. 현재 탭을 선택해 다시 시도해 주세요.';
 };
 
 const QuickCameraCapture: React.FC = () => {
@@ -1339,6 +1456,7 @@ const QuickCameraCapture: React.FC = () => {
     const abortProcessingRef = useRef(false);
     const activeStreamRef = useRef<MediaStream | null>(null);
     const activeVideoRef = useRef<HTMLVideoElement | null>(null);
+    const activeTrackCleanupRef = useRef<(() => void) | null>(null);
     const cursorPointRef = useRef<Point | null>(null);
     const selectionRectRef = useRef<Rect | null>(null);
     const selectionReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -1382,6 +1500,9 @@ const QuickCameraCapture: React.FC = () => {
     }, [selectionRect]);
 
     const stopActiveCaptureResources = useCallback(() => {
+        activeTrackCleanupRef.current?.();
+        activeTrackCleanupRef.current = null;
+
         if (activeVideoRef.current) {
             activeVideoRef.current.pause();
             activeVideoRef.current.srcObject = null;
@@ -1433,7 +1554,11 @@ const QuickCameraCapture: React.FC = () => {
     }, []);
 
     const hideHostPanel = useCallback(() => {
-        restoreHiddenPanel();
+        // Permission, frame freezing, and selection are one continuous capture
+        // flow. Restoring and hiding the panel between those phases can expose
+        // one stale panel frame to Chromium's current-tab capture.
+        if (hiddenPanelRestoreRef.current) return;
+
         const host = rootRef.current?.closest<HTMLElement>(CAPTURE_EXCLUDE_SELECTOR);
         if (!host) return;
 
@@ -1456,7 +1581,7 @@ const QuickCameraCapture: React.FC = () => {
             host.style.transform = prevTransform;
             host.style.filter = prevFilter;
         };
-    }, [restoreHiddenPanel]);
+    }, []);
 
     const resetSelection = () => {
         endScreenCaptureSession();
@@ -1486,7 +1611,9 @@ const QuickCameraCapture: React.FC = () => {
         // starts a selection. It is restored after capture, cancellation, or
         // an error so the page never gets captured with its own controls.
         hideHostPanel();
-        selectionReturnFocusRef.current = returnFocus;
+        if (!selectionReturnFocusRef.current) {
+            selectionReturnFocusRef.current = returnFocus;
+        }
         setMessage(getSelectionPromptMessage(captureMode));
         setIsSuccess(null);
         setSelectionReady(false);
@@ -1641,8 +1768,8 @@ const QuickCameraCapture: React.FC = () => {
 
     const prepareFrozenScreenFrame = useCallback(async (sessionId: number) => {
         setIsProcessing(true);
-        setProcessingStatusText('공유 화면에서 원본 프레임을 고정하는 중입니다.');
-        setMessage('공유창에서 현재 탭을 선택해 주세요. 선택한 화면을 먼저 고정한 뒤 그 이미지 위에서 범위를 지정합니다.');
+        setProcessingStatusText('화면 캡처를 준비하는 중입니다.');
+        setMessage('현재 탭의 화면을 준비하고 있습니다. 공유창이 열리면 “현재 탭”을 선택해 주세요.');
         setIsSuccess(null);
 
         let restoreCaptureUi: (() => void) | null = null;
@@ -1657,21 +1784,8 @@ const QuickCameraCapture: React.FC = () => {
         };
 
         try {
-            if (!navigator.mediaDevices?.getDisplayMedia) {
-                throw new Error('unsupported');
-            }
-
-            // Hide the camera/selection chrome before the shared tab is read.
-            // The captured bitmap is frozen before the user draws a selection.
-            const restoreCursorForCapture = hideDocumentCursorForCapture();
-            const restoreExcludedRoots = hideExcludedRoots();
-            restoreCaptureUi = () => {
-                restoreCursorForCapture();
-                restoreExcludedRoots();
-            };
-            screenCaptureUiRestoreRef.current = restoreCaptureUi;
-            await waitNextPaint();
-            assertCurrentCaptureSession();
+            const supportIssue = getDisplayCaptureSupportIssue();
+            if (supportIssue) throw new Error(supportIssue);
 
             let stream = activeStreamRef.current;
             let video = activeVideoRef.current;
@@ -1689,7 +1803,12 @@ const QuickCameraCapture: React.FC = () => {
 
             if (!canReuseCurrentTab) {
                 stopActiveCaptureResources();
-                stream = await navigator.mediaDevices.getDisplayMedia({
+
+                setProcessingStatusText('공유창에서 “현재 탭”을 선택해 주세요.');
+                // Invoke getDisplayMedia before the first await in this click
+                // path. Browsers require transient user activation and some
+                // reject a request that is deferred until after a paint/timer.
+                const displayMediaRequest = navigator.mediaDevices.getDisplayMedia({
                     video: getHighResolutionDisplayMediaConstraints(),
                     audio: false,
                     preferCurrentTab: true,
@@ -1697,6 +1816,7 @@ const QuickCameraCapture: React.FC = () => {
                     surfaceSwitching: 'exclude',
                     monitorTypeSurfaces: 'exclude'
                 } as DisplayMediaOptions);
+                stream = await displayMediaRequest;
                 assertCurrentCaptureSession(stream);
                 activeStreamRef.current = stream;
 
@@ -1717,6 +1837,9 @@ const QuickCameraCapture: React.FC = () => {
             if (!track) {
                 throw new Error('no-track');
             }
+            if (isCaptureTrackEnded(track)) {
+                throw new Error('track-ended');
+            }
             const displaySurface = track.getSettings?.().displaySurface;
             if (displaySurface && displaySurface !== 'browser') {
                 throw new Error('screen-browser-only');
@@ -1727,13 +1850,56 @@ const QuickCameraCapture: React.FC = () => {
             }
             assertCurrentCaptureSession(stream);
 
+            if (!canReuseCurrentTab) {
+                const capturedStream = stream;
+                const capturedVideo = video;
+                const capturedTrack = track;
+                const handleTrackEnded = () => {
+                    if (activeStreamRef.current !== capturedStream) return;
+
+                    activeTrackCleanupRef.current?.();
+                    activeTrackCleanupRef.current = null;
+                    activeStreamRef.current = null;
+                    if (activeVideoRef.current === capturedVideo) {
+                        capturedVideo.pause();
+                        capturedVideo.srcObject = null;
+                        activeVideoRef.current = null;
+                    }
+
+                    if (screenCapturePhaseRef.current === 'idle') {
+                        setMessage('화면 공유가 종료되었습니다. 다음 영역 선택 시 현재 탭 공유를 다시 허용해 주세요.');
+                        setIsSuccess(null);
+                    }
+                };
+                capturedTrack.addEventListener('ended', handleTrackEnded);
+                activeTrackCleanupRef.current = () => {
+                    capturedTrack.removeEventListener('ended', handleTrackEnded);
+                };
+            }
+
             setProcessingStatusText(
                 canReuseCurrentTab
                     ? '허용된 현재 탭에서 새 화면 프레임을 가져오는 중입니다.'
                     : '현재 화면 프레임을 확인하는 중입니다.'
             );
+
+            // Keep the progress message visible while permission/video setup is
+            // pending. Hide capture chrome only for the short compositor refresh
+            // immediately before freezing the bitmap.
+            await waitNextPaint();
+            assertCurrentCaptureSession(stream);
+            const restoreCursorForCapture = hideDocumentCursorForCapture();
+            const restoreExcludedRoots = hideExcludedRoots();
+            restoreCaptureUi = () => {
+                restoreCursorForCapture();
+                restoreExcludedRoots();
+            };
+            screenCaptureUiRestoreRef.current = restoreCaptureUi;
             await waitForCursorlessCaptureFrame(video, true);
             assertCurrentCaptureSession(stream);
+            if (isCaptureTrackEnded(track)) {
+                throw new Error('track-ended');
+            }
 
             const frozenCanvas = freezeVideoFrameToCanvas(video);
             if (!isFrameAspectCompatible(
@@ -1760,7 +1926,6 @@ const QuickCameraCapture: React.FC = () => {
                 restoreScreenCaptureUi();
             }
             restoreCaptureUi = null;
-            restoreHiddenPanel();
 
             screenCapturePhaseRef.current = 'selecting';
             captureOperationInFlightRef.current = false;
@@ -1789,30 +1954,13 @@ const QuickCameraCapture: React.FC = () => {
             if (error instanceof Error && error.message === 'capture-aborted') {
                 return;
             }
-            if (error instanceof Error && error.message === 'screen-browser-only') {
-                setMessage('현재 앱 화면을 고정하려면 공유창에서 “현재 탭”을 선택해 주세요. 창 또는 전체 화면은 저장하지 않았습니다.');
-                setIsSuccess(false);
-                return;
+            const wasUserCancellation = error instanceof DOMException
+                && (error.name === 'NotAllowedError' || error.name === 'AbortError');
+            if (!wasUserCancellation) {
+                console.error('[QuickCameraCapture] screen frame freeze failed', error);
             }
-            if (error instanceof Error && error.message === 'screen-aspect-mismatch') {
-                setMessage('선택한 탭의 화면 비율이 현재 앱과 달라 정확한 픽셀 좌표를 보장할 수 없습니다. 공유창에서 현재 탭을 선택해 주세요.');
-                setIsSuccess(false);
-                return;
-            }
-            if (error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'AbortError')) {
-                setMessage('화면 공유 선택이 취소되었습니다. 다시 시작하면 먼저 화면을 고정한 뒤 영역을 선택할 수 있습니다.');
-                setIsSuccess(null);
-                return;
-            }
-            if (error instanceof Error && error.message === 'unsupported') {
-                setMessage('이 브라우저는 실제 화면 캡처를 지원하지 않습니다. Chromium 기반 브라우저에서 다시 시도해 주세요.');
-                setIsSuccess(false);
-                return;
-            }
-
-            console.error('[QuickCameraCapture] screen frame freeze failed', error);
-            setMessage('화면 프레임을 고정하지 못했습니다. 현재 탭을 선택해 다시 시도해 주세요.');
-            setIsSuccess(false);
+            setMessage(getScreenCaptureFailureMessage(error));
+            setIsSuccess(wasUserCancellation ? null : false);
         }
     }, [
         clearFrozenScreenFrame,
@@ -2047,13 +2195,12 @@ const QuickCameraCapture: React.FC = () => {
             return;
         }
 
-        const shareGuide = [
-            ...(risk.level === 'warn' ? [risk.message.replace(' 계속할까요?', '')] : []),
-            '스크롤 캡처는 공유 창에서 반드시 현재 탭을 선택해야 합니다.',
-            '창 또는 화면 전체를 선택하면 캡처를 즉시 중단합니다.'
-        ].join('\n');
-
-        if (!window.confirm(`${shareGuide}\n\n계속할까요?`)) {
+        if (risk.level === 'warn' && !window.confirm([
+            risk.message.replace(' 계속할까요?', ''),
+            '',
+            '공유창에서는 반드시 “현재 탭”을 선택해야 합니다.',
+            '계속할까요?'
+        ].join('\n'))) {
             setMessage('스크롤 캡처를 시작하지 않았습니다.');
             setIsSuccess(null);
             restoreHiddenPanel();
@@ -2069,8 +2216,16 @@ const QuickCameraCapture: React.FC = () => {
         let captureInterferenceRestore: { hiddenCount: number; restore: () => void } | null = null;
         let restoreCursorForCapture: (() => void) | null = null;
         let restoreScrollBehavior: (() => void) | null = null;
+        let clipboardReservation: ClipboardWriteReservation | null = null;
         let hiddenInterferenceCount = 0;
         let restoreScrollFailed = false;
+
+        const copyCapturedBlob = async (blob: Blob): Promise<ClipboardCopyResult> => {
+            clipboardReservation?.complete(blob);
+            return clipboardReservation
+                ? await clipboardReservation.result
+                : await copyBlobToClipboard(blob);
+        };
 
         const ensureNotAborted = (track?: MediaStreamTrack) => {
             if (abortProcessingRef.current) {
@@ -2089,10 +2244,11 @@ const QuickCameraCapture: React.FC = () => {
                 throw new Error('unsupported');
             }
 
-            restoreCursorForCapture = hideDocumentCursorForCapture();
-            await waitNextPaint();
-
-            const stream = await navigator.mediaDevices.getDisplayMedia({
+            // Start the browser permission request in the same click stack as
+            // the second range-selection click. Waiting for a paint first can
+            // consume Chromium's transient user activation and reject an
+            // otherwise valid request with InvalidStateError.
+            const displayMediaRequest = navigator.mediaDevices.getDisplayMedia({
                 video: getHighResolutionDisplayMediaConstraints(),
                 audio: false,
                 preferCurrentTab: true,
@@ -2100,6 +2256,14 @@ const QuickCameraCapture: React.FC = () => {
                 surfaceSwitching: 'exclude',
                 monitorTypeSurfaces: 'exclude'
             } as DisplayMediaOptions);
+            // Reserve the clipboard write while the range-end click still has
+            // user activation. A long stitch may otherwise finish after the
+            // browser's clipboard gesture window has expired.
+            clipboardReservation = reserveClipboardWrite();
+            restoreCursorForCapture = hideDocumentCursorForCapture();
+            await waitNextPaint();
+
+            const stream = await displayMediaRequest;
             // Own the stream immediately so every validation/initialization
             // failure below is covered by the shared finally cleanup.
             activeStreamRef.current = stream;
@@ -2312,7 +2476,7 @@ const QuickCameraCapture: React.FC = () => {
                     ? ` 고정 UI ${hiddenInterferenceCount}개를 제외했습니다.`
                     : '';
 
-                const clipboardResult = await copyBlobToClipboard(blob);
+                const clipboardResult = await copyCapturedBlob(blob);
                 applyClipboardCopyResult(
                     clipboardResult,
                     historyItem,
@@ -2332,7 +2496,7 @@ const QuickCameraCapture: React.FC = () => {
                 const interferenceNotice = hiddenInterferenceCount > 0
                     ? ` 고정 UI ${hiddenInterferenceCount}개를 제외했습니다.`
                     : '';
-                const clipboardResult = await copyBlobToClipboard(singleBlob);
+                const clipboardResult = await copyCapturedBlob(singleBlob);
                 applyClipboardCopyResult(
                     clipboardResult,
                     historyItem,
@@ -2415,7 +2579,7 @@ const QuickCameraCapture: React.FC = () => {
                 ? ` 고정 UI ${hiddenInterferenceCount}개를 제외했습니다.`
                 : '';
 
-            const clipboardResult = await copyBlobToClipboard(blob);
+            const clipboardResult = await copyCapturedBlob(blob);
             applyClipboardCopyResult(
                 clipboardResult,
                 historyItem,
@@ -2424,26 +2588,19 @@ const QuickCameraCapture: React.FC = () => {
                     : `스크롤 영역을 아래까지 이어붙여 클립보드에 저장했습니다.${interferenceNotice}`
             );
         } catch (error) {
-            if (error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'AbortError')) {
-                setMessage('화면 공유 선택이 취소되었습니다.');
-            } else if (error instanceof Error && error.message === 'capture-aborted') {
-                setMessage('스크롤 캡처를 취소했습니다.');
-            } else if (error instanceof Error && error.message === 'scroll-browser-only') {
-                setMessage('스크롤 방식은 공유 창에서 반드시 현재 브라우저 탭을 선택해야 합니다.');
-            } else if (error instanceof Error && error.message === 'scroll-tab-hidden') {
-                setMessage('스크롤 방식은 현재 탭이 활성화된 상태에서만 저장할 수 있습니다. 현재 탭을 다시 선택해 주세요.');
-            } else if (error instanceof Error && error.message === 'selection-too-small') {
-                setMessage('\uc2a4\ud06c\ub864 \ucea1\ucc98 \uad6c\uac04\uc774 \ub108\ubb34 \uc791\uc2b5\ub2c8\ub2e4. \uc2dc\uc791\uc810\uacfc \ub9c8\uc9c0\ub9c9 \uc120\ud0dd\uc810\uc744 \ub354 \ub113\uac8c \uc9c0\uc815\ud574 \uc8fc\uc138\uc694.');
-            } else if (error instanceof Error && error.message === 'empty-scroll-range') {
-                setMessage('\uc2a4\ud06c\ub864 \ucea1\ucc98\ud560 \ud654\uba74 \uad6c\uac04\uc744 \ucc3e\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc2dc\uc791\uc810\uc744 \ub2e4\uc2dc \uc9c0\uc815\ud574 \uc8fc\uc138\uc694.');
-            } else if (error instanceof Error && error.message === 'scroll-range-too-long') {
-                setMessage('선택한 스크롤 구간을 끝까지 캡처하지 못했습니다. 구간을 나눠서 다시 캡처해 주세요.');
-            } else if (error instanceof Error && error.message === 'unsupported') {
-                setMessage('이 브라우저는 화면 캡처 API를 지원하지 않습니다.');
-            } else {
-                setMessage('스크롤 캡처 중 오류가 발생했습니다. 다시 시도해 주세요.');
+            clipboardReservation?.cancel(error);
+            const wasUserCancellation = (
+                error instanceof DOMException
+                && (error.name === 'NotAllowedError' || error.name === 'AbortError')
+            ) || (
+                error instanceof Error
+                && error.message === 'capture-aborted'
+            );
+            if (!wasUserCancellation) {
+                console.error('[QuickCameraCapture] scroll capture failed', error);
             }
-            setIsSuccess(false);
+            setMessage(getScrollCaptureFailureMessage(error));
+            setIsSuccess(wasUserCancellation ? null : false);
         } finally {
             if (plan.target) {
                 try {
@@ -2513,6 +2670,14 @@ const QuickCameraCapture: React.FC = () => {
         clearFrozenScreenFrame();
         clearProcessingGuide();
         setIsSuccess(null);
+
+        // Hide the right panel before asking for display permission. The media
+        // request still runs synchronously in this click stack, while the shared
+        // tab paints without the panel during the browser permission chooser.
+        selectionReturnFocusRef.current = document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
+        hideHostPanel();
         void prepareFrozenScreenFrame(sessionId);
     };
 
@@ -2836,20 +3001,21 @@ const QuickCameraCapture: React.FC = () => {
             setScrollAnchorPoint(null);
 
             if (rect.width < MIN_SIZE || rangeHeight < MIN_SIZE) {
-                setMessage('\uc601\uc5ed\uc774 \ub108\ubb34 \uc791\uc2b5\ub2c8\ub2e4. \uc2dc\uc791\uc810\uacfc \ub9c8\uc9c0\ub9c9 \uc120\ud0dd\uc810\uc744 \ub354 \ub113\uac8c \uc9c0\uc815\ud574 \uc8fc\uc138\uc694.');
+                setMessage('선택 구간이 너무 작습니다. 선택 화면을 유지했으니 시작점을 다시 지정해 주세요.');
                 setIsSuccess(false);
                 setSelectionRect(null);
-                setIsSelecting(false);
-                restoreHiddenPanel();
+                setSelectionReady(false);
+                scrollCapturePlanRef.current = null;
+                selectionScrollTargetRef.current = null;
                 return;
             }
 
             setSelectionRect(rect);
             setIsSelecting(false);
-            void (async () => {
-                await waitNextPaint();
-                await copySelectionToClipboard(rect);
-            })();
+            // Keep this call synchronous with the pointer gesture until the
+            // display-media request has been created. The capture function
+            // handles UI hiding and waits for a clean frame afterwards.
+            void copySelectionToClipboard(rect);
             return;
         }
 
@@ -2886,6 +3052,47 @@ const QuickCameraCapture: React.FC = () => {
         const end = cursorPointRef.current ?? anchor.point;
         setSelectionRect(buildRect(anchor.point, end));
     }, [captureMode, isSelecting]);
+
+    const resetScrollSelectionAnchor = useCallback(() => {
+        scrollSelectionAnchorRef.current = null;
+        selectionScrollTargetRef.current = null;
+        scrollCapturePlanRef.current = null;
+        setScrollAnchorPoint(null);
+        setSelectionRect(null);
+        setCursorPoint(null);
+        setSelectionReady(false);
+        setMessage('시작점을 다시 선택하세요. 스크롤 영역 안쪽을 한 번 클릭하면 시작점이 고정됩니다.');
+        setIsSuccess(null);
+    }, []);
+
+    const scrollActiveSelectionBy = useCallback((direction: -1 | 1) => {
+        const anchor = scrollSelectionAnchorRef.current;
+        const target = anchor?.target;
+        if (!anchor || !target || !target.isConnected) {
+            setMessage('먼저 스크롤 영역 안에서 시작점을 선택해 주세요.');
+            setIsSuccess(false);
+            return;
+        }
+
+        const previousScrollTop = getScrollTop(target);
+        const distance = Math.max(120, Math.round(target.clientHeight * 0.72));
+        const nextScrollTop = Math.min(
+            getMaxScrollTop(target),
+            Math.max(0, previousScrollTop + (direction * distance))
+        );
+        scrollElementTo(target, nextScrollTop);
+
+        const end = cursorPointRef.current ?? anchor.point;
+        setSelectionRect(buildRect(anchor.point, end));
+        setMessage(
+            nextScrollTop === previousScrollTop
+                ? direction > 0
+                    ? '스크롤 영역의 마지막 위치입니다. 원하는 끝점을 클릭하세요.'
+                    : '스크롤 영역의 시작 위치입니다. 원하는 끝점을 클릭하세요.'
+                : '화면을 이동했습니다. 원하는 마지막 지점을 클릭하면 긴 화면 캡처가 시작됩니다.'
+        );
+        setIsSuccess(null);
+    }, []);
 
     useEffect(() => {
         const overlay = selectionOverlayRef.current;
@@ -3257,6 +3464,14 @@ const QuickCameraCapture: React.FC = () => {
             viewport
         )
         : null;
+    const displayCaptureSupportIssue = getDisplayCaptureSupportIssue();
+    const displayCaptureSupportMessage = displayCaptureSupportIssue
+        ? getScreenCaptureFailureMessage(new Error(displayCaptureSupportIssue))
+        : null;
+    const activeScreenTrack = activeStreamRef.current?.getVideoTracks()[0] ?? null;
+    const hasActiveScreenShare = captureMode === 'screen'
+        && activeStreamRef.current?.active !== false
+        && activeScreenTrack?.readyState === 'live';
 
     return (
         <>
@@ -3286,56 +3501,118 @@ const QuickCameraCapture: React.FC = () => {
             </div>
 
             <p className="mt-3 text-xs leading-relaxed text-slate-400">
-                지정 영역은 현재 탭의 실제 화면 픽셀을 먼저 고정한 뒤 그 화면 위에서 선택합니다. 처음 한 번만 현재 탭 공유를 허용하면 카메라 패널을 닫기 전까지 다시 묻지 않고 새 화면을 가져옵니다.
+                캡처할 방식만 고른 뒤 화면에서 범위를 지정하세요. 결과는 자동으로 클립보드에 복사되고 최근 3개까지 미리보기로 보관됩니다.
             </p>
 
-            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {displayCaptureSupportMessage && (
+                <div
+                    role="alert"
+                    className="mt-3 rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs leading-relaxed text-rose-200"
+                >
+                    {displayCaptureSupportMessage}
+                </div>
+            )}
+
+            <div
+                className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2"
+                role="radiogroup"
+                aria-label="화면 캡처 방식"
+            >
                 <button
                     type="button"
-                    onClick={() => setCaptureMode('screen')}
+                    role="radio"
+                    aria-checked={captureMode === 'screen'}
+                    onClick={() => {
+                        if (captureMode === 'screen') return;
+                        resetSelection();
+                        setCaptureMode('screen');
+                    }}
                     disabled={isProcessing || isSelecting}
-                    className={`rounded-md border px-3 py-2 text-left transition-colors ${
+                    className={`rounded-lg border px-3 py-3 text-left transition-colors ${
                         captureMode === 'screen'
                             ? 'border-sky-400 bg-sky-500/15 text-sky-100'
                             : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
                     }`}
                 >
-                    <div className="text-sm font-semibold">실제 화면 영역 캡처 · 원본 픽셀</div>
-                    <div className="mt-1 text-[11px] leading-relaxed text-slate-400">최초 한 번 현재 탭을 허용한 뒤, 고정된 실제 화면에서 범위를 선택합니다.</div>
+                    <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold">현재 화면 영역</span>
+                        <span className="rounded-full bg-sky-400/15 px-2 py-0.5 text-[10px] font-semibold text-sky-200">원본 픽셀</span>
+                    </div>
+                    <div className="mt-1 text-[11px] leading-relaxed text-slate-400">화면을 먼저 고정하고 원하는 범위를 정밀하게 조절합니다.</div>
                 </button>
                 <button
                     type="button"
+                    role="radio"
+                    aria-checked={captureMode === 'scroll'}
                     onClick={() => {
-                        stopActiveCaptureResources();
+                        if (captureMode === 'scroll') return;
+                        resetSelection();
                         setCaptureMode('scroll');
                     }}
                     disabled={isProcessing || isSelecting}
-                    className={`rounded-md border px-3 py-2 text-left transition-colors ${
+                    className={`rounded-lg border px-3 py-3 text-left transition-colors ${
                         captureMode === 'scroll'
                             ? 'border-emerald-400 bg-emerald-500/15 text-emerald-100'
                             : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
                     }`}
                 >
-                    <div className="text-sm font-semibold">긴 화면 이어붙이기 · 공유 필요</div>
-                    <div className="mt-1 text-[11px] leading-relaxed text-slate-400">보조 기능입니다. 현재 탭 공유만 허용하고, 긴 구간은 시작 전에 경고합니다.</div>
+                    <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold">긴 화면 구간</span>
+                        <span className="rounded-full bg-emerald-400/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-200">이어붙이기</span>
+                    </div>
+                    <div className="mt-1 text-[11px] leading-relaxed text-slate-400">시작점과 끝점을 찍으면 그 사이를 자동 스크롤해 한 장으로 만듭니다.</div>
                 </button>
+            </div>
+
+            <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-[11px] leading-relaxed text-slate-300">
+                {captureMode === 'screen' ? (
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="font-semibold text-sky-200">1. 현재 탭 허용</span>
+                        <span className="text-slate-600">→</span>
+                        <span className="font-semibold text-sky-200">2. 영역 드래그</span>
+                        <span className="text-slate-600">→</span>
+                        <span className="font-semibold text-sky-200">3. 범위 확인 후 복사</span>
+                        {hasActiveScreenShare && (
+                            <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 font-semibold text-emerald-200">
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+                                현재 탭 연결됨
+                            </span>
+                        )}
+                    </div>
+                ) : (
+                    <div>
+                        <span className="font-semibold text-emerald-200">첫 지점 클릭 → 화면을 아래로 스크롤 → 마지막 지점 클릭</span>
+                        <span className="ml-1 text-slate-400">순서로 선택하세요. 공유창에서는 반드시 “현재 탭”을 선택해야 합니다.</span>
+                    </div>
+                )}
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
                 <button
                     type="button"
                     onClick={() => { void startCaptureSelection(); }}
-                    disabled={isProcessing || isSelecting}
-                    className="inline-flex items-center gap-2 rounded-md bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isProcessing || isSelecting || !!displayCaptureSupportIssue}
+                    title={displayCaptureSupportMessage || undefined}
+                    className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 ${
+                        captureMode === 'screen'
+                            ? 'bg-sky-600 hover:bg-sky-500'
+                            : 'bg-emerald-600 hover:bg-emerald-500'
+                    }`}
                 >
                     <MousePointerSquareDashed className="h-4 w-4" />
-                    {isSelecting
-                        ? '영역 선택 중...'
-                        : isProcessing && captureMode === 'screen'
-                            ? '실제 화면 가져오는 중...'
-                        : captureHistory.length > 0
-                            ? '새 실제 영역 선택'
-                            : '실제 영역 선택 시작'}
+                    {captureMode === 'screen'
+                        ? isSelecting
+                            ? '영역 선택 중...'
+                            : isProcessing
+                                ? '실제 화면 가져오는 중...'
+                                : captureHistory.length > 0
+                                    ? '새 실제 영역 선택'
+                                    : '실제 영역 선택 시작'
+                        : isSelecting
+                            ? '스크롤 구간 선택 중...'
+                            : isProcessing
+                                ? '긴 화면 만드는 중...'
+                                : '스크롤 구간 선택 시작'}
                 </button>
                 {captureMode === 'scroll' && (
                     <button
@@ -3766,13 +4043,71 @@ const QuickCameraCapture: React.FC = () => {
                         </button>
                     </div>
                 )}
+                {captureMode === 'scroll' && (
+                    <div
+                        data-selection-controls="true"
+                        className="absolute left-1/2 z-30 flex max-w-[calc(100vw-16px)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-xl border border-white/20 bg-slate-950/95 p-2.5 text-white shadow-2xl backdrop-blur"
+                        style={{ bottom: 'max(16px, env(safe-area-inset-bottom))' }}
+                        onPointerDown={(event) => event.stopPropagation()}
+                    >
+                        <div className="w-full px-1 text-center text-[11px] leading-4 text-slate-300">
+                            {scrollAnchorPoint
+                                ? '화면을 이동한 뒤 원하는 마지막 지점을 클릭하세요.'
+                                : '스크롤 영역 안쪽을 클릭해 시작점을 고정하세요.'}
+                        </div>
+                        {scrollAnchorPoint && (
+                            <>
+                                <button
+                                    type="button"
+                                    className="rounded-md border border-white/20 px-2.5 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
+                                    onClick={resetScrollSelectionAnchor}
+                                >
+                                    시작점 다시
+                                </button>
+                                <button
+                                    type="button"
+                                    className="rounded-md border border-emerald-300/40 bg-emerald-400/10 px-2.5 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-400/20"
+                                    onClick={() => scrollActiveSelectionBy(-1)}
+                                    aria-label="스크롤 영역 위로 이동"
+                                >
+                                    ↑ 위로
+                                </button>
+                                <button
+                                    type="button"
+                                    className="rounded-md border border-emerald-300/40 bg-emerald-400/10 px-2.5 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-400/20"
+                                    onClick={() => scrollActiveSelectionBy(1)}
+                                    aria-label="스크롤 영역 아래로 이동"
+                                >
+                                    ↓ 아래로
+                                </button>
+                            </>
+                        )}
+                        <button
+                            type="button"
+                            className="inline-flex items-center gap-1 rounded-md border border-rose-300/40 bg-rose-400/10 px-2.5 py-2 text-xs font-semibold text-rose-100 hover:bg-rose-400/20"
+                            onClick={() => {
+                                resetSelection();
+                                setMessage('긴 화면 캡처를 취소했습니다.');
+                                setIsSuccess(null);
+                            }}
+                            aria-label="긴 화면 구간 선택 취소"
+                        >
+                            <X className="h-3.5 w-3.5" />
+                            취소
+                        </button>
+                    </div>
+                )}
                 {!isScreenSelectionReady && (
                     <div
                         role="status"
                         aria-live="polite"
-                        className="absolute left-1/2 top-6 max-w-[calc(100vw-24px)] -translate-x-1/2 rounded-md bg-black/75 px-3 py-1.5 text-center text-xs leading-5 text-white"
+                        className={`absolute left-1/2 top-6 max-w-[calc(100vw-24px)] -translate-x-1/2 rounded-md border px-3 py-1.5 text-center text-xs leading-5 text-white ${
+                            isSuccess === false
+                                ? 'border-rose-300/70 bg-rose-950/90'
+                                : 'border-white/10 bg-black/75'
+                        }`}
                     >
-                        {getSelectionPromptMessage(captureMode)}
+                        {message || getSelectionPromptMessage(captureMode)}
                     </div>
                 )}
                 {cursorPoint && (

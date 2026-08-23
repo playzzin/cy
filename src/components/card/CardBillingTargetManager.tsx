@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { deleteField } from 'firebase/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBan, faFileInvoiceDollar, faPen, faRotateLeft, faTimes, faTrash } from '@fortawesome/free-solid-svg-icons';
 import { Card, CardBillingTargetRecord, CardBillingTargetType } from '../../types/card';
@@ -12,6 +11,7 @@ import { hexToRgba, normalizeHexColor } from '../../utils/color';
 import { formatTypedDateInput, normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
 import { BillingMode, BillingModeSelector, BillingStatusSummary } from '../support/BillingModeSelector';
 import BillingPeriodTimeline, { BillingPeriodTimelineItem } from '../support/BillingPeriodTimeline';
+import { isInactiveCardStatus } from '../../services/cardLifecyclePolicy';
 
 interface BillingTargetSelection {
     type: CardBillingTargetType;
@@ -210,6 +210,10 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
         cards.forEach((card) => map.set(String(card.id), card));
         return map;
     }, [cards]);
+    const activeCards = useMemo(
+        () => cards.filter((card) => !isInactiveCardStatus(card.status)),
+        [cards]
+    );
 
     const selectedCard = useMemo(() => {
         if (!selectedCardId) return null;
@@ -386,7 +390,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
         selectedCard.currentAssigneeName ||
         selectedCardHasExplicitBillingTarget
     ));
-    const canSaveBilling = Boolean(selectedCard) && (
+    const canSaveBilling = Boolean(selectedCard && !isInactiveCardStatus(selectedCard.status)) && (
         billingMode === 'same' ? canUseSameMode : Boolean(selectedTarget)
     );
     const saveButtonLabel = saving
@@ -398,26 +402,6 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                 : billingMode === 'split' && selectedTargetRecords.length > 0
                     ? '월중 변경 저장'
                     : '청구대상 저장';
-
-    const clearCardBillingTargetSnapshot = async (cardId: string) => {
-        await cardService.updateCard(cardId, {
-            billingTargetId: deleteField(),
-            billingTargetType: deleteField(),
-            billingTargetName: deleteField(),
-            billingTargetStartDate: deleteField(),
-            billingTargetEndDate: deleteField()
-        } as unknown as Partial<Card>);
-    };
-
-    const setCardBillingTargetSnapshot = async (cardId: string, record: Pick<CardBillingTargetRecord, 'targetId' | 'targetType' | 'targetName' | 'startDate' | 'endDate'>) => {
-        await cardService.updateCard(cardId, {
-            billingTargetId: record.targetId,
-            billingTargetType: record.targetType,
-            billingTargetName: record.targetName,
-            billingTargetStartDate: record.startDate,
-            billingTargetEndDate: record.endDate || null
-        } as unknown as Partial<Card>);
-    };
 
     const buildTargetRecord = (
         card: Card,
@@ -488,6 +472,10 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
         startDate: string = targetStartDate,
         endDate: string = targetEndDate
     ) => {
+        if (isInactiveCardStatus(card.status)) {
+            toast.error('정지·해지 카드의 청구대상은 변경할 수 없습니다.');
+            return;
+        }
         setSaving(true);
         try {
             if (!target) {
@@ -521,9 +509,8 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                     cardId: card.id,
                     closeRecords,
                     upserts,
-                    clearSnapshot: true
+                    snapshot: nextTargetRecord
                 });
-                await setCardBillingTargetSnapshot(card.id, nextTargetRecord);
                 toast.success(editingTargetRecordId ? '카드 청구대상 기간이 수정되었습니다.' : '카드 청구대상 기간이 추가되었습니다.');
                 setEditingTargetRecordId(null);
             }
@@ -537,6 +524,10 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
     const handleAssign = async () => {
         if (!selectedCard) {
             toast.error('카드를 선택해주세요.');
+            return;
+        }
+        if (isInactiveCardStatus(selectedCard.status)) {
+            toast.error('정지·해지 카드의 청구대상은 변경할 수 없습니다.');
             return;
         }
         if (billingMode === 'same') {
@@ -616,6 +607,10 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
     };
 
     const handleReset = async (card: Card) => {
+        if (isInactiveCardStatus(card.status)) {
+            toast.error('정지·해지 카드의 청구대상은 변경할 수 없습니다.');
+            return;
+        }
         const result = await showConfirmAlert(
             '카드 기본 청구',
             card.currentAssigneeName
@@ -633,6 +628,11 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
     };
 
     const handleDeleteTargetRecord = async (record: CardBillingTargetRecord) => {
+        const recordCard = cardsById.get(String(record.cardId));
+        if (recordCard && isInactiveCardStatus(recordCard.status)) {
+            toast.error('정지·해지 카드의 청구 이력은 이 화면에서 변경할 수 없습니다.');
+            return;
+        }
         const result = await showConfirmAlert(
             '청구기간 삭제',
             `${record.cardLabel} ${displayDate(record.startDate)}~${displayDate(record.endDate) || '계속'} 청구기간을 삭제할까요?`
@@ -641,17 +641,18 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
 
         setSaving(true);
         try {
-            await cardService.deleteCardBillingTarget(record.id);
             const card = cardsById.get(String(record.cardId));
             if (card) {
                 const remainingRecords = (targetRecordsByCardId.get(normalizeKey(card.id)) ?? [])
                     .filter((item) => normalizeKey(item.id) !== normalizeKey(record.id));
                 const nextRecord = getLatestTargetRecord(remainingRecords);
-                if (nextRecord) {
-                    await setCardBillingTargetSnapshot(card.id, nextRecord);
-                } else {
-                    await clearCardBillingTargetSnapshot(card.id);
-                }
+                await cardService.applyCardBillingTargetChanges({
+                    cardId: card.id,
+                    deleteIds: [record.id],
+                    snapshot: nextRecord ?? null,
+                });
+            } else {
+                await cardService.deleteCardBillingTarget(record.id);
             }
             await loadTargetRecords();
             onRefresh();
@@ -668,6 +669,10 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
     };
 
     const pickCard = (card: Card) => {
+        if (isInactiveCardStatus(card.status)) {
+            setSelectedCardId('');
+            return;
+        }
         setSelectedCardId(card.id);
         const latestRecord = getLatestTargetRecord(targetRecordsByCardId.get(normalizeKey(card.id)) ?? []);
         const hasExplicitTarget = Boolean(latestRecord || (card.billingTargetType && card.billingTargetId));
@@ -731,6 +736,10 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
     const pickCardById = (cardId: string) => {
         const card = cardsById.get(String(cardId));
         if (card) {
+            if (isInactiveCardStatus(card.status)) {
+                setSelectedCardId('');
+                return;
+            }
             pickCard(card);
             return;
         }
@@ -812,7 +821,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                                         onChange={(event) => pickCardById(event.target.value)}
                                     >
                                         <option value="">카드를 선택하세요</option>
-                                        {cards
+                                        {activeCards
                                             .slice()
                                             .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko-KR'))
                                             .map((card) => (

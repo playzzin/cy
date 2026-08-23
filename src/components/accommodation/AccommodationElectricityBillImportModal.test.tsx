@@ -81,6 +81,7 @@ const record: UtilityRecord = {
 const analysis = {
     fileIndex: 0,
     originalFileName: '20260710111817_00001.jpg',
+    sourceFileSha256: 'a'.repeat(64),
     provider: '한국전력공사',
     customerName: '(주)청연이엔지',
     customerNumber: '02-4284-4981',
@@ -118,6 +119,7 @@ const gasRecord: UtilityRecord = {
 const gasAnalysis = {
     fileIndex: 0,
     originalFileName: '20260710133829_00005.jpg',
+    sourceFileSha256: 'b'.repeat(64),
     provider: '삼천리',
     customerName: '(*)청연이엔지',
     payerNumber: '307583958',
@@ -154,6 +156,7 @@ const waterRecord: UtilityRecord = {
 const waterAnalysis = {
     fileIndex: 0,
     originalFileName: '20260710133829_00006.jpg',
+    sourceFileSha256: 'c'.repeat(64),
     provider: '안산시 상하수도사업소',
     customerName: '402호[402]',
     consumerNumber: '1271-003-393-0004-11-1',
@@ -235,6 +238,7 @@ describe('AccommodationElectricityBillImportModal', () => {
                 accommodationId: accommodation.id,
                 electricityAmount: 19370,
                 meta: expect.objectContaining({
+                    sourceFileSha256: 'a'.repeat(64),
                     customerNumber: '02-4284-4981',
                     billingYearMonth: '2026-06',
                     usageKwh: 105,
@@ -296,6 +300,46 @@ describe('AccommodationElectricityBillImportModal', () => {
         expect(screen.getByRole('button', { name: '1건 대장 반영' })).toBeDisabled();
     });
 
+    test('파일명이 바뀌어도 SHA-256이 이미 반영된 청구서와 같으면 중복 등록을 막는다', async () => {
+        mockedAnalyze.mockResolvedValueOnce([{
+            ...analysis,
+            originalFileName: '이름변경.jpg',
+        }]);
+        const importedRecord: UtilityRecord = {
+            ...record,
+            electricityBillImport: {
+                sourceFileName: analysis.originalFileName,
+                sourceFileSha256: analysis.sourceFileSha256,
+                provider: analysis.provider,
+                customerNumber: analysis.customerNumber,
+                billingYearMonth: analysis.billingYearMonth,
+                dueDate: analysis.dueDate,
+                usagePeriodStart: analysis.usagePeriodStart,
+                usagePeriodEnd: analysis.usagePeriodEnd,
+                address: analysis.address,
+                housingName: analysis.housingName,
+                usageKwh: analysis.usageKwh,
+                confidence: analysis.confidence,
+                analyzedAt: '2026-08-18T00:00:00.000Z',
+            },
+        };
+
+        render(
+            <AccommodationElectricityBillImportModal
+                yearMonth="2026-06"
+                files={[new File(['same-bill'], '이름변경.jpg', { type: 'image/jpeg' })]}
+                accommodations={[accommodation]}
+                records={[importedRecord]}
+                blockedAccommodationIds={new Set()}
+                onClose={jest.fn()}
+                onApply={jest.fn()}
+            />,
+        );
+
+        await waitFor(() => expect(screen.getByText('이미 대장에 반영된 동일 청구서 파일입니다.')).toBeInTheDocument());
+        expect(screen.getByRole('button', { name: '1건 대장 반영' })).toBeDisabled();
+    });
+
     test('가스 청구서의 총 고지금액과 납부자번호를 검수해 가스비로 전달한다', async () => {
         const onApply = jest.fn();
         render(
@@ -326,6 +370,7 @@ describe('AccommodationElectricityBillImportModal', () => {
                 accommodationId: gasAccommodation.id,
                 gasAmount: 23500,
                 meta: expect.objectContaining({
+                    sourceFileSha256: 'b'.repeat(64),
                     payerNumber: '307583958',
                     billingYearMonth: '2026-07',
                     usageCubicMeters: 21,
@@ -364,6 +409,7 @@ describe('AccommodationElectricityBillImportModal', () => {
                 accommodationId: waterAccommodation.id,
                 waterAmount: 18920,
                 meta: expect.objectContaining({
+                    sourceFileSha256: 'c'.repeat(64),
                     consumerNumber: '1271-003-393-0004-11-1',
                     billingYearMonth: '2026-06',
                     usageCubicMeters: 19,

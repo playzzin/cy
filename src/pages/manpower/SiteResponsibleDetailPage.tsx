@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 
 import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyReportService';
+import MonthNavigator from '../../components/common/MonthNavigator';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
@@ -837,14 +838,13 @@ const SiteResponsibleDetailPage: React.FC = () => {
             </section>
 
             <section id="site-responsible-filter-controls" className={isMobileFilterOpen ? 'tw-toolbar sr-toolbar--mobile-expanded' : 'tw-toolbar'}>
-                <label className="tw-control">
+                <div className="tw-control tw-control--month">
                     <span>조회월</span>
-                    <input
-                        type="month"
+                    <MonthNavigator
                         value={selectedMonth}
-                        onChange={(event) => setSelectedMonth(event.target.value)}
+                        onChange={setSelectedMonth}
                     />
-                </label>
+                </div>
 
                 <label className="tw-control tw-control--search">
                     <span>현장 검색</span>

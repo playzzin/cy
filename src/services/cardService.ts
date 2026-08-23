@@ -1,4 +1,10 @@
 import { cardFirestoreService } from './cardFirestoreService';
+import type { CardLifecycleTransitionResult } from './cardFirestoreService';
+import type { CreateSupportCancellationLogInput } from '../types/supportCancellationLog';
+import {
+    assertCardCanBeAssignedOrBilled,
+    assertCardCanBeRestored,
+} from './cardLifecyclePolicy';
 import type {
     Card,
     CardType,
@@ -59,15 +65,10 @@ export const cardService = {
     updateCardAssignment: async (
         data: Partial<CardAssignmentRecord> & { id: string; cardId: string }
     ): Promise<void> => {
+        const card = await cardFirestoreService.getCard(data.cardId);
+        if (!card) throw new Error('card-not-found');
+        assertCardCanBeAssignedOrBilled(card.status);
         await cardFirestoreService.saveCardAssignment(data);
-        if (!data.endDate && data.assigneeId && data.assigneeType && data.assigneeName) {
-            await cardFirestoreService.updateCard(data.cardId, {
-                status: 'ASSIGNED',
-                currentAssigneeId: data.assigneeId,
-                currentAssigneeType: data.assigneeType,
-                currentAssigneeName: data.assigneeName
-            });
-        }
     },
 
     listAllCardBillingTargets: async (cardId?: string): Promise<CardBillingTargetRecord[]> => {
@@ -77,6 +78,9 @@ export const cardService = {
     saveCardBillingTarget: async (
         data: Omit<CardBillingTargetRecord, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
     ): Promise<string> => {
+        const card = await cardFirestoreService.getCard(data.cardId);
+        if (!card) throw new Error('card-not-found');
+        assertCardCanBeAssignedOrBilled(card.status);
         const id = data.id || `${data.cardId}_${data.targetId}_${data.startDate}_${Date.now()}`;
         await cardFirestoreService.saveCardBillingTarget({ ...data, id });
         return id;
@@ -92,7 +96,16 @@ export const cardService = {
         closeRecords?: Array<{ id: string; endDate: string }>;
         deleteIds?: string[];
         clearSnapshot?: boolean;
+        snapshot?: Pick<CardBillingTargetRecord, 'targetId' | 'targetType' | 'targetName' | 'startDate' | 'endDate'> | null;
     }): Promise<void> => {
+        if ((params.upserts ?? []).some((record) => record.cardId !== params.cardId)) {
+            throw new Error('billing-target-card-mismatch');
+        }
+        if ((params.upserts ?? []).length > 0 || Boolean(params.snapshot)) {
+            const card = await cardFirestoreService.getCard(params.cardId);
+            if (!card) throw new Error('card-not-found');
+            assertCardCanBeAssignedOrBilled(card.status);
+        }
         await cardFirestoreService.applyCardBillingTargetChanges(params);
     },
 
@@ -107,6 +120,7 @@ export const cardService = {
         if (!card) {
             throw new Error('카드 정보를 찾을 수 없습니다.');
         }
+        assertCardCanBeAssignedOrBilled(card.status);
         const cardLabel = `${card.name} (${card.last4})`;
 
         await cardFirestoreService.assignCard({
@@ -120,7 +134,45 @@ export const cardService = {
     },
 
     unassignCard: async (cardId: string, endDate: string): Promise<void> => {
+        const card = await cardFirestoreService.getCard(cardId);
+        if (!card) throw new Error('card-not-found');
+        assertCardCanBeAssignedOrBilled(card.status);
         await cardFirestoreService.unassignCard(cardId, endDate);
+    },
+
+    cancelCardUse: async (params: {
+        cardId: string;
+        effectiveDate: string;
+        targetStatus: Extract<CardStatus, 'SUSPENDED' | 'CLOSED'>;
+        operationId: string;
+        auditLog: CreateSupportCancellationLogInput;
+    }): Promise<CardLifecycleTransitionResult> => {
+        return cardFirestoreService.transitionCardLifecycle(params);
+    },
+
+    restoreSuspendedCard: async (params: {
+        cardId: string;
+        effectiveDate: string;
+        operationId: string;
+        auditLog: CreateSupportCancellationLogInput;
+    }): Promise<CardLifecycleTransitionResult> => {
+        const card = await cardFirestoreService.getCard(params.cardId);
+        if (!card) throw new Error('card-not-found');
+        if (card.lastLifecycleOperationId === params.operationId && card.status === 'AVAILABLE') {
+            return {
+                changed: false,
+                statusBefore: 'AVAILABLE',
+                statusAfter: 'AVAILABLE',
+                operationId: params.operationId,
+                closedAssignmentCount: 0,
+                closedBillingTargetCount: 0,
+            };
+        }
+        assertCardCanBeRestored(card.status);
+        return cardFirestoreService.transitionCardLifecycle({
+            ...params,
+            targetStatus: 'AVAILABLE',
+        });
     },
 
     getTransactionsByMonth: async (yearMonth: string): Promise<CardTransaction[]> => {

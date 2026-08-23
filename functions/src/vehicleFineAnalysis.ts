@@ -3,6 +3,13 @@ import * as admin from 'firebase-admin';
 import { createHash } from 'crypto';
 import { requireCallableAuth } from './auth';
 import { getServerGeminiSettings } from './serverAiSettings';
+import {
+    buildVehicleImportIdentityDocumentId,
+    buildVehicleImportIdentityKey,
+    hashVehicleImportSource,
+    normalizeVehicleImportSourceSha256,
+    resolveVehicleImportDuplicateExpenseId,
+} from './vehicleImportIdentity';
 
 declare const fetch: any;
 
@@ -11,11 +18,13 @@ interface FineFileInput {
     originalFileName: string;
     mimeType: string;
     base64: string;
+    sourceSha256: string;
 }
 
 interface FineNoticeAnalysis {
     fileIndex: number;
     originalFileName: string;
+    sourceSha256: string;
     issuer: string;
     noticeType: 'PARKING_FINE' | 'TRAFFIC_FINE' | 'OTHER';
     violationVehiclePlate: string;
@@ -60,6 +69,7 @@ const MAX_ITEMS_PER_COMMIT = 20;
 const MAX_FILE_BASE64_LENGTH = 11_000_000;
 const MAX_TOTAL_BASE64_LENGTH = 8_000_000;
 const VEHICLE_EXPENSE_COLLECTION = 'vehicleExpenses';
+const VEHICLE_IMPORT_IDENTITY_COLLECTION = 'vehicleExpenseImportIdentities';
 const SUPPORT_OPERATION_COLLECTION = 'support_write_operations';
 
 const ALLOWED_ROLES = new Set([
@@ -255,7 +265,7 @@ const hasVehicleFineAccess = (source: Record<string, unknown>): boolean => (
     || hasAllowedRole(source.erpRoleGroups)
 );
 
-const requireVehicleFineAccess = async (
+export const requireVehicleFineAccess = async (
     context: functions.https.CallableContext,
 ): Promise<NonNullable<functions.https.CallableContext['auth']>> => {
     const auth = requireCallableAuth(context);
@@ -280,7 +290,13 @@ const sanitizeFile = (value: unknown): FineFileInput => {
     if (!base64 || base64.length > MAX_FILE_BASE64_LENGTH || !/^[A-Za-z0-9+/=]+$/.test(base64)) {
         throw new functions.https.HttpsError('invalid-argument', `${originalFileName}: 파일 데이터가 올바르지 않습니다.`);
     }
-    return { fileIndex, originalFileName, mimeType, base64 };
+    return {
+        fileIndex,
+        originalFileName,
+        mimeType,
+        base64,
+        sourceSha256: hashVehicleImportSource(base64),
+    };
 };
 
 const parseJsonObject = (value: string): Record<string, any> => {
@@ -384,6 +400,7 @@ const sanitizeNotice = (value: unknown, file: FineFileInput): FineNoticeAnalysis
     const result: FineNoticeAnalysis = {
         fileIndex: file.fileIndex,
         originalFileName: file.originalFileName,
+        sourceSha256: file.sourceSha256,
         issuer: asString(source.issuer).slice(0, 120),
         noticeType,
         violationVehiclePlate,
@@ -642,17 +659,63 @@ export const analyzeVehicleFineNotices = functions
 
             const refs = Array.from(new Set(notices.map((notice) => buildExpenseId(notice.dedupeKey))))
                 .map((id) => admin.firestore().collection(VEHICLE_EXPENSE_COLLECTION).doc(id));
+            const identityRefs = Array.from(new Set(notices
+                .map((notice) => buildVehicleImportIdentityDocumentId(
+                    buildVehicleImportIdentityKey('fine', notice.sourceSha256, 0),
+                ))
+                .filter(Boolean)))
+                .map((id) => admin.firestore().collection(VEHICLE_IMPORT_IDENTITY_COLLECTION).doc(id));
             const existingSnaps = refs.length > 0 ? await admin.firestore().getAll(...refs) : [];
+            const existingIdentitySnaps = identityRefs.length > 0
+                ? await admin.firestore().getAll(...identityRefs)
+                : [];
             const existingIds = new Set(existingSnaps.filter((snap) => snap.exists).map((snap) => snap.id));
+            const identityExpenseRefs = Array.from(new Set(existingIdentitySnaps
+                .filter((snap) => snap.exists)
+                .map((snap) => asString(snap.data()?.expenseId))
+                .filter(Boolean)))
+                .map((id) => admin.firestore().collection(VEHICLE_EXPENSE_COLLECTION).doc(id));
+            const identityExpenseSnaps = identityExpenseRefs.length > 0
+                ? await admin.firestore().getAll(...identityExpenseRefs)
+                : [];
+            const validIdentityExpenseIds = new Set(identityExpenseSnaps
+                .filter((snap) => snap.exists)
+                .map((snap) => snap.id));
+            const existingIdentityExpenseIds = new Map<string, string>(existingIdentitySnaps
+                .filter((snap) => snap.exists)
+                .map((snap): [string, string] => [snap.id, asString(snap.data()?.expenseId)])
+                .filter(([, expenseId]) => validIdentityExpenseIds.has(expenseId)));
+            const danglingIdentityIds = existingIdentitySnaps
+                .filter((snap) => snap.exists && !existingIdentityExpenseIds.has(snap.id))
+                .map((snap) => snap.id);
+            if (danglingIdentityIds.length > 0) {
+                functions.logger.warn('Vehicle fine dangling import identities ignored', { danglingIdentityIds });
+            }
             const seenIds = new Set<string>();
+            const seenIdentityExpenseIds = new Map<string, string>();
             notices.forEach((notice) => {
                 const expenseId = buildExpenseId(notice.dedupeKey);
+                const identityId = buildVehicleImportIdentityDocumentId(
+                    buildVehicleImportIdentityKey('fine', notice.sourceSha256, 0),
+                );
                 const duplicateInBatch = seenIds.has(expenseId);
+                const duplicateSourceInBatch = Boolean(identityId && seenIdentityExpenseIds.has(identityId));
+                const existingSourceExpenseId = identityId ? existingIdentityExpenseIds.get(identityId) : '';
                 seenIds.add(expenseId);
-                notice.duplicate = existingIds.has(expenseId) || duplicateInBatch;
-                notice.existingExpenseId = notice.duplicate ? expenseId : '';
+                if (identityId && !seenIdentityExpenseIds.has(identityId)) {
+                    seenIdentityExpenseIds.set(identityId, expenseId);
+                }
+                notice.duplicate = existingIds.has(expenseId)
+                    || duplicateInBatch
+                    || Boolean(existingSourceExpenseId)
+                    || duplicateSourceInBatch;
+                notice.existingExpenseId = notice.duplicate
+                    ? existingSourceExpenseId || seenIdentityExpenseIds.get(identityId) || expenseId
+                    : '';
                 if (duplicateInBatch) notice.warnings.push('같은 분석 묶음에 동일한 고지서가 중복 첨부되었습니다.');
                 if (existingIds.has(expenseId)) notice.warnings.push('이미 차량 과태료 대장에 등록된 고지서입니다.');
+                if (duplicateSourceInBatch) notice.warnings.push('같은 원본 파일이 분석 묶음에 중복 첨부되었습니다.');
+                if (existingSourceExpenseId) notice.warnings.push('동일한 원본 파일이 이미 차량 과태료 대장에 등록되었습니다.');
             });
 
             functions.logger.info('Vehicle fine analysis completed', {
@@ -678,12 +741,16 @@ const sanitizeCommitItem = (value: unknown): CommitFineItem => {
         originalFileName: asString(analysisSource.originalFileName).slice(0, 180) || `file-${fileIndex}`,
         mimeType: 'image/jpeg',
         base64: 'AA==',
+        sourceSha256: normalizeVehicleImportSourceSha256(analysisSource.sourceSha256),
     });
     if (!Number.isInteger(fileIndex) || fileIndex < 0 || !vehicleId || !expenseDate || payableAmount <= 0) {
         throw new functions.https.HttpsError('invalid-argument', '과태료 확정 항목의 차량, 일자 또는 금액이 올바르지 않습니다.');
     }
     if (!analysis.dedupeKey || (!normalizePlate(analysis.licensePlate) && source.manualMatch !== true)) {
         throw new functions.https.HttpsError('invalid-argument', '차량번호를 확인하거나 수동 매칭으로 지정해 주세요.');
+    }
+    if (!analysis.sourceSha256) {
+        throw new functions.https.HttpsError('failed-precondition', '원본 파일 식별정보가 없습니다. 고지서를 다시 분석해 주세요.');
     }
     return {
         fileIndex,
@@ -723,12 +790,38 @@ export const commitVehicleFineImports = functions
                 const vehicleRefs = vehicleIds.map((id) => db.collection('vehicles').doc(id));
                 const expenseIds = items.map((item) => buildExpenseId(item.analysis.dedupeKey));
                 const expenseRefs = Array.from(new Set(expenseIds)).map((id) => db.collection(VEHICLE_EXPENSE_COLLECTION).doc(id));
+                const identityKeys = items.map((item) => buildVehicleImportIdentityKey('fine', item.analysis.sourceSha256, 0));
+                const identityIds = identityKeys.map(buildVehicleImportIdentityDocumentId);
+                const identityRefs = Array.from(new Set(identityIds.filter(Boolean)))
+                    .map((id) => db.collection(VEHICLE_IMPORT_IDENTITY_COLLECTION).doc(id));
                 const vehicleSnaps = await Promise.all(vehicleRefs.map((ref) => transaction.get(ref)));
                 const expenseSnaps = await Promise.all(expenseRefs.map((ref) => transaction.get(ref)));
+                const identitySnaps = await Promise.all(identityRefs.map((ref) => transaction.get(ref)));
+                const identityTargetExpenseIds = Array.from(new Set(identitySnaps
+                    .filter((snap) => snap.exists)
+                    .map((snap) => asString(snap.data()?.expenseId))
+                    .filter(Boolean)));
+                const identityTargetRefs = identityTargetExpenseIds
+                    .filter((id) => !expenseIds.includes(id))
+                    .map((id) => db.collection(VEHICLE_EXPENSE_COLLECTION).doc(id));
+                const identityTargetSnaps = await Promise.all(identityTargetRefs.map((ref) => transaction.get(ref)));
                 const operationSnap = await transaction.get(operationRef);
                 const vehicleById = new Map(vehicleSnaps.map((snap) => [snap.id, snap]));
-                const existingExpenseIds = new Set(expenseSnaps.filter((snap) => snap.exists).map((snap) => snap.id));
+                const existingExpenseIds = new Set([
+                    ...expenseSnaps.filter((snap) => snap.exists).map((snap) => snap.id),
+                    ...identityTargetSnaps.filter((snap) => snap.exists).map((snap) => snap.id),
+                ]);
+                const identityRefById = new Map(identityRefs.map((ref) => [ref.id, ref]));
+                const existingIdentityExpenseIds = new Map<string, string>(identitySnaps
+                    .filter((snap) => snap.exists)
+                    .map((snap): [string, string] => [snap.id, asString(snap.data()?.expenseId)])
+                    .filter(([, linkedExpenseId]) => existingExpenseIds.has(linkedExpenseId)));
+                const existingIdentityIds = new Set(existingIdentityExpenseIds.keys());
+                const danglingIdentityExpenseIds = new Map<string, string>(identitySnaps
+                    .filter((snap) => snap.exists && !existingIdentityIds.has(snap.id))
+                    .map((snap): [string, string] => [snap.id, asString(snap.data()?.expenseId)]));
                 const createdIds = new Set<string>();
+                const claimedIdentityExpenseIds = new Map<string, string>();
                 const results: Array<{ fileIndex: number; expenseId: string; status: 'created' | 'duplicate' }> = [];
                 const now = admin.firestore.FieldValue.serverTimestamp();
 
@@ -748,11 +841,52 @@ export const commitVehicleFineImports = functions
                     }
 
                     const expenseId = expenseIds[index];
-                    if (existingExpenseIds.has(expenseId) || createdIds.has(expenseId)) {
-                        results.push({ fileIndex: item.fileIndex, expenseId, status: 'duplicate' });
+                    const identityKey = identityKeys[index];
+                    const identityId = identityIds[index];
+                    const duplicateExpenseId = resolveVehicleImportDuplicateExpenseId({
+                        expenseId,
+                        identityId,
+                        existingExpenseIds,
+                        createdExpenseIds: createdIds,
+                        existingIdentityIds,
+                        existingIdentityExpenseIds,
+                        claimedIdentityExpenseIds,
+                    });
+                    if (duplicateExpenseId) {
+                        if (identityId && !existingIdentityIds.has(identityId) && !claimedIdentityExpenseIds.has(identityId)) {
+                            claimedIdentityExpenseIds.set(identityId, duplicateExpenseId);
+                            transaction.set(identityRefById.get(identityId)!, {
+                                id: identityId,
+                                kind: 'fine',
+                                identityKey,
+                                sourceSha256: item.analysis.sourceSha256,
+                                entryIndex: 0,
+                                expenseId: duplicateExpenseId,
+                                operationId,
+                                recoveredDanglingExpenseId: danglingIdentityExpenseIds.get(identityId) || null,
+                                createdAt: now,
+                                updatedAt: now,
+                            }, { merge: false });
+                        }
+                        results.push({ fileIndex: item.fileIndex, expenseId: duplicateExpenseId, status: 'duplicate' });
                         return;
                     }
                     createdIds.add(expenseId);
+                    if (identityId) {
+                        claimedIdentityExpenseIds.set(identityId, expenseId);
+                        transaction.set(identityRefById.get(identityId)!, {
+                            id: identityId,
+                            kind: 'fine',
+                            identityKey,
+                            sourceSha256: item.analysis.sourceSha256,
+                            entryIndex: 0,
+                            expenseId,
+                            operationId,
+                            recoveredDanglingExpenseId: danglingIdentityExpenseIds.get(identityId) || null,
+                            createdAt: now,
+                            updatedAt: now,
+                        }, { merge: false });
+                    }
                     const fineChargeTarget = vehicle.fineChargeTarget === 'DRIVER' ? 'DRIVER' : 'BILLING_TARGET';
                     transaction.set(db.collection(VEHICLE_EXPENSE_COLLECTION).doc(expenseId), {
                         id: expenseId,
@@ -770,6 +904,7 @@ export const commitVehicleFineImports = functions
                         importSource: 'GEMINI_FINE_NOTICE',
                         fineNotice: {
                             sourceFileName: item.analysis.originalFileName,
+                            sourceSha256: item.analysis.sourceSha256,
                             issuer: item.analysis.issuer,
                             noticeType: item.analysis.noticeType,
                             violationVehiclePlate: item.analysis.violationVehiclePlate,
@@ -825,7 +960,7 @@ export const commitVehicleFineImports = functions
                     metadata: {
                         action: 'vehicle-fine-import',
                         requestedCount: items.length,
-                        createdCount: affectedDocumentIds.length,
+                        createdCount: results.filter((result) => result.status === 'created').length,
                         duplicateCount: results.filter((result) => result.status === 'duplicate').length,
                     },
                     createdAt: now,

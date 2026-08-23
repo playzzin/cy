@@ -1,22 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faUsers } from '@fortawesome/free-solid-svg-icons';
 import {
   ArrowDownLeft,
   ArrowUpRight,
   Building2,
   Car,
   CreditCard,
-  FilePlus2,
   Landmark,
   ReceiptText,
   RefreshCw,
   Sigma,
   type LucideIcon
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { YearMonthPicker } from '../../components/common/YearMonthPicker';
+import MonthNavigator from '../../components/common/MonthNavigator';
 import { ExpenseLedgerDetailBoard } from './components/ExpenseLedgerDetailBoard';
 import {
-  buildDefaultYearMonth,
   formatCurrency,
   getSummaryTotal,
   hexToRgba,
@@ -24,6 +23,12 @@ import {
   useExpenseLedgerData
 } from './hooks/useExpenseLedgerData';
 import type { BillingScope, LedgerSummary } from './hooks/useExpenseLedgerData';
+import { resolveIcon } from '../../constants/iconMap';
+import {
+  getSupportManagementYearMonth,
+  rememberSupportManagementYearMonth,
+  subscribeSupportManagementYearMonth,
+} from '../../utils/supportManagementState';
 
 interface ExpenseLedgerPageProps {
   embedded?: boolean;
@@ -84,10 +89,16 @@ const saveSummaryHighlights = (yearMonth: string, teamId: string, itemKeys: Set<
 };
 
 const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false }) => {
-  const [yearMonth, setYearMonth] = useState(buildDefaultYearMonth());
+  const [yearMonth, setYearMonth] = useState(getSupportManagementYearMonth);
   const [selectedTeamId, setSelectedTeamId] = useState('all');
   const [highlightedSummaryItemKeys, setHighlightedSummaryItemKeys] = useState<Set<string>>(() => new Set());
   const billingScope: BillingScope = 'posted';
+
+  useEffect(() => {
+    rememberSupportManagementYearMonth(yearMonth);
+  }, [yearMonth]);
+
+  useEffect(() => subscribeSupportManagementYearMonth(setYearMonth), []);
 
   const {
     loading,
@@ -168,19 +179,24 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
   return (
     <div className={embedded ? 'min-h-0 w-full' : 'min-h-screen bg-slate-50 p-4 xl:p-6'}>
       <div className="mx-auto w-full min-w-0 max-w-full space-y-4">
-        <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+        <div className={`flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm lg:flex-row lg:items-center lg:justify-between ${embedded ? 'gap-2 px-3 py-2' : 'gap-3 p-4'}`}>
           <div>
-            <h1 className="text-xl font-black text-slate-950">팀별 경비내역</h1>
-            <p className="mt-1 text-sm font-medium text-slate-500">
-              원장 대장에서 청구 처리한 숙소/차량/카드와 청구완료·정산완료 후청구 내역을 표시합니다.
+            <h1 className={embedded ? 'text-sm font-black text-slate-950' : 'text-xl font-black text-slate-950'}>팀별 경비내역</h1>
+            <p className={embedded ? 'hidden' : 'mt-1 text-sm font-medium text-slate-500'}>
+              카드·숙소·차량 대장에서 저장한 경비와 청구완료·정산완료 후청구 내역을 표시합니다.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <YearMonthPicker
-              value={yearMonth}
-              onChange={setYearMonth}
-              inputClassName="h-10 w-36 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none focus:border-blue-500"
-            />
+            {!embedded && (
+              <div className="w-full min-w-[180px] sm:w-[180px]">
+                <MonthNavigator
+                  value={yearMonth}
+                  onChange={setYearMonth}
+                  disabled={loading}
+                  ariaLabel="경비내역 조회월"
+                />
+              </div>
+            )}
             <button
               type="button"
               onClick={loadData}
@@ -190,24 +206,19 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
               <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
               새로고침
             </button>
-            <Link
-              to="/support/expense-claims"
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-black text-white shadow-sm hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2"
-            >
-              <FilePlus2 size={16} />
-              후청구 입력
-            </Link>
           </div>
         </div>
 
-        <div className="grid gap-2 text-xs font-bold text-slate-600 md:grid-cols-3">
-          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
-            조회 기준: 원장 청구/청구완료/정산완료 내역
+        <div className={embedded
+          ? 'support-scroll-x flex gap-2 text-xs font-bold text-slate-600'
+          : 'grid gap-2 text-xs font-bold text-slate-600 md:grid-cols-3'}>
+          <div className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+            조회 기준: 저장 반영·청구완료·정산완료 내역
           </div>
-          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+          <div className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
             반영 문서: {postedCount.toLocaleString('ko-KR')}건
           </div>
-          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+          <div className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
             원장 제외 작성중 문서: {draftCount.toLocaleString('ko-KR')}건
           </div>
         </div>
@@ -235,6 +246,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
               if (!id) return null;
               const isSelected = selectedTeamId === id;
               const teamColor = normalizeColor(team.color);
+              const teamIcon = resolveIcon(team.iconKey || team.icon || 'fa-users', faUsers);
               const tabStyle: React.CSSProperties = isSelected
                 ? {
                     borderColor: hexToRgba(teamColor, 0.45),
@@ -262,7 +274,23 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
                   title={team.name}
                 >
                   <span className="inline-flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full shadow-sm" style={{ backgroundColor: teamColor }} />
+                    <span
+                      className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-[11px] shadow-sm"
+                      style={{
+                        borderColor: hexToRgba(teamColor, 0.35),
+                        backgroundColor: hexToRgba(teamColor, 0.12),
+                        color: teamColor,
+                      }}
+                      aria-hidden="true"
+                      data-team-visual="true"
+                      title={`팀 색상 ${teamColor}`}
+                    >
+                      <FontAwesomeIcon icon={teamIcon} data-testid="team-icon" />
+                      <span
+                        className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-white"
+                        style={{ backgroundColor: teamColor }}
+                      />
+                    </span>
                     <span className="whitespace-nowrap">{team.name}</span>
                   </span>
                 </button>

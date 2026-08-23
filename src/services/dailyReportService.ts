@@ -173,6 +173,17 @@ const normalizeReportForStats = async (
     return normalizeReport(enriched as any);
 };
 
+const didDailyReportSiteIdentityChange = (
+    existingReport: Partial<DailyReport>,
+    updates: Partial<DailyReport>
+): boolean => {
+    const changedField = (key: 'siteId' | 'siteName'): boolean => {
+        if (updates[key] === undefined) return false;
+        return String(updates[key] ?? '').trim() !== String(existingReport[key] ?? '').trim();
+    };
+    return changedField('siteId') || changedField('siteName');
+};
+
 const filterReportsByParams = (reports: DailyReport[], params: {
     startDate?: string;
     endDate?: string;
@@ -261,9 +272,13 @@ const buildReportUpdateDraft = async (
     updates: Partial<DailyReport>,
     resolveSiteSnapshot: SiteSnapshotResolver = createSiteSnapshotResolver()
 ): Promise<DailyReportUpdateDraft> => {
-    const oldData = await normalizeReportForStats({ id, ...existingReport }, resolveSiteSnapshot);
+    // 기존 출력일보에 저장된 당시 팀·현장 스냅샷을 현재 마스터로 덮어쓰지 않는다.
+    const oldData = normalizeReport({ id, ...existingReport });
     const normalizedUpdates = normalizeReportUpdates(updates);
-    const newData = await normalizeReportForStats({ ...oldData, ...normalizedUpdates } as any, resolveSiteSnapshot);
+    const merged = normalizeReport({ ...oldData, ...normalizedUpdates } as any);
+    const newData = didDailyReportSiteIdentityChange(oldData, normalizedUpdates)
+        ? await normalizeReportForStats(merged as any, resolveSiteSnapshot)
+        : merged;
 
     return { id, oldData, newData };
 };
@@ -299,24 +314,11 @@ export const dailyReportService = {
     updateReport: async (id: string, updates: Partial<DailyReport>): Promise<void> => {
         const oldSnap = await getDoc(doc(db, 'daily_reports', id));
         if (!oldSnap.exists()) throw new Error('Report not found');
-        const oldData = await normalizeReportForStats({ id, ...(oldSnap.data() as any) });
-        let normalizedUpdates = {
-            ...updates,
-            ...(updates.date !== undefined ? { date: normalizeLooseDateText(updates.date) } : {})
-        };
-        // workers 필드가 있으면 undefined -> null 치환
-        if (Array.isArray(normalizedUpdates.workers)) {
-          normalizedUpdates = {
-            ...normalizedUpdates,
-            workers: normalizedUpdates.workers.map(cleanWorker)
-          };
-        }
-
-        const newData = await normalizeReportForStats({ ...oldData, ...normalizedUpdates } as any);
-        await dailyReportFirestoreService.updateReport(id, newData as any);
-        await dailyReportService._updateStats(oldData, -1);
-        await dailyReportService._updateStats(newData, 1);
-        await notifyDailyReportSystemMessage('dailyReport.updated', { ...newData, id } as DailyReport, oldData);
+        await updateReportFromExistingData(
+            id,
+            { id, ...(oldSnap.data() as any) },
+            updates
+        );
     },
 
     addReportsBatch: async (reports: DailyReportInput[]): Promise<void> => {
@@ -338,10 +340,9 @@ export const dailyReportService = {
         ));
 
         const toDelete = existingSnap.docs.filter(snapshot => teamIdSet.has(String(snapshot.data().teamId ?? '')));
-        const resolveSiteSnapshot = createSiteSnapshotResolver();
         for (const snapshot of toDelete) {
             await dailyReportFirestoreService.deleteReport(snapshot.id);
-            const oldReport = await normalizeReportForStats({ id: snapshot.id, ...(snapshot.data() as any) }, resolveSiteSnapshot);
+            const oldReport = normalizeReport({ id: snapshot.id, ...(snapshot.data() as any) });
             await dailyReportService._updateStats(oldReport, -1);
             await notifyDailyReportSystemMessage('dailyReport.deleted', oldReport, oldReport, 'dailyReportOverwrite');
         }
@@ -351,7 +352,7 @@ export const dailyReportService = {
 
     deleteReport: async (id: string): Promise<void> => {
         const snap = await getDoc(doc(db, 'daily_reports', id));
-        const oldData = snap.exists() ? await normalizeReportForStats({ id, ...(snap.data() as any) }) : null;
+        const oldData = snap.exists() ? normalizeReport({ id, ...(snap.data() as any) }) : null;
         await dailyReportFirestoreService.deleteReport(id);
         if (oldData) {
             await dailyReportService._updateStats(oldData, -1);
@@ -362,11 +363,10 @@ export const dailyReportService = {
     deleteReports: async (ids: string[]): Promise<void> => {
         const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
         const oldReports: DailyReport[] = [];
-        const resolveSiteSnapshot = createSiteSnapshotResolver();
         for (const id of uniqueIds) {
             const snap = await getDoc(doc(db, 'daily_reports', id));
             if (snap.exists()) {
-                oldReports.push(await normalizeReportForStats({ id, ...(snap.data() as any) }, resolveSiteSnapshot));
+                oldReports.push(normalizeReport({ id, ...(snap.data() as any) }));
             }
         }
 

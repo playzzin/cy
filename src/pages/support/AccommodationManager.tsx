@@ -24,7 +24,11 @@ import { AccommodationBillingTarget } from '../../types/accommodationBillingTarg
 import { menuServiceV11 } from '../../services/menuServiceV11';
 import { userMenuPositionService } from '../../services/userMenuPositionService';
 import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
-import { appendOfficeAssignmentTeam } from '../../utils/supportAssignmentTargets';
+import {
+    appendOfficeAssignmentTeam,
+    isOfficeBillingTargetForSelectedTeam,
+    officeAssignmentReferencesMatch
+} from '../../utils/supportAssignmentTargets';
 import { uniqueAccessRoles } from '../../utils/accessRoles';
 import { buildMenuAccessRoles, canAccessMenuRoute } from '../../utils/menuAccess';
 import { SupportCancellationHistory } from '../../components/support/SupportCancellationHistory';
@@ -35,14 +39,16 @@ import type { SiteDataType } from '../../types/menu';
 
 interface AccommodationManagerProps {
     embedded?: boolean;
+    initialTab?: AccommodationTabId;
+    onTabChange?: (tab: AccommodationTabId) => void;
 }
 
 type AccommodationTabId = 'status' | 'ledger' | 'history';
 type AccommodationStatusFilter = 'todo' | 'all' | 'active' | 'inactive';
 
 const accommodationTabs: SupportSegmentedTabOption<AccommodationTabId>[] = [
-    { id: 'status', label: '배정 및 청구현황', icon: faChartPie },
-    { id: 'ledger', label: '숙소 통합관리대장', icon: faFileInvoiceDollar },
+    { id: 'status', label: '배정·경비현황', icon: faChartPie },
+    { id: 'ledger', label: '통합관리대장', icon: faFileInvoiceDollar },
     { id: 'history', label: '처리내역', icon: faHistory }
 ];
 
@@ -88,11 +94,24 @@ const compareTeamThenAccommodation = (leftTeam: string, rightTeam: string, leftN
     return normalizeSortKey(leftName).localeCompare(normalizeSortKey(rightName), 'ko-KR');
 };
 
-const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = false }) => {
+const AccommodationManager: React.FC<AccommodationManagerProps> = ({
+    embedded = false,
+    initialTab = 'status',
+    onTabChange,
+}) => {
     const navigate = useNavigate();
     const { currentUser } = useAuth();
     const [canUseAccommodationManager, setCanUseAccommodationManager] = useState<boolean | null>(null);
-    const [activeTab, setActiveTab] = useState<AccommodationTabId>('status');
+    const [activeTab, setActiveTab] = useState<AccommodationTabId>(initialTab);
+
+    useEffect(() => {
+        setActiveTab(initialTab);
+    }, [initialTab]);
+
+    const handleTabChange = (tab: AccommodationTabId) => {
+        setActiveTab(tab);
+        onTabChange?.(tab);
+    };
     const [accommodations, setAccommodations] = useState<Accommodation[]>([]);
     const [assignments, setAssignments] = useState<AccommodationAssignment[]>([]);
     const [billingTargets, setBillingTargets] = useState<AccommodationBillingTarget[]>([]);
@@ -567,6 +586,13 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
     const matchesSelectedTeam = (teamId?: unknown, teamName?: unknown): boolean => {
         if (!selectedTeamId) return true;
 
+        if (officeAssignmentReferencesMatch(
+            selectedTeamCanonicalId,
+            selectedTeamCanonicalName,
+            teamId,
+            teamName
+        )) return true;
+
         const rawTeamId = normalizeKey(teamId);
         const rawTeamName = normalizeKey(teamName);
         const matchedById = rawTeamId ? teamByAnyId.get(rawTeamId) : undefined;
@@ -607,6 +633,11 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
     };
 
     const billingTargetMatchesSelectedTeam = (target: AccommodationBillingTarget): boolean => {
+        if (isOfficeBillingTargetForSelectedTeam(
+            selectedTeamCanonicalId,
+            selectedTeamCanonicalName,
+            target.targetType
+        )) return true;
         if (target.targetType !== 'team') return false;
         return matchesSelectedTeam(target.teamId, target.teamName);
     };
@@ -1187,7 +1218,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
             });
 
             setCancellationTarget(null);
-            setActiveTab('history');
+            handleTabChange('history');
             loadData();
         } catch (error) {
             console.error("Failed to process accommodation cancellation", error);
@@ -1361,14 +1392,15 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
     const occupancyRate = totalCount > 0 ? Math.round((occupiedCount / totalCount) * 100) : 0;
 
     return (
-        <div className={embedded ? 'space-y-5 sm:space-y-6 bg-transparent min-h-full w-full min-w-0 max-w-full overflow-x-hidden' : 'p-3 sm:p-6 space-y-5 sm:space-y-6 bg-slate-50 min-h-full w-full max-w-[calc(100vw-30px)] sm:max-w-full min-w-0 overflow-x-hidden'}>
-            <div className={embedded ? 'space-y-5 sm:space-y-6 w-full min-w-0' : 'space-y-5 sm:space-y-6 w-full min-w-0'}>
+        <div className={embedded ? 'space-y-3 bg-transparent min-h-full w-full min-w-0 max-w-full overflow-x-hidden' : 'p-3 sm:p-6 space-y-5 sm:space-y-6 bg-slate-50 min-h-full w-full max-w-[calc(100vw-30px)] sm:max-w-full min-w-0 overflow-x-hidden'}>
+            <div className={embedded ? 'space-y-3 w-full min-w-0' : 'space-y-5 sm:space-y-6 w-full min-w-0'}>
 
                 <SupportPageHeader
                     icon={faBuilding}
                     title="숙소 통합관리"
                     description="숙소 배정 현황 및 공과금/청구 내역을 관리합니다."
                     tone="emerald"
+                    compact={embedded}
                     actions={(
                         <>
                         <button
@@ -1406,7 +1438,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                         <SupportSegmentedTabs
                             options={accommodationTabs}
                             activeId={activeTab}
-                            onChange={setActiveTab}
+                            onChange={handleTabChange}
                             ariaLabel="숙소 관리 보기"
                         />
 
@@ -2492,6 +2524,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                 <AccommodationQuickAssignmentModal
                     accommodation={quickAssignItem}
                     activeAssignments={getActiveAssignmentsForAccommodation(quickAssignItem)}
+                    assignmentHistory={getAssignmentsForAccommodation(quickAssignItem)}
                     isOpen={!!quickAssignItem}
                     onClose={() => setQuickAssignItem(null)}
                     onSuccess={() => {

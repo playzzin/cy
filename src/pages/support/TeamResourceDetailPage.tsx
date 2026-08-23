@@ -18,11 +18,13 @@ import {
 } from 'lucide-react';
 
 import { accommodationService } from '../../services/accommodationService';
+import MonthNavigator from '../../components/common/MonthNavigator';
 import { cardService } from '../../services/cardService';
 import { vehicleService } from '../../services/vehicleService';
 import type { Accommodation } from '../../types/accommodation';
 import type { AccommodationAssignment } from '../../types/accommodationAssignment';
 import type { AccommodationBillingDocument } from '../../types/accommodationBilling';
+import { getAccommodationExpenseBucket } from '../../utils/accommodationExpenseClassification';
 import type { Card, CardAssignmentRecord } from '../../types/card';
 import type { CardBillingDocument } from '../../types/cardBilling';
 import type { TeamExpenseClaim } from '../../types/teamExpenseLedger';
@@ -215,12 +217,13 @@ const buildSummaryFromDocs = (
     docs.accommodationDocs.forEach(doc => {
         (doc.lineItems ?? []).forEach(item => {
             const amount = asNumber(item.amount);
-            if (item.targetField === 'accommodation') summary.accommodation += amount;
-            else if (item.targetField === 'privateRoom') summary.privateRoom += amount;
-            else if (item.targetField === 'electricity') summary.electricity += amount;
-            else if (item.targetField === 'gas') summary.gas += amount;
-            else if (item.targetField === 'water') summary.water += amount;
-            else if (item.targetField === 'internet') summary.internet += amount;
+            const expenseBucket = getAccommodationExpenseBucket(item);
+            if (expenseBucket === 'accommodation') summary.accommodation += amount;
+            else if (expenseBucket === 'privateRoom') summary.privateRoom += amount;
+            else if (expenseBucket === 'electricity') summary.electricity += amount;
+            else if (expenseBucket === 'gas') summary.gas += amount;
+            else if (expenseBucket === 'water') summary.water += amount;
+            else if (expenseBucket === 'internet') summary.internet += amount;
             else summary.accommodationOther += amount;
         });
     });
@@ -1078,14 +1081,13 @@ const TeamResourceDetailPage: React.FC = () => {
             </header>
 
             <section className="tw-toolbar trd-toolbar">
-                <label className="tw-control">
+                <div className="tw-control tw-control--month">
                     <span>조회월</span>
-                    <input
-                        type="month"
+                    <MonthNavigator
                         value={selectedMonth}
-                        onChange={(event) => setSelectedMonth(event.target.value)}
+                        onChange={setSelectedMonth}
                     />
-                </label>
+                </div>
 
                 <label className="tw-control tw-control--search">
                     <span>팀 검색</span>

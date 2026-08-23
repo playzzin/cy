@@ -13,8 +13,10 @@ import { teamService, type Team } from '../../../services/teamService';
 import { vehicleBillingService } from '../../../services/vehicleBillingService';
 import { isSupportBillingMonthEnabled } from '../../../utils/supportBillingPeriod';
 import {
+  getSettlementBillingRowScopeKey,
   isPostedSettlementBillingStatus,
-  normalizeSettlementBillingStatus
+  normalizeSettlementBillingStatus,
+  selectPreferredSettlementBillings
 } from '../../../utils/supportSettlementBilling';
 import { toast } from '../../../utils/swal';
 import {
@@ -24,6 +26,8 @@ import {
   isOfficeAssignmentReference
 } from '../../../utils/supportAssignmentTargets';
 import { normalizeVehicleExpenseType } from '../../../utils/vehicleExpenseType';
+import { getHistoricalAttendedSiteOptions } from '../../../utils/dailyReportHistoricalSite';
+import { getAccommodationExpenseBucket } from '../../../utils/accommodationExpenseClassification';
 import type { AccommodationBillingDocument } from '../../../types/accommodationBilling';
 import type { Card, CardBillingTargetRecord, CardBillingTargetType } from '../../../types/card';
 import type { CardBillingDocument } from '../../../types/cardBilling';
@@ -366,6 +370,48 @@ const isPostedClaim = (claim: TeamExpenseClaim) => claim.status === 'charged' ||
 const isTeamExpenseBillingDocument = (doc: { issuedToType?: unknown }) =>
   String(doc.issuedToType ?? '').trim().toLowerCase() !== 'worker';
 
+const normalizeBillingIdentityPart = (value: unknown): string => (
+  String(value ?? '').trim().toLowerCase().replace(/\s+/g, '')
+);
+
+const firstBillingIdentityPart = (...values: unknown[]): string => {
+  for (const value of values) {
+    const normalized = normalizeBillingIdentityPart(value);
+    if (normalized) return normalized;
+  }
+  return '';
+};
+
+const getBillingRecipientIdentity = (doc: {
+  teamId?: unknown;
+  assignedTeamId?: unknown;
+  teamName?: unknown;
+  assignedTeamName?: unknown;
+  issuedToType?: unknown;
+  issuedToWorkerId?: unknown;
+  issuedToWorkerName?: unknown;
+}): string => [
+  firstBillingIdentityPart(doc.teamName, doc.assignedTeamName, doc.teamId, doc.assignedTeamId),
+  normalizeBillingIdentityPart(doc.issuedToType),
+  firstBillingIdentityPart(doc.issuedToWorkerName, doc.issuedToWorkerId)
+].join('|');
+
+const getAccommodationSettlementBillingGroupKey = (doc: AccommodationBillingDocument): string => (
+  `accommodation|${getBillingRecipientIdentity(doc)}`
+);
+
+const getVehicleSettlementBillingGroupKey = (doc: VehicleBillingDocument): string => [
+  'vehicle',
+  firstBillingIdentityPart(doc.vehiclePlate, doc.vehicleId),
+  getBillingRecipientIdentity(doc)
+].join('|');
+
+const getCardSettlementBillingGroupKey = (doc: CardBillingDocument): string => [
+  'card',
+  firstBillingIdentityPart(doc.cardLabel, doc.cardId),
+  getBillingRecipientIdentity(doc)
+].join('|');
+
 const hasChargeTarget = (claim: TeamExpenseClaim) =>
   Boolean(String(claim.chargeToTeamId ?? '').trim() || String(claim.chargeToTeamName ?? '').trim());
 
@@ -385,47 +431,7 @@ export const getEffectiveClaimType = (claim: TeamExpenseClaim): TeamExpenseClaim
   return 'teamCharge';
 };
 
-const hasAttendance = (report: DailyReport) => {
-  if (toFiniteNumber((report as any).totalManDay) > 0) return true;
-
-  return (report.workers ?? []).some((worker) => {
-    const manDay = toFiniteNumber((worker as any).manDay);
-    const status = String((worker as any).status ?? '');
-    return manDay > 0 || status === 'attendance' || status === 'half';
-  });
-};
-
-export const getAttendedSiteOptions = (siteOptions: Site[], dailyReports: DailyReport[], endDate: string) => {
-  const normalizedEndDate = String(endDate ?? '').slice(0, 10);
-  const yearMonth = normalizedEndDate.slice(0, 7);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedEndDate) || !yearMonth) return [];
-
-  const startDate = `${yearMonth}-01`;
-  const attendedSiteIds = new Set<string>();
-  const attendedSiteNames = new Set<string>();
-
-  dailyReports.forEach((report) => {
-    const reportDate = String(report.date ?? '').slice(0, 10);
-    if (reportDate < startDate || reportDate > normalizedEndDate) return;
-    if (!hasAttendance(report)) return;
-
-    const siteId = String(report.siteId ?? '').trim();
-    const siteNameKey = normalizeKey(report.siteName);
-    if (siteId) attendedSiteIds.add(siteId);
-    if (siteNameKey) attendedSiteNames.add(siteNameKey);
-  });
-
-  return siteOptions.filter((site) => {
-    const siteId = String(site.id ?? '').trim();
-    const legacyId = String((site as any).legacyId ?? '').trim();
-    const siteNameKey = normalizeKey(site.name);
-    return (
-      (siteId && attendedSiteIds.has(siteId)) ||
-      (legacyId && attendedSiteIds.has(legacyId)) ||
-      (siteNameKey && attendedSiteNames.has(siteNameKey))
-    );
-  });
-};
+export const getAttendedSiteOptions = getHistoricalAttendedSiteOptions;
 
 export const summarizeVehicleBillingCosts = (doc: VehicleBillingDocument): VehicleCostBreakdown => {
   let rent = 0;
@@ -682,7 +688,13 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
   );
 
   const includedAccommodationDocs = useMemo(
-    () => (billingScope === 'all' ? accommodationDocs : accommodationDocs.filter(isPostedAccommodation)),
+    () => billingScope === 'all'
+      ? accommodationDocs
+      : selectPreferredSettlementBillings(
+        accommodationDocs.filter(isPostedAccommodation),
+        isAccommodationLedgerClaim,
+        getAccommodationSettlementBillingGroupKey
+      ),
     [accommodationDocs, billingScope]
   );
 
@@ -692,7 +704,14 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
   );
 
   const baseIncludedVehicleDocs = useMemo(
-    () => (billingScope === 'all' ? vehicleDocs : vehicleDocs.filter(isPostedVehicle)),
+    () => billingScope === 'all'
+      ? vehicleDocs
+      : selectPreferredSettlementBillings(
+        vehicleDocs.filter(isPostedVehicle),
+        isVehicleLedgerClaim,
+        getVehicleSettlementBillingGroupKey,
+        getSettlementBillingRowScopeKey
+      ),
     [billingScope, vehicleDocs]
   );
 
@@ -712,7 +731,14 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
   );
 
   const includedCardDocs = useMemo(
-    () => (billingScope === 'all' ? cardDocs : cardDocs.filter(isPostedCard)),
+    () => billingScope === 'all'
+      ? cardDocs
+      : selectPreferredSettlementBillings(
+        cardDocs.filter(isPostedCard),
+        isCardLedgerClaim,
+        getCardSettlementBillingGroupKey,
+        getSettlementBillingRowScopeKey
+      ),
     [billingScope, cardDocs]
   );
 
@@ -766,12 +792,13 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
       (doc.lineItems ?? []).forEach((item) => {
         const amount = toFiniteNumber(item.amount);
         if (amount <= 0) return;
-        if (item.targetField === 'accommodation') row.accommodation += amount;
-        else if (item.targetField === 'privateRoom') row.privateRoom += amount;
-        else if (item.targetField === 'electricity') row.electricity += amount;
-        else if (item.targetField === 'gas') row.gas += amount;
-        else if (item.targetField === 'water') row.water += amount;
-        else if (item.targetField === 'internet') row.internet += amount;
+        const expenseBucket = getAccommodationExpenseBucket(item);
+        if (expenseBucket === 'accommodation') row.accommodation += amount;
+        else if (expenseBucket === 'privateRoom') row.privateRoom += amount;
+        else if (expenseBucket === 'electricity') row.electricity += amount;
+        else if (expenseBucket === 'gas') row.gas += amount;
+        else if (expenseBucket === 'water') row.water += amount;
+        else if (expenseBucket === 'internet') row.internet += amount;
         else row.accommodationOther += amount;
       });
     });

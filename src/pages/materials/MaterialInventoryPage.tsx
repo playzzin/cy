@@ -295,39 +295,39 @@ const MaterialInventoryPage: React.FC = () => {
                         <table className="w-full min-w-[1680px] text-sm">
                             <thead className="bg-slate-100 border-b border-slate-300 sticky top-0 z-10">
                                 <tr>
-                                    <th className="px-3 py-2 text-left font-bold text-slate-700 sticky left-0 z-20 bg-slate-100 min-w-[180px]">현장</th>
-                                    <th className="px-3 py-2 text-left font-bold text-slate-700 sticky left-[180px] z-20 bg-slate-100 min-w-[160px]">분류</th>
-                                    <th className="px-3 py-2 text-left font-bold text-slate-700 sticky left-[340px] z-20 bg-slate-100 min-w-[180px]">품명</th>
-                                    <th className="px-3 py-2 text-left font-bold text-slate-700 sticky left-[520px] z-20 bg-slate-100 min-w-[130px]">규격</th>
-                                    <th className="px-3 py-2 text-right font-bold text-slate-700">입고</th>
-                                    <th className="px-3 py-2 text-right font-bold text-slate-700">출고</th>
-                                    <th className="px-3 py-2 text-right font-bold text-slate-700">현재고</th>
-                                    <th className="px-3 py-2 text-right font-bold text-slate-700">안전재고</th>
-                                    <th className="px-3 py-2 text-center font-bold text-slate-700">상태</th>
+                                    <th className="px-3 py-1.5 text-left font-bold text-slate-700 sticky left-0 z-20 bg-slate-100 min-w-[180px]">현장</th>
+                                    <th className="px-3 py-1.5 text-left font-bold text-slate-700 sticky left-[180px] z-20 bg-slate-100 min-w-[160px]">분류</th>
+                                    <th className="px-3 py-1.5 text-left font-bold text-slate-700 sticky left-[340px] z-20 bg-slate-100 min-w-[180px]">품명</th>
+                                    <th className="px-3 py-1.5 text-left font-bold text-slate-700 sticky left-[520px] z-20 bg-slate-100 min-w-[130px]">규격</th>
+                                    <th className="px-3 py-1.5 text-right font-bold text-slate-700">입고</th>
+                                    <th className="px-3 py-1.5 text-right font-bold text-slate-700">출고</th>
+                                    <th className="px-3 py-1.5 text-right font-bold text-slate-700">현재고</th>
+                                    <th className="px-3 py-1.5 text-right font-bold text-slate-700">안전재고</th>
+                                    <th className="px-3 py-1.5 text-center font-bold text-slate-700">상태</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200">
                                 {groupedInventoriesBySite.map((group) => (
                                     <React.Fragment key={group.key}>
                                         <tr className="bg-sky-50 border-y border-sky-100">
-                                            <td colSpan={9} className="px-4 py-3 text-sm font-bold text-sky-800 sticky top-[49px] z-[5] bg-sky-50">
+                                            <td colSpan={9} className="px-4 py-2 text-sm font-bold text-sky-800 sticky top-[49px] z-[5] bg-sky-50">
                                                 {group.label} · {group.rows.length}건
                                             </td>
                                         </tr>
                                         {group.rows.map(inv => (
                                             <tr key={`${inv.materialId}-${inv.siteId}`} className="hover:bg-slate-50">
-                                                <td className="px-3 py-2 sticky left-0 z-10 bg-white font-semibold text-slate-800">
+                                                <td className="px-3 py-1 sticky left-0 z-10 bg-white font-semibold text-slate-800">
                                                     <div>{inv.siteName || '미지정 현장'}</div>
                                                     <div className="text-[11px] font-semibold text-slate-400">{getSiteStatusLabel(siteById.get(inv.siteId)?.status)}</div>
                                                 </td>
-                                                <td className="px-3 py-2 sticky left-[180px] z-10 bg-white">{inv.category}</td>
-                                                <td className="px-3 py-2 sticky left-[340px] z-10 bg-white font-semibold">{inv.itemName}</td>
-                                                <td className="px-3 py-2 sticky left-[520px] z-10 bg-white">{inv.spec}</td>
-                                                <td className="px-3 py-2 text-right text-blue-600">{inv.totalInbound.toLocaleString()}</td>
-                                                <td className="px-3 py-2 text-right text-red-600">{inv.totalOutbound.toLocaleString()}</td>
-                                                <td className="px-3 py-2 text-right font-bold">{inv.currentStock.toLocaleString()}</td>
-                                                <td className="px-3 py-2 text-right text-slate-500">{inv.safetyStock?.toLocaleString() || '-'}</td>
-                                                <td className="px-3 py-2 text-center">
+                                                <td className="px-3 py-1 sticky left-[180px] z-10 bg-white">{inv.category}</td>
+                                                <td className="px-3 py-1 sticky left-[340px] z-10 bg-white font-semibold">{inv.itemName}</td>
+                                                <td className="px-3 py-1 sticky left-[520px] z-10 bg-white">{inv.spec}</td>
+                                                <td className="px-3 py-1 text-right text-blue-600">{inv.totalInbound.toLocaleString()}</td>
+                                                <td className="px-3 py-1 text-right text-red-600">{inv.totalOutbound.toLocaleString()}</td>
+                                                <td className="px-3 py-1 text-right font-bold">{inv.currentStock.toLocaleString()}</td>
+                                                <td className="px-3 py-1 text-right text-slate-500">{inv.safetyStock?.toLocaleString() || '-'}</td>
+                                                <td className="px-3 py-1 text-center">
                                                     {inv.status === 'sufficient' && (
                                                         <span className="inline-flex items-center gap-1 bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-semibold">
                                                             <FontAwesomeIcon icon={faCheckCircle} />

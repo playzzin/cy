@@ -53,6 +53,7 @@ const SmartTeamRegistrationPage = React.lazy(() => import('./pages/manpower/Smar
 const SmartCompanyRegistrationPage = React.lazy(() => import('./pages/database/SmartCompanyRegistrationPage'));
 const PartnerPhotoRegistrationPage = React.lazy(() => import('./pages/database/PartnerPhotoRegistrationPage'));
 const BusinessCardContactsPage = React.lazy(() => import('./pages/database/BusinessCardContactsPage'));
+const IdentityBundlePage = React.lazy(() => import('./pages/database/IdentityBundlePage'));
 const SmartSiteRegistrationPage = React.lazy(() => import('./pages/manpower/SmartSiteRegistrationPage'));
 const SmartDailyReportRegistrationPage = React.lazy(() => import('./pages/report/SmartDailyReportRegistrationPage'));
 const PayslipPage = React.lazy(() => import('./pages/payroll/PayslipPage'));
@@ -80,6 +81,8 @@ const SignManagementPage = React.lazy(() => import('./pages/payroll/SignManageme
 const SignatureGeneratorPage = React.lazy(() => import('./pages/payroll/SignatureGeneratorPage'));
 const DelegationLetterPage = React.lazy(() => import('./pages/payroll/DelegationLetterPage'));
 const DelegationLetterV2Page = React.lazy(() => import('./pages/payroll/DelegationLetterV2Page'));
+const CashReceiptConfirmationPage = React.lazy(() => import('./pages/payroll/CashReceiptConfirmationPage'));
+const AccountChangeRequestPage = React.lazy(() => import('./pages/payroll/AccountChangeRequestPage'));
 const DelegationBuilderPage = React.lazy(() => import('./pages/payroll/DelegationBuilderPage'));
 const DelegationLetterV5Page = React.lazy(() => import('./pages/payroll/DelegationLetterV5Page'));
 const LaborCostStatementGeneratorPage = React.lazy(() => import('./pages/payroll/LaborCostStatementGeneratorPage'));
@@ -96,7 +99,6 @@ const EngineOilCyclePage = React.lazy(() => import('./pages/support/EngineOilCyc
 const TeamEquipmentStatusPage = React.lazy(() => import('./pages/support/TeamEquipmentStatusPage'));
 const CardBillingLogPage = React.lazy(() => import('./pages/support/CardBillingLogPage'));
 const AccommodationBillingLogPage = React.lazy(() => import('./pages/support/AccommodationBillingLogPage'));
-const ExpenseClaimManagementPage = React.lazy(() => import('./pages/support/ExpenseClaimManagementPage'));
 const TeamResourceDetailPage = React.lazy(() => import('./pages/support/TeamResourceDetailPage'));
 const TeamBasedPaymentDraftPage = React.lazy(() => import('./pages/payroll/TeamBasedPaymentDraftPage'));
 const TeamBasedPaymentDraftPageV2 = React.lazy(() => import('./pages/payroll/TeamBasedPaymentDraftPageV2'));
@@ -361,6 +363,7 @@ const App: React.FC = () => {
               <Route path="smart-company-registration" element={<SmartCompanyRegistrationPage />} />
               <Route path="partner-photo-registration" element={<PartnerPhotoRegistrationPage />} />
               <Route path="business-card-contacts" element={<BusinessCardContactsPage />} />
+              <Route path="identity-bundle" element={<IdentityBundlePage />} />
             </Route>
 
             {/* Restricted internal compliance records */}
@@ -435,6 +438,8 @@ const App: React.FC = () => {
               <Route path="tax-affairs" element={<TaxAffairsPage />} />
               <Route path="delegation-letter" element={<DelegationLetterPage />} />
               <Route path="delegation-letter-v2" element={<DelegationLetterV2Page />} />
+              <Route path="cash-receipt-confirmation" element={<CashReceiptConfirmationPage />} />
+              <Route path="account-change-request" element={<AccountChangeRequestPage />} />
               <Route path="delegation-letter-v3" element={<DelegationBuilderPage />} />
               <Route path="delegation-letter-v5" element={<DelegationLetterV5Page />} />
               <Route path="labor-exchange" element={<LaborExchangePage />} />
@@ -642,8 +647,8 @@ const App: React.FC = () => {
             <Route path="/support/cards" element={<SupportManagerPage />} />
             <Route path="/support/cards/logs" element={<CardBillingLogPage />} />
             <Route path="/support/expense-ledger" element={<SupportManagerPage />} />
-            <Route path="/support/expense-claims" element={<ExpenseClaimManagementPage />} />
-            <Route path="/support/expense-claim-input" element={<ExpenseClaimManagementPage />} />
+            <Route path="/support/expense-claims" element={<SupportManagerPage />} />
+            <Route path="/support/expense-claim-input" element={<SupportManagerPage />} />
             <Route path="/support/team-resource-detail" element={<TeamResourceDetailPage />} />
             <Route path="/support/team-resources" element={<TeamResourceDetailPage />} />
 

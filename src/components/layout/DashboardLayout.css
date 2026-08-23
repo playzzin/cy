@@ -104,6 +104,18 @@ a {
     padding: 0;
 }
 
+/* Spreadsheet-style pages need one definite viewport and one scroll owner. */
+#main-content.page-contained-scroll {
+    height: calc(100dvh - var(--header-height));
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* The support workspace owns its compact gutters and starts directly below the app header. */
+#main-content.page-support-management {
+    padding: 0;
+}
+
 /* Cheongyeon Mode Main Content Dark Theme */
 .app.cheongyeon-mode {
     background-color: #0f172a;
@@ -964,8 +976,15 @@ a {
 
 .menu-icon {
     width: 24px;
+    min-width: 24px;
+    height: 1.25rem;
+    font-size: 1.25rem;
     text-align: center;
     margin-right: 10px;
+    flex: 0 0 24px;
+}
+
+#sidebar-logo-icon {
     flex-shrink: 0;
 }
 

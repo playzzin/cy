@@ -19,6 +19,7 @@ import {
     faRotateRight,
     faSearch,
     faSitemap,
+    faStar,
     faTrash,
     faTriangleExclamation,
     faUpload,
@@ -29,6 +30,13 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService, Company } from '../../services/companyService';
 import { accountDirectoryService, AccountDirectory } from '../../services/accountDirectoryService';
+import {
+    primaryAccountService,
+    PrimaryAccountSetting,
+    PrimaryAccountSourceType,
+} from '../../services/primaryAccountService';
+import { hasAccountHolderNameMismatch } from '../../utils/accountHolderName';
+import { saveLaborStatementDefaults } from '../../utils/payrollLaborStatementDefaults';
 
 type AccountTab = 'overview' | 'workers' | 'teams' | 'companies' | 'custom';
 type CustomCategory = AccountDirectory['category'];
@@ -169,6 +177,13 @@ const AccountNumberCopyButton: React.FC<{ value: unknown }> = ({ value }) => {
             {copied ? '복사됨' : '복사'}
         </button>
     );
+};
+
+const PRIMARY_ACCOUNT_SOURCE_LABEL: Record<PrimaryAccountSourceType, string> = {
+    worker: '작업자',
+    team: '팀',
+    company: '회사',
+    custom: '매입/기타',
 };
 
 const HIDDEN_ACCOUNT_STORAGE_KEY = 'cy_account_management_hidden_accounts_v1';
@@ -398,6 +413,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const [teams, setTeams] = useState<Team[]>([]);
     const [companies, setCompanies] = useState<Company[]>([]);
     const [customAccounts, setCustomAccounts] = useState<AccountDirectory[]>([]);
+    const [primaryAccount, setPrimaryAccount] = useState<PrimaryAccountSetting | null>(null);
 
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const [savingKeys, setSavingKeys] = useState<Record<string, boolean>>({});
@@ -479,17 +495,22 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            const [workerRows, teamRows, companyRows, customRows] = await Promise.all([
+            const [workerRows, teamRows, companyRows, customRows, savedPrimaryAccount] = await Promise.all([
                 manpowerService.getWorkers(true),
                 teamService.getTeams(),
                 companyService.getCompanies(),
                 accountDirectoryService.getEntries(),
+                primaryAccountService.getPrimaryAccount().catch((error) => {
+                    console.warn('Failed to load primary account setting:', error);
+                    return null;
+                }),
             ]);
 
             setWorkers(workerRows);
             setTeams(teamRows);
             setCompanies(companyRows);
             setCustomAccounts(sortCustomAccounts(customRows));
+            setPrimaryAccount(savedPrimaryAccount);
             setEditingKeys({});
             setRowSnapshots({});
         } catch (error) {
@@ -502,6 +523,52 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     useEffect(() => {
         loadData();
     }, [loadData]);
+
+    const isPrimaryAccount = useCallback((sourceType: PrimaryAccountSourceType, sourceId: unknown) => (
+        primaryAccount?.sourceType === sourceType &&
+        primaryAccount.sourceId === normalizeText(sourceId)
+    ), [primaryAccount]);
+
+    const setAsPrimaryAccount = useCallback(async (
+        sourceType: PrimaryAccountSourceType,
+        sourceId: unknown,
+        sourceName: unknown,
+        bankName: unknown,
+        accountHolder: unknown,
+        accountNumber: unknown
+    ) => {
+        const normalizedAccountNumber = normalizeText(accountNumber);
+        if (!normalizedAccountNumber) {
+            alert('대표계좌로 설정하려면 계좌번호를 먼저 입력해 주세요.');
+            return;
+        }
+
+        const key = `primary:${sourceType}:${normalizeText(sourceId)}`;
+        const nextPrimaryAccount: PrimaryAccountSetting = {
+            sourceType,
+            sourceId: normalizeText(sourceId),
+            sourceName: normalizeText(sourceName),
+            bankName: normalizeText(bankName),
+            accountHolder: normalizeText(accountHolder),
+            accountNumber: normalizedAccountNumber,
+        };
+
+        setSaving(key, true);
+        try {
+            await primaryAccountService.setPrimaryAccount(nextPrimaryAccount);
+            setPrimaryAccount(nextPrimaryAccount);
+            saveLaborStatementDefaults({
+                delegateBankName: nextPrimaryAccount.bankName,
+                delegateAccountHolder: nextPrimaryAccount.accountHolder,
+                delegateAccountNumber: nextPrimaryAccount.accountNumber,
+            });
+        } catch (error) {
+            console.error('Failed to set primary account:', error);
+            alert('대표계좌 설정 중 오류가 발생했습니다.');
+        } finally {
+            setSaving(key, false);
+        }
+    }, [setSaving]);
 
     const teamById = useMemo(() => new Map(teams.map((team) => [team.id || '', team])), [teams]);
     const companyById = useMemo(() => new Map(companies.map((company) => [company.id || '', company])), [companies]);
@@ -2003,6 +2070,37 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 </div>
             )}
 
+            <div className={`rounded-2xl border p-5 shadow-sm ${primaryAccount ? 'border-amber-200 bg-amber-50' : 'border-dashed border-slate-300 bg-white'}`}>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex items-start gap-3">
+                        <span className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border ${primaryAccount ? 'border-amber-300 bg-white text-amber-500' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>
+                            <FontAwesomeIcon icon={faStar} />
+                        </span>
+                        <div>
+                            <div className="text-sm font-bold text-slate-900">대표계좌</div>
+                            {primaryAccount ? (
+                                <>
+                                    <div className="mt-1 font-semibold text-slate-800">
+                                        {[primaryAccount.bankName, primaryAccount.accountNumber, primaryAccount.accountHolder ? `(${primaryAccount.accountHolder})` : ''].filter(Boolean).join(' ')}
+                                    </div>
+                                    <div className="mt-1 text-xs text-slate-500">
+                                        {PRIMARY_ACCOUNT_SOURCE_LABEL[primaryAccount.sourceType]} · {primaryAccount.sourceName || '이름 없음'}
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="mt-1 text-sm text-slate-500">아래 계좌의 “대표 설정” 버튼을 누르면 노무비 명세서의 위임 계좌 기본값으로 사용됩니다.</div>
+                            )}
+                        </div>
+                    </div>
+                    {primaryAccount && (
+                        <div className="inline-flex items-center gap-2 self-start rounded-full border border-amber-200 bg-white px-3 py-1.5 text-xs font-bold text-amber-700 lg:self-center">
+                            <FontAwesomeIcon icon={faCheck} />
+                            위임 계좌 기본값 적용
+                        </div>
+                    )}
+                </div>
+            </div>
+
             {renderToolbar}
 
             <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -2298,6 +2396,9 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         group.items.map((worker) => {
                                                             const rowKey = `worker:${worker.id}`;
                                                             const savingKey = rowKey;
+                                                            const primarySavingKey = `primary:worker:${normalizeText(worker.id)}`;
+                                                            const isPrimary = isPrimaryAccount('worker', worker.id);
+                                                            const accountHolderMismatch = hasAccountHolderNameMismatch(worker.name, worker.accountHolder);
                                                             const isEditing = true;
                                                             const accountMissing = !hasAccountNumber(worker.accountNumber);
                                                             const accountKey = getWorkerAccountKey(worker);
@@ -2387,11 +2488,20 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                                 value={worker.accountHolder || ''}
                                                                                 onChange={(event) => updateWorkerField(worker.id || '', 'accountHolder', event.target.value)}
                                                                                 placeholder="예금주"
-                                                                                className={workerSheetInputClass}
+                                                                                aria-label={`${worker.name || '작업자'} 예금주${accountHolderMismatch ? ' (작업자명과 다름)' : ''}`}
+                                                                                className={`${workerSheetInputClass} ${accountHolderMismatch ? 'border-rose-300 bg-rose-50 font-bold text-rose-700 ring-2 ring-rose-100' : ''}`}
                                                                             />
                                                                         ) : (
-                                                                            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
-                                                                                {worker.accountHolder || '-'}
+                                                                            <div
+                                                                                className={`rounded-md border px-3 py-2.5 text-sm ${accountHolderMismatch ? 'border-rose-300 bg-rose-50 font-extrabold text-rose-700 ring-2 ring-rose-100' : 'border-slate-200 bg-slate-50 text-slate-700'}`}
+                                                                                title={accountHolderMismatch ? `작업자명(${worker.name || '-'})과 예금주가 다릅니다. 입금 전 확인해 주세요.` : undefined}
+                                                                            >
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <span>{worker.accountHolder || '-'}</span>
+                                                                                    {accountHolderMismatch && (
+                                                                                        <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-black text-white">명의 다름</span>
+                                                                                    )}
+                                                                                </div>
                                                                             </div>
                                                                         )}
                                                                     </td>
@@ -2414,6 +2524,15 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                             >
                                                                                 <FontAwesomeIcon icon={faTrash} />
                                                                                 삭제
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                disabled={!worker.id || !hasAccountNumber(worker.accountNumber) || !!savingKeys[primarySavingKey]}
+                                                                                onClick={() => worker.id && setAsPrimaryAccount('worker', worker.id, worker.name, worker.bankName, worker.accountHolder, worker.accountNumber)}
+                                                                                className={`${rowActionButtonClass} ${isPrimary ? 'border-amber-400 bg-amber-400 text-slate-900' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+                                                                            >
+                                                                                <FontAwesomeIcon icon={faStar} />
+                                                                                {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '대표계좌' : '대표 설정'}
                                                                             </button>
                                                                             <button
                                                                                 type="button"
@@ -2477,6 +2596,8 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                     {group.items.map((team) => {
                                                         const rowKey = `team:${team.id}`;
                                                         const savingKey = rowKey;
+                                                        const primarySavingKey = `primary:team:${normalizeText(team.id)}`;
+                                                        const isPrimary = isPrimaryAccount('team', team.id);
                                                         const isEditing = true;
                                                         const accountKey = getTeamAccountKey(team);
                                                         const isManuallyHidden = isAccountKeyHidden(accountKey);
@@ -2563,6 +2684,15 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                         </button>
                                                                         <button
                                                                             type="button"
+                                                                            disabled={!team.id || !hasAccountNumber(team.accountNumber) || !!savingKeys[primarySavingKey]}
+                                                                            onClick={() => team.id && setAsPrimaryAccount('team', team.id, team.name, team.bankName, team.accountHolder, team.accountNumber)}
+                                                                            className={`${rowActionButtonClass} ${isPrimary ? 'border-amber-400 bg-amber-400 text-slate-900' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+                                                                        >
+                                                                            <FontAwesomeIcon icon={faStar} />
+                                                                            {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '대표계좌' : '대표 설정'}
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
                                                                             disabled={!team.id}
                                                                             onClick={() => (isManuallyHidden ? showAccountKey(accountKey) : hideAccountKey(accountKey))}
                                                                             className={rowActionSecondaryClass}
@@ -2622,6 +2752,8 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                     {group.items.map((company) => {
                                                         const rowKey = `company:${company.id}`;
                                                         const savingKey = rowKey;
+                                                        const primarySavingKey = `primary:company:${normalizeText(company.id)}`;
+                                                        const isPrimary = isPrimaryAccount('company', company.id);
                                                         const isEditing = true;
                                                         const accountKey = getCompanyAccountKey(company);
                                                         const isManuallyHidden = isAccountKeyHidden(accountKey);
@@ -2705,6 +2837,15 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                         >
                                                                             <FontAwesomeIcon icon={faTrash} />
                                                                             삭제
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={!company.id || !hasAccountNumber(company.accountNumber) || !!savingKeys[primarySavingKey]}
+                                                                            onClick={() => company.id && setAsPrimaryAccount('company', company.id, company.name, company.bankName, company.accountHolder, company.accountNumber)}
+                                                                            className={`${rowActionButtonClass} ${isPrimary ? 'border-amber-400 bg-amber-400 text-slate-900' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+                                                                        >
+                                                                            <FontAwesomeIcon icon={faStar} />
+                                                                            {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '대표계좌' : '대표 설정'}
                                                                         </button>
                                                                         <button
                                                                             type="button"
@@ -2797,6 +2938,8 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                 {group.items.map((entry) => {
                                                                     const rowKey = `custom:${entry.id}`;
                                                                     const rowSavingKey = rowKey;
+                                                                    const primarySavingKey = `primary:custom:${normalizeText(entry.id)}`;
+                                                                    const isPrimary = isPrimaryAccount('custom', entry.id);
                                                                     const isEditing = !!editingKeys[rowKey];
                                                                     const accountKey = getCustomAccountKey(entry);
                                                                     const isManuallyHidden = isAccountKeyHidden(accountKey);
@@ -2879,6 +3022,15 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                                     <button type="button" disabled={!entry.id || !isEditing || !!savingKeys[rowSavingKey]} onClick={() => entry.id && saveCustomEntry(entry.id)} className={rowActionPrimaryClass}>
                                                                                         <FontAwesomeIcon icon={faFloppyDisk} />
                                                                                         {savingKeys[rowSavingKey] ? '저장중' : '저장'}
+                                                                                    </button>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        disabled={!entry.id || !hasAccountNumber(entry.accountNumber) || !!savingKeys[primarySavingKey]}
+                                                                                        onClick={() => entry.id && setAsPrimaryAccount('custom', entry.id, entry.name, entry.bankName, entry.accountHolder, entry.accountNumber)}
+                                                                                        className={`${rowActionButtonClass} ${isPrimary ? 'border-amber-400 bg-amber-400 text-slate-900' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+                                                                                    >
+                                                                                        <FontAwesomeIcon icon={faStar} />
+                                                                                        {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '대표계좌' : '대표 설정'}
                                                                                     </button>
                                                                                     <button type="button" disabled={!entry.id || !!savingKeys[rowSavingKey]} onClick={() => entry.id && deleteCustomEntry(entry.id)} className={rowActionDangerClass}>
                                                                                         <FontAwesomeIcon icon={faTrash} />

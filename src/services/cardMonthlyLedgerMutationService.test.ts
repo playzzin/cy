@@ -74,7 +74,6 @@ const buildBilling = (id: string): CardBillingDocument => ({
 
 const buildDependencies = (): jest.Mocked<CardMonthlyLedgerMutationDependencies> => ({
   applyTransactionChanges: jest.fn().mockResolvedValue(undefined),
-  saveBilling: jest.fn().mockResolvedValue(undefined),
   recordOperation: jest.fn().mockResolvedValue(undefined)
 });
 
@@ -83,12 +82,9 @@ describe('saveCardMonthlyLedgerMutation', () => {
     jest.clearAllMocks();
   });
 
-  it('upserts deterministic visible transactions and cancels stale visible transactions', async () => {
+  it('saves deterministic ledger transactions without mutating billing documents', async () => {
     const dependencies = buildDependencies();
     const row = buildRow();
-    const existingBilling = buildBilling('billing-current');
-    const staleBilling = buildBilling('billing-stale');
-    const nextBilling = buildBilling('billing-current');
 
     const result = await saveCardMonthlyLedgerMutation({
       yearMonth: '2026-07',
@@ -98,8 +94,7 @@ describe('saveCardMonthlyLedgerMutation', () => {
         buildTransaction({ id: 'hidden-tx', date: '2026-08-01' })
       ],
       categories: ['FUEL', 'TOLL', 'MEAL', 'MATERIAL', 'OTHER'],
-      getBillingDocumentsForRow: () => [existingBilling, staleBilling],
-      buildBillingDocumentForRow: () => nextBilling,
+      getBillingDocumentsForRow: () => [],
       dependencies
     });
 
@@ -120,21 +115,14 @@ describe('saveCardMonthlyLedgerMutation', () => {
       amount: 10000,
       status: 'ACTIVE'
     });
-    expect(dependencies.saveBilling).toHaveBeenCalledWith(nextBilling);
-    expect(dependencies.saveBilling).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'billing-stale',
-      status: 'CANCELLED',
-      totalAmount: 0,
-      lineItems: []
-    }));
     expect(result).toMatchObject({
       upsertedTransactionCount: 2,
       cancelledTransactionCount: 1,
-      savedBillingCount: 1,
-      cancelledBillingCount: 1,
+      savedBillingCount: 0,
+      cancelledBillingCount: 0,
       transactionCancelIds: ['visible-tx'],
-      billingSaveIds: ['billing-current'],
-      billingCancelIds: ['billing-stale']
+      billingSaveIds: [],
+      billingCancelIds: []
     });
     expect(dependencies.recordOperation).toHaveBeenCalledWith(expect.objectContaining({
       domain: 'card',
@@ -143,9 +131,7 @@ describe('saveCardMonthlyLedgerMutation', () => {
       status: 'success',
       affectedDocumentIds: expect.arrayContaining([
         'card-ledger__2026-07__card-1__2026-07-01__2026-07-31__FUEL',
-        'visible-tx',
-        'billing-current',
-        'billing-stale'
+        'visible-tx'
       ])
     }));
   });
@@ -160,14 +146,12 @@ describe('saveCardMonthlyLedgerMutation', () => {
       originalTransactions: [buildTransaction({ id: 'visible-tx' })],
       categories: ['FUEL'],
       getBillingDocumentsForRow: () => [buildBilling('billing-current')],
-      buildBillingDocumentForRow: () => buildBilling('billing-current'),
       dependencies
     })).rejects.toThrow('batch failed');
 
     expect(dependencies.applyTransactionChanges).toHaveBeenCalledWith(expect.objectContaining({
       cancelIds: ['visible-tx']
     }));
-    expect(dependencies.saveBilling).not.toHaveBeenCalled();
     expect(dependencies.recordOperation).toHaveBeenCalledWith(expect.objectContaining({
       domain: 'card',
       operationId: 'card-monthly-ledger:2026-07',
@@ -180,7 +164,7 @@ describe('saveCardMonthlyLedgerMutation', () => {
     }));
   });
 
-  it('uses stable transaction and billing ids when the same save is executed twice', async () => {
+  it('uses stable transaction ids when the same ledger save is executed twice', async () => {
     const dependencies = buildDependencies();
     const row = buildRow();
     const nextBilling = buildBilling('billing-current');
@@ -190,7 +174,6 @@ describe('saveCardMonthlyLedgerMutation', () => {
       originalTransactions: [] as CardTransaction[],
       categories: ['FUEL', 'TOLL'] as CardTransactionCategory[],
       getBillingDocumentsForRow: () => [nextBilling],
-      buildBillingDocumentForRow: () => nextBilling,
       dependencies
     };
 
@@ -198,10 +181,78 @@ describe('saveCardMonthlyLedgerMutation', () => {
     const second = await saveCardMonthlyLedgerMutation(input);
 
     expect(first.transactionUpsertIds).toEqual(second.transactionUpsertIds);
-    expect(first.billingSaveIds).toEqual(second.billingSaveIds);
+    expect(first.billingSaveIds).toEqual([]);
+    expect(second.billingSaveIds).toEqual([]);
     expect(dependencies.applyTransactionChanges.mock.calls[0][0].upserts.map((transaction) => transaction.id)).toEqual(
       dependencies.applyTransactionChanges.mock.calls[1][0].upserts.map((transaction) => transaction.id)
     );
+  });
+
+  it('keeps imported PDF attachments when the monthly ledger is saved again', async () => {
+    const dependencies = buildDependencies();
+    const row = buildRow({
+      statementAttachmentPaths: [
+        'card-statement-imports/2026-07/job-1/statement.pdf',
+        'card-statement-imports/2026-07/job-1/statement.pdf'
+      ]
+    });
+
+    await saveCardMonthlyLedgerMutation({
+      yearMonth: '2026-07',
+      visibleRows: [{ row }],
+      originalTransactions: [],
+      categories: ['FUEL'],
+      getBillingDocumentsForRow: () => [],
+      dependencies
+    });
+
+    const [upsert] = dependencies.applyTransactionChanges.mock.calls[0][0].upserts;
+    expect(upsert).toMatchObject({
+      evidenceUrl: 'card-statement-imports/2026-07/job-1/statement.pdf',
+      statementAttachmentPaths: ['card-statement-imports/2026-07/job-1/statement.pdf']
+    });
+  });
+
+  it('cancels every physical PDF duplicate hidden by the ledger deduplication', async () => {
+    const dependencies = buildDependencies();
+    const originalPath = 'card-billing-statements/2026-07/imports/job-old/001_김세흔팀_9910.pdf';
+    const repeatedPath = 'card-billing-statements/2026-07/imports/job-new/001_김세흔팀_9910.pdf';
+    const row = buildRow({
+      segment: { startDate: '2026-07-13', endDate: '2026-07-31' },
+      statementAttachmentPaths: [repeatedPath]
+    });
+
+    await saveCardMonthlyLedgerMutation({
+      yearMonth: '2026-07',
+      visibleRows: [{ row }],
+      originalTransactions: [
+        buildTransaction({
+          id: 'legacy-import',
+          date: '2026-07-01',
+          category: 'FUEL',
+          amount: 10000,
+          evidenceUrl: originalPath,
+          operationId: 'card-statement-import:job-old'
+        }),
+        buildTransaction({
+          id: 'hash-import',
+          date: '2026-07-01',
+          category: 'FUEL',
+          amount: 10000,
+          evidenceUrl: repeatedPath,
+          statementAttachmentPaths: [repeatedPath],
+          statementSourceSha256: 'same-hash',
+          operationId: 'card-statement-import:job-new'
+        })
+      ],
+      categories: ['FUEL'],
+      getBillingDocumentsForRow: () => [],
+      dependencies
+    });
+
+    expect(dependencies.applyTransactionChanges).toHaveBeenCalledWith(expect.objectContaining({
+      cancelIds: ['legacy-import', 'hash-import']
+    }));
   });
 
   it('skips posted billing rows and still saves safe rows in the same batch', async () => {
@@ -231,10 +282,6 @@ describe('saveCardMonthlyLedgerMutation', () => {
       ],
       categories: ['FUEL'],
       getBillingDocumentsForRow: (row) => row.id === 'posted-row' ? [postedBilling] : [safeBilling],
-      buildBillingDocumentForRow: (row) => row.id === 'posted-row' ? {
-        ...postedBilling,
-        totalAmount: 20000
-      } : safeBilling,
       dependencies
     });
 
@@ -247,13 +294,11 @@ describe('saveCardMonthlyLedgerMutation', () => {
       id: 'card-ledger__2026-07__card-2__2026-07-01__2026-07-31__FUEL',
       cardId: 'card-2'
     });
-    expect(dependencies.saveBilling).toHaveBeenCalledTimes(1);
-    expect(dependencies.saveBilling).toHaveBeenCalledWith(safeBilling);
     expect(result).toMatchObject({
-      savedBillingCount: 1,
+      savedBillingCount: 0,
       cancelledBillingCount: 0,
       skippedBillingCount: 1,
-      billingSaveIds: ['billing-safe'],
+      billingSaveIds: [],
       billingCancelIds: []
     });
     expect(result.skippedBillingRows).toEqual([{
@@ -275,11 +320,9 @@ describe('saveCardMonthlyLedgerMutation', () => {
       originalTransactions: [],
       categories: ['FUEL'],
       getBillingDocumentsForRow: () => [],
-      buildBillingDocumentForRow: () => null,
       dependencies
     })).rejects.toThrow('invalid-ledger-period:row-1');
 
     expect(dependencies.applyTransactionChanges).not.toHaveBeenCalled();
-    expect(dependencies.saveBilling).not.toHaveBeenCalled();
   });
 });

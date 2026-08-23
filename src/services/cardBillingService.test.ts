@@ -10,6 +10,8 @@ jest.mock('./cardFirestoreService', () => ({
     cardFirestoreService: {
         getBillingById: jest.fn(),
         saveBilling: jest.fn(),
+        replaceDraftBilling: jest.fn(),
+        deleteDraftBillings: jest.fn(),
         deleteBilling: jest.fn(),
         getBillingsByMonth: jest.fn()
     }
@@ -168,6 +170,8 @@ describe('cardBillingService posted document protection', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockedCardFirestoreService.saveBilling.mockResolvedValue(undefined);
+        mockedCardFirestoreService.replaceDraftBilling.mockResolvedValue(undefined);
+        mockedCardFirestoreService.deleteDraftBillings.mockResolvedValue(undefined);
         mockedCardBillingLogService.createLog.mockResolvedValue({} as any);
     });
 
@@ -227,5 +231,78 @@ describe('cardBillingService posted document protection', () => {
                 confirmationCancelReason: 'duplicate entry'
             })
         }));
+    });
+
+    it('atomically replaces a DRAFT billing and removes stale legacy drafts', async () => {
+        const next = buildBilling({ id: 'billing-row', totalAmount: 502750, variableCost: 502750 });
+        mockedCardFirestoreService.getBillingById.mockImplementation(async (id: string) => (
+            id === 'billing-legacy'
+                ? buildBilling({ id, totalAmount: 1005500, variableCost: 1005500, status: 'DRAFT' })
+                : null
+        ));
+
+        await cardBillingService.replaceDraftBilling(next, ['billing-legacy']);
+
+        expect(mockedCardFirestoreService.replaceDraftBilling).toHaveBeenCalledWith(
+            next,
+            ['billing-legacy']
+        );
+        expect(mockedCardBillingLogService.createLog).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'created',
+            after: expect.objectContaining({ id: 'billing-row', totalAmount: 502750 }),
+            source: 'cardBillingService.replaceDraftBilling'
+        }));
+        expect(mockedCardBillingLogService.createLog).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'deleted',
+            before: expect.objectContaining({ id: 'billing-legacy', totalAmount: 1005500 }),
+            source: 'cardBillingService.replaceDraftBilling'
+        }));
+    });
+
+    it('does not replace or delete a posted billing', async () => {
+        mockedCardFirestoreService.getBillingById.mockImplementation(async (id: string) => (
+            buildBilling({ id, status: id === 'billing-legacy' ? 'CONFIRMED' : 'DRAFT' })
+        ));
+
+        await expect(cardBillingService.replaceDraftBilling(
+            buildBilling({ id: 'billing-row' }),
+            ['billing-legacy']
+        )).rejects.toThrow('card-billing-posted-replace-blocked');
+
+        expect(mockedCardFirestoreService.replaceDraftBilling).not.toHaveBeenCalled();
+    });
+
+    it('deletes only DRAFT documents during zero-amount reconciliation', async () => {
+        mockedCardFirestoreService.getBillingById.mockImplementation(async (id: string) => (
+            id === 'draft-1'
+                ? buildBilling({ id, status: 'DRAFT' })
+                : buildBilling({ id, status: 'CANCELLED' })
+        ));
+
+        await cardBillingService.deleteDraftBillings(['draft-1', 'cancelled-1', 'draft-1']);
+
+        expect(mockedCardFirestoreService.deleteDraftBillings).toHaveBeenCalledWith([
+            'draft-1',
+            'cancelled-1'
+        ]);
+        expect(mockedCardBillingLogService.createLog).toHaveBeenCalledTimes(1);
+        expect(mockedCardBillingLogService.createLog).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'deleted',
+            before: expect.objectContaining({ id: 'draft-1', status: 'DRAFT' }),
+            source: 'cardBillingService.deleteDraftBillings'
+        }));
+    });
+
+    it('blocks zero-amount deletion when any related document is posted', async () => {
+        mockedCardFirestoreService.getBillingById.mockImplementation(async (id: string) => (
+            buildBilling({ id, status: id === 'posted-1' ? 'PAID' : 'DRAFT' })
+        ));
+
+        await expect(cardBillingService.deleteDraftBillings([
+            'draft-1',
+            'posted-1'
+        ])).rejects.toThrow('card-billing-posted-delete-blocked');
+
+        expect(mockedCardFirestoreService.deleteDraftBillings).not.toHaveBeenCalled();
     });
 });

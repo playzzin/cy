@@ -155,7 +155,10 @@ const PARTNER_RECOGNITION_SCHEMA = {
 };
 
 const db = admin.firestore();
-const bucket = admin.storage().bucket();
+// Resolve the default bucket only when a recognition job reads a file.  Firebase
+// loads this module while discovering functions during deployment, before the
+// runtime Storage configuration is guaranteed to be available.
+const getBucket = () => admin.storage().bucket();
 
 const getGeminiApiKey = async (): Promise<string> => {
     const settings = await getServerGeminiSettings();
@@ -229,7 +232,7 @@ const downloadStorageFileAsBase64 = async (
     storagePath: string,
     fallbackMimeType?: string
 ): Promise<{ base64: string; mimeType: string }> => {
-    const file = bucket.file(storagePath);
+    const file = getBucket().file(storagePath);
     const [buffer] = await file.download();
     const [metadata] = await file.getMetadata();
     return {

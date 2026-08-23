@@ -65,6 +65,9 @@ export interface CardStatementImportFile {
   mimeType: string;
   size: number;
   sha256?: string;
+  sourceHashVerificationStatus?: 'verified' | 'recovered_requires_reanalysis' | 'mismatch';
+  sourceHashObservedSha256?: string;
+  sourceHashVerifiedAt?: Timestamp;
   status: CardStatementImportFileStatus;
   statementMonth?: string;
   grandTotalAmount?: number;
@@ -101,6 +104,7 @@ export interface CardStatementImportResult {
   fileId: string;
   fileIndex: number;
   resultIndex: number;
+  sourceBlockIndex?: number;
   yearMonth: string;
   statementMonth?: string;
   cardLast4?: string;
@@ -123,6 +127,10 @@ export interface CardStatementImportResult {
   analysisReviewResolvedByName?: string;
   errorMessage?: string;
   sourceStoragePath?: string;
+  sourceSha256?: string;
+  duplicateSourceSha256?: string;
+  duplicateSourceOwnerJobId?: string;
+  duplicateSourceOwnerFileId?: string;
   originalFileName?: string;
   committedAt?: Timestamp;
   createdAt?: Timestamp;

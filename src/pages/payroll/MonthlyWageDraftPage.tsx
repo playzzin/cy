@@ -5,6 +5,7 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService, Company } from '../../services/companyService';
 import { siteService, Site } from '../../services/siteService';
+import { primaryAccountService, type PrimaryAccountSetting } from '../../services/primaryAccountService';
 import { AdvancePayment } from '../../services/advancePaymentService';
 import { statementOutputService } from '../../services/statementOutputService';
 import type { StatementOutputRecord } from '../../types/statementOutput';
@@ -66,6 +67,7 @@ import {
     type PayslipIssueSummary,
 } from './utils/payslipIssue';
 import { filterRowsByWorkerName } from './utils/workerNameSearch';
+import { calculatePayslipPrintScale } from './utils/payslipPrintLayout';
 
 import { usePayrollData } from './hooks/usePayrollData';
 import { PaymentData, MonthlyAdvanceLedgerRow, MonthlyAdvanceLedgerWorkEntry, LedgerManualInput, DeductionBreakdown, WorkerWorkEntry, DeductionLine, TaxRateSnapshot, LedgerUtilityInputLike, InsuranceAppliedSummary, InsuranceAppliedSiteSummary, InsuranceAppliedReason, WithholdingAppliedSummary, WithholdingAppliedSiteSummary, BusinessIncomeAppliedSummary, BusinessIncomeAppliedSiteSummary } from './types/payroll';
@@ -1665,6 +1667,7 @@ type KBTransferRow = {
     amount: number;
     receiverDisplay: string;
     senderMemo: string;
+    usesPrimaryAccount: boolean;
     validationErrors: KBTransferValidationError[];
 };
 
@@ -1694,11 +1697,21 @@ type KBPreviewCriteria = {
 
 type KBPreviewSnapshot = {
     createdAtIso: string;
+    primaryAccount: PrimaryAccountSetting | null;
     sourceRows: KBPreviewSourceRow[];
     rows: KBTransferRow[];
     excludedRows: KBExcludedTransferRow[];
     criteria: KBPreviewCriteria;
 };
+
+const formatKBPrimaryAccountLabel = (account: PrimaryAccountSetting): string => (
+    [
+        account.sourceName,
+        account.bankName,
+        account.accountNumber,
+        account.accountHolder ? `(${account.accountHolder})` : '',
+    ].filter(Boolean).join(' · ')
+);
 
 const DEFAULT_PAYSLIP_CONTRACTOR_NAME = '(주)청연이엔지';
 const DEFAULT_PAYSLIP_CONTRACTOR_OPTIONS = [
@@ -1746,6 +1759,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [allSites, setAllSites] = useState<Site[]>([]);
     const [showCalculationLabor, setShowCalculationLabor] = useState<boolean>(false);
     const [companies, setCompanies] = useState<Company[]>([]);
+    const [primaryAccount, setPrimaryAccount] = useState<PrimaryAccountSetting | null>(null);
     const [workerSearchText, setWorkerSearchText] = useState<string>('');
     const [filterMode, setFilterMode] = useState<'team' | 'worker'>('team');
     const [pageViewMode, setPageViewMode] = useState<'simple' | 'standard' | 'ledger'>('ledger');
@@ -1797,6 +1811,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [kbMemoSuffix, setKbMemoSuffix] = useState<string>('{이름} 가불');
     const [kbAmountType, setKbAmountType] = useState<KBAmountType>('totalAmount');
     const [kbPreviewSnapshot, setKbPreviewSnapshot] = useState<KBPreviewSnapshot | null>(null);
+    const [kbSelectedTransferRowIds, setKbSelectedTransferRowIds] = useState<Set<string>>(new Set());
+    const [kbPrimaryAccountAppliedRowIds, setKbPrimaryAccountAppliedRowIds] = useState<Set<string>>(new Set());
     const [payslipOutputIds, setPayslipOutputIds] = useState<Record<string, string>>({});
     const [issuingPayslip, setIssuingPayslip] = useState<boolean>(false);
     const [payslipIssueMessage, setPayslipIssueMessage] = useState<string>('');
@@ -1812,6 +1828,22 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         });
         return map;
     }, [companies]);
+
+    useEffect(() => {
+        if (!showKBPreview) return;
+        setKbPreviewSnapshot((current) => current
+            ? buildKBPreviewSnapshot(
+                current.sourceRows,
+                kbAmountType,
+                kbReceiverDisplay,
+                kbMemoSuffix,
+                current.createdAtIso,
+                kbPrimaryAccountAppliedRowIds
+            )
+            : current);
+    // 대표계좌 자체가 변경된 경우 현재 적용 행을 새 대표계좌 정보로 다시 계산한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [primaryAccount]);
 
     const workerTeamByWorkerId = useMemo(() => {
         const map = new Map<string, { teamId: string; teamName: string }>();
@@ -2807,17 +2839,28 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         let mounted = true;
         const fetchInitialData = async () => {
             try {
-                const [fetchedTeams, fetchedWorkers, fetchedCompanies, fetchedSites] = await Promise.all([
+                const [
+                    fetchedTeams,
+                    fetchedWorkers,
+                    fetchedCompanies,
+                    fetchedSites,
+                    fetchedPrimaryAccount,
+                ] = await Promise.all([
                     teamService.getTeams(),
                     manpowerService.getWorkers(),
                     companyService.getCompanies(),
                     siteService.getSites(),
+                    primaryAccountService.getPrimaryAccount().catch((error) => {
+                        console.warn('Failed to load primary account for KB preview:', error);
+                        return null;
+                    }),
                 ]);
                 if (!mounted) return;
                 setAllTeams(fetchedTeams);
                 setAllWorkers(fetchedWorkers);
                 setCompanies(fetchedCompanies);
                 setAllSites(fetchedSites);
+                setPrimaryAccount(fetchedPrimaryAccount);
             } catch (error) {
                 if (!mounted) return;
                 console.error('Failed to load initial data:', error);
@@ -3426,6 +3469,56 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         selectedPayslipOutputId,
     ]);
 
+    const fitPayslipPrintPages = useCallback(() => {
+        const printRoot = document.getElementById('monthly-payslip-print-root');
+        if (!printRoot) return;
+
+        printRoot.setAttribute('data-print-measuring', 'true');
+        const pages = Array.from(
+            printRoot.querySelectorAll<HTMLElement>('.monthly-payslip-print-page')
+        );
+
+        pages.forEach((page) => {
+            page.style.setProperty('--payslip-print-scale', '1');
+            page.style.setProperty('--payslip-print-source-width', '194mm');
+        });
+
+        // Force the hidden print portal to use the same geometry as the print stylesheet.
+        void printRoot.offsetHeight;
+
+        pages.forEach((page) => {
+            const card = page.querySelector<HTMLElement>('.payslip-template-card');
+            if (!card) return;
+
+            const pageWidth = page.clientWidth;
+            const pageHeight = page.clientHeight;
+            const baseScale = calculatePayslipPrintScale({
+                pageWidth,
+                pageHeight,
+                contentWidth: Math.max(card.scrollWidth, card.offsetWidth),
+                contentHeight: Math.max(card.scrollHeight, card.offsetHeight),
+            });
+
+            if (baseScale < 1) {
+                page.style.setProperty(
+                    '--payslip-print-source-width',
+                    `${pageWidth / baseScale}px`
+                );
+                void card.offsetHeight;
+            }
+
+            const finalScale = calculatePayslipPrintScale({
+                pageWidth,
+                pageHeight,
+                contentWidth: Math.max(card.scrollWidth, card.offsetWidth),
+                contentHeight: Math.max(card.scrollHeight, card.offsetHeight),
+            });
+            page.style.setProperty('--payslip-print-scale', finalScale.toFixed(4));
+        });
+
+        printRoot.removeAttribute('data-print-measuring');
+    }, []);
+
     const printPayslipRows = useCallback(async (rows: PaymentData[], actionLabel: string, fileName: string) => {
         if (rows.length === 0 || preparingPayslipPrint) return;
         if (!ensurePayslipIssueReady(rows, actionLabel)) return;
@@ -3440,6 +3533,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             if (document.fonts?.ready) {
                 await document.fonts.ready;
             }
+            fitPayslipPrintPages();
             document.title = fileName;
             window.print();
         } finally {
@@ -3447,7 +3541,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             setPayslipPrintRows([]);
             setPreparingPayslipPrint(false);
         }
-    }, [ensurePayslipIssueReady, preparingPayslipPrint]);
+    }, [ensurePayslipIssueReady, fitPayslipPrintPages, preparingPayslipPrint]);
 
     const handlePrintPayslip = useCallback(() => {
         if (!resolvedPayslipTarget) return;
@@ -4418,7 +4512,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         sourceRows: KBPreviewSourceRow[],
         amountType: KBAmountType,
         receiverDisplay: string,
-        memoSuffix: string
+        memoSuffix: string,
+        primaryAccountRowIds: Set<string>
     ): { rows: KBTransferRow[]; excludedRows: KBExcludedTransferRow[] } => {
         const rows: KBTransferRow[] = [];
         const excludedRows: KBExcludedTransferRow[] = [];
@@ -4438,13 +4533,18 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 return;
             }
 
-            const analysis = analyzeBankMapping(sourceRow.bankName, sourceRow.bankCode);
-            const rawBankName = String(sourceRow.bankName ?? '').trim();
+            const usesPrimaryAccount = Boolean(primaryAccount && primaryAccountRowIds.has(sourceRow.sourceRowId));
+            const bankName = usesPrimaryAccount ? primaryAccount?.bankName ?? '' : sourceRow.bankName;
+            const accountNumber = usesPrimaryAccount ? primaryAccount?.accountNumber ?? '' : sourceRow.accountNumber;
+            const accountHolder = usesPrimaryAccount ? primaryAccount?.accountHolder ?? '' : sourceRow.accountHolder;
+            const bankCode = usesPrimaryAccount ? '' : sourceRow.bankCode;
+            const analysis = analyzeBankMapping(bankName, bankCode);
+            const rawBankName = String(bankName ?? '').trim();
             const bankCodeDisplay = analysis.code || rawBankName || '(은행명없음)';
             const validationErrors = validateKBTransferRow({
                 bankCode: analysis.code,
-                accountNumber: sourceRow.accountNumber,
-                accountHolder: sourceRow.accountHolder,
+                accountNumber,
+                accountHolder,
                 amount,
             }).filter((error) => error !== 'amount');
 
@@ -4460,12 +4560,13 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 bankCodeNeedsFix: validationErrors.includes('bankCode'),
                 bankCodeReason: analysis.reason,
                 bankCodeCandidates: analysis.candidates.join(', '),
-                bankName: sourceRow.bankName,
-                accountNumber: sourceRow.accountNumber,
-                accountHolder: sourceRow.accountHolder,
+                bankName,
+                accountNumber,
+                accountHolder,
                 amount,
                 receiverDisplay,
                 senderMemo: formatKBTransferMemo(memoSuffix, sourceRow.workerName),
+                usesPrimaryAccount,
                 validationErrors,
             });
         });
@@ -4478,13 +4579,21 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         amountType: KBAmountType,
         receiverDisplay: string,
         memoSuffix: string,
-        createdAtIso = new Date().toISOString()
+        createdAtIso = new Date().toISOString(),
+        primaryAccountRowIds = kbPrimaryAccountAppliedRowIds
     ): KBPreviewSnapshot => {
-        const { rows, excludedRows } = buildKBTransferRowsFromSources(sourceRows, amountType, receiverDisplay, memoSuffix);
+        const { rows, excludedRows } = buildKBTransferRowsFromSources(
+            sourceRows,
+            amountType,
+            receiverDisplay,
+            memoSuffix,
+            primaryAccountRowIds
+        );
         const summary = summarizeKBTransferRows(rows, excludedRows.length);
 
         return {
             createdAtIso,
+            primaryAccount,
             sourceRows,
             rows,
             excludedRows,
@@ -4518,9 +4627,47 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 overrides.amountType ?? kbAmountType,
                 overrides.receiverDisplay ?? kbReceiverDisplay,
                 overrides.memoSuffix ?? kbMemoSuffix,
-                prev.createdAtIso
+                prev.createdAtIso,
+                kbPrimaryAccountAppliedRowIds
             );
         });
+    };
+
+    const rebuildKBPreviewWithPrimaryRows = (nextAppliedRowIds: Set<string>) => {
+        setKbPrimaryAccountAppliedRowIds(nextAppliedRowIds);
+        setKbPreviewSnapshot((current) => current
+            ? buildKBPreviewSnapshot(
+                current.sourceRows,
+                kbAmountType,
+                kbReceiverDisplay,
+                kbMemoSuffix,
+                current.createdAtIso,
+                nextAppliedRowIds
+            )
+            : current);
+    };
+
+    const handleApplyPrimaryAccountToSelectedRows = () => {
+        if (!primaryAccount) {
+            alert('계좌 관리에서 대표계좌를 먼저 설정해 주세요.');
+            return;
+        }
+        if (kbSelectedTransferRowIds.size === 0) {
+            alert('대표계좌로 변경할 작업자를 선택해 주세요.');
+            return;
+        }
+
+        rebuildKBPreviewWithPrimaryRows(new Set([
+            ...kbPrimaryAccountAppliedRowIds,
+            ...kbSelectedTransferRowIds,
+        ]));
+    };
+
+    const handleRestoreSelectedWorkerAccounts = () => {
+        if (kbSelectedTransferRowIds.size === 0) return;
+        const nextAppliedRowIds = new Set(kbPrimaryAccountAppliedRowIds);
+        kbSelectedTransferRowIds.forEach((rowId) => nextAppliedRowIds.delete(rowId));
+        rebuildKBPreviewWithPrimaryRows(nextAppliedRowIds);
     };
 
     const getKBValidationMessages = (row: KBTransferRow): string => (
@@ -4542,8 +4689,9 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         }
 
         const invalidRows = kbTransferRows.filter((row) => row.validationErrors.length > 0);
-        if (invalidRows.length > 0) {
-            alert(`은행코드/계좌/예금주 오류 ${invalidRows.length}건을 먼저 수정해주세요.`);
+        const validRows = kbTransferRows.filter((row) => row.validationErrors.length === 0);
+        if (validRows.length === 0) {
+            alert('은행코드와 계좌번호가 정상인 다운로드 가능 행이 없습니다.');
             return;
         }
 
@@ -4581,7 +4729,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             'E. 내통장메모',
         ];
 
-        const rowData: (string | number)[][] = kbTransferRows.map(row => [
+        const rowData: (string | number)[][] = validRows.map(row => [
             sanitizeKBExcelText(row.bankCode),
             sanitizeKBExcelText(row.accountNumber),
             row.amount,
@@ -4641,20 +4789,24 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         const verificationRows: (string | number)[][] = [
             ['항목', '값'],
             ['생성일시', snapshot.criteria.generatedAt],
+            ['적용 대표계좌', snapshot.primaryAccount ? formatKBPrimaryAccountLabel(snapshot.primaryAccount) : '미설정'],
+            ['대표계좌 적용 인원', snapshot.rows.filter((row) => row.usesPrimaryAccount).length],
             ['기간', snapshot.criteria.rangeLabel],
             ['팀/대상', snapshot.criteria.targetLabel],
             ['구분 필터', snapshot.criteria.salaryFilterLabel],
             ['금액 기준', snapshot.criteria.amountTypeLabel],
             ['공제 적용 상태', snapshot.criteria.deductionStatusLabel],
             ['원본 대상', snapshot.criteria.sourceCount],
-            ['다운로드 행', snapshot.criteria.exportCount],
-            ['제외 행', snapshot.criteria.excludedCount],
-            ['총 이체금액', snapshot.criteria.totalAmount],
+            ['다운로드 행', validRows.length],
+            ['검증 오류 제외', invalidRows.length],
+            ['기타 제외 행', snapshot.criteria.excludedCount],
+            ['총 이체금액', validRows.reduce((sum, row) => sum + row.amount, 0)],
             [],
-            ['다운로드 행 검증', '상태', '은행명', '은행코드', '계좌번호', '예금주', '이체금액'],
+            ['다운로드 행 검증', '상태', '계좌 적용', '은행명', '은행코드', '계좌번호', '예금주', '이체금액'],
             ...snapshot.rows.map((row) => [
                 `${row.month} ${row.teamName} ${row.workerName}`,
-                row.validationErrors.length > 0 ? getKBValidationMessages(row) : '정상',
+                row.validationErrors.length > 0 ? `다운로드 제외: ${getKBValidationMessages(row)}` : '정상',
+                row.usesPrimaryAccount ? '대표계좌' : '작업자 원계좌',
                 row.bankName || '-',
                 row.bankCode || '-',
                 row.accountNumber || '-',
@@ -4663,6 +4815,11 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             ]),
             [],
             ['다운로드 제외', '사유', '금액'],
+            ...invalidRows.map((row) => [
+                `${row.month} ${row.teamName} ${row.workerName}`,
+                `검증 오류: ${getKBValidationMessages(row)}`,
+                row.amount,
+            ]),
             ...snapshot.excludedRows.map((row) => [
                 `${row.month} ${row.teamName} ${row.workerName}`,
                 row.reason,
@@ -4673,6 +4830,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         verificationSheet['!cols'] = [
             { wch: 28 },
             { wch: 42 },
+            { wch: 16 },
             { wch: 18 },
             { wch: 12 },
             { wch: 24 },
@@ -4693,6 +4851,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         if (!show) {
             setShowKBPreview(false);
             setKbPreviewSnapshot(null);
+            setKbSelectedTransferRowIds(new Set());
+            setKbPrimaryAccountAppliedRowIds(new Set());
             return;
         }
 
@@ -4703,8 +4863,18 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
         const nextAmountType: KBAmountType = 'totalAmount';
         const sourceRows = buildKBPreviewSourceRows();
+        const emptyPrimaryAccountRowIds = new Set<string>();
         setKbAmountType(nextAmountType);
-        setKbPreviewSnapshot(buildKBPreviewSnapshot(sourceRows, nextAmountType, kbReceiverDisplay, kbMemoSuffix));
+        setKbSelectedTransferRowIds(new Set());
+        setKbPrimaryAccountAppliedRowIds(emptyPrimaryAccountRowIds);
+        setKbPreviewSnapshot(buildKBPreviewSnapshot(
+            sourceRows,
+            nextAmountType,
+            kbReceiverDisplay,
+            kbMemoSuffix,
+            new Date().toISOString(),
+            emptyPrimaryAccountRowIds
+        ));
 
         if (insuranceApplied || businessIncomeApplied || utilitiesApplied || dailyFeeApplied) {
             applyCalculatedDeductions({
@@ -4735,7 +4905,27 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const kbPreviewRows = kbPreviewSnapshot?.rows ?? [];
     const kbPreviewExcludedRows = kbPreviewSnapshot?.excludedRows ?? [];
     const kbPreviewInvalidRows = kbPreviewRows.filter((row) => row.validationErrors.length > 0);
-    const canDownloadKBExcel = Boolean(kbPreviewSnapshot && kbPreviewRows.length > 0 && kbPreviewInvalidRows.length === 0);
+    const kbPreviewValidRows = kbPreviewRows.filter((row) => row.validationErrors.length === 0);
+    const kbPreviewValidAmount = kbPreviewValidRows.reduce((sum, row) => sum + row.amount, 0);
+    const kbAllPreviewRowsSelected = kbPreviewRows.length > 0
+        && kbPreviewRows.every((row) => kbSelectedTransferRowIds.has(row.sourceRowId));
+    const kbAppliedPrimaryAccountCount = kbPreviewRows.filter((row) => row.usesPrimaryAccount).length;
+    const canDownloadKBExcel = Boolean(kbPreviewSnapshot && kbPreviewValidRows.length > 0);
+
+    const toggleKBPreviewRowSelection = (sourceRowId: string) => {
+        setKbSelectedTransferRowIds((current) => {
+            const next = new Set(current);
+            if (next.has(sourceRowId)) next.delete(sourceRowId);
+            else next.add(sourceRowId);
+            return next;
+        });
+    };
+
+    const toggleAllKBPreviewRows = () => {
+        setKbSelectedTransferRowIds(kbAllPreviewRowsSelected
+            ? new Set()
+            : new Set(kbPreviewRows.map((row) => row.sourceRowId)));
+    };
 
     const bankMappingDiagnostics = useMemo(() => {
         const grouped = new Map<string, {
@@ -5330,6 +5520,67 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     return (
         <div className="relative h-full flex flex-col p-2 w-full overflow-hidden">
             <style>{`
+                #monthly-payslip-print-root[data-print-measuring="true"] {
+                    display: block !important;
+                    position: fixed !important;
+                    left: -100000px !important;
+                    top: 0 !important;
+                    width: 194mm !important;
+                    max-width: 194mm !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    visibility: hidden !important;
+                    pointer-events: none !important;
+                }
+
+                #monthly-payslip-print-root[data-print-measuring="true"] .monthly-payslip-print-page {
+                    display: block !important;
+                    width: 194mm !important;
+                    min-width: 194mm !important;
+                    max-width: 194mm !important;
+                    height: 281mm !important;
+                    min-height: 281mm !important;
+                    max-height: 281mm !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    overflow: hidden !important;
+                    box-sizing: border-box !important;
+                }
+
+                #monthly-payslip-print-root[data-print-measuring="true"] .payslip-template-card {
+                    width: var(--payslip-print-source-width, 194mm) !important;
+                    min-width: var(--payslip-print-source-width, 194mm) !important;
+                    max-width: var(--payslip-print-source-width, 194mm) !important;
+                    min-height: 0 !important;
+                    margin: 0 !important;
+                    box-sizing: border-box !important;
+                    transform: none !important;
+                }
+
+                #monthly-payslip-print-root[data-print-measuring="true"] .payslip-template-details-grid {
+                    grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr) !important;
+                    gap: 2.5mm !important;
+                }
+
+                #monthly-payslip-print-root[data-print-measuring="true"] .payslip-template-card .p-4 {
+                    padding: 2.5mm !important;
+                }
+
+                #monthly-payslip-print-root[data-print-measuring="true"] .payslip-template-card .p-3 {
+                    padding: 2mm !important;
+                }
+
+                #monthly-payslip-print-root[data-print-measuring="true"] .payslip-template-card .py-4 {
+                    padding-top: 2.5mm !important;
+                    padding-bottom: 2.5mm !important;
+                }
+
+                #monthly-payslip-print-root[data-print-measuring="true"] .payslip-template-card th,
+                #monthly-payslip-print-root[data-print-measuring="true"] .payslip-template-card td {
+                    padding-top: 1.2mm !important;
+                    padding-bottom: 1.2mm !important;
+                }
+
                 @media screen {
                     #monthly-payslip-print-root {
                         display: none !important;
@@ -5338,7 +5589,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
                 @media print {
                     @page {
-                        size: A4 landscape;
+                        size: A4 portrait;
                         margin: 8mm;
                     }
 
@@ -5361,7 +5612,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     #monthly-payslip-print-root {
                         display: block !important;
                         position: static !important;
-                        width: 100% !important;
+                        width: 194mm !important;
+                        max-width: 194mm !important;
                         margin: 0 !important;
                         padding: 0 !important;
                         background: #fff !important;
@@ -5369,9 +5621,18 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
                     .monthly-payslip-print-page {
                         display: block !important;
-                        width: 100% !important;
+                        width: 194mm !important;
+                        min-width: 194mm !important;
+                        max-width: 194mm !important;
+                        height: 281mm !important;
+                        min-height: 281mm !important;
+                        max-height: 281mm !important;
+                        box-sizing: border-box !important;
                         margin: 0 !important;
                         padding: 0 !important;
+                        overflow: hidden !important;
+                        break-inside: avoid !important;
+                        page-break-inside: avoid !important;
                         break-after: page;
                         page-break-after: always;
                     }
@@ -5382,21 +5643,47 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     }
 
                     .monthly-payslip-print-page .payslip-template-card {
-                        width: 100% !important;
-                        max-width: none !important;
+                        width: var(--payslip-print-source-width, 194mm) !important;
+                        min-width: var(--payslip-print-source-width, 194mm) !important;
+                        max-width: var(--payslip-print-source-width, 194mm) !important;
+                        min-height: 0 !important;
+                        box-sizing: border-box !important;
                         margin: 0 !important;
-                        border: 2px solid #e2e8f0 !important;
-                        border-radius: 12px !important;
+                        border: 0.35mm solid #e2e8f0 !important;
+                        border-radius: 2.5mm !important;
                         box-shadow: none !important;
                         color: #0f172a !important;
                         background: #fff !important;
                         font-family: "Malgun Gothic", "Noto Sans KR", sans-serif !important;
+                        overflow-wrap: anywhere !important;
+                        transform: scale(var(--payslip-print-scale, 1)) !important;
+                        transform-origin: top left !important;
                         -webkit-print-color-adjust: exact !important;
                         print-color-adjust: exact !important;
                     }
 
                     .monthly-payslip-print-page .payslip-template-details-grid {
-                        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+                        grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr) !important;
+                        gap: 2.5mm !important;
+                    }
+
+                    .monthly-payslip-print-page .payslip-template-card .p-4 {
+                        padding: 2.5mm !important;
+                    }
+
+                    .monthly-payslip-print-page .payslip-template-card .p-3 {
+                        padding: 2mm !important;
+                    }
+
+                    .monthly-payslip-print-page .payslip-template-card .py-4 {
+                        padding-top: 2.5mm !important;
+                        padding-bottom: 2.5mm !important;
+                    }
+
+                    .monthly-payslip-print-page .payslip-template-card th,
+                    .monthly-payslip-print-page .payslip-template-card td {
+                        padding-top: 1.2mm !important;
+                        padding-bottom: 1.2mm !important;
                     }
 
                     .monthly-payslip-print-page table,
@@ -6295,6 +6582,39 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                 </KBPreviewCloseButton>
                             </KBPreviewTitleRow>
 
+                            <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-amber-400/40 bg-amber-400/10 p-4 lg:flex-row lg:items-center lg:justify-between">
+                                <div>
+                                    <div className="text-xs font-black uppercase tracking-[0.12em] text-amber-300">작업자 입금계좌 변경</div>
+                                    <div className="mt-1 text-sm font-bold text-white">
+                                        대표계좌: {primaryAccount ? formatKBPrimaryAccountLabel(primaryAccount) : '미설정'}
+                                    </div>
+                                    <div className="mt-1 text-xs text-slate-300">
+                                        아래 작업자를 선택한 뒤 대표계좌 적용을 누르면 해당 작업자의 국민은행 이체 계좌만 변경됩니다.
+                                    </div>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="rounded-full border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-xs font-bold text-slate-200">
+                                        선택 {kbSelectedTransferRowIds.size}명 · 대표계좌 적용 {kbAppliedPrimaryAccountCount}명
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={handleApplyPrimaryAccountToSelectedRows}
+                                        disabled={!primaryAccount || kbSelectedTransferRowIds.size === 0}
+                                        className="min-h-[40px] rounded-xl border border-amber-300 bg-amber-400 px-4 text-xs font-black text-slate-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-slate-600 disabled:bg-slate-700 disabled:text-slate-400"
+                                    >
+                                        선택 작업자 → 대표계좌
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleRestoreSelectedWorkerAccounts}
+                                        disabled={kbSelectedTransferRowIds.size === 0}
+                                        className="min-h-[40px] rounded-xl border border-slate-600 bg-slate-800 px-4 text-xs font-bold text-slate-100 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
+                                        선택 작업자 원계좌 복원
+                                    </button>
+                                </div>
+                            </div>
+
                             <KBPreviewControlsGrid>
                                 <KBPreviewFieldCard>
                                     <KBPreviewFieldLabel htmlFor="kb-receiver-display">받는분통장표시</KBPreviewFieldLabel>
@@ -6392,7 +6712,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                     {(kbPreviewInvalidRows.length > 0 || kbPreviewExcludedRows.length > 0) && (
                                         <div className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
                                             {kbPreviewInvalidRows.length > 0 && (
-                                                <div className="font-bold">수정 필요 {kbPreviewInvalidRows.length}건: {kbPreviewInvalidRows.slice(0, 5).map((row) => `${row.workerName}(${getKBValidationMessages(row)})`).join(', ')}</div>
+                                                <div className="font-bold">검증 오류로 다운로드 제외 {kbPreviewInvalidRows.length}건: {kbPreviewInvalidRows.slice(0, 5).map((row) => `${row.workerName}(${getKBValidationMessages(row)})`).join(', ')}</div>
                                             )}
                                             {kbPreviewExcludedRows.length > 0 && (
                                                 <div className="mt-1">다운로드 제외 {kbPreviewExcludedRows.length}건: {kbPreviewExcludedRows.slice(0, 5).map((row) => `${row.workerName}(${row.reason})`).join(', ')}</div>
@@ -6406,6 +6726,17 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                             <KBPreviewTable>
                                 <thead className="bg-slate-800/95 sticky top-0">
                                     <tr>
+                                        <th className="border border-slate-700 px-3 py-2 text-left font-bold text-slate-100">
+                                            <label className="flex min-w-[150px] cursor-pointer items-center gap-2">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={kbAllPreviewRowsSelected}
+                                                    onChange={toggleAllKBPreviewRows}
+                                                    className="h-4 w-4 rounded border-slate-500 bg-slate-900 text-amber-400 focus:ring-amber-400"
+                                                />
+                                                작업자 선택
+                                            </label>
+                                        </th>
                                         <th className="border border-slate-700 px-3 py-2 text-left font-bold text-slate-100">A. 은행코드</th>
                                         <th className="border border-slate-700 px-3 py-2 text-left font-bold text-slate-100">B. 계좌번호</th>
                                         <th className="border border-slate-700 px-3 py-2 text-right font-bold text-slate-100">C. 이체금액</th>
@@ -6417,12 +6748,32 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                 <tbody>
                                     {getKBPreviewData().length === 0 ? (
                                         <tr>
-                                            <td colSpan={6} className="border border-slate-700 px-3 py-8 text-center text-slate-400">
+                                            <td colSpan={7} className="border border-slate-700 px-3 py-8 text-center text-slate-400">
                                                 다운로드할 이체금액 데이터가 없습니다.
                                             </td>
                                         </tr>
                                     ) : getKBPreviewData().map((row, idx) => (
-                                        <tr key={row.sourceRowId || idx} className={`hover:bg-slate-800/60 ${row.validationErrors.length > 0 ? 'bg-rose-950/30' : ''}`}>
+                                        <tr key={row.sourceRowId || idx} className={`hover:bg-slate-800/60 ${row.usesPrimaryAccount ? 'bg-amber-950/30' : row.validationErrors.length > 0 ? 'bg-rose-950/30' : ''}`}>
+                                            <td className="border border-slate-700 px-3 py-2">
+                                                <label className="flex cursor-pointer items-start gap-2">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={kbSelectedTransferRowIds.has(row.sourceRowId)}
+                                                        onChange={() => toggleKBPreviewRowSelection(row.sourceRowId)}
+                                                        aria-label={`${row.workerName} 계좌 선택`}
+                                                        className="mt-0.5 h-4 w-4 rounded border-slate-500 bg-slate-900 text-amber-400 focus:ring-amber-400"
+                                                    />
+                                                    <span>
+                                                        <span className="block font-bold text-slate-100">{row.workerName}</span>
+                                                        <span className="block text-[11px] text-slate-400">{row.teamName || row.salaryLabel}</span>
+                                                        {row.usesPrimaryAccount && (
+                                                            <span className="mt-1 inline-flex rounded-full border border-amber-400/50 bg-amber-400/15 px-2 py-0.5 text-[10px] font-black text-amber-300">
+                                                                대표계좌 적용
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                </label>
+                                            </td>
                                             <td className={`border border-slate-700 px-3 py-2 ${row.bankCodeUnmapped ? 'text-rose-300 font-semibold' : ''}`}>
                                                 <div className="flex items-center gap-1.5">
                                                     <span>{row.bankCodeDisplay}</span>
@@ -6447,7 +6798,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                         </KBPreviewTableArea>
                         <KBPreviewFooter>
                             <KBPreviewSummary>
-                                총 {kbPreviewSnapshot?.criteria.exportCount ?? 0}명 · 총 이체금액 {(kbPreviewSnapshot?.criteria.totalAmount ?? 0).toLocaleString()}원 · 제외 {kbPreviewSnapshot?.criteria.excludedCount ?? 0}건
+                                다운로드 가능 {kbPreviewValidRows.length}명 · 이체금액 {kbPreviewValidAmount.toLocaleString()}원 · 제외 {kbPreviewInvalidRows.length + (kbPreviewSnapshot?.criteria.excludedCount ?? 0)}건
                             </KBPreviewSummary>
                             <ActionCluster>
                                 <ActionButton
@@ -6462,7 +6813,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                     $variant="warning"
                                     onClick={handleDownloadKBExcel}
                                     disabled={!canDownloadKBExcel}
-                                    title={!canDownloadKBExcel ? '검증 오류를 먼저 수정하세요.' : '국민은행용 엑셀 다운로드'}
+                                    title={!canDownloadKBExcel ? '은행코드와 계좌번호가 정상인 행이 없습니다.' : `정상 ${kbPreviewValidRows.length}건을 다운로드합니다.`}
                                 >
                                     <FontAwesomeIcon icon={faFileExcel} />
                                     국민은행용 다운로드

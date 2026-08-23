@@ -82,12 +82,14 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
       </header>
 
       <section
-        className="team-settlement-page__workspace-bar sticky top-[60px] z-30 mt-3 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between"
+        className="team-settlement-page__workspace-bar sticky top-[60px] z-30 mt-3 flex flex-col gap-3 rounded-2xl border p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between"
         aria-label="정산 상태와 실행 작업"
       >
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <span className="font-semibold text-slate-500">현재 정산</span>
-          <strong className="truncate text-slate-950">{teamName || '팀 선택'}</strong>
+          <strong className="team-settlement-page__current-team inline-flex max-w-full items-center truncate rounded-lg border px-3 py-1 text-base font-black shadow-sm">
+            {teamName || '팀 선택'}
+          </strong>
           <span className="text-slate-300">·</span>
           <span className="font-semibold text-slate-700">{year}년 {month}월</span>
           <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${confirmedAt ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}`}>

@@ -1,17 +1,17 @@
-import { getAuth } from 'firebase/auth';
-import { getStorage } from 'firebase/storage';
+import { connectStorageEmulator, getStorage } from 'firebase/storage';
 import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
-import { getFirestore, initializeFirestore } from 'firebase/firestore';
+import { connectFirestoreEmulator, getFirestore, initializeFirestore } from 'firebase/firestore';
 import { app } from './firebaseBase';
+import { auth } from './firebaseAuth';
 
 export { app };
-
-export const auth = getAuth(app);
+export { auth };
 export const storage = getStorage(app);
 const createFirestore = () => {
   try {
     return initializeFirestore(app, {
-      experimentalForceLongPolling: true,
+      // Preserve proxy compatibility without forcing slower long-polling on healthy networks.
+      experimentalAutoDetectLongPolling: true,
       experimentalLongPollingOptions: {
         timeoutSeconds: 25,
       },
@@ -31,7 +31,13 @@ const shouldUseEmulators =
   process.env.NODE_ENV === 'development' && process.env.REACT_APP_USE_EMULATORS === 'true';
 
 if (shouldUseEmulators) {
-  connectFunctionsEmulator(functions, 'localhost', 5001);
+  // Keep browser E2E on one hermetic Firebase project. Connecting Functions
+  // alone would authenticate against production while reading/writing local
+  // services, which makes the real create→save→reload scenario impossible to
+  // verify and can mask permission regressions.
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  connectStorageEmulator(storage, '127.0.0.1', 9199);
+  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
 }
 
 export default app;

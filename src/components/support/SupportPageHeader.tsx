@@ -8,6 +8,7 @@ interface SupportPageHeaderProps {
     description: string;
     tone?: 'indigo' | 'blue' | 'emerald' | 'violet' | 'amber' | 'slate';
     actions?: React.ReactNode;
+    compact?: boolean;
 }
 
 const toneClasses: Record<NonNullable<SupportPageHeaderProps['tone']>, string> = {
@@ -24,20 +25,23 @@ export const SupportPageHeader: React.FC<SupportPageHeaderProps> = ({
     title,
     description,
     tone = 'indigo',
-    actions
+    actions,
+    compact = false
 }) => (
-    <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-        <div className="flex min-w-0 items-center gap-3">
-            <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg shadow-lg ${toneClasses[tone]}`}>
-                <FontAwesomeIcon icon={icon} className="text-lg" />
+    <div className={compact
+        ? 'flex min-h-12 flex-col justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm lg:flex-row lg:items-center'
+        : 'flex flex-col justify-between gap-4 lg:flex-row lg:items-center'}>
+        <div className={`min-w-0 items-center gap-2.5 ${compact ? 'hidden 2xl:flex' : 'flex'}`}>
+            <div className={`flex shrink-0 items-center justify-center rounded-lg shadow-lg ${toneClasses[tone]} ${compact ? 'h-8 w-8' : 'h-12 w-12'}`}>
+                <FontAwesomeIcon icon={icon} className={compact ? 'text-sm' : 'text-lg'} />
             </div>
             <div className="min-w-0">
-                <h1 className="truncate text-xl font-black tracking-tight text-slate-950 sm:text-2xl">{title}</h1>
-                <p className="mt-1 text-sm font-semibold text-slate-500">{description}</p>
+                <h1 className={compact ? 'truncate text-sm font-black text-slate-900' : 'truncate text-xl font-black tracking-tight text-slate-950 sm:text-2xl'}>{title}</h1>
+                <p className={compact ? 'hidden text-xs font-semibold text-slate-500' : 'mt-1 text-sm font-semibold text-slate-500'}>{description}</p>
             </div>
         </div>
         {actions && (
-            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+            <div className={`flex w-full flex-wrap items-center gap-2 sm:justify-end ${compact ? 'lg:w-auto' : 'sm:w-auto'}`}>
                 {actions}
             </div>
         )}

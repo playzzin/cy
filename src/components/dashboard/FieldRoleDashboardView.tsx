@@ -248,8 +248,6 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
         ? (role === 'worker' ? '오늘 출역 확인됨' : `오늘 일보 ${todayReports.length}건 확인됨`)
         : (role === 'worker' ? '오늘 출역 확인 필요' : '오늘 일보 작성 필요');
     const profileReady = Boolean(normalize(linkedWorker?.id));
-    const identityLabel = normalize(linkedWorker?.name) || (role === 'worker' ? '내 작업자 프로필' : '소속 팀 프로필');
-    const teamLabel = normalize(linkedWorker?.teamName) || '소속 팀 미지정';
 
     const metrics = role === 'teamLead'
         ? [
@@ -282,23 +280,6 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
 
     return (
         <div className="space-y-6">
-            <section className={`overflow-hidden rounded-2xl bg-gradient-to-br ${config.gradient} px-5 py-6 text-white shadow-lg sm:px-7 sm:py-7`}>
-                <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-                    <div className="max-w-3xl">
-                        <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-bold text-white/90"><FontAwesomeIcon icon={role === 'teamLead' ? faUsers : role === 'foreman' ? faHardHat : faUserCheck} />{config.eyebrow}</span>
-                        <h1 className="mt-4 text-2xl font-black tracking-tight sm:text-3xl">{config.title}</h1>
-                        <p className="mt-2 max-w-2xl text-sm leading-6 text-white/75">{config.description}</p>
-                    </div>
-                    <div className="rounded-xl border border-white/15 bg-white/10 px-4 py-3 text-sm">
-                        <p className="font-extrabold text-white">{identityLabel}</p>
-                        <p className="mt-1 text-xs font-medium text-white/65">{teamLabel} · {profileReady ? todayStatus : '프로필 연결 필요'}</p>
-                    </div>
-                </div>
-                <div className="mt-6 grid grid-cols-2 gap-3 border-t border-white/10 pt-5 sm:grid-cols-4">
-                    {metrics.map((metric) => <div key={metric.label}><p className="text-xs font-bold text-white/65">{metric.label}</p><p className="mt-1 text-lg font-black sm:text-xl">{metric.value}</p></div>)}
-                </div>
-            </section>
-
             {error && <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">{error}</div>}
             {!profileReady && <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium leading-6 text-sky-800">작업자 프로필을 연결하면 내 팀과 개인 출역 기록을 기준으로 정확한 대시보드를 확인할 수 있습니다.</div>}
 

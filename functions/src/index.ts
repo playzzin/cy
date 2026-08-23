@@ -48,6 +48,13 @@ export {
     commitVehicleFineImports,
 } from './vehicleFineAnalysis';
 export {
+    analyzeVehicleTollUsages,
+    commitVehicleTollImports,
+} from './vehicleTollAnalysis';
+export {
+    analyzeIdentityDocuments,
+} from './identityDocumentAnalysis';
+export {
     syncAllUserAccessClaims,
     syncUserAccessClaims,
     syncUserAccessClaimsOnUserWrite,

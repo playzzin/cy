@@ -12,17 +12,126 @@ import {
     orderBy,
     serverTimestamp,
     writeBatch,
+    runTransaction,
     limit as firestoreLimit
 } from 'firebase/firestore';
 import { createConverter } from '../utils/firestoreConverter';
 import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 import { vehicleSchema, vehicleAssignmentSchema, vehicleBillingTargetSchema, vehicleExpenseSchema } from '../types/zod/vehicleSchema';
 import { Vehicle, VehicleAssignmentRecord, VehicleBillingTargetRecord, VehicleExpenseRecord } from '../types/vehicle';
+import type { VehicleBillingDocument } from '../types/vehicleBilling';
 
 const VEHICLE_COLLECTION = 'vehicles';
 const ASSIGNMENT_COLLECTION = 'vehicleAssignments';
 const BILLING_TARGET_COLLECTION = 'vehicleBillingTargets';
 const EXPENSE_COLLECTION = 'vehicleExpenses';
+const BILLING_DOCUMENT_COLLECTION = 'vehicle_billing_documents';
+const SYSTEM_CONFIGS_COLLECTION = 'system_configs';
+const POSTED_BILLING_STATUSES = new Set(['CONFIRMED', 'PAID', 'OVERDUE']);
+
+export interface VehicleBillingSettlementGuardTarget {
+    yearMonth: string;
+    teamId?: string | null;
+}
+
+export interface ReplaceVehicleBillingDraftsParams {
+    desiredDocuments: VehicleBillingDocument[];
+    existingDocumentIds: string[];
+    settlementTargets?: VehicleBillingSettlementGuardTarget[];
+}
+
+export interface ReplaceVehicleBillingDraftsResult {
+    savedIds: string[];
+    deletedDraftIds: string[];
+}
+
+export interface ProtectedVehicleBillingWriteParams {
+    billing: VehicleBillingDocument;
+    settlementTargets?: VehicleBillingSettlementGuardTarget[];
+}
+
+const normalizeKey = (value: unknown): string => String(value ?? '').trim();
+
+const toIsoTimestamp = (value: unknown): string | undefined => {
+    if (!value) return undefined;
+    if (typeof value === 'string') {
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+    }
+    if (value instanceof Date) return value.toISOString();
+    const timestamp = value as { toDate?: () => Date };
+    if (typeof timestamp?.toDate === 'function') return timestamp.toDate().toISOString();
+    return undefined;
+};
+
+const getTeamSettlementConfigId = (target: VehicleBillingSettlementGuardTarget): string => {
+    const yearMonth = normalizeKey(target.yearMonth);
+    const teamId = normalizeKey(target.teamId);
+    if (!yearMonth || !teamId || teamId.includes('/')) return '';
+    return `team_settlement_${yearMonth}__${teamId}`;
+};
+
+const isConfirmedTeamSettlementConfig = (value: unknown): boolean => {
+    if (!value || typeof value !== 'object') throw new Error('vehicle-team-settlement-guard-invalid');
+    const rawData = (value as { data?: unknown }).data;
+    let parsed: Record<string, unknown> | null = null;
+    if (rawData && typeof rawData === 'object' && !Array.isArray(rawData)) {
+        parsed = rawData as Record<string, unknown>;
+    } else if (typeof rawData === 'string' && rawData.trim()) {
+        try {
+            const candidate = JSON.parse(rawData) as unknown;
+            if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+                parsed = candidate as Record<string, unknown>;
+            }
+        } catch {
+            // A malformed guard document must fail closed instead of silently
+            // allowing an automatic billing mutation.
+            throw new Error('vehicle-team-settlement-guard-invalid');
+        }
+    }
+    if (!parsed) throw new Error('vehicle-team-settlement-guard-invalid');
+    return Boolean(normalizeKey(parsed?.confirmedAt));
+};
+
+const buildVehicleBillingPayload = (
+    billing: VehicleBillingDocument,
+    createdAt: unknown,
+    updatedAtIso: string
+): Record<string, unknown> => stripUndefinedFields({
+    yearMonth: billing.yearMonth,
+    vehicleId: billing.vehicleId,
+    vehiclePlate: billing.vehiclePlate,
+    assignedTeamId: billing.assignedTeamId ?? null,
+    assignedTeamName: billing.assignedTeamName ?? null,
+    teamId: billing.teamId ?? null,
+    teamName: billing.teamName ?? null,
+    issuedToType: billing.issuedToType ?? null,
+    issuedToWorkerId: billing.issuedToWorkerId ?? null,
+    issuedToWorkerName: billing.issuedToWorkerName ?? null,
+    fixedCost: Number(billing.fixedCost ?? 0),
+    variableCost: Number(billing.variableCost ?? 0),
+    totalAmount: Number(billing.totalAmount ?? 0),
+    status: billing.status,
+    lineItems: JSON.stringify(billing.lineItems ?? []),
+    memo: billing.memo ?? null,
+    confirmationCancelReason: billing.confirmationCancelReason ?? null,
+    confirmationCancelledAt: toIsoTimestamp(billing.confirmationCancelledAt) ?? null,
+    confirmationCancelledById: billing.confirmationCancelledById ?? null,
+    confirmationCancelledByName: billing.confirmationCancelledByName ?? null,
+    createdAt: toIsoTimestamp(createdAt) ?? toIsoTimestamp(billing.createdAt) ?? updatedAtIso,
+    updatedAt: updatedAtIso,
+    confirmedAt: toIsoTimestamp(billing.confirmedAt) ?? null
+}) as Record<string, unknown>;
+
+const buildVehicleBillingDraftPayload = (
+    billing: VehicleBillingDocument,
+    createdAt: unknown,
+    updatedAtIso: string
+): Record<string, unknown> => buildVehicleBillingPayload({
+    ...billing,
+    status: 'DRAFT',
+    confirmedAt: undefined
+}, createdAt, updatedAtIso);
 
 export const vehicleFirestoreService = {
     /**
@@ -206,6 +315,204 @@ export const vehicleFirestoreService = {
         });
 
         await batch.commit();
+    },
+
+    /**
+     * Replaces every DRAFT owned by one monthly-ledger row in a single commit.
+     * Billing statuses and both the old/new settlement targets are read inside
+     * the transaction, so a concurrent confirmation causes Firestore to retry
+     * and then fail closed before any new DRAFT can become visible.
+     */
+    replaceVehicleBillingDrafts: async (
+        params: ReplaceVehicleBillingDraftsParams
+    ): Promise<ReplaceVehicleBillingDraftsResult> => {
+        const desiredDocuments = params.desiredDocuments.map((billing) => ({
+            ...billing,
+            id: normalizeKey(billing.id),
+            status: 'DRAFT' as const,
+            confirmedAt: undefined
+        }));
+        const desiredIds = desiredDocuments.map((billing) => billing.id);
+        if (desiredIds.some((id) => !id) || new Set(desiredIds).size !== desiredIds.length) {
+            throw new Error('vehicle-billing-deterministic-id-required');
+        }
+
+        const existingIds = Array.from(new Set(
+            params.existingDocumentIds.map(normalizeKey).filter(Boolean)
+        ));
+        const allIds = Array.from(new Set([...desiredIds, ...existingIds]));
+        if (allIds.length === 0) return { savedIds: [], deletedDraftIds: [] };
+
+        const billingRefs = allIds.map((id) => doc(db, BILLING_DOCUMENT_COLLECTION, id));
+        const desiredIdSet = new Set(desiredIds);
+        const ownedExistingIdSet = new Set(existingIds);
+        const updatedAtIso = new Date().toISOString();
+
+        return runTransaction(db, async (transaction) => {
+            const billingSnapshots = await Promise.all(
+                billingRefs.map((billingRef) => transaction.get(billingRef))
+            );
+            const snapshotById = new Map(
+                billingSnapshots.map((snapshot) => [snapshot.id, snapshot] as const)
+            );
+
+            const unmanagedCollision = billingSnapshots.find((snapshot) => (
+                snapshot.exists() &&
+                desiredIdSet.has(snapshot.id) &&
+                !ownedExistingIdSet.has(snapshot.id)
+            ));
+            if (unmanagedCollision) {
+                throw new Error('vehicle-billing-unmanaged-collision-blocked');
+            }
+
+            billingSnapshots.forEach((snapshot) => {
+                if (!snapshot.exists()) return;
+                const status = normalizeKey(snapshot.data()?.status).toUpperCase() || 'DRAFT';
+                if (status === 'DRAFT') return;
+                if (POSTED_BILLING_STATUSES.has(status)) {
+                    throw new Error('vehicle-billing-posted-replace-blocked');
+                }
+                throw new Error('vehicle-billing-non-draft-replace-blocked');
+            });
+
+            const settlementTargets: VehicleBillingSettlementGuardTarget[] = [
+                ...(params.settlementTargets ?? []),
+                ...desiredDocuments.map((billing) => ({
+                    yearMonth: billing.yearMonth,
+                    teamId: billing.teamId
+                })),
+                ...billingSnapshots
+                    .filter((snapshot) => snapshot.exists())
+                    .map((snapshot) => ({
+                        yearMonth: normalizeKey(snapshot.data()?.yearMonth),
+                        teamId: normalizeKey(snapshot.data()?.teamId) || normalizeKey(snapshot.data()?.assignedTeamId)
+                    }))
+            ];
+            const settlementConfigIds = Array.from(new Set(
+                settlementTargets.map(getTeamSettlementConfigId).filter(Boolean)
+            ));
+            const settlementSnapshots = await Promise.all(
+                settlementConfigIds.map((id) => transaction.get(doc(db, SYSTEM_CONFIGS_COLLECTION, id)))
+            );
+            if (settlementSnapshots.some((snapshot) => (
+                snapshot.exists() && isConfirmedTeamSettlementConfig(snapshot.data())
+            ))) {
+                throw new Error('team-settlement-confirmed-vehicle-billing-blocked');
+            }
+
+            desiredDocuments.forEach((billing) => {
+                const current = snapshotById.get(billing.id);
+                transaction.set(
+                    doc(db, BILLING_DOCUMENT_COLLECTION, billing.id),
+                    buildVehicleBillingDraftPayload(
+                        billing,
+                        current?.exists() ? current.data()?.createdAt : undefined,
+                        updatedAtIso
+                    )
+                );
+            });
+
+            const deletedDraftIds: string[] = [];
+            billingSnapshots.forEach((snapshot) => {
+                if (!snapshot.exists() || desiredIdSet.has(snapshot.id)) return;
+                // The status was validated above from this same snapshot.
+                transaction.delete(snapshot.ref);
+                deletedDraftIds.push(snapshot.id);
+            });
+
+            return { savedIds: desiredIds, deletedDraftIds };
+        });
+    },
+
+    saveVehicleBillingDocumentProtected: async (
+        params: ProtectedVehicleBillingWriteParams
+    ): Promise<void> => {
+        const billingId = normalizeKey(params.billing.id);
+        if (!billingId) throw new Error('vehicle-billing-id-required');
+        const billingRef = doc(db, BILLING_DOCUMENT_COLLECTION, billingId);
+        const updatedAtIso = new Date().toISOString();
+
+        await runTransaction(db, async (transaction) => {
+            const beforeSnapshot = await transaction.get(billingRef);
+            if (beforeSnapshot.exists()) {
+                const status = normalizeKey(beforeSnapshot.data()?.status).toUpperCase() || 'DRAFT';
+                if (POSTED_BILLING_STATUSES.has(status)) {
+                    throw new Error('vehicle-billing-posted-modification-blocked');
+                }
+            }
+
+            const settlementTargets: VehicleBillingSettlementGuardTarget[] = [
+                ...(params.settlementTargets ?? []),
+                { yearMonth: params.billing.yearMonth, teamId: params.billing.teamId }
+            ];
+            if (beforeSnapshot.exists()) {
+                settlementTargets.push({
+                    yearMonth: normalizeKey(beforeSnapshot.data()?.yearMonth),
+                    teamId: normalizeKey(beforeSnapshot.data()?.teamId) || normalizeKey(beforeSnapshot.data()?.assignedTeamId)
+                });
+            }
+            const settlementConfigIds = Array.from(new Set(
+                settlementTargets.map(getTeamSettlementConfigId).filter(Boolean)
+            ));
+            const settlementSnapshots = await Promise.all(
+                settlementConfigIds.map((id) => transaction.get(doc(db, SYSTEM_CONFIGS_COLLECTION, id)))
+            );
+            if (settlementSnapshots.some((snapshot) => (
+                snapshot.exists() && isConfirmedTeamSettlementConfig(snapshot.data())
+            ))) {
+                throw new Error('team-settlement-confirmed-vehicle-billing-blocked');
+            }
+
+            transaction.set(
+                billingRef,
+                buildVehicleBillingPayload(
+                    { ...params.billing, id: billingId },
+                    beforeSnapshot.exists() ? beforeSnapshot.data()?.createdAt : undefined,
+                    updatedAtIso
+                )
+            );
+        });
+    },
+
+    deleteVehicleBillingDocumentProtected: async (
+        billingIdInput: string,
+        settlementTargets: VehicleBillingSettlementGuardTarget[] = []
+    ): Promise<void> => {
+        const billingId = normalizeKey(billingIdInput);
+        if (!billingId) throw new Error('vehicle-billing-id-required');
+        const billingRef = doc(db, BILLING_DOCUMENT_COLLECTION, billingId);
+
+        await runTransaction(db, async (transaction) => {
+            const beforeSnapshot = await transaction.get(billingRef);
+            if (!beforeSnapshot.exists()) return;
+            const status = normalizeKey(beforeSnapshot.data()?.status).toUpperCase() || 'DRAFT';
+            if (POSTED_BILLING_STATUSES.has(status)) {
+                throw new Error('vehicle-billing-posted-delete-blocked');
+            }
+            if (status !== 'DRAFT') {
+                throw new Error('vehicle-billing-non-draft-delete-blocked');
+            }
+
+            const targets: VehicleBillingSettlementGuardTarget[] = [
+                ...settlementTargets,
+                {
+                    yearMonth: normalizeKey(beforeSnapshot.data()?.yearMonth),
+                    teamId: normalizeKey(beforeSnapshot.data()?.teamId) || normalizeKey(beforeSnapshot.data()?.assignedTeamId)
+                }
+            ];
+            const settlementConfigIds = Array.from(new Set(
+                targets.map(getTeamSettlementConfigId).filter(Boolean)
+            ));
+            const settlementSnapshots = await Promise.all(
+                settlementConfigIds.map((id) => transaction.get(doc(db, SYSTEM_CONFIGS_COLLECTION, id)))
+            );
+            if (settlementSnapshots.some((snapshot) => (
+                snapshot.exists() && isConfirmedTeamSettlementConfig(snapshot.data())
+            ))) {
+                throw new Error('team-settlement-confirmed-vehicle-billing-blocked');
+            }
+            transaction.delete(billingRef);
+        });
     },
 
     /**

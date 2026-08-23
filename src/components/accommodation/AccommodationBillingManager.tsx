@@ -33,7 +33,8 @@ const createEmptyLineItem = (): AccommodationBillingLineItem => {
         id: uuidv4(),
         label: '',
         amount: 0,
-        targetField: 'accommodation'
+        targetField: 'accommodation',
+        sourceType: 'manual'
     };
 };
 

@@ -8,6 +8,7 @@ import {
     faFilter,
     faRotateRight,
     faSearch,
+    faShareNodes,
     faSpinner,
 } from '@fortawesome/free-solid-svg-icons';
 import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyReportService';
@@ -269,6 +270,7 @@ const DailyReportWorkerCalendar: React.FC<DailyReportWorkerCalendarProps> = ({ i
     const [sites, setSites] = useState<Site[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [selectedWorkerKeys, setSelectedWorkerKeys] = useState<Set<string>>(new Set());
+    const [isShareView, setIsShareView] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [loadMessage, setLoadMessage] = useState('');
 
@@ -550,6 +552,11 @@ const DailyReportWorkerCalendar: React.FC<DailyReportWorkerCalendarProps> = ({ i
             .sort(compareWorkerChecklistItems);
     }, [entries]);
 
+    const selectedWorker = useMemo(
+        () => workerChecklist.find((worker) => worker.workerKey === selectedWorkerKey) ?? null,
+        [selectedWorkerKey, workerChecklist]
+    );
+
     useEffect(() => {
         setSelectedWorkerKeys((previous) => {
             const selectedKey = Array.from(previous)[0];
@@ -559,6 +566,10 @@ const DailyReportWorkerCalendar: React.FC<DailyReportWorkerCalendarProps> = ({ i
             return new Set();
         });
     }, [workerChecklist]);
+
+    useEffect(() => {
+        if (!selectedWorkerKey) setIsShareView(false);
+    }, [selectedWorkerKey]);
 
     useEffect(() => {
         if (!requestedWorkerId && !requestedWorkerName) return;
@@ -777,6 +788,41 @@ const DailyReportWorkerCalendar: React.FC<DailyReportWorkerCalendarProps> = ({ i
         );
     };
 
+    const renderShareDayCell = (day: Date) => {
+        const ymd = formatYmd(day);
+        const isCurrentMonth = day.getMonth() + 1 === selectedMonthNumber;
+        const isSaturday = day.getDay() === 6;
+        const isSunday = day.getDay() === 0;
+        const dayEntries = entriesByDate.get(ymd) ?? [];
+        const dayTone = isSaturday
+            ? 'bg-blue-50 text-blue-800'
+            : isSunday
+                ? 'bg-rose-50 text-rose-800'
+                : 'bg-white text-slate-900';
+
+        return (
+            <div
+                key={`share-${ymd}`}
+                className={`min-h-[150px] border-b border-r border-slate-300 p-2 ${isCurrentMonth ? dayTone : 'bg-slate-50 text-slate-300'}`}
+            >
+                <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
+                    <span className="text-lg font-black">{day.getDate()}</span>
+                    <span className="text-xs font-black">{getWeekdayLabel(day)}</span>
+                </div>
+                {isCurrentMonth && dayEntries.length > 0 && (
+                    <div className="mt-2 space-y-2">
+                        {dayEntries.map((entry) => (
+                            <div key={`share-${entry.entryKey}`} className="rounded-lg border border-slate-300 bg-white px-2.5 py-2 shadow-sm">
+                                <div className="truncate text-base font-black text-slate-950">{entry.siteName || '-'}</div>
+                                <div className="mt-1 text-lg font-black text-blue-700">{formatManDay(entry.manDay)}공수</div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
     return (
         <div className="flex h-full min-h-0 flex-col gap-3">
             {loadMessage && (
@@ -870,6 +916,23 @@ const DailyReportWorkerCalendar: React.FC<DailyReportWorkerCalendarProps> = ({ i
                     </div>
                     <button
                         type="button"
+                        onClick={() => setIsShareView((current) => !current)}
+                        disabled={!selectedWorkerKey}
+                        aria-pressed={isShareView}
+                        className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-black shadow-sm transition-colors ${
+                            isShareView
+                                ? 'border-blue-700 bg-blue-700 text-white hover:bg-blue-800'
+                                : selectedWorkerKey
+                                    ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                    : 'border-slate-200 bg-slate-100 text-slate-400'
+                        }`}
+                        title={selectedWorkerKey ? '개인 전달용 화면으로 전환' : '작업자를 먼저 선택하세요'}
+                    >
+                        <FontAwesomeIcon icon={faShareNodes} />
+                        {isShareView ? '기본 화면' : '개인 전달용'}
+                    </button>
+                    <button
+                        type="button"
                         onClick={handleResetFilters}
                         disabled={activeFilterCount === 0 && selectedWorkerKeys.size === 0}
                         className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-bold shadow-sm ${
@@ -914,6 +977,39 @@ const DailyReportWorkerCalendar: React.FC<DailyReportWorkerCalendarProps> = ({ i
                 </div>
             </div>
 
+            {isShareView && selectedWorker ? (
+                <section
+                    data-testid="daily-worker-calendar-share-view"
+                    className="min-h-0 flex-1 overflow-auto rounded-xl border border-slate-300 bg-slate-100 p-3 shadow-sm"
+                    aria-label={`${selectedWorker.workerName} 개인 전달용 공수 달력`}
+                >
+                    <div className="mx-auto min-w-[980px] max-w-[1320px] overflow-hidden rounded-xl border-2 border-slate-800 bg-white shadow-lg">
+                        <header className="grid grid-cols-[1fr_auto] items-center gap-6 border-b-2 border-slate-800 bg-white px-6 py-5">
+                            <div>
+                                <div className="text-sm font-black tracking-[0.16em] text-slate-500">{selectedMonth} 개인 공수 확인표</div>
+                                <h2 className="mt-1 text-4xl font-black tracking-tight text-slate-950">{selectedWorker.workerName}</h2>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-sm font-black text-slate-500">총공수</div>
+                                <div className="mt-1 text-5xl font-black tracking-tight text-blue-700">
+                                    {formatManDay(totals.totalManDay)}
+                                    <span className="ml-2 text-xl text-slate-600">공수</span>
+                                </div>
+                            </div>
+                        </header>
+                        <div className="grid grid-cols-7 border-b border-slate-800 bg-slate-900 text-center text-base font-black text-white">
+                            {WEEKDAY_LABELS.map((weekday, index) => (
+                                <div key={`share-weekday-${weekday}`} className={`px-3 py-3 ${index < 6 ? 'border-r border-slate-700' : ''}`}>
+                                    {weekday}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="grid grid-cols-7 border-l border-t border-slate-300">
+                            {weeks.flatMap((week) => week.map(renderShareDayCell))}
+                        </div>
+                    </div>
+                </section>
+            ) : (
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[260px_minmax(0,1fr)]">
                 <aside className="min-h-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                     <div className="border-b border-slate-200 px-3 py-3">
@@ -1103,6 +1199,7 @@ const DailyReportWorkerCalendar: React.FC<DailyReportWorkerCalendarProps> = ({ i
                     </footer>
                 </section>
             </div>
+            )}
         </div>
     );
 };

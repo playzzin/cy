@@ -34,6 +34,7 @@ export interface TaxInvoiceIssue {
     isNew: string;             // 신규/입력/다원 상태
     issueDate: string;         // 발행일 (YYYY-MM-DD)
     recipient: string;         // 공급받는자 (업체명)
+    recipientManuallyEdited?: boolean; // 사용자가 직접 수정한 공급받는자 보호 여부
     item: string;              // 품목
     supplyAmount: number;      // 공급가 (음수 가능)
     note: string;              // 비고

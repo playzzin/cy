@@ -38,7 +38,7 @@ describe('kbTransferExport', () => {
         expect(validateKBTransferRow({
             bankCode: '004',
             accountNumber: '123-456',
-            accountHolder: '홍길동',
+            accountHolder: '',
             amount: 1000,
         })).toEqual([]);
 
@@ -47,7 +47,7 @@ describe('kbTransferExport', () => {
             accountNumber: '',
             accountHolder: '',
             amount: 0,
-        })).toEqual(['bankCode', 'accountNumber', 'accountHolder', 'amount']);
+        })).toEqual(['bankCode', 'accountNumber', 'amount']);
     });
 
     it('summarizes preview rows', () => {

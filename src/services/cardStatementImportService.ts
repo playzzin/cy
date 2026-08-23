@@ -52,15 +52,17 @@ const assertPdfFile = (file: File): void => {
   throw new Error(`${file.name} 파일은 PDF가 아닙니다.`);
 };
 
-const calculateSha256 = async (file: File): Promise<string | undefined> => {
-  if (typeof crypto === 'undefined' || !crypto.subtle) return undefined;
+const calculateSha256 = async (file: File): Promise<string> => {
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    throw new Error('이 브라우저에서는 PDF 원본 SHA-256을 계산할 수 없습니다. 최신 브라우저에서 다시 시도해 주세요.');
+  }
   try {
     const hashBuffer = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
     return Array.from(new Uint8Array(hashBuffer))
       .map((byte) => byte.toString(16).padStart(2, '0'))
       .join('');
   } catch {
-    return undefined;
+    throw new Error(`${file.name} 파일의 원본 SHA-256 계산에 실패했습니다. 파일을 다시 선택해 주세요.`);
   }
 };
 
@@ -146,7 +148,7 @@ export const cardStatementImportService = {
           originalFileName: file.name,
           mimeType: file.type || 'application/pdf',
           size: file.size,
-          sha256: await calculateSha256(file),
+          sha256: sessionFile.sha256 || await calculateSha256(file),
         };
         uploaded.push(fileInput);
         onProgress?.({
@@ -190,16 +192,19 @@ export const cardStatementImportService = {
   ): Promise<CreateCardStatementImportJobResult> {
     assertYearMonth(yearMonth);
     files.forEach(assertPdfFile);
+    const sourceSha256s: string[] = [];
+    for (const file of files) sourceSha256s.push(await calculateSha256(file));
     let session: CreateCardStatementImportUploadSessionResult | null = null;
     let completeAttempted = false;
     try {
       session = await this.createUploadSession({
         yearMonth,
         bankName: 'KB국민카드',
-        files: files.map((file) => ({
+        files: files.map((file, index) => ({
           originalFileName: file.name,
           mimeType: file.type || 'application/pdf',
           size: file.size,
+          sha256: sourceSha256s[index],
         })),
       });
       const uploadedFiles = await this.uploadStatementFilesToSession(files, session.files, onProgress);

@@ -69,6 +69,7 @@ const TENANT_COLLECTIONS: Record<WorkbookLedgerTenant, string> = {
     dawon: 'sales_purchase_workbook_entries_dawon'
 };
 const BATCH_SIZE = 400;
+const MAX_CACHED_ENTRY_QUERIES = 8;
 
 const resolveCollectionName = (tenantKey: WorkbookLedgerTenant | string): string => {
     const mapped = TENANT_COLLECTIONS[tenantKey as WorkbookLedgerTenant];
@@ -229,6 +230,7 @@ const normalizeStoredEntry = (id: string, data: Record<string, unknown>): Workbo
 
 export interface WorkbookLedgerService {
     getEntries(options?: GetEntriesOptions): Promise<WorkbookLedgerEntry[]>;
+    getLinkedEntries(matchedEntryId: string): Promise<WorkbookLedgerEntry[]>;
     addEntries(entries: WorkbookLedgerEntryInput[]): Promise<WorkbookLedgerEntry[]>;
     updateEntry(id: string, updates: WorkbookLedgerEntryUpdate): Promise<void>;
     softDeleteEntry(id: string, deletedBy?: string): Promise<void>;
@@ -241,17 +243,35 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
     const collectionName = resolveCollectionName(tenantKey);
     const cachedEntriesByQuery = new Map<string, WorkbookLedgerEntry[]>();
     const pendingEntriesByQuery = new Map<string, Promise<WorkbookLedgerEntry[]>>();
+    let cacheGeneration = 0;
 
     const setCachedEntries = (cacheKey: string, entries: WorkbookLedgerEntry[]) => {
-        cachedEntriesByQuery.set(cacheKey, cloneEntries(entries).sort(sortEntries));
+        cachedEntriesByQuery.delete(cacheKey);
+        cachedEntriesByQuery.set(cacheKey, entries);
+
+        while (cachedEntriesByQuery.size > MAX_CACHED_ENTRY_QUERIES) {
+            const oldestCacheKey = cachedEntriesByQuery.keys().next().value;
+            if (!oldestCacheKey) break;
+            cachedEntriesByQuery.delete(oldestCacheKey);
+        }
     };
 
     const clearCachedEntries = () => {
+        cacheGeneration += 1;
         cachedEntriesByQuery.clear();
         pendingEntriesByQuery.clear();
     };
 
-    const getEntriesCollectionQuery = (options: GetEntriesOptions = {}, omitTransactionType = false) => {
+    const sortEntriesForOptions = (entries: WorkbookLedgerEntry[], options: GetEntriesOptions) => {
+        const direction = options.orderDirection === 'desc' ? -1 : 1;
+        return entries.slice().sort((left, right) => direction * sortEntries(left, right));
+    };
+
+    const getEntriesCollectionQuery = (
+        options: GetEntriesOptions = {},
+        omitTransactionType = false,
+        omitLimit = false
+    ) => {
         const constraints: QueryConstraint[] = [];
         const startDate = normalizeText(options.startDate);
         const endDate = normalizeText(options.endDate);
@@ -275,7 +295,7 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
             constraints.push(orderBy('date', orderDirection));
         }
 
-        if (limitCount) {
+        if (limitCount && !omitLimit) {
             constraints.push(firestoreLimit(limitCount));
         }
 
@@ -297,6 +317,8 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
             } else {
                 const cachedEntries = cachedEntriesByQuery.get(cacheKey);
                 if (cachedEntries) {
+                    cachedEntriesByQuery.delete(cacheKey);
+                    cachedEntriesByQuery.set(cacheKey, cachedEntries);
                     return cloneEntries(cachedEntries);
                 }
 
@@ -306,8 +328,10 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                 }
             }
 
+            const requestCacheGeneration = cacheGeneration;
             const loadEntries = (async () => {
                 const transactionType = normalizeText(options.transactionType);
+                const limitCount = normalizeLimit(options.limitCount);
                 let snapshot;
 
                 try {
@@ -320,7 +344,7 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                     console.warn(
                         `[workbookLedgerService] Missing Firestore index for ${collectionName} transactionType/date query. Falling back to client-side transactionType filtering.`
                     );
-                    snapshot = await getDocs(getEntriesCollectionQuery(options, true));
+                    snapshot = await getDocs(getEntriesCollectionQuery(options, true, true));
                 }
 
                 const entries = snapshot.docs.map((entryDoc) => {
@@ -334,8 +358,13 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                     .filter((entry): entry is WorkbookLedgerEntry => entry !== null)
                     .filter((entry) => !transactionType || entry.transactionType === transactionType);
 
-                setCachedEntries(cacheKey, entries);
-                return entries;
+                const sortedEntries = sortEntriesForOptions(entries, options);
+                const limitedEntries = limitCount ? sortedEntries.slice(0, limitCount) : sortedEntries;
+
+                if (requestCacheGeneration === cacheGeneration) {
+                    setCachedEntries(cacheKey, limitedEntries);
+                }
+                return limitedEntries;
             })();
 
             pendingEntriesByQuery.set(cacheKey, loadEntries);
@@ -347,6 +376,26 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                     pendingEntriesByQuery.delete(cacheKey);
                 }
             }
+        },
+
+        async getLinkedEntries(matchedEntryId: string): Promise<WorkbookLedgerEntry[]> {
+            const normalizedMatchedEntryId = normalizeText(matchedEntryId);
+            if (!normalizedMatchedEntryId) return [];
+
+            const entriesCollection = collection(db, collectionName);
+            const snapshot = await getDocs(query(
+                entriesCollection,
+                where('matchedEntryId', '==', normalizedMatchedEntryId)
+            ));
+
+            return snapshot.docs
+                .map((entryDoc) => {
+                    const data = entryDoc.data() as Record<string, unknown>;
+                    if (normalizeText(data.deletedAt)) return null;
+                    return normalizeStoredEntry(entryDoc.id, data);
+                })
+                .filter((entry): entry is WorkbookLedgerEntry => entry !== null)
+                .sort(sortEntries);
         },
 
         async addEntries(entries: WorkbookLedgerEntryInput[]): Promise<WorkbookLedgerEntry[]> {

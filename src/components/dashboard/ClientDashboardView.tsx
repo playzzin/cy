@@ -201,7 +201,6 @@ const ClientDashboardView: React.FC = () => {
 
     useEffect(() => { void load(); }, [load]);
 
-    const selectedCompany = useMemo(() => data.companies.find((company) => company.id === selectedCompanyId) || null, [data.companies, selectedCompanyId]);
     const scopedSites = useMemo(() => data.sites.filter((site) => !selectedCompanyId || String(site.clientCompanyId || '') === selectedCompanyId), [data.sites, selectedCompanyId]);
     const scopedSiteIds = useMemo(() => new Set(scopedSites.map((site) => String(site.id || ''))), [scopedSites]);
     const scopedReports = useMemo(() => data.reports.filter((report) => scopedSiteIds.has(String(report.siteId || ''))), [data.reports, scopedSiteIds]);
@@ -240,25 +239,10 @@ const ClientDashboardView: React.FC = () => {
 
     return (
         <div className="space-y-6">
-            <section className="overflow-hidden rounded-2xl bg-gradient-to-br from-slate-950 via-blue-950 to-cyan-900 px-5 py-6 text-white shadow-lg sm:px-7">
-                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                        <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-bold text-blue-100"><FontAwesomeIcon icon={faBuilding} /> 건설 전용</span>
-                        <h1 className="mt-4 text-2xl font-black tracking-tight sm:text-3xl">{selectedCompany?.name || '건설 현황'}</h1>
-                        <p className="mt-2 max-w-2xl text-sm leading-6 text-blue-100/80">연결된 현장의 인력 투입, 기성 진행과 검토가 필요한 항목을 한 화면에서 확인합니다.</p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                        {data.companies.length > 1 && <label className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-sm font-bold text-white"><span className="sr-only">건설 회사 선택</span><select value={selectedCompanyId} onChange={(event) => setSelectedCompanyId(event.target.value)} className="max-w-[180px] cursor-pointer bg-transparent pr-2 text-white outline-none">{data.companies.map((company) => <option key={company.id} value={company.id} className="text-slate-950">{company.name}</option>)}</select></label>}
-                        <button type="button" onClick={() => void load(true)} disabled={refreshing} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-3.5 text-sm font-extrabold text-slate-800 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"><FontAwesomeIcon icon={faRotateRight} spin={refreshing} /> 새로고침</button>
-                    </div>
-                </div>
-                <div className="mt-6 grid grid-cols-2 gap-3 border-t border-white/10 pt-5 sm:grid-cols-4">
-                    <div><p className="text-xs font-bold text-blue-100/70">진행 중 현장</p><p className="mt-1 text-xl font-black">{metrics.activeSiteCount}곳</p></div>
-                    <div><p className="text-xs font-bold text-blue-100/70">오늘 투입</p><p className="mt-1 text-xl font-black">{metrics.todayManDay.toLocaleString('ko-KR')} 공수</p></div>
-                    <div><p className="text-xs font-bold text-blue-100/70">이번 달 공수</p><p className="mt-1 text-xl font-black">{metrics.monthManDay.toLocaleString('ko-KR')} 공수</p></div>
-                    <div><p className="text-xs font-bold text-blue-100/70">검토 필요</p><p className="mt-1 text-xl font-black">{metrics.pendingClaims.length}건</p></div>
-                </div>
-            </section>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+                {data.companies.length > 1 && <label className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm"><span className="sr-only">건설 회사 선택</span><select value={selectedCompanyId} onChange={(event) => setSelectedCompanyId(event.target.value)} className="max-w-[180px] cursor-pointer bg-transparent pr-2 outline-none">{data.companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></label>}
+                <button type="button" onClick={() => void load(true)} disabled={refreshing} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 text-sm font-extrabold text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"><FontAwesomeIcon icon={faRotateRight} spin={refreshing} /> 새로고침</button>
+            </div>
 
             {error && <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"><FontAwesomeIcon icon={faTriangleExclamation} className="mt-0.5" /><div className="flex-1 font-medium">{error}</div><button type="button" onClick={() => void load(true)} className="font-extrabold underline">다시 시도</button></div>}
 

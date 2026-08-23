@@ -97,6 +97,7 @@
     "test:card-statement-import": "react-scripts test --watchAll=false --runTestsByPath src/utils/cardStatementImportAnalysisHarness.test.ts",
     "functions:build": "npm --prefix functions run build",
     "test:bank-rules": "node scripts/run-bank-rules-test.mjs",
+    "test:vehicle-import-rules": "node scripts/run-vehicle-import-rules-test.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "audit:functions": "npm --prefix functions audit --omit=dev --audit-level=high",
     "audit:all": "npm run audit:prod && npm run audit:functions",

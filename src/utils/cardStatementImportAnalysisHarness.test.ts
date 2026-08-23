@@ -89,7 +89,7 @@ describe('card statement import analysis harness', () => {
     expect(excluded.exclusionReason).toBe('not this month');
   });
 
-  it('keeps ledger commit ids idempotent across retry runs', () => {
+  it('keeps ledger-only commit ids idempotent without creating a billing claim', () => {
     const [duplicateLast4Result, officeResult] = buildRiskResults();
     const manuallyMatched = applyCardStatementHarnessReview(
       duplicateLast4Result,
@@ -115,20 +115,106 @@ describe('card statement import analysis harness', () => {
     }, firstCommit);
 
     expect(retryCommit.transactionIds).toEqual(firstCommit.transactionIds);
-    expect(retryCommit.billingLogIds).toEqual(firstCommit.billingLogIds);
-    expect(retryCommit.billingLineItemIds).toEqual(firstCommit.billingLineItemIds);
     expect(retryCommit.transactionIds).toHaveLength(2);
-    expect(retryCommit.billingLogIds).toHaveLength(1);
-    expect(Object.values(retryCommit.billingLineItemIds)[0]).toHaveLength(2);
     expect(retryCommit.results[0]).toMatchObject({
       status: 'committed',
-      committedBillingId: 'card-billing__2026-07__card-team-a-1234',
-      committedBillingLogId: 'card-statement-import-billing-log__card-statement-import_job-risk_commit__card-billing_2026-07_card-team-a-1234',
       committedTransactionIds: [
         'card-statement__2026-07__card-team-a-1234__file-risk__0__tx-duplicate-a',
         'card-statement__2026-07__card-team-a-1234__file-risk__0__tx-duplicate-b',
       ],
     });
+    expect(retryCommit.results[0].committedBillingId).toBeUndefined();
+    expect(retryCommit.results[0].committedBillingLogId).toBeUndefined();
     expect(retryCommit.results[1].status).toBe('excluded');
+  });
+
+  it('reuses transaction ids when the same SHA-256 PDF is committed from another job', () => {
+    const firstResults = buildCardStatementHarnessResults({
+      jobId: 'job-first',
+      fileId: 'file-first',
+      sourceSha256: 'ABC123',
+      yearMonth: '2026-07',
+      gemini: kbCardStatementValidGeminiResponse,
+      cards: kbCardStatementHarnessCards,
+    });
+    const secondResults = buildCardStatementHarnessResults({
+      jobId: 'job-second',
+      fileId: 'file-second',
+      sourceSha256: 'abc123',
+      yearMonth: '2026-07',
+      gemini: kbCardStatementValidGeminiResponse,
+      cards: kbCardStatementHarnessCards,
+    }).map((result) => ({
+      ...result,
+      // Simulate unrelated files being processed before this PDF in the new job.
+      resultIndex: result.resultIndex + 7,
+    }));
+
+    const firstCommit = commitCardStatementHarnessResults({
+      operationId: 'card-statement-import:job-first:commit',
+      yearMonth: '2026-07',
+      results: firstResults,
+    });
+    const secondCommit = commitCardStatementHarnessResults({
+      operationId: 'card-statement-import:job-second:commit',
+      yearMonth: '2026-07',
+      results: secondResults,
+    }, firstCommit);
+
+    expect(secondCommit.transactionIds).toEqual(firstCommit.transactionIds);
+    expect(secondCommit.transactionIds).toHaveLength(2);
+    expect(secondCommit.results[0].committedTransactionIds).toEqual(
+      firstCommit.results[0].committedTransactionIds,
+    );
+  });
+
+  it('keeps identical transaction indexes distinct across same-card blocks in one PDF', () => {
+    const results = buildCardStatementHarnessResults({
+      jobId: 'job-multi-block',
+      fileId: 'file-multi-block',
+      sourceSha256: 'same-sha',
+      yearMonth: '2026-07',
+      cards: kbCardStatementHarnessCards,
+      gemini: {
+        bankName: 'KB Kookmin Card',
+        statementMonth: '2026-07',
+        grandTotalAmount: 30000,
+        cards: [
+          {
+            cardLast4: '5678',
+            subtotalAmount: 10000,
+            transactions: [{
+              date: '2026-07-01',
+              merchant: 'Fuel Station',
+              amount: 10000,
+              category: 'FUEL',
+              confidence: 1,
+            }],
+          },
+          {
+            cardLast4: '5678',
+            subtotalAmount: 20000,
+            transactions: [{
+              date: '2026-07-02',
+              merchant: 'Toll Gate',
+              amount: 20000,
+              category: 'TOLL',
+              confidence: 1,
+            }],
+          },
+        ],
+      },
+    });
+
+    const commit = commitCardStatementHarnessResults({
+      operationId: 'card-statement-import:job-multi-block:commit',
+      yearMonth: '2026-07',
+      results,
+    });
+
+    expect(commit.transactionIds).toEqual([
+      'card-statement__2026-07__card-office-5678__same-sha__0__tx_0000',
+      'card-statement__2026-07__card-office-5678__same-sha__1__tx_0000',
+    ]);
   });
 });

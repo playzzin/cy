@@ -29,9 +29,6 @@ export const getUtilityOnlyTotal = (record: Pick<UtilityRecord, 'costs'>): numbe
     toSafeAmount(record.costs.electricity)
     + toSafeAmount(record.costs.gas)
     + toSafeAmount(record.costs.water)
-    + toSafeAmount(record.costs.internet)
-    + toSafeAmount(record.costs.maintenance)
-    + toSafeAmount(record.costs.other)
 );
 
 export const getDefaultAccommodationOverchargeThreshold = (
@@ -54,7 +51,7 @@ export const getAccommodationOvercharge = (
     if (!threshold) return null;
 
     const utilityTotal = getUtilityOnlyTotal(record);
-    if (utilityTotal < threshold) return null;
+    if (utilityTotal <= threshold) return null;
 
     return {
         type,
@@ -76,7 +73,7 @@ export const stripAccommodationOverchargeMemo = (memo?: string): string => (
 export const formatAccommodationOverchargeMemo = (
     summary: AccommodationOverchargeSummary
 ): string => (
-    `${ACCOMMODATION_OVERCHARGE_MEMO_PREFIX} ${summary.typeLabel} 공과금 `
+    `${ACCOMMODATION_OVERCHARGE_MEMO_PREFIX} ${summary.typeLabel} 전기+가스+수도 `
     + `${summary.utilityTotal.toLocaleString('ko-KR')}원 / 기준 `
     + `${summary.threshold.toLocaleString('ko-KR')}원 / 초과액 `
     + `${summary.exceededAmount.toLocaleString('ko-KR')}원`

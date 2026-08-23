@@ -58,6 +58,18 @@ const readFileAsBase64 = (file: File): Promise<string> => new Promise((resolve, 
     reader.readAsDataURL(file);
 });
 
+const calculateFileSha256 = async (file: File): Promise<string | undefined> => {
+    if (typeof crypto === 'undefined' || !crypto.subtle) return undefined;
+    try {
+        const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+        return Array.from(new Uint8Array(digest))
+            .map((byte) => byte.toString(16).padStart(2, '0'))
+            .join('');
+    } catch {
+        return undefined;
+    }
+};
+
 const buildBatches = (files: File[]): Array<Array<{ file: File; fileIndex: number }>> => {
     const batches: Array<Array<{ file: File; fileIndex: number }>> = [];
     let current: Array<{ file: File; fileIndex: number }> = [];
@@ -93,7 +105,11 @@ const validateFiles = (files: File[], billLabel: string): void => {
     files.forEach(validateFile);
 };
 
-const analyzeFiles = async <TInput, TResult extends { bills: TAnalysis[] }, TAnalysis>(
+const analyzeFiles = async <
+    TInput,
+    TResult extends { bills: TAnalysis[] },
+    TAnalysis extends { fileIndex?: number; sourceFileSha256?: string },
+>(
     yearMonth: string,
     files: File[],
     callableName: string,
@@ -109,7 +125,21 @@ const analyzeFiles = async <TInput, TResult extends { bills: TAnalysis[] }, TAna
     const callable = httpsCallable<TInput, TResult>(functions, callableName, { timeout: ANALYSIS_TIMEOUT_MS });
     const batches = buildBatches(files);
     const analyses: TAnalysis[] = [];
+    const sha256ByFileIndex = new Map<number, string>();
+    const clientHashOwners = new Map<string, string>();
+    const serverHashOwners = new Map<string, string>();
     let completedFiles = 0;
+
+    const calculatedHashes = await Promise.all(files.map(calculateFileSha256));
+    calculatedHashes.forEach((sha256, fileIndex) => {
+        if (!sha256) return;
+        const previousFileName = clientHashOwners.get(sha256);
+        if (previousFileName) {
+            throw new Error(`${files[fileIndex].name}: ${previousFileName}와 동일한 파일입니다. 같은 청구서는 한 번만 첨부해 주세요.`);
+        }
+        clientHashOwners.set(sha256, files[fileIndex].name);
+        sha256ByFileIndex.set(fileIndex, sha256);
+    });
 
     for (const batch of batches) {
         const encodedFiles: AnalyzeAccommodationElectricityBillFileInput[] = await Promise.all(
@@ -118,6 +148,7 @@ const analyzeFiles = async <TInput, TResult extends { bills: TAnalysis[] }, TAna
                 originalFileName: file.name,
                 mimeType: inferMimeType(file),
                 base64: await readFileAsBase64(file),
+                sourceFileSha256: sha256ByFileIndex.get(fileIndex),
             })),
         );
         onProgress?.({
@@ -128,7 +159,23 @@ const analyzeFiles = async <TInput, TResult extends { bills: TAnalysis[] }, TAna
 
         try {
             const response = await callable({ yearMonth, files: encodedFiles } as TInput);
-            analyses.push(...(response.data.bills || []));
+            (response.data.bills || []).forEach((analysis) => {
+                const fileIndex = Number(analysis.fileIndex ?? -1);
+                const expectedHash = sha256ByFileIndex.get(fileIndex) || '';
+                const returnedHash = String(analysis.sourceFileSha256 || '').trim().toLowerCase();
+                if (expectedHash && returnedHash && expectedHash !== returnedHash) {
+                    throw new Error(`${files[fileIndex]?.name || '첨부파일'}: 서버 파일 지문 검증에 실패했습니다.`);
+                }
+                const sourceFileSha256 = returnedHash || expectedHash;
+                if (sourceFileSha256) {
+                    const previousFileName = serverHashOwners.get(sourceFileSha256);
+                    if (previousFileName) {
+                        throw new Error(`${files[fileIndex]?.name || '첨부파일'}: ${previousFileName}와 동일한 파일입니다. 같은 청구서는 한 번만 첨부해 주세요.`);
+                    }
+                    serverHashOwners.set(sourceFileSha256, files[fileIndex]?.name || String(fileIndex));
+                }
+                analyses.push({ ...analysis, sourceFileSha256 } as TAnalysis);
+            });
         } catch (error) {
             throw new Error(getCallableErrorMessage(error, featureLabel));
         }

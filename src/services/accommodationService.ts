@@ -4,6 +4,11 @@ import { accommodationBillingTargetService } from './accommodationBillingTargetS
 import { Accommodation, UtilityRecord } from '../types/accommodation';
 import { AccommodationAssignment } from '../types/accommodationAssignment';
 import { DEFAULT_SUPPORT_BILLING_START_DATE, isSupportBillingMonthEnabled, maxIsoDate, minIsoDate, normalizeDateText } from '../utils/supportBillingPeriod';
+import {
+    buildAccommodationUtilityRecordId,
+    dedupeAccommodationUtilityRecords,
+    dedupeAccommodationUtilityRecordWrites,
+} from '../utils/accommodationUtilityDeduplication';
 
 const makeId = (prefix: string): string => {
     const c = typeof crypto !== 'undefined' ? crypto : undefined;
@@ -30,6 +35,17 @@ const normalizeUtilityMemo = (value: unknown): string => {
     return value.trim() ? value : '';
 };
 
+const getStoredUtilityCostOrDefault = (
+    existingCosts: Partial<UtilityRecord['costs']>,
+    field: keyof UtilityRecord['costs'],
+    fallback: number
+): number => {
+    const stored = existingCosts[field];
+    if (stored === undefined || stored === null) return fallback;
+    const amount = Number(stored);
+    return Number.isFinite(amount) ? amount : 0;
+};
+
 const buildUtilityRecord = (
     accommodation: Accommodation,
     yearMonth: string,
@@ -42,19 +58,23 @@ const buildUtilityRecord = (
     const fixedWater = costProfile?.water === 'fixed' ? Number(costProfile.fixedWater ?? 0) || 0 : 0;
     const fixedInternet = costProfile?.internet === 'fixed' ? Number(costProfile.fixedInternet ?? 0) || 0 : 0;
     const fixedMaintenance = costProfile?.maintenance === 'fixed' ? Number(costProfile.fixedMaintenance ?? 0) || 0 : 0;
-    const rent = Number(existingCosts.rent ?? 0) || Number(accommodation.contract?.monthlyRent ?? 0) || 0;
-    const electricity = Number(existingCosts.electricity ?? 0) || fixedElectricity;
-    const gas = Number(existingCosts.gas ?? 0) || fixedGas;
-    const water = Number(existingCosts.water ?? 0) || fixedWater;
-    const internet = Number(existingCosts.internet ?? 0) || fixedInternet;
-    const maintenance = Number(existingCosts.maintenance ?? 0) || fixedMaintenance;
-    const other = Number(existingCosts.other ?? 0) || 0;
+    const rent = getStoredUtilityCostOrDefault(
+        existingCosts,
+        'rent',
+        Number(accommodation.contract?.monthlyRent ?? 0) || 0
+    );
+    const electricity = getStoredUtilityCostOrDefault(existingCosts, 'electricity', fixedElectricity);
+    const gas = getStoredUtilityCostOrDefault(existingCosts, 'gas', fixedGas);
+    const water = getStoredUtilityCostOrDefault(existingCosts, 'water', fixedWater);
+    const internet = getStoredUtilityCostOrDefault(existingCosts, 'internet', fixedInternet);
+    const maintenance = getStoredUtilityCostOrDefault(existingCosts, 'maintenance', fixedMaintenance);
+    const other = getStoredUtilityCostOrDefault(existingCosts, 'other', 0);
     const total = rent + electricity + gas + water + internet + maintenance + other;
     const paymentDay = accommodation.contract?.rentPayDate ?? accommodation.contract?.paymentDay;
     const defaultPaymentDate = getMonthPaymentDate(yearMonth, paymentDay);
 
     return {
-        id: String(existing?.id ?? makeId('utility_record')),
+        id: String(existing?.id ?? buildAccommodationUtilityRecordId(accommodation.id, yearMonth)),
         accommodationId: accommodation.id,
         accommodationName: accommodation.name,
         yearMonth,
@@ -74,6 +94,7 @@ const buildUtilityRecord = (
         electricityBillImport: existing?.electricityBillImport,
         gasBillImport: existing?.gasBillImport,
         waterBillImport: existing?.waterBillImport,
+        billingSyncPending: existing?.billingSyncPending,
         isAnomaly: existing?.isAnomaly,
         createdAt: existing?.createdAt,
         updatedAt: existing?.updatedAt
@@ -131,7 +152,17 @@ export const accommodationService = {
     },
 
     listAllUtilityRecords: async (yearMonth?: string) => {
-        return accommodationFirestoreService.listUtilityRecords(yearMonth);
+        const records = await accommodationFirestoreService.listUtilityRecords(yearMonth);
+        return dedupeAccommodationUtilityRecords(records);
+    },
+
+    getSavedUtilityRecord: async (accommodationId: string, yearMonth: string): Promise<UtilityRecord | null> => {
+        const normalizedAccommodationId = String(accommodationId ?? '').trim();
+        if (!normalizedAccommodationId || !/^\d{4}-\d{2}$/.test(String(yearMonth ?? '').trim())) return null;
+        const records = dedupeAccommodationUtilityRecords(
+            await accommodationFirestoreService.listUtilityRecords(yearMonth)
+        );
+        return records.find((record) => String(record.accommodationId ?? '').trim() === normalizedAccommodationId) ?? null;
     },
 
     getMonthlyLedger: async (yearMonth: string): Promise<UtilityRecord[]> => {
@@ -142,7 +173,7 @@ export const accommodationService = {
         ]);
 
         const existingByAccommodationId = new Map<string, UtilityRecord>();
-        utilityRecords.forEach((record) => {
+        dedupeAccommodationUtilityRecords(utilityRecords).forEach((record) => {
             const key = String(record.accommodationId ?? '').trim();
             if (key) {
                 existingByAccommodationId.set(key, record);
@@ -182,12 +213,28 @@ export const accommodationService = {
     },
 
     saveUtilityRecord: async (data: Partial<UtilityRecord> & { id?: string }) => {
-        const id = data.id ? String(data.id) : makeId('utility_record');
+        const accommodationId = String(data.accommodationId ?? '').trim();
+        const yearMonth = String(data.yearMonth ?? '').trim();
+        if (!accommodationId || !/^\d{4}-\d{2}$/.test(yearMonth)) {
+            throw new Error('공과금 대장 저장에는 숙소와 yyyy-MM 형식의 대장 월이 필요합니다.');
+        }
+        const id = data.id
+            ? String(data.id)
+            : buildAccommodationUtilityRecordId(accommodationId, yearMonth);
         await accommodationFirestoreService.saveUtilityRecord({ ...data, id } as Partial<UtilityRecord> & { id: string });
     },
 
     saveUtilityRecords: async (records: Array<Partial<UtilityRecord> & { id?: string }>) => {
-        await Promise.all(records.map((record) => accommodationService.saveUtilityRecord(record)));
+        const uniqueRecords = dedupeAccommodationUtilityRecordWrites(records);
+        await Promise.all(uniqueRecords.map((record) => accommodationService.saveUtilityRecord(record)));
+    },
+
+    replaceUtilityRecord: async (record: UtilityRecord) => {
+        await accommodationFirestoreService.replaceUtilityRecord(record);
+    },
+
+    deleteUtilityRecord: async (id: string) => {
+        await accommodationFirestoreService.deleteUtilityRecord(id);
     },
 
     getLatestUtilityRecord: async (accommodationId: string) => {

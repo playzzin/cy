@@ -13,11 +13,13 @@ import { toast } from '../../utils/swal';
 import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
 import { appendOfficeAssignmentTeam, buildOfficeStaffAssignmentOptions, isOfficeAssignmentTeam } from '../../utils/supportAssignmentTargets';
 import { normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
+import { findAccommodationAssignmentForDate } from '../../utils/accommodationAssignmentTimeline';
 import { BillingMode } from '../support/BillingModeSelector';
 
 interface UseAccommodationQuickAssignmentParams {
     accommodation: Accommodation;
     activeAssignments: AccommodationAssignment[];
+    assignmentHistory?: AccommodationAssignment[];
     isOpen: boolean;
     initialBillingSplitMode?: boolean;
     onSuccess: () => void;
@@ -88,6 +90,7 @@ const includesCheongyeonKeyword = (...values: unknown[]): boolean => {
 export const useAccommodationQuickAssignment = ({
     accommodation,
     activeAssignments,
+    assignmentHistory = activeAssignments,
     isOpen,
     initialBillingSplitMode = false,
     onSuccess
@@ -634,7 +637,8 @@ export const useAccommodationQuickAssignment = ({
     }), [accommodation.id, accommodation.name]);
 
     const buildActiveAssignmentBillingTargetInput = useCallback((startDate: string, endDate: string) => {
-        const assignment = activeAssignmentsInScope[0];
+        const assignment = findAccommodationAssignmentForDate(assignmentHistory, endDate || startDate)
+            ?? activeAssignmentsInScope[0];
         if (!assignment) return null;
 
         const isTeamAssignment = assignment.source === 'team' ||
@@ -671,7 +675,7 @@ export const useAccommodationQuickAssignment = ({
             endDate,
             memo: '분할 전 기본 입실자'
         };
-    }, [accommodation.id, accommodation.name, activeAssignmentsInScope]);
+    }, [accommodation.id, accommodation.name, activeAssignmentsInScope, assignmentHistory]);
 
     const applySameBillingTarget = useCallback(async (effectiveDate: string = DEFAULT_BILLING_START_DATE) => {
         const targets = await accommodationBillingTargetService.listTargetsByAccommodationId(accommodation.id);

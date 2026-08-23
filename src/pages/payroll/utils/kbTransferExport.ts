@@ -99,7 +99,6 @@ export const validateKBTransferRow = (row: {
 
     if (!String(row.bankCode ?? '').trim()) errors.push('bankCode');
     if (!String(row.accountNumber ?? '').trim()) errors.push('accountNumber');
-    if (!String(row.accountHolder ?? '').trim()) errors.push('accountHolder');
     if (!Number.isFinite(row.amount) || Number(row.amount) <= 0) errors.push('amount');
 
     return errors;

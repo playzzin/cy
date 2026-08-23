@@ -11,6 +11,8 @@ jest.mock('@handsontable/react', () => ({
             'data-after-selection-end': String(typeof props.afterSelectionEnd),
             'data-before-key-down': String(typeof props.beforeKeyDown),
             'data-modify-focused-element': String(typeof props.modifyFocusedElement),
+            'data-grid-height': String(props.height),
+            'data-fixed-columns': String(props.fixedColumnsStart),
         })
     )),
 }));
@@ -42,5 +44,7 @@ describe('WorkbookInputHotTable', () => {
         expect(hotTable.getAttribute('data-after-selection-end')).toBe('undefined');
         expect(hotTable.getAttribute('data-before-key-down')).toBe('undefined');
         expect(hotTable.getAttribute('data-modify-focused-element')).toBe('undefined');
+        expect(hotTable.getAttribute('data-grid-height')).toBe('min(68vh, 760px)');
+        expect(hotTable.getAttribute('data-fixed-columns')).toBe('2');
     });
 });

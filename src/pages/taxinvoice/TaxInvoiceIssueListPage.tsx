@@ -13,7 +13,10 @@ import {
     faSearch,
     faSort,
     faFileExcel,
+    faCopy,
     faXmark,
+    faFloppyDisk,
+    faArrowRotateLeft,
 } from '@fortawesome/free-solid-svg-icons';
 import { taxInvoiceListService } from '../../services/taxInvoiceListService';
 import { TaxInvoiceIssue, IssueStatus, SiteWorkSummary, STATUS_CONFIG } from '../../types/taxInvoiceList';
@@ -21,6 +24,7 @@ import { exportIssuesToExcel } from '../../utils/taxInvoiceExcelUtils';
 import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
 import PayrollIssueTopTabs from '../../components/payroll/PayrollIssueTopTabs';
 import { showConfirmAlert, toast } from '../../utils/swal';
+import html2canvas from 'html2canvas';
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -134,6 +138,186 @@ const compareIssuesByTeam = (a: TaxInvoiceIssue, b: TaxInvoiceIssue): number => 
 const getIssueTypeLabel = (value: TaxInvoiceIssue['isNew'] | boolean | null | undefined) => {
     if (typeof value === 'boolean') return value ? '입력' : '';
     return String(value ?? '');
+};
+
+interface ImageClipboardWriteReservation {
+    complete: (blob: Blob) => void;
+    cancel: (error: unknown) => void;
+    result: Promise<void>;
+}
+
+const reserveImageClipboardWrite = (): ImageClipboardWriteReservation | null => {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined' || window.isSecureContext === false) {
+        return null;
+    }
+
+    const ClipboardItemCtor = (window as unknown as {
+        ClipboardItem?: new (items: Record<string, Blob | Promise<Blob>>) => ClipboardItem;
+    }).ClipboardItem;
+    const clipboard = navigator.clipboard as Clipboard & {
+        write?: (data: ClipboardItem[]) => Promise<void>;
+    };
+
+    if (!ClipboardItemCtor || !clipboard?.write) return null;
+
+    let resolveBlob: (blob: Blob) => void = () => {};
+    let rejectBlob: (error: unknown) => void = () => {};
+    let settled = false;
+    const blobPromise = new Promise<Blob>((resolve, reject) => {
+        resolveBlob = resolve;
+        rejectBlob = reject;
+    });
+
+    try {
+        const item = new ClipboardItemCtor({ 'image/png': blobPromise });
+        return {
+            complete: (blob) => {
+                if (settled) return;
+                settled = true;
+                resolveBlob(blob);
+            },
+            cancel: (error) => {
+                if (settled) return;
+                settled = true;
+                rejectBlob(error);
+            },
+            result: clipboard.write([item]),
+        };
+    } catch {
+        return null;
+    }
+};
+
+const canvasToPngBlob = (canvas: HTMLCanvasElement) => new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+        if (blob) {
+            resolve(blob);
+            return;
+        }
+        reject(new Error('이미지 변환에 실패했습니다.'));
+    }, 'image/png');
+});
+
+interface IssueCaptureColumn {
+    label: string;
+    width: number;
+    align?: 'left' | 'center' | 'right';
+    getValue: (issue: TaxInvoiceIssue) => string;
+}
+
+const ISSUE_CAPTURE_COLUMNS: IssueCaptureColumn[] = [
+    { label: 'No', width: 52, align: 'center', getValue: issue => String(issue.no) },
+    { label: '신규', width: 64, align: 'center', getValue: issue => getIssueTypeLabel(issue.isNew) || '-' },
+    { label: '발행일', width: 112, align: 'center', getValue: issue => issue.issueDate || '-' },
+    { label: '공급받는자', width: 160, getValue: issue => issue.recipient || '-' },
+    { label: '품목', width: 120, getValue: issue => issue.item || '-' },
+    { label: '공급가', width: 112, align: 'right', getValue: issue => fmt(Number(issue.supplyAmount) || 0) },
+    { label: '비고', width: 280, getValue: issue => issue.note || '-' },
+    { label: '공수', width: 64, align: 'right', getValue: issue => String(Number(issue.manDays) || 0) },
+    { label: '팀', width: 110, align: 'center', getValue: issue => issue.teamName || '-' },
+    { label: '현장구분', width: 88, align: 'center', getValue: issue => issue.siteType || '-' },
+    { label: '결제구분', width: 88, align: 'center', getValue: issue => issue.paymentType || '-' },
+    { label: '발행', width: 82, align: 'center', getValue: issue => STATUS_CONFIG[issue.issueStatus]?.label || issue.issueStatus || '-' },
+    { label: '노임서류', width: 90, align: 'center', getValue: issue => issue.scanCompleted ? '완료' : '미완료' },
+    { label: '특이사항', width: 238, getValue: issue => issue.remark || '-' },
+];
+
+const ISSUE_CAPTURE_STATUS_STYLES: Record<IssueStatus, { background: string; accent: string; text: string }> = {
+    ready: { background: '#ffffff', accent: '#8b5cf6', text: '#6d28d9' },
+    issued: { background: '#bbf7d0', accent: '#10b981', text: '#15803d' },
+    pending: { background: '#fde68a', accent: '#fbbf24', text: '#b45309' },
+    deferred: { background: '#bfdbfe', accent: '#3b82f6', text: '#1d4ed8' },
+};
+
+const ISSUE_CAPTURE_WIDTH = ISSUE_CAPTURE_COLUMNS.reduce((total, column) => total + column.width, 0);
+
+const createIssueCaptureTable = (issues: TaxInvoiceIssue[]): HTMLDivElement => {
+    const root = document.createElement('div');
+    root.dataset.taxInvoiceCaptureRoot = 'true';
+    root.setAttribute('aria-hidden', 'true');
+    root.style.cssText = [
+        'position:fixed',
+        'left:0',
+        'top:0',
+        'z-index:-2147483647',
+        'pointer-events:none',
+        `width:${ISSUE_CAPTURE_WIDTH}px`,
+        'background:#ffffff',
+        'color:#334155',
+        "font-family:Pretendard,'Noto Sans KR','Malgun Gothic',Arial,sans-serif",
+    ].join(';');
+
+    const table = document.createElement('table');
+    table.style.cssText = [
+        'width:100%',
+        'table-layout:fixed',
+        'border-collapse:collapse',
+        'border:1px solid #cbd5e1',
+        'background:#ffffff',
+    ].join(';');
+
+    const colgroup = document.createElement('colgroup');
+    ISSUE_CAPTURE_COLUMNS.forEach((column) => {
+        const col = document.createElement('col');
+        col.style.width = `${column.width}px`;
+        colgroup.appendChild(col);
+    });
+    table.appendChild(colgroup);
+
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    ISSUE_CAPTURE_COLUMNS.forEach((column) => {
+        const cell = document.createElement('th');
+        cell.textContent = column.label;
+        cell.style.cssText = [
+            'box-sizing:border-box',
+            'padding:12px 10px',
+            'border:1px solid #cbd5e1',
+            'background:#f1f5f9',
+            'color:#475569',
+            'font-size:15px',
+            'font-weight:800',
+            'line-height:1.35',
+            `text-align:${column.align || 'left'}`,
+            'white-space:normal',
+            'overflow-wrap:anywhere',
+        ].join(';');
+        headerRow.appendChild(cell);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    issues.forEach((issue) => {
+        const row = document.createElement('tr');
+        const statusStyle = ISSUE_CAPTURE_STATUS_STYLES[issue.issueStatus] || ISSUE_CAPTURE_STATUS_STYLES.ready;
+        ISSUE_CAPTURE_COLUMNS.forEach((column, columnIndex) => {
+            const cell = document.createElement('td');
+            cell.textContent = column.getValue(issue);
+            cell.style.cssText = [
+                'box-sizing:border-box',
+                'padding:12px 10px',
+                'border:1px solid #e2e8f0',
+                columnIndex === 0 ? `border-left:4px solid ${statusStyle.accent}` : '',
+                `background:${statusStyle.background}`,
+                `color:${column.label === '발행' ? statusStyle.text : '#334155'}`,
+                'font-size:15px',
+                `font-weight:${column.label === '공급받는자' || column.label === '발행' ? '700' : '500'}`,
+                'line-height:1.5',
+                'vertical-align:top',
+                `text-align:${column.align || 'left'}`,
+                'white-space:normal',
+                'word-break:keep-all',
+                'overflow-wrap:anywhere',
+            ].join(';');
+            row.appendChild(cell);
+        });
+        tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+    root.appendChild(table);
+
+    return root;
 };
 
 const getCarryoverSourceId = (issue: TaxInvoiceIssue) =>
@@ -643,7 +827,7 @@ const ColumnFilter: React.FC<ColumnFilterProps> = ({ label, value, onChange, opt
                 aria-expanded={isOpen}
                 aria-haspopup="dialog"
                 title={`${label} 필터`}
-                className={`inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${value ? 'border-indigo-200 bg-indigo-50 text-indigo-600' : 'border-slate-200 bg-white text-slate-500 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600'}`}
+                className={`inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${value ? 'border-emerald-600 bg-emerald-500 text-white shadow-sm hover:bg-emerald-600' : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700'}`}
             >
                 <FontAwesomeIcon icon={faFilter} className="text-[11px]" />
             </button>
@@ -807,12 +991,19 @@ const SelectCell: React.FC<SelectCellProps> = ({
 const TaxInvoiceIssueListPage: React.FC = () => {
     const [yearMonth, setYearMonth] = useState<string>(toYearMonth(new Date()));
     const [issues, setIssues] = useState<TaxInvoiceIssue[]>([]);
+    const [savedIssues, setSavedIssues] = useState<TaxInvoiceIssue[]>([]);
+    const [pendingChanges, setPendingChanges] = useState<Record<string, Partial<TaxInvoiceIssue>>>({});
+    const [showPendingChanges, setShowPendingChanges] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [isCopyingSelection, setIsCopyingSelection] = useState(false);
     const [saving, setSaving] = useState<Set<string>>(new Set());
     const [saveFeedback, setSaveFeedback] = useState<SaveFeedback>({
         status: 'idle',
-        message: '자동 저장 준비됨',
+        message: '변경 후 저장 버튼을 눌러주세요',
     });
+
+    const pendingRowCount = Object.keys(pendingChanges).length;
+    const hasPendingChanges = pendingRowCount > 0;
 
     // Site import
     const [siteData, setSiteData] = useState<SiteWorkSummary[]>([]);
@@ -943,10 +1134,16 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         setLoading(true);
         try {
             const data = await taxInvoiceListService.getIssuesByMonth(yearMonth);
-            setIssues(data.sort((a, b) => a.no - b.no));
+            const sorted = [...data].sort((a, b) => a.no - b.no);
+            setIssues(sorted);
+            setSavedIssues(sorted);
+            setPendingChanges({});
+            setShowPendingChanges(false);
+            setSaveFeedback({ status: 'idle', message: '변경 후 저장 버튼을 눌러주세요' });
         } catch (e) {
             console.error('발행리스트 로드 실패:', e);
             setIssues([]);
+            setSavedIssues([]);
             markSaveError(`${formatYearMonth(yearMonth)} 목록을 불러오지 못했습니다.`);
             toast.error(`${formatYearMonth(yearMonth)} 데이터 로드에 실패했습니다.`);
         } finally {
@@ -971,6 +1168,8 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
     useEffect(() => { 
         setIssues([]); // 월 변경 시 즉시 목록을 비워 순번 꼬임 방지
+        setSavedIssues([]);
+        setPendingChanges({});
         setSiteData([]); 
         setPreviousDeferredIssues([]);
         loadIssues(); 
@@ -979,19 +1178,36 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
     // ── Month navigation ──
     const stepMonth = (delta: number) => {
+        if (hasPendingChanges && !window.confirm('저장하지 않은 변경사항이 있습니다. 변경사항을 버리고 다른 달로 이동할까요?')) {
+            return;
+        }
         const [y, m] = yearMonth.split('-').map(Number);
         const d = new Date(y, m - 1 + delta, 1);
         setYearMonth(toYearMonth(d));
     };
 
+    const handleRefresh = () => {
+        if (hasPendingChanges && !window.confirm('저장하지 않은 변경사항이 있습니다. 변경사항을 버리고 목록을 새로고침할까요?')) {
+            return;
+        }
+        loadIssues();
+        loadPreviousDeferredSites();
+    };
+
     // ── Add row ──
     const handleAddRow = async () => {
+        if (hasPendingChanges) {
+            toast.warning('먼저 변경사항을 저장하거나 되돌려주세요.');
+            return;
+        }
         const nextNo = issues.length + 1;
         const newIssue = EMPTY_ISSUE(yearMonth, nextNo);
         markSaving('새 행을 추가하는 중입니다.');
         try {
             const id = await taxInvoiceListService.addIssue(newIssue);
-            setIssues(prev => [...prev, { ...newIssue, id }].sort((a, b) => a.no - b.no));
+            const created = { ...newIssue, id } as TaxInvoiceIssue;
+            setIssues(prev => [...prev, created].sort((a, b) => a.no - b.no));
+            setSavedIssues(prev => [...prev, created].sort((a, b) => a.no - b.no));
             markSaved('새 행이 저장되었습니다.');
             toast.success('새 행을 추가했습니다.');
         } catch (e) {
@@ -1004,6 +1220,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
     // ── Delete row ──
     const handleDelete = async (id: string | undefined) => {
         if (!id) return;
+        if (hasPendingChanges) {
+            toast.warning('먼저 변경사항을 저장하거나 되돌려주세요.');
+            return;
+        }
         const confirmation = await showConfirmAlert('항목 삭제', '선택한 항목을 삭제하시겠습니까?', '삭제');
         if (!confirmation.isConfirmed) return;
         markSaving('항목을 삭제하는 중입니다.');
@@ -1011,6 +1231,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
             await taxInvoiceListService.deleteIssue(id);
             const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
             setIssues(renumbered);
+            setSavedIssues(renumbered);
             setSelectedIds(prev => {
                 const next = new Set(prev);
                 next.delete(id);
@@ -1027,6 +1248,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
     const handleBulkDelete = async () => {
         if (selectedIds.size === 0) return;
+        if (hasPendingChanges) {
+            toast.warning('먼저 변경사항을 저장하거나 되돌려주세요.');
+            return;
+        }
         const confirmation = await showConfirmAlert(
             '선택 항목 삭제',
             `선택한 ${selectedIds.size}개의 항목을 모두 삭제하시겠습니까?`,
@@ -1042,6 +1267,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
             await taxInvoiceListService.deleteIssuesBatch(ids);
             const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
             setIssues(renumbered);
+            setSavedIssues(renumbered);
             setSelectedIds(new Set());
             markSaved(`${deleteCount}개 항목을 삭제했습니다.`);
             toast.success(`${deleteCount}개 항목을 삭제했습니다.`);
@@ -1074,27 +1300,133 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         });
     };
 
-    // ── Inline edit commit ──
+    const handleCopySelected = async () => {
+        if (selectedIssues.length === 0) {
+            toast.warning('복사할 항목을 선택해주세요.');
+            return;
+        }
+
+        const clipboardReservation = reserveImageClipboardWrite();
+        if (!clipboardReservation) {
+            toast.error('이 브라우저에서는 이미지 클립보드 복사를 지원하지 않습니다.');
+            return;
+        }
+
+        const captureRoot = createIssueCaptureTable(selectedIssues);
+        document.body.appendChild(captureRoot);
+        setIsCopyingSelection(true);
+        try {
+            await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+            if (document.fonts?.ready) await document.fonts.ready;
+
+            const captureWidth = Math.ceil(captureRoot.scrollWidth);
+            const captureHeight = Math.ceil(captureRoot.scrollHeight);
+            const canvas = await html2canvas(captureRoot, {
+                backgroundColor: '#ffffff',
+                scale: 2,
+                useCORS: true,
+                logging: false,
+                width: captureWidth,
+                height: captureHeight,
+                windowWidth: Math.max(document.documentElement.clientWidth, captureWidth),
+                windowHeight: Math.max(document.documentElement.clientHeight, captureHeight),
+                scrollX: 0,
+                scrollY: 0,
+                onclone: (clonedDocument: Document) => {
+                    const clonedRoot = clonedDocument.querySelector<HTMLElement>('[data-tax-invoice-capture-root="true"]');
+                    if (!clonedRoot) return;
+                    clonedRoot.style.position = 'absolute';
+                    clonedRoot.style.zIndex = '0';
+                },
+            } as any);
+
+            clipboardReservation.complete(await canvasToPngBlob(canvas));
+            await clipboardReservation.result;
+            toast.success(`선택한 ${selectedIssues.length}개 행을 이미지로 클립보드에 복사했습니다.`);
+        } catch (error) {
+            clipboardReservation.cancel(error);
+            await clipboardReservation.result.catch(() => undefined);
+            console.error('선택 항목 클립보드 복사 실패:', error);
+            toast.error('이미지를 클립보드에 복사하지 못했습니다. 브라우저 권한을 확인해주세요.');
+        } finally {
+            captureRoot.remove();
+            setIsCopyingSelection(false);
+        }
+    };
+
+    // ── Inline edit staging ──
     const handleCellCommit = async (
         id: string | undefined,
         field: EditableField,
         value: string | number | boolean
     ) => {
         if (!id) return;
-        setSaving(prev => new Set(prev).add(id));
-        markSaving('변경사항을 저장하는 중입니다.');
+        const savedIssue = savedIssues.find(issue => issue.id === id);
+        if (!savedIssue) return;
+
+        const update: Partial<TaxInvoiceIssue> = field === 'recipient'
+            ? {
+                recipient: String(value),
+                recipientManuallyEdited: String(value) === String(savedIssue.recipient ?? '')
+                    ? savedIssue.recipientManuallyEdited === true
+                    : true,
+            }
+            : { [field]: value };
+
+        setIssues(prev => prev.map(issue => issue.id === id ? { ...issue, ...update } : issue));
+        setPendingChanges(prev => {
+            const nextForRow: Partial<TaxInvoiceIssue> = { ...(prev[id] || {}), ...update };
+
+            Object.keys(nextForRow).forEach(key => {
+                const issueKey = key as keyof TaxInvoiceIssue;
+                if (nextForRow[issueKey] === savedIssue[issueKey]) {
+                    delete nextForRow[issueKey];
+                }
+            });
+
+            const next = { ...prev };
+            if (Object.keys(nextForRow).length === 0) delete next[id];
+            else next[id] = nextForRow;
+
+            const nextCount = Object.keys(next).length;
+            setSaveFeedback({
+                status: 'idle',
+                message: nextCount > 0 ? `저장 전 변경 ${nextCount}건` : '변경 후 저장 버튼을 눌러주세요',
+            });
+            return next;
+        });
+    };
+
+    const handleSavePendingChanges = async () => {
+        const updates = Object.entries(pendingChanges).map(([id, data]) => ({ id, data }));
+        if (updates.length === 0) return;
+
+        const changedIds = new Set(updates.map(({ id }) => id));
+        setSaving(changedIds);
+        markSaving(`${updates.length}개 항목의 변경사항을 저장하는 중입니다.`);
         try {
-            const update: Partial<TaxInvoiceIssue> = { [field]: value };
-            await taxInvoiceListService.updateIssue(id, update);
-            setIssues(prev => prev.map(i => i.id === id ? { ...i, [field]: value } : i));
-            markSaved('모든 변경사항이 저장되었습니다.');
+            await taxInvoiceListService.updateIssuesBatch(updates);
+            setSavedIssues(issues);
+            setPendingChanges({});
+            setShowPendingChanges(false);
+            markSaved(`${updates.length}개 항목의 변경사항을 저장했습니다.`);
+            toast.success(`${updates.length}개 항목의 변경사항을 저장했습니다.`);
         } catch (e) {
             console.error(e);
-            markSaveError('변경사항을 저장하지 못했습니다.');
+            markSaveError('변경사항을 저장하지 못했습니다. 검토 목록은 유지됩니다.');
             toast.error('변경사항 저장에 실패했습니다. 다시 시도해주세요.');
         } finally {
-            setSaving(prev => { const n = new Set(prev); n.delete(id); return n; });
+            setSaving(new Set());
         }
+    };
+
+    const handleDiscardPendingChanges = () => {
+        if (!hasPendingChanges) return;
+        setIssues(savedIssues);
+        setPendingChanges({});
+        setShowPendingChanges(false);
+        setSaveFeedback({ status: 'idle', message: '변경사항을 되돌렸습니다.' });
+        toast.info('저장 전 변경사항을 되돌렸습니다.');
     };
 
     // ── Status toggle ──
@@ -1127,6 +1459,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
     // ── Import sites as issues ──
     const handleImportSites = async (selected: SiteWorkSummary[]): Promise<boolean> => {
         if (selected.length === 0) return false;
+        if (hasPendingChanges) {
+            toast.warning('먼저 변경사항을 저장하거나 되돌려주세요.');
+            return false;
+        }
 
         markSaving(`${selected.length}개 현장을 발행리스트에 추가하는 중입니다.`);
         const startNo = issues.length;
@@ -1167,6 +1503,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
             if (added.length > 0) {
                 const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
                 setIssues(renumbered);
+                setSavedIssues(renumbered);
             }
         } catch (e) {
             console.error('현장 데이터 순번 정리 실패:', e);
@@ -1193,6 +1530,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
     const handleImportDeferredIssues = async (selected: TaxInvoiceIssue[]) => {
         const importTargets = selected.filter(issue => !importedCarryoverKeys.has(getCarryoverSourceKey(issue)));
         if (importTargets.length === 0) return;
+        if (hasPendingChanges) {
+            toast.warning('먼저 변경사항을 저장하거나 되돌려주세요.');
+            return;
+        }
 
         setLoading(true);
         markSaving(`${importTargets.length}개 이월 현장을 추가하는 중입니다.`);
@@ -1210,6 +1551,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                 isNew: getIssueTypeLabel(source.isNew),
                 issueDate: getCarryoverIssueDate(source, monthEndDate),
                 recipient: source.recipient || '',
+                recipientManuallyEdited: source.recipientManuallyEdited === true,
                 item: source.item || '',
                 supplyAmount: Number(source.supplyAmount) || 0,
                 note: source.note || siteName,
@@ -1239,6 +1581,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
             if (added.length > 0) {
                 const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
                 setIssues(renumbered);
+                setSavedIssues(renumbered);
             }
             if (failedCount > 0) {
                 markSaveError(`${added.length}건 추가, ${failedCount}건 실패했습니다.`);
@@ -1336,6 +1679,50 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         + (globalSearch.trim() ? 1 : 0);
     const allFilteredSelected = filteredIssues.length > 0
         && filteredIssues.every(issue => Boolean(issue.id) && selectedIds.has(issue.id as string));
+    const selectedIssues = useMemo(() => (
+        issues
+            .filter(issue => Boolean(issue.id) && selectedIds.has(issue.id as string))
+            .sort(sortMode === 'team' ? compareIssuesByTeam : compareIssuesByNo)
+    ), [issues, selectedIds, sortMode]);
+    const pendingChangeItems = useMemo(() => {
+        const formatValue = (field: string, value: unknown) => {
+            if (field === 'issueStatus') {
+                return STATUS_CONFIG[value as IssueStatus]?.label ?? String(value ?? '');
+            }
+            if (field === 'scanCompleted') return value ? '완료' : '미완료';
+            if (typeof value === 'number') return value.toLocaleString('ko-KR');
+            return String(value ?? '') || '(빈 셀)';
+        };
+
+        return Object.entries(pendingChanges).flatMap(([id, changes]) => {
+            const current = issues.find(issue => issue.id === id);
+            const saved = savedIssues.find(issue => issue.id === id);
+            if (!current || !saved) return [];
+
+            return Object.keys(changes)
+                .filter(field => field !== 'recipientManuallyEdited')
+                .map(field => {
+                    const issueField = field as keyof TaxInvoiceIssue;
+                    return {
+                        key: `${id}-${field}`,
+                        no: current.no,
+                        label: COLUMN_FILTER_LABELS[field] ?? field,
+                        before: formatValue(field, saved[issueField]),
+                        after: formatValue(field, current[issueField]),
+                    };
+                });
+        });
+    }, [issues, pendingChanges, savedIssues]);
+
+    useEffect(() => {
+        if (!hasPendingChanges) return;
+        const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+            event.preventDefault();
+            event.returnValue = '';
+        };
+        window.addEventListener('beforeunload', warnBeforeUnload);
+        return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+    }, [hasPendingChanges]);
     const saveFeedbackClass = {
         idle: 'border-slate-200 bg-white text-slate-500',
         saving: 'border-indigo-200 bg-indigo-50 text-indigo-700',
@@ -1409,6 +1796,36 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
                         <button
                             type="button"
+                            onClick={() => setShowPendingChanges(prev => !prev)}
+                            disabled={!hasPendingChanges}
+                            aria-expanded={showPendingChanges}
+                            className="flex min-h-10 items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-800 transition-all hover:bg-amber-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                        >
+                            변경 검토 ({pendingChangeItems.length})
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={handleDiscardPendingChanges}
+                            disabled={!hasPendingChanges || saveFeedback.status === 'saving'}
+                            className="flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 transition-all hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                            <FontAwesomeIcon icon={faArrowRotateLeft} />
+                            되돌리기
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={handleSavePendingChanges}
+                            disabled={!hasPendingChanges || saveFeedback.status === 'saving'}
+                            className="flex min-h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white shadow-sm transition-all hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300"
+                        >
+                            <FontAwesomeIcon icon={faFloppyDisk} />
+                            변경사항 저장 ({pendingRowCount})
+                        </button>
+
+                        <button
+                            type="button"
                             onClick={handleLoadSites}
                             disabled={loadingSites}
                             className="flex min-h-10 items-center gap-2 rounded-xl bg-slate-700 px-4 py-2 text-sm font-bold text-white shadow-sm transition-all hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
@@ -1439,6 +1856,18 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                         {selectedIds.size > 0 && (
                             <button
                                 type="button"
+                                onClick={handleCopySelected}
+                                disabled={isCopyingSelection}
+                                className="flex min-h-10 items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-bold text-indigo-700 transition-all hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 active:scale-95 disabled:cursor-wait disabled:opacity-60"
+                            >
+                                <FontAwesomeIcon icon={isCopyingSelection ? faRotateRight : faCopy} className={isCopyingSelection ? 'animate-spin' : ''} />
+                                {isCopyingSelection ? '이미지 생성 중...' : `선택 이미지 복사 (${selectedIssues.length})`}
+                            </button>
+                        )}
+
+                        {selectedIds.size > 0 && (
+                            <button
+                                type="button"
                                 onClick={handleBulkDelete}
                                 className="flex min-h-10 items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-600 transition-all hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 active:scale-95"
                             >
@@ -1449,10 +1878,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
                         <button
                             type="button"
-                            onClick={() => {
-                                loadIssues();
-                                loadPreviousDeferredSites();
-                            }}
+                            onClick={handleRefresh}
                             disabled={loading || loadingDeferredSites}
                             className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-all hover:border-indigo-200 hover:text-indigo-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
                             title="목록 새로고침"
@@ -1462,6 +1888,42 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                         </button>
                     </div>
                 </div>
+
+                {showPendingChanges && hasPendingChanges && (
+                    <div className="overflow-hidden rounded-2xl border border-amber-200 bg-amber-50 shadow-sm">
+                        <div className="flex items-center justify-between border-b border-amber-200 px-4 py-3">
+                            <div>
+                                <h2 className="text-sm font-black text-amber-950">저장 전 변경사항</h2>
+                                <p className="mt-0.5 text-xs font-medium text-amber-800">아래 내용을 확인한 뒤 ‘변경사항 저장’을 눌러야 실제 목록에 반영됩니다.</p>
+                            </div>
+                            <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-amber-800 ring-1 ring-amber-200">
+                                {pendingRowCount}개 항목 · {pendingChangeItems.length}개 셀
+                            </span>
+                        </div>
+                        <div className="max-h-52 overflow-auto bg-white">
+                            <table className="w-full text-left text-xs">
+                                <thead className="sticky top-0 bg-slate-100 text-slate-600">
+                                    <tr>
+                                        <th className="px-4 py-2 font-black">No</th>
+                                        <th className="px-4 py-2 font-black">항목</th>
+                                        <th className="px-4 py-2 font-black">변경 전</th>
+                                        <th className="px-4 py-2 font-black">변경 후</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {pendingChangeItems.map(item => (
+                                        <tr key={item.key}>
+                                            <td className="px-4 py-2 font-black text-slate-700">{item.no}</td>
+                                            <td className="px-4 py-2 font-bold text-slate-700">{item.label}</td>
+                                            <td className="max-w-xs truncate px-4 py-2 text-slate-500" title={item.before}>{item.before}</td>
+                                            <td className="max-w-xs truncate bg-amber-50 px-4 py-2 font-bold text-amber-950" title={item.after}>{item.after}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
 
                 <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:flex-row xl:items-center xl:justify-between">
                     <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">

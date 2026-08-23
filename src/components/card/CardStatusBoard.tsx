@@ -29,6 +29,7 @@ interface CardStatusBoardProps {
     onBillingTargetAssign?: (card: Card) => void;
     onCancelUse: (card: Card) => void;
     onRestoreUse: (card: Card) => void;
+    restoringCardId?: string | null;
 }
 
 type CardStatusFilter = 'work' | 'active' | 'all' | 'ASSIGNED' | 'AVAILABLE' | 'inactive';
@@ -73,7 +74,7 @@ const compareTeamThenCard = (leftTeam: string, rightTeam: string, leftName: stri
     return normalizeKey(leftName).localeCompare(normalizeKey(rightName), 'ko-KR');
 };
 
-export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams = [], loading, onEdit, onAssign, onBillingTargetAssign, onCancelUse, onRestoreUse }) => {
+export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams = [], loading, onEdit, onAssign, onBillingTargetAssign, onCancelUse, onRestoreUse, restoringCardId = null }) => {
     const [viewMode, setViewMode] = useState<'list' | 'card'>(getInitialViewMode);
     const [statusFilter, setStatusFilter] = useState<CardStatusFilter>('active');
     const [workers, setWorkers] = useState<Worker[]>([]);
@@ -669,8 +670,9 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                 {card.currentAssigneeName ? (
                                                     <button
                                                         type="button"
-                                                        onClick={(e) => { e.stopPropagation(); onAssign(card); }}
-                                                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold transition-transform hover:-translate-y-0.5"
+                                                        onClick={(e) => { e.stopPropagation(); if (!isInactiveCard) onAssign(card); }}
+                                                        disabled={isInactiveCard}
+                                                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
                                                           style={tc ? {
                                                               backgroundColor: tc,
                                                               color: tcText,
@@ -694,8 +696,9 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                     </button>
                                                 ) : (
                                                     <button
-                                                        onClick={(e) => { e.stopPropagation(); onAssign(card); }}
-                                                        className="px-2 py-1 rounded-md text-xs font-bold bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-100 transition-colors flex items-center gap-1"
+                                                        onClick={(e) => { e.stopPropagation(); if (!isInactiveCard) onAssign(card); }}
+                                                        disabled={isInactiveCard}
+                                                        className="px-2 py-1 rounded-md text-xs font-bold bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-100 transition-colors flex items-center gap-1 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                                                     >
                                                         <FontAwesomeIcon icon={faPlus} className="text-[10px]" />
                                                         배정/청구
@@ -708,9 +711,9 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                         type="button"
                                                         onClick={(e) => {
                                                             e.stopPropagation();
-                                                            onBillingTargetAssign?.(card);
+                                                            if (!isInactiveCard) onBillingTargetAssign?.(card);
                                                         }}
-                                                        disabled={!onBillingTargetAssign}
+                                                        disabled={isInactiveCard || !onBillingTargetAssign}
                                                         className="inline-flex max-w-[180px] items-center gap-1.5 rounded-md px-2 py-1 text-xs font-bold transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
                                                         style={getTargetBadgeStyle(billingTargetType, billingTargetTeamInfo)}
                                                         title={`${hasExplicitBillingTarget ? '배정자와 다른 청구대상' : billingTargetTypeLabel} · ${billingTargetName} · 청구대상 설정에서 이력 확인`}
@@ -749,25 +752,28 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                     >
                                                         <FontAwesomeIcon icon={faPenToSquare} className="text-xs" />
                                                     </button>
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); onAssign(card); }}
-                                                        className="inline-flex h-7 items-center justify-center gap-1 rounded-md bg-indigo-50 px-2 text-xs font-bold text-indigo-600 transition-colors hover:bg-indigo-100"
-                                                        aria-label={`배정/청구 설정: ${card.name}`}
-                                                        title="배정/청구 설정"
-                                                    >
-                                                        <FontAwesomeIcon icon={card.currentAssigneeType === 'TEAM' ? faUsers : faUser} className="text-xs" />
-                                                        <span>배정/청구</span>
-                                                    </button>
-                                                    {isInactiveCard ? (
+                                                    {!isInactiveCard && (
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); onAssign(card); }}
+                                                            className="inline-flex h-7 items-center justify-center gap-1 rounded-md bg-indigo-50 px-2 text-xs font-bold text-indigo-600 transition-colors hover:bg-indigo-100"
+                                                            aria-label={`배정/청구 설정: ${card.name}`}
+                                                            title="배정/청구 설정"
+                                                        >
+                                                            <FontAwesomeIcon icon={card.currentAssigneeType === 'TEAM' ? faUsers : faUser} className="text-xs" />
+                                                            <span>배정/청구</span>
+                                                        </button>
+                                                    )}
+                                                    {card.status === 'SUSPENDED' ? (
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); onRestoreUse(card); }}
-                                                            className="w-7 h-7 rounded-md bg-emerald-50 hover:bg-emerald-100 flex items-center justify-center text-emerald-600 hover:text-emerald-700 transition-colors"
-                                                            aria-label={`카드 처리취소: ${card.name}`}
-                                                            title="처리취소"
+                                                            disabled={Boolean(restoringCardId)}
+                                                            className="w-7 h-7 rounded-md bg-emerald-50 hover:bg-emerald-100 flex items-center justify-center text-emerald-600 hover:text-emerald-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                                                            aria-label={`카드 정지 해제: ${card.name}`}
+                                                            title="카드 정지 해제"
                                                         >
-                                                            <FontAwesomeIcon icon={faRotateLeft} className="text-xs" />
+                                                            <FontAwesomeIcon icon={faRotateLeft} spin={restoringCardId === card.id} className="text-xs" />
                                                         </button>
-                                                    ) : (
+                                                    ) : card.status === 'CLOSED' ? null : (
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); onCancelUse(card); }}
                                                             className="w-7 h-7 rounded-md bg-slate-50 hover:bg-amber-50 flex items-center justify-center text-slate-400 hover:text-amber-600 transition-colors"
@@ -847,31 +853,34 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                              >
                                                 <FontAwesomeIcon icon={faPenToSquare} className="text-xs" />
                                             </button>
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onAssign(card);
-                                                }}
-                                                 className="inline-flex h-8 items-center justify-center gap-1.5 rounded-full bg-indigo-50 px-3 text-xs font-bold text-indigo-600 transition-colors hover:bg-indigo-100"
-                                                 aria-label={`배정/청구 설정: ${card.name}`}
-                                                 title="배정/청구 설정"
-                                             >
-                                                <FontAwesomeIcon icon={card.currentAssigneeType === 'TEAM' ? faUsers : faUser} className="text-xs" />
-                                                <span>설정</span>
-                                            </button>
-                                            {isInactiveCard ? (
+                                            {!isInactiveCard && (
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        onAssign(card);
+                                                    }}
+                                                     className="inline-flex h-8 items-center justify-center gap-1.5 rounded-full bg-indigo-50 px-3 text-xs font-bold text-indigo-600 transition-colors hover:bg-indigo-100"
+                                                     aria-label={`배정/청구 설정: ${card.name}`}
+                                                     title="배정/청구 설정"
+                                                 >
+                                                    <FontAwesomeIcon icon={card.currentAssigneeType === 'TEAM' ? faUsers : faUser} className="text-xs" />
+                                                    <span>설정</span>
+                                                </button>
+                                            )}
+                                            {card.status === 'SUSPENDED' ? (
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         onRestoreUse(card);
                                                     }}
-                                                    className="w-8 h-8 rounded-full bg-emerald-50 hover:bg-emerald-100 flex items-center justify-center text-emerald-600 hover:text-emerald-700 transition-colors"
-                                                    aria-label={`카드 처리취소: ${card.name}`}
-                                                    title="처리취소"
+                                                    disabled={Boolean(restoringCardId)}
+                                                    className="w-8 h-8 rounded-full bg-emerald-50 hover:bg-emerald-100 flex items-center justify-center text-emerald-600 hover:text-emerald-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                                                    aria-label={`카드 정지 해제: ${card.name}`}
+                                                    title="카드 정지 해제"
                                                 >
-                                                    <FontAwesomeIcon icon={faRotateLeft} className="text-xs" />
+                                                    <FontAwesomeIcon icon={faRotateLeft} spin={restoringCardId === card.id} className="text-xs" />
                                                 </button>
-                                            ) : (
+                                            ) : card.status === 'CLOSED' ? null : (
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -892,8 +901,9 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                         <div className="mb-3">
                                             <button
                                                 type="button"
-                                                onClick={(e) => { e.stopPropagation(); onAssign(card); }}
-                                                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-transform hover:-translate-y-0.5"
+                                                onClick={(e) => { e.stopPropagation(); if (!isInactiveCard) onAssign(card); }}
+                                                disabled={isInactiveCard}
+                                                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
                                                   style={tc ? {
                                                       backgroundColor: tc,
                                                       color: tcText,
@@ -947,9 +957,9 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                     type="button"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        onBillingTargetAssign?.(card);
+                                                        if (!isInactiveCard) onBillingTargetAssign?.(card);
                                                     }}
-                                                    disabled={!onBillingTargetAssign}
+                                                    disabled={isInactiveCard || !onBillingTargetAssign}
                                                     className="inline-flex min-w-0 items-center gap-1.5 rounded px-2 py-0.5 text-xs font-bold transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
                                                     style={getTargetBadgeStyle(billingTargetType, billingTargetTeamInfo)}
                                                     title={`${hasExplicitBillingTarget ? '배정자와 다른 청구대상' : billingTargetTypeLabel} · ${billingTargetName} · 청구대상 설정에서 이력 확인`}
@@ -985,8 +995,9 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                     {!card.currentAssigneeName && (
                                         <div className="mt-3 pt-3 border-t border-dashed border-slate-100 flex justify-center">
                                             <button
-                                                onClick={(e) => { e.stopPropagation(); onAssign(card); }}
-                                                className="w-full py-2 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors flex items-center justify-center gap-1.5"
+                                            onClick={(e) => { e.stopPropagation(); if (!isInactiveCard) onAssign(card); }}
+                                            disabled={isInactiveCard}
+                                            className="w-full py-2 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors flex items-center justify-center gap-1.5 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                                             >
                                                 <FontAwesomeIcon icon={faPlus} />
                                                 배정/청구 설정

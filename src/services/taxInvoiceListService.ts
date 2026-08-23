@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { TaxInvoiceIssue, SiteWorkSummary } from '../types/taxInvoiceList';
+import { syncIssueRecipientFromSite } from '../utils/taxInvoiceIssueRecipient';
 
 const COLLECTION_NAME = 'tax_invoice_issues';
 const BATCH_WRITE_LIMIT = 450;
@@ -162,9 +163,7 @@ const syncIssueRecipientsWithCurrentSites = async (issues: TaxInvoiceIssue[]): P
     const normalized = issues.map((issue) => {
         const site = findSiteFromLookup(siteLookup, issue.siteId, issue.siteName || issue.note);
         const currentRecipient = resolveCurrentSiteCompanyName(site, normalizeText(issue.siteType), normalizeText(issue.recipient), companyLookup);
-        return currentRecipient && currentRecipient !== issue.recipient
-            ? { ...issue, recipient: currentRecipient }
-            : issue;
+        return syncIssueRecipientFromSite(issue, currentRecipient);
     });
 
     let batch = writeBatch(db);
@@ -296,6 +295,21 @@ export const taxInvoiceListService = {
             ...data,
             updatedAt: serverTimestamp(),
         });
+    },
+
+    async updateIssuesBatch(
+        updates: Array<{ id: string; data: Partial<TaxInvoiceIssue> }>
+    ): Promise<void> {
+        for (let start = 0; start < updates.length; start += BATCH_WRITE_LIMIT) {
+            const batch = writeBatch(db);
+            updates.slice(start, start + BATCH_WRITE_LIMIT).forEach(({ id, data }) => {
+                batch.update(doc(db, COLLECTION_NAME, id), {
+                    ...data,
+                    updatedAt: serverTimestamp(),
+                });
+            });
+            await batch.commit();
+        }
     },
 
     async deleteIssue(id: string): Promise<void> {

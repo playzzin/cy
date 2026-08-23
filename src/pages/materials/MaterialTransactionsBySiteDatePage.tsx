@@ -1020,23 +1020,23 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                                                                                         <table className="w-full min-w-[1480px] text-sm">
                                                                                             <thead className="bg-slate-50 text-xs font-black text-slate-500">
                                                                                                 <tr>
-                                                                                                    <th className="px-4 py-3 text-center">구분</th>
-                                                                                                    <th className="px-4 py-3 text-left">품명</th>
-                                                                                                    <th className="px-4 py-3 text-left">규격</th>
-                                                                                                    <th className="px-4 py-3 text-right">입고</th>
-                                                                                                    <th className="px-4 py-3 text-right">출고</th>
-                                                                                                    <th className="px-4 py-3 text-center">단위</th>
-                                                                                                    <th className="px-4 py-3 text-left">차량번호</th>
-                                                                                                    <th className="px-4 py-3 text-left">입고처/출고자</th>
-                                                                                                    <th className="px-4 py-3 text-left">임대사</th>
-                                                                                                    <th className="px-4 py-3 text-center">사진</th>
-                                                                                                    <th className="px-4 py-3 text-left">비고</th>
+                                                                                                    <th className="px-4 py-2 text-center">구분</th>
+                                                                                                    <th className="px-4 py-2 text-left">품명</th>
+                                                                                                    <th className="px-4 py-2 text-left">규격</th>
+                                                                                                    <th className="px-4 py-2 text-right">입고</th>
+                                                                                                    <th className="px-4 py-2 text-right">출고</th>
+                                                                                                    <th className="px-4 py-2 text-center">단위</th>
+                                                                                                    <th className="px-4 py-2 text-left">차량번호</th>
+                                                                                                    <th className="px-4 py-2 text-left">입고처/출고자</th>
+                                                                                                    <th className="px-4 py-2 text-left">임대사</th>
+                                                                                                    <th className="px-4 py-2 text-center">사진</th>
+                                                                                                    <th className="px-4 py-2 text-left">비고</th>
                                                                                                 </tr>
                                                                                             </thead>
                                                                                             <tbody className="divide-y divide-slate-100">
                                                                                                 {dateGroup.rows.map((tx) => (
                                                                                                     <tr key={`${tx.type}-${tx.id}`} className="hover:bg-slate-50">
-                                                                                                        <td className="px-4 py-2.5 text-center">
+                                                                                                        <td className="px-4 py-1.5 text-center">
                                                                                                             <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-black ${
                                                                                                                 tx.type === 'inbound'
                                                                                                                     ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
@@ -1046,16 +1046,16 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                                                                                                                 {tx.type === 'inbound' ? '입고' : '출고'}
                                                                                                             </span>
                                                                                                         </td>
-                                                                                                        <td className="px-4 py-2.5 font-bold text-slate-900">{tx.itemName || '-'}</td>
-                                                                                                        <td className="px-4 py-2.5 text-slate-600">{tx.spec || '-'}</td>
-                                                                                                        <td className="px-4 py-2.5 text-right font-black text-emerald-700">
+                                                                                                        <td className="px-4 py-1.5 font-bold text-slate-900">{tx.itemName || '-'}</td>
+                                                                                                        <td className="px-4 py-1.5 text-slate-600">{tx.spec || '-'}</td>
+                                                                                                        <td className="px-4 py-1.5 text-right font-black text-emerald-700">
                                                                                                             {tx.type === 'inbound' ? formatQuantity(tx.quantity) : '-'}
                                                                                                         </td>
-                                                                                                        <td className="px-4 py-2.5 text-right font-black text-orange-700">
+                                                                                                        <td className="px-4 py-1.5 text-right font-black text-orange-700">
                                                                                                             {tx.type === 'outbound' ? formatQuantity(tx.quantity) : '-'}
                                                                                                         </td>
-                                                                                                        <td className="px-4 py-2.5 text-center text-slate-500">{tx.unit || '-'}</td>
-                                                                                                        <td className="px-4 py-2.5 text-slate-600">
+                                                                                                        <td className="px-4 py-1.5 text-center text-slate-500">{tx.unit || '-'}</td>
+                                                                                                        <td className="px-4 py-1.5 text-slate-600">
                                                                                                             {trimText(tx.vehicleNumber) ? (
                                                                                                                 <span className="inline-flex items-center gap-1.5 rounded bg-slate-100 px-2 py-1 font-mono text-xs font-bold text-slate-600">
                                                                                                                     <FontAwesomeIcon icon={faTruck} className="text-slate-400" />
@@ -1065,9 +1065,9 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                                                                                                                 <span className="text-slate-300">-</span>
                                                                                                             )}
                                                                                                         </td>
-                                                                                                        <td className="px-4 py-2.5 text-slate-600">{getCounterparty(tx) || '-'}</td>
-                                                                                                        <td className="px-4 py-2.5 text-slate-600">{getRentalRowText(tx)}</td>
-                                                                                                        <td className="px-4 py-2.5 text-center">
+                                                                                                        <td className="px-4 py-1.5 text-slate-600">{getCounterparty(tx) || '-'}</td>
+                                                                                                        <td className="px-4 py-1.5 text-slate-600">{getRentalRowText(tx)}</td>
+                                                                                                        <td className="px-4 py-1.5 text-center">
                                                                                                             {hasMaterialPhotoReference(tx) ? (
                                                                                                                 <button
                                                                                                                     type="button"
@@ -1084,7 +1084,7 @@ const MaterialTransactionsBySiteDatePage: React.FC = () => {
                                                                                                                 <span className="text-slate-300">-</span>
                                                                                                             )}
                                                                                                         </td>
-                                                                                                        <td className="max-w-md whitespace-pre-wrap break-words px-4 py-2.5 text-slate-500">
+                                                                                                        <td className="max-w-md whitespace-pre-wrap break-words px-4 py-1.5 text-slate-500">
                                                                                                             {tx.notes || '-'}
                                                                                                         </td>
                                                                                                     </tr>

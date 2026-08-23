@@ -437,7 +437,7 @@ export const CardStatementImportModal: React.FC<CardStatementImportModalProps> =
               KB Card Statement Import
             </div>
             <h2 className="mt-1 text-xl font-black text-slate-900">국민은행 카드 청구 PDF 일괄등록</h2>
-            <p className="mt-1 text-sm font-medium text-slate-500">{yearMonth} 월 원장에 반영할 청구 PDF를 분석합니다.</p>
+            <p className="mt-1 text-sm font-medium text-slate-500">{yearMonth} 월 원장에 금액과 PDF를 함께 임시저장합니다.</p>
           </div>
           <button
             type="button"
@@ -807,7 +807,7 @@ export const CardStatementImportModal: React.FC<CardStatementImportModalProps> =
               ? `분석 진행 중 ${processedFileCount.toLocaleString('ko-KR')} / ${totalFileCount.toLocaleString('ko-KR')}개`
               : step === 'review' && summary.needsReviewCount > 0
               ? `저장 전 확인 필요 항목 ${summary.needsReviewCount.toLocaleString('ko-KR')}건`
-              : 'AI 분석 결과는 검수 후 저장 단계에서 원장에 반영됩니다.'}
+              : '금액과 PDF만 임시저장되며, 청구처리는 카드 원장에서 직접 진행합니다.'}
           </div>
           <div className="flex flex-wrap justify-end gap-2">
             {step === 'review' && (
@@ -845,10 +845,10 @@ export const CardStatementImportModal: React.FC<CardStatementImportModalProps> =
                 onClick={() => void handleCommit()}
                 disabled={actionBusy || !payload?.job?.id || summary.needsReviewCount > 0 || activeResults.length === 0}
                 className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-extrabold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                title={summary.needsReviewCount > 0 ? '확인 필요 항목을 먼저 매칭하거나 제외하세요.' : '검수 완료 결과를 카드 원장에 반영합니다.'}
+                title={summary.needsReviewCount > 0 ? '확인 필요 항목을 먼저 매칭하거나 제외하세요.' : '금액과 PDF를 원장에 임시저장합니다. 청구처리는 실행하지 않습니다.'}
               >
                 <FontAwesomeIcon icon={faCheckCircle} />
-                {processing ? '반영 중...' : '원장 반영'}
+                {processing ? '저장 중...' : '금액·PDF 임시저장'}
               </button>
             )}
           </div>

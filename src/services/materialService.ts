@@ -85,6 +85,11 @@ const trimText = (value: unknown): string => String(value ?? '').trim();
 
 const normalizeSpaces = (value: unknown): string => trimText(value).replace(/\s+/g, ' ');
 
+const normalizeMaterialDescription = (value: unknown): string => {
+    const description = trimText(value);
+    return description === 'Excel 기본 자재' ? '' : description;
+};
+
 const compactKeyPart = (value: unknown): string => normalizeSpaces(value).replace(/\s+/g, '').toLowerCase();
 
 const normalizeMaterialCategory = (value: unknown): string => {
@@ -161,7 +166,7 @@ const createCatalogMaterials = (): Material[] => {
                 spec,
                 unit: group.unit || 'EA',
                 safetyStock: 0,
-                description: 'Excel 기본 자재',
+                description: '',
                 isActive: true,
                 isCatalogDefault: true,
             } as Material;
@@ -192,6 +197,7 @@ const normalizeMaterialForSelection = (material: Material): Material => {
         itemName: normalizeSpaces(material.itemName),
         spec: normalizeSpaces(material.spec),
         unit: normalizeSpaces(material.unit) || 'EA',
+        description: normalizeMaterialDescription(material.description),
     };
     return {
         ...normalized,

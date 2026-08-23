@@ -21,7 +21,10 @@ import { teamService } from './teamService';
 import { vehicleBillingService } from './vehicleBillingService';
 import { vehicleService } from './vehicleService';
 import { isSupportBillingMonthEnabled } from '../utils/supportBillingPeriod';
-import { selectPreferredSettlementBillings } from '../utils/supportSettlementBilling';
+import {
+  getSettlementBillingRowScopeKey,
+  selectPreferredSettlementBillings
+} from '../utils/supportSettlementBilling';
 import {
   TeamSettlementDocumentSchema,
   type TeamSettlementAdditionItem,
@@ -31,8 +34,25 @@ import {
   type TeamSettlementSalesItem
 } from '../types/teamSettlement';
 import type { TeamExpenseClaim, TeamExpenseClaimCategory } from '../types/teamExpenseLedger';
+import { resolveHistoricalResponsibleTeam } from '../utils/dailyReportHistoricalSite';
+import {
+  DEFAULT_SUPPORT_UNIT_PRICE,
+  hasSupportRateOverrides,
+  mergeSupportRateOverridePatch,
+  normalizeSupportRateOverrides,
+  type SupportMonthlyRateOverridePatch,
+  type SupportMonthlyRateOverrides
+} from '../utils/teamSettlementSupportRateOverrides';
+import { getTeamSettlementConfirmationIssues } from '../utils/teamSettlementDraft';
+
+export type {
+  SupportMonthlyRateOverridePatch,
+  SupportMonthlyRateOverrides
+} from '../utils/teamSettlementSupportRateOverrides';
 
 const SYSTEM_CONFIG_ID_PREFIX = 'team_settlement_';
+const TEAM_DISPLAY_ORDER_CONFIG_ID = 'team_settlement_team_display_order_v1';
+const SUPPORT_RATE_OVERRIDE_CONFIG_ID_PREFIX = 'team_settlement_support_rate_overrides_v1_';
 
 export type TeamSettlementSupportDirection = '내부지원간곳' | '내부지원온곳' | '외부지원간곳' | '외부지원온곳';
 
@@ -87,17 +107,6 @@ const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 
 const SUPPORT_RATE_OVERRIDE_STORAGE_PREFIX = 'support-team-payment-rate-overrides-v1';
 
-type SupportMonthlyRateOverrides = {
-  bulkSupportRate?: number;
-  bulkRate?: number;
-  supportTeamRates: Record<string, number>;
-  supportAggregateRates: Record<string, number>;
-  supportSiteRates: Record<string, number>;
-  teamRates: Record<string, number>;
-  aggregateRates: Record<string, number>;
-  siteRates: Record<string, number>;
-};
-
 const normalizeSupportIdentity = (value: unknown): string =>
   String(value ?? '').replace(/\(.*?\)/g, '').replace(/\s+/g, '').trim();
 
@@ -116,8 +125,6 @@ const toPositiveRate = (value: unknown): number | null => {
 
 const calculateSupportLaborAmount = (manDay: number, supportUnitPrice: number): number =>
   Math.round(Math.max(0, manDay) * Math.max(0, Math.round(supportUnitPrice)));
-
-const DEFAULT_SUPPORT_UNIT_PRICE = 230000;
 const CHEONGYEON_COMPANY_NAME_KEYS = [normalizeSupportIdentity('청연이엔지'), normalizeSupportIdentity('청연')].filter(Boolean);
 
 const isCheongyeonCompanyName = (value?: string | null): boolean => {
@@ -149,29 +156,7 @@ const isSameTeamIdentity = (
   return leftKeys.length > 0 && rightKeys.length > 0 && leftKeys.some((key) => rightKeys.includes(key));
 };
 
-const normalizeSupportRateOverrides = (value: Partial<SupportMonthlyRateOverrides> | undefined): SupportMonthlyRateOverrides => {
-  const normalizeRateMap = (raw: unknown): Record<string, number> => {
-    if (!raw || typeof raw !== 'object') return {};
-    return Object.entries(raw as Record<string, unknown>).reduce<Record<string, number>>((acc, [key, rate]) => {
-      const parsed = toPositiveRate(rate);
-      if (parsed) acc[key] = parsed;
-      return acc;
-    }, {});
-  };
-
-  return {
-    bulkSupportRate: toPositiveRate(value?.bulkSupportRate) ?? undefined,
-    bulkRate: toPositiveRate(value?.bulkRate) ?? undefined,
-    supportTeamRates: normalizeRateMap(value?.supportTeamRates),
-    supportAggregateRates: normalizeRateMap(value?.supportAggregateRates),
-    supportSiteRates: normalizeRateMap(value?.supportSiteRates),
-    teamRates: normalizeRateMap(value?.teamRates),
-    aggregateRates: normalizeRateMap(value?.aggregateRates),
-    siteRates: normalizeRateMap(value?.siteRates)
-  };
-};
-
-const loadSupportRateOverrides = (yearMonth: string): SupportMonthlyRateOverrides => {
+const loadLocalSupportRateOverrides = (yearMonth: string): SupportMonthlyRateOverrides => {
   if (typeof window === 'undefined' || !yearMonth) return normalizeSupportRateOverrides(undefined);
   try {
     const raw = window.localStorage.getItem(getSupportRateOverrideStorageKey(yearMonth));
@@ -181,6 +166,9 @@ const loadSupportRateOverrides = (yearMonth: string): SupportMonthlyRateOverride
     return normalizeSupportRateOverrides(undefined);
   }
 };
+
+const getSupportRateOverrideConfigId = (yearMonth: string): string =>
+  `${SUPPORT_RATE_OVERRIDE_CONFIG_ID_PREFIX}${yearMonth}`;
 
 const getSupportSettlementMergeKey = (direction: string, settlementTeamId?: string, settlementTeamName?: string): string => [
   direction,
@@ -310,10 +298,78 @@ const addDays = (date: Date, days: number): Date => {
 
 const selectPreferredTeamBillings = <T extends { status?: unknown }>(
   docs: T[],
-  additionalPosted?: (doc: T) => boolean
+  additionalPosted?: (doc: T) => boolean,
+  getGroupKey?: (doc: T) => unknown,
+  getScopeKey?: (doc: T) => unknown
 ): T[] => {
-  return selectPreferredSettlementBillings(docs, additionalPosted);
+  return selectPreferredSettlementBillings(docs, additionalPosted, getGroupKey, getScopeKey);
 };
+
+const normalizeBillingIdentityPart = (value: unknown): string => (
+  String(value ?? '').trim().toLowerCase().replace(/\s+/g, '')
+);
+
+const firstBillingIdentityPart = (...values: unknown[]): string => {
+  for (const value of values) {
+    const normalized = normalizeBillingIdentityPart(value);
+    if (normalized) return normalized;
+  }
+  return '';
+};
+
+const getBillingRecipientIdentity = (doc: {
+  teamId?: unknown;
+  assignedTeamId?: unknown;
+  teamName?: unknown;
+  assignedTeamName?: unknown;
+  issuedToType?: unknown;
+  issuedToWorkerId?: unknown;
+  issuedToWorkerName?: unknown;
+}): string => [
+  firstBillingIdentityPart(doc.teamName, doc.assignedTeamName, doc.teamId, doc.assignedTeamId),
+  normalizeBillingIdentityPart(doc.issuedToType),
+  firstBillingIdentityPart(doc.issuedToWorkerName, doc.issuedToWorkerId)
+].join('|');
+
+const getAccommodationSettlementBillingGroupKey = (doc: {
+  teamId?: unknown;
+  teamName?: unknown;
+  issuedToType?: unknown;
+  issuedToWorkerId?: unknown;
+  issuedToWorkerName?: unknown;
+}): string => `accommodation|${getBillingRecipientIdentity(doc)}`;
+
+const getVehicleSettlementBillingGroupKey = (doc: {
+  vehicleId?: unknown;
+  vehiclePlate?: unknown;
+  teamId?: unknown;
+  assignedTeamId?: unknown;
+  teamName?: unknown;
+  assignedTeamName?: unknown;
+  issuedToType?: unknown;
+  issuedToWorkerId?: unknown;
+  issuedToWorkerName?: unknown;
+}): string => [
+  'vehicle',
+  firstBillingIdentityPart(doc.vehiclePlate, doc.vehicleId),
+  getBillingRecipientIdentity(doc)
+].join('|');
+
+const getCardSettlementBillingGroupKey = (doc: {
+  cardId?: unknown;
+  cardLabel?: unknown;
+  teamId?: unknown;
+  assignedTeamId?: unknown;
+  teamName?: unknown;
+  assignedTeamName?: unknown;
+  issuedToType?: unknown;
+  issuedToWorkerId?: unknown;
+  issuedToWorkerName?: unknown;
+}): string => [
+  'card',
+  firstBillingIdentityPart(doc.cardLabel, doc.cardId),
+  getBillingRecipientIdentity(doc)
+].join('|');
 
 const allowUnconfirmedLedgerFallback = false;
 
@@ -480,7 +536,7 @@ const mergeAutoAndDraft = (params: { autoDoc: TeamSettlementDocument; savedDoc: 
   const { autoDoc, savedDoc } = params;
   if (!savedDoc) return autoDoc;
   if (savedDoc.confirmedAt) {
-    return mergeLatestSupportAutoLines({ baseDoc: stripSupportOriginalLines(savedDoc), autoDoc });
+    return stripSupportOriginalLines(savedDoc);
   }
 
   const savedSalesById = new Map(savedDoc.sales.map((x) => [x.id, x] as const));
@@ -524,6 +580,24 @@ const didUpdateSystemConfig = (value: unknown): boolean => {
   return data.systemConfig_update != null;
 };
 
+const upsertSystemConfigPayload = async (id: string, payload: string): Promise<void> => {
+  const updateVars: UpdateSystemConfigVariables = { id, data: payload };
+  const createVars: CreateSystemConfigVariables = { id, data: payload };
+
+  try {
+    const updateRes = await updateSystemConfig(updateVars);
+    if (!didUpdateSystemConfig(updateRes)) {
+      await createSystemConfig(createVars);
+    }
+  } catch {
+    try {
+      await createSystemConfig(createVars);
+    } catch {
+      await updateSystemConfig(updateVars);
+    }
+  }
+};
+
 const notifyTeamSettlementSystemMessage = async (
   event: 'teamSettlement.confirmed' | 'teamSettlement.unconfirmed',
   doc: TeamSettlementDocument
@@ -537,16 +611,103 @@ const notifyTeamSettlementSystemMessage = async (
 };
 
 export const teamSettlementService = {
+  async getSupportRateOverrides(yearMonth: string): Promise<SupportMonthlyRateOverrides> {
+    const normalizedYearMonth = String(yearMonth ?? '').trim();
+    if (!/^\d{4}-\d{2}$/.test(normalizedYearMonth)) {
+      return normalizeSupportRateOverrides(undefined);
+    }
+
+    const res = await listSystemConfigs();
+    const rows = extractSystemConfigRows(res);
+    const row = rows.find((item) => String(item.id ?? '') === getSupportRateOverrideConfigId(normalizedYearMonth));
+
+    if (typeof row?.data === 'string') {
+      const parsed = safeJsonParse<Partial<SupportMonthlyRateOverrides> & {
+        overrides?: Partial<SupportMonthlyRateOverrides>;
+      }>(row.data);
+      if (parsed) {
+        return normalizeSupportRateOverrides(parsed.overrides ?? parsed);
+      }
+    }
+
+    // 예전에 이 브라우저에만 저장된 단가는 서버 설정이 없는 달에 한 번 자동 이관한다.
+    const localOverrides = loadLocalSupportRateOverrides(normalizedYearMonth);
+    if (hasSupportRateOverrides(localOverrides)) {
+      await this.saveSupportRateOverrides(normalizedYearMonth, localOverrides);
+      return localOverrides;
+    }
+
+    return normalizeSupportRateOverrides(undefined);
+  },
+
+  async saveSupportRateOverrides(
+    yearMonth: string,
+    overrides: SupportMonthlyRateOverrides
+  ): Promise<SupportMonthlyRateOverrides> {
+    const normalizedYearMonth = String(yearMonth ?? '').trim();
+    if (!/^\d{4}-\d{2}$/.test(normalizedYearMonth)) {
+      throw new Error('지원단가 저장 월이 올바르지 않습니다.');
+    }
+
+    const normalized = normalizeSupportRateOverrides(overrides);
+    await upsertSystemConfigPayload(
+      getSupportRateOverrideConfigId(normalizedYearMonth),
+      JSON.stringify({
+        version: 1,
+        yearMonth: normalizedYearMonth,
+        overrides: normalized,
+        updatedAt: new Date().toISOString()
+      })
+    );
+    return normalized;
+  },
+
+  async saveSupportRateOverridePatch(
+    yearMonth: string,
+    patch: SupportMonthlyRateOverridePatch
+  ): Promise<SupportMonthlyRateOverrides> {
+    const current = await this.getSupportRateOverrides(yearMonth);
+    const next = mergeSupportRateOverridePatch(current, patch);
+    return this.saveSupportRateOverrides(yearMonth, next);
+  },
+
+  async getTeamDisplayOrder(): Promise<string[]> {
+    const res = await listSystemConfigs();
+    const rows = extractSystemConfigRows(res);
+    const row = rows.find((item) => String(item.id ?? '') === TEAM_DISPLAY_ORDER_CONFIG_ID);
+    const parsed = typeof row?.data === 'string'
+      ? safeJsonParse<{ teamIds?: unknown }>(row.data)
+      : null;
+    const teamIds = Array.isArray(parsed?.teamIds) ? parsed.teamIds : [];
+    return Array.from(new Set(teamIds.map((value) => String(value ?? '').trim()).filter(Boolean)));
+  },
+
+  async saveTeamDisplayOrder(teamIds: string[]): Promise<void> {
+    const normalizedTeamIds = Array.from(new Set(
+      teamIds.map((value) => String(value ?? '').trim()).filter(Boolean)
+    ));
+    await upsertSystemConfigPayload(TEAM_DISPLAY_ORDER_CONFIG_ID, JSON.stringify({
+      version: 1,
+      teamIds: normalizedTeamIds,
+      updatedAt: new Date().toISOString()
+    }));
+  },
+
+  async resetTeamDisplayOrder(): Promise<void> {
+    await this.saveTeamDisplayOrder([]);
+  },
+
   async getSupportSettlementDetailRows(params: { yearMonth: string; teamId: string }): Promise<TeamSettlementSupportDetailRow[]> {
     const team = await buildTeamIdVariants(params.teamId);
     const period = getMonthRange(params.yearMonth);
 
-    const [sites, teams, companies, reports, supportRates] = await Promise.all([
+    const [sites, teams, companies, reports, supportRates, supportRateOverrides] = await Promise.all([
       siteService.getSites(),
       teamService.getTeams(),
       companyService.getCompanies(),
       dailyReportService.getReportsByRange(period.startDate, period.endDate),
-      supportRateService.getAllSiteRates()
+      supportRateService.getAllSiteRates(),
+      this.getSupportRateOverrides(params.yearMonth)
     ]);
 
     const matchesTeam = (value: unknown): boolean => {
@@ -685,11 +846,11 @@ export const teamSettlementService = {
       const rawSiteId = String(report.siteId ?? '').trim();
       const rawSiteName = String(report.siteName ?? '').trim() || '현장 미지정';
       const site = resolveSite(rawSiteId, rawSiteName);
-      const siteId = site?.id ? String(site.id) : (rawSiteId || undefined);
-      const siteName = site?.name ? String(site.name) : rawSiteName;
+      const siteId = rawSiteId || (site?.id ? String(site.id) : undefined);
+      const siteName = rawSiteName || (site?.name ? String(site.name) : '현장 미지정');
 
-      const siteConstructorCompanyId = String(site?.constructorCompanyId ?? site?.companyId ?? report.constructorCompanyId ?? report.companyId ?? '').trim();
-      const siteConstructorCompanyName = String(site?.constructorCompanyName ?? site?.companyName ?? report.constructorCompanyName ?? report.companyName ?? '').trim();
+      const siteConstructorCompanyId = String(report.constructorCompanyId ?? report.companyId ?? site?.constructorCompanyId ?? site?.companyId ?? '').trim();
+      const siteConstructorCompanyName = String(report.constructorCompanyName ?? report.companyName ?? site?.constructorCompanyName ?? site?.companyName ?? '').trim();
       const siteIsCheongyeon = isCheongyeonCompany(siteConstructorCompanyId, siteConstructorCompanyName);
 
       (Array.isArray(report.workers) ? report.workers : []).forEach((reportWorker, workerIndex) => {
@@ -714,8 +875,9 @@ export const teamSettlementService = {
           ''
         ).trim();
 
-        const targetTeamIdRaw = String(report.responsibleTeamId ?? site?.responsibleTeamId ?? report.teamId ?? '').trim();
-        const targetTeamNameRaw = String(report.responsibleTeamName ?? site?.responsibleTeamName ?? report.teamName ?? '').trim();
+        const historicalResponsibleTeam = resolveHistoricalResponsibleTeam(report, site);
+        const targetTeamIdRaw = historicalResponsibleTeam.teamId;
+        const targetTeamNameRaw = historicalResponsibleTeam.teamName;
         const resolvedTargetTeam = findTeamByIdentity(targetTeamIdRaw, targetTeamNameRaw);
         const targetTeamId = String(resolvedTargetTeam?.id ?? targetTeamIdRaw).trim();
         const targetTeamName = String(resolvedTargetTeam?.name ?? targetTeamNameRaw ?? '팀 미지정').trim();
@@ -797,7 +959,7 @@ export const teamSettlementService = {
           if (!isSelectedViewTeam) return;
 
           const supportUnitPrice = resolveSupportUnitRate({
-            overrides: loadSupportRateOverrides(params.yearMonth),
+            overrides: supportRateOverrides,
             baseRate: baseSupportRate,
             contexts: [entry],
             siteId: rateSiteId || siteName
@@ -838,6 +1000,12 @@ export const teamSettlementService = {
     const savedParsed = savedUnknown ? TeamSettlementDocumentSchema.safeParse(savedUnknown) : null;
     const savedDoc = savedParsed && savedParsed.success ? savedParsed.data : null;
 
+    // 저장된 스냅샷은 명시적인 재집계 전까지 그대로 사용한다.
+    // 확정된 구 문서도 현재 마스터 데이터로 다시 계산하지 않아 과거 정산을 보호한다.
+    if (savedDoc?.sourceSnapshot || savedDoc?.confirmedAt) {
+      return stripSupportOriginalLines(savedDoc);
+    }
+
     const autoDoc = await this.calculateAutoSettlement({
       yearMonth: params.yearMonth,
       teamId: team.canonicalTeamId,
@@ -845,7 +1013,10 @@ export const teamSettlementService = {
       teamIdVariants: team.variants
     });
 
-    return mergeAutoAndDraft({ autoDoc, savedDoc });
+    const merged = mergeAutoAndDraft({ autoDoc, savedDoc });
+    // 최초 조회 또는 구 문서 보완 시 계산 결과를 즉시 저장해 같은 월의 원천을 고정한다.
+    await this.saveTeamSettlement(merged);
+    return merged;
   },
 
   async recalculateAndSaveTeamSettlement(params: { yearMonth: string; teamId: string; keepConfirmed?: boolean }): Promise<void> {
@@ -898,29 +1069,29 @@ export const teamSettlementService = {
 
     const systemId = buildSystemConfigId({ yearMonth: next.yearMonth, teamId: next.teamId });
     const payload = JSON.stringify(next);
-
-    const updateVars: UpdateSystemConfigVariables = { id: systemId, data: payload };
-    const createVars: CreateSystemConfigVariables = { id: systemId, data: payload };
-
-    try {
-      const updateRes = await updateSystemConfig(updateVars);
-      if (!didUpdateSystemConfig(updateRes)) {
-        await createSystemConfig(createVars);
-      }
-    } catch {
-      try {
-        await createSystemConfig(createVars);
-      } catch {
-        await updateSystemConfig(updateVars);
-      }
-    }
+    await upsertSystemConfigPayload(systemId, payload);
   },
 
   async saveAndConfirmTeamSettlement(doc: TeamSettlementDocument): Promise<TeamSettlementDocument> {
     const parsed = TeamSettlementDocumentSchema.parse(doc);
+    const team = await buildTeamIdVariants(parsed.teamId);
+    const autoDoc = await this.calculateAutoSettlement({
+      yearMonth: parsed.yearMonth,
+      teamId: team.canonicalTeamId,
+      teamName: parsed.teamName || team.teamName,
+      teamIdVariants: team.variants
+    });
+    const refreshed = mergeAutoAndDraft({
+      autoDoc,
+      savedDoc: { ...parsed, confirmedAt: null }
+    });
+    const confirmationIssues = getTeamSettlementConfirmationIssues(refreshed);
+    if (confirmationIssues.length > 0) {
+      throw new Error(`team-settlement-confirmation-blocked:${confirmationIssues[0]?.code ?? 'validation'}`);
+    }
     const now = new Date().toISOString();
     const nextDoc: TeamSettlementDocument = {
-      ...parsed,
+      ...refreshed,
       confirmedAt: now,
       updatedAt: now
     };
@@ -936,14 +1107,7 @@ export const teamSettlementService = {
 
   async confirmTeamSettlement(params: { yearMonth: string; teamId: string }): Promise<void> {
     const doc = await this.getTeamSettlement(params);
-    const now = new Date().toISOString();
-    const nextDoc: TeamSettlementDocument = {
-      ...doc,
-      confirmedAt: now,
-      updatedAt: now
-    };
-    await this.saveTeamSettlement(nextDoc);
-    await notifyTeamSettlementSystemMessage('teamSettlement.confirmed', nextDoc);
+    await this.saveAndConfirmTeamSettlement(doc);
   },
 
   async unconfirmTeamSettlement(params: { yearMonth: string; teamId: string }): Promise<void> {
@@ -977,6 +1141,7 @@ export const teamSettlementService = {
       workerRows,
       supportReports,
       supportRates,
+      supportRateOverrides,
       supportClientAllocations,
       accommodationDocs,
       vehicleDocs,
@@ -989,9 +1154,10 @@ export const teamSettlementService = {
       dailyReportService.getReportWorkerRowsByRange({ startDate: period.startDate, endDate: period.endDate }),
       dailyReportService.getReportsByRange(period.startDate, period.endDate),
       supportRateService.getAllSiteRates(),
+      this.getSupportRateOverrides(params.yearMonth),
       supportClientSiteAllocationService.getAllocationsByMonth(params.yearMonth).catch(() => [] as SupportClientAllocation[]),
       accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth: params.yearMonth }),
-      vehicleBillingService.getBillingsByMonth(params.yearMonth),
+      vehicleBillingService.getBillingsByMonth(params.yearMonth, { throwOnError: true }),
       cardBillingService.getBillingsByMonth(params.yearMonth),
       teamExpenseLedgerService.getClaimsByMonth(params.yearMonth)
     ]);
@@ -1178,8 +1344,6 @@ export const teamSettlementService = {
       return 0;
     };
 
-    const supportRateOverrides = loadSupportRateOverrides(params.yearMonth);
-
     const supportSalesGrouped = new Map<
       string,
       {
@@ -1212,20 +1376,14 @@ export const teamSettlementService = {
       const rawSiteId = row.siteId ? String(row.siteId) : '';
       const rawSiteName = row.siteName ? String(row.siteName) : '현장 미지정';
       const site = resolveSite(rawSiteId, rawSiteName);
-      const reportTeamId = row.teamId ? String(row.teamId) : '';
-      const rowResponsibleTeamId = row.responsibleTeamId ? String(row.responsibleTeamId) : '';
-      const siteResponsibleTeamId = site?.responsibleTeamId ? String(site.responsibleTeamId) : '';
-      return siteResponsibleTeamId || rowResponsibleTeamId || reportTeamId;
+      const historicalResponsibleTeam = resolveHistoricalResponsibleTeam(row, site);
+      return historicalResponsibleTeam.teamId || historicalResponsibleTeam.teamName;
     };
 
     const getWorkerRowManagedKind = (row: (typeof workerRows)[number]): '도급' | '직영' | '지원' => {
-      const rawSiteId = row.siteId ? String(row.siteId) : '';
-      const rawSiteName = row.siteName ? String(row.siteName) : '현장 미지정';
-      const site = resolveSite(rawSiteId, rawSiteName);
       const rowSiteType = String(row.siteType ?? '').trim();
-      const resolvedSiteType = rowSiteType || String(site?.siteType ?? '').trim();
-      return resolvedSiteType === '도급' || resolvedSiteType === '직영' || resolvedSiteType === '지원'
-        ? resolvedSiteType
+      return rowSiteType === '도급' || rowSiteType === '직영' || rowSiteType === '지원'
+        ? rowSiteType
         : '직영';
     };
 
@@ -1291,11 +1449,11 @@ export const teamSettlementService = {
       const rawSiteId = String(report.siteId ?? '').trim();
       const rawSiteName = String(report.siteName ?? '').trim() || '현장 미지정';
       const site = resolveSite(rawSiteId, rawSiteName);
-      const siteId = site?.id ? String(site.id) : (rawSiteId || undefined);
-      const siteName = site?.name ? String(site.name) : rawSiteName;
+      const siteId = rawSiteId || (site?.id ? String(site.id) : undefined);
+      const siteName = rawSiteName || (site?.name ? String(site.name) : '현장 미지정');
 
-      const siteConstructorCompanyId = String(site?.constructorCompanyId ?? site?.companyId ?? report.constructorCompanyId ?? report.companyId ?? '').trim();
-      const siteConstructorCompanyName = String(site?.constructorCompanyName ?? site?.companyName ?? report.constructorCompanyName ?? report.companyName ?? '').trim();
+      const siteConstructorCompanyId = String(report.constructorCompanyId ?? report.companyId ?? '').trim();
+      const siteConstructorCompanyName = String(report.constructorCompanyName ?? report.companyName ?? '').trim();
       const siteIsCheongyeon = isCheongyeonCompany(siteConstructorCompanyId, siteConstructorCompanyName);
 
       (Array.isArray(report.workers) ? report.workers : []).forEach((reportWorker) => {
@@ -1320,8 +1478,9 @@ export const teamSettlementService = {
           ''
         ).trim();
 
-        const targetTeamIdRaw = String(report.responsibleTeamId ?? site?.responsibleTeamId ?? report.teamId ?? '').trim();
-        const targetTeamNameRaw = String(report.responsibleTeamName ?? site?.responsibleTeamName ?? report.teamName ?? '').trim();
+        const historicalResponsibleTeam = resolveHistoricalResponsibleTeam(report, site);
+        const targetTeamIdRaw = historicalResponsibleTeam.teamId;
+        const targetTeamNameRaw = historicalResponsibleTeam.teamName;
         const resolvedTargetTeam = findTeamByIdentity(targetTeamIdRaw, targetTeamNameRaw);
         const targetTeamId = String(resolvedTargetTeam?.id ?? targetTeamIdRaw).trim();
         const targetTeamName = String(resolvedTargetTeam?.name ?? targetTeamNameRaw ?? '팀 미지정').trim();
@@ -1426,7 +1585,6 @@ export const teamSettlementService = {
       const rowManDay = toFiniteNumberOrZero(row.manDay);
       const rowAmount = toFiniteNumberOrZero(row.amount);
 
-      const site = resolveSite(rawSiteId, rawSiteName);
       const responsibleTeamId = getWorkerRowResponsibleTeamId(row);
 
       const isManagedSiteStrict = matchesTeam(responsibleTeamId);
@@ -1436,12 +1594,12 @@ export const teamSettlementService = {
 
       if (managedKind !== '도급' && managedKind !== '직영') return;
 
-      const siteKey = site?.id ? String(site.id) : (rawSiteId || rawSiteName);
+      const siteKey = rawSiteId || rawSiteName;
       const key = `${managedKind}__${siteKey}__`;
 
       const current = managedSalesGrouped.get(key) ?? {
-        siteId: site?.id ? String(site.id) : (rawSiteId || undefined),
-        siteName: site?.name ? String(site.name) : rawSiteName,
+        siteId: rawSiteId || undefined,
+        siteName: rawSiteName,
         kind: managedKind,
         manDay: 0,
         amount: 0
@@ -1673,7 +1831,11 @@ export const teamSettlementService = {
         );
         return resolved ? matchesTeam(resolved) : false;
       });
-      const selectedAccommodationDocs = selectPreferredTeamBillings(teamAccommodationDocs, isAccommodationLedgerClaim);
+      const selectedAccommodationDocs = selectPreferredTeamBillings(
+        teamAccommodationDocs,
+        isAccommodationLedgerClaim,
+        getAccommodationSettlementBillingGroupKey
+      );
 
       accommodationDeductions = selectedAccommodationDocs
         .map((doc): TeamSettlementDeductionItem | null => {
@@ -1713,7 +1875,12 @@ export const teamSettlementService = {
       );
       return resolved ? matchesTeam(resolved) : false;
     }) : [];
-    const selectedVehicleDocs = selectPreferredTeamBillings(teamVehicleDocs, isVehicleLedgerClaim);
+    const selectedVehicleDocs = selectPreferredTeamBillings(
+      teamVehicleDocs,
+      isVehicleLedgerClaim,
+      getVehicleSettlementBillingGroupKey,
+      getSettlementBillingRowScopeKey
+    );
 
     const vehicleDeductionsFromDocs: TeamSettlementDeductionItem[] = selectedVehicleDocs
       .map((doc): TeamSettlementDeductionItem => {
@@ -1724,7 +1891,7 @@ export const teamSettlementService = {
         const amount = Math.round(lineTotal > 0 ? lineTotal : (fixedCost + variableCost > 0 ? fixedCost + variableCost : fallbackTotal));
 
         return {
-          id: `vehicle_billing:${params.yearMonth}:${doc.vehicleId || doc.vehiclePlate}`,
+          id: `vehicle_billing:${params.yearMonth}:${doc.id || doc.vehicleId || doc.vehiclePlate}`,
           source: 'auto',
           origin: 'vehicle_billing',
           category: `차량비 (${doc.vehiclePlate})`,
@@ -1930,7 +2097,12 @@ export const teamSettlementService = {
       );
       return resolved ? matchesTeam(resolved) : false;
     }) : [];
-    const selectedCardDocs = selectPreferredTeamBillings(teamCardDocs, isCardLedgerClaim);
+    const selectedCardDocs = selectPreferredTeamBillings(
+      teamCardDocs,
+      isCardLedgerClaim,
+      getCardSettlementBillingGroupKey,
+      getSettlementBillingRowScopeKey
+    );
 
     const cardDeductionsFromDocs: TeamSettlementDeductionItem[] = selectedCardDocs
       .map((doc): TeamSettlementDeductionItem => {
@@ -1939,7 +2111,7 @@ export const teamSettlementService = {
         const amount = Math.round(lineTotal > 0 ? lineTotal : fallbackTotal);
 
         return {
-          id: `card_billing:${params.yearMonth}:${doc.cardId || doc.cardLabel}`,
+          id: `card_billing:${params.yearMonth}:${doc.id || doc.cardId || doc.cardLabel}`,
           source: 'auto',
           origin: 'card_billing',
           category: `카드비 (${doc.cardLabel})`,
@@ -2151,27 +2323,86 @@ export const teamSettlementService = {
     });
 
     const nowIso = new Date().toISOString();
+    const sales = [...dailyReportSales, ...supportFeeSales];
+    const purchases = [...supportFeePurchases];
+    const deductions = [
+      officeExpenseDeduction,
+      ...(dailyWageDeduction ? [dailyWageDeduction] : []),
+      ...(monthlyWageDeduction ? [monthlyWageDeduction] : []),
+      ...(serviceTeamDeduction ? [serviceTeamDeduction] : []),
+      ...accommodationDeductions,
+      ...vehicleDeductions,
+      ...cardDeductions,
+      ...teamExpenseDeductions
+    ];
+    const additions = [...teamExpenseAdditions];
+    const sumAmounts = (rows: Array<{ amount: number }>): number => Math.round(
+      rows.reduce((sum, row) => sum + toFiniteNumberOrZero(row.amount), 0)
+    );
+    const sourceTotals = {
+      sales: sumAmounts(sales),
+      purchases: sumAmounts(purchases),
+      deductions: sumAmounts(deductions),
+      additions: sumAmounts(additions),
+      net: 0
+    };
+    sourceTotals.net = sourceTotals.sales - sourceTotals.purchases - sourceTotals.deductions + sourceTotals.additions;
+
+    const relevantReportSnapshots = supportReports
+      .filter((report) => {
+        const reportSite = resolveSite(String(report.siteId ?? ''), String(report.siteName ?? ''));
+        const historicalResponsibleTeam = resolveHistoricalResponsibleTeam(report, reportSite);
+        if (matchesTeam(historicalResponsibleTeam.teamId) || matchesTeam(historicalResponsibleTeam.teamName)) return true;
+        if (matchesTeam(report.teamId) || matchesTeam(report.teamName)) return true;
+        return (report.workers ?? []).some((worker) =>
+          matchesTeam(worker.teamId) || matchesTeam(worker.workerTeamName)
+        );
+      })
+      .map((report, index) => {
+        const reportSite = resolveSite(String(report.siteId ?? ''), String(report.siteName ?? ''));
+        const historicalResponsibleTeam = resolveHistoricalResponsibleTeam(report, reportSite);
+        const teamAssignmentMissing = !String(report.responsibleTeamId ?? '').trim()
+          && !String(report.responsibleTeamName ?? '').trim()
+          && !String(report.teamId ?? '').trim()
+          && !String(report.teamName ?? '').trim();
+        const workerTeamIds = Array.from(new Set(
+          (report.workers ?? []).map((worker) => String(worker.teamId ?? '').trim()).filter(Boolean)
+        ));
+        const workerTeamNames = Array.from(new Set(
+          (report.workers ?? []).map((worker) => String(worker.workerTeamName ?? '').trim()).filter(Boolean)
+        ));
+        return {
+          reportId: String(report.id ?? '').trim() || `${report.date}:${report.siteId}:${report.teamId}:${index}`,
+          date: String(report.date ?? '').trim(),
+          reportTeamId: String(report.teamId ?? '').trim(),
+          reportTeamName: String(report.teamName ?? '').trim(),
+          siteId: String(report.siteId ?? '').trim(),
+          siteName: String(report.siteName ?? '').trim(),
+          responsibleTeamId: historicalResponsibleTeam.teamId,
+          responsibleTeamName: historicalResponsibleTeam.teamName,
+          teamAssignmentMissing,
+          workerTeamIds,
+          workerTeamNames
+        };
+      });
 
     return {
       yearMonth: params.yearMonth,
       teamId: params.teamId,
       teamName: params.teamName,
-      sales: [...dailyReportSales, ...supportFeeSales],
-      purchases: [...supportFeePurchases],
-      deductions: [
-        officeExpenseDeduction,
-        ...(dailyWageDeduction ? [dailyWageDeduction] : []),
-        ...(monthlyWageDeduction ? [monthlyWageDeduction] : []),
-        ...(serviceTeamDeduction ? [serviceTeamDeduction] : []),
-        ...accommodationDeductions,
-        ...vehicleDeductions,
-        ...cardDeductions,
-        ...teamExpenseDeductions
-      ],
-      additions: [...teamExpenseAdditions],
+      sales,
+      purchases,
+      deductions,
+      additions,
       summary: {
         prevCarryover: 0,
         deposit: 0
+      },
+      sourceSnapshot: {
+        version: 1,
+        capturedAt: nowIso,
+        dailyReports: relevantReportSnapshots,
+        totals: sourceTotals
       },
       confirmedAt: null,
       updatedAt: nowIso

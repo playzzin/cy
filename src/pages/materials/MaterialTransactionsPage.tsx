@@ -38,6 +38,10 @@ import MaterialPhotoViewerModal, {
     getMaterialPhotoDisplayCount,
     hasMaterialPhotoReference,
 } from './MaterialPhotoViewerModal';
+import {
+    getMaterialTransactionRentalCompanyLink,
+    matchesMaterialTransactionRentalCompanyFilter,
+} from './materialTransactionRentalCompany';
 
 type Transaction = (InboundTransaction | OutboundTransaction) & {
     type: 'inbound' | 'outbound';
@@ -327,6 +331,7 @@ const MaterialTransactionsPage: React.FC = () => {
     };
 
     const openEditModal = (tx: Transaction) => {
+        const rentalCompany = getMaterialTransactionRentalCompanyLink(tx);
         setEditingTx(tx);
         setEditForm({
             transactionDate: tx.transactionDate,
@@ -336,8 +341,8 @@ const MaterialTransactionsPage: React.FC = () => {
             counterparty: tx.type === 'inbound'
                 ? trimText((tx as InboundTransaction).supplier)
                 : trimText((tx as OutboundTransaction).recipient),
-            rentalCompanyId: tx.type === 'outbound' ? trimText((tx as OutboundTransaction).rentalCompanyId) : '',
-            rentalCompanyName: tx.type === 'outbound' ? trimText((tx as OutboundTransaction).rentalCompanyName) : '',
+            rentalCompanyId: rentalCompany.id,
+            rentalCompanyName: rentalCompany.name,
             notes: tx.notes || ''
         });
         setIsEditModalOpen(true);
@@ -414,6 +419,8 @@ const MaterialTransactionsPage: React.FC = () => {
                 siteName: sites.find(s => s.id === editForm.siteId)?.name || '',
                 vehicleNumber: editForm.vehicleNumber,
                 quantity: Number(editForm.quantity),
+                rentalCompanyId: editForm.rentalCompanyId,
+                rentalCompanyName: editForm.rentalCompanyName,
                 notes: editForm.notes
             };
 
@@ -422,8 +429,6 @@ const MaterialTransactionsPage: React.FC = () => {
                 await materialService.updateInboundTransaction(editingTx.id, updates);
             } else {
                 updates.recipient = editForm.counterparty;
-                updates.rentalCompanyId = editForm.rentalCompanyId;
-                updates.rentalCompanyName = editForm.rentalCompanyName;
                 await materialService.updateOutboundTransaction(editingTx.id, updates);
             }
 
@@ -471,7 +476,7 @@ const MaterialTransactionsPage: React.FC = () => {
                 t.type === 'inbound'
                     ? ((t as InboundTransaction).supplier || '')
                     : ((t as OutboundTransaction).recipient || ''),
-                t.type === 'outbound' ? ((t as OutboundTransaction).rentalCompanyName || '') : '',
+                getMaterialTransactionRentalCompanyLink(t).name,
                 t.notes || '',
             ]),
         ];
@@ -564,27 +569,18 @@ const MaterialTransactionsPage: React.FC = () => {
         }
 
         if (!rentalCompanyFilter) return true;
-        if (t.type !== 'outbound') return false;
-
-        const outbound = t as OutboundTransaction;
-        const rentalCompanyId = trimText(outbound.rentalCompanyId);
-        const rentalCompanyName = trimText(outbound.rentalCompanyName);
-
-        if (rentalCompanyFilter === RENTAL_UNASSIGNED_FILTER) {
-            return !rentalCompanyId && !rentalCompanyName;
-        }
 
         const selectedCompany = rentalCompanies.find((company) => getMaterialRentalCompanyOptionId(company) === rentalCompanyFilter);
         const selectedName = trimText(selectedCompany?.name);
-
-        return (
-            rentalCompanyId === rentalCompanyFilter ||
-            (!!selectedName && normalizeSearchText(rentalCompanyName) === normalizeSearchText(selectedName)) ||
-            normalizeSearchText(rentalCompanyName).includes(normalizeSearchText(rentalCompanyFilter))
+        return matchesMaterialTransactionRentalCompanyFilter(
+            t,
+            rentalCompanyFilter,
+            selectedName,
+            RENTAL_UNASSIGNED_FILTER
         );
     });
     const showDetachedEditRentalOption = !!(
-        editingTx?.type === 'outbound' &&
+        editingTx &&
         editForm.rentalCompanyId &&
         editForm.rentalCompanyName &&
         !rentalCompanies.some((company) => getMaterialRentalCompanyOptionId(company) === editForm.rentalCompanyId)
@@ -736,7 +732,7 @@ const MaterialTransactionsPage: React.FC = () => {
                     <table className="w-full text-sm" style={{ minWidth: 2110 }}>
                         <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
                             <tr>
-                                <th className="px-3 py-3 text-center font-bold text-slate-600 w-12 sticky left-0 z-30 bg-slate-50">
+                                <th className="px-3 py-2 text-center font-bold text-slate-600 w-12 sticky left-0 z-30 bg-slate-50">
                                     <input
                                         type="checkbox"
                                         checked={allVisibleSelected}
@@ -744,19 +740,19 @@ const MaterialTransactionsPage: React.FC = () => {
                                         className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                                     />
                                 </th>
-                                <th className="px-4 py-3 text-left font-bold text-slate-600 w-32 sticky left-[48px] z-20 bg-slate-50">일자</th>
-                                <th className="px-4 py-3 text-center font-bold text-slate-600 w-24 sticky left-[176px] z-20 bg-slate-50">구분</th>
-                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[220px] sticky left-[272px] z-20 bg-slate-50">현장</th>
-                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[220px] sticky left-[492px] z-20 bg-slate-50">품명</th>
-                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[160px]">규격</th>
-                                <th className="px-4 py-3 text-right font-bold text-slate-600 w-24">수량</th>
-                                <th className="px-4 py-3 text-left font-bold text-slate-600 w-20">단위</th>
-                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[150px]">차량번호</th>
-                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[160px]">입고처/출고자</th>
-                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[160px]">임대사</th>
-                                <th className="px-4 py-3 text-center font-bold text-slate-600 min-w-[140px]">사진</th>
-                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[220px]">비고</th>
-                                <th className="px-4 py-3 text-center font-bold text-slate-600 w-24">관리</th>
+                                <th className="px-4 py-2 text-left font-bold text-slate-600 w-32 sticky left-[48px] z-20 bg-slate-50">일자</th>
+                                <th className="px-4 py-2 text-center font-bold text-slate-600 w-24 sticky left-[176px] z-20 bg-slate-50">구분</th>
+                                <th className="px-4 py-2 text-left font-bold text-slate-600 min-w-[220px] sticky left-[272px] z-20 bg-slate-50">현장</th>
+                                <th className="px-4 py-2 text-left font-bold text-slate-600 min-w-[220px] sticky left-[492px] z-20 bg-slate-50">품명</th>
+                                <th className="px-4 py-2 text-left font-bold text-slate-600 min-w-[160px]">규격</th>
+                                <th className="px-4 py-2 text-right font-bold text-slate-600 w-24">수량</th>
+                                <th className="px-4 py-2 text-left font-bold text-slate-600 w-20">단위</th>
+                                <th className="px-4 py-2 text-left font-bold text-slate-600 min-w-[150px]">차량번호</th>
+                                <th className="px-4 py-2 text-left font-bold text-slate-600 min-w-[160px]">입고처/출고자</th>
+                                <th className="px-4 py-2 text-left font-bold text-slate-600 min-w-[160px]">임대사</th>
+                                <th className="px-4 py-2 text-center font-bold text-slate-600 min-w-[140px]">사진</th>
+                                <th className="px-4 py-2 text-left font-bold text-slate-600 min-w-[220px]">비고</th>
+                                <th className="px-4 py-2 text-center font-bold text-slate-600 w-24">관리</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -775,7 +771,7 @@ const MaterialTransactionsPage: React.FC = () => {
                                     const photoCount = getMaterialPhotoDisplayCount(t);
                                     return (
                                     <tr key={`${getTransactionKey(t)}-${index}`} className={`hover:bg-slate-50 transition-colors ${isSelected ? 'bg-indigo-50' : ''}`}>
-                                        <td className={`px-3 py-2.5 text-center sticky left-0 z-20 ${stickyBgClass}`}>
+                                        <td className={`px-3 py-1.5 text-center sticky left-0 z-20 ${stickyBgClass}`}>
                                             <input
                                                 type="checkbox"
                                                 checked={isSelected}
@@ -783,8 +779,8 @@ const MaterialTransactionsPage: React.FC = () => {
                                                 className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                                             />
                                         </td>
-                                        <td className={`px-4 py-2.5 text-slate-600 sticky left-[48px] z-10 ${stickyBgClass}`}>{t.transactionDate}</td>
-                                        <td className={`px-4 py-2.5 text-center sticky left-[176px] z-10 ${stickyBgClass}`}>
+                                        <td className={`px-4 py-1.5 text-slate-600 sticky left-[48px] z-10 ${stickyBgClass}`}>{t.transactionDate}</td>
+                                        <td className={`px-4 py-1.5 text-center sticky left-[176px] z-10 ${stickyBgClass}`}>
                                             <span className={`px-2.5 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1.5
                                                 ${t.type === 'inbound'
                                                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
@@ -795,17 +791,17 @@ const MaterialTransactionsPage: React.FC = () => {
                                                 {t.type === 'inbound' ? '입고' : '출고'}
                                             </span>
                                         </td>
-                                        <td className={`px-4 py-2.5 font-medium text-slate-800 sticky left-[272px] z-10 ${stickyBgClass}`}>
+                                        <td className={`px-4 py-1.5 font-medium text-slate-800 sticky left-[272px] z-10 ${stickyBgClass}`}>
                                             <div>{t.siteName}</div>
                                             <div className="text-[11px] font-semibold text-slate-400">{t.siteStatusLabel}</div>
                                         </td>
-                                        <td className={`px-4 py-2.5 font-medium text-slate-800 sticky left-[492px] z-10 ${stickyBgClass}`}>{t.itemName}</td>
-                                        <td className="px-4 py-2.5 text-slate-500">{t.spec}</td>
-                                        <td className={`px-4 py-2.5 text-right font-bold ${t.type === 'inbound' ? 'text-emerald-600' : 'text-orange-600'}`}>
+                                        <td className={`px-4 py-1.5 font-medium text-slate-800 sticky left-[492px] z-10 ${stickyBgClass}`}>{t.itemName}</td>
+                                        <td className="px-4 py-1.5 text-slate-500">{t.spec}</td>
+                                        <td className={`px-4 py-1.5 text-right font-bold ${t.type === 'inbound' ? 'text-emerald-600' : 'text-orange-600'}`}>
                                             {t.quantity.toLocaleString()}
                                         </td>
-                                        <td className="px-4 py-2.5 text-slate-500">{t.unit}</td>
-                                        <td className="px-4 py-2.5 text-slate-600">
+                                        <td className="px-4 py-1.5 text-slate-500">{t.unit}</td>
+                                        <td className="px-4 py-1.5 text-slate-600">
                                             {(t.vehicleNumber != null && String(t.vehicleNumber).trim()) ? (
                                                 <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-mono">
                                                     {String(t.vehicleNumber).trim()}
@@ -814,15 +810,15 @@ const MaterialTransactionsPage: React.FC = () => {
                                                 <span className="text-slate-300">-</span>
                                             )}
                                         </td>
-                                        <td className="px-4 py-2.5 text-slate-600 text-xs">
+                                        <td className="px-4 py-1.5 text-slate-600 text-xs">
                                             {t.type === 'inbound'
                                                 ? ((t as InboundTransaction).supplier || '-')
                                                 : ((t as OutboundTransaction).recipient || '-')}
                                         </td>
-                                        <td className="px-4 py-2.5 text-slate-600 text-xs">
-                                            {t.type === 'outbound' ? ((t as OutboundTransaction).rentalCompanyName || '-') : '-'}
+                                        <td className="px-4 py-1.5 text-slate-600 text-xs">
+                                            {getMaterialTransactionRentalCompanyLink(t).name || '-'}
                                         </td>
-                                        <td className="px-4 py-2.5 text-center">
+                                        <td className="px-4 py-1.5 text-center">
                                             {hasPhotos ? (
                                                 <button
                                                     type="button"
@@ -837,8 +833,8 @@ const MaterialTransactionsPage: React.FC = () => {
                                                 <span className="text-slate-300">-</span>
                                             )}
                                         </td>
-                                        <td className="px-4 py-2.5 text-slate-500 whitespace-pre-wrap break-words">{t.notes || '-'}</td>
-                                        <td className="px-4 py-2.5 text-center">
+                                        <td className="px-4 py-1.5 text-slate-500 whitespace-pre-wrap break-words">{t.notes || '-'}</td>
+                                        <td className="px-4 py-1.5 text-center">
                                             <div className="flex justify-center gap-2">
                                                 <button
                                                     onClick={() => openEditModal(t)}
@@ -974,7 +970,7 @@ const MaterialTransactionsPage: React.FC = () => {
                                     />
                                 </div>
 
-                                {editingTx?.type === 'outbound' && (
+                                {editingTx && (
                                     <div>
                                         <label className="block text-sm font-bold text-slate-700 mb-1">임대사</label>
                                         <select

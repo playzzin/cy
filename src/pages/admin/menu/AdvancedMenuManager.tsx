@@ -36,6 +36,7 @@ import RoleManager from './components/RoleManager';
 import SiteManager from './components/SiteManager';
 import MenuManagerHeader from './components/MenuManagerHeader';
 import PositionMenuCopyModal from './components/PositionMenuCopyModal';
+import { addMenuItemsSafely } from './menuBulkApply';
 import { isDevAdminSessionEnabled } from '../../../utils/devAdminSession';
 import { useSiteMode } from '../../../contexts/SiteModeContext';
 
@@ -174,47 +175,6 @@ const collectDescendantIds = (item: MenuItem | string, ids = new Set<string>()):
     return ids;
 };
 
-
-const createIdBase = (value: unknown) => {
-    const base = String(value || 'menu')
-        .trim()
-        .replace(/[^a-zA-Z0-9_-]+/g, '_')
-        .replace(/^_+|_+$/g, '')
-        .slice(0, 48);
-
-    return base || 'menu';
-};
-
-const cloneMenuItemForCopy = (item: MenuItem, existingIds: Set<string>, token: string, path: number[]): MenuItem => {
-    const cloned = JSON.parse(JSON.stringify(item)) as MenuItem;
-
-    const assignIds = (node: MenuItem, currentPath: number[]): MenuItem => {
-        const base = createIdBase(node.id || node.path || node.text);
-        const pathSuffix = currentPath.join('_') || '0';
-        let candidate = `${base}_copy_${token}_${pathSuffix}`;
-        let counter = 1;
-
-        while (existingIds.has(candidate)) {
-            candidate = `${base}_copy_${token}_${pathSuffix}_${counter}`;
-            counter += 1;
-        }
-
-        node.id = candidate;
-        existingIds.add(candidate);
-
-        if (Array.isArray(node.sub)) {
-            node.sub = node.sub.map((child, index) => (
-                typeof child === 'string'
-                    ? child
-                    : assignIds(child, [...currentPath, index])
-            ));
-        }
-
-        return node;
-    };
-
-    return assignIds(cloned, path);
-};
 
 const getPositionSiteKey = (positionId: string | null) => {
     const id = String(positionId || '').trim();
@@ -728,8 +688,8 @@ const AdvancedMenuManagerEditor: React.FC = () => {
         updateMenuData(newData);
     }, [currentMenuDuplicateCount, menuData, selectedSite, updateMenuData]);
 
-    const handleCopyFromPosition = useCallback((sourceSite: string, itemIds: string[]) => {
-        if (!menuData || !menuData[selectedSite]) return;
+    const handleCopyFromPosition = useCallback((sourceSite: string, itemIds: string[], targetSites: string[]) => {
+        if (!menuData) return;
 
         const sourceItems = findMenuItemsByIds(menuData[sourceSite]?.menu || [], itemIds);
         if (sourceItems.length === 0) {
@@ -737,21 +697,40 @@ const AdvancedMenuManagerEditor: React.FC = () => {
             return;
         }
 
-        const newData = JSON.parse(JSON.stringify(menuData)) as SiteDataType;
-        const targetMenu = newData[selectedSite]?.menu || [];
-        const existingIds = collectMenuIds(targetMenu);
-        const token = Date.now().toString(36);
-        const copiedItems = sourceItems.map((item, index) => cloneMenuItemForCopy(item, existingIds, token, [index]));
+        const validTargetSites = Array.from(new Set(targetSites)).filter((siteKey) => (
+            siteKey !== sourceSite && Boolean(menuData[siteKey])
+        ));
+        if (validTargetSites.length === 0) {
+            alert('메뉴를 추가할 직책을 선택해주세요.');
+            return;
+        }
 
-        newData[selectedSite] = {
-            ...newData[selectedSite],
-            menu: [...targetMenu, ...copiedItems]
-        };
+        const newData = JSON.parse(JSON.stringify(menuData)) as SiteDataType;
+        const token = Date.now().toString(36);
+        let addedCount = 0;
+
+        validTargetSites.forEach((siteKey, index) => {
+            const result = addMenuItemsSafely(
+                newData[siteKey]?.menu || [],
+                sourceItems,
+                `${token}_${index}`
+            );
+            addedCount += result.addedCount;
+            newData[siteKey] = {
+                ...newData[siteKey],
+                menu: result.menu
+            };
+        });
+
+        if (addedCount === 0) {
+            alert('선택한 메뉴가 대상 직책에 이미 모두 등록되어 있습니다.');
+            return;
+        }
 
         updateMenuData(newData);
-        setSelectedIds(copiedItems.map((item) => item.id).filter((id): id is string => Boolean(id)));
+        setSelectedIds([]);
         setIsCopyModalOpen(false);
-    }, [menuData, selectedSite, updateMenuData]);
+    }, [menuData, updateMenuData]);
 
     const handleResetDefaults = () => {
         if (window.confirm('정말 초기화하시겠습니까? 기존 메뉴 설정이 모두 사라지고 기본값(한글)으로 복원됩니다.')) {
@@ -1086,10 +1065,10 @@ const AdvancedMenuManagerEditor: React.FC = () => {
                                                 type="button"
                                                 onClick={() => setIsCopyModalOpen(true)}
                                                 className="flex items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-600/15 px-3 py-2 text-xs font-bold text-blue-200 transition-colors hover:border-blue-400 hover:bg-blue-600/25 hover:text-white"
-                                                title="다른 직책에 있는 메뉴를 선택해서 현재 메뉴로 복사"
+                                                title="전체메뉴에서 메뉴를 선택해 여러 직책에 안전하게 추가"
                                             >
                                                 <FontAwesomeIcon icon={faCopy} />
-                                                다른 직책에서 복사
+                                                여러 직책에 메뉴 추가
                                             </button>
                                         </>
                                     )}

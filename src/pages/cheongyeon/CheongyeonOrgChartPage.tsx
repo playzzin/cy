@@ -120,6 +120,47 @@ const PersonAvatar: React.FC<{ person?: OrgNode; className?: string }> = ({ pers
     );
 };
 
+const ORGANIZATION_PROMISES = [
+    {
+        icon: faUserGroup,
+        label: '사람 먼저',
+        title: '일보다 먼저 안부를 묻습니다.',
+        body: '조직도의 선은 명령만 전달하지 않습니다. 오늘 누가 지쳤는지, 어디에 손이 더 필요한지도 함께 연결합니다.',
+    },
+    {
+        icon: faHelmetSafety,
+        label: '안전 우선',
+        title: '빠른 퇴근보다 안전한 귀가를 선택합니다.',
+        body: '공정이 하루 늦어지는 것보다 한 사람이 다치지 않고 집으로 돌아가는 일이 훨씬 중요합니다.',
+    },
+    {
+        icon: faLocationDot,
+        label: '현장 존중',
+        title: '답은 회의실보다 현장 가까이에 있습니다.',
+        body: '계획표가 현실과 다를 때는 현장의 목소리를 먼저 듣고, 실행하는 사람이 납득할 수 있는 방법을 찾습니다.',
+    },
+    {
+        icon: faUsers,
+        label: '함께 성장',
+        title: '한 사람의 노하우를 모두의 자산으로 남깁니다.',
+        body: '베테랑의 감각이 개인의 기억으로 사라지지 않도록 기록하고 나누며 다음 사람의 시행착오를 줄입니다.',
+    },
+];
+
+const FIELD_DAY_STEPS = [
+    { time: '07:30', label: 'MORNING CHECK', title: '이름을 부르며 하루를 엽니다.', body: '출근 숫자보다 사람의 표정과 컨디션을 먼저 확인하고, 오늘의 위험 요소를 함께 짚습니다.' },
+    { time: '09:10', label: 'FIELD SIGNAL', title: '작은 이상 신호도 바로 연결합니다.', body: '“이 정도는 괜찮겠지”를 넘기지 않고 팀과 현장, 지원 부서가 같은 정보를 보고 빠르게 움직입니다.' },
+    { time: '12:20', label: 'TABLE TALK', title: '밥상에서 더 솔직한 답을 듣습니다.', body: '보고서에 쓰기 어려운 불편과 아이디어를 편하게 나누고, 오후의 계획을 현실에 맞게 다시 조정합니다.' },
+    { time: '17:40', label: 'SAFE RETURN', title: '오늘의 마지막 목표는 무사 귀가입니다.', body: '완료한 일과 남은 위험을 다음 팀에 정확히 넘기고, 서로의 귀가를 확인하며 하루를 닫습니다.' },
+];
+
+const ROLE_STORIES = [
+    { number: '01', label: 'TEAM LEADER', title: '앞에서 끌기보다 옆에서 막아주는 사람', body: '결정이 필요할 때 책임지고, 팀원이 일에 집중할 수 있도록 불필요한 혼선을 먼저 걷어냅니다.' },
+    { number: '02', label: 'FOREMAN', title: '도면과 현실 사이를 번역하는 사람', body: '오늘의 공정, 장비, 날씨, 작업자의 호흡을 읽고 가장 안전하고 현실적인 순서를 만듭니다.' },
+    { number: '03', label: 'FIELD CREW', title: '계획을 실제 결과로 바꾸는 사람', body: '작은 오차를 가장 먼저 발견하고, 손끝의 경험으로 현장의 품질과 동료의 안전을 함께 지킵니다.' },
+    { number: '04', label: 'SUPPORT TEAM', title: '보이지 않는 곳에서 길을 비우는 사람', body: '자료, 일정, 자원, 행정의 막힘을 풀어 현장의 좋은 판단이 늦지 않게 도착하도록 돕습니다.' },
+];
+
 const CheongyeonOrgChartPage: React.FC = () => {
     const { treeData, loading } = useOrganizationTree();
     const [query, setQuery] = useState('');
@@ -515,6 +556,94 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                 </div>
                             )}
                         </section>
+                    </div>
+                </section>
+
+                <section className="org-people-story" aria-labelledby="org-people-story-title">
+                    <div className="org-shell">
+                        <header className="org-story-heading">
+                            <span>01 · PEOPLE BEFORE BOXES</span>
+                            <h2 id="org-people-story-title">조직도 안의 네모보다,<br /><em>그 안에서 일하는 사람을 봅니다.</em></h2>
+                            <p>연결선은 직급의 높낮이를 그리는 장식이 아닙니다. 서로의 상황을 더 빨리 알고, 필요한 도움을 제때 건네기 위한 약속입니다.</p>
+                        </header>
+
+                        <div className="org-promise-grid">
+                            {ORGANIZATION_PROMISES.map((promise, index) => (
+                                <article className="org-promise-card" key={promise.label}>
+                                    <div className="org-promise-card-top">
+                                        <span><FontAwesomeIcon icon={promise.icon} /></span>
+                                        <small>{String(index + 1).padStart(2, '0')} · {promise.label}</small>
+                                    </div>
+                                    <h3>{promise.title}</h3>
+                                    <p>{promise.body}</p>
+                                </article>
+                            ))}
+                        </div>
+                    </div>
+                </section>
+
+                <section className="org-field-day" aria-labelledby="org-field-day-title">
+                    <div className="org-shell org-field-day-layout">
+                        <header className="org-field-day-intro">
+                            <span><FontAwesomeIcon icon={faBolt} /> 02 · A DAY IN THE FIELD</span>
+                            <h2 id="org-field-day-title">한 팀의 하루는<br />연결로 움직입니다.</h2>
+                            <p>화면 속 팀과 현장이 실제 하루에서는 어떻게 이어지는지, 청연의 평범하지만 중요한 네 장면으로 보여드립니다.</p>
+                            <div className="org-field-day-stat">
+                                <strong>{formatNumber(teamSummaries.length)}</strong><span>개 팀이</span>
+                                <strong>{formatNumber(totalSites)}</strong><span>개 현장을 함께 지킵니다.</span>
+                            </div>
+                        </header>
+
+                        <ol className="org-day-timeline">
+                            {FIELD_DAY_STEPS.map((step) => (
+                                <li key={step.time}>
+                                    <time>{step.time}</time>
+                                    <span className="org-day-dot" aria-hidden="true" />
+                                    <div>
+                                        <small>{step.label}</small>
+                                        <h3>{step.title}</h3>
+                                        <p>{step.body}</p>
+                                    </div>
+                                </li>
+                            ))}
+                        </ol>
+                    </div>
+                </section>
+
+                <section className="org-role-section" aria-labelledby="org-role-title">
+                    <div className="org-shell">
+                        <header className="org-story-heading org-story-heading-wide">
+                            <span>03 · EVERY ROLE MATTERS</span>
+                            <h2 id="org-role-title">직함은 다르지만,<br /><em>한 사람도 배경이 되지 않습니다.</em></h2>
+                            <p>현장은 영웅 한 명이 아니라 서로 다른 역할이 정확한 순간에 손을 맞잡을 때 완성됩니다.</p>
+                        </header>
+                        <div className="org-role-grid">
+                            {ROLE_STORIES.map((role) => (
+                                <article className="org-role-card" key={role.number}>
+                                    <span>{role.number}</span>
+                                    <small>{role.label}</small>
+                                    <h3>{role.title}</h3>
+                                    <p>{role.body}</p>
+                                    <i aria-hidden="true" />
+                                </article>
+                            ))}
+                        </div>
+                    </div>
+                </section>
+
+                <section className="org-closing-letter" aria-labelledby="org-closing-title">
+                    <div className="org-shell org-closing-card">
+                        <div className="org-closing-mark"><FontAwesomeIcon icon={faUserGroup} /></div>
+                        <div>
+                            <span>04 · WE GO HOME TOGETHER</span>
+                            <h2 id="org-closing-title">성과는 숫자로 남지만,<br />좋은 조직은 사람의 기억에 남습니다.</h2>
+                            <p>
+                                {formatNumber(totalMembers)}명의 동료가 {formatNumber(totalSites)}개의 현장에서 같은 이름으로 일합니다.
+                                일이 잘된 날뿐 아니라 일이 꼬인 날에도 누구에게 말해야 할지 아는 조직,
+                                실수한 사람을 숨기기보다 다시 안전하게 일할 방법을 찾는 조직이 되겠습니다.
+                            </p>
+                            <blockquote>오늘도 각자의 자리에서 일한 모든 사람에게, “무사히 돌아와줘서 고맙습니다.”</blockquote>
+                        </div>
                     </div>
                 </section>
             </main>

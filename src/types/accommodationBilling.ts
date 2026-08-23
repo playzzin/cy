@@ -1,6 +1,16 @@
 import { Timestamp } from 'firebase/firestore';
 
-export type AccommodationBillingStatus = 'draft' | 'confirmed';
+export type AccommodationBillingStatus =
+    | 'draft'
+    | 'confirmed'
+    | 'paid'
+    | 'overdue'
+    | 'cancelled'
+    | 'DRAFT'
+    | 'CONFIRMED'
+    | 'PAID'
+    | 'OVERDUE'
+    | 'CANCELLED';
 export type AccommodationBillingLineItemStatus = 'active' | 'cancelled';
 
 export type AccommodationBillingIssuedToType = 'team' | 'team_leader' | 'worker';

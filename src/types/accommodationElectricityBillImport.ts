@@ -1,6 +1,7 @@
 export interface AccommodationElectricityBillAnalysis {
     fileIndex: number;
     originalFileName: string;
+    sourceFileSha256?: string;
     provider: string;
     customerName: string;
     customerNumber: string;
@@ -21,6 +22,7 @@ export type AccommodationUtilityBillType = 'electricity' | 'gas' | 'water';
 export interface AccommodationGasBillAnalysis {
     fileIndex: number;
     originalFileName: string;
+    sourceFileSha256?: string;
     provider: string;
     customerName: string;
     payerNumber: string;
@@ -39,6 +41,7 @@ export interface AccommodationGasBillAnalysis {
 export interface AccommodationWaterBillAnalysis {
     fileIndex: number;
     originalFileName: string;
+    sourceFileSha256?: string;
     provider: string;
     customerName: string;
     consumerNumber: string;
@@ -73,6 +76,7 @@ export interface AccommodationElectricityBillMatchResult {
 
 export interface UtilityElectricityBillImportMeta {
     sourceFileName: string;
+    sourceFileSha256?: string;
     provider: string;
     customerNumber: string;
     billingYearMonth: string;
@@ -88,6 +92,7 @@ export interface UtilityElectricityBillImportMeta {
 
 export interface UtilityGasBillImportMeta {
     sourceFileName: string;
+    sourceFileSha256?: string;
     provider: string;
     payerNumber: string;
     billingYearMonth: string;
@@ -103,6 +108,7 @@ export interface UtilityGasBillImportMeta {
 
 export interface UtilityWaterBillImportMeta {
     sourceFileName: string;
+    sourceFileSha256?: string;
     provider: string;
     consumerNumber: string;
     billingYearMonth: string;
@@ -153,6 +159,7 @@ export interface AnalyzeAccommodationElectricityBillFileInput {
     originalFileName: string;
     mimeType: string;
     base64: string;
+    sourceFileSha256?: string;
 }
 
 export interface AnalyzeAccommodationElectricityBillsInput {

@@ -1,10 +1,12 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx-js-style';
+import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faBuilding,
   faCalendarAlt,
+  faCopy,
   faDownload,
   faSave,
   faSearch,
@@ -24,6 +26,7 @@ import {
 import { manpowerService, type Worker } from '../../services/manpowerService';
 import { teamService, type Team } from '../../services/teamService';
 import { storageService } from '../../services/storageService';
+import { toast } from '../../utils/swal';
 
 // 인원DB/일급제/용역팀 등에서 공통적으로 사용하는 엔트리 타입 (WorkerMasterRow와 동일 구조)
 type WorkbookEntry = {
@@ -140,6 +143,642 @@ const TAB_OPTIONS: Array<{ key: WorkbookTabKey; label: string }> = [
   { key: 'day-lookup', label: '일자별조회' },
   { key: 'daily-wage', label: '일급제' },
 ];
+
+const CAPTURE_RENDER_TIMEOUT_MS = 45_000;
+const PNG_ENCODING_TIMEOUT_MS = 15_000;
+const CLIPBOARD_WRITE_TIMEOUT_MS = 12_000;
+
+class WorkbookCopyTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WorkbookCopyTimeoutError';
+  }
+}
+
+const withWorkbookCopyTimeout = <T,>(
+  promise: PromiseLike<T>,
+  timeoutMs: number,
+  message: string
+): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      callback();
+    };
+    const timeoutId = window.setTimeout(() => {
+      finish(() => reject(new WorkbookCopyTimeoutError(message)));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error))
+    );
+  });
+
+type ImageClipboardWriteReservation = {
+  complete: (blob: Blob) => void;
+  cancel: (error: unknown) => void;
+  result: Promise<void>;
+};
+
+type ImageClipboardItemConstructor = new (
+  items: Record<string, Blob | Promise<Blob>>
+) => ClipboardItem;
+
+type ImageClipboardWriter = {
+  ClipboardItemCtor: ImageClipboardItemConstructor;
+  clipboard: Clipboard & { write: (items: ClipboardItem[]) => Promise<void> };
+};
+
+const getImageClipboardWriter = (): ImageClipboardWriter | null => {
+  if (
+    typeof window === 'undefined' ||
+    typeof navigator === 'undefined' ||
+    window.isSecureContext === false
+  ) {
+    return null;
+  }
+
+  const ClipboardItemCtor = (window as unknown as {
+    ClipboardItem?: ImageClipboardItemConstructor;
+  }).ClipboardItem;
+  const clipboard = navigator.clipboard as Clipboard & {
+    write?: (items: ClipboardItem[]) => Promise<void>;
+  };
+
+  if (!ClipboardItemCtor || !clipboard?.write) return null;
+
+  return {
+    ClipboardItemCtor,
+    clipboard: clipboard as Clipboard & { write: (items: ClipboardItem[]) => Promise<void> },
+  };
+};
+
+const reserveImageClipboardWrite = (
+  writer: ImageClipboardWriter
+): ImageClipboardWriteReservation | null => {
+  const { ClipboardItemCtor, clipboard } = writer;
+
+  let resolveBlob: (blob: Blob) => void = () => undefined;
+  let rejectBlob: (error: unknown) => void = () => undefined;
+  let settled = false;
+  const blobPromise = new Promise<Blob>((resolve, reject) => {
+    resolveBlob = resolve;
+    rejectBlob = reject;
+  });
+
+  try {
+    const result = clipboard.write([
+      new ClipboardItemCtor({
+        'image/png': blobPromise,
+      }),
+    ]);
+    // Keep early permission failures handled while the image is still rendering.
+    void result.catch(() => undefined);
+
+    return {
+      complete: (blob) => {
+        if (settled) return;
+        settled = true;
+        resolveBlob(blob);
+      },
+      cancel: (error) => {
+        if (settled) return;
+        settled = true;
+        rejectBlob(error);
+      },
+      result,
+    };
+  } catch {
+    settled = true;
+    resolveBlob(new Blob());
+    return null;
+  }
+};
+
+const writeImageBlobToClipboard = async (
+  writer: ImageClipboardWriter,
+  blob: Blob
+): Promise<void> => {
+  await writer.clipboard.write([
+    new writer.ClipboardItemCtor({
+      'image/png': blob,
+    }),
+  ]);
+};
+
+const getCaptureDimensions = (root: HTMLElement): { width: number; height: number } => {
+  const rootRect = root.getBoundingClientRect();
+  let width = Math.max(rootRect.width, root.clientWidth, root.scrollWidth);
+  let height = Math.max(rootRect.height, root.clientHeight, root.scrollHeight);
+
+  root.querySelectorAll<HTMLElement>('.overflow-x-auto').forEach((element) => {
+    const rect = element.getBoundingClientRect();
+    const offsetLeft = rect.left - rootRect.left;
+    const offsetTop = rect.top - rootRect.top;
+    width = Math.max(width, offsetLeft + Math.max(rect.width, element.clientWidth, element.scrollWidth));
+    height = Math.max(height, offsetTop + Math.max(rect.height, element.clientHeight, element.scrollHeight));
+  });
+
+  return {
+    width: Math.ceil(width),
+    height: Math.ceil(height),
+  };
+};
+
+const getCaptureScale = (width: number, height: number): number => {
+  const preferredScale = Math.max(2, window.devicePixelRatio || 1);
+  const maxPixelArea = 18_000_000;
+  const maxCanvasDimension = 32_000;
+  const areaScale = Math.sqrt(maxPixelArea / Math.max(width * height, 1));
+  const dimensionScale = maxCanvasDimension / Math.max(width, height, 1);
+
+  return Math.min(preferredScale, areaScale, dimensionScale);
+};
+
+const canvasToPngBlob = (canvas: HTMLCanvasElement): Promise<Blob> =>
+  new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+        return;
+      }
+      reject(new Error('PNG 이미지 변환에 실패했습니다.'));
+    }, 'image/png');
+  });
+
+type CaptureFormFieldSnapshot = {
+  captureKey: string;
+  displayValue: string;
+  nativeValue: string;
+  nativePlaceholder: string;
+  checked: boolean | null;
+  selectedIndex: number | null;
+  isPlaceholder: boolean;
+  placeholderColor: string;
+  placeholderOpacity: number;
+  preserveNativeControl: boolean;
+};
+
+const CAPTURE_FIELD_ATTRIBUTE = 'data-daily-advance-capture-field';
+
+const getCaptureFormFieldSnapshot = (
+  field: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+  captureKey: string
+): CaptureFormFieldSnapshot => {
+  const isInput = field instanceof HTMLInputElement;
+  const isSelect = field instanceof HTMLSelectElement;
+  const nativePlaceholder = isSelect ? '' : field.placeholder || '';
+  let placeholderColor = '#64748B';
+  let placeholderOpacity = 1;
+
+  if (!isSelect) {
+    try {
+      const placeholderStyle = window.getComputedStyle(field, '::placeholder');
+      placeholderColor = placeholderStyle.color || placeholderColor;
+      const parsedOpacity = Number.parseFloat(placeholderStyle.opacity);
+      if (Number.isFinite(parsedOpacity)) {
+        placeholderOpacity = Math.max(0, Math.min(1, parsedOpacity));
+      }
+    } catch {
+      // Some older engines do not expose pseudo-element computed styles.
+    }
+  }
+
+  if (field instanceof HTMLInputElement) {
+    const type = String(field.type || 'text').toLowerCase();
+    if (
+      ['checkbox', 'radio', 'file', 'color', 'range', 'hidden', 'password', 'button', 'submit', 'reset', 'image']
+        .includes(type)
+    ) {
+      return {
+        captureKey,
+        displayValue: field.value,
+        nativeValue: field.value,
+        nativePlaceholder,
+        checked: field.checked,
+        selectedIndex: null,
+        isPlaceholder: false,
+        placeholderColor,
+        placeholderOpacity,
+        preserveNativeControl: true,
+      };
+    }
+  }
+
+  const rawValue = isSelect
+    ? field.selectedOptions[0]?.textContent || field.value
+    : field.value;
+  const isPlaceholder = rawValue === '' && nativePlaceholder !== '';
+
+  return {
+    captureKey,
+    displayValue: String(isPlaceholder ? nativePlaceholder : rawValue).replace(/\s*\r?\n\s*/g, ' '),
+    nativeValue: field.value,
+    nativePlaceholder,
+    checked: isInput ? field.checked : null,
+    selectedIndex: isSelect ? field.selectedIndex : null,
+    isPlaceholder,
+    placeholderColor,
+    placeholderOpacity,
+    preserveNativeControl: false,
+  };
+};
+
+const parseCssPixelValue = (value: string | null | undefined): number => {
+  const parsed = Number.parseFloat(value || '0');
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const renderCaptureFieldTextOverlays = (
+  clonedDocument: Document,
+  clonedRoot: HTMLElement,
+  snapshots: CaptureFormFieldSnapshot[]
+): void => {
+  const clonedWindow = clonedDocument.defaultView;
+  if (!clonedWindow) return;
+
+  const clonedFields = Array.from(
+    clonedRoot.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+      'input, textarea, select'
+    )
+  );
+  const clonedFieldsByKey = new Map<string, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>();
+  clonedFields.forEach((field) => {
+    const captureKey = field.getAttribute(CAPTURE_FIELD_ATTRIBUTE);
+    if (captureKey) clonedFieldsByKey.set(captureKey, field);
+  });
+
+  // A single measuring context is enough for every field. Keeping the visible
+  // overlay as DOM text avoids allocating hundreds of individual bitmaps on
+  // large worker lists.
+  const measuringContext = clonedDocument.createElement('canvas').getContext('2d');
+
+  snapshots.forEach((snapshot) => {
+    const field = clonedFieldsByKey.get(snapshot.captureKey);
+    if (!field) return;
+
+    const fieldTagName = field.tagName;
+    if (fieldTagName === 'SELECT') {
+      if (snapshot.selectedIndex !== null) {
+        (field as HTMLSelectElement).selectedIndex = snapshot.selectedIndex;
+      }
+    } else {
+      const nativeField = field as HTMLInputElement | HTMLTextAreaElement;
+      const isFileInput = fieldTagName === 'INPUT' && (nativeField as HTMLInputElement).type === 'file';
+      if (!isFileInput) nativeField.value = snapshot.nativeValue;
+      nativeField.placeholder = snapshot.nativePlaceholder;
+      if (fieldTagName === 'INPUT' && snapshot.checked !== null) {
+        (nativeField as HTMLInputElement).checked = snapshot.checked;
+      }
+    }
+
+    if (snapshot.preserveNativeControl) {
+      return;
+    }
+
+    const computedStyle = clonedWindow.getComputedStyle(field);
+    if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden') return;
+
+    const fieldRect = field.getBoundingClientRect();
+    const width = Math.max(
+      1,
+      fieldRect.width || field.offsetWidth || parseCssPixelValue(computedStyle.width)
+    );
+    const height = Math.max(
+      1,
+      fieldRect.height || field.offsetHeight || parseCssPixelValue(computedStyle.height)
+    );
+
+    const wrapper = clonedDocument.createElement('span');
+    wrapper.dataset.captureFieldOverlay = 'true';
+    wrapper.style.position = 'relative';
+    wrapper.style.display = computedStyle.display === 'inline' ? 'inline-block' : computedStyle.display;
+    wrapper.style.boxSizing = 'border-box';
+    wrapper.style.width = `${width}px`;
+    wrapper.style.minWidth = `${width}px`;
+    wrapper.style.maxWidth = `${width}px`;
+    wrapper.style.height = `${height}px`;
+    wrapper.style.minHeight = `${height}px`;
+    wrapper.style.maxHeight = `${height}px`;
+    wrapper.style.marginTop = computedStyle.marginTop;
+    wrapper.style.marginRight = computedStyle.marginRight;
+    wrapper.style.marginBottom = computedStyle.marginBottom;
+    wrapper.style.marginLeft = computedStyle.marginLeft;
+    wrapper.style.verticalAlign = computedStyle.verticalAlign;
+    wrapper.style.borderRadius = computedStyle.borderRadius;
+    wrapper.style.overflow = 'hidden';
+    wrapper.style.flexGrow = computedStyle.flexGrow;
+    wrapper.style.flexShrink = computedStyle.flexShrink;
+    wrapper.style.flexBasis = computedStyle.flexBasis;
+    wrapper.style.alignSelf = computedStyle.alignSelf;
+    wrapper.style.order = computedStyle.order;
+
+    const borderLeft = parseCssPixelValue(computedStyle.borderLeftWidth);
+    const borderRight = parseCssPixelValue(computedStyle.borderRightWidth);
+    const borderTop = parseCssPixelValue(computedStyle.borderTopWidth);
+    const borderBottom = parseCssPixelValue(computedStyle.borderBottomWidth);
+    const paddingLeft = parseCssPixelValue(computedStyle.paddingLeft);
+    const paddingRight = parseCssPixelValue(computedStyle.paddingRight);
+    const contentLeft = Math.min(width - 1, borderLeft + paddingLeft + 1);
+    // Use the input's inner border box vertically instead of its tight CSS
+    // content box. The extra breathing room prevents html2canvas from trimming
+    // the lower pixels of Korean glyphs without changing the table row height.
+    const contentTop = Math.min(height - 1, borderTop + 1);
+    const contentWidth = Math.max(
+      1,
+      width - contentLeft - borderRight - paddingRight - 1
+    );
+    const contentHeight = Math.max(
+      1,
+      height - contentTop - borderBottom - 1
+    );
+    const baseFontSize = Math.max(1, parseCssPixelValue(computedStyle.fontSize) || 14);
+    const heightFittedFontSize = Math.max(1, Math.min(baseFontSize, (contentHeight - 1) / 1.35));
+    const minFontSize = Math.min(heightFittedFontSize, 8);
+    const letterSpacing = computedStyle.letterSpacing === 'normal'
+      ? 0
+      : parseCssPixelValue(computedStyle.letterSpacing);
+    let fontSize = heightFittedFontSize;
+
+    const setMeasuringFont = () => {
+      if (!measuringContext) return;
+      measuringContext.font = `${computedStyle.fontStyle} ${computedStyle.fontVariant} ${computedStyle.fontWeight} ${fontSize}px ${computedStyle.fontFamily}`;
+    };
+    const measureTextWidth = (): number => {
+      const baseWidth = measuringContext
+        ? measuringContext.measureText(snapshot.displayValue).width
+        : snapshot.displayValue.length * fontSize * 0.65;
+      return baseWidth + Math.max(0, snapshot.displayValue.length - 1) * letterSpacing;
+    };
+
+    setMeasuringFont();
+    const initialTextWidth = measureTextWidth();
+    const fittedTextWidth = Math.max(1, contentWidth * 0.98);
+    if (initialTextWidth > fittedTextWidth && initialTextWidth > 0) {
+      fontSize = Math.max(minFontSize, fontSize * (fittedTextWidth / initialTextWidth));
+      setMeasuringFont();
+    }
+    const measuredTextWidth = measureTextWidth();
+
+    const direction = computedStyle.direction === 'rtl' ? 'rtl' : 'ltr';
+    const requestedAlign = computedStyle.textAlign;
+    const normalizedAlign = requestedAlign === 'center'
+      ? 'center'
+      : requestedAlign === 'right' ||
+          (requestedAlign === 'end' && direction === 'ltr') ||
+          (requestedAlign === 'start' && direction === 'rtl')
+        ? 'right'
+        : 'left';
+    const justifyContent = normalizedAlign === 'right'
+      ? 'flex-end'
+      : normalizedAlign === 'center'
+        ? 'center'
+        : 'flex-start';
+    const transformOrigin = normalizedAlign === 'right'
+      ? 'right center'
+      : normalizedAlign === 'center'
+        ? 'center center'
+        : 'left center';
+
+    const overlay = clonedDocument.createElement('span');
+    overlay.dataset.captureFieldText = 'true';
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.style.position = 'absolute';
+    overlay.style.left = `${contentLeft}px`;
+    overlay.style.top = `${contentTop}px`;
+    overlay.style.zIndex = '1';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = justifyContent;
+    overlay.style.boxSizing = 'border-box';
+    overlay.style.width = `${contentWidth}px`;
+    overlay.style.height = `${contentHeight}px`;
+    overlay.style.overflow = 'hidden';
+    overlay.style.whiteSpace = 'pre';
+    overlay.style.pointerEvents = 'none';
+    overlay.style.userSelect = 'none';
+    overlay.style.direction = direction;
+    overlay.style.paddingBottom = '1px';
+
+    const text = clonedDocument.createElement('span');
+    text.textContent = snapshot.displayValue;
+    text.style.display = 'block';
+    text.style.flex = 'none';
+    text.style.maxWidth = 'none';
+    text.style.overflow = 'visible';
+    text.style.whiteSpace = 'pre';
+    text.style.wordBreak = 'normal';
+    text.style.overflowWrap = 'normal';
+    text.style.textOverflow = 'clip';
+    text.style.fontFamily = computedStyle.fontFamily;
+    text.style.fontSize = `${fontSize}px`;
+    text.style.fontStyle = computedStyle.fontStyle;
+    text.style.fontVariant = computedStyle.fontVariant;
+    text.style.fontWeight = computedStyle.fontWeight;
+    text.style.letterSpacing = computedStyle.letterSpacing;
+    text.style.lineHeight = `${Math.min(contentHeight, Math.max(fontSize * 1.4, fontSize + 2))}px`;
+    text.style.textAlign = normalizedAlign;
+    text.style.textRendering = 'geometricPrecision';
+    text.style.setProperty('-webkit-font-smoothing', 'antialiased');
+    text.style.color = snapshot.isPlaceholder
+      ? snapshot.placeholderColor
+      : computedStyle.getPropertyValue('-webkit-text-fill-color') || computedStyle.color;
+    text.style.opacity = snapshot.isPlaceholder ? String(snapshot.placeholderOpacity) : '1';
+
+    if (measuredTextWidth > fittedTextWidth && measuredTextWidth > 0) {
+      text.style.transform = `scaleX(${fittedTextWidth / measuredTextWidth})`;
+      text.style.transformOrigin = transformOrigin;
+    }
+
+    overlay.append(text);
+
+    field.style.position = 'absolute';
+    field.style.inset = '0';
+    field.style.width = '100%';
+    field.style.minWidth = '0';
+    field.style.maxWidth = 'none';
+    field.style.height = '100%';
+    field.style.minHeight = '0';
+    field.style.maxHeight = 'none';
+    field.style.margin = '0';
+    field.style.setProperty('color', 'transparent', 'important');
+    field.style.setProperty('-webkit-text-fill-color', 'transparent', 'important');
+    field.style.setProperty('text-shadow', 'none', 'important');
+    field.style.caretColor = 'transparent';
+    field.style.pointerEvents = 'none';
+    if (fieldTagName === 'SELECT') {
+      field.style.setProperty('appearance', 'none');
+      field.style.setProperty('-webkit-appearance', 'none');
+      (field as HTMLSelectElement).selectedIndex = -1;
+    } else {
+      if (fieldTagName === 'INPUT' && (field as HTMLInputElement).type === 'number') {
+        (field as HTMLInputElement).type = 'text';
+      }
+      field.value = '';
+      (field as HTMLInputElement | HTMLTextAreaElement).placeholder = '';
+    }
+
+    field.replaceWith(wrapper);
+    wrapper.append(field, overlay);
+  });
+};
+
+const waitForCaptureLayout = async (): Promise<void> => {
+  try {
+    if (document.fonts?.ready) {
+      await Promise.race([
+        document.fonts.ready,
+        new Promise<void>((resolve) => window.setTimeout(resolve, 1500)),
+      ]);
+    }
+  } catch (error) {
+    console.warn('Failed to wait for fonts before workbook capture:', error);
+  }
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let animationFrameId = 0;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      if (animationFrameId) window.cancelAnimationFrame(animationFrameId);
+      resolve();
+    };
+    const timeoutId = window.setTimeout(finish, 350);
+    animationFrameId = window.requestAnimationFrame(finish);
+  });
+};
+
+const captureWorkbookTabToPng = async (root: HTMLElement): Promise<Blob> => {
+  const sourceFields = Array.from(
+    root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+      'input, textarea, select'
+    )
+  );
+  const fieldBindings = sourceFields.map((field, index) => ({
+    captureKey: `field-${index}`,
+    field,
+    previousCaptureKey: field.getAttribute(CAPTURE_FIELD_ATTRIBUTE),
+  }));
+  const sourceFieldSnapshots = fieldBindings.map(({ field, captureKey }) =>
+    getCaptureFormFieldSnapshot(field, captureKey)
+  );
+
+  fieldBindings.forEach(({ field, captureKey }) => {
+    field.setAttribute(CAPTURE_FIELD_ATTRIBUTE, captureKey);
+  });
+
+  try {
+    await waitForCaptureLayout();
+    const currentFields = Array.from(
+      root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+        'input, textarea, select'
+      )
+    );
+    const captureSourceChanged =
+      !root.isConnected ||
+      currentFields.length !== sourceFields.length ||
+      currentFields.some((field, index) => field !== sourceFields[index]);
+    if (captureSourceChanged) {
+      throw new Error('캡처 준비 중 목록 화면이 변경되었습니다. 다시 시도해주세요.');
+    }
+
+    const { width, height } = getCaptureDimensions(root);
+    if (width <= 0 || height <= 0) {
+      throw new Error('캡처할 목록의 크기를 확인할 수 없습니다.');
+    }
+    const captureScale = getCaptureScale(width, height);
+
+    const canvas = await withWorkbookCopyTimeout(
+      html2canvas(root, {
+        backgroundColor: '#ffffff',
+        scale: captureScale,
+        useCORS: true,
+        allowTaint: false,
+        imageTimeout: 12_000,
+        logging: false,
+        width,
+        height,
+        windowWidth: window.innerWidth,
+        windowHeight: Math.max(window.innerHeight, height),
+        scrollX: 0,
+        scrollY: -window.scrollY,
+        ignoreElements: (element: Element) =>
+          (element as HTMLElement).dataset?.html2canvasIgnore === 'true',
+        onclone: (clonedDocument: Document) => {
+          const clonedRoot = clonedDocument.querySelector<HTMLElement>(
+            '[data-daily-advance-capture-root="true"]'
+          );
+          if (!clonedRoot) return;
+
+          clonedRoot.style.width = `${width}px`;
+          clonedRoot.style.minWidth = `${width}px`;
+          clonedRoot.style.maxWidth = 'none';
+          clonedRoot.style.height = 'auto';
+          clonedRoot.style.maxHeight = 'none';
+          clonedRoot.style.overflow = 'visible';
+          clonedRoot.style.backgroundColor = '#ffffff';
+          clonedRoot.style.textRendering = 'geometricPrecision';
+          clonedRoot.style.setProperty('-webkit-font-smoothing', 'antialiased');
+
+          let ancestor = clonedRoot.parentElement;
+          while (ancestor) {
+            ancestor.style.overflow = 'visible';
+            ancestor.style.maxWidth = 'none';
+            ancestor.style.maxHeight = 'none';
+            ancestor = ancestor.parentElement;
+          }
+
+          clonedRoot.querySelectorAll<HTMLElement>('.overflow-x-auto, .overflow-hidden').forEach((element) => {
+            element.style.overflow = 'visible';
+            element.style.maxWidth = 'none';
+            element.style.maxHeight = 'none';
+            element.scrollLeft = 0;
+            element.scrollTop = 0;
+          });
+
+          clonedRoot.querySelectorAll<HTMLElement>('.sticky').forEach((element) => {
+            element.style.position = 'static';
+            element.style.left = 'auto';
+            element.style.right = 'auto';
+            element.style.top = 'auto';
+            element.style.zIndex = 'auto';
+          });
+
+          clonedRoot.querySelectorAll<HTMLElement>('*').forEach((element) => {
+            element.style.animation = 'none';
+            element.style.transition = 'none';
+            element.style.caretColor = 'transparent';
+          });
+
+          renderCaptureFieldTextOverlays(clonedDocument, clonedRoot, sourceFieldSnapshots);
+        },
+      } as unknown as Parameters<typeof html2canvas>[1]),
+      CAPTURE_RENDER_TIMEOUT_MS,
+      '화면 이미지 생성이 45초 이상 지연되어 중단했습니다. 잠시 후 다시 시도해 주세요.'
+    );
+
+    return await withWorkbookCopyTimeout(
+      canvasToPngBlob(canvas),
+      PNG_ENCODING_TIMEOUT_MS,
+      'PNG 이미지 변환이 지연되어 중단했습니다. 목록 크기를 줄인 뒤 다시 시도해 주세요.'
+    );
+  } finally {
+    fieldBindings.forEach(({ field, captureKey, previousCaptureKey }) => {
+      if (field.getAttribute(CAPTURE_FIELD_ATTRIBUTE) !== captureKey) return;
+      if (previousCaptureKey === null) {
+        field.removeAttribute(CAPTURE_FIELD_ATTRIBUTE);
+      } else {
+        field.setAttribute(CAPTURE_FIELD_ATTRIBUTE, previousCaptureKey);
+      }
+    });
+  }
+};
 
 const normalizeText = (value: unknown): string =>
   String(value ?? '')
@@ -559,6 +1198,9 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   const [loadWarningMessage, setLoadWarningMessage] = useState('');
   const [savingProfiles, setSavingProfiles] = useState(false);
   const [savingStatementRecruiterFees, setSavingStatementRecruiterFees] = useState(false);
+  const [copyingTab, setCopyingTab] = useState<WorkbookTabKey | null>(null);
+  const copyInFlightRef = useRef(false);
+  const activeTabCaptureRef = useRef<HTMLDivElement | null>(null);
   const [isGoyunjungMode, setIsGoyunjungMode] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(GOYUNJUNG_MODE_STORAGE_KEY) === 'true';
@@ -1752,25 +2394,109 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     }
   }, [allWorkerMasterRows, loadData, profileBaselineDrafts, profileDirtyWorkerIds, profileDrafts]);
 
-  const renderSheetTabs = () => (
-    <div className="flex flex-wrap gap-2 border-b border-[#d8cfb1] pb-3">
-      {TAB_OPTIONS.map((tab) => {
-        const active = activeTab === tab.key;
-        return (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setActiveTab(tab.key)}
-            className={`rounded-md border px-3 py-2 text-sm font-bold transition ${
-              active
-                ? 'border-[#4F6228] bg-[#4F6228] text-white'
-                : 'border-[#d7cfb5] bg-white text-[#4A452A] hover:border-[#948A54] hover:bg-[#fff9dd]'
-            }`}
-          >
-            {tab.label}
-          </button>
+  const handleCopyActiveTab = useCallback(async () => {
+    if (copyInFlightRef.current) return;
+    copyInFlightRef.current = true;
+
+    const tabLabel = TAB_OPTIONS.find((tab) => tab.key === activeTab)?.label || '현재 탭';
+    let copyStage: 'capture' | 'clipboard' = 'capture';
+    let clipboardReservation: ImageClipboardWriteReservation | null = null;
+
+    try {
+      const captureRoot = activeTabCaptureRef.current;
+      if (!captureRoot) {
+        toast.error(`${tabLabel} 목록 화면을 찾지 못했습니다.`);
+        return;
+      }
+
+      const clipboardWriter = getImageClipboardWriter();
+      if (!clipboardWriter) {
+        toast.error('이 브라우저에서는 이미지 클립보드 복사를 지원하지 않습니다. HTTPS 또는 localhost에서 다시 시도해 주세요.');
+        return;
+      }
+      clipboardReservation = reserveImageClipboardWrite(clipboardWriter);
+
+      setCopyingTab(activeTab);
+      const captureBlob = await captureWorkbookTabToPng(captureRoot);
+      copyStage = 'clipboard';
+
+      if (clipboardReservation) {
+        clipboardReservation.complete(captureBlob);
+        try {
+          await withWorkbookCopyTimeout(
+            clipboardReservation.result,
+            CLIPBOARD_WRITE_TIMEOUT_MS,
+            '클립보드 저장 응답이 지연되어 중단했습니다. 브라우저 권한을 확인한 뒤 다시 시도해 주세요.'
+          );
+        } catch (error) {
+          if (error instanceof WorkbookCopyTimeoutError) throw error;
+          console.warn('Reserved image clipboard write failed, retrying with a rendered blob:', error);
+          await withWorkbookCopyTimeout(
+            writeImageBlobToClipboard(clipboardWriter, captureBlob),
+            CLIPBOARD_WRITE_TIMEOUT_MS,
+            '클립보드 저장 응답이 지연되어 중단했습니다. 브라우저 권한을 확인한 뒤 다시 시도해 주세요.'
+          );
+        }
+      } else {
+        await withWorkbookCopyTimeout(
+          writeImageBlobToClipboard(clipboardWriter, captureBlob),
+          CLIPBOARD_WRITE_TIMEOUT_MS,
+          '클립보드 저장 응답이 지연되어 중단했습니다. 브라우저 권한을 확인한 뒤 다시 시도해 주세요.'
         );
-      })}
+      }
+      toast.success(`${tabLabel} 목록 전체를 이미지로 클립보드에 복사했습니다.`);
+    } catch (error) {
+      clipboardReservation?.cancel(error);
+      if (clipboardReservation) void clipboardReservation.result.catch(() => undefined);
+      console.error(`Failed during daily advance workbook ${copyStage}:`, error);
+
+      if (error instanceof WorkbookCopyTimeoutError) {
+        toast.error(error.message);
+      } else if (copyStage === 'capture') {
+        toast.error(`${tabLabel} 화면 이미지를 생성하지 못했습니다. 목록 크기나 외부 이미지 상태를 확인해 주세요.`);
+      } else {
+        toast.error(`${tabLabel} 화면복사에 실패했습니다. 브라우저의 클립보드 권한을 확인해 주세요.`);
+      }
+    } finally {
+      setCopyingTab(null);
+      copyInFlightRef.current = false;
+    }
+  }, [activeTab]);
+
+  const renderSheetTabs = () => (
+    <div className="flex flex-wrap items-center gap-2 border-b border-[#d8cfb1] pb-3">
+      <div className="flex min-w-0 flex-1 flex-wrap gap-2">
+        {TAB_OPTIONS.map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              disabled={copyingTab !== null}
+              className={`rounded-md border px-3 py-2 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                active
+                  ? 'border-[#4F6228] bg-[#4F6228] text-white'
+                  : 'border-[#d7cfb5] bg-white text-[#4A452A] hover:border-[#948A54] hover:bg-[#fff9dd]'
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => void handleCopyActiveTab()}
+        disabled={loading || copyingTab !== null}
+        data-html2canvas-ignore="true"
+        title={`${TAB_OPTIONS.find((tab) => tab.key === activeTab)?.label || '현재 탭'} 목록 전체를 이미지로 복사`}
+        className="inline-flex items-center gap-2 rounded-md border border-sky-600 bg-sky-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:border-sky-700 hover:bg-sky-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-300"
+      >
+        <FontAwesomeIcon icon={copyingTab === activeTab ? faSpinner : faCopy} spin={copyingTab === activeTab} />
+        <span>{copyingTab === activeTab ? '복사 중...' : '화면복사'}</span>
+      </button>
     </div>
   );
 
@@ -2764,7 +3490,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsGoyunjungMode((prev) => !prev)}
-                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                disabled={copyingTab !== null}
+                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                   isGoyunjungMode
                     ? 'border-rose-200 bg-rose-50 text-rose-700'
                     : 'border-[#d7cfb5] bg-white text-[#4A452A] hover:border-[#948A54]'
@@ -2781,7 +3508,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => void applyRandomGoyunjungBackground()}
-                  className="inline-flex items-center rounded-full border border-rose-200 bg-white/85 px-3 py-1.5 text-xs font-bold text-rose-700 transition hover:bg-rose-50"
+                  disabled={copyingTab !== null}
+                  className="inline-flex items-center rounded-full border border-rose-200 bg-white/85 px-3 py-1.5 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   배경 변경
                 </button>
@@ -2841,6 +3569,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                 type="month"
                 value={month}
                 onChange={(event) => setMonth(event.target.value)}
+                disabled={copyingTab !== null}
                 className="w-full rounded-md border border-[#d7cfb5] px-3 py-2 outline-none focus:border-[#948A54]"
               />
             </label>
@@ -2853,6 +3582,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                 min={monthToPeriod(month).startDate}
                 max={monthToPeriod(month).endDate}
                 onChange={(event) => setSelectedDate(event.target.value)}
+                disabled={copyingTab !== null}
                 className="w-full rounded-md border border-[#d7cfb5] px-3 py-2 outline-none focus:border-[#948A54]"
               />
             </label>
@@ -2862,6 +3592,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               <select
                 value={selectedTeamKey}
                 onChange={(event) => setSelectedTeamKey(event.target.value)}
+                disabled={copyingTab !== null}
                 className="w-full rounded-md border border-[#d7cfb5] px-3 py-2 outline-none focus:border-[#948A54]"
               >
                 <option value="ALL">전체 팀</option>
@@ -2878,6 +3609,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               <select
                 value={statementTeamKey}
                 onChange={(event) => setStatementTeamKey(event.target.value)}
+                disabled={copyingTab !== null}
                 className="w-full rounded-md border border-[#d7cfb5] px-3 py-2 outline-none focus:border-[#948A54]"
               >
                 {statementTeamOptions.length === 0 ? (
@@ -2896,7 +3628,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => void loadData()}
-                disabled={loading}
+                disabled={loading || copyingTab !== null}
                 className="inline-flex items-center gap-2 rounded-md bg-[#4A452A] px-4 py-2 text-sm font-bold text-white transition hover:bg-[#3a361f] disabled:cursor-not-allowed disabled:bg-slate-300"
               >
                 <FontAwesomeIcon icon={loading ? faSpinner : faSearch} spin={loading} />
@@ -2939,7 +3671,9 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               </div>
             </div>
           ) : (
-            renderActiveTab()
+            <div ref={activeTabCaptureRef} data-daily-advance-capture-root="true">
+              {renderActiveTab()}
+            </div>
           )}
         </div>
       </div>

@@ -87,6 +87,32 @@ export const accommodationFirestoreService = {
     },
 
     /**
+     * 공과금 기록 완전 교체 (저장-자동청구 중 확정 충돌 롤백에만 사용)
+     *
+     * 일반 저장은 merge가 맞지만 롤백은 새 저장에서 추가된 필드까지 제거해야
+     * 하므로 기존 스냅샷으로 문서를 교체한다.
+     */
+    replaceUtilityRecord: async (data: UtilityRecord) => {
+        const normalizedId = String(data.id ?? '').trim();
+        if (!normalizedId) throw new Error('공과금 대장 교체 ID가 필요합니다.');
+        const ref = doc(db, UTILITY_RECORD_COLLECTION, normalizedId).withConverter(createConverter(utilityRecordSchema));
+        await setDoc(ref, {
+            ...data,
+            id: normalizedId,
+            updatedAt: Timestamp.now()
+        });
+    },
+
+    /**
+     * 공과금 기록 삭제 (저장-자동청구 중 확정 충돌 롤백에만 사용)
+     */
+    deleteUtilityRecord: async (id: string) => {
+        const normalizedId = String(id ?? '').trim();
+        if (!normalizedId) throw new Error('공과금 대장 삭제 ID가 필요합니다.');
+        await deleteDoc(doc(db, UTILITY_RECORD_COLLECTION, normalizedId));
+    },
+
+    /**
      * 특정 숙소의 최근 공과금 기록 조회
      */
     getLatestUtilityRecord: async (accommodationId: string) => {

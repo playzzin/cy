@@ -8,7 +8,8 @@ service firebase.storage {
     function adminRoles() {
       return [
         'ADMIN', 'admin', 'administrator', 'super_admin', 'owner',
-        'DEV', 'dev', 'developer', 'system_admin',
+        'DEV', 'Dev', 'dev', 'DEVELOPER', 'Developer', 'developer',
+        'SYSTEM_ADMIN', 'system_admin',
         '관리자', '사장', '실장', '개발', '개발자', '시스템관리자',
         '愿由ъ옄', '?ъ옣', '?ㅼ옣', '媛쒕컻', '媛쒕컻??', '?쒖뒪?쒓?由ъ옄'
       ];

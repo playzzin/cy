@@ -1,4 +1,5 @@
 import {
+    getSettlementBillingRowScopeKey,
     isPostedSettlementBillingStatus,
     normalizeSettlementBillingStatus,
     selectPreferredSettlementBillings
@@ -33,5 +34,80 @@ describe('supportSettlementBilling', () => {
         expect(selectPreferredSettlementBillings(docs, (doc) => doc.sourceType === 'ledger')).toEqual([
             docs[0]
         ]);
+    });
+
+    it('keeps a different asset ledger draft when another asset is posted', () => {
+        const docs = [
+            { id: 'vehicle-a-confirmed', assetId: 'vehicle-a', status: 'CONFIRMED', sourceType: 'ledger' },
+            { id: 'vehicle-a-draft', assetId: 'vehicle-a', status: 'DRAFT', sourceType: 'ledger' },
+            { id: 'vehicle-b-draft', assetId: 'vehicle-b', status: 'DRAFT', sourceType: 'ledger' }
+        ];
+
+        expect(selectPreferredSettlementBillings(
+            docs,
+            (doc) => doc.sourceType === 'ledger',
+            (doc) => doc.assetId
+        )).toEqual([
+            docs[0],
+            docs[2]
+        ]);
+    });
+
+    it('does not merge documents whose grouping identity is missing', () => {
+        const docs = [
+            { id: 'unknown-confirmed', status: 'CONFIRMED', sourceType: 'ledger' },
+            { id: 'unknown-draft', status: 'DRAFT', sourceType: 'ledger' }
+        ];
+
+        expect(selectPreferredSettlementBillings(
+            docs,
+            (doc) => doc.sourceType === 'ledger',
+            () => ''
+        )).toEqual(docs);
+    });
+
+    it('prefers posted status only within the same modern row scope', () => {
+        const docs = [
+            { id: 'vehicle-a__row_segment-a', assetId: 'vehicle-a', status: 'CONFIRMED', sourceType: 'ledger' },
+            { id: 'vehicle-a__row_segment-a', assetId: 'vehicle-a', status: 'DRAFT', sourceType: 'ledger' },
+            { id: 'vehicle-a__row_segment-b', assetId: 'vehicle-a', status: 'DRAFT', sourceType: 'ledger' }
+        ];
+
+        expect(selectPreferredSettlementBillings(
+            docs,
+            (doc) => doc.sourceType === 'ledger',
+            (doc) => doc.assetId,
+            getSettlementBillingRowScopeKey
+        )).toEqual([docs[0], docs[2]]);
+    });
+
+    it('lets an unscoped posted legacy document supersede scoped drafts for that asset', () => {
+        const docs = [
+            { id: 'vehicle-a-legacy', assetId: 'vehicle-a', status: 'CONFIRMED', sourceType: 'ledger' },
+            { id: 'vehicle-a__row_segment-a', assetId: 'vehicle-a', status: 'DRAFT', sourceType: 'ledger' },
+            { id: 'vehicle-a__row_segment-b', assetId: 'vehicle-a', status: 'DRAFT', sourceType: 'ledger' }
+        ];
+
+        expect(selectPreferredSettlementBillings(
+            docs,
+            (doc) => doc.sourceType === 'ledger',
+            (doc) => doc.assetId,
+            getSettlementBillingRowScopeKey
+        )).toEqual([docs[0]]);
+    });
+
+    it('drops an unscoped legacy ledger draft after modern row drafts exist', () => {
+        const docs = [
+            { id: 'vehicle-a-legacy', assetId: 'vehicle-a', status: 'DRAFT', sourceType: 'ledger' },
+            { id: 'vehicle-a__row_segment-a', assetId: 'vehicle-a', status: 'DRAFT', sourceType: 'ledger' },
+            { id: 'vehicle-a__row_segment-b', assetId: 'vehicle-a', status: 'DRAFT', sourceType: 'ledger' }
+        ];
+
+        expect(selectPreferredSettlementBillings(
+            docs,
+            (doc) => doc.sourceType === 'ledger',
+            (doc) => doc.assetId,
+            getSettlementBillingRowScopeKey
+        )).toEqual([docs[1], docs[2]]);
     });
 });
