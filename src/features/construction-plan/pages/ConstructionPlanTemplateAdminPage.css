@@ -1,0 +1,98 @@
+.cp-template-admin { min-height: 100%; background: #f2f5f7; }
+.cp-template-admin__body { display: flex; flex-direction: column; gap: 18px; }
+.cp-template-admin__summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.cp-template-admin__summary > div { min-height: 82px; padding: 16px 18px; display: grid; grid-template-columns: 34px 1fr auto; grid-template-rows: auto auto; align-items: center; column-gap: 10px; border: 1px solid #dce4e9; border-radius: 10px; background: #fff; box-shadow: 0 2px 8px rgba(15, 43, 55, .04); }
+.cp-template-admin__summary > div > span { width: 34px; height: 34px; grid-row: 1 / 3; display: grid; place-items: center; border-radius: 8px; color: #0e6274; background: #e5f2f4; }
+.cp-template-admin__summary small { color: #6c7880; font-size: 12px; font-weight: 700; }
+.cp-template-admin__summary strong { grid-column: 3; grid-row: 1 / 3; color: #173641; font-size: 26px; font-variant-numeric: tabular-nums; }
+.cp-template-admin__notice { padding: 13px 16px; display: flex; gap: 11px; align-items: center; border: 1px solid #b8d7de; border-radius: 9px; color: #174f5d; background: #ecf7f8; }
+.cp-template-admin__notice strong, .cp-template-admin__notice p { margin: 0; }
+.cp-template-admin__notice p { margin-top: 3px; color: #55717a; font-size: 12px; }
+.cp-template-admin__grid { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 16px; align-items: start; }
+.cp-template-admin__catalog { overflow: hidden; }
+.cp-template-admin__toolbar { min-height: 58px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #e1e7eb; background: #fbfcfd; }
+.cp-template-admin__toolbar > div { padding: 3px; display: flex; gap: 3px; border: 1px solid #dce4e8; border-radius: 8px; background: #f1f4f6; }
+.cp-template-admin__toolbar button { padding: 7px 12px; border: 0; border-radius: 6px; color: #65737a; background: transparent; font-size: 12px; font-weight: 700; cursor: pointer; }
+.cp-template-admin__toolbar button.is-active { color: #164e63; background: #fff; box-shadow: 0 1px 4px rgba(20, 51, 62, .12); }
+.cp-template-admin__toolbar > span { display: inline-flex; gap: 6px; align-items: center; color: #708087; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; letter-spacing: .02em; }
+.cp-template-admin__row { min-height: 178px; padding: 18px; display: grid; grid-template-columns: minmax(220px, 1.15fr) minmax(250px, 1.3fr) minmax(170px, .8fr) auto; gap: 18px; align-items: center; border-bottom: 1px solid #e4eaed; background: #fff; }
+.cp-template-admin__row:last-child { border-bottom: 0; }
+.cp-template-admin__row.is-published { box-shadow: inset 4px 0 #13806e; }
+.cp-template-admin__row.is-retired { background: #f8f9fa; }
+.cp-template-admin__identity { min-width: 0; }
+.cp-template-admin__state-line { min-height: 24px; display: flex; align-items: center; gap: 7px; }
+.cp-template-admin__state { padding: 4px 7px; display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; color: #657079; background: #edf0f2; font-size: 10px; font-weight: 800; }
+.cp-template-admin__state.is-draft { color: #7b5b16; background: #fbf2d9; }
+.cp-template-admin__state.is-in_review { color: #2c5f8a; background: #e5f0fa; }
+.cp-template-admin__state.is-published { color: #126552; background: #dff2eb; }
+.cp-template-admin__state.is-retired { color: #7a4b50; background: #f2e7e8; }
+.cp-template-admin__state-line em { display: inline-flex; align-items: center; gap: 4px; color: #137363; font-size: 10px; font-style: normal; font-weight: 800; }
+.cp-template-admin__identity > strong { margin-top: 9px; display: block; color: #17333d; font-size: 15px; line-height: 1.35; }
+.cp-template-admin__identity > p { margin: 5px 0 0; overflow: hidden; color: #748087; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.cp-template-admin__contract { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.cp-template-admin__contract > div { min-width: 0; padding: 8px 9px; border: 1px solid #e2e8eb; border-radius: 6px; background: #f9fbfb; }
+.cp-template-admin__contract dt { color: #879197; font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.cp-template-admin__contract dd { margin: 4px 0 0; overflow: hidden; color: #344d56; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.cp-template-admin__audit { min-width: 0; display: flex; flex-direction: column; gap: 5px; color: #7b878d; font-size: 10px; }
+.cp-template-admin__audit span { display: flex; justify-content: space-between; gap: 8px; }
+.cp-template-admin__audit strong { overflow: hidden; color: #4b5f67; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.cp-template-admin__audit p { margin: 4px 0 0; padding: 6px 7px; overflow: hidden; border-left: 2px solid #b8cbd1; color: #526971; background: #f3f7f8; text-overflow: ellipsis; white-space: nowrap; }
+.cp-template-admin__actions { min-width: 110px; display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.cp-template-admin__actions button { min-height: 34px; padding: 0 11px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #17687a; border-radius: 7px; color: #fff; background: #17687a; font-size: 11px; font-weight: 800; cursor: pointer; }
+.cp-template-admin__actions button.is-ghost { color: #49626b; border-color: #cedadd; background: #fff; }
+.cp-template-admin__actions button.is-danger { color: #9a3e43; border-color: #e1bec1; background: #fff7f7; }
+.cp-template-admin__read-only, .cp-template-admin__terminal { padding: 7px 9px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border-radius: 6px; color: #7d888e; background: #eef1f2; font-size: 10px; font-weight: 800; }
+.cp-template-admin__loading, .cp-template-admin__error, .cp-template-admin__empty { min-height: 260px; padding: 32px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #64757c; text-align: center; }
+.cp-template-admin__loading strong, .cp-template-admin__error strong, .cp-template-admin__empty strong { margin-top: 12px; color: #294650; }
+.cp-template-admin__loading p, .cp-template-admin__error p, .cp-template-admin__empty p { margin: 6px 0 0; max-width: 430px; font-size: 12px; }
+.cp-template-admin__error { color: #a44343; }
+.cp-template-admin__error button { margin-top: 14px; padding: 8px 12px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid #d2dde1; border-radius: 7px; color: #435e67; background: #fff; font-weight: 700; cursor: pointer; }
+.cp-template-admin__policy { display: flex; flex-direction: column; gap: 12px; }
+.cp-template-admin__policy > section { padding: 18px; border: 1px solid #d9e3e7; border-radius: 10px; background: #fff; box-shadow: 0 2px 8px rgba(15, 43, 55, .04); }
+.cp-template-admin__policy-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 9px; color: #126679; background: #e5f2f4; }
+.cp-template-admin__policy h2 { margin: 11px 0 15px; color: #193943; font-size: 15px; }
+.cp-template-admin__policy ol { margin: 0; padding: 0; display: flex; flex-direction: column; list-style: none; }
+.cp-template-admin__policy li { padding: 10px 0; display: grid; grid-template-columns: 24px 1fr; gap: 9px; border-top: 1px solid #e8edef; }
+.cp-template-admin__policy li b { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; color: #17687a; background: #e7f1f3; font-size: 10px; }
+.cp-template-admin__policy li span { display: flex; flex-direction: column; color: #7b878d; font-size: 10px; line-height: 1.45; }
+.cp-template-admin__policy li strong { color: #3d555e; font-size: 11px; }
+.cp-template-admin__upgrade-policy { display: flex; gap: 10px; color: #805c16; border-color: #ead9ad !important; background: #fffaf0 !important; }
+.cp-template-admin__upgrade-policy strong, .cp-template-admin__upgrade-policy p { margin: 0; }
+.cp-template-admin__upgrade-policy p { margin-top: 5px; color: #7c704f; font-size: 10px; line-height: 1.55; }
+.cp-template-admin__modal-backdrop { position: fixed; z-index: 1300; inset: 0; padding: 24px; display: grid; place-items: center; background: rgba(13, 31, 38, .48); backdrop-filter: blur(2px); }
+.cp-template-admin__modal { width: min(520px, 100%); padding: 22px; border: 1px solid #d8e2e6; border-radius: 12px; background: #fff; box-shadow: 0 22px 70px rgba(7, 27, 35, .25); }
+.cp-template-admin__modal header { display: flex; gap: 12px; align-items: center; }
+.cp-template-admin__modal header > span { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 9px; color: #fff; background: #17687a; }
+.cp-template-admin__modal header small { color: #75838a; font-size: 10px; }
+.cp-template-admin__modal h2 { margin: 2px 0 0; color: #193943; font-size: 18px; }
+.cp-template-admin__modal > p { margin: 15px 0 0; color: #65747b; font-size: 12px; line-height: 1.6; }
+.cp-template-admin__modal-binding { margin-top: 13px; padding: 9px 10px; display: flex; gap: 7px; align-items: center; border: 1px solid #dce5e8; border-radius: 7px; color: #61727a; background: #f6f9fa; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
+.cp-template-admin__modal-binding strong { margin-left: auto; color: #17687a; font-family: inherit; }
+.cp-template-admin__modal > label { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; color: #40575f; font-size: 11px; font-weight: 800; }
+.cp-template-admin__modal textarea { min-height: 100px; padding: 10px; resize: vertical; border: 1px solid #cfdadd; border-radius: 7px; color: #263e47; font: inherit; line-height: 1.55; }
+.cp-template-admin__modal label small { align-self: end; color: #8a969b; font-weight: 500; }
+.cp-template-admin__modal-error { margin-top: 10px; padding: 9px 10px; display: flex; gap: 7px; align-items: center; border-radius: 7px; color: #9b3e43; background: #fff0f0; font-size: 11px; }
+.cp-template-admin__modal footer { margin-top: 18px; display: flex; justify-content: flex-end; gap: 8px; }
+.cp-template-admin__modal footer button { min-height: 36px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid #17687a; border-radius: 7px; color: #fff; background: #17687a; font-size: 11px; font-weight: 800; cursor: pointer; }
+.cp-template-admin__modal footer button.is-ghost { color: #526971; border-color: #d2dde0; background: #fff; }
+.cp-template-admin__modal footer button:disabled { opacity: .5; cursor: not-allowed; }
+
+@media (max-width: 1180px) {
+  .cp-template-admin__grid { grid-template-columns: 1fr; }
+  .cp-template-admin__policy { display: grid; grid-template-columns: 1fr 1fr; }
+  .cp-template-admin__row { grid-template-columns: minmax(210px, 1fr) minmax(230px, 1.2fr) auto; }
+  .cp-template-admin__audit { grid-column: 1 / 3; }
+  .cp-template-admin__actions { grid-column: 3; grid-row: 1 / 3; }
+}
+
+@media (max-width: 760px) {
+  .cp-template-admin__summary { grid-template-columns: 1fr 1fr; }
+  .cp-template-admin__toolbar { align-items: stretch; flex-direction: column; }
+  .cp-template-admin__toolbar > div { overflow-x: auto; }
+  .cp-template-admin__toolbar > span { display: none; }
+  .cp-template-admin__row { grid-template-columns: 1fr; gap: 12px; }
+  .cp-template-admin__audit, .cp-template-admin__actions { grid-column: 1; grid-row: auto; }
+  .cp-template-admin__actions { flex-direction: row; }
+  .cp-template-admin__actions button { flex: 1; }
+  .cp-template-admin__policy { grid-template-columns: 1fr; }
+}

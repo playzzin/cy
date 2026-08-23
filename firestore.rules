@@ -293,6 +293,117 @@ service cloud.firestore {
       return isAdmin() || hasAnyRole(officeRoles()) || hasAnyRole(siteRoles());
     }
 
+    function constructionPlanCentralRoles() {
+      // Access claims are normalized by syncUserAccessClaims. Keep this list
+      // compact because the plan rules share the 1,000-expression budget with
+      // the repository's generic collection guards.
+      return [
+        'ADMIN', 'admin', 'administrator', 'super_admin', 'owner',
+        'DEV', 'Dev', 'dev', 'DEVELOPER', 'Developer', 'developer',
+        'SYSTEM_ADMIN', 'system_admin',
+        'jhl2VTnk9V3C4EiZ4QQI', 'jhl2vtnk9v3c4eiz4qqi',
+        'pos_jhl2VTnk9V3C4EiZ4QQI', 'pos_jhl2vtnk9v3c4eiz4qqi',
+        '관리자', '사장', '실장', '개발', '개발자', '시스템관리자',
+        'OFFICE_STAFF', 'office_staff', 'office',
+        '사무실직원', '사무직원', '사무'
+      ];
+    }
+
+    function hasConstructionPlanCentralAccess() {
+      let roles = constructionPlanCentralRoles();
+      return isSignedIn()
+        && (
+          request.auth.token.get('role', '') in roles
+          || request.auth.token.get('position', '') in roles
+          || request.auth.token.get('systemRole', '') in roles
+          || request.auth.token.get('accountType', '') in roles
+          || (
+            request.auth.token.get('roles', []) is list
+            && request.auth.token.get('roles', []).hasAny(roles)
+          )
+          || (
+            request.auth.token.get('additionalPositions', []) is list
+            && request.auth.token.get('additionalPositions', []).hasAny(roles)
+          )
+          || (
+            hasUserProfile()
+            && (
+              userProfile().get('role', '') in roles
+              || userProfile().get('position', '') in roles
+              || userProfile().get('systemRole', '') in roles
+              || userProfile().get('accountType', '') in roles
+              || (
+                userProfile().get('roles', []) is list
+                && userProfile().get('roles', []).hasAny(roles)
+              )
+              || (
+                userProfile().get('additionalPositions', []) is list
+                && userProfile().get('additionalPositions', []).hasAny(roles)
+              )
+            )
+          )
+        );
+    }
+
+    function isConstructionPlanParticipant(data) {
+      let participants = data.get('participants', {});
+      return isSignedIn()
+        && (
+          data.get('createdBy', '') == request.auth.uid
+          || (
+            participants is map
+            && (
+              (
+                participants.get('authorIds', []) is list
+                && request.auth.uid in participants.get('authorIds', [])
+              )
+              || (
+                participants.get('reviewerIds', []) is list
+                && request.auth.uid in participants.get('reviewerIds', [])
+              )
+              || (
+                participants.get('approverIds', []) is list
+                && request.auth.uid in participants.get('approverIds', [])
+              )
+            )
+          )
+        );
+    }
+
+    function canReadConstructionPlanData(data) {
+      // Participants are server-assigned and provide the canonical browser
+      // boundary even when the legacy user profile only stores worker links.
+      // Central staff retain portfolio-wide read access.
+      return hasConstructionPlanCentralAccess()
+        || isConstructionPlanParticipant(data);
+    }
+
+    function isConstructionPlanAuthor(data) {
+      let participants = data.get('participants', {});
+      return isSignedIn()
+        && (
+          data.get('createdBy', '') == request.auth.uid
+          || (
+            participants is map
+            && participants.get('authorIds', []) is list
+            && request.auth.uid in participants.get('authorIds', [])
+          )
+        );
+    }
+
+    function canWriteConstructionPlanData(data) {
+      // Authorship is server-assigned and immutable to browser updates. It is
+      // therefore the canonical edit boundary even for legacy accounts whose
+      // user profile only links a worker id and has no denormalized siteId.
+      return isConstructionPlanAuthor(data)
+        || hasConstructionPlanCentralAccess();
+    }
+
+    function canReadConstructionPlanById(planId) {
+      let planPath = /databases/$(database)/documents/constructionPlans/$(planId);
+      return exists(planPath) && canReadConstructionPlanData(get(planPath).data);
+    }
+
     function canReadFinance() {
       return isAdmin() || hasAnyRole(payrollRoles()) || hasAnyRole(financeRoles());
     }
@@ -620,7 +731,29 @@ service cloud.firestore {
     }
 
     function isLockedCollection(collectionId) {
-      return isMasterDataCollection(collectionId)
+      // High-volume construction-plan writes also reach the generic fallback
+      // match. Short-circuit these server-controlled collections before the
+      // large ERP collection classifiers to stay under the rules expression
+      // budget.
+      return collectionId in [
+          'constructionPlans',
+          'constructionPlanSeries',
+          'constructionPlanMutationKeys',
+          'constructionPlanTemplates',
+          'constructionPlanExportJobs',
+          'constructionPlanPdfRenderOperations',
+          'constructionPlanUploadSessions',
+          'constructionPlanDrawingReuseJobs',
+          'constructionPlanLockRequests',
+          'constructionPlanLifecycleMutationReceipts',
+          'constructionPlanPdfDownloadReceipts',
+          'constructionPlanPdfDownloadGrants',
+          'constructionPlanRecordUploadSessions',
+          'constructionPlanRecordExports',
+          'constructionPlanAuditEvents',
+          'constructionPlanRecords'
+        ]
+        || isMasterDataCollection(collectionId)
         || isOperationsCollection(collectionId)
         || isMaterialCollection(collectionId)
         || isRecruitingCollection(collectionId)
@@ -632,6 +765,186 @@ service cloud.firestore {
         || isWelfareCollection(collectionId)
         || isBankNotificationCollection(collectionId)
         || collectionId == 'erp_messages';
+    }
+
+    function isConstructionPlanEditableStatus(status) {
+      return status in ['draft', 'changes_requested'];
+    }
+
+    function isValidConstructionPlanTransition(beforeStatus, afterStatus) {
+      return (beforeStatus == 'draft' && afterStatus in ['in_review', 'void', 'archived'])
+        || (beforeStatus == 'in_review' && afterStatus in ['changes_requested', 'review_completed', 'draft', 'void'])
+        || (beforeStatus == 'changes_requested' && afterStatus in ['in_review', 'void', 'archived'])
+        || (beforeStatus == 'review_completed' && afterStatus in ['approved_pending_issue', 'changes_requested', 'void'])
+        || (beforeStatus == 'approved_pending_issue' && afterStatus in ['issued', 'void'])
+        || (beforeStatus == 'issued' && afterStatus in ['superseded', 'archived'])
+        || (beforeStatus == 'superseded' && afterStatus == 'archived')
+        || (beforeStatus == 'void' && afterStatus == 'archived');
+    }
+
+    function isClientConstructionPlanTransition(beforeStatus, afterStatus) {
+      // Every workflow transition is server-owned. Browser clients may save
+      // editable content while holding a lock, but cannot forge review,
+      // approval, snapshot or issued-for-use control fields.
+      return false;
+    }
+
+    function isConstructionPlanControlOnlyUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'status',
+        'updatedBy',
+        'updatedAt',
+        'lockVersion',
+        'editLock',
+        'activeReviewSnapshotId',
+        'approvedSnapshotId',
+        'issuedExportId',
+        'releaseReadiness',
+        'validationSummary'
+      ]);
+    }
+
+    function isConstructionPlanLockOnlyUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'updatedBy',
+        'updatedAt',
+        'lockVersion',
+        'editLock'
+      ]);
+    }
+
+    function isConstructionPlanStatusTransitionUpdate(beforeStatus) {
+      return beforeStatus in ['issued', 'superseded']
+        ? request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'updatedBy', 'updatedAt', 'lockVersion', 'editLock'
+          ])
+        : isConstructionPlanControlOnlyUpdate();
+    }
+
+    function isConstructionPlanEditableUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      // Keep the overwhelmingly common autosave branch minimal: this ruleset
+      // is large enough that evaluating nested snapshot checks unnecessarily
+      // can exceed Firestore's 1,000-expression request budget.
+      return changed.hasAny(['projectSnapshot'])
+        ? (
+          !changed.hasAny(['organizationSnapshot'])
+          && changed.hasOnly([
+            'title', 'documentDate', 'projectSnapshot', 'sections', 'sectionOrder', 'drawings',
+            'drawingApplicability', 'engineeringValues', 'equipmentPlan',
+            'riskAssessments', 'status', 'updatedBy', 'updatedAt', 'lockVersion', 'editLock'
+          ])
+          && ('projectSnapshot' in resource.data)
+          && ('projectSnapshot' in request.resource.data)
+          && request.resource.data.projectSnapshot.diff(resource.data.projectSnapshot)
+            .affectedKeys().hasOnly([
+              'buildings', 'floors', 'zones', 'emergencyContactsComplete'
+            ])
+        )
+        : changed.hasAny(['organizationSnapshot'])
+          ? (
+            changed.hasOnly([
+              'title', 'documentDate', 'organizationSnapshot', 'sections', 'sectionOrder', 'drawings',
+              'drawingApplicability', 'engineeringValues', 'equipmentPlan',
+              'riskAssessments', 'status', 'updatedBy', 'updatedAt', 'lockVersion', 'editLock'
+            ])
+            && request.resource.data.get('organizationSnapshot', {}).get('sourceSiteId', null)
+              == resource.data.get('organizationSnapshot', {}).get('sourceSiteId', null)
+            && request.resource.data.get('organizationSnapshot', {}).get('workerDirectoryProvenance', null)
+              == resource.data.get('organizationSnapshot', {}).get('workerDirectoryProvenance', null)
+          )
+          : changed.hasOnly([
+            'title', 'documentDate', 'sections', 'sectionOrder', 'drawings',
+            'drawingApplicability', 'engineeringValues', 'equipmentPlan',
+            'riskAssessments', 'status', 'updatedBy', 'updatedAt', 'lockVersion', 'editLock'
+          ]);
+    }
+
+    function ownsConstructionPlanLock() {
+      return ('editLock' in resource.data)
+        && resource.data.editLock.userId == request.auth.uid
+        && resource.data.editLock.expiresAtEpochMs is number
+        && resource.data.editLock.expiresAtEpochMs > request.time.toMillis();
+    }
+
+    function hasValidRequestedConstructionPlanLock() {
+      return ('editLock' in request.resource.data)
+        && request.resource.data.editLock.userId == request.auth.uid
+        && request.resource.data.editLock.userName is string
+        && request.resource.data.editLock.acquiredAt is string
+        && request.resource.data.editLock.heartbeatAt is string
+        && request.resource.data.editLock.expiresAt is string
+        && request.resource.data.editLock.expiresAtEpochMs is number
+        && request.resource.data.editLock.expiresAtEpochMs > request.time.toMillis()
+        && request.resource.data.editLock.expiresAtEpochMs <= request.time.toMillis() + 300000;
+    }
+
+    function isValidConstructionPlanLockMutation(beforeStatus) {
+      let hadLock = 'editLock' in resource.data;
+      let hasLock = 'editLock' in request.resource.data;
+      let priorLockExpired = hadLock
+        && resource.data.editLock.expiresAtEpochMs is number
+        && resource.data.editLock.expiresAtEpochMs <= request.time.toMillis();
+      let priorLockOwned = hadLock && resource.data.editLock.userId == request.auth.uid;
+      return request.resource.data.lockVersion == resource.data.lockVersion + 1
+        && (
+          (
+            hasLock
+            && isConstructionPlanEditableStatus(beforeStatus)
+            && hasValidRequestedConstructionPlanLock()
+            && (!hadLock || priorLockOwned || priorLockExpired)
+            && (
+              !hadLock
+              || priorLockExpired
+              || request.resource.data.editLock.acquiredAt == resource.data.editLock.acquiredAt
+            )
+          )
+          || (
+            !hasLock
+            && hadLock
+            && priorLockOwned
+          )
+        );
+    }
+
+    function canApproveConstructionPlan() {
+      return isAdmin() || hasAnyRole(officeRoles());
+    }
+
+    function isValidConstructionPlanUpdate() {
+      let beforeStatus = resource.data.status;
+      let afterStatus = request.resource.data.status;
+      let statusChanged = beforeStatus != afterStatus;
+      let approvalTransition = afterStatus in ['approved_pending_issue', 'issued', 'superseded'];
+      return request.resource.data.updatedBy == request.auth.uid
+        // Approval snapshots and issued-for-use exports are produced by the
+        // trusted server pipeline. Admin SDK writes bypass these client rules.
+        && !approvalTransition
+        && (
+          (
+            !statusChanged
+            && isConstructionPlanEditableStatus(beforeStatus)
+            && isConstructionPlanEditableUpdate()
+            && ownsConstructionPlanLock()
+            && request.resource.data.lockVersion == resource.data.lockVersion + 1
+            && request.resource.data.editLock == resource.data.editLock
+          )
+          || (
+            !statusChanged
+            && isConstructionPlanLockOnlyUpdate()
+            && isValidConstructionPlanLockMutation(beforeStatus)
+          )
+          || (
+            statusChanged
+            && isValidConstructionPlanTransition(beforeStatus, afterStatus)
+            && isClientConstructionPlanTransition(beforeStatus, afterStatus)
+            && isConstructionPlanStatusTransitionUpdate(beforeStatus)
+            && ownsConstructionPlanLock()
+            && request.resource.data.lockVersion == resource.data.lockVersion + 1
+            && request.resource.data.editLock == resource.data.editLock
+            && (!approvalTransition || canApproveConstructionPlan())
+          )
+        );
     }
 
     function isNullableString(value) {
@@ -1227,6 +1540,88 @@ service cloud.firestore {
       allow get, list: if isAdmin()
         || (isSignedIn() && resource.data.userId == request.auth.uid);
       allow update, delete: if false;
+    }
+
+    // Construction plans retain a revision trail. Issued/closed records are
+    // immutable; corrections must be authored as a new draft revision.
+    match /constructionPlans/{planId} {
+      allow get: if canReadConstructionPlanData(resource.data);
+      // Participant portfolio queries run through the scoped callable. Only
+      // central roles may issue an unbounded browser collection query.
+      allow list: if hasConstructionPlanCentralAccess();
+      // Draft identity, document number and revision are allocated by the
+      // trusted series transaction. Browser clients may edit an existing
+      // draft while holding its lock, but cannot create a parallel lineage.
+      allow create: if false;
+      allow update: if canWriteConstructionPlanData(resource.data) && isValidConstructionPlanUpdate();
+      allow delete: if false;
+    }
+
+    // Review bodies and replies can be narrower than the parent plan ACL
+    // (`central_only` / reviewer visibility). Browser reads would make those
+    // policies impossible to enforce consistently, so all collaboration data
+    // is projected by the trusted callables.
+    match /constructionPlans/{planId}/comments/{commentId}/{nested=**} {
+      allow read, write: if false;
+    }
+
+    match /constructionPlans/{planId}/{subcollection}/{nestedDocId}/{nested=**} {
+      // Review comment visibility is stricter than plan participation and is
+      // filtered by the trusted callable. Snapshot/workflow metadata remains
+      // readable to plan participants through the parent ACL.
+      allow read: if subcollection != 'comments' && canReadConstructionPlanById(planId);
+      allow write: if false;
+    }
+
+    match /constructionPlanSeries/{seriesId} {
+      allow get, list: if hasConstructionPlanCentralAccess();
+      allow create, update, delete: if false;
+    }
+
+    match /constructionPlanSeries/{seriesId}/{subcollection}/{nestedDocId}/{nested=**} {
+      // Idempotency claims and allocation internals are server-only. The
+      // public lineage view is the top-level series plus plan documents.
+      allow read, write: if false;
+    }
+
+    match /constructionPlanMutationKeys/{claimId} {
+      // Contains hashed idempotency claims and request fingerprints. Only the
+      // trusted callable pipeline may inspect or mutate this collection.
+      allow read, write: if false;
+    }
+
+    match /constructionPlanMutationKeys/{claimId}/{subcollection}/{nestedDocId}/{nested=**} {
+      allow read, write: if false;
+    }
+
+    match /constructionPlanDrawingReuseJobs/{jobId} {
+      // Contains immutable Storage paths/generations/SHA values, opaque
+      // idempotency ownership and cleanup state. Visibility and mutations are
+      // projected exclusively by trusted drawing-reuse callables.
+      allow read, write: if false;
+    }
+
+    match /constructionPlanDrawingReuseJobs/{jobId}/{subcollection}/{nestedDocId}/{nested=**} {
+      allow read, write: if false;
+    }
+
+    // Unlock requests, lifecycle idempotency claims and PDF download receipts
+    // are created and projected only by trusted callables. They contain exact
+    // concurrency bindings and must never be forged or enumerated by clients.
+    match /constructionPlanLockRequests/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /constructionPlanLifecycleMutationReceipts/{receiptId} {
+      allow read, write: if false;
+    }
+
+    match /constructionPlanPdfDownloadReceipts/{receiptId} {
+      allow read, write: if false;
+    }
+
+    match /constructionPlanPdfDownloadGrants/{grantId} {
+      allow read, write: if false;
     }
 
     match /welfare_game_daily_usage/{usageId} {

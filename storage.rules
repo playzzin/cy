@@ -51,17 +51,17 @@ service firebase.storage {
     function hasTokenRole(roles) {
       return isSignedIn()
         && (
-          request.auth.token.role in roles
-          || request.auth.token.position in roles
-          || request.auth.token.systemRole in roles
-          || request.auth.token.accountType in roles
+          (request.auth.token.get('role', '') in roles)
+          || (request.auth.token.get('position', '') in roles)
+          || (request.auth.token.get('systemRole', '') in roles)
+          || (request.auth.token.get('accountType', '') in roles)
           || (
-            request.auth.token.roles is list
-            && request.auth.token.roles.hasAny(roles)
+            request.auth.token.get('roles', []) is list
+            && request.auth.token.get('roles', []).hasAny(roles)
           )
           || (
-            request.auth.token.additionalPositions is list
-            && request.auth.token.additionalPositions.hasAny(roles)
+            request.auth.token.get('additionalPositions', []) is list
+            && request.auth.token.get('additionalPositions', []).hasAny(roles)
           )
         );
     }
@@ -76,6 +76,155 @@ service firebase.storage {
         || hasTokenRole(supportRoles())
         || hasTokenRole(financeRoles())
         || hasTokenRole(payrollRoles());
+    }
+
+    function constructionPlanCentralRoles() {
+      return [
+        'ADMIN', 'admin', 'administrator', 'super_admin', 'owner',
+        'DEV', 'Dev', 'dev', 'DEVELOPER', 'Developer', 'developer',
+        'SYSTEM_ADMIN', 'system_admin',
+        'jhl2VTnk9V3C4EiZ4QQI', 'jhl2vtnk9v3c4eiz4qqi',
+        'pos_jhl2VTnk9V3C4EiZ4QQI', 'pos_jhl2vtnk9v3c4eiz4qqi',
+        '관리자', '사장', '실장', '개발', '개발자', '시스템관리자',
+        'OFFICE_STAFF', 'office_staff', 'office',
+        '사무실직원', '사무직원', '사무'
+      ];
+    }
+
+    function hasConstructionPlanCentralAccess() {
+      let roles = constructionPlanCentralRoles();
+      return isSignedIn()
+        && (
+          hasTokenRole(roles)
+          || (
+            firestore.exists(
+              /databases/(default)/documents/users/$(request.auth.uid)
+            )
+            && (
+              firestore.get(
+                /databases/(default)/documents/users/$(request.auth.uid)
+              ).data.get('role', '') in roles
+              || firestore.get(
+                /databases/(default)/documents/users/$(request.auth.uid)
+              ).data.get('position', '') in roles
+              || firestore.get(
+                /databases/(default)/documents/users/$(request.auth.uid)
+              ).data.get('systemRole', '') in roles
+              || firestore.get(
+                /databases/(default)/documents/users/$(request.auth.uid)
+              ).data.get('accountType', '') in roles
+              || (
+                firestore.get(
+                  /databases/(default)/documents/users/$(request.auth.uid)
+                ).data.get('roles', []) is list
+                && firestore.get(
+                  /databases/(default)/documents/users/$(request.auth.uid)
+                ).data.get('roles', []).hasAny(roles)
+              )
+              || (
+                firestore.get(
+                  /databases/(default)/documents/users/$(request.auth.uid)
+                ).data.get('additionalPositions', []) is list
+                && firestore.get(
+                  /databases/(default)/documents/users/$(request.auth.uid)
+                ).data.get('additionalPositions', []).hasAny(roles)
+              )
+            )
+          )
+        );
+    }
+
+    function canIssueConstructionPlans() {
+      return hasConstructionPlanCentralAccess();
+    }
+
+    function constructionPlanDocumentExists(planId) {
+      return firestore.exists(
+        /databases/(default)/documents/constructionPlans/$(planId)
+      );
+    }
+
+    function constructionPlanPathMatchesSite(siteId, planId) {
+      return constructionPlanDocumentExists(planId)
+        && firestore.get(
+          /databases/(default)/documents/constructionPlans/$(planId)
+        ).data.get('siteId', '') == siteId;
+    }
+
+    function constructionPlanIsFieldUseRelease(planId) {
+      return constructionPlanDocumentExists(planId)
+        && firestore.get(
+          /databases/(default)/documents/constructionPlans/$(planId)
+        ).data.get('status', '') in ['issued', 'superseded', 'archived'];
+    }
+
+    function hasAuditedConstructionPlanPdfGrant(planId, artifactFile) {
+      let grantPath = /databases/(default)/documents/constructionPlanPdfDownloadGrants/$(planId + '__' + request.auth.uid);
+      let grant = firestore.get(grantPath).data;
+      return isSignedIn()
+        && firestore.exists(grantPath)
+        && grant.get('planId', '') == planId
+        && grant.get('actorId', '') == request.auth.uid
+        && grant.get('status', '') == 'active'
+        && grant.get('expiresAtEpochMs', 0) is number
+        && grant.get('expiresAtEpochMs', 0) > request.time.toMillis()
+        && grant.get('artifactSha256', '') is string
+        && artifactFile == grant.get('artifactSha256', '') + '.pdf';
+    }
+
+    function isConstructionPlanParticipant(planId) {
+      let planData = firestore.get(
+        /databases/(default)/documents/constructionPlans/$(planId)
+      ).data;
+      let participants = planData.get('participants', {});
+      return planData.get('createdBy', '') == request.auth.uid
+        || (
+          participants is map
+          && (
+            (
+              participants.get('authorIds', []) is list
+              && request.auth.uid in participants.get('authorIds', [])
+            )
+            || (
+              participants.get('reviewerIds', []) is list
+              && request.auth.uid in participants.get('reviewerIds', [])
+            )
+            || (
+              participants.get('approverIds', []) is list
+              && request.auth.uid in participants.get('approverIds', [])
+            )
+          )
+        );
+    }
+
+    function canAccessConstructionPlanPath(siteId, planId) {
+      return isSignedIn()
+        // Every browser-visible object is bound to a real plan and its site.
+        // The plan read is reused by the participant check. Site profile
+        // denormalization alone never grants access to a non-participant.
+        && constructionPlanPathMatchesSite(siteId, planId)
+        && (
+          // participants is server-owned in Firestore and is the canonical
+          // per-plan ACL, including legacy users without normalized siteIds.
+          isConstructionPlanParticipant(planId)
+          || hasConstructionPlanCentralAccess()
+        );
+    }
+
+    function canReadLegacyConstructionPlanDrawing(planId) {
+      return constructionPlanDocumentExists(planId)
+        && firestore.get(
+          /databases/(default)/documents/constructionPlans/$(planId)
+        ).data.get('siteId', '') is string
+        && firestore.get(
+          /databases/(default)/documents/constructionPlans/$(planId)
+        ).data.get('siteId', '') != ''
+        && canAccessConstructionPlanPath(
+          firestore.get(
+            /databases/(default)/documents/constructionPlans/$(planId)
+          ).data.get('siteId', ''),
+          planId
+        );
     }
 
     function isValidBusinessUpload() {
@@ -98,7 +247,83 @@ service firebase.storage {
         && (
           request.resource.contentType.matches('image/.*')
           || request.resource.contentType == 'application/pdf'
+      );
+    }
+
+    function isValidConstructionPlanAttachment() {
+      return request.resource != null
+        && request.resource.size < 50 * 1024 * 1024
+        && request.resource.contentType is string
+        && (
+          request.resource.contentType == 'image/png'
+          || request.resource.contentType == 'image/jpeg'
+          || request.resource.contentType == 'application/pdf'
         );
+    }
+
+    function canCreateConstructionPlanStagingSource(uid, sessionId) {
+      let sessionPath = /databases/(default)/documents/constructionPlanUploadSessions/$(sessionId);
+      let session = firestore.get(sessionPath).data;
+      return isSignedIn()
+        && request.auth.uid == uid
+        && firestore.exists(sessionPath)
+        && resource == null
+        && session.get('schemaVersion', 0) == 1
+        && session.get('id', '') == sessionId
+        && session.get('ownerId', '') == uid
+        && session.get('status', '') == 'awaiting_upload'
+        && session.get('stagingPath', '') == 'construction-plan-staging/' + uid + '/' + sessionId + '/source'
+        && session.get('expiresAtEpochMs', 0) is number
+        && session.get('expiresAtEpochMs', 0) > request.time.toMillis()
+        && request.resource != null
+        && request.resource.size == session.get('sizeBytes', -1)
+        && request.resource.size > 0
+        && request.resource.size <= 50 * 1024 * 1024
+        && request.resource.contentType == session.get('mimeType', '')
+        && request.resource.contentType in ['application/pdf', 'image/png', 'image/jpeg']
+        && request.resource.metadata.get('uploadSessionId', '') == sessionId
+        && request.resource.metadata.get('sourceSha256', '') == session.get('sha256', '');
+    }
+
+    function canCreateConstructionPlanRecordStagingSource(uid, sessionId) {
+      let sessionPath = /databases/(default)/documents/constructionPlanRecordUploadSessions/$(sessionId);
+      let session = firestore.get(sessionPath).data;
+      return isSignedIn()
+        && request.auth.uid == uid
+        && firestore.exists(sessionPath)
+        && resource == null
+        && session.get('schemaVersion', 0) == 1
+        && session.get('id', '') == sessionId
+        && session.get('ownerId', '') == uid
+        && session.get('status', '') == 'awaiting_upload'
+        && session.get('stagingPath', '') == 'construction-plan-record-staging/' + uid + '/' + sessionId + '/source'
+        && session.get('expiresAtEpochMs', 0) is number
+        && session.get('expiresAtEpochMs', 0) > request.time.toMillis()
+        && request.resource != null
+        && request.resource.size == session.get('sizeBytes', -1)
+        && request.resource.size > 0
+        && request.resource.size <= 12 * 1024 * 1024
+        && request.resource.contentType == session.get('mimeType', '')
+        && request.resource.contentType in ['image/png', 'image/jpeg']
+        && request.resource.metadata.get('uploadSessionId', '') == sessionId
+        && request.resource.metadata.get('sourceSha256', '') == session.get('sha256', '');
+    }
+
+    function constructionPlanRecordDocumentExists(recordId) {
+      return firestore.exists(
+        /databases/(default)/documents/constructionPlanRecords/$(recordId)
+      );
+    }
+
+    function canAccessConstructionPlanRecordPath(siteId, planId, recordId) {
+      let record = firestore.get(
+        /databases/(default)/documents/constructionPlanRecords/$(recordId)
+      ).data;
+      return constructionPlanRecordDocumentExists(recordId)
+        && record.get('id', '') == recordId
+        && record.get('siteId', '') == siteId
+        && record.get('planId', '') == planId
+        && canAccessConstructionPlanPath(siteId, planId);
     }
 
     // These paths have their own least-privilege rules below. They must stay
@@ -110,7 +335,11 @@ service firebase.storage {
         'users',
         'backups',
         'system',
-        'card-billing-statements'
+        'card-billing-statements',
+        'construction-plans',
+        'construction-plan-staging',
+        'construction-plan-record-staging',
+        'construction-plan-records'
       ];
     }
 
@@ -156,6 +385,113 @@ service firebase.storage {
       allow read: if canAccessCardBillingStatements();
       allow write: if canAccessCardBillingStatements()
         && isValidCardBillingAttachment();
+    }
+
+    // Browsers may create exactly one source object under a short-lived,
+    // server-created session. They cannot read, replace, rename, or delete it.
+    // MIME magic, SHA-256, lock ownership, and the immutable canonical copy are
+    // verified by finalizeConstructionPlanDrawingUploadServer.
+    match /construction-plan-staging/{uid}/{sessionId}/source {
+      allow create: if canCreateConstructionPlanStagingSource(uid, sessionId);
+      allow read, update, delete: if false;
+    }
+
+    match /construction-plan-staging/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // The browser may create only the exact source object described by a
+    // short-lived server session. It cannot read, replace, rename or delete it.
+    match /construction-plan-record-staging/{uid}/{sessionId}/source {
+      allow create: if canCreateConstructionPlanRecordStagingSource(uid, sessionId);
+      allow read, update, delete: if false;
+    }
+
+    match /construction-plan-record-staging/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // Confirmed/draft record readers may fetch an exact immutable photo or
+    // appendix through authenticated Storage APIs. Browser writes and list
+    // operations stay denied; canonical objects are Admin SDK create-only.
+    match /construction-plan-records/{siteId}/{planId}/{recordId}/{allPaths=**} {
+      allow get: if canAccessConstructionPlanRecordPath(siteId, planId, recordId);
+      allow write: if false;
+    }
+
+    match /construction-plan-records/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // Raster previews are derived from immutable PDF sources by Admin SDK.
+    // Keeping them outside drawings/** prevents a browser participant from
+    // forging a page image that would later be used for review or printing.
+    match /construction-plans/{siteId}/{planId}/previews/{allPaths=**} {
+      allow get: if canAccessConstructionPlanPath(siteId, planId);
+      allow write: if false;
+    }
+
+    // Server-rendered visual-check candidates are visible only to a central
+    // issuer who also has access to the plan. Browser writes are never
+    // permitted, preventing namespace pre-claim/412 denial of service.
+    match /construction-plans/{siteId}/{planId}/server-exports/candidate/{allPaths=**} {
+      allow get: if canIssueConstructionPlans()
+        && canAccessConstructionPlanPath(siteId, planId);
+      allow write: if false;
+    }
+
+    // Every final field-use download must first obtain a short-lived,
+    // server-authored grant. The grant is created only after the callable has
+    // re-hashed the immutable bytes and appended a download-intent audit.
+    match /construction-plans/{siteId}/{planId}/server-exports/issued/{revisionDir}/{rendererVersion}/{snapshotHash}/{artifactFile} {
+      allow get: if canAccessConstructionPlanPath(siteId, planId)
+        && constructionPlanIsFieldUseRelease(planId)
+        && hasAuditedConstructionPlanPdfGrant(planId, artifactFile);
+      allow write: if false;
+    }
+
+    match /construction-plans/{siteId}/{planId}/server-exports/issued/{allPaths=**} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    match /construction-plans/{siteId}/{planId}/drawings/{allPaths=**} {
+      allow get: if canAccessConstructionPlanPath(siteId, planId);
+      // Canonical drawing sources and derived previews are Admin SDK-only.
+      // Browser uploads must pass through construction-plan-staging first.
+      allow write: if false;
+    }
+
+    // Existing two-segment drawing objects remain readable after the canonical
+    // siteId migration, but they can never be created, replaced, or deleted by
+    // browser clients. The plan document supplies the missing site scope.
+    match /construction-plans/{planId}/drawings/{allPaths=**} {
+      allow get: if canReadLegacyConstructionPlanDrawing(planId);
+      allow write: if false;
+    }
+
+    match /construction-plans/{siteId}/{planId}/exports/{allPaths=**} {
+      allow get: if canAccessConstructionPlanPath(siteId, planId);
+      allow create: if canIssueConstructionPlans()
+        && canAccessConstructionPlanPath(siteId, planId)
+        && resource == null
+        && isValidConstructionPlanAttachment()
+        && request.resource.contentType == 'application/pdf';
+      allow update, delete: if false;
+    }
+
+    // Approved snapshot JSON is written only by Admin SDK and is readable only
+    // through the same canonical site/plan binding. Keeping this namespace
+    // explicit prevents a legacy path from triggering an extra bogus plan read.
+    match /construction-plans/{siteId}/{planId}/snapshots/{allPaths=**} {
+      allow get: if canAccessConstructionPlanPath(siteId, planId);
+      allow write: if false;
+    }
+
+    // Legacy paths without siteId, malformed paths, and orphan plan objects
+    // must not inherit the authenticated fallback below.
+    match /construction-plans/{allPaths=**} {
+      allow read, write: if false;
     }
 
     match /{topLevel}/{allPaths=**} {

@@ -1,0 +1,842 @@
+.construction-drawing-studio {
+  --drawing-border: #d8e0ea;
+  --drawing-muted: #64748b;
+  --drawing-ink: #172033;
+  --drawing-blue: #2557a7;
+  width: 100%;
+  color: var(--drawing-ink);
+  font-family: inherit;
+}
+
+.construction-drawing-studio *,
+.construction-drawing-studio *::before,
+.construction-drawing-studio *::after {
+  box-sizing: border-box;
+}
+
+.construction-drawing-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 18px;
+}
+
+.construction-drawing-header h2 {
+  margin: 3px 0 5px;
+  font-size: 24px;
+  letter-spacing: -0.025em;
+}
+
+.construction-drawing-header p {
+  margin: 0;
+  color: var(--drawing-muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.construction-drawing-header .construction-drawing-eyebrow {
+  color: var(--drawing-blue);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.construction-drawing-file-actions,
+.construction-drawing-history-actions,
+.construction-drawing-polygon-actions,
+.construction-drawing-tool-group {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.construction-drawing-studio button,
+.construction-drawing-studio input,
+.construction-drawing-studio select {
+  font: inherit;
+}
+
+.construction-drawing-studio button {
+  cursor: pointer;
+}
+
+.construction-drawing-studio button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.construction-drawing-primary-button,
+.construction-drawing-secondary-button,
+.construction-drawing-toolbar button,
+.construction-drawing-danger-button {
+  min-height: 38px;
+  padding: 8px 13px;
+  border: 1px solid var(--drawing-border);
+  border-radius: 9px;
+  background: white;
+  color: #334155;
+  font-weight: 700;
+}
+
+.construction-drawing-primary-button {
+  border-color: var(--drawing-blue);
+  background: var(--drawing-blue);
+  color: white;
+}
+
+.construction-drawing-secondary-button:hover,
+.construction-drawing-toolbar button:hover:not(:disabled) {
+  border-color: #8da1bd;
+  background: #f8fafc;
+}
+
+.construction-drawing-alert {
+  margin: 0 0 12px;
+  padding: 11px 14px;
+  border: 1px solid #fecaca;
+  border-radius: 9px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.construction-drawing-file-info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  min-height: 42px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid #dbe4ef;
+  border-radius: 9px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+}
+
+.construction-drawing-file-info strong {
+  color: #1e293b;
+  overflow-wrap: anywhere;
+}
+
+.construction-drawing-file-badge {
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.construction-drawing-pdf-notice {
+  flex-basis: 100%;
+  padding-top: 6px;
+  border-top: 1px solid #dbe4ef;
+  color: #7c2d12;
+  line-height: 1.5;
+}
+
+.construction-drawing-page-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  color: #334155;
+  font-weight: 700;
+}
+
+.construction-drawing-page-picker select {
+  min-height: 30px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #0f172a;
+}
+
+.construction-drawing-studio--practice {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.construction-drawing-studio > .construction-plan-dwg-guide {
+  margin-bottom: 12px;
+}
+
+.construction-drawing-page-thumbnails {
+  display: flex;
+  gap: 9px;
+  margin: 0 0 12px;
+  padding: 10px;
+  overflow-x: auto;
+  border: 1px solid #d8e0ea;
+  border-radius: 10px;
+  background: #edf2f7;
+  scrollbar-gutter: stable;
+}
+
+.construction-drawing-page-thumbnail {
+  display: grid;
+  width: 88px;
+  min-width: 88px;
+  min-height: 108px;
+  gap: 5px;
+  place-items: center;
+  padding: 6px;
+  border: 2px solid transparent;
+  border-radius: 9px;
+  background: #fff;
+  color: #334155;
+}
+
+.construction-drawing-page-thumbnail.is-selected {
+  border-color: #2557a7;
+  box-shadow: 0 0 0 2px rgba(37, 87, 167, 0.16);
+  color: #173f80;
+}
+
+.construction-drawing-page-thumbnail__image {
+  display: grid;
+  width: 72px;
+  height: 78px;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.construction-drawing-page-thumbnail__image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.construction-drawing-page-thumbnail strong {
+  font-size: 11px;
+}
+
+.construction-drawing-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-height: 58px;
+  margin-bottom: 12px;
+  padding: 9px;
+  border: 1px solid var(--drawing-border);
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.construction-drawing-tool-group {
+  padding-right: 12px;
+  border-right: 1px solid var(--drawing-border);
+}
+
+.construction-drawing-tool-group button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.construction-drawing-tool-group button span {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.construction-drawing-toolbar button.is-active {
+  border-color: #254d8d;
+  background: #e8f0fc;
+  color: #193d76;
+  box-shadow: inset 0 0 0 1px #254d8d;
+}
+
+.construction-drawing-layer-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.construction-drawing-layer-picker select,
+.construction-drawing-inspector select,
+.construction-drawing-inspector input {
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: white;
+  color: #1e293b;
+}
+
+.construction-drawing-polygon-actions {
+  color: #475569;
+  font-size: 12px;
+}
+
+.construction-drawing-history-actions {
+  margin-left: auto;
+}
+
+.construction-drawing-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 14px;
+  align-items: start;
+}
+
+.construction-drawing-canvas-shell,
+.construction-drawing-sidebar > section {
+  overflow: hidden;
+  border: 1px solid var(--drawing-border);
+  border-radius: 13px;
+  background: white;
+}
+
+.construction-drawing-canvas-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 8px 13px;
+  border-bottom: 1px solid var(--drawing-border);
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.construction-drawing-canvas-status strong {
+  color: #334155;
+  white-space: nowrap;
+}
+
+.construction-drawing-viewport-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.construction-drawing-viewport-actions button {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.construction-drawing-viewport-actions button:hover:not(:disabled),
+.construction-drawing-viewport-actions button.is-active {
+  border-color: #254d8d;
+  background: #e8f0fc;
+  color: #193d76;
+}
+
+.construction-drawing-viewport-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.construction-drawing-viewport-actions output {
+  min-width: 44px;
+  color: #334155;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.construction-drawing-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 420px;
+  aspect-ratio: 10 / 7;
+  border-bottom: 1px solid var(--drawing-border);
+  background-color: #f8fafc;
+  touch-action: none;
+  user-select: none;
+}
+
+.construction-drawing-canvas.tool-rectangle,
+.construction-drawing-canvas.tool-polygon,
+.construction-drawing-canvas.tool-arrow {
+  cursor: crosshair;
+}
+
+.construction-drawing-canvas.is-pan-mode {
+  cursor: grab;
+}
+
+.construction-drawing-canvas.is-panning {
+  cursor: grabbing;
+}
+
+.construction-drawing-shape {
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+
+.construction-drawing-shape:hover,
+.construction-drawing-shape.is-selected {
+  filter: drop-shadow(0 0 4px rgba(15, 23, 42, 0.35));
+}
+
+.construction-drawing-resize-handle {
+  cursor: nwse-resize;
+  filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.35));
+}
+
+.construction-drawing-resize-handle:nth-of-type(2),
+.construction-drawing-resize-handle:nth-of-type(4) {
+  cursor: nesw-resize;
+}
+
+.construction-drawing-resize-handle:focus {
+  outline: none;
+  stroke: #2563eb;
+  stroke-width: 4px;
+}
+
+.construction-drawing-label text {
+  font-size: 19px;
+  font-weight: 900;
+}
+
+.construction-drawing-empty-canvas text {
+  fill: #64748b;
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.construction-drawing-empty-canvas text.construction-drawing-empty-help {
+  fill: #94a3b8;
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.construction-drawing-canvas-hint {
+  margin: 0;
+  padding: 9px 13px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.construction-drawing-canvas-hint kbd {
+  padding: 1px 4px;
+  border: 1px solid #cbd5e1;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: #f8fafc;
+  color: #334155;
+  font: inherit;
+  font-weight: 800;
+}
+
+.construction-drawing-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.construction-drawing-sidebar > section {
+  padding: 14px;
+}
+
+.construction-drawing-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.construction-drawing-section-heading span {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.construction-drawing-section-heading h3 {
+  margin: 2px 0 0;
+  color: #1e293b;
+  font-size: 16px;
+}
+
+.construction-drawing-section-heading > button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.construction-drawing-legend ul,
+.construction-drawing-object-list ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.construction-drawing-legend li {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.construction-drawing-layer-visibility {
+  width: 100%;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.construction-drawing-layer-visibility small {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.construction-drawing-legend li.is-hidden,
+.construction-drawing-object-list li.is-hidden {
+  opacity: .48;
+}
+
+.construction-drawing-legend li svg {
+  width: 56px;
+  height: 22px;
+}
+
+.construction-drawing-legend > p {
+  margin: 11px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid #edf1f5;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.construction-drawing-inspector {
+  border-top: 3px solid #315b97 !important;
+}
+
+.construction-drawing-inspector > label {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 11px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.construction-drawing-inspector textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.construction-drawing-standard-style {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 2px 0 12px;
+  padding: 10px;
+  border: 1px solid #dbe4ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.construction-drawing-standard-style__swatch {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.construction-drawing-inspector-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 11px;
+}
+
+.construction-drawing-inspector-grid label {
+  display: grid;
+  gap: 5px;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.construction-drawing-inspector-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.construction-drawing-inspector-actions button {
+  min-height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.construction-drawing-inspector input:focus,
+.construction-drawing-inspector select:focus,
+.construction-drawing-layer-picker select:focus,
+.construction-drawing-studio button:focus-visible,
+.construction-drawing-shape:focus-visible {
+  outline: 3px solid rgba(37, 87, 167, 0.28);
+  outline-offset: 2px;
+}
+
+.construction-drawing-danger-button {
+  width: 100%;
+  margin-top: 3px;
+  border-color: #fecaca;
+  color: #b42318;
+}
+
+.construction-drawing-object-list ol {
+  display: grid;
+  gap: 6px;
+  max-height: 370px;
+  overflow-y: auto;
+}
+
+.construction-drawing-object-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: stretch;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.construction-drawing-object-list li.is-selected {
+  border-color: #315b97;
+  box-shadow: 0 0 0 1px #315b97;
+}
+
+.construction-drawing-object-select {
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 0;
+  background: white;
+  color: #334155;
+  text-align: left;
+}
+
+.construction-drawing-object-select > span:last-child {
+  display: grid;
+  min-width: 0;
+}
+
+.construction-drawing-object-select strong,
+.construction-drawing-object-select small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.construction-drawing-object-select strong {
+  font-size: 12px;
+}
+
+.construction-drawing-object-select small {
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 10px;
+}
+
+.construction-drawing-object-index {
+  display: inline-grid;
+  width: 23px;
+  height: 23px;
+  place-items: center;
+  border-radius: 6px;
+  background: #eef2f7;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.construction-drawing-list-delete {
+  border: 0;
+  border-left: 1px solid #edf1f5;
+  background: #fff;
+  color: #94a3b8;
+  font-size: 18px;
+}
+
+.construction-drawing-list-delete:hover {
+  background: #fef2f2;
+  color: #b42318;
+}
+
+.construction-drawing-list-empty {
+  margin: 0;
+  padding: 18px 8px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 9px;
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: center;
+}
+
+.construction-drawing-visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+@media (max-width: 980px) {
+  .construction-drawing-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .construction-drawing-sidebar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .construction-drawing-header {
+    display: grid;
+  }
+
+  .construction-drawing-file-actions,
+  .construction-drawing-file-actions button {
+    width: 100%;
+  }
+
+  .construction-drawing-toolbar {
+    align-items: stretch;
+  }
+
+  .construction-drawing-tool-group {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    width: 100%;
+    padding: 0 0 9px;
+    border-right: 0;
+    border-bottom: 1px solid var(--drawing-border);
+  }
+
+  .construction-drawing-tool-group button {
+    justify-content: center;
+  }
+
+  .construction-drawing-layer-picker {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .construction-drawing-layer-picker select {
+    flex: 1;
+    max-width: 190px;
+  }
+
+  .construction-drawing-history-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .construction-drawing-history-actions button {
+    flex: 1;
+  }
+
+  .construction-drawing-canvas {
+    min-height: 290px;
+  }
+
+  .construction-drawing-canvas-status {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .construction-drawing-viewport-actions {
+    width: 100%;
+    margin-left: 0;
+    overflow-x: auto;
+  }
+
+  .construction-drawing-sidebar {
+    display: flex;
+  }
+}
+
+@media print {
+  .construction-drawing-header,
+  .construction-drawing-toolbar,
+  .construction-drawing-sidebar,
+  .construction-drawing-canvas-status,
+  .construction-drawing-canvas-hint,
+  .construction-drawing-file-info {
+    display: none !important;
+  }
+
+  .construction-drawing-workspace {
+    display: block;
+  }
+
+  .construction-drawing-canvas-shell {
+    border: 0;
+  }
+
+  .construction-drawing-canvas {
+    min-height: 0;
+    border: 0;
+  }
+}

@@ -1,0 +1,230 @@
+.construction-plan-onboarding,
+.construction-plan-polygon-practice,
+.construction-plan-dwg-guide {
+  border: 1px solid #b8c8d6;
+  border-radius: 14px;
+  background: #f8fbfd;
+  color: #132b3a;
+  box-shadow: 0 10px 24px rgba(15, 45, 65, 0.08);
+}
+
+.construction-plan-onboarding {
+  padding: 18px;
+}
+
+.cp-editor-page > .construction-plan-onboarding,
+.cp-editor-page > .construction-plan-onboarding-reopen {
+  width: auto;
+  margin: 10px 14px 0;
+}
+
+.construction-plan-onboarding__header,
+.construction-plan-onboarding__steps li,
+.construction-plan-polygon-practice__actions,
+.construction-plan-polygon-practice__keyboard,
+.construction-plan-dwg-guide {
+  display: flex;
+  align-items: center;
+}
+
+.construction-plan-onboarding__header {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.construction-plan-onboarding__header strong {
+  font-size: 16px;
+}
+
+.construction-plan-onboarding__header p,
+.construction-plan-polygon-practice__copy p,
+.construction-plan-dwg-guide p {
+  margin: 5px 0 0;
+  color: #526979;
+  line-height: 1.55;
+}
+
+.construction-plan-onboarding__progress {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #dceef7;
+  padding: 7px 11px;
+  font-weight: 700;
+  color: #0d526f;
+}
+
+.construction-plan-onboarding__steps {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.construction-plan-onboarding__steps li {
+  min-height: 54px;
+  gap: 10px;
+  border: 1px solid #d7e2e9;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 6px 8px;
+}
+
+.construction-plan-onboarding__steps li.is-complete {
+  border-color: #9bd2bc;
+  background: #f1fbf6;
+}
+
+.construction-plan-onboarding__number {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 50%;
+  background: #e5edf3;
+  font-weight: 800;
+}
+
+.construction-plan-onboarding__steps .is-complete .construction-plan-onboarding__number {
+  background: #16835d;
+  color: white;
+}
+
+.construction-plan-onboarding__steps li > span:nth-child(2) {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+}
+
+.construction-plan-onboarding__steps small {
+  color: #667b89;
+}
+
+.construction-plan-onboarding button,
+.construction-plan-polygon-practice button,
+.construction-plan-dwg-guide button,
+.construction-plan-onboarding-reopen {
+  min-height: 44px;
+  border: 1px solid #9db3c2;
+  border-radius: 9px;
+  background: #ffffff;
+  padding: 0 13px;
+  color: #183c51;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.construction-plan-onboarding button:focus-visible,
+.construction-plan-polygon-practice button:focus-visible,
+.construction-plan-dwg-guide button:focus-visible,
+.construction-plan-onboarding-reopen:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.35);
+  outline-offset: 2px;
+}
+
+.construction-plan-onboarding__dismiss {
+  width: 100%;
+}
+
+.construction-plan-onboarding-reopen {
+  width: 100%;
+  background: #edf6fa;
+}
+
+.construction-plan-polygon-practice {
+  padding: 20px;
+}
+
+.construction-plan-polygon-practice__copy > span {
+  color: #176481;
+  font-weight: 800;
+}
+
+.construction-plan-polygon-practice__copy h3 {
+  margin: 6px 0 0;
+  font-size: 20px;
+}
+
+.construction-plan-polygon-practice svg {
+  display: block;
+  width: 100%;
+  max-height: 280px;
+  margin: 16px 0 10px;
+  border: 1px solid #b9cbd7;
+  border-radius: 10px;
+  background: white;
+  cursor: crosshair;
+}
+
+.construction-plan-polygon-practice svg text {
+  font-size: 11px;
+  font-weight: 800;
+  fill: #163d56;
+}
+
+.construction-plan-polygon-practice__keyboard {
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.construction-plan-polygon-practice__keyboard span {
+  color: #526979;
+  font-size: 13px;
+}
+
+.construction-plan-polygon-practice__status {
+  min-height: 24px;
+  color: #244f66;
+  font-weight: 700;
+}
+
+.construction-plan-polygon-practice__actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.construction-plan-polygon-practice button.primary {
+  border-color: #145e7b;
+  background: #145e7b;
+  color: white;
+}
+
+.construction-plan-polygon-practice button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.construction-plan-dwg-guide {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-color: #e0b15b;
+  background: #fffaf0;
+  padding: 16px;
+}
+
+.construction-plan-dwg-guide ol {
+  margin: 9px 0 0;
+  padding-left: 20px;
+  color: #59471f;
+  line-height: 1.55;
+}
+
+@media (max-width: 720px) {
+  .construction-plan-onboarding__header,
+  .construction-plan-onboarding__steps li,
+  .construction-plan-dwg-guide {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .construction-plan-onboarding__progress {
+    align-self: flex-start;
+  }
+
+  .construction-plan-onboarding__steps button {
+    width: 100%;
+  }
+}

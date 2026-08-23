@@ -228,6 +228,14 @@ const SettlementAlertCenterPage = React.lazy(() => import('./pages/settlement/Se
 const BankNotificationsPage = React.lazy(() => import('./features/bank-notifications/BankNotificationsPage'));
 const KakaoMessageCenterPage = React.lazy(() => import('./pages/kakao/KakaoMessageCenterPage'));
 const FreelancerPage = React.lazy(() => import('./pages/manpower/FreelancerPage'));
+const ConstructionPlanListPage = React.lazy(() => import('./features/construction-plan/pages/ConstructionPlanListPage'));
+const ConstructionPlanCreatePage = React.lazy(() => import('./features/construction-plan/pages/ConstructionPlanCreatePage'));
+const ConstructionPlanEditorPage = React.lazy(() => import('./features/construction-plan/pages/ConstructionPlanEditorPage'));
+const ConstructionPlanReviewInboxPage = React.lazy(() => import('./features/construction-plan/pages/ConstructionPlanReviewInboxPage'));
+const ConstructionPlanExportsPage = React.lazy(() => import('./features/construction-plan/pages/ConstructionPlanExportsPage'));
+const ConstructionPlanTemplateAdminPage = React.lazy(() => import('./features/construction-plan/pages/ConstructionPlanTemplateAdminPage'));
+const ConstructionPlanRecordListPage = React.lazy(() => import('./features/construction-plan/pages/ConstructionPlanRecordListPage'));
+const ConstructionPlanRecordDetailPage = React.lazy(() => import('./features/construction-plan/pages/ConstructionPlanRecordDetailPage'));
 
 const INITIAL_INTRO_DURATION_MS = 0;
 
@@ -273,6 +281,23 @@ const App: React.FC = () => {
             <Route path="/dashboard2" element={<CheongyeonHome />} />
             <Route path="/dashboard3" element={<NationwideDashboardHome />} />
             <Route path="/cheongyeon/home" element={<Navigate to="/dashboard2" replace />} />
+
+            {/* Construction-plan quick PDF creation and document management */}
+            <Route path="/construction-plans" element={<ConstructionPlanCreatePage />} />
+            <Route path="/construction-plans/create" element={<ConstructionPlanCreatePage />} />
+            <Route path="/construction-plans/new" element={<Navigate to="/construction-plans/create" replace />} />
+            <Route path="/construction-plans/manage" element={<ConstructionPlanListPage />} />
+            <Route path="/construction-plans/:planId/preview" element={<ConstructionPlanEditorPage />} />
+            <Route path="/construction-plans/:planId" element={<ConstructionPlanEditorPage />} />
+            <Route path="/construction-plans/:planId/drawings/:drawingId" element={<ConstructionPlanEditorPage />} />
+            <Route path="/construction-plans/:planId/compare/:snapshotId" element={<ConstructionPlanEditorPage />} />
+            <Route path="/construction-plans/:planId/exports" element={<ConstructionPlanExportsPage />} />
+            <Route path="/construction-plan-approvals" element={<ConstructionPlanReviewInboxPage />} />
+            <Route path="/construction-plan-reviews" element={<Navigate to="/construction-plan-approvals" replace />} />
+            <Route path="/construction-plan-exports" element={<ConstructionPlanExportsPage />} />
+            <Route path="/construction-plan-templates" element={<ConstructionPlanTemplateAdminPage />} />
+            <Route path="/construction-plan-records" element={<ConstructionPlanRecordListPage />} />
+            <Route path="/construction-plan-records/:recordId" element={<ConstructionPlanRecordDetailPage />} />
 
             {/* Reports */}
             {/* Daily Reports */}
