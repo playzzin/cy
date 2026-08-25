@@ -147,6 +147,7 @@ const TAB_OPTIONS: Array<{ key: WorkbookTabKey; label: string }> = [
 const CAPTURE_RENDER_TIMEOUT_MS = 45_000;
 const PNG_ENCODING_TIMEOUT_MS = 15_000;
 const CLIPBOARD_WRITE_TIMEOUT_MS = 12_000;
+const CAPTURE_BOTTOM_SAFE_AREA_PX = 16;
 
 class WorkbookCopyTimeoutError extends Error {
   constructor(message: string) {
@@ -692,7 +693,7 @@ const captureWorkbookTabToPng = async (root: HTMLElement): Promise<Blob> => {
     if (width <= 0 || height <= 0) {
       throw new Error('캡처할 목록의 크기를 확인할 수 없습니다.');
     }
-    const captureScale = getCaptureScale(width, height);
+    const captureScale = getCaptureScale(width, height + CAPTURE_BOTTOM_SAFE_AREA_PX);
 
     const canvas = await withWorkbookCopyTimeout(
       html2canvas(root, {
@@ -703,9 +704,8 @@ const captureWorkbookTabToPng = async (root: HTMLElement): Promise<Blob> => {
         imageTimeout: 12_000,
         logging: false,
         width,
-        height,
         windowWidth: window.innerWidth,
-        windowHeight: Math.max(window.innerHeight, height),
+        windowHeight: Math.max(window.innerHeight, height + CAPTURE_BOTTOM_SAFE_AREA_PX),
         scrollX: 0,
         scrollY: -window.scrollY,
         ignoreElements: (element: Element) =>
@@ -723,6 +723,10 @@ const captureWorkbookTabToPng = async (root: HTMLElement): Promise<Blob> => {
           clonedRoot.style.maxHeight = 'none';
           clonedRoot.style.overflow = 'visible';
           clonedRoot.style.backgroundColor = '#ffffff';
+          const clonedRootPaddingBottom = parseCssPixelValue(
+            clonedDocument.defaultView?.getComputedStyle(clonedRoot).paddingBottom || '0'
+          );
+          clonedRoot.style.paddingBottom = `${clonedRootPaddingBottom + CAPTURE_BOTTOM_SAFE_AREA_PX}px`;
           clonedRoot.style.textRendering = 'geometricPrecision';
           clonedRoot.style.setProperty('-webkit-font-smoothing', 'antialiased');
 

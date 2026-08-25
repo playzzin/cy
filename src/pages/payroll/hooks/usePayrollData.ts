@@ -9,9 +9,10 @@ import {
   AdvanceItemLabelsConfig,
 } from '../../../services/payrollConfigService';
 import { advancePaymentService, AdvancePayment } from '../../../services/advancePaymentService';
-import { PaymentData, MonthlyAdvanceLedgerRow, DeductionBreakdown, WorkerWorkEntry, DeductionLine, LedgerManualInput } from '../types/payroll';
+import { PaymentData, MonthlyAdvanceLedgerRow, DeductionBreakdown, WorkerWorkEntry, DeductionLine } from '../types/payroll';
 import { BANK_CODES, STANDARD_DEDUCTION_FIELDS } from '../constants/payroll.constants';
 import { resolveReportPayType } from '../../../utils/payType';
+import { buildManualInputFromAdvanceRecord } from '../utils/advanceLedgerInput';
 
 // Helper: Convert any value to number safely
 const toNumber = (value: unknown): number => {
@@ -109,21 +110,6 @@ const createEmptyDeductionBreakdown = (): DeductionBreakdown => ({
   businessResidentTax: 0,
   total: 0,
   hasData: false,
-});
-
-const createEmptyLedgerSideInput = (): LedgerManualInput['invoice'] => ({
-  carry: 0,
-  carrySecond: 0,
-  currentAdvance: 0,
-  currentAdvanceSecond: 0,
-  lodging: 0,
-  electricity: 0,
-  gas: 0,
-  water: 0,
-  internet: 0,
-  management: 0,
-  fine: 0,
-  other: 0,
 });
 
 const ITEM_KEY_LABEL_FALLBACKS: Record<string, string> = {
@@ -254,85 +240,6 @@ const pickPreferredAdvanceRecord = (
 
     return best;
   }, undefined);
-};
-
-const buildManualInputFromAdvanceRecord = (record?: AdvancePayment): LedgerManualInput | undefined => {
-  if (!record) return undefined;
-
-  const corporateAdvance1 = record.items?.corporateAdvance1;
-  const corporateAdvance2 = record.items?.corporateAdvance2;
-  const corporateAdvance3 = record.items?.corporateAdvance3;
-  const corporateAdvance4 = record.items?.corporateAdvance4;
-  const laborAdvance1 = record.items?.laborAdvance1;
-  const laborAdvance2 = record.items?.laborAdvance2;
-  const laborAdvance3 = record.items?.laborAdvance3;
-  const laborAdvance4 = record.items?.laborAdvance4;
-  const normalizedItemAssignments = Object.entries(record.itemAssignments ?? {}).reduce<Record<string, 'corporate' | 'labor'>>((acc, [key, value]) => {
-    const normalizedKey =
-      key === 'accommodation' ? 'lodging'
-        : key === 'maintenance' ? 'management'
-          : key === 'fines' ? 'fine'
-            : key;
-    if (!normalizedKey) return acc;
-    acc[normalizedKey] = value;
-    return acc;
-  }, {});
-
-  // The advance-management page has three legacy standard fields that do not
-  // have dedicated cells in the integrated-payroll ledger.  Previously they
-  // were simply omitted here, so values such as a deposit were visible in
-  // advance management but disappeared from the ledger.  Keep their amount in
-  // the ledger's "other" deduction bucket instead of relying on a display name
-  // match.  This uses the stable stored field keys and also supports old rows
-  // that still have a legacy field inside `items`.
-  const getStandardDeductionAmount = (key: 'privateRoom' | 'gloves' | 'deposit'): number => {
-    const directAmount = toNumber(record[key]);
-    return directAmount > 0 ? directAmount : toNumber(record.items?.[key]);
-  };
-  const legacyOtherDeduction =
-    getStandardDeductionAmount('privateRoom')
-    + getStandardDeductionAmount('gloves')
-    + getStandardDeductionAmount('deposit');
-
-  // Preserve the source item's classification when all merged legacy fields
-  // share one.  Otherwise the existing row-level classification remains the
-  // fallback, matching the ledger's current behavior.
-  if (!normalizedItemAssignments.other) {
-    const mergedAssignments = ['privateRoom', 'gloves', 'deposit']
-      .map((key) => record.itemAssignments?.[key])
-      .filter((value): value is 'corporate' | 'labor' => value === 'corporate' || value === 'labor');
-    if (mergedAssignments.length > 0 && mergedAssignments.every((value) => value === mergedAssignments[0])) {
-      normalizedItemAssignments.other = mergedAssignments[0];
-    }
-  }
-
-  return {
-    invoice: {
-      ...createEmptyLedgerSideInput(),
-      carry: toNumber(corporateAdvance1),
-      carrySecond: toNumber(corporateAdvance2 ?? record.items?.carrySecond),
-      currentAdvance: toNumber(corporateAdvance3 ?? record.items?.currentAdvance),
-      currentAdvanceSecond: toNumber(corporateAdvance4 ?? record.items?.currentAdvanceSecond),
-      lodging: toNumber(record.accommodation),
-      electricity: toNumber(record.electricity),
-      gas: toNumber(record.gas),
-      water: toNumber(record.water),
-    },
-    labor: {
-      ...createEmptyLedgerSideInput(),
-      carry: toNumber(laborAdvance1),
-      carrySecond: toNumber(laborAdvance2),
-      currentAdvance: toNumber(laborAdvance3),
-      currentAdvanceSecond: toNumber(laborAdvance4),
-      internet: toNumber(record.internet),
-      management: toNumber(record.items?.management ?? record.items?.maintenance),
-      fine: toNumber(record.fines),
-      other: toNumber(record.items?.other) + legacyOtherDeduction,
-    },
-    personalMemo: String(record.memo ?? ''),
-    assignmentType: (record.assignmentType === 'corporate' ? 'corporate' : 'labor'),
-    itemAssignments: normalizedItemAssignments,
-  };
 };
 
 const buildDeductionBreakdownFromRecords = (
@@ -848,7 +755,7 @@ export const usePayrollData = (
             preferredSalaryModel: agg.salaryModel,
           }
         );
-        const manual = buildManualInputFromAdvanceRecord(selectedAdvanceRecord);
+        const manual = buildManualInputFromAdvanceRecord(selectedAdvanceRecord, deductionLabelMap);
 
         const rowKey = `${agg.month}__${agg.workerId}__${agg.teamId}__${agg.salaryModel}`;
         return {
@@ -871,6 +778,7 @@ export const usePayrollData = (
           type: '월급',
           assignmentType: selectedAdvanceRecord?.assignmentType ?? manual?.assignmentType ?? 'labor',
           manual,
+          sourceManualUpdatedAt: selectedAdvanceRecord?.updatedAt,
         };
       });
 

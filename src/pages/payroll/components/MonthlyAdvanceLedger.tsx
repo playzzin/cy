@@ -344,14 +344,14 @@ const LedgerInputCell: React.FC<{
     else inputBg = '';
 
     return (
-        <div className="flex flex-col gap-0.5 group">
-            <div className="flex items-center gap-1">
+        <div className="min-w-0 flex flex-col gap-0.5 group">
+            <div className="min-w-0 flex items-center gap-1">
                 <input
                     type="text"
                     inputMode="numeric"
                     value={formatInputAmount(value)}
                     onChange={(e) => onChange(toSafeAmount(e.target.value))}
-                    className={`w-full ${inputBg} border border-transparent hover:border-slate-300 focus:border-blue-400 focus:bg-white rounded px-1.5 text-right text-[12px] font-mono outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-all ${className}`}
+                    className={`min-w-0 w-full ${inputBg} border border-transparent hover:border-slate-300 focus:border-blue-400 focus:bg-white rounded px-1.5 text-right text-[12px] font-mono tabular-nums outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-all ${className}`}
                     placeholder={placeholder}
                 />
                 {onAssignmentChange && (
@@ -403,6 +403,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     const [showLaborGroupBasis, setShowLaborGroupBasis] = useState<boolean>(false);
     const [showRateGuide, setShowRateGuide] = useState<boolean>(false);
     const touchedRowKeysRef = React.useRef<Set<string>>(new Set());
+    const previousInitialInputsRef = React.useRef<Props['initialInputs']>(initialInputs);
     const resolvedAdvanceItemLabels = useMemo<AdvanceItemLabelsConfig>(() => {
         const next: AdvanceItemLabelsConfig = { ...DEFAULT_ADVANCE_ITEM_LABELS };
         Object.entries(advanceItemLabels || {}).forEach(([key, val]) => {
@@ -416,11 +417,13 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     const totalColumnCount = 10 + (showUtilities ? 5 : 0) + (showAdvances ? 5 : 0) + (showTaxes ? 7 : 0);
     const tableMinWidth =
         848
-        + (showUtilities ? 484 : 0)
+        + (showUtilities ? 624 : 0)
         + (showAdvances ? 674 : 0)
         + (showTaxes ? 712 : 0);
 
     useEffect(() => {
+        const previousInitialInputs = previousInitialInputsRef.current;
+        previousInitialInputsRef.current = initialInputs;
         setInputsByRowKey((prev) => {
             const next: Record<string, LedgerManualInput> = {};
             let changed = false;
@@ -429,9 +432,16 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 const defaultAssignment = resolveDefaultMonthlyAdvanceAssignment(row);
                 const prevInput = prev[row.rowKey];
                 const initialInput = initialInputs?.[row.rowKey];
+                const previousInitialInput = previousInitialInputs?.[row.rowKey];
                 const isTouchedRow = touchedRowKeysRef.current.has(row.rowKey);
-                const shouldAdoptInitial = Boolean(initialInput) && !isTouchedRow && isManualInputEffectivelyEmpty(prevInput, defaultAssignment);
+                const initialInputChanged = initialInput !== previousInitialInput;
+                const shouldAdoptInitial = Boolean(initialInput)
+                    && !isTouchedRow
+                    && (initialInputChanged || isManualInputEffectivelyEmpty(prevInput, defaultAssignment));
                 const existing = shouldAdoptInitial ? initialInput : (prevInput ?? initialInput);
+                if (shouldAdoptInitial && existing !== prevInput) {
+                    changed = true;
+                }
                 if (!existing) {
                     changed = true;
                     next[row.rowKey] = createEmptyManualInput(defaultAssignment);
@@ -1966,23 +1976,23 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                         <tr className="h-[43px] text-slate-800">
                             {showUtilities && (
                                 <>
-                                    <th className="sticky top-[27px] z-[50] w-[98px] bg-slate-200 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                    <th className="sticky top-[27px] z-[50] w-[128px] min-w-[128px] bg-slate-200 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                         <span className="flex min-h-[21px] items-center justify-center border-b border-slate-300 px-1 whitespace-nowrap">숙소비</span>
                                         <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">인터넷</span>
                                     </th>
-                                    <th className="sticky top-[27px] z-[50] w-[98px] bg-slate-200 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                    <th className="sticky top-[27px] z-[50] w-[128px] min-w-[128px] bg-slate-200 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                         <span className="flex min-h-[21px] items-center justify-center border-b border-slate-300 px-1 whitespace-nowrap">전기료</span>
                                         <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">관리비</span>
                                     </th>
-                                    <th className="sticky top-[27px] z-[50] w-[98px] bg-slate-200 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                    <th className="sticky top-[27px] z-[50] w-[128px] min-w-[128px] bg-slate-200 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                         <span className="flex min-h-[21px] items-center justify-center border-b border-slate-300 px-1 whitespace-nowrap">가스비</span>
                                         <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">과태료</span>
                                     </th>
-                                    <th className="sticky top-[27px] z-[50] w-[98px] bg-slate-200 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                    <th className="sticky top-[27px] z-[50] w-[128px] min-w-[128px] bg-slate-200 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                         <span className="flex min-h-[21px] items-center justify-center border-b border-slate-300 px-1 whitespace-nowrap">수도세</span>
                                         <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">기타</span>
                                     </th>
-                                    <th className="sticky top-[27px] z-[50] w-[92px] bg-slate-300 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                    <th className="sticky top-[27px] z-[50] w-[112px] min-w-[112px] bg-slate-300 border-b border-r border-slate-400 p-0 text-[11px] leading-tight shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                         <span className="flex min-h-[21px] items-center justify-center border-b border-slate-400/70 px-1 whitespace-nowrap">법인 합계</span>
                                         <span className="flex min-h-[21px] items-center justify-center px-1 whitespace-nowrap">노무 합계</span>
                                     </th>
@@ -2101,7 +2111,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                 <td className="sticky left-[432px] z-30 w-[92px] min-w-[92px] max-w-[92px] border border-slate-400 bg-blue-50 px-2 text-right font-bold text-blue-900 shadow-[2px_0_0_rgba(15,23,42,0.18)]">{formatAmount(row.invoiceGrossAmount)}</td>
                                                 {showUtilities && (
                                                     <>
-                                                        <td className="border border-slate-300 px-1 bg-blue-100">
+                                                        <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-blue-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.invoice.lodging}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'lodging', v)}
@@ -2110,7 +2120,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                                 placeholder="숙소"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-blue-100">
+                                                        <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-blue-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.invoice.electricity}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'electricity', v)}
@@ -2119,7 +2129,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                                 placeholder="전기"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-blue-100">
+                                                        <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-blue-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.invoice.gas}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'gas', v)}
@@ -2128,7 +2138,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                                 placeholder="가스"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-blue-100">
+                                                        <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-blue-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.invoice.water}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'water', v)}
@@ -2137,7 +2147,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                                 placeholder="수도"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-2 text-right bg-slate-200 font-semibold">{formatAmount(row.invoiceDeductionTotal)}</td>
+                                                        <td className="w-[112px] min-w-[112px] border border-slate-300 px-2 text-right bg-slate-200 font-semibold tabular-nums">{formatAmount(row.invoiceDeductionTotal)}</td>
                                                     </>
                                                 )}
                                                 {showAdvances && (
@@ -2205,7 +2215,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                 <td className="sticky left-[432px] z-30 w-[92px] min-w-[92px] max-w-[92px] border border-slate-400 bg-amber-50 px-2 text-right font-bold text-amber-900 shadow-[2px_0_0_rgba(15,23,42,0.18)]">{formatAmount(row.laborGrossAmount)}</td>
                                                 {showUtilities && (
                                                     <>
-                                                        <td className="border border-slate-300 px-1 bg-emerald-100">
+                                                        <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-emerald-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.labor.internet}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'internet', v)}
@@ -2214,7 +2224,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                                 placeholder="인터넷"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-emerald-100">
+                                                        <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-emerald-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.labor.management}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'management', v)}
@@ -2223,7 +2233,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                                 placeholder="관리비"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-emerald-100">
+                                                        <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-emerald-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.labor.fine}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'fine', v)}
@@ -2232,7 +2242,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                                 placeholder="과태료"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-emerald-100">
+                                                        <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-emerald-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.labor.other}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'other', v)}
@@ -2241,7 +2251,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                                 placeholder="기타"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-2 text-right bg-slate-200 font-semibold">{formatAmount(row.laborDeductionTotal)}</td>
+                                                        <td className="w-[112px] min-w-[112px] border border-slate-300 px-2 text-right bg-slate-200 font-semibold tabular-nums">{formatAmount(row.laborDeductionTotal)}</td>
                                                     </>
                                                 )}
                                                 {showAdvances && (

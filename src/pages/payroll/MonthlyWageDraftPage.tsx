@@ -71,6 +71,7 @@ import { calculatePayslipPrintScale } from './utils/payslipPrintLayout';
 
 import { usePayrollData } from './hooks/usePayrollData';
 import { PaymentData, MonthlyAdvanceLedgerRow, MonthlyAdvanceLedgerWorkEntry, LedgerManualInput, DeductionBreakdown, WorkerWorkEntry, DeductionLine, TaxRateSnapshot, LedgerUtilityInputLike, InsuranceAppliedSummary, InsuranceAppliedSiteSummary, InsuranceAppliedReason, WithholdingAppliedSummary, WithholdingAppliedSiteSummary, BusinessIncomeAppliedSummary, BusinessIncomeAppliedSiteSummary } from './types/payroll';
+import { resolveInitialLedgerManualInput } from './utils/advanceLedgerInput';
 import { BANK_CODES, STANDARD_DEDUCTION_FIELDS, WITHHOLDING_MAX_MAN_DAY } from './constants/payroll.constants';
 
 // --- Premium UI Styled Components ---
@@ -2512,35 +2513,40 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         return map;
     }, [ledgerComputedAmounts]);
 
-    const loadedLedgerInputsFromAdvance = useMemo<Record<string, LedgerManualInput>>(() => {
-        const next: Record<string, LedgerManualInput> = {};
+    const loadedLedgerInputsFromAdvance = useMemo<Record<string, { input: LedgerManualInput; updatedAt?: unknown }>>(() => {
+        const next: Record<string, { input: LedgerManualInput; updatedAt?: unknown }> = {};
         ledgerRows.forEach((row) => {
             const key = String(row.rowKey || row.id || '').trim();
             if (!key || !row.manual) return;
-            next[key] = row.manual;
+            next[key] = { input: row.manual, updatedAt: row.sourceManualUpdatedAt };
         });
         return next;
     }, [ledgerRows]);
 
-    const loadedLedgerInputsFromSettlement = useMemo<Record<string, LedgerManualInput>>(() => {
+    const initialLedgerInputs = useMemo<Record<string, LedgerManualInput>>(() => {
         const next: Record<string, LedgerManualInput> = {};
+        Object.entries(loadedLedgerInputsFromAdvance).forEach(([rowKey, source]) => {
+            next[rowKey] = source.input;
+        });
+
         savedPayrollSettlements.forEach((settlement) => {
             settlement.rows.forEach((row) => {
                 const rowKey = String(row.rowKey ?? '').trim();
                 if (!rowKey || !row.manualInput) return;
-                next[rowKey] = row.manualInput as LedgerManualInput;
+                const source = loadedLedgerInputsFromAdvance[rowKey];
+                const resolved = resolveInitialLedgerManualInput({
+                    advanceInput: source?.input,
+                    advanceUpdatedAt: source?.updatedAt,
+                    settlementInput: row.manualInput as LedgerManualInput,
+                    settlementUpdatedAt: settlement.updatedAt,
+                    settlementStatus: settlement.runStatus,
+                });
+                if (resolved) next[rowKey] = resolved;
             });
         });
-        return next;
-    }, [savedPayrollSettlements]);
 
-    const initialLedgerInputs = useMemo<Record<string, LedgerManualInput>>(
-        () => ({
-            ...loadedLedgerInputsFromAdvance,
-            ...loadedLedgerInputsFromSettlement,
-        }),
-        [loadedLedgerInputsFromAdvance, loadedLedgerInputsFromSettlement]
-    );
+        return next;
+    }, [loadedLedgerInputsFromAdvance, savedPayrollSettlements]);
 
     const activeLedgerRowKeySet = useMemo<Set<string>>(() => {
         const set = new Set<string>();

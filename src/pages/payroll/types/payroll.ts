@@ -229,6 +229,7 @@ export interface MonthlyAdvanceLedgerRow {
     statementTaxAmounts?: MonthlyAdvanceLedgerTaxAmounts;
     assignmentType?: 'corporate' | 'labor';
     manual?: LedgerManualInput;
+    sourceManualUpdatedAt?: unknown;
 }
 
 export type LedgerUtilityInputLike = LedgerManualInput;
