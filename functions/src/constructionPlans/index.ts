@@ -67,3 +67,7 @@ export {
 export {
     monitorConstructionPlanPdfRenderOperationsScheduled,
 } from './pdfRenderMonitoring';
+export {
+    buildConstructionPlanStaticMapUrl,
+    getConstructionPlanMapSnapshotServer,
+} from './referenceMapSnapshot';

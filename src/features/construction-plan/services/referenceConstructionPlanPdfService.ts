@@ -16,6 +16,13 @@ export const REFERENCE_CONSTRUCTION_PLAN_COVER_URL =
   '/assets/construction-plan/system-shoring-rev5-cover.png';
 export const REFERENCE_CONSTRUCTION_PLAN_PAGE_COUNT = 42;
 export const REFERENCE_CONSTRUCTION_PLAN_DEFAULT_COMPANY = '청연이엔지';
+export const REFERENCE_CONSTRUCTION_PLAN_PAGE_HEADER_LAYOUT = {
+  pageWidth: 595.28,
+  height: 42,
+  brand: { x: 455, y: 0, width: 129, height: 42 },
+  logoPanel: { x: 459, y: 4, width: 36, height: 34 },
+  logo: { x: 461, y: 6, width: 32, height: 30 },
+} as const;
 
 export type ReferenceConstructionPlanCoverTemplate = 'blueprint' | 'executive' | 'minimal';
 
@@ -38,6 +45,11 @@ export type ReferenceConstructionPlanInput = {
   floors?: string;
   zones?: string;
   customLogoDataUrl?: string;
+  siteMapImageDataUrl?: string;
+  siteMapAddress?: string;
+  siteMapLink?: string;
+  aerialViewDataUrl?: string;
+  aerialViewFileName?: string;
   coverTemplate?: ReferenceConstructionPlanCoverTemplate;
 };
 
@@ -55,7 +67,7 @@ export type ReferenceConstructionPlanUploadedDrawing = {
 
 type CanvasContext = CanvasRenderingContext2D;
 
-const PAGE_WIDTH = 595.28;
+const PAGE_WIDTH = REFERENCE_CONSTRUCTION_PLAN_PAGE_HEADER_LAYOUT.pageWidth;
 const PAGE_HEIGHT = 841.89;
 const DRAWING_FRAME_WIDTH = PAGE_WIDTH - 64;
 const DRAWING_FRAME_HEIGHT = 688;
@@ -111,6 +123,11 @@ export const normalizeReferenceConstructionPlanInput = (
   floors: clean(input.floors),
   zones: clean(input.zones),
   customLogoDataUrl: clean(input.customLogoDataUrl) || undefined,
+  siteMapImageDataUrl: clean(input.siteMapImageDataUrl) || undefined,
+  siteMapAddress: clean(input.siteMapAddress) || undefined,
+  siteMapLink: clean(input.siteMapLink) || undefined,
+  aerialViewDataUrl: clean(input.aerialViewDataUrl) || undefined,
+  aerialViewFileName: clean(input.aerialViewFileName) || undefined,
   coverTemplate: ['blueprint', 'executive', 'minimal'].includes(input.coverTemplate ?? '')
     ? input.coverTemplate
     : 'blueprint',
@@ -221,15 +238,62 @@ const drawHeaderBrand = (
   input: ReferenceConstructionPlanInput,
   logo: HTMLImageElement,
 ): void => {
+  const { brand, logoPanel, logo: logoBounds } = REFERENCE_CONSTRUCTION_PLAN_PAGE_HEADER_LAYOUT;
+  context.save();
+  context.beginPath();
+  context.rect(brand.x, brand.y, brand.width, brand.height);
+  context.clip();
   context.fillStyle = '#061d36';
-  context.fillRect(462, 0, 122, 45);
-  drawContainedImage(context, logo, 469, 9, 24, 24);
-  fittedText(context, input.companyName, 495, 22, 82, {
-    size: 9.2,
-    minSize: 6.2,
+  context.fillRect(brand.x, brand.y, brand.width, brand.height);
+  context.fillStyle = 'rgba(255, 255, 255, 0.96)';
+  context.beginPath();
+  context.roundRect(logoPanel.x, logoPanel.y, logoPanel.width, logoPanel.height, 5);
+  context.fill();
+  context.strokeStyle = 'rgba(145, 205, 236, 0.72)';
+  context.lineWidth = 0.7;
+  context.stroke();
+  drawContainedImage(
+    context,
+    logo,
+    logoBounds.x,
+    logoBounds.y,
+    logoBounds.width,
+    logoBounds.height,
+  );
+  fittedText(context, input.companyName, 501, 21, 76, {
+    size: 9.6,
+    minSize: 6.4,
     color: '#ffffff',
-    weight: 700,
+    weight: 750,
   });
+  context.restore();
+};
+
+const drawStandardPageHeader = (
+  context: CanvasContext,
+  input: ReferenceConstructionPlanInput,
+  logo: HTMLImageElement,
+  kicker: string,
+  title: string,
+): void => {
+  const { height, brand } = REFERENCE_CONSTRUCTION_PLAN_PAGE_HEADER_LAYOUT;
+  context.fillStyle = '#061d36';
+  context.fillRect(0, 0, PAGE_WIDTH, height);
+  context.fillStyle = '#1291d0';
+  context.fillRect(0, 0, 9, height);
+  fittedText(context, kicker, 28, 9.5, brand.x - 44, {
+    size: 5.8,
+    minSize: 5.2,
+    color: '#9eb8ca',
+    weight: 750,
+  });
+  fittedText(context, title, 28, 28, brand.x - 40, {
+    size: 17,
+    minSize: 10.5,
+    color: '#ffffff',
+    weight: 820,
+  });
+  drawHeaderBrand(context, input, logo);
 };
 
 const drawFooterBrand = (context: CanvasContext, input: ReferenceConstructionPlanInput): void => {
@@ -682,12 +746,101 @@ const buildCommonBrandOverlay = async (
   drawFooterBrand(context, input);
 });
 
+const drawSiteVisualPanel = (
+  context: CanvasContext,
+  title: string,
+  helper: string,
+  image: HTMLImageElement | undefined,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void => {
+  context.fillStyle = '#ffffff';
+  context.strokeStyle = '#d4e0e9';
+  context.lineWidth = 0.8;
+  context.beginPath();
+  context.roundRect(x, y, width, height, 8);
+  context.fill();
+  context.stroke();
+  context.fillStyle = '#e9f5fa';
+  context.beginPath();
+  context.roundRect(x + 1, y + 1, width - 2, 43, [7, 7, 0, 0]);
+  context.fill();
+  fittedText(context, title, x + 15, y + 18, width - 30, {
+    size: 11.2,
+    minSize: 8.2,
+    color: '#123e5b',
+    weight: 800,
+  });
+  fittedText(context, helper, x + 15, y + 33, width - 30, {
+    size: 6.2,
+    minSize: 5.2,
+    color: '#698496',
+    weight: 600,
+  });
+  const imageX = x + 12;
+  const imageY = y + 55;
+  const imageWidth = width - 24;
+  const imageHeight = height - 67;
+  context.fillStyle = '#f3f7fa';
+  context.fillRect(imageX, imageY, imageWidth, imageHeight);
+  if (image) {
+    drawContainedImage(context, image, imageX, imageY, imageWidth, imageHeight);
+  } else {
+    fittedText(context, '등록된 이미지가 없습니다.', x + (width / 2), imageY + (imageHeight / 2), imageWidth - 40, {
+      size: 9,
+      minSize: 9,
+      color: '#8a9ba8',
+      weight: 650,
+      align: 'center',
+    });
+  }
+};
+
+const buildSiteVisualsOverlay = async (
+  input: ReferenceConstructionPlanInput,
+  logo: HTMLImageElement,
+  mapImage?: HTMLImageElement,
+): Promise<Uint8Array> => canvasPngBytes((context) => {
+  context.fillStyle = '#f4f8fb';
+  context.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
+  drawStandardPageHeader(context, input, logo, 'SITE INFORMATION', '현장 위치 지도');
+  context.fillStyle = '#e8f5fc';
+  context.beginPath();
+  context.roundRect(24, 106, 547, 44, 8);
+  context.fill();
+  fittedText(context, '현장주소', 38, 128, 52, {
+    size: 7.2,
+    minSize: 7.2,
+    color: '#1178aa',
+    weight: 850,
+  });
+  fittedText(context, input.siteAddress || '-', 99, 128, 455, {
+    size: 10.2,
+    minSize: 7.2,
+    color: '#173b57',
+    weight: 750,
+  });
+  drawSiteVisualPanel(
+    context,
+    'Google 지도 · 현장 위치',
+    '입력한 현장주소를 기준으로 생성한 지도입니다.',
+    mapImage,
+    24,
+    164,
+    547,
+    632,
+  );
+  drawFooterBrand(context, input);
+});
+
 type TocItemLayout = {
   id: string;
   title: string;
   englishTitle: string;
   sourceLabel: string;
-  kind: 'standard' | 'uploaded-drawing';
+  kind: 'site-visuals' | 'standard' | 'uploaded-drawing';
   outputOrder: number;
   outputStartPage: number;
   outputEndPage: number;
@@ -697,9 +850,23 @@ const buildTocLayout = (
   sections: ReferenceConstructionPlanSection[],
   drawings: ReferenceConstructionPlanUploadedDrawing[],
   firstContentPage: number,
+  includeSiteVisuals = false,
+  hasSiteMap = false,
 ): TocItemLayout[] => {
   let outputPage = firstContentPage;
   const items: TocItemLayout[] = [];
+  if (includeSiteVisuals) {
+    items.push({
+      id: 'site-visuals',
+      title: '현장 위치 지도',
+      englishTitle: 'SITE LOCATION MAP',
+      sourceLabel: hasSiteMap ? '지도 등록' : '지도 미등록',
+      kind: 'site-visuals',
+      outputOrder: 1,
+      outputStartPage: 3,
+      outputEndPage: 3,
+    });
+  }
   sections.forEach((current) => {
     items.push({
       id: current.id,
@@ -741,14 +908,15 @@ const drawTocCard = (
   y: number,
   width: number,
 ): void => {
-  context.fillStyle = '#ffffff';
-  context.strokeStyle = '#d5e0e9';
+  const isSiteVisuals = item.kind === 'site-visuals';
+  context.fillStyle = isSiteVisuals ? '#e9f8f5' : '#ffffff';
+  context.strokeStyle = isSiteVisuals ? '#55ad9a' : '#d5e0e9';
   context.lineWidth = 0.8;
   context.beginPath();
   context.roundRect(x, y, width, 49, 6);
   context.fill();
   context.stroke();
-  context.fillStyle = '#08375f';
+  context.fillStyle = isSiteVisuals ? '#11846e' : '#08375f';
   context.beginPath();
   context.roundRect(x + 8, y + 8, 31, 31, 7);
   context.fill();
@@ -794,23 +962,7 @@ const buildSelectedTocOverlay = async (
 ): Promise<Uint8Array> => canvasPngBytes((context) => {
   context.fillStyle = '#ffffff';
   context.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
-  context.fillStyle = '#061d36';
-  context.fillRect(0, 0, PAGE_WIDTH, 88);
-  context.fillStyle = '#1291d0';
-  context.fillRect(0, 0, 9, 88);
-  fittedText(context, 'DOCUMENT', 28, 20, 100, {
-    size: 6,
-    minSize: 6,
-    color: '#9eb8ca',
-    weight: 700,
-  });
-  fittedText(context, '선택 목차 · Visual Index', 28, 51, 330, {
-    size: 19,
-    minSize: 15,
-    color: '#ffffff',
-    weight: 800,
-  });
-  drawHeaderBrand(context, input, logo);
+  drawStandardPageHeader(context, input, logo, 'DOCUMENT', '선택 목차 · Visual Index');
 
   const itemStart = tocPageIndex * REFERENCE_CONSTRUCTION_PLAN_TOC_ITEMS_PER_PAGE;
   const items = allItems.slice(
@@ -899,31 +1051,19 @@ const buildUploadedDrawingOverlay = async (
   sourcePageCount: number,
   sourceType: ReferenceConstructionPlanUploadedDrawing['sourceType'],
 ): Promise<Uint8Array> => canvasPngBytes((context) => {
-  context.fillStyle = '#061d36';
-  context.fillRect(0, 0, PAGE_WIDTH, 82);
-  context.fillStyle = '#1291d0';
-  context.fillRect(0, 0, 9, 82);
-  fittedText(context, sourceType === 'image' ? 'UPLOADED PHOTO DRAWING' : 'UPLOADED PDF DRAWING', 28, 18, 220, {
-    size: 6.4,
-    minSize: 6.4,
-    color: '#9eb8ca',
-    weight: 750,
-  });
-  fittedText(
+  drawStandardPageHeader(
     context,
+    input,
+    logo,
+    sourceType === 'image' ? 'UPLOADED PHOTO DRAWING' : 'UPLOADED PDF DRAWING',
     sourcePageCount > 1 ? `${title} (${sourcePageNumber}/${sourcePageCount})` : title,
-    28,
-    48,
-    410,
-    { size: 17, minSize: 10.5, color: '#ffffff', weight: 800 },
   );
-  fittedText(context, fileName, 28, 68, 410, {
+  fittedText(context, fileName, 28, 66, PAGE_WIDTH - 56, {
     size: 6.2,
     minSize: 5.2,
-    color: '#a8bdcc',
+    color: '#61788b',
     weight: 550,
   });
-  drawHeaderBrand(context, input, logo);
   context.strokeStyle = '#b9cddd';
   context.lineWidth = 0.8;
   context.strokeRect(24, 96, PAGE_WIDTH - 48, 704);
@@ -988,15 +1128,20 @@ export const generateReferenceConstructionPlanPdf = async (
     selectedSectionIds,
     uploadedDrawingPageCount,
     sectionCatalog,
+    input.siteAddress ? 1 : 0,
   );
+  const siteVisualPageCount = input.siteAddress ? 1 : 0;
   const totalPageCount = countReferenceConstructionPlanPages(
     selectedSectionIds,
     uploadedDrawingPageCount,
     sectionCatalog,
+    siteVisualPageCount,
+    siteVisualPageCount,
   );
   const document = await PDFDocument.create();
   const fixedPages = await document.copyPages(sourceDocument, [0, 1]);
   fixedPages.forEach((page) => document.addPage(page));
+  if (siteVisualPageCount > 0) document.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
 
   Array.from({ length: tocPageCount }).forEach(() => document.addPage([PAGE_WIDTH, PAGE_HEIGHT]));
   const selectedSourceIndices = selectedSections
@@ -1074,15 +1219,23 @@ export const generateReferenceConstructionPlanPdf = async (
   const logo = await loadBrowserImage(
     input.customLogoDataUrl || REFERENCE_CONSTRUCTION_PLAN_DEFAULT_LOGO_URL,
   );
+  const siteMapImage = input.siteMapImageDataUrl
+    ? await loadBrowserImage(input.siteMapImageDataUrl)
+    : undefined;
   const coverOverlay = await document.embedPng(await buildCoverOverlay(input, logo, customBranding));
   const controlOverlay = await document.embedPng(
     await buildDocumentControlOverlay(input, logo, customBranding),
   );
   const commonBrandOverlay = await document.embedPng(await buildCommonBrandOverlay(input, logo));
+  const siteVisualsOverlay = siteVisualPageCount > 0
+    ? await document.embedPng(await buildSiteVisualsOverlay(input, logo, siteMapImage))
+    : undefined;
   const tocLayout = buildTocLayout(
     selectedSections,
     loadedDrawings,
-    3 + tocPageCount,
+    3 + siteVisualPageCount + tocPageCount,
+    siteVisualPageCount > 0,
+    Boolean(input.siteMapImageDataUrl),
   );
   for (let tocPageIndex = 0; tocPageIndex < tocPageCount; tocPageIndex += 1) {
     const tocOverlay = await document.embedPng(await buildSelectedTocOverlay(
@@ -1091,10 +1244,10 @@ export const generateReferenceConstructionPlanPdf = async (
       tocLayout,
       tocPageIndex,
       tocPageCount,
-      tocPageIndex + 3,
+      tocPageIndex + 3 + siteVisualPageCount,
       totalPageCount,
     ));
-    document.getPage(tocPageIndex + 2).drawImage(tocOverlay, {
+    document.getPage(tocPageIndex + 2 + siteVisualPageCount).drawImage(tocOverlay, {
       x: 0,
       y: 0,
       width: PAGE_WIDTH,
@@ -1114,8 +1267,17 @@ export const generateReferenceConstructionPlanPdf = async (
     width: PAGE_WIDTH,
     height: PAGE_HEIGHT,
   });
-  const standardPageEndIndex = 2 + tocPageCount + selectedPages.length;
-  document.getPages().slice(2, standardPageEndIndex).forEach((page) => page.drawImage(commonBrandOverlay, {
+  if (siteVisualsOverlay) {
+    document.getPage(2).drawImage(siteVisualsOverlay, {
+      x: 0,
+      y: 0,
+      width: PAGE_WIDTH,
+      height: PAGE_HEIGHT,
+    });
+  }
+  const standardPageStartIndex = 2 + siteVisualPageCount;
+  const standardPageEndIndex = standardPageStartIndex + tocPageCount + selectedPages.length;
+  document.getPages().slice(standardPageStartIndex, standardPageEndIndex).forEach((page) => page.drawImage(commonBrandOverlay, {
     x: 0,
     y: 0,
     width: PAGE_WIDTH,
@@ -1279,6 +1441,18 @@ export const readReferenceDrawingFile = async (
     return readReferenceDrawingPdfFile(file);
   }
   return readReferenceDrawingImageFile(file);
+};
+
+export const readReferenceSiteImageAsDataUrl = async (file: File): Promise<string> => {
+  const image = await readReferenceDrawingImageFile(file);
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string'
+      ? resolve(reader.result)
+      : reject(new Error('construction-plan-site-image-read-failed'));
+    reader.onerror = () => reject(new Error('construction-plan-site-image-read-failed'));
+    reader.readAsDataURL(new Blob([image.bytes as BlobPart], { type: image.mimeType }));
+  });
 };
 
 export const readLogoFileAsDataUrl = async (file: File): Promise<string> => {

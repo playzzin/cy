@@ -87,6 +87,13 @@ service cloud.firestore {
       ];
     }
 
+    function cardExpenseAuditRoles() {
+      return [
+        'CEO', 'ceo', '대표', '사장', 'pos_ceo',
+        'DEV', 'dev', 'developer', '개발', '개발자'
+      ];
+    }
+
     function hasTokenRole(roles) {
       return isSignedIn()
         && (
@@ -491,6 +498,10 @@ service cloud.firestore {
         || hasAnyRole(payrollRoles());
     }
 
+    function canAccessCardExpenseAudit() {
+      return hasAnyRole(cardExpenseAuditRoles());
+    }
+
     function canRecruitingRead() {
       return canReadOperations();
     }
@@ -729,6 +740,15 @@ service cloud.firestore {
       ];
     }
 
+    function isCardExpenseAuditCollection(collectionId) {
+      return collectionId in [
+        'cardExpenseAuditPolicies',
+        'cardExpenseAuditRuns',
+        'cardExpenseAuditFindings',
+        'cardExpenseAuditReviewLogs'
+      ];
+    }
+
     function isLockedCollection(collectionId) {
       // High-volume construction-plan writes also reach the generic fallback
       // match. Short-circuit these server-controlled collections before the
@@ -763,6 +783,7 @@ service cloud.firestore {
         || isIncidentCaseCollection(collectionId)
         || isWelfareCollection(collectionId)
         || isBankNotificationCollection(collectionId)
+        || isCardExpenseAuditCollection(collectionId)
         || collectionId in ['cards', 'cardAssignments', 'cardBillingTargets']
         || collectionId == 'vehicleExpenseImportIdentities'
         || collectionId == 'erp_messages';
@@ -1323,6 +1344,20 @@ service cloud.firestore {
 
     match /server_settings/{settingsId} {
       allow read, write: if false;
+    }
+
+    // Card-audit results contain executive financial review data. Reads are
+    // restricted to CEO/DEV accounts; all mutations are owned by callables.
+    match /{collectionId}/{docId} {
+      allow read: if isCardExpenseAuditCollection(collectionId)
+        && canAccessCardExpenseAudit();
+      allow create, update, delete: if false;
+    }
+
+    match /{collectionId}/{docId}/{subcollection}/{nestedDocId}/{nested=**} {
+      allow read: if isCardExpenseAuditCollection(collectionId)
+        && canAccessCardExpenseAudit();
+      allow write: if false;
     }
 
     match /system_configs/{configId} {

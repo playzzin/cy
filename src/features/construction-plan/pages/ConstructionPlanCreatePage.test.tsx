@@ -15,7 +15,10 @@ import {
   generateReferenceConstructionPlanPdf,
   readReferenceDrawingFile,
   readLogoFileAsDataUrl,
+  readReferenceSiteImageAsDataUrl,
 } from '../services/referenceConstructionPlanPdfService';
+import { downloadReferenceConstructionPlanExcel } from '../services/constructionPlanExcelService';
+import { fetchConstructionPlanMapSnapshot } from '../services/constructionPlanMapService';
 import ConstructionPlanCreatePage from './ConstructionPlanCreatePage';
 
 jest.mock('../services/referenceConstructionPlanPdfService', () => ({
@@ -29,12 +32,23 @@ jest.mock('../services/referenceConstructionPlanPdfService', () => ({
   generateReferenceConstructionPlanPdf: jest.fn(),
   readReferenceDrawingFile: jest.fn(),
   readLogoFileAsDataUrl: jest.fn(),
+  readReferenceSiteImageAsDataUrl: jest.fn(),
 }));
 
 jest.mock('../services/referenceConstructionPlanSectionCatalogService', () => ({
   loadReferenceConstructionPlanSectionCatalog: jest.fn(),
   saveReferenceConstructionPlanSectionCatalog: jest.fn(),
   getReferenceSectionCatalogErrorMessage: jest.fn(() => '목차 데이터베이스 오류'),
+}));
+
+jest.mock('../services/constructionPlanExcelService', () => ({
+  downloadReferenceConstructionPlanExcel: jest.fn(),
+}));
+
+jest.mock('../services/constructionPlanMapService', () => ({
+  createGoogleMapsEmbedUrl: (address: string) => `https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed`,
+  createGoogleMapsSearchUrl: (address: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`,
+  fetchConstructionPlanMapSnapshot: jest.fn(),
 }));
 
 const generatePdf = generateReferenceConstructionPlanPdf as jest.MockedFunction<
@@ -44,6 +58,7 @@ const estimateDrawingDpi = estimateReferenceDrawingImagePrintDpi as jest.MockedF
   typeof estimateReferenceDrawingImagePrintDpi
 >;
 const readLogo = readLogoFileAsDataUrl as jest.MockedFunction<typeof readLogoFileAsDataUrl>;
+const readSiteImage = readReferenceSiteImageAsDataUrl as jest.MockedFunction<typeof readReferenceSiteImageAsDataUrl>;
 const readDrawing = readReferenceDrawingFile as jest.MockedFunction<
   typeof readReferenceDrawingFile
 >;
@@ -52,6 +67,12 @@ const loadCatalog = loadReferenceConstructionPlanSectionCatalog as jest.MockedFu
 >;
 const saveCatalog = saveReferenceConstructionPlanSectionCatalog as jest.MockedFunction<
   typeof saveReferenceConstructionPlanSectionCatalog
+>;
+const downloadExcel = downloadReferenceConstructionPlanExcel as jest.MockedFunction<
+  typeof downloadReferenceConstructionPlanExcel
+>;
+const fetchMap = fetchConstructionPlanMapSnapshot as jest.MockedFunction<
+  typeof fetchConstructionPlanMapSnapshot
 >;
 
 const renderPage = () => render(
@@ -62,6 +83,7 @@ const renderPage = () => render(
 
 const enterRequiredProjectData = () => {
   fireEvent.change(screen.getByLabelText('현장명 *'), { target: { value: '테스트 신축공사 현장' } });
+  fireEvent.change(screen.getByLabelText('현장주소 *'), { target: { value: '서울특별시 강남구 테헤란로 123' } });
 };
 
 const goToSiteInput = () => {
@@ -83,8 +105,15 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     generatePdf.mockResolvedValue(new Blob(['reference-pdf'], { type: 'application/pdf' }));
+    downloadExcel.mockResolvedValue();
     estimateDrawingDpi.mockReturnValue(325);
     readLogo.mockResolvedValue('data:image/png;base64,dGVzdA==');
+    readSiteImage.mockResolvedValue('data:image/png;base64,YWVyaWFs');
+    fetchMap.mockResolvedValue({
+      address: '서울특별시 강남구 테헤란로 123',
+      imageDataUrl: 'data:image/png;base64,bWFw',
+      googleMapsUrl: 'https://www.google.com/maps/search/?api=1&query=test',
+    });
     loadCatalog.mockResolvedValue({
       sections: REFERENCE_CONSTRUCTION_PLAN_SECTIONS,
       source: 'database',
@@ -138,7 +167,7 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
     fireEvent.click(screen.getByLabelText('일반사항 PDF 포함'));
     expect(screen.getByLabelText('일반사항 PDF 포함')).not.toBeChecked();
     expect(screen.getByText('32/33개 DB 목차 · 업로드 도면 0장')).toBeInTheDocument();
-    expect(screen.getByText(/선택 구성: DB 목차 32개 · 업로드 도면 0장 · 41쪽/)).toBeInTheDocument();
+    expect(screen.getByText(/선택 구성: DB 목차 32개 · 업로드 도면 0장 · 42쪽/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '이 목차 PDF에 포함' })).toBeEnabled();
   });
 
@@ -155,7 +184,7 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
       REFERENCE_CONSTRUCTION_PLAN_SECTIONS,
     ));
     expect(await screen.findByAltText('첨부 원본 기반 A4 표지 미리보기')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '41쪽 PDF 다운로드' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '42쪽 PDF 다운로드' })).toBeEnabled();
   });
 
   it('lets the user reorder selected TOC items and passes that order to the PDF generator', async () => {
@@ -208,7 +237,7 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
     expect(await screen.findByDisplayValue('구조 평면도')).toBeInTheDocument();
     expect(screen.getByText('PDF 2개 · 사진 0장 · 총 3쪽 등록')).toBeInTheDocument();
     expect(screen.getAllByText(/업로드 도면 3장/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/최종 45쪽/)).toBeInTheDocument();
+    expect(screen.getByText(/최종 47쪽/)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('1번 도면 제목'), { target: { value: 'A동 구조 평면도' } });
     fireEvent.click(screen.getByRole('button', { name: '동바리 상세도 도면 위로 이동' }));
@@ -274,7 +303,7 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
       REFERENCE_CONSTRUCTION_PLAN_SECTIONS,
     ));
     expect(await screen.findByRole('link', { name: /전체 PDF 보기/ })).toHaveAttribute('href', 'blob:construction-plan-preview');
-    expect(screen.getByRole('button', { name: '42쪽 PDF 다운로드' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '43쪽 PDF 다운로드' })).toBeEnabled();
   });
 
   it('passes a registered company name and logo into the selected PDF', async () => {
@@ -303,6 +332,81 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
       [],
       REFERENCE_CONSTRUCTION_PLAN_SECTIONS,
     ));
+  });
+
+  it('automatically creates the address map and carries the same image into PDF and Excel', async () => {
+    renderPage();
+    goToSiteInput();
+    enterRequiredProjectData();
+
+    fireEvent.click(screen.getByRole('button', { name: /다음: 목차 선택·미리보기/ }));
+    expect(screen.getByRole('button', { name: /현장 위치 지도.*지도 링크 연결.*PDF 3쪽/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /다음: PDF 구성 확인/ }));
+    await waitFor(() => expect(fetchMap).toHaveBeenCalledWith('서울특별시 강남구 테헤란로 123'));
+    await waitFor(() => expect(generatePdf).toHaveBeenCalledWith(
+      expect.objectContaining({
+        siteMapImageDataUrl: 'data:image/png;base64,bWFw',
+      }),
+      REFERENCE_CONSTRUCTION_PLAN_ALL_SECTION_IDS,
+      [],
+      REFERENCE_CONSTRUCTION_PLAN_SECTIONS,
+    ));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Excel 다운로드' }));
+    await waitFor(() => expect(downloadExcel).toHaveBeenCalledWith(expect.objectContaining({
+      input: expect.objectContaining({
+        siteMapImageDataUrl: 'data:image/png;base64,bWFw',
+      }),
+    })));
+  });
+
+  it('keeps the document flow usable with a live map link when the snapshot server is unavailable', async () => {
+    fetchMap.mockRejectedValue(new Error('internal'));
+    renderPage();
+    goToSiteInput();
+    enterRequiredProjectData();
+
+    fireEvent.click(screen.getByRole('button', { name: '지도 자동 생성' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('실시간 Google 지도와 링크는 연결');
+    expect(await screen.findByRole('link', { name: /지도에서 열기/ })).toHaveAttribute(
+      'href',
+      expect.stringContaining('https://www.google.com/maps/search/'),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /다음: 목차 선택·미리보기/ }));
+    fireEvent.click(screen.getByRole('button', { name: /다음: PDF 구성 확인/ }));
+    await waitFor(() => expect(generatePdf).toHaveBeenCalledWith(
+      expect.objectContaining({
+        siteMapAddress: '서울특별시 강남구 테헤란로 123',
+        siteMapLink: expect.stringContaining('https://www.google.com/maps/search/'),
+      }),
+      REFERENCE_CONSTRUCTION_PLAN_ALL_SECTION_IDS,
+      [],
+      REFERENCE_CONSTRUCTION_PLAN_SECTIONS,
+    ));
+  });
+
+  it('registers a directly uploaded map image in the application preview and TOC status', async () => {
+    readSiteImage.mockResolvedValueOnce('data:image/png;base64,dXBsb2FkZWQtbWFw');
+    renderPage();
+    goToSiteInput();
+    enterRequiredProjectData();
+    const mapImage = new File(['map'], '현장-약도.png', { type: 'image/png' });
+
+    fireEvent.change(screen.getByLabelText('지도 이미지 파일 선택'), { target: { files: [mapImage] } });
+    await waitFor(() => expect(readSiteImage).toHaveBeenCalledWith(mapImage));
+    expect(await screen.findByAltText('서울특별시 강남구 테헤란로 123 현장 위치 지도')).toHaveAttribute(
+      'src',
+      'data:image/png;base64,dXBsb2FkZWQtbWFw',
+    );
+    expect(screen.getByAltText('문서에 적용될 현장 위치 지도 예시')).toHaveAttribute(
+      'src',
+      'data:image/png;base64,dXBsb2FkZWQtbWFw',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /다음: 목차 선택·미리보기/ }));
+    const siteVisualOrder = screen.getByRole('button', { name: /현장 위치 지도.*지도 이미지 등록.*PDF 3쪽/ });
+    expect(siteVisualOrder.closest('li')).toHaveClass('has-map');
   });
 
   it('adds, edits, and deletes TOC catalog items through the database-backed manager', async () => {
@@ -344,7 +448,7 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('PDF를 만들지 못했습니다');
     expect(screen.getByRole('button', { name: /다시 생성/ })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '42쪽 PDF 다운로드' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '43쪽 PDF 다운로드' })).toBeDisabled();
   });
 
   it('offers direct edit shortcuts from the final PDF preview', async () => {
@@ -354,6 +458,18 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
     expect(await screen.findByRole('region', { name: 'PDF 빠른 수정' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '목차·순서' }));
     expect(screen.getByRole('heading', { name: '목차 선택·미리보기' })).toBeInTheDocument();
+  });
+
+  it('downloads Excel from the final composition using the same selected sections', async () => {
+    renderPage();
+    goToPdfPreview();
+
+    const excelButton = await screen.findByRole('button', { name: 'Excel 다운로드' });
+    fireEvent.click(excelButton);
+
+    await waitFor(() => expect(downloadExcel).toHaveBeenCalledTimes(1));
+    expect(downloadExcel.mock.calls[0][0].sections).toHaveLength(33);
+    expect(downloadExcel.mock.calls[0][0].input.siteName).toBe('테스트 신축공사 현장');
   });
 
   it('shows a clear validation message for an unsupported logo file', async () => {

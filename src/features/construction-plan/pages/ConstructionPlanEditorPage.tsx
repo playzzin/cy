@@ -139,6 +139,7 @@ import {
     generateConstructionPlanPdf,
     type ConstructionPlanPdfResult,
 } from '../services/constructionPlanPdfService';
+import { downloadConstructionPlanExcel } from '../services/constructionPlanExcelService';
 import {
     cloneConstructionPlanServer,
     createConstructionPlanRevisionServer,
@@ -1759,6 +1760,27 @@ export function ConstructionPlanEditorPage() {
         }
     }, [flushSave, workflowBusy]);
 
+    const createExcelDownload = useCallback(async () => {
+        const current = planRef.current;
+        if (!current || workflowBusy) return;
+        setActionError('');
+        setWorkflowBusy({ label: '시공계획서 Excel 파일을 구성하고 있습니다.' });
+        try {
+            if (constructionPlanStatusAllowsEditing(current.status) && lockAcquired) {
+                const saved = await flushSave();
+                if (!saved || Object.keys(pendingPatchRef.current).length) {
+                    throw new Error('미저장 변경사항이 남아 Excel 파일을 만들 수 없습니다.');
+                }
+            }
+            await downloadConstructionPlanExcel(planRef.current ?? current);
+        } catch (error) {
+            console.error('[ConstructionPlanEditorPage] Excel download failed', error);
+            setActionError(error instanceof Error ? error.message : 'Excel 파일을 생성하지 못했습니다.');
+        } finally {
+            setWorkflowBusy(undefined);
+        }
+    }, [flushSave, lockAcquired, workflowBusy]);
+
     useEffect(() => {
         if (!quickDownloadRequested || loading || !plan || workflowBusy || quickDownloadStartedRef.current) return;
         quickDownloadStartedRef.current = true;
@@ -2405,6 +2427,7 @@ export function ConstructionPlanEditorPage() {
                 onApprove={() => void runReviewAction('approve')}
                 onIssue={() => void prepareIssuedPdf()}
                 onDownloadIssued={() => void downloadIssuedPdf()}
+                onExcelDownload={() => void createExcelDownload()}
                 onCreateRevision={plan.status !== 'issued' || revisionLookupReady ? () => setDeriveMode('revision') : undefined}
                 onClone={() => setDeriveMode('clone')}
             />}

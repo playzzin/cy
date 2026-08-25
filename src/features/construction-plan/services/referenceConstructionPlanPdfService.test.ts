@@ -4,6 +4,7 @@ import {
   normalizeReferenceConstructionPlanInput,
   REFERENCE_CONSTRUCTION_PLAN_DEFAULT_COMPANY,
   REFERENCE_CONSTRUCTION_PLAN_PAGE_COUNT,
+  REFERENCE_CONSTRUCTION_PLAN_PAGE_HEADER_LAYOUT,
 } from './referenceConstructionPlanPdfService';
 
 describe('referenceConstructionPlanPdfService', () => {
@@ -53,5 +54,21 @@ describe('referenceConstructionPlanPdfService', () => {
   it('calculates the effective DPI after fitting a photo into the A4 drawing frame', () => {
     expect(estimateReferenceDrawingImagePrintDpi(2400, 1600)).toBe(325);
     expect(estimateReferenceDrawingImagePrintDpi(0, 1600)).toBe(0);
+  });
+
+  it('keeps every content-page brand and logo inside the standardized header', () => {
+    const { pageWidth, height, brand, logoPanel, logo } = REFERENCE_CONSTRUCTION_PLAN_PAGE_HEADER_LAYOUT;
+
+    expect(height).toBe(42);
+    expect(brand.height).toBe(height);
+    expect(brand.x + brand.width).toBeLessThanOrEqual(pageWidth);
+    expect(logoPanel.x).toBeGreaterThanOrEqual(brand.x);
+    expect(logoPanel.y).toBeGreaterThanOrEqual(brand.y);
+    expect(logoPanel.x + logoPanel.width).toBeLessThanOrEqual(brand.x + brand.width);
+    expect(logoPanel.y + logoPanel.height).toBeLessThanOrEqual(height);
+    expect(logo.x).toBeGreaterThanOrEqual(logoPanel.x);
+    expect(logo.y).toBeGreaterThanOrEqual(logoPanel.y);
+    expect(logo.x + logo.width).toBeLessThanOrEqual(logoPanel.x + logoPanel.width);
+    expect(logo.y + logo.height).toBeLessThanOrEqual(logoPanel.y + logoPanel.height);
   });
 });

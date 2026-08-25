@@ -14,6 +14,8 @@ describe('referenceConstructionPlanSections', () => {
     expect(REFERENCE_CONSTRUCTION_PLAN_SECTIONS).toHaveLength(33);
     expect(REFERENCE_CONSTRUCTION_PLAN_ALL_SECTION_IDS).toHaveLength(33);
     expect(countReferenceConstructionPlanPages()).toBe(42);
+    expect(countReferenceConstructionPlanPages(undefined, 0, REFERENCE_CONSTRUCTION_PLAN_SECTIONS, 1)).toBe(43);
+    expect(countReferenceConstructionPlanPages(undefined, 0, REFERENCE_CONSTRUCTION_PLAN_SECTIONS, 1, 1)).toBe(43);
     expect(REFERENCE_CONSTRUCTION_PLAN_SECTIONS.flatMap(({ sourcePages }) => sourcePages)).toEqual(
       Array.from({ length: 38 }, (_, index) => index + 5),
     );
@@ -38,6 +40,7 @@ describe('referenceConstructionPlanSections', () => {
     expect(countReferenceConstructionPlanPages(['section-01'], 20)).toBe(25);
     expect(countReferenceConstructionPlanTocPages(undefined, 4)).toBe(3);
     expect(countReferenceConstructionPlanPages(undefined, 4)).toBe(47);
+    expect(countReferenceConstructionPlanTocPages([], 18, REFERENCE_CONSTRUCTION_PLAN_SECTIONS, 1)).toBe(2);
   });
 
   it('uses database catalog titles and added items for selection and page counting', () => {

@@ -36,7 +36,7 @@ const getTodayText = (): string => {
 
 const RESOURCE_TITLE: Record<SupportCancellationResourceType, string> = {
   vehicle: '차량 사용취소 처리',
-  card: '카드 사용취소 처리',
+  card: '카드 정지·해지 처리',
   accommodation: '숙소 사용취소 처리',
 };
 
@@ -75,6 +75,9 @@ export const SupportCancellationModal: React.FC<SupportCancellationModalProps> =
     const numberValue = Number(normalized);
     return Number.isFinite(numberValue) ? numberValue : undefined;
   }, [settlementAmountText]);
+  const submitLabel = resourceType === 'card'
+    ? (reason === 'CARD_SUSPENDED' || reason === 'CARD_LOST' ? '카드 정지' : '카드 해지')
+    : '처리 완료';
 
   if (!isOpen) return null;
 
@@ -154,7 +157,7 @@ export const SupportCancellationModal: React.FC<SupportCancellationModalProps> =
 
           <div className="grid gap-3 md:grid-cols-2">
             <label className="block">
-              <span className="text-sm font-black text-slate-700">처리 사유</span>
+              <span className="text-sm font-black text-slate-700">{resourceType === 'card' ? '정지·해지 선택' : '처리 사유'}</span>
               <select
                 value={reason}
                 onChange={(event) => setReason(event.target.value as SupportCancellationReason)}
@@ -213,7 +216,7 @@ export const SupportCancellationModal: React.FC<SupportCancellationModalProps> =
             disabled={submitting}
             className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-black text-white hover:bg-slate-800 disabled:cursor-wait disabled:opacity-60"
           >
-            {submitting ? '처리 중...' : '처리 완료'}
+            {submitting ? '처리 중...' : submitLabel}
           </button>
         </div>
       </form>

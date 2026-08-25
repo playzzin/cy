@@ -1926,33 +1926,6 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                 )}
 
                 <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:flex-row xl:items-center xl:justify-between">
-                    <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
-                        <label className="relative block min-w-0 flex-1 xl:max-w-md">
-                            <span className="sr-only">발행리스트 통합검색</span>
-                            <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400" />
-                            <input
-                                type="search"
-                                value={globalSearch}
-                                onChange={event => setGlobalSearch(event.target.value)}
-                                placeholder="공급받는자, 현장, 팀, 품목 통합검색"
-                                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-10 text-sm font-medium text-slate-700 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
-                            />
-                            {globalSearch && (
-                                <button
-                                    type="button"
-                                    onClick={() => setGlobalSearch('')}
-                                    className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-200 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                                    aria-label="통합검색어 지우기"
-                                >
-                                    <FontAwesomeIcon icon={faXmark} />
-                                </button>
-                            )}
-                        </label>
-                        <span className="whitespace-nowrap text-xs font-bold text-slate-500" aria-live="polite">
-                            {filteredIssues.length} / {issues.length}건 표시
-                        </span>
-                    </div>
-
                     <div className="flex flex-wrap items-center gap-2">
                         <div className="flex min-h-10 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 shadow-sm" aria-label="조회 월 선택">
                             <button
@@ -1991,6 +1964,33 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                             <FontAwesomeIcon icon={faSort} />
                             {sortMode === 'team' ? '번호순으로 전환' : '팀별 정렬'}
                         </button>
+                    </div>
+
+                    <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center xl:justify-end">
+                        <label className="relative block min-w-0 flex-1 xl:max-w-md">
+                            <span className="sr-only">발행리스트 통합검색</span>
+                            <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400" />
+                            <input
+                                type="search"
+                                value={globalSearch}
+                                onChange={event => setGlobalSearch(event.target.value)}
+                                placeholder="공급받는자, 현장, 팀, 품목 통합검색"
+                                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-10 text-sm font-medium text-slate-700 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                            />
+                            {globalSearch && (
+                                <button
+                                    type="button"
+                                    onClick={() => setGlobalSearch('')}
+                                    className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-200 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                                    aria-label="통합검색어 지우기"
+                                >
+                                    <FontAwesomeIcon icon={faXmark} />
+                                </button>
+                            )}
+                        </label>
+                        <span className="whitespace-nowrap text-xs font-bold text-slate-500" aria-live="polite">
+                            {filteredIssues.length} / {issues.length}건 표시
+                        </span>
                     </div>
                 </div>
 

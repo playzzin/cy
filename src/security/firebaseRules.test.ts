@@ -96,6 +96,18 @@ describe('firebase security rules', () => {
     expect(firestoreRules).toContain('isValidErpMessageReadReceiptUpdate');
   });
 
+  it('keeps executive card-audit data behind CEO/DEV access and server-owned writes', () => {
+    expect(firestoreRules).toContain('function cardExpenseAuditRoles()');
+    expect(firestoreRules).toContain('function canAccessCardExpenseAudit()');
+    expect(firestoreRules).toContain('function isCardExpenseAuditCollection(collectionId)');
+    expect(firestoreRules).toContain("'cardExpenseAuditPolicies'");
+    expect(firestoreRules).toContain("'cardExpenseAuditRuns'");
+    expect(firestoreRules).toContain("'cardExpenseAuditFindings'");
+    expect(firestoreRules).toContain("'cardExpenseAuditReviewLogs'");
+    expect(firestoreRules).toContain('&& canAccessCardExpenseAudit();');
+    expect(firestoreRules).toContain('allow create, update, delete: if false;');
+  });
+
   it('deploys TTL retention for sensitive bank integration records', () => {
     const indexes = JSON.parse(firestoreIndexes) as {
       fieldOverrides?: Array<{ collectionGroup?: string; fieldPath?: string; ttl?: boolean }>;

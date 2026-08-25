@@ -13,7 +13,6 @@ import { CardStatusBoard } from '../../components/card/CardStatusBoard';
 import { CardMonthlyLedger } from '../../components/card/CardMonthlyLedger';
 import { AssignmentBillingSetupModal, type AssignmentBillingSection } from '../../components/support/AssignmentBillingSetupModal';
 import { SupportTeamFilterTabs } from '../../components/support/SupportTeamFilterTabs';
-import { SupportCancellationHistory } from '../../components/support/SupportCancellationHistory';
 import { SupportCancellationModal, type SupportCancellationFormValue } from '../../components/support/SupportCancellationModal';
 import { SupportPageHeader } from '../../components/support/SupportPageHeader';
 import { SupportSegmentedTabs, type SupportSegmentedTabOption } from '../../components/support/SupportSegmentedTabs';
@@ -23,9 +22,12 @@ import {
     isInactiveCardStatus,
 } from '../../services/cardLifecyclePolicy';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faCreditCard, faChartPie, faTable, faRotateLeft, faRotateRight, faCircleExclamation, faHistory, faSearch } from '@fortawesome/free-solid-svg-icons';
+import { faPlus, faCreditCard, faChartPie, faTable, faRotateRight, faCircleExclamation, faHistory, faSearch } from '@fortawesome/free-solid-svg-icons';
 import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
 import { appendOfficeAssignmentTeam, isOfficeAssignmentReference, isOfficeAssignmentTeam, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
+import { useAuth } from '../../contexts/AuthContext';
+import { userService } from '../../services/userService';
+import { canAccessCardExpenseAudit } from '../../utils/cardExpenseAuditAccess';
 
 interface CardManagerPageProps {
     embedded?: boolean;
@@ -37,11 +39,11 @@ type CardTabId = 'status' | 'ledger' | 'history';
 
 const cardTabs: SupportSegmentedTabOption<CardTabId>[] = [
     { id: 'status', label: '배정·경비현황', icon: faChartPie },
-    { id: 'ledger', label: '통합관리대장', icon: faTable },
-    { id: 'history', label: '처리내역', icon: faHistory }
+    { id: 'ledger', label: '통합관리대장', icon: faTable }
 ];
 
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
+const normalizeCardTab = (tab: CardTabId): CardTabId => tab === 'history' ? 'status' : tab;
 
 export const CardManagerPage: React.FC<CardManagerPageProps> = ({
     embedded = false,
@@ -49,11 +51,29 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
     onTabChange,
 }) => {
     const navigate = useNavigate();
+    const { currentUser } = useAuth();
+    const [canUseCardAudit, setCanUseCardAudit] = useState(false);
     // Data State
     const [cards, setCards] = useState<Card[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
     const [refreshKey, setRefreshKey] = useState(0);
+
+    useEffect(() => {
+        let alive = true;
+        if (!currentUser?.uid) {
+            setCanUseCardAudit(false);
+            return () => { alive = false; };
+        }
+        void userService.getUser(currentUser.uid)
+            .then((profile) => {
+                if (alive) setCanUseCardAudit(canAccessCardExpenseAudit(profile));
+            })
+            .catch(() => {
+                if (alive) setCanUseCardAudit(false);
+            });
+        return () => { alive = false; };
+    }, [currentUser?.uid]);
 
     // Team Search State
     const [teams, setTeams] = useState<Team[]>([]);
@@ -65,10 +85,10 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
     const [searchTerm, setSearchTerm] = useState('');
 
     // Tab State
-    const [activeTab, setActiveTab] = useState<CardTabId>(initialTab);
+    const [activeTab, setActiveTab] = useState<CardTabId>(() => normalizeCardTab(initialTab));
 
     useEffect(() => {
-        setActiveTab(initialTab);
+        setActiveTab(normalizeCardTab(initialTab));
     }, [initialTab]);
 
     const handleTabChange = (tab: CardTabId) => {
@@ -264,22 +284,6 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
         });
     }, [cards, selectedTeamId, selectedTeamIdentity, teamByAnyId, teamByName, workerByAnyId, workerByName, searchTerm, officeStaffRows]);
 
-    const inactiveCards = React.useMemo(() => {
-        const query = searchTerm.trim().toLowerCase();
-        return cards.filter((card) => {
-            if (card.status !== 'SUSPENDED' && card.status !== 'CLOSED') return false;
-            if (!query) return true;
-            return [
-                card.name,
-                card.issuer,
-                card.maskedNumber,
-                card.last4,
-                card.currentAssigneeName,
-                card.memo,
-            ].some((value) => String(value ?? '').toLowerCase().includes(query));
-        });
-    }, [cards, searchTerm]);
-
     // 핸들러 함수들
     const handleRefresh = () => {
         setRefreshKey(prev => prev + 1);
@@ -383,7 +387,6 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
                 setIsSetupModalOpen(false);
             }
             setCancellationTarget(null);
-            handleTabChange('history');
             handleRefresh();
         } catch (error) {
             console.error('Failed to process card cancellation', error);
@@ -492,6 +495,16 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
                 compact={embedded}
                 actions={(
                     <>
+                    {canUseCardAudit && (
+                    <button
+                        type="button"
+                        onClick={() => navigate('/support/card-audit')}
+                        className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 font-bold text-indigo-700 shadow-sm transition-all hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 sm:flex-none"
+                    >
+                        <span aria-hidden="true">✦</span>
+                        <span>AI 카드감사</span>
+                    </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => navigate('/support/cards/logs')}
@@ -566,7 +579,15 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
                         <p className="text-rose-600 text-sm">{loadError}</p>
                         <button type="button" onClick={handleRefresh} className="mt-4 rounded-lg bg-rose-100 px-4 py-2 text-sm font-bold text-rose-700 transition-all hover:bg-rose-200">다시 시도</button>
                     </div>
-                ) : activeTab === 'status' ? (
+                ) : activeTab === 'ledger' ? (
+                    <CardMonthlyLedger
+                        cards={filteredCards}
+                        teams={teams}
+                        loadingCards={loading}
+                        onOpenSetup={openAssignCard}
+                        onOpenBillingTarget={(card) => openBillingTargetCard(card, { split: true })}
+                    />
+                ) : (
                     <CardStatusBoard
                         cards={filteredCards}
                         teams={teams}
@@ -578,72 +599,6 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
                         onRestoreUse={handleRestoreUse}
                         restoringCardId={restoringCardId}
                     />
-                ) : activeTab === 'ledger' ? (
-                    <CardMonthlyLedger
-                        cards={filteredCards}
-                        teams={teams}
-                        loadingCards={loading}
-                        onOpenSetup={openAssignCard}
-                        onOpenBillingTarget={(card) => openBillingTargetCard(card, { split: true })}
-                    />
-                ) : (
-                    <div className="space-y-5">
-                        <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-5 shadow-sm">
-                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                <div>
-                                    <h2 className="text-base font-black text-amber-950">정지·해지 카드</h2>
-                                    <p className="mt-1 text-sm font-semibold text-amber-800">
-                                        분실 카드를 다시 찾은 경우 정지 카드만 해제할 수 있습니다. 해지 카드는 복구할 수 없습니다.
-                                    </p>
-                                </div>
-                                <span className="inline-flex w-fit rounded-full bg-white px-3 py-1 text-xs font-black text-amber-800 shadow-sm">
-                                    {inactiveCards.length.toLocaleString('ko-KR')}장
-                                </span>
-                            </div>
-
-                            {inactiveCards.length > 0 ? (
-                                <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                                    {inactiveCards.map((card) => {
-                                        const isRestoring = restoringCardId === card.id;
-                                        return (
-                                            <div key={card.id} className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-                                                <div className="min-w-0">
-                                                    <div className="truncate font-black text-slate-900">{card.name || '카드명 미입력'}</div>
-                                                    <div className="mt-1 text-xs font-semibold text-slate-500">
-                                                        {card.issuer || '발급사 미지정'} · {card.maskedNumber || card.last4 || '카드번호 미입력'} · {card.status === 'SUSPENDED' ? '정지' : '해지'}
-                                                    </div>
-                                                </div>
-                                                {card.status === 'SUSPENDED' ? (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleRestoreUse(card)}
-                                                        disabled={Boolean(restoringCardId)}
-                                                        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                                    >
-                                                        <FontAwesomeIcon icon={faRotateLeft} spin={isRestoring} />
-                                                        {isRestoring ? '해제 중...' : '카드 정지 해제'}
-                                                    </button>
-                                                ) : (
-                                                    <span className="inline-flex shrink-0 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-black text-slate-500">
-                                                        해지 카드 · 복구 불가
-                                                    </span>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            ) : (
-                                <div className="mt-4 rounded-xl border border-dashed border-amber-200 bg-white/70 px-4 py-6 text-center text-sm font-bold text-amber-700">
-                                    현재 정지·해지된 카드가 없습니다.
-                                </div>
-                            )}
-                        </section>
-
-                        <SupportCancellationHistory
-                            resourceType="card"
-                            title="카드 사용취소 처리내역"
-                        />
-                    </div>
                 )}
             </div>
 

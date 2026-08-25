@@ -6,6 +6,8 @@ export * from './constructionPlanReviewService';
 export * from './constructionPlanIssuedPdfSource';
 export * from './constructionPlanIssuedDownloadService';
 export * from './constructionPlanLifecycleControlApi';
+export * from './constructionPlanExcelService';
+export * from './constructionPlanMapService';
 export * from './safeWorkerDirectoryService';
 export * from './constructionPlanTemplateService';
 export * from './constructionPlanRecordService';

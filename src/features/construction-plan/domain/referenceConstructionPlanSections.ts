@@ -136,10 +136,15 @@ export const countReferenceConstructionPlanTocPages = (
   sectionIds?: string[],
   uploadedDrawingPageCount = 0,
   catalog: readonly ReferenceConstructionPlanSection[] = REFERENCE_CONSTRUCTION_PLAN_SECTIONS,
+  additionalTocItemCount = 0,
 ): number => Math.max(
   1,
   Math.ceil(
-    (getSelectedReferenceSections(sectionIds, catalog).length + Math.max(0, uploadedDrawingPageCount))
+    (
+      getSelectedReferenceSections(sectionIds, catalog).length
+      + Math.max(0, uploadedDrawingPageCount)
+      + Math.max(0, Math.floor(additionalTocItemCount))
+    )
     / REFERENCE_CONSTRUCTION_PLAN_TOC_ITEMS_PER_PAGE,
   ),
 );
@@ -148,9 +153,17 @@ export const countReferenceConstructionPlanPages = (
   sectionIds?: string[],
   uploadedDrawingPageCount = 0,
   catalog: readonly ReferenceConstructionPlanSection[] = REFERENCE_CONSTRUCTION_PLAN_SECTIONS,
+  additionalFixedPageCount = 0,
+  additionalTocItemCount = 0,
 ): number => (
   2
-  + countReferenceConstructionPlanTocPages(sectionIds, uploadedDrawingPageCount, catalog)
+  + Math.max(0, Math.floor(additionalFixedPageCount))
+  + countReferenceConstructionPlanTocPages(
+    sectionIds,
+    uploadedDrawingPageCount,
+    catalog,
+    additionalTocItemCount,
+  )
   + getSelectedReferenceSections(sectionIds, catalog)
     .reduce((total, current) => total + current.sourcePages.length, 0)
   + Math.max(0, uploadedDrawingPageCount)

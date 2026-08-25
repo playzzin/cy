@@ -239,7 +239,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "지원 관리",
                 icon: "fa-hand-holding-dollar",
-                sub: ["지원비 단가 관리", "인력 교류 정산", "경비내역"]
+                sub: ["지원비 단가 관리", "인력 교류 정산", "경비내역", "카드 AI 감사"]
             }
         ]
     },

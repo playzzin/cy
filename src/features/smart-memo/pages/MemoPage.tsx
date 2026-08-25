@@ -39,6 +39,7 @@ import { MemoViewToolbar } from '../components/MemoViewToolbar';
 
 const MEMO_COLLECTION = 'smart_memos';
 const CATEGORY_COLLECTION = 'smart_memo_categories';
+const SHARED_CATEGORY_ID = 'public';
 const AUTO_SAVE_DELAY_MS = 650;
 const CATEGORY_COLORS = ['#dc2626', '#f97316', '#facc15', '#16a34a', '#2563eb', '#1e3a8a', '#7c3aed', '#64748b'];
 const LEGACY_CATEGORY_COLORS: Record<string, string> = {
@@ -83,6 +84,8 @@ type ChecklistItemRecord = {
 
 type MemoRecord = {
     id: string;
+    userId: string;
+    scope: 'private' | 'public';
     type: MemoType;
     title: string;
     content: string;
@@ -99,6 +102,15 @@ type CategoryRecord = {
     name: string;
     order: number;
     color: string;
+    isShared?: boolean;
+};
+
+const SHARED_CATEGORY: CategoryRecord = {
+    id: SHARED_CATEGORY_ID,
+    name: '공통 메모',
+    order: Number.MIN_SAFE_INTEGER,
+    color: '#0f766e',
+    isShared: true
 };
 
 type TimestampLike = {
@@ -311,12 +323,17 @@ const normalizeMemo = (id: string, data: Record<string, unknown>): MemoRecord =>
     const checklistItems = rawChecklistItems.length > 0 || type !== 'checklist'
         ? rawChecklistItems
         : checklistItemsFromText(rawContent);
+    const scope: MemoRecord['scope'] = data.scope === 'public' ? 'public' : 'private';
     const rawCategoryId = typeof data.categoryId === 'string' ? data.categoryId : null;
-    const categoryId = rawCategoryId && rawCategoryId !== 'public' ? rawCategoryId : null;
+    const categoryId = scope === 'public' || rawCategoryId === SHARED_CATEGORY_ID
+        ? SHARED_CATEGORY_ID
+        : rawCategoryId;
     const rawOrder = typeof data.order === 'number' && Number.isFinite(data.order) ? data.order : 0;
 
     return {
         id,
+        userId: typeof data.userId === 'string' ? data.userId : '',
+        scope: categoryId === SHARED_CATEGORY_ID ? 'public' : scope,
         type,
         title: rawTitle || '제목 없음',
         content: rawContent,
@@ -562,7 +579,11 @@ export function MemoPage() {
     const isLocalMemoMode = currentUser?.uid === 'dev-admin';
 
     const [memos, setMemos] = useState<MemoRecord[]>([]);
-    const [categories, setCategories] = useState<CategoryRecord[]>([]);
+    const [personalCategories, setPersonalCategories] = useState<CategoryRecord[]>([]);
+    const categories = useMemo(
+        () => [SHARED_CATEGORY, ...personalCategories],
+        [personalCategories]
+    );
     const [selectedCategoryId, setSelectedCategoryId] = useState('all');
     const [selectedMemoId, setSelectedMemoId] = useState<string | null>(null);
     const [checkedMemoIds, setCheckedMemoIds] = useState<string[]>([]);
@@ -619,7 +640,7 @@ export function MemoPage() {
     useEffect(() => {
         if (!currentUser?.uid) {
             setMemos([]);
-            setCategories([]);
+            setPersonalCategories([]);
             setSelectedMemoId(null);
             setCheckedMemoIds([]);
             setIsLoading(false);
@@ -630,7 +651,7 @@ export function MemoPage() {
         setErrorMessage('');
 
         if (isLocalMemoMode) {
-            setCategories(readLocalCategories());
+            setPersonalCategories(readLocalCategories());
             setMemos(readLocalMemos());
             setIsLoading(false);
             return;
@@ -640,9 +661,13 @@ export function MemoPage() {
             collection(db, CATEGORY_COLLECTION),
             where('userId', '==', currentUser.uid)
         );
-        const memoQuery = query(
+        const personalMemoQuery = query(
             collection(db, MEMO_COLLECTION),
             where('userId', '==', currentUser.uid)
+        );
+        const sharedMemoQuery = query(
+            collection(db, MEMO_COLLECTION),
+            where('scope', '==', 'public')
         );
 
         const unsubscribeCategories = onSnapshot(
@@ -652,7 +677,7 @@ export function MemoPage() {
                     .map((categoryDoc, index) => normalizeCategory(categoryDoc.id, categoryDoc.data(), index))
                     .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, 'ko-KR'));
 
-                setCategories(nextCategories);
+                setPersonalCategories(nextCategories);
             },
             error => {
                 console.error('Failed to load memo categories:', error);
@@ -660,23 +685,59 @@ export function MemoPage() {
             }
         );
 
-        const unsubscribeMemos = onSnapshot(
-            memoQuery,
-            snapshot => {
-                const nextMemos = snapshot.docs.map(memoDoc => normalizeMemo(memoDoc.id, memoDoc.data()));
-                setMemos(sortMemos(nextMemos));
+        let personalMemos: MemoRecord[] = [];
+        let sharedMemos: MemoRecord[] = [];
+        let hasLoadedPersonalMemos = false;
+        let hasLoadedSharedMemos = false;
+
+        const publishMemos = () => {
+            const byId = new Map<string, MemoRecord>();
+            personalMemos.forEach(memo => byId.set(memo.id, memo));
+            sharedMemos.forEach(memo => byId.set(memo.id, memo));
+            setMemos(sortMemos(Array.from(byId.values())));
+            if (hasLoadedPersonalMemos && hasLoadedSharedMemos) {
                 setIsLoading(false);
+            }
+        };
+
+        const unsubscribePersonalMemos = onSnapshot(
+            personalMemoQuery,
+            snapshot => {
+                personalMemos = snapshot.docs.map(memoDoc => normalizeMemo(memoDoc.id, memoDoc.data()));
+                hasLoadedPersonalMemos = true;
+                publishMemos();
             },
             error => {
-                console.error('Failed to load memos:', error);
-                setErrorMessage('메모를 불러오지 못했습니다.');
-                setIsLoading(false);
+                console.error('Failed to load personal memos:', error);
+                setErrorMessage('개인 메모를 불러오지 못했습니다.');
+                hasLoadedPersonalMemos = true;
+                publishMemos();
+            }
+        );
+
+        const unsubscribeSharedMemos = onSnapshot(
+            sharedMemoQuery,
+            snapshot => {
+                sharedMemos = snapshot.docs.map(memoDoc => normalizeMemo(memoDoc.id, {
+                    ...memoDoc.data(),
+                    scope: 'public',
+                    categoryId: SHARED_CATEGORY_ID
+                }));
+                hasLoadedSharedMemos = true;
+                publishMemos();
+            },
+            error => {
+                console.error('Failed to load shared memos:', error);
+                setErrorMessage('공통 메모를 불러오지 못했습니다.');
+                hasLoadedSharedMemos = true;
+                publishMemos();
             }
         );
 
         return () => {
             unsubscribeCategories();
-            unsubscribeMemos();
+            unsubscribePersonalMemos();
+            unsubscribeSharedMemos();
         };
     }, [currentUser?.uid, isLocalMemoMode]);
 
@@ -899,7 +960,7 @@ export function MemoPage() {
         const nextCategories = updater(readLocalCategories())
             .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, 'ko-KR'));
         writeLocalCategories(nextCategories);
-        setCategories(nextCategories);
+        setPersonalCategories(nextCategories);
         return nextCategories;
     }, []);
 
@@ -1026,8 +1087,8 @@ export function MemoPage() {
                     const batch = writeBatch(db);
                     snapshots.slice(index, index + BATCH_WRITE_SIZE).forEach(memo => {
                         batch.set(doc(db, MEMO_COLLECTION, memo.id), {
-                            userId: currentUser.uid,
-                            scope: 'private',
+                            userId: memo.userId || currentUser.uid,
+                            scope: memo.scope,
                             type: memo.type,
                             title: memo.title,
                             content: memo.content,
@@ -1099,22 +1160,40 @@ export function MemoPage() {
 
     const moveMemosToCategory = async (memoIds: string[], targetCategoryId: string | null) => {
         if (!currentUser?.uid || memoIds.length === 0) return;
+        const selectedMemos = memos.filter(memo => memoIds.includes(memo.id));
+        if (
+            targetCategoryId !== SHARED_CATEGORY_ID &&
+            selectedMemos.some(memo => memo.scope === 'public')
+        ) {
+            setErrorMessage('공통 메모는 개인 카테고리로 이동할 수 없습니다.');
+            return;
+        }
         if (!beginSaving()) return;
 
         setErrorMessage('');
+        const nextScope: MemoRecord['scope'] = targetCategoryId === SHARED_CATEGORY_ID ? 'public' : 'private';
 
         try {
             if (isLocalMemoMode) {
                 const memoIdSet = new Set(memoIds);
                 const updatedAt = Date.now();
                 updateLocalMemos(items => items.map(memo =>
-                    memoIdSet.has(memo.id) ? { ...memo, categoryId: targetCategoryId, updatedAt } : memo
+                    memoIdSet.has(memo.id)
+                        ? {
+                            ...memo,
+                            userId: memo.userId || currentUser.uid,
+                            scope: nextScope,
+                            categoryId: targetCategoryId,
+                            updatedAt
+                        }
+                        : memo
                 ));
             } else {
                 for (let index = 0; index < memoIds.length; index += BATCH_WRITE_SIZE) {
                     const batch = writeBatch(db);
                     memoIds.slice(index, index + BATCH_WRITE_SIZE).forEach(memoId => {
                         batch.update(doc(db, MEMO_COLLECTION, memoId), {
+                            scope: nextScope,
                             categoryId: targetCategoryId,
                             updatedAt: serverTimestamp()
                         });
@@ -1162,6 +1241,7 @@ export function MemoPage() {
                 selectedCategoryId !== 'all'
                     ? selectedCategoryId
                     : null;
+            const scope: MemoRecord['scope'] = categoryId === SHARED_CATEGORY_ID ? 'public' : 'private';
             const title = type === 'checklist' ? '새 체크리스트' : '새 메모';
             const initialDraftChecklistItems = type === 'checklist' ? [createChecklistItem('')] : [];
             const checklistItemsForSave: ChecklistItemRecord[] = [];
@@ -1171,6 +1251,8 @@ export function MemoPage() {
                 const now = Date.now();
                 const memo: MemoRecord = {
                     id: `local-memo-${now}-${generateChecklistItemId()}`,
+                    userId: currentUser.uid,
+                    scope,
                     type,
                     title,
                     content: '',
@@ -1186,7 +1268,7 @@ export function MemoPage() {
             } else {
                 const memoRef = await addDoc(collection(db, MEMO_COLLECTION), {
                     userId: currentUser.uid,
-                    scope: 'private',
+                    scope,
                     type,
                     title,
                     content: '',
@@ -1211,7 +1293,13 @@ export function MemoPage() {
             setDraftChecklistItems(initialDraftChecklistItems);
             setDraftCategoryId(categoryId ?? '');
             setAutoSaveState('saved');
-            showStatus(type === 'checklist' ? '새 체크리스트를 만들었습니다.' : '새 메모를 만들었습니다.');
+            showStatus(
+                categoryId === SHARED_CATEGORY_ID
+                    ? '모든 사용자와 공유되는 공통 메모를 만들었습니다.'
+                    : type === 'checklist'
+                        ? '새 체크리스트를 만들었습니다.'
+                        : '새 메모를 만들었습니다.'
+            );
         } catch (error) {
             console.error('Failed to create memo:', error);
             setErrorMessage('메모를 만들지 못했습니다.');
@@ -1244,6 +1332,10 @@ export function MemoPage() {
                 ? normalizeMemoTitle(draftTitle)
                 : parsedDraft.title;
             const nextContent = draftMemoType === 'checklist' ? '' : parsedDraft.content;
+            const nextCategoryId = selectedMemo.scope === 'public'
+                ? SHARED_CATEGORY_ID
+                : draftCategoryId || null;
+            const nextScope: MemoRecord['scope'] = nextCategoryId === SHARED_CATEGORY_ID ? 'public' : 'private';
 
             if (isLocalMemoMode) {
                 const updatedAt = Date.now();
@@ -1254,7 +1346,9 @@ export function MemoPage() {
                         title: nextTitle,
                         content: nextContent,
                         checklistItems: draftMemoType === 'checklist' ? checklistItems : [],
-                        categoryId: draftCategoryId || null,
+                        userId: memo.userId || currentUser.uid,
+                        scope: nextScope,
+                        categoryId: nextCategoryId,
                         updatedAt
                     }
                     : memo
@@ -1265,7 +1359,8 @@ export function MemoPage() {
                     title: nextTitle,
                     content: nextContent,
                     checklistItems: draftMemoType === 'checklist' ? checklistItems : [],
-                    categoryId: draftCategoryId || null,
+                    scope: nextScope,
+                    categoryId: nextCategoryId,
                     updatedAt: serverTimestamp()
                 });
             }
@@ -1598,6 +1693,7 @@ export function MemoPage() {
     };
 
     const deleteCategory = async (category: CategoryRecord) => {
+        if (category.isShared) return;
         if (!window.confirm(`"${category.name}" 카테고리를 삭제할까요? 메모는 분류 없음으로 이동합니다.`)) return;
         if (!beginSaving()) return;
 
@@ -1745,6 +1841,7 @@ export function MemoPage() {
         );
     }
 
+    const isSharedMemoSelected = selectedMemo?.scope === 'public';
     const memoCategoryPicker = (
         <div
             className="w-full min-w-0 rounded-lg border border-indigo-200 bg-indigo-50 p-1.5 sm:w-auto"
@@ -1753,6 +1850,7 @@ export function MemoPage() {
             <select
                 value={draftCategoryId}
                 onChange={event => setDraftCategoryId(event.target.value)}
+                disabled={isSharedMemoSelected}
                 className="h-11 w-full rounded-md border border-indigo-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 sm:hidden"
                 aria-label="메모 카테고리"
             >
@@ -1765,6 +1863,7 @@ export function MemoPage() {
                 <button
                     type="button"
                     onClick={() => setDraftCategoryId('')}
+                    disabled={isSharedMemoSelected}
                     className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs font-bold transition ${
                         draftCategoryId === ''
                             ? 'border-slate-900 bg-white text-slate-950 shadow-sm ring-2 ring-indigo-100'
@@ -1783,6 +1882,7 @@ export function MemoPage() {
                             key={category.id}
                             type="button"
                             onClick={() => setDraftCategoryId(category.id)}
+                            disabled={isSharedMemoSelected && !category.isShared}
                             className={`inline-flex h-8 max-w-[150px] items-center gap-1.5 rounded-md border px-2 text-xs font-bold transition ${
                                 isSelected
                                     ? 'border-slate-900 bg-white text-slate-950 shadow-sm ring-2 ring-indigo-100'
@@ -1795,6 +1895,7 @@ export function MemoPage() {
                                 style={{ backgroundColor: category.color }}
                             />
                             <span className="truncate">{category.name}</span>
+                            {category.isShared && <span className="text-[10px] opacity-70">공유</span>}
                         </button>
                     );
                 })}
@@ -1830,7 +1931,7 @@ export function MemoPage() {
                 </span>
             </button>
             {categories.map(category => {
-                const isEditing = editingCategoryId === category.id;
+                const isEditing = !category.isShared && editingCategoryId === category.id;
                 const isSelected = selectedCategoryId === category.id;
 
                 if (isEditing) {
@@ -1897,6 +1998,13 @@ export function MemoPage() {
                             <span className="flex min-w-0 items-center gap-2">
                                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: category.color }} />
                                 <span className="max-w-[160px] truncate">{category.name}</span>
+                                {category.isShared && (
+                                    <span className={`rounded px-1.5 py-0.5 text-[10px] ${
+                                        isSelected ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
+                                    }`}>
+                                        전체 공유
+                                    </span>
+                                )}
                             </span>
                             <span
                                 className={`rounded-full px-2 py-0.5 text-xs ${
@@ -1906,7 +2014,7 @@ export function MemoPage() {
                                 {categoryCounts.get(category.id) ?? 0}
                             </span>
                         </button>
-                        <div className="mr-1 flex items-center gap-0.5">
+                        {!category.isShared && <div className="mr-1 flex items-center gap-0.5">
                             <button
                                 type="button"
                                 onClick={() => startEditCategory(category)}
@@ -1925,7 +2033,7 @@ export function MemoPage() {
                             >
                                 <Trash2 className="h-3.5 w-3.5" />
                             </button>
-                        </div>
+                        </div>}
                     </div>
                 );
             })}
@@ -2112,6 +2220,7 @@ export function MemoPage() {
                                                     <select
                                                         value={draftCategoryId}
                                                         onChange={event => setDraftCategoryId(event.target.value)}
+                                                        disabled={memo.scope === 'public'}
                                                         className="h-11 min-w-[130px] rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none focus:border-slate-500 sm:h-8"
                                                     >
                                                         <option value="">분류 없음</option>

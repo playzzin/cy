@@ -139,6 +139,44 @@ describe('downloadEstimateExcel', () => {
         expect(sheet!.pageSetup.fitToWidth).toBe(1);
     });
 
+    it('includes the rental subtotal in the rental estimate grand total formula', async () => {
+        const draft = {
+            ...getEmptyDraft('estimate'),
+            estimateMode: 'rental' as const,
+            includeVat: false,
+            clientCompany: '테스트 발주처',
+            projectName: '테스트 현장',
+            supplierCompany: '청연이엔지(주)',
+            scopeNotes: ''
+        };
+        const item = {
+            ...createItem({
+                category: '시스템 동바리',
+                section: '설치/해체',
+                unit: '㎥',
+                quantity: 2,
+                laborUnitPrice: 1000,
+                rentalUnitPrice: 500
+            }),
+            laborAmount: 2000,
+            rentalAmount: 1000,
+            amount: 3000
+        };
+
+        await downloadEstimateExcel(draft, [item], 3000, 0, 3000, 'estimate', { freezePanes: false });
+
+        const output = mockedSaveAs.mock.calls[0]?.[0] as Blob;
+        const outputBuffer = await blobToArrayBuffer(output);
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(outputBuffer);
+        const sheet = workbook.getWorksheet('견적서');
+
+        expect(sheet).toBeDefined();
+        expect(sheet!.getCell('G21').formula).toBe('SUM(G20,I20)');
+        expect(sheet!.getCell('G21').result).toBe(3000);
+        expect(sheet!.getCell('I21').result).toBe(1000);
+    });
+
     it('exports standard transactions in the attached B-to-K layout with a visible note column', async () => {
         const draft = {
             ...getEmptyDraft('transaction'),

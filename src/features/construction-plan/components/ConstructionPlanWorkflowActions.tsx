@@ -6,6 +6,7 @@ import {
   FileCheck2,
   FileClock,
   FilePlus2,
+  FileSpreadsheet,
   Loader2,
   MessageSquareWarning,
   Send,
@@ -31,6 +32,7 @@ type ConstructionPlanWorkflowActionsProps = {
   onApprove: () => void;
   onIssue: () => void;
   onDownloadIssued: () => void;
+  onExcelDownload?: () => void;
   activeRevision?: { id: string; revision: number; status: PlanStatus };
   onOpenActiveRevision?: () => void;
   onCreateRevision?: () => void;
@@ -84,6 +86,7 @@ export function ConstructionPlanWorkflowActions({
   onApprove,
   onIssue,
   onDownloadIssued,
+  onExcelDownload,
   activeRevision,
   onOpenActiveRevision,
   onCreateRevision,
@@ -144,6 +147,11 @@ export function ConstructionPlanWorkflowActions({
       )}
 
       <div className="cp-workflow__actions">
+        {onExcelDownload && (
+          <button type="button" className="cp-button cp-button--ghost cp-button--small" disabled={isBusy} onClick={onExcelDownload}>
+            <FileSpreadsheet size={14} /> Excel 다운로드
+          </button>
+        )}
         {!['issued', 'superseded', 'archived', 'void'].includes(status) && (
           <button type="button" className="cp-button cp-button--ghost cp-button--small" disabled={isBusy} onClick={onDraftPdf}>
             <Download size={14} /> DRAFT PDF

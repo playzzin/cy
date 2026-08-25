@@ -13,6 +13,7 @@ import { Team } from '../../services/teamService';
 import { Company } from '../../services/companyService';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import OutputManagementTabs from '../../components/common/OutputManagementTabs';
+import MonthNavigator from '../../components/common/MonthNavigator';
 import { loadSessionState, saveSessionState } from '../../utils/sessionStorage';
 import { getContrastingTextColor, getReadableAccentColor } from '../../utils/color';
 
@@ -242,6 +243,18 @@ const WhiteboardStatusBoard: React.FC = () => {
     const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
     const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set());
     const [expandedWorkers, setExpandedWorkers] = useState<Set<string>>(new Set());
+
+    const selectedYearMonth = `${year}-${String(month).padStart(2, '0')}`;
+    const handleMonthChange = React.useCallback((nextYearMonth: string) => {
+        const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(nextYearMonth);
+        if (!match) return;
+
+        setYear(Number(match[1]));
+        setMonth(Number(match[2]));
+        setExpandedItems(new Set());
+        setExpandedDetails(new Set());
+        setExpandedWorkers(new Set());
+    }, []);
 
     const containerRef = useRef<HTMLDivElement>(null);
     const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -1328,28 +1341,13 @@ const WhiteboardStatusBoard: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="flex items-center gap-2 bg-slate-100 px-4 py-2 rounded-xl border border-slate-200">
-                            <select
-                                value={year}
-                                onChange={(e) => setYear(Number(e.target.value))}
-                                aria-label="통합현황판 연도"
-                                className="bg-transparent text-base font-bold text-slate-700 focus:outline-none cursor-pointer"
-                            >
-                                {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map(y => (
-                                    <option key={y} value={y}>{y}년</option>
-                                ))}
-                            </select>
-                            <span className="text-slate-300">|</span>
-                            <select
-                                value={month}
-                                onChange={(e) => setMonth(Number(e.target.value))}
-                                aria-label="통합현황판 월"
-                                className="bg-transparent text-base font-bold text-slate-700 focus:outline-none cursor-pointer"
-                            >
-                                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                                    <option key={m} value={m}>{m}월</option>
-                                ))}
-                            </select>
+                        <div className="w-52">
+                            <MonthNavigator
+                                value={selectedYearMonth}
+                                onChange={handleMonthChange}
+                                disabled={loading}
+                                ariaLabel="통합현황판 조회월"
+                            />
                         </div>
                         <button
                             onClick={fetchReports}

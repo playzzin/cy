@@ -7,7 +7,6 @@ import {
     faCopy,
     faLandmark,
     faPrint,
-    faShieldHalved,
     faSpinner,
     faTriangleExclamation,
     faUser,
@@ -17,6 +16,16 @@ import { companyService, Company } from '../../services/companyService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 
 type AccountType = 'self' | 'thirdParty';
+
+const DEFAULT_PLEDGE_TEXTS = {
+    voluntary: '본 신청은 신청인의 자유로운 의사에 따른 것이며, 기재한 계좌와 사유가 사실과 다름없음을 확인합니다.',
+    correction: '계좌번호·예금주 등 잘못된 정보 또는 허위 자료로 생긴 문제의 확인, 오입금 회수 및 정정 절차에 성실히 협조하겠습니다.',
+    thirdPartyConsent: '예금주에게 임금 입금 목적과 개인정보 처리 내용을 설명하고 명시적 동의를 받았으며, 예금주는 입금액을 신청인에게 그대로 전달할 것임을 확인합니다.',
+    approval: '신청서 제출만으로 변경이 승인되거나 효력이 발생하지 않으며, 회사의 확인·승인 전에는 기존 지급방법이 유지될 수 있음을 이해합니다.',
+    responsibility: '신청인의 고의·과실 또는 허위 기재에 따른 책임은 관계 법령상 인정되는 범위에서 부담할 수 있음을 확인합니다.',
+};
+
+type PledgeKey = keyof typeof DEFAULT_PLEDGE_TEXTS;
 
 const pad2 = (value: number): string => String(value).padStart(2, '0');
 const toLocalDateText = (date: Date): string =>
@@ -56,6 +65,7 @@ const AccountChangeRequestPage: React.FC = () => {
     const [changeReason, setChangeReason] = useState('');
     const [unavailableReason, setUnavailableReason] = useState('');
     const [paymentScope, setPaymentScope] = useState('변경 승인 이후 지급되는 임금');
+    const [pledgeTexts, setPledgeTexts] = useState(DEFAULT_PLEDGE_TEXTS);
 
     const printRef = useRef<HTMLDivElement>(null);
 
@@ -158,6 +168,22 @@ const AccountChangeRequestPage: React.FC = () => {
         && thirdPartyReady
     );
 
+    const pledgeEditors: Array<{ key: PledgeKey; label: string }> = [
+        { key: 'voluntary', label: '자발적 신청 및 사실 확인' },
+        { key: 'correction', label: '오입금 회수 및 정정 협조' },
+        ...(accountType === 'thirdParty'
+            ? [{ key: 'thirdPartyConsent' as const, label: '제3자 예금주 동의 및 전달 확인' }]
+            : []),
+        { key: 'approval', label: '회사 승인 전 효력 미발생' },
+        { key: 'responsibility', label: '허위 기재 등에 대한 책임' },
+    ];
+
+    const visiblePledges = pledgeEditors.map(({ key }) => pledgeTexts[key]);
+
+    const updatePledgeText = (key: PledgeKey, value: string) => {
+        setPledgeTexts((current) => ({ ...current, [key]: value }));
+    };
+
     const handleCopy = async () => {
         if (!printRef.current || !canPrint) return;
         setCopying(true);
@@ -200,6 +226,12 @@ const AccountChangeRequestPage: React.FC = () => {
                 @page { size: A4 portrait; margin: 0; }
                 .account-change-preview-container { container-type: inline-size; }
                 .account-change-preview-container .account-change-print-root { zoom: 0.52; }
+                .account-change-document--third-party th,
+                .account-change-document--third-party td {
+                    padding-top: 0.25rem !important;
+                    padding-bottom: 0.25rem !important;
+                }
+                .account-change-document--third-party h3 { margin-bottom: 0.25rem !important; }
                 @container (min-width: 650px) {
                     .account-change-preview-container .account-change-print-root { zoom: 0.78; }
                 }
@@ -308,9 +340,35 @@ const AccountChangeRequestPage: React.FC = () => {
                     </div>
                 </section>
 
-                <section className="rounded-2xl border border-cyan-400/25 bg-cyan-400/5 p-4 text-xs leading-5 text-slate-300">
-                    <p className="font-black text-cyan-300"><FontAwesomeIcon icon={faShieldHalved} className="mr-2" />양식에 반영한 안전장치</p>
-                    <p className="mt-2">포괄 면책 대신 본인 요청, 정보 정확성, 명의자 동의, 증빙 확인, 오입금 회수 협조, 회사의 승인·반려 절차를 기록합니다.</p>
+                <section className="rounded-2xl border border-slate-700/80 bg-slate-900/85 p-5 shadow-xl">
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                        <div>
+                            <h2 className="text-sm font-black text-white">신청인 확인 및 서약</h2>
+                            <p className="mt-1 text-xs leading-5 text-slate-400">각 항목을 수정하면 우측 신청서에 바로 반영됩니다.</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setPledgeTexts(DEFAULT_PLEDGE_TEXTS)}
+                            className="shrink-0 rounded-lg border border-slate-600 px-2.5 py-1.5 text-[11px] font-bold text-slate-300 transition hover:border-slate-400 hover:text-white"
+                        >
+                            기본값 복원
+                        </button>
+                    </div>
+                    <div className="space-y-3">
+                        {pledgeEditors.map(({ key, label }, index) => (
+                            <label key={key} className="block">
+                                <span className={labelClass}>{index + 1}. {label}</span>
+                                <textarea
+                                    value={pledgeTexts[key]}
+                                    onChange={(event) => updatePledgeText(key, event.target.value)}
+                                    rows={2}
+                                    maxLength={120}
+                                    className={`${fieldClass} resize-y leading-5`}
+                                />
+                                <span className="mt-1 block text-right text-[10px] text-slate-500">{pledgeTexts[key].length}/120</span>
+                            </label>
+                        ))}
+                    </div>
                 </section>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -326,14 +384,14 @@ const AccountChangeRequestPage: React.FC = () => {
 
             <main className="account-change-preview-container min-w-0 flex-1 overflow-auto rounded-2xl border border-slate-700 bg-slate-800/60 p-3 shadow-2xl sm:p-6">
                 <div className="account-change-print-root mx-auto w-[210mm] origin-top">
-                    <article ref={printRef} className="account-change-document flex h-[297mm] w-[210mm] flex-col bg-white px-[16mm] py-[13mm] font-serif text-black shadow-2xl">
-                        <header className="border-b-2 border-black pb-[5mm] text-center">
+                    <article ref={printRef} className={`account-change-document box-border flex h-[297mm] w-[210mm] flex-col overflow-hidden bg-white px-[16mm] font-serif text-black shadow-2xl ${accountType === 'thirdParty' ? 'account-change-document--third-party py-[7mm]' : 'py-[13mm]'}`}>
+                        <header className={`border-b-2 border-black text-center ${accountType === 'thirdParty' ? 'pb-[3.5mm]' : 'pb-[5mm]'}`}>
                             <p className="mb-1 font-sans text-[10px] font-bold tracking-[0.35em] text-slate-500">PAYROLL ACCOUNT CHANGE REQUEST</p>
                             <h2 className="text-[25px] font-extrabold tracking-[0.08em]">급여계좌 변경 신청서</h2>
                             <p className="mt-2 font-sans text-[11px] text-slate-600">본인 명의 변경 · 제3자 명의 계좌 예외지정</p>
                         </header>
 
-                        <section className="mt-[6mm]">
+                        <section className={accountType === 'thirdParty' ? 'mt-[4mm]' : 'mt-[6mm]'}>
                             <h3 className="mb-2 border-l-4 border-black pl-2 font-sans text-[12px] font-black">1. 신청인 및 적용 정보</h3>
                             <table className="w-full table-fixed border-collapse font-sans text-[11px]">
                                 <tbody>
@@ -345,7 +403,7 @@ const AccountChangeRequestPage: React.FC = () => {
                             </table>
                         </section>
 
-                        <section className="mt-[5mm]">
+                        <section className={accountType === 'thirdParty' ? 'mt-[3.5mm]' : 'mt-[5mm]'}>
                             <h3 className="mb-2 border-l-4 border-black pl-2 font-sans text-[12px] font-black">2. 계좌 변경 내용</h3>
                             <table className="w-full table-fixed border-collapse font-sans text-[11px]">
                                 <thead><tr><th className="w-[23mm] border border-black bg-slate-200 px-2 py-2">구분</th><th className="w-[33mm] border border-black bg-slate-200 px-2 py-2">은행</th><th className="border border-black bg-slate-200 px-2 py-2">계좌번호</th><th className="w-[34mm] border border-black bg-slate-200 px-2 py-2">예금주</th></tr></thead>
@@ -353,41 +411,34 @@ const AccountChangeRequestPage: React.FC = () => {
                                     <tr><th className="border border-black bg-slate-50 px-2 py-2">변경 전</th><td className="border border-black px-2 py-2">{currentBankName || '-'}</td><td className="border border-black px-2 py-2 tracking-[0.04em]">{currentAccountNumber || '-'}</td><td className="border border-black px-2 py-2">{currentAccountHolder || '-'}</td></tr>
                                     <tr><th className="border border-black bg-slate-50 px-2 py-2">변경 후</th><td className="border border-black px-2 py-2 font-bold">{newBankName}</td><td className="border border-black px-2 py-2 font-bold tracking-[0.04em]">{newAccountNumber}</td><td className="border border-black px-2 py-2 font-bold">{newAccountHolder}</td></tr>
                                     <tr><th className="border border-black bg-slate-50 px-2 py-2">계좌 유형</th><td colSpan={3} className="border border-black px-2 py-2 font-bold">{accountType === 'self' ? '☑ 본인 명의 계좌  ☐ 제3자 명의 계좌' : '☐ 본인 명의 계좌  ☑ 제3자 명의 계좌'}</td></tr>
-                                    <tr><th className="border border-black bg-slate-50 px-2 py-2">변경 사유</th><td colSpan={3} className="h-[12mm] border border-black px-2 py-2 align-top leading-5">{changeReason}</td></tr>
+                                    <tr><th className="border border-black bg-slate-50 px-2 py-2">변경 사유</th><td colSpan={3} className={`${accountType === 'thirdParty' ? 'h-[9mm]' : 'h-[12mm]'} border border-black px-2 py-2 align-top leading-5`}>{changeReason}</td></tr>
                                 </tbody>
                             </table>
                         </section>
 
                         {accountType === 'thirdParty' && (
-                            <section className="mt-[5mm]">
+                            <section className="mt-[3.5mm]">
                                 <h3 className="mb-2 border-l-4 border-amber-600 pl-2 font-sans text-[12px] font-black">3. 제3자 명의 계좌 예외지정 사항</h3>
                                 <table className="w-full table-fixed border-collapse font-sans text-[11px]">
                                     <tbody>
                                         <tr><th className="w-[28mm] border border-black bg-amber-50 px-2 py-2">예금주</th><td className="border border-black px-2 py-2 font-bold">{newAccountHolder}</td><th className="w-[28mm] border border-black bg-amber-50 px-2 py-2">신청인과 관계</th><td className="border border-black px-2 py-2">{holderRelationship}</td></tr>
                                         <tr><th className="border border-black bg-amber-50 px-2 py-2">예금주 연락처</th><td className="border border-black px-2 py-2">{holderPhone}</td><th className="border border-black bg-amber-50 px-2 py-2">명의자 동의</th><td className="border border-black px-2 py-2">☐ 확인 완료</td></tr>
-                                        <tr><th className="border border-black bg-amber-50 px-2 py-2">본인계좌 불가 사유</th><td colSpan={3} className="h-[12mm] border border-black px-2 py-2 align-top leading-5">{unavailableReason}</td></tr>
+                                        <tr><th className="border border-black bg-amber-50 px-2 py-2">본인계좌 불가 사유</th><td colSpan={3} className="h-[9mm] border border-black px-2 py-2 align-top leading-5">{unavailableReason}</td></tr>
                                     </tbody>
                                 </table>
                             </section>
                         )}
 
-                        <section className="mt-[5mm] font-sans">
+                        <section className={`${accountType === 'thirdParty' ? 'mt-[3.5mm]' : 'mt-[5mm]'} font-sans`}>
                             <h3 className="mb-2 border-l-4 border-black pl-2 text-[12px] font-black">{accountType === 'thirdParty' ? '4' : '3'}. 신청인 확인 및 서약</h3>
-                            <div className="space-y-1.5 border border-black p-[3mm] text-[10.5px] leading-[1.45]">
-                                <p>① 본 신청은 신청인의 자유로운 의사에 따른 것이며, 기재한 계좌와 사유가 사실과 다름없음을 확인합니다.</p>
-                                <p>② 계좌번호·예금주 등 잘못된 정보 또는 허위 자료로 생긴 문제의 확인, 오입금 회수 및 정정 절차에 성실히 협조하겠습니다.</p>
-                                {accountType === 'thirdParty' && <p>③ 예금주에게 임금 입금 목적과 개인정보 처리 내용을 설명하고 명시적 동의를 받았으며, 예금주는 입금액을 신청인에게 그대로 전달할 것임을 확인합니다.</p>}
-                                <p>{accountType === 'thirdParty' ? '④' : '③'} 신청서 제출만으로 변경이 승인되거나 효력이 발생하지 않으며, 회사의 확인·승인 전에는 기존 지급방법이 유지될 수 있음을 이해합니다.</p>
-                                <p>{accountType === 'thirdParty' ? '⑤' : '④'} 신청인의 고의·과실 또는 허위 기재에 따른 책임은 관계 법령상 인정되는 범위에서 부담할 수 있음을 확인합니다.</p>
+                            <div className={`border border-black p-[3mm] ${accountType === 'thirdParty' ? 'space-y-1 text-[9.5px] leading-[1.35]' : 'space-y-1.5 text-[10.5px] leading-[1.45]'}`}>
+                                {visiblePledges.map((pledge, index) => (
+                                    <p key={pledgeEditors[index].key}>{index + 1}. {pledge}</p>
+                                ))}
                             </div>
                         </section>
 
-                        <section className="mt-[4mm] border-2 border-black bg-slate-50 p-[3mm] font-sans">
-                            <p className="mb-1 text-[10.5px] font-black">법적 유의사항</p>
-                            <p className="text-[9.5px] leading-[1.45]">근로기준법 제43조에 따라 임금은 근로자에게 직접 지급하는 것이 원칙입니다. 제3자 명의 계좌는 본인계좌 사용이 불가능한 상당한 사유가 있고, 사회통념상 본인에게 지급하는 것과 동일시할 수 있거나 본인에게 그대로 전달될 것이 확실한 경우에 한해 예외적으로 검토됩니다. 본 신청서와 서약은 회사의 법정 임금지급의무 또는 고의·중과실 책임을 면제하지 않습니다.</p>
-                        </section>
-
-                        <section className="mt-[4mm] grid grid-cols-[1.2fr_1fr] gap-[4mm] font-sans text-[10px]">
+                        <section className={`${accountType === 'thirdParty' ? 'mt-[3mm]' : 'mt-[4mm]'} grid grid-cols-[1.2fr_1fr] gap-[4mm] font-sans text-[10px]`}>
                             <div className="border border-black p-[3mm]">
                                 <p className="mb-2 font-black">제출·확인 서류</p>
                                 <p>☐ 신청인 본인확인 &nbsp; ☐ 변경계좌 사본 또는 계좌확인서</p>
@@ -401,18 +452,18 @@ const AccountChangeRequestPage: React.FC = () => {
                             </div>
                         </section>
 
-                        <footer className="mt-auto pt-[5mm] text-center font-sans">
+                        <footer className={`mt-auto text-center font-sans ${accountType === 'thirdParty' ? 'pt-[3mm]' : 'pt-[5mm]'}`}>
                             <p className="text-[11px]">위 내용을 충분히 읽고 이해한 후 급여계좌 변경을 신청합니다.</p>
-                            <p className="mt-[4mm] text-[12px] font-bold tracking-[0.12em]">{formatKoreanDate(applicationDate)}</p>
-                            <div className="mt-[5mm] flex items-center justify-center gap-2 text-[12px]">
+                            <p className={`${accountType === 'thirdParty' ? 'mt-[2mm]' : 'mt-[4mm]'} text-[12px] font-bold tracking-[0.12em]`}>{formatKoreanDate(applicationDate)}</p>
+                            <div className={`${accountType === 'thirdParty' ? 'mt-[2.5mm]' : 'mt-[5mm]'} flex items-center justify-center gap-2 text-[12px]`}>
                                 <span>신청인</span><span className="min-w-[42mm] border-b border-black px-4 py-1 font-bold">{selectedWorker?.name || ''}</span>
                                 <span className="relative inline-flex h-[12mm] w-[25mm] items-center justify-center">
                                     <span>(서명 또는 인)</span>
                                     {selectedWorker?.signatureUrl && <img src={selectedWorker.signatureUrl} alt="신청인 서명" className="absolute left-1/2 top-1/2 h-[13mm] w-[28mm] -translate-x-1/2 -translate-y-1/2 object-contain opacity-90 mix-blend-multiply" />}
                                 </span>
                             </div>
-                            {accountType === 'thirdParty' && <p className="mt-2 text-[10.5px]">지정 예금주 동의 확인: {newAccountHolder} __________________ (서명 또는 인)</p>}
-                            <p className="mt-[3mm] text-[14px] font-black tracking-[0.08em]">{selectedCompany?.name || ''} 귀중</p>
+                            {accountType === 'thirdParty' && <p className="mt-1.5 text-[10.5px]">지정 예금주 동의 확인: {newAccountHolder} __________________ (서명 또는 인)</p>}
+                            <p className={`${accountType === 'thirdParty' ? 'mt-[2mm]' : 'mt-[3mm]'} text-[14px] font-black tracking-[0.08em]`}>{selectedCompany?.name || ''} 귀중</p>
                         </footer>
 
                         {!canPrint && (

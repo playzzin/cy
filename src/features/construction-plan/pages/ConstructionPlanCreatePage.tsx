@@ -15,6 +15,7 @@ import {
   Download,
   Eye,
   ExternalLink,
+  FileSpreadsheet,
   FileText,
   FileUp,
   GripVertical,
@@ -22,6 +23,7 @@ import {
   Layers3,
   ListChecks,
   Loader2,
+  MapPin,
   PencilLine,
   Plus,
   RefreshCw,
@@ -38,6 +40,7 @@ import {
   generateReferenceConstructionPlanPdf,
   readReferenceDrawingFile,
   readLogoFileAsDataUrl,
+  readReferenceSiteImageAsDataUrl,
   REFERENCE_CONSTRUCTION_PLAN_DEFAULT_COMPANY,
   REFERENCE_CONSTRUCTION_PLAN_DEFAULT_LOGO_URL,
   REFERENCE_CONSTRUCTION_PLAN_COVER_URL,
@@ -46,6 +49,7 @@ import {
   type ReferenceConstructionPlanCoverTemplate,
   type ReferenceConstructionPlanUploadedDrawing,
 } from '../services/referenceConstructionPlanPdfService';
+import { downloadReferenceConstructionPlanExcel } from '../services/constructionPlanExcelService';
 import {
   countReferenceConstructionPlanPages,
   getSelectedReferenceSections,
@@ -63,13 +67,18 @@ import {
   loadReferenceConstructionPlanSectionCatalog,
   saveReferenceConstructionPlanSectionCatalog,
 } from '../services/referenceConstructionPlanSectionCatalogService';
+import {
+  createGoogleMapsEmbedUrl,
+  createGoogleMapsSearchUrl,
+  fetchConstructionPlanMapSnapshot,
+} from '../services/constructionPlanMapService';
 import '../components/ConstructionPlanUI.css';
 
 const WIZARD_STEPS = [
   { number: 1, label: '로고·상호 등록', helper: '기본값은 청연이엔지' },
   { number: 2, label: '현장정보 직접입력', helper: 'ERP 현장 선택 없이 작성' },
   { number: 3, label: '목차 선택·미리보기', helper: '필요한 내용만 PDF 등록' },
-  { number: 4, label: 'PDF 구성 확인', helper: '선택한 목차로 다운로드' },
+  { number: 4, label: 'PDF·Excel 구성 확인', helper: '같은 데이터로 문서 다운로드' },
 ] as const;
 
 const COVER_TEMPLATES: Array<{
@@ -109,12 +118,15 @@ const today = (): string => {
 const INITIAL_FORM: ReferenceConstructionPlanInput = {
   siteName: '',
   projectName: '공동주택(아파트) 신축공사 - 시스템동바리 설치 및 해체공사',
+  siteAddress: '',
   clientName: '',
   contractorName: '',
   companyName: REFERENCE_CONSTRUCTION_PLAN_DEFAULT_COMPANY,
   documentNo: 'CY-SSP-001',
   revision: 5,
   preparedDate: today(),
+  constructionStartDate: '',
+  constructionEndDate: '',
   applicationScope: '지하층 · 저층부 · 기준층 · 특수구간',
   structuralReviewNo: '',
   installationDrawingNo: '',
@@ -170,6 +182,7 @@ const parseSourcePagesInput = (value: string): number[] => {
 export function ConstructionPlanCreatePage() {
   const navigate = useNavigate();
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const mapImageInputRef = useRef<HTMLInputElement>(null);
   const drawingInputRef = useRef<HTMLInputElement>(null);
   const drawingPreviewUrlsRef = useRef<string[]>([]);
   const catalogSelectionTouchedRef = useRef(false);
@@ -195,13 +208,26 @@ export function ConstructionPlanCreatePage() {
   const [drawingError, setDrawingError] = useState('');
   const [customLogoDataUrl, setCustomLogoDataUrl] = useState<string>();
   const [logoError, setLogoError] = useState('');
+  const [mapLoading, setMapLoading] = useState(false);
+  const [mapError, setMapError] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [excelGenerating, setExcelGenerating] = useState(false);
+  const [excelError, setExcelError] = useState('');
   const [generationError, setGenerationError] = useState('');
   const [pdfBlob, setPdfBlob] = useState<Blob>();
   const [pdfUrl, setPdfUrl] = useState('');
 
   const updateText = (key: FormTextKey, value: string) => {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => key === 'siteAddress'
+      ? {
+        ...current,
+        siteAddress: value,
+        siteMapImageDataUrl: undefined,
+        siteMapAddress: value.replace(/\s+/g, ' ').trim() || undefined,
+        siteMapLink: createGoogleMapsSearchUrl(value) || undefined,
+      }
+      : { ...current, [key]: value });
+    if (key === 'siteAddress') setMapError('');
     setGenerationError('');
   };
 
@@ -217,6 +243,7 @@ export function ConstructionPlanCreatePage() {
   const directInputReady = Boolean(
     form.siteName.trim()
     && form.projectName.trim()
+    && form.siteAddress?.trim()
     && form.documentNo.trim()
     && form.preparedDate.trim(),
   );
@@ -243,6 +270,8 @@ export function ConstructionPlanCreatePage() {
     selectedSectionIds,
     uploadedDrawingPageCount,
     sectionCatalog,
+    form.siteAddress?.trim() ? 1 : 0,
+    form.siteAddress?.trim() ? 1 : 0,
   );
   const activeSection = sectionCatalog.find(
     ({ id }) => id === activeSectionId,
@@ -298,13 +327,110 @@ export function ConstructionPlanCreatePage() {
     drawingPreviewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
   }, []);
 
+  const ensureSiteMap = useCallback(async (
+    input: ReferenceConstructionPlanInput,
+    forceRefresh = false,
+  ): Promise<ReferenceConstructionPlanInput> => {
+    const address = input.siteAddress?.replace(/\s+/g, ' ').trim() ?? '';
+    if (!address) throw new Error('construction-plan-map-address-required');
+    if (!forceRefresh && input.siteMapImageDataUrl && input.siteMapAddress === address) return input;
+    setMapLoading(true);
+    setMapError('');
+    try {
+      const snapshot = await fetchConstructionPlanMapSnapshot(address);
+      const mappedInput: ReferenceConstructionPlanInput = {
+        ...input,
+        siteAddress: address,
+        siteMapAddress: snapshot.address,
+        siteMapImageDataUrl: snapshot.imageDataUrl,
+        siteMapLink: snapshot.googleMapsUrl,
+      };
+      setForm((current) => current.siteAddress?.replace(/\s+/g, ' ').trim() === address
+        ? {
+          ...current,
+          siteAddress: address,
+          siteMapAddress: snapshot.address,
+          siteMapImageDataUrl: snapshot.imageDataUrl,
+          siteMapLink: snapshot.googleMapsUrl,
+        }
+        : current);
+      setPdfBlob(undefined);
+      return mappedInput;
+    } catch (error) {
+      console.info('[ConstructionPlanCreatePage] Static map unavailable; keeping the live map link', error);
+      const siteMapLink = createGoogleMapsSearchUrl(address);
+      const linkedInput: ReferenceConstructionPlanInput = {
+        ...input,
+        siteAddress: address,
+        siteMapAddress: address,
+        siteMapLink,
+      };
+      setForm((current) => current.siteAddress?.replace(/\s+/g, ' ').trim() === address
+        ? {
+          ...current,
+          siteAddress: address,
+          siteMapAddress: address,
+          siteMapLink,
+        }
+        : current);
+      setMapError('지도 이미지 자동 생성 서버에 연결하지 못했습니다. 실시간 Google 지도와 링크는 연결되며, PDF에 지도 이미지를 넣으려면 아래의 “지도 이미지 등록”을 이용해주세요.');
+      return linkedInput;
+    } finally {
+      setMapLoading(false);
+    }
+  }, []);
+
+  const handleMapImageFile = async (file?: File) => {
+    if (!file) return;
+    setMapError('');
+    try {
+      const siteMapImageDataUrl = await readReferenceSiteImageAsDataUrl(file);
+      setForm((current) => {
+        const address = current.siteAddress?.replace(/\s+/g, ' ').trim() ?? '';
+        return {
+          ...current,
+          siteMapImageDataUrl,
+          siteMapAddress: address,
+          siteMapLink: createGoogleMapsSearchUrl(address),
+        };
+      });
+      setPdfBlob(undefined);
+      setGenerationError('');
+    } catch (error) {
+      const code = error instanceof Error ? error.message : '';
+      setMapError(code.includes('size')
+        ? '지도 이미지는 20MB 이하로 등록해주세요.'
+        : code.includes('dimensions')
+          ? '지도 이미지 해상도가 너무 큽니다. 4,800만 화소 이하로 줄여주세요.'
+          : 'PNG, JPG, WebP 형식의 정상 지도 이미지를 등록해주세요.');
+    } finally {
+      if (mapImageInputRef.current) mapImageInputRef.current.value = '';
+    }
+  };
+
+  const removeMapImage = () => {
+    setForm((current) => {
+      const address = current.siteAddress?.replace(/\s+/g, ' ').trim() ?? '';
+      return {
+        ...current,
+        siteMapImageDataUrl: undefined,
+        siteMapAddress: address || undefined,
+        siteMapLink: createGoogleMapsSearchUrl(address) || undefined,
+      };
+    });
+    setMapError('');
+    setPdfBlob(undefined);
+    if (mapImageInputRef.current) mapImageInputRef.current.value = '';
+  };
+
   const generatePdf = useCallback(async () => {
     if (!directInputReady || !brandingReady) return;
     setGenerating(true);
     setGenerationError('');
     try {
+      const mappedInput = await ensureSiteMap(effectiveInput);
       setPdfBlob(await generateReferenceConstructionPlanPdf(
-        effectiveInput,
+        mappedInput,
         selectedSectionIds,
         uploadedDrawings,
         sectionCatalog,
@@ -312,11 +438,14 @@ export function ConstructionPlanCreatePage() {
     } catch (error) {
       console.warn('[ConstructionPlanCreatePage] Failed to build reference PDF', error);
       setPdfBlob(undefined);
-      setGenerationError('PDF를 만들지 못했습니다. 원본 템플릿 연결과 입력값을 확인한 뒤 다시 시도해주세요.');
+      const code = error instanceof Error ? error.message : '';
+      setGenerationError(code.includes('construction-plan-map-address-required')
+        ? '현장주소를 입력한 뒤 다시 시도해주세요.'
+        : 'PDF를 만들지 못했습니다. 원본 템플릿 연결과 입력값을 확인한 뒤 다시 시도해주세요.');
     } finally {
       setGenerating(false);
     }
-  }, [brandingReady, directInputReady, effectiveInput, sectionCatalog, selectedSectionIds, uploadedDrawings]);
+  }, [brandingReady, directInputReady, effectiveInput, ensureSiteMap, sectionCatalog, selectedSectionIds, uploadedDrawings]);
 
   const showSectionPreview = (section: ReferenceConstructionPlanSection) => {
     setActiveSectionId(section.id);
@@ -595,7 +724,7 @@ export function ConstructionPlanCreatePage() {
       return;
     }
     if (nextStep >= 3 && !directInputReady) {
-      setGenerationError('현장명, 공사명, 문서번호, 작성일자를 입력해주세요.');
+      setGenerationError('현장명, 공사명, 현장주소, 문서번호, 작성일자를 입력해주세요.');
       return;
     }
     if (nextStep === 4 && !selectionReady) {
@@ -622,6 +751,28 @@ export function ConstructionPlanCreatePage() {
     window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
   };
 
+  const downloadExcel = async () => {
+    if (!directInputReady || !brandingReady || !selectionReady || excelGenerating) return;
+    setExcelGenerating(true);
+    setExcelError('');
+    try {
+      const mappedInput = await ensureSiteMap(effectiveInput);
+      await downloadReferenceConstructionPlanExcel({
+        input: mappedInput,
+        sections: selectedSections,
+        drawings: uploadedDrawings,
+      });
+    } catch (error) {
+      console.error('[ConstructionPlanCreatePage] Failed to build Excel workbook', error);
+      const code = error instanceof Error ? error.message : '';
+      setExcelError(code.includes('construction-plan-map-address-required')
+        ? '현장주소를 입력한 뒤 다시 시도해주세요.'
+        : 'Excel 파일을 만들지 못했습니다. 입력값과 브라우저 다운로드 권한을 확인한 뒤 다시 시도해주세요.');
+    } finally {
+      setExcelGenerating(false);
+    }
+  };
+
   const scopeSummary = [form.buildings, form.floors, form.zones]
     .map((value) => value?.trim())
     .filter(Boolean)
@@ -646,7 +797,7 @@ export function ConstructionPlanCreatePage() {
           <div>
             <span className="cp-eyebrow">REV.5 REFERENCE PDF</span>
             <h1>시스템동바리 시공계획서 만들기</h1>
-            <p>회사 로고와 상호를 등록하고 현장정보를 입력한 뒤 필요한 목차로 PDF를 만듭니다.</p>
+            <p>회사 로고와 상호를 등록하고 현장정보를 입력한 뒤 필요한 목차로 PDF와 Excel을 만듭니다.</p>
           </div>
         </div>
         <button
@@ -710,7 +861,7 @@ export function ConstructionPlanCreatePage() {
             <p>{step === 1
               ? 'PDF에 표시할 상호와 로고를 먼저 등록합니다. 변경하지 않으면 첨부 원본의 청연이엔지를 사용합니다.'
               : step === 2
-                ? '기존 ERP 현장을 선택하지 않고 문서에 들어갈 현장정보를 직접 입력합니다.'
+                ? '현장정보와 주소를 입력하면 Google 지도를 미리보기·PDF·Excel에 자동으로 등록합니다.'
                 : step === 3
                   ? '데이터베이스 목차를 선택하고 PDF·사진 도면을 여러 장 추가해 제목과 출력 순서를 함께 편집합니다.'
                   : `선택한 ${selectedSections.length}개 DB 목차와 업로드 도면 ${uploadedDrawingPageCount}장으로 구성된 ${selectedPageCount}쪽 PDF를 확인하고 다운로드합니다.`}</p>
@@ -729,11 +880,78 @@ export function ConstructionPlanCreatePage() {
                   <label><span>Revision</span><input type="number" min="0" value={form.revision} onChange={(event) => updateRevision(event.target.value)} /></label>
                   <label><span>작성일자 *</span><input type="date" value={form.preparedDate} onChange={(event) => updateText('preparedDate', event.target.value)} /></label>
                   <label><span>적용범위</span><input value={form.applicationScope} onChange={(event) => updateText('applicationScope', event.target.value)} /></label>
+                  <label><span>공사 시작일</span><input type="date" value={form.constructionStartDate ?? ''} onChange={(event) => updateText('constructionStartDate', event.target.value)} /></label>
+                  <label><span>공사 종료일</span><input type="date" value={form.constructionEndDate ?? ''} onChange={(event) => updateText('constructionEndDate', event.target.value)} /></label>
                 </div>
               </section>
 
               <section>
-                <div className="cp-reference-section-title"><span>2</span><div><strong>현장 적용정보</strong><p>비어 있는 항목은 원본 양식의 기입란으로 남습니다.</p></div></div>
+                <div className="cp-reference-section-title"><span>2</span><div><strong>현장 위치 지도</strong><p>주소를 입력하면 지도 이미지가 자동 생성되어 미리보기·PDF·Excel에 동일하게 반영됩니다.</p></div></div>
+                <div className="cp-form-grid cp-form-grid--2">
+                  <label className="cp-reference-span-2"><span>현장주소 *</span><input value={form.siteAddress ?? ''} onChange={(event) => updateText('siteAddress', event.target.value)} onBlur={() => form.siteAddress?.trim() && void ensureSiteMap(effectiveInput)} placeholder="예: 서울특별시 강남구 테헤란로 123" /></label>
+                </div>
+                <div className="cp-site-visuals cp-site-visuals--map-only">
+                  <article className="cp-site-visual-card">
+                    <header><span><MapPin size={17} /></span><div><strong>현장 위치 지도</strong><p>입력 주소 기준 · PDF/Excel 공통</p></div></header>
+                    <div className={`cp-site-visual-card__preview${form.siteMapImageDataUrl ? ' has-image' : ''}`}>
+                      {form.siteMapImageDataUrl
+                        ? <img src={form.siteMapImageDataUrl} alt={`${form.siteAddress} 현장 위치 지도`} />
+                        : form.siteAddress?.trim()
+                          ? <iframe title="Google 지도 실시간 미리보기" src={createGoogleMapsEmbedUrl(form.siteAddress)} loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
+                          : <div><MapPin size={28} /><strong>현장주소를 입력해주세요</strong><p>입력 즉시 Google 지도 미리보기가 연결됩니다.</p></div>}
+                    </div>
+                    <footer>
+                      <div className="cp-site-visual-card__actions">
+                        <button
+                          type="button"
+                          className="cp-button cp-button--secondary cp-button--small"
+                          disabled={!form.siteAddress?.trim() || mapLoading}
+                          onClick={() => void ensureSiteMap(effectiveInput, true)}
+                        >
+                          {mapLoading ? <Loader2 size={14} className="cp-spin" /> : <RefreshCw size={14} />}
+                          지도 자동 생성
+                        </button>
+                        <button type="button" className="cp-button cp-button--ghost cp-button--small" onClick={() => mapImageInputRef.current?.click()} disabled={!form.siteAddress?.trim()}>
+                          <Upload size={14} />지도 이미지 등록
+                        </button>
+                        <input
+                          ref={mapImageInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          aria-label="지도 이미지 파일 선택"
+                          hidden
+                          onChange={(event) => void handleMapImageFile(event.target.files?.[0])}
+                        />
+                      </div>
+                      {form.siteMapImageDataUrl && <button type="button" className="cp-site-visual-card__remove" onClick={removeMapImage}><Trash2 size={13} /> 삭제</button>}
+                      {form.siteAddress?.trim() && <a href={form.siteMapLink || createGoogleMapsSearchUrl(form.siteAddress)} target="_blank" rel="noreferrer"><ExternalLink size={13} /> 지도에서 열기</a>}
+                    </footer>
+                  </article>
+                </div>
+                <section className="cp-site-application-preview" aria-label="현장 위치 지도 문서 적용 예시">
+                  <header>
+                    <div><span>PDF 3쪽 · 목차 01</span><strong>현장 위치 지도</strong><p>지도 한 장이 A4 페이지의 본문 영역을 넓게 사용합니다.</p></div>
+                    <div className="cp-site-application-preview__status">
+                      <span className={form.siteMapImageDataUrl ? 'is-complete' : 'is-live'}><MapPin size={12} />{form.siteMapImageDataUrl ? '지도 이미지 등록' : '실시간 지도 연결'}</span>
+                    </div>
+                  </header>
+                  <div className="cp-site-application-preview__sheet cp-site-application-preview__sheet--map-only">
+                    <div className="cp-site-application-preview__address"><strong>현장주소</strong><span>{form.siteAddress?.trim() || '현장주소 입력 대기'}</span></div>
+                    <div className="cp-site-application-preview__panel is-map">
+                      <strong>현장 위치 지도</strong>
+                      {form.siteMapImageDataUrl
+                        ? <img src={form.siteMapImageDataUrl} alt="문서에 적용될 현장 위치 지도 예시" />
+                        : form.siteAddress?.trim()
+                          ? <iframe title="문서 적용 Google 지도 예시" src={createGoogleMapsEmbedUrl(form.siteAddress)} loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
+                          : <span>현장주소 입력 후 표시됩니다.</span>}
+                    </div>
+                  </div>
+                </section>
+                {mapError && <div className="cp-form-error" role="alert"><AlertCircle size={16} />{mapError}</div>}
+              </section>
+
+              <section>
+                <div className="cp-reference-section-title"><span>3</span><div><strong>현장 적용정보</strong><p>비어 있는 항목은 원본 양식의 기입란으로 남습니다.</p></div></div>
                 <div className="cp-form-grid cp-form-grid--2">
                   <label><span>동</span><input value={form.buildings} onChange={(event) => updateText('buildings', event.target.value)} placeholder="예: 101동, 102동" /></label>
                   <label><span>층</span><input value={form.floors} onChange={(event) => updateText('floors', event.target.value)} placeholder="예: 지하 2층~지상 20층" /></label>
@@ -854,8 +1072,24 @@ export function ConstructionPlanCreatePage() {
                   <div><GripVertical size={20} /><span><strong>선택 목차 순서</strong><small>끌어서 놓거나 화살표로 순서를 바꾸면 PDF 본문과 목차에 바로 반영됩니다.</small></span></div>
                   <button type="button" className="cp-button cp-button--ghost cp-button--small" onClick={restoreOriginalSectionOrder} disabled={!selectionReady}><RotateCcw size={15} /> DB 순서</button>
                 </div>
-                {selectionReady ? (
+                {form.siteAddress?.trim() || selectionReady ? (
                   <ol>
+                    {form.siteAddress?.trim() && (
+                      <li className={`cp-toc-order-editor__site-visuals${form.siteMapImageDataUrl ? ' has-map' : ''}`}>
+                        <span className="cp-toc-order-editor__handle" aria-hidden="true"><MapPin size={16} /></span>
+                        <span className="cp-toc-order-editor__number">01</span>
+                        <button type="button" className="cp-toc-order-editor__title" onClick={() => setStep(2)}>
+                          <strong>현장 위치 지도</strong>
+                          <small className="cp-toc-order-editor__visual-status">
+                            <span className={form.siteMapImageDataUrl ? 'is-complete' : 'is-live'}>{form.siteMapImageDataUrl ? '지도 이미지 등록' : '지도 링크 연결'}</span>
+                            <span>PDF 3쪽</span>
+                          </small>
+                        </button>
+                        <div className="cp-toc-order-editor__actions">
+                          <button type="button" onClick={() => setStep(2)} aria-label="현장 위치 지도 수정"><PencilLine size={15} /></button>
+                        </div>
+                      </li>
+                    )}
                     {selectedSections.map((item, index) => (
                       <li
                         key={item.id}
@@ -867,7 +1101,7 @@ export function ConstructionPlanCreatePage() {
                         onDrop={() => dropSelectedSection(item.id)}
                       >
                         <span className="cp-toc-order-editor__handle" aria-hidden="true"><GripVertical size={16} /></span>
-                        <span className="cp-toc-order-editor__number">{String(index + 1).padStart(2, '0')}</span>
+                        <span className="cp-toc-order-editor__number">{String(index + 2).padStart(2, '0')}</span>
                         <button type="button" className="cp-toc-order-editor__title" onClick={() => showSectionPreview(item)}>
                           <strong>{item.title}</strong><small>DB 목록 {String(item.number).padStart(2, '0')} · 원본 {item.sourcePages.length > 1 ? `${item.sourcePages[0]}~${item.sourcePages[item.sourcePages.length - 1]}` : item.sourcePages[0]}쪽</small>
                         </button>
@@ -1116,7 +1350,7 @@ export function ConstructionPlanCreatePage() {
                 </div>
               ) : null}
 
-              {pdfBlob && <div className="cp-reference-ready"><CheckCircle2 size={18} /><div><strong>선택 구성 PDF 생성 완료</strong><p>DB 목차 {selectedSections.length}개, 업로드 도면 {uploadedDrawingPageCount}장과 직접 입력한 현장정보·브랜드를 적용한 {selectedPageCount}쪽 문서입니다.</p></div></div>}
+              {pdfBlob && <div className="cp-reference-ready"><CheckCircle2 size={18} /><div><strong>선택 구성 PDF·Excel 준비 완료</strong><p>Excel의 ‘선택본문’ 시트에도 같은 목차 순서와 실제 기준 본문 페이지가 함께 들어갑니다. DB 목차 {selectedSections.length}개 · 업로드 도면 {uploadedDrawingPageCount}장 · PDF {selectedPageCount}쪽 구성입니다.</p></div></div>}
             </div>
           )}
 
@@ -1151,18 +1385,30 @@ export function ConstructionPlanCreatePage() {
                       : '다음: PDF 구성 확인'} <ArrowRight size={16} />
                 </button>
               ) : (
-                <button
-                  type="button"
-                  className="cp-button cp-button--primary cp-button--create"
-                  disabled={!pdfBlob || generating}
-                  onClick={downloadPdf}
-                >
-                  {generating ? <Loader2 size={16} className="cp-spin" /> : <Download size={16} />}
-                  {generating ? 'PDF 생성 중...' : `${selectedPageCount}쪽 PDF 다운로드`}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="cp-button cp-button--secondary cp-button--create"
+                    disabled={!directInputReady || !brandingReady || !selectionReady || excelGenerating}
+                    onClick={() => void downloadExcel()}
+                  >
+                    {excelGenerating ? <Loader2 size={16} className="cp-spin" /> : <FileSpreadsheet size={16} />}
+                    {excelGenerating ? 'Excel 생성 중...' : 'Excel 다운로드'}
+                  </button>
+                  <button
+                    type="button"
+                    className="cp-button cp-button--primary cp-button--create"
+                    disabled={!pdfBlob || generating}
+                    onClick={downloadPdf}
+                  >
+                    {generating ? <Loader2 size={16} className="cp-spin" /> : <Download size={16} />}
+                    {generating ? 'PDF 생성 중...' : `${selectedPageCount}쪽 PDF 다운로드`}
+                  </button>
+                </>
               )}
             </div>
           </footer>
+          {excelError && step === 4 && <div className="cp-form-error" role="alert"><AlertCircle size={16} />{excelError}</div>}
         </section>
       </div>
     </main>

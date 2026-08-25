@@ -90,4 +90,25 @@ describe('CardStatusBoard inactive card controls', () => {
         expect(onAssign).not.toHaveBeenCalled();
         expect(onBillingTargetAssign).not.toHaveBeenCalled();
     });
+
+    it('opens the suspend-or-close flow when an active card row is clicked', async () => {
+        const onCancelUse = jest.fn();
+        const activeCard = makeCard('card-1234', '사용카드', 'ASSIGNED');
+
+        render(
+            <CardStatusBoard
+                cards={[activeCard]}
+                loading={false}
+                onEdit={jest.fn()}
+                onAssign={jest.fn()}
+                onCancelUse={onCancelUse}
+                onRestoreUse={jest.fn()}
+            />
+        );
+
+        await waitFor(() => expect(mockedCardService.listAllCardBillingTargets).toHaveBeenCalled());
+        fireEvent.click(screen.getByText('사용카드'));
+
+        expect(onCancelUse).toHaveBeenCalledWith(activeCard);
+    });
 });

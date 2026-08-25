@@ -42,14 +42,17 @@ import {
     getMaterialTransactionRentalCompanyLink,
     matchesMaterialTransactionRentalCompanyFilter,
 } from './materialTransactionRentalCompany';
+import {
+    buildMaterialTransactionExcelRows,
+    MATERIAL_TRANSACTION_EXCEL_HEADERS,
+    MaterialTransactionExcelCellValue,
+} from './materialTransactionExcel';
 
 type Transaction = (InboundTransaction | OutboundTransaction) & {
     type: 'inbound' | 'outbound';
     siteStatus?: Site['status'];
     siteStatusLabel?: string;
 };
-
-type ExcelCellValue = string | number;
 
 interface PhotoViewerState {
     isOpen: boolean;
@@ -445,40 +448,10 @@ const MaterialTransactionsPage: React.FC = () => {
     };
 
     const handleDownloadExcel = () => {
-        const headers = [
-            '일자',
-            '구분',
-            '현장',
-            '품명',
-            '규격',
-            '수량',
-            '단위',
-            '차량번호',
-            '입고처/출고자',
-            '임대사',
-            '비고',
-        ];
-        const toExcelQuantity = (value: unknown): number => {
-            const quantity = Number(value || 0);
-            return Number.isFinite(quantity) ? Math.round(quantity) : 0;
-        };
-        const rows: ExcelCellValue[][] = [
-            headers,
-            ...visibleTransactions.map((t) => [
-                t.transactionDate,
-                t.type === 'inbound' ? '입고' : '출고',
-                t.siteName,
-                t.itemName,
-                t.spec,
-                toExcelQuantity(t.quantity),
-                t.unit,
-                t.vehicleNumber || '',
-                t.type === 'inbound'
-                    ? ((t as InboundTransaction).supplier || '')
-                    : ((t as OutboundTransaction).recipient || ''),
-                getMaterialTransactionRentalCompanyLink(t).name,
-                t.notes || '',
-            ]),
+        const headers = MATERIAL_TRANSACTION_EXCEL_HEADERS;
+        const rows: MaterialTransactionExcelCellValue[][] = [
+            [...headers],
+            ...buildMaterialTransactionExcelRows(visibleTransactions),
         ];
 
         const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -486,12 +459,14 @@ const MaterialTransactionsPage: React.FC = () => {
             { wch: 12 },
             { wch: 10 },
             { wch: 24 },
+            { wch: 14 },
             { wch: 22 },
             { wch: 18 },
             { wch: 10 },
             { wch: 8 },
             { wch: 16 },
             { wch: 20 },
+            { wch: 18 },
             { wch: 20 },
             { wch: 34 },
         ];
@@ -503,8 +478,8 @@ const MaterialTransactionsPage: React.FC = () => {
         };
 
         const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-        const centerColumns = new Set([0, 1, 6, 7]);
-        const rightColumns = new Set([5]);
+        const centerColumns = new Set([0, 1, 7, 8, 10]);
+        const rightColumns = new Set([6]);
         for (let r = range.s.r; r <= range.e.r; r += 1) {
             for (let c = range.s.c; c <= range.e.c; c += 1) {
                 const address = XLSX.utils.encode_cell({ r, c });
@@ -514,8 +489,8 @@ const MaterialTransactionsPage: React.FC = () => {
                 const isData = r > 0;
                 const isInboundType = isData && c === 1 && cell.v === '입고';
                 const isOutboundType = isData && c === 1 && cell.v === '출고';
-                const isQuantity = c === 5;
-                const isTextLong = c === 10;
+                const isQuantity = c === 6;
+                const isTextLong = c === 12;
                 const isAltRow = isData && r % 2 === 0;
 
                 cell.s = {

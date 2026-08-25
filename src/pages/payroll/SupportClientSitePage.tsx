@@ -5,6 +5,7 @@ import {
     faArrowLeft,
     faBuilding,
     faCalendarAlt,
+    faChevronLeft,
     faChevronRight,
     faCircleCheck,
     faCopy,
@@ -383,6 +384,21 @@ const formatFullIdNumber = (value?: string | null): string => {
 const getCurrentYearMonth = (): string => {
     const today = new Date();
     return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const formatYearMonthLabel = (yearMonth: string): string => {
+    const [year, month] = yearMonth.split('-');
+    const monthNumber = parseInt(month ?? '', 10);
+    return `${year || ''}년 ${Number.isFinite(monthNumber) && monthNumber > 0 ? monthNumber : ''}월`.trim();
+};
+
+const shiftYearMonth = (yearMonth: string, monthOffset: number): string => {
+    const [rawYear, rawMonth] = yearMonth.split('-').map(Number);
+    const fallback = new Date();
+    const year = Number.isFinite(rawYear) ? rawYear : fallback.getFullYear();
+    const month = Number.isFinite(rawMonth) ? rawMonth : fallback.getMonth() + 1;
+    const target = new Date(year, month - 1 + monthOffset, 1);
+    return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}`;
 };
 
 const getMonthRange = (yearMonth: string): { start: string; end: string } => {
@@ -6070,12 +6086,29 @@ const SupportClientSitePage: React.FC = () => {
                             <div className="flex items-center gap-3">
                                 <FontAwesomeIcon icon={faCalendarAlt} className="text-emerald-500" />
                                 <span className="text-sm font-bold text-slate-500">집계 기준월</span>
-                                <input
-                                    type="month"
-                                    value={selectedMonth}
-                                    onChange={(event) => setSelectedMonth(event.target.value)}
-                                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-black outline-none transition focus:ring-2 focus:ring-emerald-500"
-                                />
+                                <div className="flex min-h-10 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 shadow-sm" aria-label="집계 기준월 선택">
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedMonth((current) => shiftYearMonth(current, -1))}
+                                        className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-50 hover:text-emerald-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                                        aria-label="이전 달 보기"
+                                        title="이전 달"
+                                    >
+                                        <FontAwesomeIcon icon={faChevronLeft} className="text-xs" />
+                                    </button>
+                                    <span className="min-w-[92px] px-2 text-center text-sm font-black text-slate-800" aria-live="polite">
+                                        {formatYearMonthLabel(selectedMonth)}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedMonth((current) => shiftYearMonth(current, 1))}
+                                        className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-50 hover:text-emerald-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                                        aria-label="다음 달 보기"
+                                        title="다음 달"
+                                    >
+                                        <FontAwesomeIcon icon={faChevronRight} className="text-xs" />
+                                    </button>
+                                </div>
                             </div>
                             {showAllocationColumns && (
                                 <>

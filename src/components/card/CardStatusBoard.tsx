@@ -484,7 +484,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                 <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-0.5">
                     {([
                         ['active', `현재 관리 ${stats.active}`],
-                        ['inactive', `보관/정지 ${stats.suspended + stats.closed}`],
+                        ['inactive', `정지·해지 ${stats.suspended + stats.closed}`],
                         ['all', `전체 ${stats.total}`]
                     ] as Array<[CardStatusFilter, string]>).map(([filter, label]) => (
                         <button
@@ -552,7 +552,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                         {statusFilter === 'active'
                             ? '현재 관리 중인 카드가 없습니다'
                             : statusFilter === 'inactive'
-                                ? '보관/정지 카드가 없습니다'
+                                ? '정지·해지 카드가 없습니다'
                                 : statusFilter === 'work'
                                     ? '확인할 카드 업무가 없습니다'
                                     : '조건에 맞는 카드가 없습니다'}
@@ -621,7 +621,9 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                     return (
                                         <tr
                                             key={card.id}
-                                            className={`hover:bg-indigo-50/40 transition-colors group ${needsWork ? 'bg-amber-50/35' : ''}`}
+                                            onClick={() => { if (!isInactiveCard) onCancelUse(card); }}
+                                            title={isInactiveCard ? undefined : '카드를 눌러 정지·해지 처리'}
+                                            className={`hover:bg-indigo-50/40 transition-colors group ${isInactiveCard ? '' : 'cursor-pointer'} ${needsWork ? 'bg-amber-50/35' : ''}`}
                                             style={tc ? { borderLeft: `3px solid ${tc}` } : needsWork ? { borderLeft: '3px solid #f59e0b' } : undefined}
                                         >
                                             {/* ... (existing td cells except Assignee) */}
@@ -826,7 +828,9 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                         return (
                             <div
                                 key={card.id}
-                                className={`group rounded-2xl border bg-white transition-all relative overflow-hidden ${needsWork ? 'border-amber-200 shadow-[0_8px_24px_-16px_rgba(245,158,11,0.65)]' : 'border-slate-200 hover:border-slate-300 hover:-translate-y-1'}`}
+                                onClick={() => { if (!isInactiveCard) onCancelUse(card); }}
+                                title={isInactiveCard ? undefined : '카드를 눌러 정지·해지 처리'}
+                                className={`group rounded-2xl border bg-white transition-all relative overflow-hidden ${isInactiveCard ? '' : 'cursor-pointer'} ${needsWork ? 'border-amber-200 shadow-[0_8px_24px_-16px_rgba(245,158,11,0.65)]' : 'border-slate-200 hover:border-slate-300 hover:-translate-y-1'}`}
                                 style={{
                                     borderLeftWidth: tc ? '4px' : undefined,
                                     borderLeftColor: tc || undefined,

@@ -122,6 +122,29 @@ describe('MemoPage dev-admin local storage mode', () => {
         unmount();
     });
 
+    it('creates a memo in the shared category for every memo user', async () => {
+        render(<MemoPage />);
+
+        const sharedCategory = screen.getByRole('button', { name: /공통 메모.*0/ });
+        expect(screen.queryByRole('button', { name: '공통 메모 카테고리 수정' })).toBeNull();
+        expect(screen.queryByRole('button', { name: '공통 메모 카테고리 삭제' })).toBeNull();
+
+        fireEvent.click(sharedCategory);
+        createTextMemo();
+
+        await waitFor(() => {
+            expect(readStoredMemos()).toEqual([
+                expect.objectContaining({
+                    userId: 'dev-admin',
+                    scope: 'public',
+                    categoryId: 'public'
+                })
+            ]);
+        });
+
+        expect(screen.getByText('모든 사용자와 공유되는 공통 메모를 만들었습니다.')).toBeTruthy();
+    });
+
     it('auto-saves memo changes after a short pause', async () => {
         render(<MemoPage />);
         createTextMemo();

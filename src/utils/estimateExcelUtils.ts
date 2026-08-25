@@ -595,16 +595,22 @@ const downloadReferenceEstimateExcel = async (
         bottomStyle: 'thin'
     });
     worksheet.getCell(`B${grandTotalRow}`).value = '총 합계';
-    const sumFormula = (col: string) => subtotalRows.length === 1
-        ? `${col}${subtotalRows[0]}`
-        : `SUM(${subtotalRows.map(row => `${col}${row}`).join(',')})`;
+    const sumFormula = (...cols: string[]) => {
+        const subtotalCells = cols.flatMap(col => subtotalRows.map(row => `${col}${row}`));
+        return subtotalCells.length === 1
+            ? subtotalCells[0]
+            : `SUM(${subtotalCells.join(',')})`;
+    };
     worksheet.getCell(`E${grandTotalRow}`).value = {
         formula: sumFormula('E'),
         result: totalQuantity
     };
     worksheet.getCell(`G${grandTotalRow}`).value = {
-        formula: sumFormula('G'),
-        result: isRental ? totalLabor : subtotal
+        // 화면의 임대료형 총계는 인건비와 임대료를 합친 공급가액입니다.
+        // Excel이 파일을 열며 수식을 다시 계산해도 같은 값이 유지되도록
+        // 임대료 소계(I열)까지 수식에 직접 포함합니다.
+        formula: isRental ? sumFormula('G', 'I') : sumFormula('G'),
+        result: isRental ? totalLabor + totalRental : subtotal
     };
     if (isRental) {
         worksheet.getCell(`I${grandTotalRow}`).value = {

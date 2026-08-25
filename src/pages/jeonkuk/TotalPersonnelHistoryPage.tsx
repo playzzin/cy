@@ -11,10 +11,12 @@ import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typ
 import { resolveReportPayType, resolveWorkerPayType } from '../../utils/payType';
 import { buildTeamIdsByAffiliation } from '../../utils/cheongyeonTeams';
 import OutputManagementTabs from '../../components/common/OutputManagementTabs';
+import MonthNavigator from '../../components/common/MonthNavigator';
 import { useSearchParams } from 'react-router-dom';
 
 type CompanyTypeFilter = 'construction' | 'partner';
 type SalaryModelFilter = '전체' | '일급제' | '월급제' | '지원팀' | '용역팀';
+type DateMode = 'period' | 'monthly';
 
 const TABLE_COLUMN_COUNT = 12;
 
@@ -156,6 +158,24 @@ const parseSortOrderParam = (value?: string | null): 'asc' | 'desc' | null => {
     return value === 'asc' || value === 'desc' ? value : null;
 };
 
+const parseDateModeParam = (value?: string | null): DateMode | null => {
+    return value === 'period' || value === 'monthly' ? value : null;
+};
+
+const normalizeYearMonth = (value?: string | null): string | null => {
+    const normalized = String(value ?? '').trim();
+    return /^\d{4}-(0[1-9]|1[0-2])$/.test(normalized) ? normalized : null;
+};
+
+const getCalendarMonthRange = (yearMonth: string): { startDate: string; endDate: string } => {
+    const [year, month] = yearMonth.split('-').map(Number);
+    const lastDay = new Date(year, month, 0).getDate();
+    return {
+        startDate: `${yearMonth}-01`,
+        endDate: `${yearMonth}-${String(lastDay).padStart(2, '0')}`,
+    };
+};
+
 
 const TotalPersonnelHistoryPage: React.FC = () => {
     return (
@@ -185,12 +205,19 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         return `${year}-${month}-${day}`;
     };
 
-    const initialStartDate = normalizeDateParam(searchParams.get('startDate')) ?? formatDate(firstDay);
-    const initialEndDate = normalizeDateParam(searchParams.get('endDate')) ?? formatDate(lastDay);
+    const initialDateMode = parseDateModeParam(searchParams.get('dateMode')) ?? 'period';
+    const requestedStartDate = normalizeDateParam(searchParams.get('startDate')) ?? formatDate(firstDay);
+    const requestedEndDate = normalizeDateParam(searchParams.get('endDate')) ?? formatDate(lastDay);
+    const initialYearMonth = normalizeYearMonth(searchParams.get('month')) ?? requestedStartDate.slice(0, 7);
+    const initialMonthRange = getCalendarMonthRange(initialYearMonth);
+    const initialStartDate = initialDateMode === 'monthly' ? initialMonthRange.startDate : requestedStartDate;
+    const initialEndDate = initialDateMode === 'monthly' ? initialMonthRange.endDate : requestedEndDate;
     const initialCompanyType = parseCompanyTypeParam(searchParams.get('companyType')) ?? 'construction';
     const initialSalaryModel = parseSalaryModelParam(searchParams.get('salaryModel')) ?? '전체';
     const initialSortOrder = parseSortOrderParam(searchParams.get('sortOrder') ?? searchParams.get('sort')) ?? 'asc';
 
+    const [dateMode, setDateMode] = useState<DateMode>(initialDateMode);
+    const [selectedMonth, setSelectedMonth] = useState(initialYearMonth);
     const [startDate, setStartDate] = useState(initialStartDate);
     const [endDate, setEndDate] = useState(initialEndDate);
     const [startDateInput, setStartDateInput] = useState(initialStartDate);
@@ -262,6 +289,8 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     useEffect(() => {
         const nextStartDate = normalizeDateParam(searchParams.get('startDate'));
         const nextEndDate = normalizeDateParam(searchParams.get('endDate'));
+        const nextDateMode = parseDateModeParam(searchParams.get('dateMode'));
+        const nextSelectedMonth = normalizeYearMonth(searchParams.get('month'));
         const nextCompanyType = parseCompanyTypeParam(searchParams.get('companyType'));
         const nextSalaryModel = parseSalaryModelParam(searchParams.get('salaryModel'));
         const nextSortOrder = parseSortOrderParam(searchParams.get('sortOrder') ?? searchParams.get('sort'));
@@ -279,6 +308,8 @@ const TotalPersonnelHistoryInner: React.FC = () => {
             setEndDate(nextEndDate);
             setEndDateInput(nextEndDate);
         }
+        if (nextDateMode && nextDateMode !== dateMode) setDateMode(nextDateMode);
+        if (nextSelectedMonth && nextSelectedMonth !== selectedMonth) setSelectedMonth(nextSelectedMonth);
         if (nextCompanyType && nextCompanyType !== companyType) setCompanyType(nextCompanyType);
         if (nextSalaryModel && nextSalaryModel !== salaryModel) setSalaryModel(nextSalaryModel);
         if (nextSortOrder && nextSortOrder !== sortOrder) setSortOrder(nextSortOrder);
@@ -292,6 +323,9 @@ const TotalPersonnelHistoryInner: React.FC = () => {
             const next = new URLSearchParams(prev);
             next.set('startDate', startDate);
             next.set('endDate', endDate);
+            next.set('dateMode', dateMode);
+            if (dateMode === 'monthly') next.set('month', selectedMonth);
+            else next.delete('month');
             next.set('companyType', companyType);
             next.set('salaryModel', salaryModel);
             next.set('sortOrder', sortOrder);
@@ -312,7 +346,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
 
             return next.toString() === prev.toString() ? prev : next;
         }, { replace: true });
-    }, [companyType, endDate, salaryModel, selectedTeamId, selectedWorkerId, setSearchParams, sortOrder, startDate, workerSearchTerm]);
+    }, [companyType, dateMode, endDate, salaryModel, selectedMonth, selectedTeamId, selectedWorkerId, setSearchParams, sortOrder, startDate, workerSearchTerm]);
 
     useEffect(() => {
         if (!didRunCompanyTypeEffectRef.current) {
@@ -472,6 +506,16 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     };
 
     const commitDateDrafts = (): { startDate: string; endDate: string } | null => {
+        if (dateMode === 'monthly') {
+            const nextRange = getCalendarMonthRange(selectedMonth);
+            setStartDate(nextRange.startDate);
+            setEndDate(nextRange.endDate);
+            setStartDateInput(nextRange.startDate);
+            setEndDateInput(nextRange.endDate);
+            setErrorMessage('');
+            return nextRange;
+        }
+
         const nextStartDate = normalizeTypedDateInput(startDateInput);
         const nextEndDate = normalizeTypedDateInput(endDateInput);
 
@@ -754,6 +798,37 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         }
     };
 
+    const applyMonthlyRange = (nextMonth: string, refreshAfterChange: boolean) => {
+        const normalizedMonth = normalizeYearMonth(nextMonth);
+        if (!normalizedMonth) return;
+
+        const nextRange = getCalendarMonthRange(normalizedMonth);
+        setSelectedMonth(normalizedMonth);
+        setStartDate(nextRange.startDate);
+        setEndDate(nextRange.endDate);
+        setStartDateInput(nextRange.startDate);
+        setEndDateInput(nextRange.endDate);
+        setErrorMessage('');
+
+        if (refreshAfterChange && !initialLoading) {
+            void fetchData(nextRange);
+        }
+    };
+
+    const handleDateModeChange = (nextMode: DateMode) => {
+        if (nextMode === dateMode) return;
+        setDateMode(nextMode);
+
+        if (nextMode === 'monthly') {
+            const nextMonth = normalizeYearMonth(startDate.slice(0, 7)) ?? formatDate(new Date()).slice(0, 7);
+            applyMonthlyRange(nextMonth, hasSearched);
+        }
+    };
+
+    const handleMonthChange = (nextMonth: string) => {
+        applyMonthlyRange(nextMonth, hasSearched);
+    };
+
     useEffect(() => {
         if (didAutoSearchFromUrlRef.current) return;
         if (!initialUrlSearchRef.current) return;
@@ -848,7 +923,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                         인원 전체내역 조회
                     </h1>
                     <p className="text-sm text-slate-500 mt-1">
-                        기간별 전체 인원의 공수 및 급여 내역을 조회하고 엑셀로 다운로드합니다.
+                        기간별 또는 월별로 전체 인원의 공수 및 급여 내역을 조회하고 엑셀로 다운로드합니다.
                     </p>
                 </div>
                 {/* Header Buttons Row */}
@@ -876,84 +951,124 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                 <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col gap-3 flex-shrink-0">
                     <div className="flex flex-wrap items-stretch sm:items-end gap-3">
                         <div className="flex flex-col gap-1">
-                            <div className="flex items-center gap-1">
-                                <label className="text-xs font-medium text-slate-500">시작일</label>
+                            <span className="text-xs font-medium text-slate-500">조회 방식</span>
+                            <div className="inline-flex h-9 rounded-lg bg-slate-100 p-1" role="tablist" aria-label="조회 방식">
                                 <button
-                                    onClick={() => {
-                                        const t = new Date();
-                                        const nextStartDate = formatDate(new Date(t.getFullYear(), t.getMonth() - 1, 1));
-                                        const nextEndDate = formatDate(new Date(t.getFullYear(), t.getMonth(), 0));
-                                        setStartDate(nextStartDate);
-                                        setEndDate(nextEndDate);
-                                        setStartDateInput(nextStartDate);
-                                        setEndDateInput(nextEndDate);
-                                    }}
-                                    className="px-1.5 py-0.5 text-[10px] bg-slate-100 hover:bg-slate-200 rounded"
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={dateMode === 'period'}
+                                    onClick={() => handleDateModeChange('period')}
+                                    className={`rounded-md px-3 text-xs font-bold transition-all ${dateMode === 'period' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                                 >
-                                    전달
+                                    기간별
                                 </button>
                                 <button
-                                    onClick={() => {
-                                        const t = new Date();
-                                        const nextStartDate = formatDate(new Date(t.getFullYear(), t.getMonth(), 1));
-                                        const nextEndDate = formatDate(t);
-                                        setStartDate(nextStartDate);
-                                        setEndDate(nextEndDate);
-                                        setStartDateInput(nextStartDate);
-                                        setEndDateInput(nextEndDate);
-                                    }}
-                                    className="px-1.5 py-0.5 text-[10px] bg-slate-100 hover:bg-slate-200 rounded"
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={dateMode === 'monthly'}
+                                    onClick={() => handleDateModeChange('monthly')}
+                                    className={`rounded-md px-3 text-xs font-bold transition-all ${dateMode === 'monthly' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                                 >
-                                    이달
+                                    월별
                                 </button>
                             </div>
-                            <input
-                                type="text"
-                                inputMode="numeric"
-                                aria-label="조회 시작일"
-                                value={startDateInput}
-                                onChange={(e) => handleDateInputChange('start', e.target.value)}
-                                onBlur={() => {
-                                    const nextStartDate = normalizeTypedDateInput(startDateInput) ?? startDate;
-                                    setStartDateInput(nextStartDate);
-                                    if (nextStartDate !== startDate) {
-                                        setStartDate(nextStartDate);
-                                    }
-                                }}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                        e.currentTarget.blur();
-                                    }
-                                }}
-                                placeholder="YYYY-MM-DD"
-                                className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm w-36"
-                            />
                         </div>
 
-                        <div className="flex flex-col gap-1">
-                            <label className="text-xs font-medium text-slate-500">종료일</label>
-                            <input
-                                type="text"
-                                inputMode="numeric"
-                                aria-label="조회 종료일"
-                                value={endDateInput}
-                                onChange={(e) => handleDateInputChange('end', e.target.value)}
-                                onBlur={() => {
-                                    const nextEndDate = normalizeTypedDateInput(endDateInput) ?? endDate;
-                                    setEndDateInput(nextEndDate);
-                                    if (nextEndDate !== endDate) {
-                                        setEndDate(nextEndDate);
-                                    }
-                                }}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                        e.currentTarget.blur();
-                                    }
-                                }}
-                                placeholder="YYYY-MM-DD"
-                                className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm w-36"
-                            />
-                        </div>
+                        {dateMode === 'period' ? (
+                            <>
+                                <div className="flex flex-col gap-1">
+                                    <div className="flex items-center gap-1">
+                                        <label className="text-xs font-medium text-slate-500">시작일</label>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const t = new Date();
+                                                const nextStartDate = formatDate(new Date(t.getFullYear(), t.getMonth() - 1, 1));
+                                                const nextEndDate = formatDate(new Date(t.getFullYear(), t.getMonth(), 0));
+                                                setStartDate(nextStartDate);
+                                                setEndDate(nextEndDate);
+                                                setStartDateInput(nextStartDate);
+                                                setEndDateInput(nextEndDate);
+                                            }}
+                                            className="px-1.5 py-0.5 text-[10px] bg-slate-100 hover:bg-slate-200 rounded"
+                                        >
+                                            전달
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const t = new Date();
+                                                const nextStartDate = formatDate(new Date(t.getFullYear(), t.getMonth(), 1));
+                                                const nextEndDate = formatDate(t);
+                                                setStartDate(nextStartDate);
+                                                setEndDate(nextEndDate);
+                                                setStartDateInput(nextStartDate);
+                                                setEndDateInput(nextEndDate);
+                                            }}
+                                            className="px-1.5 py-0.5 text-[10px] bg-slate-100 hover:bg-slate-200 rounded"
+                                        >
+                                            이달
+                                        </button>
+                                    </div>
+                                    <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        aria-label="조회 시작일"
+                                        value={startDateInput}
+                                        onChange={(e) => handleDateInputChange('start', e.target.value)}
+                                        onBlur={() => {
+                                            const nextStartDate = normalizeTypedDateInput(startDateInput) ?? startDate;
+                                            setStartDateInput(nextStartDate);
+                                            if (nextStartDate !== startDate) {
+                                                setStartDate(nextStartDate);
+                                            }
+                                        }}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                e.currentTarget.blur();
+                                            }
+                                        }}
+                                        placeholder="YYYY-MM-DD"
+                                        className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm w-36"
+                                    />
+                                </div>
+
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-xs font-medium text-slate-500">종료일</label>
+                                    <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        aria-label="조회 종료일"
+                                        value={endDateInput}
+                                        onChange={(e) => handleDateInputChange('end', e.target.value)}
+                                        onBlur={() => {
+                                            const nextEndDate = normalizeTypedDateInput(endDateInput) ?? endDate;
+                                            setEndDateInput(nextEndDate);
+                                            if (nextEndDate !== endDate) {
+                                                setEndDate(nextEndDate);
+                                            }
+                                        }}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                e.currentTarget.blur();
+                                            }
+                                        }}
+                                        placeholder="YYYY-MM-DD"
+                                        className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm w-36"
+                                    />
+                                </div>
+                            </>
+                        ) : (
+                            <div className="flex w-full flex-col gap-1 sm:w-52">
+                                <span className="text-xs font-medium text-slate-500">조회월</span>
+                                <MonthNavigator
+                                    value={selectedMonth}
+                                    onChange={handleMonthChange}
+                                    disabled={loading || initialLoading}
+                                    ariaLabel="인원 전체내역 조회월"
+                                />
+                            </div>
+                        )}
 
                         <div className="flex flex-col gap-1">
                             <label className="text-xs font-medium text-slate-500">구분</label>
