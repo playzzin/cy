@@ -116,10 +116,9 @@ const recordOperationSafely = async (
   try {
     await recordOperation(input);
   } catch (error) {
-    console.error('[vehicleMonthlyLedgerMutationService] operation log failed', {
-      operationId: input.operationId,
-      status: input.status
-    }, error);
+    try {
+      reportSupportWriteError(error, { domain: 'vehicle', status: 'record-failed' });
+    } catch { /* Diagnostics must not change the financial outcome. */ }
   }
 };
 
@@ -261,22 +260,24 @@ export const saveVehicleMonthlyLedgerMutation = async <TRow extends VehicleMonth
 
   return result;
   } catch (error) {
-    const failedContext = {
-      domain: 'vehicle' as const,
-      yearMonth,
-      operationId: resolvedOperationId,
-      affectedDocumentIds: attemptedAffectedDocumentIds,
-      errorMessage: getErrorMessage(error),
-      userMessage: SUPPORT_WRITE_RETRY_USER_MESSAGE
-    };
-    await recordOperationSafely(deps.recordOperation, {
-      ...failedContext,
-      status: 'failed'
-    });
-    reportSupportWriteError(error, {
-      ...failedContext,
-      status: 'failed'
-    });
+    try {
+      const failedContext = {
+        domain: 'vehicle' as const,
+        yearMonth,
+        operationId: resolvedOperationId,
+        affectedDocumentIds: attemptedAffectedDocumentIds,
+        errorMessage: getErrorMessage(error),
+        userMessage: SUPPORT_WRITE_RETRY_USER_MESSAGE
+      };
+      await recordOperationSafely(deps.recordOperation, {
+        ...failedContext,
+        status: 'failed'
+      });
+      reportSupportWriteError(error, {
+        ...failedContext,
+        status: 'failed'
+      });
+    } catch { /* Even error extraction must not replace the original exception. */ }
     throw error;
   }
 };

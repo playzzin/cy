@@ -56,13 +56,14 @@ describe('constructionPlanExcelService', () => {
         siteAddress: '서울시 강남구',
         siteMapLink: 'https://www.google.com/maps/search/?api=1&query=test',
         aerialViewFileName: '강남현장-조감도.jpg',
-        clientName: '발주처',
-        contractorName: '원도급사',
+        contractorName: '전문건설 주식회사',
         companyName: '청연이엔지',
         documentNo: 'CY-SSP-101',
         revision: 5,
         preparedDate: '2026-08-23',
         applicationScope: '101동 지하 2층',
+        buildingArea: '1,234.56 ㎡',
+        totalFloorArea: '25,678.90 ㎡',
         buildings: '101동',
         floors: '지하 2층',
         zones: 'A구간',
@@ -86,7 +87,11 @@ describe('constructionPlanExcelService', () => {
 
     expect(output.worksheets.map(({ name }) => name)).toEqual(['문서개요', '현장위치', '목차', '선택본문', '도면목록']);
     expect(output.getWorksheet('문서개요')?.getCell('B7').value).toBe('강남 공동주택 현장');
+    expect(output.getWorksheet('문서개요')?.getCell('B8').value).toBe('전문건설 주식회사');
+    expect(output.getWorksheet('문서개요')?.getCell('F8').value).toBe('101동 지하 2층');
     expect(output.getWorksheet('문서개요')?.getCell('F10').value).toBe(5);
+    expect(output.getWorksheet('문서개요')?.getCell('F11').value).toBe('1,234.56 ㎡');
+    expect(output.getWorksheet('문서개요')?.getCell('B12').value).toBe('25,678.90 ㎡');
     expect(output.getWorksheet('문서개요')?.getCell('F18').value).toBe(8);
     expect((output.getWorksheet('문서개요')?.getCell('B11').value as Date).toISOString()).toBe('2026-08-23T00:00:00.000Z');
     expect(output.getWorksheet('목차')?.getCell('D6').value).toBe('현장 위치 지도');

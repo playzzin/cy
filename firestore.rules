@@ -21,6 +21,14 @@ service cloud.firestore {
       return get(userDocPath()).data;
     }
 
+    function hasActiveUserProfile() {
+      return hasUserProfile()
+        && (
+          !('status' in userProfile())
+          || userProfile().status == 'active'
+        );
+    }
+
     function adminRoles() {
       return [
         'ADMIN', 'admin', 'administrator', 'super_admin', 'owner',
@@ -95,7 +103,7 @@ service cloud.firestore {
     }
 
     function hasTokenRole(roles) {
-      return isSignedIn()
+      return hasActiveUserProfile()
         && (
           ('role' in request.auth.token && request.auth.token.role in roles)
           || ('position' in request.auth.token && request.auth.token.position in roles)
@@ -115,7 +123,7 @@ service cloud.firestore {
     }
 
     function hasUserRole(roles) {
-      return hasUserProfile()
+      return hasActiveUserProfile()
         && (
           ('role' in userProfile() && userProfile().role in roles)
           || ('position' in userProfile() && userProfile().position in roles)
@@ -147,10 +155,11 @@ service cloud.firestore {
     }
 
     function canReadMasterData() {
-      return isAdmin()
-        || hasAnyRole(officeRoles())
-        || hasAnyRole(siteRoles())
-        || hasAnyRole(payrollRoles());
+      // Check the same allowed roles once, keeping portal reads below the
+      // Firestore expression limit before evaluating their company/site scope.
+      return hasAnyRole(
+        adminRoles().concat(officeRoles()).concat(siteRoles()).concat(payrollRoles())
+      );
     }
 
     function canWriteMasterData() {
@@ -165,7 +174,7 @@ service cloud.firestore {
     }
 
     function canReadOwnWorker(workerId) {
-      return isSignedIn()
+      return hasActiveUserProfile()
         && (
           hasLinkedWorker(workerId)
           || (('uid' in resource.data) && resource.data.uid == request.auth.uid)
@@ -198,14 +207,14 @@ service cloud.firestore {
     // view only the records related to its linked company and cannot mutate
     // operational or financial source data.
     function hasLinkedClientCompany(companyId) {
-      return hasUserProfile()
+      return hasActiveUserProfile()
         && ('linkedCompanyIds' in userProfile())
         && userProfile().linkedCompanyIds is list
         && companyId in userProfile().linkedCompanyIds;
     }
 
     function isClientPortalAccount() {
-      return hasUserProfile()
+      return hasActiveUserProfile()
         && (
           (('accountType' in userProfile()) && userProfile().accountType == 'construction_company')
           || (('role' in userProfile()) && userProfile().role in ['발주사', '건설사', '원청', 'client', 'client_company', 'construction_company'])
@@ -217,38 +226,61 @@ service cloud.firestore {
       return isClientPortalAccount() && hasLinkedClientCompany(companyId);
     }
 
-    function canReadClientSite() {
+    function recordHasLinkedClientCompany(data) {
+      return (
+          ('clientCompanyId' in data) && hasLinkedClientCompany(data.clientCompanyId)
+        ) || (
+          ('constructorCompanyId' in data) && hasLinkedClientCompany(data.constructorCompanyId)
+        ) || (
+          ('companyId' in data) && hasLinkedClientCompany(data.companyId)
+        );
+    }
+
+    function hasLinkedSite(siteId) {
+      return hasActiveUserProfile()
+        && (
+          !('linkedSiteIds' in userProfile())
+          || (
+            userProfile().linkedSiteIds is list
+            && siteId in userProfile().linkedSiteIds
+          )
+        );
+    }
+
+    function canReadClientSite(siteId) {
       return isClientPortalAccount()
-        && ('clientCompanyId' in resource.data)
-        && hasLinkedClientCompany(resource.data.clientCompanyId);
+        && hasLinkedSite(siteId)
+        && recordHasLinkedClientCompany(resource.data);
     }
 
     function canReadClientDailyReport() {
       return isClientPortalAccount()
-        && ('companyId' in resource.data)
-        && hasLinkedClientCompany(resource.data.companyId);
+        && ('siteId' in resource.data)
+        && resource.data.siteId is string
+        && hasLinkedSite(resource.data.siteId)
+        && recordHasLinkedClientCompany(resource.data);
     }
 
     function canReadClientProgressClaim() {
       return isClientPortalAccount()
         && ('siteId' in resource.data)
         && resource.data.siteId is string
+        && hasLinkedSite(resource.data.siteId)
         && exists(/databases/$(database)/documents/sites/$(resource.data.siteId))
-        && ('clientCompanyId' in get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data)
-        && hasLinkedClientCompany(
-          get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data.clientCompanyId
+        && recordHasLinkedClientCompany(
+          get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data
         );
     }
 
     function hasLinkedRentalCompany(companyId) {
-      return hasUserProfile()
+      return hasActiveUserProfile()
         && ('linkedCompanyIds' in userProfile())
         && userProfile().linkedCompanyIds is list
         && companyId in userProfile().linkedCompanyIds;
     }
 
     function isRentalPortalAccount() {
-      return hasUserProfile()
+      return hasActiveUserProfile()
         && (
           (('accountType' in userProfile()) && userProfile().accountType == 'rental_company')
           || (('role' in userProfile()) && userProfile().role in ['임대사', 'rental', 'rental_company'])
@@ -264,15 +296,18 @@ service cloud.firestore {
       return isClientPortalAccount()
         && ('siteId' in resource.data)
         && resource.data.siteId is string
+        && hasLinkedSite(resource.data.siteId)
         && exists(/databases/$(database)/documents/sites/$(resource.data.siteId))
-        && ('clientCompanyId' in get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data)
-        && hasLinkedClientCompany(
-          get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data.clientCompanyId
+        && recordHasLinkedClientCompany(
+          get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data
         );
     }
 
     function canReadRentalMaterialTransaction() {
       return isRentalPortalAccount()
+        && ('siteId' in resource.data)
+        && resource.data.siteId is string
+        && hasLinkedSite(resource.data.siteId)
         && ('rentalCompanyId' in resource.data)
         && resource.data.rentalCompanyId is string
         && hasLinkedRentalCompany(resource.data.rentalCompanyId);
@@ -282,15 +317,18 @@ service cloud.firestore {
       return isClientPortalAccount()
         && ('siteId' in resource.data)
         && resource.data.siteId is string
+        && hasLinkedSite(resource.data.siteId)
         && exists(/databases/$(database)/documents/sites/$(resource.data.siteId))
-        && ('clientCompanyId' in get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data)
-        && hasLinkedClientCompany(
-          get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data.clientCompanyId
+        && recordHasLinkedClientCompany(
+          get(/databases/$(database)/documents/sites/$(resource.data.siteId)).data
         );
     }
 
     function canReadRentalMaterialPhotoBatch() {
       return isRentalPortalAccount()
+        && ('siteId' in resource.data)
+        && resource.data.siteId is string
+        && hasLinkedSite(resource.data.siteId)
         && ('rentalCompanyId' in resource.data)
         && resource.data.rentalCompanyId is string
         && hasLinkedRentalCompany(resource.data.rentalCompanyId);
@@ -318,7 +356,7 @@ service cloud.firestore {
 
     function hasConstructionPlanCentralAccess() {
       let roles = constructionPlanCentralRoles();
-      return isSignedIn()
+      return hasActiveUserProfile()
         && (
           request.auth.token.get('role', '') in roles
           || request.auth.token.get('position', '') in roles
@@ -354,7 +392,7 @@ service cloud.firestore {
 
     function isConstructionPlanParticipant(data) {
       let participants = data.get('participants', {});
-      return isSignedIn()
+      return hasActiveUserProfile()
         && (
           data.get('createdBy', '') == request.auth.uid
           || (
@@ -387,7 +425,7 @@ service cloud.firestore {
 
     function isConstructionPlanAuthor(data) {
       let participants = data.get('participants', {});
-      return isSignedIn()
+      return hasActiveUserProfile()
         && (
           data.get('createdBy', '') == request.auth.uid
           || (
@@ -487,7 +525,7 @@ service cloud.firestore {
     }
 
     function canWriteSupport() {
-      return isAdmin() || hasAnyRole(officeRoles()) || hasAnyRole(supportRoles());
+      return hasAnyRole(adminRoles().concat(officeRoles()).concat(supportRoles()));
     }
 
     function canReadCardBillingStatements() {
@@ -1236,6 +1274,7 @@ service cloud.firestore {
           'linkedWorkerIds',
           'linkedCompanyIds',
           'linkedOfficeStaffIds',
+          'linkedSiteIds',
           'status',
           'updatedAt'
         ])
@@ -1250,7 +1289,9 @@ service cloud.firestore {
         && request.resource.data.linkedCompanyIds is list
         && request.resource.data.linkedCompanyIds.size() == 0
         && request.resource.data.linkedOfficeStaffIds is list
-        && request.resource.data.linkedOfficeStaffIds.size() == 0;
+        && request.resource.data.linkedOfficeStaffIds.size() == 0
+        && request.resource.data.linkedSiteIds is list
+        && request.resource.data.linkedSiteIds.size() == 0;
     }
 
     function isSafeSelfUserUpdate(userId) {
@@ -1333,7 +1374,7 @@ service cloud.firestore {
     }
 
     match /settings/{settingsId} {
-      allow read: if isSignedIn();
+      allow read: if hasActiveUserProfile();
       allow create, update: if (isAdmin() && canWriteSettingsDocument(settingsId))
         || (
           settingsId == 'delegation_letter_v2_public'
@@ -1361,51 +1402,51 @@ service cloud.firestore {
     }
 
     match /system_configs/{configId} {
-      allow read: if isSignedIn();
+      allow read: if hasActiveUserProfile();
       allow create, update, delete: if isAdmin();
     }
 
     match /positions/{positionId} {
-      allow read: if isSignedIn();
+      allow read: if hasActiveUserProfile();
       allow create, update, delete: if isAdmin();
     }
 
     match /menus/{menuId} {
-      allow read: if isSignedIn();
+      allow read: if hasActiveUserProfile();
       allow create, update, delete: if isAdmin();
     }
 
     match /menu_configs/{menuConfigId} {
-      allow read: if isSignedIn();
+      allow read: if hasActiveUserProfile();
       allow create, update, delete: if isAdmin();
     }
 
     match /system_logs/{logId} {
-      allow create: if isSignedIn();
+      allow create: if hasActiveUserProfile();
       allow get, list: if canReadAudit();
       allow update, delete: if false;
     }
 
     match /audit_logs/{logId} {
-      allow create: if isSignedIn();
+      allow create: if hasActiveUserProfile();
       allow get, list: if canReadAudit();
       allow update, delete: if false;
     }
 
     match /database_logs/{logId} {
-      allow create: if isSignedIn();
+      allow create: if hasActiveUserProfile();
       allow get, list: if canReadAudit();
       allow update, delete: if false;
     }
 
     match /daily_report_logs/{logId} {
-      allow create: if isSignedIn();
+      allow create: if hasActiveUserProfile();
       allow get, list: if canReadAudit() || canReadOperations();
       allow update, delete: if false;
     }
 
     match /material_logs/{logId} {
-      allow create: if isSignedIn();
+      allow create: if hasActiveUserProfile();
       allow get, list: if canReadAudit() || canReadSupport();
       allow update, delete: if false;
     }
@@ -1514,16 +1555,16 @@ service cloud.firestore {
     // server-authored bank alerts are visible only to configured recipients
     // and may only receive the current recipient's read receipt.
     match /erp_messages/{messageId} {
-      allow read: if isSignedIn()
+      allow read: if hasActiveUserProfile()
         && (
           (isBankSystemMessage(resource.data) && canReadBankSystemMessage(resource.data))
           || (!isBankSystemMessage(resource.data) && canReadRegularErpMessage(resource.data))
         );
-      allow create: if isSignedIn()
+      allow create: if hasActiveUserProfile()
         && !isBankSystemMessage(request.resource.data)
         && request.resource.data.senderId == request.auth.uid
         && request.resource.data.type in ['direct', 'broadcast'];
-      allow update: if isSignedIn()
+      allow update: if hasActiveUserProfile()
         && (
           (isBankSystemMessage(resource.data) && isValidErpMessageReadReceiptUpdate())
           || (
@@ -1537,13 +1578,13 @@ service cloud.firestore {
             )
           )
         );
-      allow delete: if isSignedIn()
+      allow delete: if hasActiveUserProfile()
         && !isBankSystemMessage(resource.data)
         && (isAdmin() || ('senderId' in resource.data && resource.data.senderId == request.auth.uid));
     }
 
     match /support_shared_data/{dataId} {
-      allow read: if isSignedIn();
+      allow read: if hasActiveUserProfile();
       allow create, update, delete: if canWriteSupport();
     }
 
@@ -1585,7 +1626,8 @@ service cloud.firestore {
           canReadMasterData()
           || (collectionId == 'companies' && canReadClientCompany(docId))
           || (collectionId == 'companies' && canReadRentalCompany(docId))
-          || (collectionId == 'sites' && canReadClientSite())
+          || (collectionId == 'sites' && canReadClientSite(docId))
+          || (collectionId == 'sites' && isRentalPortalAccount() && ('linkedSiteIds' in userProfile()) && hasLinkedSite(docId))
         );
       allow create, update, delete: if isMasterDataCollection(collectionId) && canWriteMasterData();
     }
@@ -1819,8 +1861,8 @@ service cloud.firestore {
     }
 
     match /welfare_game_daily_usage/{usageId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
+      allow read: if hasActiveUserProfile();
+      allow create, update: if hasActiveUserProfile();
       allow delete: if isAdmin();
     }
 
@@ -1851,11 +1893,11 @@ service cloud.firestore {
     }
 
     match /{collectionId}/{docId} {
-      allow read, write: if isSignedIn() && !isLockedCollection(collectionId);
+      allow read, write: if hasActiveUserProfile() && !isLockedCollection(collectionId);
     }
 
     match /{collectionId}/{docId}/{subcollection}/{nestedDocId}/{nested=**} {
-      allow read, write: if isSignedIn() && !isLockedCollection(collectionId);
+      allow read, write: if hasActiveUserProfile() && !isLockedCollection(collectionId);
     }
   }
 }

@@ -10,9 +10,11 @@ import { teamService, Team } from '../../services/teamService';
 import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typedDateInput';
 import { resolveReportPayType, resolveWorkerPayType } from '../../utils/payType';
 import { buildTeamIdsByAffiliation } from '../../utils/cheongyeonTeams';
+import { buildWorkedTeamIds } from '../../utils/personnelHistoryWorkedTeams';
 import OutputManagementTabs from '../../components/common/OutputManagementTabs';
 import MonthNavigator from '../../components/common/MonthNavigator';
 import { useSearchParams } from 'react-router-dom';
+import { formatTextForDisplay, formatNumberForDisplay } from '../../utils/zeroDisplay';
 
 type CompanyTypeFilter = 'construction' | 'partner';
 type SalaryModelFilter = '전체' | '일급제' | '월급제' | '지원팀' | '용역팀';
@@ -116,7 +118,7 @@ const formatResidentNumberForDisplay = (rawValue: string): string => {
 
 const maskResidentNumberForDisplay = (rawValue: string): string => {
     const formatted = formatResidentNumberForDisplay(rawValue);
-    if (!formatted) return '-';
+    if (formatTextForDisplay(formatted) === '-') return '-';
 
     const digits = formatted.replace(/[^0-9]/g, '');
     if (digits.length === 13) {
@@ -129,7 +131,7 @@ const maskResidentNumberForDisplay = (rawValue: string): string => {
 };
 
 const formatManDay = (value: number): string => {
-    return Number.isFinite(value) ? value.toFixed(2) : '0.00';
+    return formatNumberForDisplay(value, (amount) => amount.toFixed(2));
 };
 
 const escapeRegExp = (value: string): string => {
@@ -236,6 +238,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     const [companies, setCompanies] = useState<Company[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [allWorkers, setAllWorkers] = useState<Worker[]>([]);
+    const [workedTeamIds, setWorkedTeamIds] = useState<Set<string> | null>(null);
     const [initialLoading, setInitialLoading] = useState(true);
     const [loading, setLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
@@ -389,10 +392,16 @@ const TotalPersonnelHistoryInner: React.FC = () => {
 
     const teamOptions = useMemo(() => {
         return teams
-            .filter((team) => Boolean(team.id) && team.id && allowedTeamIds.has(team.id))
+            .filter((team) => {
+                const teamId = String(team.id ?? '').trim();
+                const legacyId = String(team.legacyId ?? '').trim();
+                if (!teamId || (!allowedTeamIds.has(teamId) && !allowedTeamIds.has(legacyId))) return false;
+                if (workedTeamIds === null) return true;
+                return workedTeamIds.has(teamId) || (legacyId ? workedTeamIds.has(legacyId) : false);
+            })
             .slice()
             .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko'));
-    }, [allowedTeamIds, teams]);
+    }, [allowedTeamIds, teams, workedTeamIds]);
 
     const workerOptions = useMemo(() => {
         const filtered = allWorkers
@@ -548,6 +557,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     const handleDateInputChange = (field: 'start' | 'end', value: string) => {
         const sanitized = sanitizeTypedDateInput(value);
         const normalized = normalizeTypedDateInput(sanitized);
+        setWorkedTeamIds(null);
 
         if (field === 'start') {
             setStartDateInput(sanitized);
@@ -582,6 +592,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                 dailyReportService.getReportWorkerRowsByRange({ startDate: effectiveStartDate, endDate: effectiveEndDate })
             ]);
             setAllWorkers(workers);
+            setWorkedTeamIds(buildWorkedTeamIds(reportRows, teams, workers));
             const workerById = new Map<string, Worker>();
             workers.forEach((w) => {
                 const id = String(w.id ?? '').trim();
@@ -792,6 +803,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         } catch (error) {
             console.error('Error fetching history data:', error);
             setHistoryData([]);
+            setWorkedTeamIds(null);
             setErrorMessage('데이터 조회 중 오류가 발생했습니다. 잠시 후 다시 조회해주세요.');
         } finally {
             setLoading(false);
@@ -808,6 +820,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         setEndDate(nextRange.endDate);
         setStartDateInput(nextRange.startDate);
         setEndDateInput(nextRange.endDate);
+        setWorkedTeamIds(null);
         setErrorMessage('');
 
         if (refreshAfterChange && !initialLoading) {
@@ -1318,18 +1331,18 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                             <td className={`px-4 py-3 text-center text-slate-400 text-xs border-b border-slate-100 ${isFixed ? 'sticky left-0 z-10 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`}>{index + 1}</td>
                                             <td className={`px-4 py-3 font-bold text-slate-800 border-b border-slate-100 ${isFixed ? 'sticky left-[48px] z-10 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`}>{item.name}</td>
                                             <td className={`px-4 py-3 text-slate-600 border-b border-slate-100 ${isFixed ? 'sticky left-[148px] z-10 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`}>{item.teamName || '-'}</td>
-                                            <td className="px-4 py-3 text-slate-500 font-mono text-xs border-b border-slate-100">{maskResidentNumberForDisplay(item.idNumber)}</td>
+                                            <td className="px-4 py-3 text-slate-500 font-sans tabular-nums text-xs border-b border-slate-100">{maskResidentNumberForDisplay(item.idNumber)}</td>
                                             <td className="px-4 py-3 border-b border-slate-100">
                                                 <span className={`px-2 py-0.5 rounded text-xs font-medium ${item.salaryModel === '일급제' ? 'bg-blue-50 text-blue-600' :
                                                     item.salaryModel === '월급제' ? 'bg-indigo-50 text-indigo-600' :
                                                         item.salaryModel === '지원팀' ? 'bg-green-50 text-green-600' : 'bg-slate-100 text-slate-600'
                                                     }`}>{item.salaryModel}</span>
                                             </td>
-                                            <td className="px-3 py-3 text-right font-mono text-slate-500 bg-slate-50/30 border-b border-r border-slate-100">{item.laborManDay > 0 ? formatManDay(item.laborManDay) : '-'}</td>
-                                            <td className="px-3 py-3 text-right font-mono text-slate-500 bg-slate-50/30 border-b border-r border-slate-100">{item.invoiceManDay > 0 ? formatManDay(item.invoiceManDay) : '-'}</td>
-                                            <td className="px-3 py-3 text-right font-mono text-slate-800 font-bold bg-slate-100/30 border-b border-r border-slate-100 tracking-tighter">{formatManDay(item.totalManDay)}</td>
+                                            <td className="px-3 py-3 text-right font-sans tabular-nums text-slate-500 bg-slate-50/30 border-b border-r border-slate-100">{item.laborManDay > 0 ? formatManDay(item.laborManDay) : '-'}</td>
+                                            <td className="px-3 py-3 text-right font-sans tabular-nums text-slate-500 bg-slate-50/30 border-b border-r border-slate-100">{item.invoiceManDay > 0 ? formatManDay(item.invoiceManDay) : '-'}</td>
+                                            <td className="px-3 py-3 text-right font-sans tabular-nums text-slate-800 font-bold bg-slate-100/30 border-b border-r border-slate-100 tracking-tighter">{formatManDay(item.totalManDay)}</td>
                                             <td
-                                                className="px-4 py-3 text-right font-mono text-xs border-b border-r border-slate-100"
+                                                className="px-4 py-3 text-right font-sans tabular-nums text-xs border-b border-r border-slate-100"
                                                 title={item.unitPriceBreakdown.length > 1
                                                     ? `기간 가중 평균: ${item.unitPrice.toLocaleString()}원\n${item.unitPriceBreakdown
                                                         .map((price) => `${price.unitPrice.toLocaleString()}원 × ${formatManDay(price.manDay)}일 = ${price.amount.toLocaleString()}원`)
@@ -1346,14 +1359,14 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                                         ))}
                                                     </div>
                                                 ) : (
-                                                    <span className="text-slate-500">{item.unitPrice.toLocaleString()}원</span>
+                                                    <span className="text-slate-500">{item.unitPrice === 0 ? '-' : `${item.unitPrice.toLocaleString()}원`}</span>
                                                 )}
                                             </td>
-                                            <td className="px-3 py-3 text-right font-mono text-slate-600 border-b border-r border-slate-100">{item.laborAmount > 0 ? item.laborAmount.toLocaleString() : '-'}</td>
-                                            <td className="px-3 py-3 text-right font-mono text-slate-600 border-b border-r border-slate-100">{item.invoiceAmount > 0 ? item.invoiceAmount.toLocaleString() : '-'}</td>
+                                            <td className="px-3 py-3 text-right font-sans tabular-nums text-slate-600 border-b border-r border-slate-100">{item.laborAmount > 0 ? item.laborAmount.toLocaleString() : '-'}</td>
+                                            <td className="px-3 py-3 text-right font-sans tabular-nums text-slate-600 border-b border-r border-slate-100">{item.invoiceAmount > 0 ? item.invoiceAmount.toLocaleString() : '-'}</td>
                                             <td className="px-4 py-3 text-right border-b border-slate-100 bg-blue-50/10">
-                                                <span className="font-bold text-blue-700 font-mono tracking-tighter">{item.totalAmount.toLocaleString()}</span>
-                                                <span className="text-[10px] text-slate-400 ml-0.5">원</span>
+                                                <span className="font-bold text-blue-700 font-sans tabular-nums tracking-tighter">{formatNumberForDisplay(item.totalAmount)}</span>
+                                                {item.totalAmount !== 0 && <span className="text-[10px] text-slate-400 ml-0.5">원</span>}
                                             </td>
                                         </tr>
                                     ))
@@ -1363,24 +1376,25 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                 <tfoot className="bg-slate-50 font-bold border-t border-slate-200 sticky bottom-0 z-40">
                                     <tr>
                                         <td colSpan={5} className="px-4 py-3 text-center text-slate-600 border-r border-slate-200">전체 합계</td>
-                                        <td className="px-3 py-3 text-right text-slate-500 font-mono text-xs border-r border-slate-200">
+                                        <td className="px-3 py-3 text-right text-slate-500 font-sans tabular-nums text-xs border-r border-slate-200">
                                             {formatManDay(sortedHistoryData.reduce((sum, item) => sum + item.laborManDay, 0))}
                                         </td>
-                                        <td className="px-3 py-3 text-right text-slate-500 font-mono text-xs border-r border-slate-200">
+                                        <td className="px-3 py-3 text-right text-slate-500 font-sans tabular-nums text-xs border-r border-slate-200">
                                             {formatManDay(sortedHistoryData.reduce((sum, item) => sum + item.invoiceManDay, 0))}
                                         </td>
-                                        <td className="px-3 py-3 text-right text-slate-900 font-mono border-r border-slate-200">
+                                        <td className="px-3 py-3 text-right text-slate-900 font-sans tabular-nums border-r border-slate-200">
                                             {formatManDay(sortedHistoryData.reduce((sum, item) => sum + item.totalManDay, 0))}
                                         </td>
                                         <td className="px-4 py-3 border-r border-slate-200"></td>
-                                        <td className="px-3 py-3 text-right text-slate-600 font-mono text-xs border-r border-slate-200">
-                                            {sortedHistoryData.reduce((sum, item) => sum + item.laborAmount, 0).toLocaleString()}
+                                        <td className="px-3 py-3 text-right text-slate-600 font-sans tabular-nums text-xs border-r border-slate-200">
+                                            {formatNumberForDisplay(sortedHistoryData.reduce((sum, item) => sum + item.laborAmount, 0))}
                                         </td>
-                                        <td className="px-3 py-3 text-right text-slate-600 font-mono text-xs border-r border-slate-200">
-                                            {sortedHistoryData.reduce((sum, item) => sum + item.invoiceAmount, 0).toLocaleString()}
+                                        <td className="px-3 py-3 text-right text-slate-600 font-sans tabular-nums text-xs border-r border-slate-200">
+                                            {formatNumberForDisplay(sortedHistoryData.reduce((sum, item) => sum + item.invoiceAmount, 0))}
                                         </td>
-                                        <td className="px-4 py-3 text-right text-blue-800 font-mono font-black text-base">
-                                            {sortedHistoryData.reduce((sum, item) => sum + item.totalAmount, 0).toLocaleString()} <span className="text-[10px] font-normal">원</span>
+                                        <td className="px-4 py-3 text-right text-blue-800 font-sans tabular-nums font-black text-base">
+                                            {formatNumberForDisplay(sortedHistoryData.reduce((sum, item) => sum + item.totalAmount, 0))}
+                                            {sortedHistoryData.some((item) => item.totalAmount !== 0) && <span className="text-[10px] font-normal"> 원</span>}
                                         </td>
                                     </tr>
                                 </tfoot>

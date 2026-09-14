@@ -2,8 +2,9 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 
 export const MAX_DAY_COLUMNS = 31;
-export const DAY_LABELS_FIRST = Array.from({ length: 15 }, (_, i) => i + 1);
-export const DAY_LABELS_SECOND = Array.from({ length: 16 }, (_, i) => i + 16);
+export const DAY_LABELS_FIRST = Array.from({ length: 16 }, (_, i) => i + 1);
+export const DAY_LABELS_SECOND = Array.from({ length: 15 }, (_, i) => i + 17);
+export const SPLIT_DAY_COLUMN_COUNT = Math.max(DAY_LABELS_FIRST.length, DAY_LABELS_SECOND.length);
 
 export interface SupportLaborStatementExcelRow {
     workerId?: string;
@@ -36,8 +37,9 @@ export interface SupportLaborStatementExcelBlock {
     rows: SupportLaborStatementExcelRow[];
 }
 
-interface GenerateLaborStatementExcelOptions {
+export interface GenerateLaborStatementExcelOptions {
     fileName?: string;
+    showBankColumn?: boolean;
 }
 
 const COLUMN = {
@@ -48,7 +50,26 @@ const COLUMN = {
     dayStart: 5,
     attendance: 21,
     amount: 22,
-    billing: 23
+    billing: 23,
+    bank: 24
+};
+
+export const buildLaborStatementWorkbook = (
+    statements: SupportLaborStatementExcelBlock[],
+    yearMonth: string,
+    options: GenerateLaborStatementExcelOptions = {}
+): ExcelJS.Workbook => {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Smart Construction';
+    workbook.created = new Date();
+
+    const showBankColumn = options.showBankColumn !== false;
+    statements.forEach((statement, statementIndex) => {
+        const worksheet = workbook.addWorksheet(resolveUniqueSheetName(workbook, statement, statementIndex));
+        buildStatementWorksheet(worksheet, statement, yearMonth, showBankColumn);
+    });
+
+    return workbook;
 };
 
 export const generateLaborStatementExcel = async (
@@ -56,15 +77,7 @@ export const generateLaborStatementExcel = async (
     yearMonth: string,
     options: GenerateLaborStatementExcelOptions = {}
 ) => {
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'Smart Construction';
-    workbook.created = new Date();
-
-    statements.forEach((statement, statementIndex) => {
-        const worksheet = workbook.addWorksheet(resolveUniqueSheetName(workbook, statement, statementIndex));
-        buildStatementWorksheet(worksheet, statement, yearMonth);
-    });
-
+    const workbook = buildLaborStatementWorkbook(statements, yearMonth, options);
     const buffer = await workbook.xlsx.writeBuffer();
     saveAs(new Blob([buffer]), options.fileName ?? `노무내역서_${yearMonth}.xlsx`);
 };
@@ -72,17 +85,19 @@ export const generateLaborStatementExcel = async (
 const buildStatementWorksheet = (
     worksheet: ExcelJS.Worksheet,
     statement: SupportLaborStatementExcelBlock,
-    yearMonth: string
+    yearMonth: string,
+    showBankColumn: boolean
 ) => {
     worksheet.columns = [
         { width: 6 },
         { width: 14 },
         { width: 16 },
         { width: 28 },
-        ...Array.from({ length: DAY_LABELS_SECOND.length }, () => ({ width: 4.5 })),
+        ...Array.from({ length: SPLIT_DAY_COLUMN_COUNT }, () => ({ width: 4.5 })),
         { width: 9 },
         { width: 13 },
-        { width: 13 }
+        { width: 13 },
+        { width: 24 }
     ];
     worksheet.views = [{ state: 'frozen', ySplit: 4 }];
     worksheet.pageSetup = {
@@ -103,10 +118,11 @@ const buildStatementWorksheet = (
     };
 
     const showTaxColumns = false;
-    const lastColumn = showTaxColumns ? COLUMN.billing : COLUMN.amount;
+    const lastColumn = showBankColumn ? COLUMN.bank : showTaxColumns ? COLUMN.billing : COLUMN.amount;
     const lastColumnLetter = getExcelColumnLetter(lastColumn);
     const monthNumber = parseInt(yearMonth.split('-')[1] ?? '0', 10);
     worksheet.getColumn(COLUMN.billing).hidden = !showTaxColumns;
+    worksheet.getColumn(COLUMN.bank).hidden = !showBankColumn;
 
     worksheet.mergeCells(`A1:${lastColumnLetter}1`);
     const titleCell = worksheet.getCell('A1');
@@ -127,19 +143,19 @@ const buildStatementWorksheet = (
     });
     worksheet.getRow(2).height = 22;
 
-    writeHeader(worksheet, showTaxColumns);
+    writeHeader(worksheet, showTaxColumns, showBankColumn);
 
     let currentRow = 5;
     statement.rows.forEach((row, index) => {
-        writeWorkerRows(worksheet, currentRow, row, index + 1, showTaxColumns);
+        writeWorkerRows(worksheet, currentRow, row, index + 1, showTaxColumns, showBankColumn);
         currentRow += 2;
     });
 
-    writeTotalRows(worksheet, currentRow, statement.rows, statement.settlementName, showTaxColumns);
+    writeTotalRows(worksheet, currentRow, statement.rows, statement.settlementName, showTaxColumns, showBankColumn);
 };
 
-const writeHeader = (worksheet: ExcelJS.Worksheet, showTaxColumns: boolean) => {
-    const lastColumn = showTaxColumns ? COLUMN.billing : COLUMN.amount;
+const writeHeader = (worksheet: ExcelJS.Worksheet, showTaxColumns: boolean, showBankColumn: boolean) => {
+    const lastColumn = showBankColumn ? COLUMN.bank : showTaxColumns ? COLUMN.billing : COLUMN.amount;
     const top = worksheet.getRow(3);
     const bottom = worksheet.getRow(4);
     top.height = 20;
@@ -149,6 +165,7 @@ const writeHeader = (worksheet: ExcelJS.Worksheet, showTaxColumns: boolean) => {
     worksheet.mergeCells('B3:B4');
     worksheet.mergeCells('D3:D4');
     worksheet.mergeCells('U3:U4');
+    if (showBankColumn) worksheet.mergeCells('X3:X4');
 
     top.getCell(COLUMN.no).value = 'NO';
     top.getCell(COLUMN.name).value = '성명';
@@ -163,17 +180,15 @@ const writeHeader = (worksheet: ExcelJS.Worksheet, showTaxColumns: boolean) => {
         cell.font = { bold: true, color: { argb: 'FF0369A1' } };
     });
 
-    const spacerCell = top.getCell(COLUMN.dayStart + DAY_LABELS_FIRST.length);
-    spacerCell.value = 'X';
-    spacerCell.fill = solidFill('FFF8FAFC');
-    spacerCell.font = { bold: true, color: { argb: 'FF64748B' } };
-
     DAY_LABELS_SECOND.forEach((day, idx) => {
         const cell = bottom.getCell(COLUMN.dayStart + idx);
-        cell.value = day;
+        cell.value = String(day).padStart(2, '0');
         cell.fill = solidFill('FFFFF1F2');
         cell.font = { bold: true, color: { argb: 'FFBE123C' } };
     });
+    const spacerCell = bottom.getCell(COLUMN.dayStart + DAY_LABELS_SECOND.length);
+    spacerCell.value = '';
+    spacerCell.fill = solidFill('FFF8FAFC');
 
     top.getCell(COLUMN.attendance).value = '출역';
     top.getCell(COLUMN.amount).value = '청구단가';
@@ -181,6 +196,12 @@ const writeHeader = (worksheet: ExcelJS.Worksheet, showTaxColumns: boolean) => {
     if (showTaxColumns) {
         top.getCell(COLUMN.billing).value = '부가세';
         bottom.getCell(COLUMN.billing).value = '발행금액';
+    }
+    if (showBankColumn) {
+        const bankHeaderCell = top.getCell(COLUMN.bank);
+        bankHeaderCell.value = '계좌번호 / 지급구분';
+        bankHeaderCell.fill = solidFill('FFFEF3C7');
+        bankHeaderCell.font = { bold: true, color: { argb: 'FF854D0E' } };
     }
 
     for (let row = 3; row <= 4; row++) {
@@ -198,9 +219,10 @@ const writeWorkerRows = (
     rowNumber: number,
     row: SupportLaborStatementExcelRow,
     sequence: number,
-    showTaxColumns: boolean
+    showTaxColumns: boolean,
+    showBankColumn: boolean
 ) => {
-    const lastColumn = showTaxColumns ? COLUMN.billing : COLUMN.amount;
+    const lastColumn = showBankColumn ? COLUMN.bank : showTaxColumns ? COLUMN.billing : COLUMN.amount;
     worksheet.getRow(rowNumber).height = 19;
     worksheet.getRow(rowNumber + 1).height = 19;
 
@@ -208,6 +230,7 @@ const writeWorkerRows = (
     worksheet.mergeCells(`B${rowNumber}:B${rowNumber + 1}`);
     worksheet.mergeCells(`D${rowNumber}:D${rowNumber + 1}`);
     worksheet.mergeCells(`U${rowNumber}:U${rowNumber + 1}`);
+    if (showBankColumn) worksheet.mergeCells(`X${rowNumber}:X${rowNumber + 1}`);
 
     worksheet.getCell(rowNumber, COLUMN.no).value = sequence;
     worksheet.getCell(rowNumber, COLUMN.name).value = row.workerName || '-';
@@ -220,13 +243,12 @@ const writeWorkerRows = (
         cell.value = formatDayValue(row.days[day - 1] ?? 0);
         cell.fill = solidFill('FFF0F9FF');
     });
-    worksheet.getCell(rowNumber, COLUMN.dayStart + DAY_LABELS_FIRST.length).fill = solidFill('FFF8FAFC');
-
     DAY_LABELS_SECOND.forEach((day, idx) => {
         const cell = worksheet.getCell(rowNumber + 1, COLUMN.dayStart + idx);
         cell.value = formatDayValue(row.days[day - 1] ?? 0);
         cell.fill = solidFill('FFFFF7F7');
     });
+    worksheet.getCell(rowNumber + 1, COLUMN.dayStart + DAY_LABELS_SECOND.length).fill = solidFill('FFF8FAFC');
 
     const attendanceCell = worksheet.getCell(rowNumber, COLUMN.attendance);
     attendanceCell.value = roundOneDecimal(row.totalManDay);
@@ -255,6 +277,19 @@ const writeWorkerRows = (
         issuedAmountCell.fill = solidFill('FFFEF3C7');
     }
 
+    if (showBankColumn) {
+        const bankCell = worksheet.getCell(rowNumber, COLUMN.bank);
+        bankCell.value = formatPaymentAccount(row);
+        bankCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        if (row.payType === 'delegate') {
+            bankCell.fill = solidFill('FFFEF3C7');
+            bankCell.font = { bold: true, color: { argb: 'FF854D0E' } };
+        } else {
+            bankCell.fill = solidFill('FFFFFFFF');
+            bankCell.font = { bold: true, color: { argb: 'FF334155' } };
+        }
+    }
+
     for (let rowIdx = rowNumber; rowIdx <= rowNumber + 1; rowIdx++) {
         for (let col = 1; col <= lastColumn; col++) {
             const cell = worksheet.getCell(rowIdx, col);
@@ -269,9 +304,10 @@ const writeTotalRows = (
     rowNumber: number,
     rows: SupportLaborStatementExcelRow[],
     settlementName: string,
-    showTaxColumns: boolean
+    showTaxColumns: boolean,
+    showBankColumn: boolean
 ) => {
-    const lastColumn = showTaxColumns ? COLUMN.billing : COLUMN.amount;
+    const lastColumn = showBankColumn ? COLUMN.bank : showTaxColumns ? COLUMN.billing : COLUMN.amount;
     const dayTotals = Array.from({ length: MAX_DAY_COLUMNS }, () => 0);
     rows.forEach((row) => {
         row.days.forEach((value, index) => {
@@ -290,6 +326,7 @@ const writeTotalRows = (
     worksheet.mergeCells(`A${rowNumber}:D${rowNumber}`);
     worksheet.mergeCells(`A${rowNumber + 1}:D${rowNumber + 1}`);
     worksheet.mergeCells(`U${rowNumber}:U${rowNumber + 1}`);
+    if (showBankColumn) worksheet.mergeCells(`X${rowNumber}:X${rowNumber + 1}`);
 
     worksheet.getCell(rowNumber, 1).value = '합 계';
     worksheet.getCell(rowNumber + 1, 1).value = showTaxColumns ? '공급/발행금액' : '공급가액';
@@ -298,12 +335,15 @@ const writeTotalRows = (
     DAY_LABELS_FIRST.forEach((day, idx) => {
         const cell = worksheet.getCell(rowNumber, COLUMN.dayStart + idx);
         cell.value = formatDayValue(dayTotals[day - 1]);
+        cell.fill = solidFill('FFE0F2FE');
     });
 
     DAY_LABELS_SECOND.forEach((day, idx) => {
         const cell = worksheet.getCell(rowNumber + 1, COLUMN.dayStart + idx);
         cell.value = formatDayValue(dayTotals[day - 1]);
+        cell.fill = solidFill('FFFFF1F2');
     });
+    worksheet.getCell(rowNumber + 1, COLUMN.dayStart + DAY_LABELS_SECOND.length).fill = solidFill('FFF8FAFC');
 
     const totalManDayCell = worksheet.getCell(rowNumber, COLUMN.attendance);
     totalManDayCell.value = roundOneDecimal(totalManDay);
@@ -329,6 +369,9 @@ const writeTotalRows = (
         totalIssuedAmountCell.numFmt = '#,##0';
         totalIssuedAmountCell.font = { bold: true, color: { argb: 'FF92400E' } };
         totalIssuedAmountCell.fill = solidFill('FFFDE68A');
+    }
+    if (showBankColumn) {
+        worksheet.getCell(rowNumber, COLUMN.bank).fill = solidFill('FFFEF3C7');
     }
 
     for (let rowIdx = rowNumber; rowIdx <= rowNumber + 1; rowIdx++) {
@@ -387,6 +430,15 @@ const formatDelegateAccountLabel = (row: Pick<SupportLaborStatementExcelRow, 'ba
     const accountHolder = String(row.accountHolder ?? '').trim();
     const holderLabel = accountHolder ? `예금주 ${accountHolder}` : '';
     return [bankName, accountNumber, holderLabel].filter(Boolean).join(' ');
+};
+
+const formatPaymentAccount = (row: SupportLaborStatementExcelRow): string => {
+    const paymentLabel = row.payType === 'delegate' ? '위임' : '직불';
+    const bankLabel = [row.bankName, row.accountHolder, row.accountNumber]
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)
+        .join(' / ');
+    return bankLabel ? `${paymentLabel}\n${bankLabel}` : paymentLabel;
 };
 
 const sanitizeSheetName = (value: string): string => {

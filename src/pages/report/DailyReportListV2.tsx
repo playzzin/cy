@@ -43,6 +43,7 @@ import {
 } from '../../hooks/useWorkerAccessScope';
 import '../taxinvoice/WorkbookLedgerPage.css';
 import './DailyReportListV2.css';
+import { formatTextForDisplay, formatNumberForDisplay } from '../../utils/zeroDisplay';
 
 interface DailyReportListV2Props {
     initialDate?: string;
@@ -3463,8 +3464,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                                 />
                                             </td>
                                         )}
-                                        <td className={`daily-report-col-date px-2.5 py-1.5 font-mono text-slate-500 ${isFixed ? `sticky z-30 bg-inherit border-r border-slate-200 ${isEditMode ? 'left-[48px]' : 'left-0'}` : ''}`}>
-                                            {row.date}
+                                        <td className={`daily-report-col-date px-2.5 py-1.5 font-sans tabular-nums text-slate-500 ${isFixed ? `sticky z-30 bg-inherit border-r border-slate-200 ${isEditMode ? 'left-[48px]' : 'left-0'}` : ''}`}>
+                                            {formatTextForDisplay(row.date)}
                                         </td>
                                         <td className="px-2.5 py-1.5">
                                             {isInlineEditing ? (
@@ -3689,7 +3690,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                                 <span className="text-slate-500">{resolveReportPayType(row)}</span>
                                             )}
                                         </td>
-                                        <td className="px-2.5 py-1.5 text-right font-mono">
+                                        <td className="px-2.5 py-1.5 text-right font-sans tabular-nums">
                                             {isInlineEditing && !isEmptyReport ? (
                                                 <input
                                                     type="number"
@@ -3701,10 +3702,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                             ) : isEmptyReport ? (
                                                 <span className="text-slate-300">-</span>
                                             ) : (
-                                                <span className="font-bold">{formatManDay(row.manDay)}</span>
+                                                <span className="font-bold">{formatNumberForDisplay(row.manDay, (value) => value.toFixed(1))}</span>
                                             )}
                                         </td>
-                                        <td className="px-2.5 py-1.5 text-right font-mono">
+                                        <td className="px-2.5 py-1.5 text-right font-sans tabular-nums">
                                             {isInlineEditing && !isEmptyReport ? (
                                                 <input
                                                     type="number"
@@ -3715,11 +3716,14 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                             ) : isEmptyReport ? (
                                                 <span className="text-slate-300">-</span>
                                             ) : (
-                                                formatNumber(Math.round(row.unitPrice))
+                                                formatNumberForDisplay(row.unitPrice, (value) => formatNumber(Math.round(value)))
                                             )}
                                         </td>
-                                        <td className="px-2.5 py-1.5 text-right font-mono font-bold text-indigo-600">
-                                            {isEmptyReport ? '-' : formatNumber(Math.round((Number(displayRow.manDay) || 0) * (Number(displayRow.unitPrice) || 0)))}
+                                        <td className="px-2.5 py-1.5 text-right font-sans tabular-nums font-bold text-indigo-600">
+                                            {isEmptyReport ? '-' : formatNumberForDisplay(
+                                                (Number(displayRow.manDay) || 0) * (Number(displayRow.unitPrice) || 0),
+                                                (value) => formatNumber(Math.round(value))
+                                            )}
                                         </td>
                                         <td className="px-2.5 py-1.5">
                                             {isInlineEditing ? (

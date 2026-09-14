@@ -40,3 +40,13 @@ export interface CreateSupportWriteOperationLogInput {
   actor?: Partial<SupportWriteOperationActor>;
   metadata?: Record<string, unknown>;
 }
+
+
+/** Local presentation only; not a persisted status, receipt, authorization or retry token. */
+export type SupportWriteFeedbackOutcome =
+  | 'completed'
+  | 'partial'
+  | 'blocked'
+  | 'unknown'
+  | 'refresh-failed'
+  | 'record-failed';

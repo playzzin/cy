@@ -113,6 +113,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                             "권한 변경 로그",
                             "엑셀 업로드·다운로드 로그",
                             "PDF 업로드·다운로드 로그",
+                            "신분증 로그",
                             "자동 메시지 발송 로그"
                         ]
                     },

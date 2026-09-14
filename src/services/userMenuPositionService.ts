@@ -174,6 +174,35 @@ class UserMenuPositionService {
         await this.save();
     }
 
+    /** 모든 사용자에게서 특정 추가 직책을 한 번에 해제 */
+    public async removePositionFromAllUsers(position: string): Promise<string[]> {
+        const target = String(position || '').trim();
+        if (!target) return [];
+
+        if (isDevAdminSessionEnabled()) {
+            const current = getDevUserPositionMap();
+            const affected = Object.entries(current)
+                .filter(([, positions]) => positions.includes(target))
+                .map(([uid]) => uid);
+            affected.forEach((uid) => removeDevUserPosition(uid, target));
+            return affected;
+        }
+
+        const affected: string[] = [];
+        const nextData: UserMenuPositionMap = {};
+
+        Object.entries(this.data).forEach(([uid, positions]) => {
+            const nextPositions = positions.filter((value) => value !== target);
+            if (nextPositions.length !== positions.length) affected.push(uid);
+            if (nextPositions.length > 0) nextData[uid] = nextPositions;
+        });
+
+        if (affected.length === 0) return [];
+        this.data = nextData;
+        await this.save();
+        return affected;
+    }
+
     /** 蹂寃?援щ룆 */
     public subscribe(listener: (data: UserMenuPositionMap) => void): () => void {
         if (isDevAdminSessionEnabled()) {

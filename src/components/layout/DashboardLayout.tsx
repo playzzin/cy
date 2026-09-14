@@ -19,9 +19,7 @@ import { SiteData, SiteDataType, MenuItem, PositionItem } from '../../types/menu
 import { findBusinessPartnerPositionDefinition } from '../../constants/businessPartnerPositions';
 import { MENU_PATHS } from '../../constants/menuPaths';
 import { matchesMenuPosition } from '../../utils/menuPosition';
-import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faTriangleExclamation, faRotateRight } from '@fortawesome/free-solid-svg-icons';
+import RuntimeErrorBoundary from '../../app/bootstrap/RuntimeErrorBoundary';
 import { SiteModeProvider } from '../../contexts/SiteModeContext';
 import {
     applyDocumentTheme,
@@ -37,29 +35,6 @@ interface DashboardLayoutProps {
 }
 
 type QuickTool = 'calculator' | 'camera';
-
-// Error Fallback Component for UI Stability
-const ErrorFallback = ({ error, resetErrorBoundary }: FallbackProps) => {
-    const message = error instanceof Error ? error.message : String(error ?? '');
-
-    return (
-        <div className="flex flex-col items-center justify-center h-full p-6 text-center bg-slate-50 rounded-lg border border-slate-200 m-4">
-            <FontAwesomeIcon icon={faTriangleExclamation} className="text-amber-500 text-3xl mb-3" />
-            <h3 className="text-lg font-bold text-slate-700 mb-1">일시적인 오류 발생</h3>
-            <p className="text-slate-500 text-sm mb-4">화면을 불러오는 중 문제가 발생했습니다.</p>
-            <pre className="text-xs text-red-400 bg-red-50 p-2 rounded mb-4 max-w-xs overflow-auto">
-                {message}
-            </pre>
-            <button
-                onClick={resetErrorBoundary}
-                className="px-4 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-700 text-sm font-medium transition-colors flex items-center gap-2"
-            >
-                <FontAwesomeIcon icon={faRotateRight} />
-                다시 시도
-            </button>
-        </div>
-    );
-};
 
 const normalizePositionKey = (value: unknown): string =>
     String(value || '').trim().toLowerCase().replace(/[\s_-]/g, '');
@@ -736,7 +711,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                     />
 
                     {/* Same Sidebar as Admin ERP (Left Side) */}
-                    <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => window.location.reload()}>
+                    <RuntimeErrorBoundary>
                         <Sidebar
                             currentSite={effectiveSite}
                             currentSiteData={currentSiteData}
@@ -755,7 +730,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                             toggleSidebar={toggleSidebar}
                             logoUrl={activeLogoUrl}
                         />
-                    </ErrorBoundary>
+                    </RuntimeErrorBoundary>
 
 
                     {/* Bottom Panel */}
@@ -783,13 +758,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                             closeAll();
                         }
                     }}>
-                        <ErrorBoundary
-                            FallbackComponent={ErrorFallback}
-                            onReset={() => window.location.reload()}
+                        <RuntimeErrorBoundary
                             resetKeys={[location.pathname]}
                         >
                             {children}
-                        </ErrorBoundary>
+                        </RuntimeErrorBoundary>
                     </main>
                 </div>
             </SiteModeProvider>
@@ -820,7 +793,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                     logoUrl={activeLogoUrl}
                 />
 
-                <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => window.location.reload()}>
+                <RuntimeErrorBoundary>
                     <Sidebar
                         currentSite={effectiveSite}
                         currentSiteData={currentSiteData}
@@ -839,7 +812,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                         toggleSidebar={toggleSidebar}
                         logoUrl={activeLogoUrl}
                     />
-                </ErrorBoundary>
+                </RuntimeErrorBoundary>
 
 
                 <BottomPanel
@@ -864,13 +837,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                         closeAll();
                     }
                 }}>
-                    <ErrorBoundary
-                        FallbackComponent={ErrorFallback}
-                        onReset={() => window.location.reload()}
+                    <RuntimeErrorBoundary
                         resetKeys={[location.pathname]}
                     >
                         {children}
-                    </ErrorBoundary>
+                    </RuntimeErrorBoundary>
                 </main>
             </div>
         </SiteModeProvider>

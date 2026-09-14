@@ -5,6 +5,7 @@ import { AppInstallButton } from './AppInstallButton';
 import { DashboardModeConfig } from './roleDashboardConfig';
 import type { PositionItem } from '../../types/menu';
 import { resolveIcon } from '../../constants/iconMap';
+import { matchesMenuPosition } from '../../utils/menuPosition';
 
 interface DashboardHeaderProps {
     user: any;
@@ -168,8 +169,11 @@ export const DashboardHeader = React.memo<DashboardHeaderProps>(({
     currentPosition,
     onPositionChange
 }) => {
+    const currentPositionName = positions.find((position) => position.id === currentPosition)?.name;
+    const showPositionSwitcher = matchesMenuPosition(currentPosition, currentPositionName, 'dev');
+
     return (
-            <HeaderContainer $gradient={modeConfig.gradient}>
+        <HeaderContainer $gradient={modeConfig.gradient}>
             <ContentHelper>
                 <LogoSection>
                     <BrandLogo src="/icons/icon-192.png?v=20260524" alt="청연ENG ERP 로고" />
@@ -196,26 +200,28 @@ export const DashboardHeader = React.memo<DashboardHeaderProps>(({
 
                     <ActionGroup>
                         <AppInstallButton />
-                        <ModeSwitcher aria-label="대시보드 직책 모드">
-                            {positions.length > 0 ? (
-                                positions.map((position) => (
-                                    <ModeButton
-                                        key={position.id}
-                                        type="button"
-                                        $active={currentPosition === position.id}
-                                        onClick={() => onPositionChange(position.id)}
-                                    >
-                                        <FontAwesomeIcon icon={resolveIcon(position.icon, modeConfig.icon)} />
-                                        {position.name}
+                        {showPositionSwitcher && (
+                            <ModeSwitcher aria-label="대시보드 직책 모드">
+                                {positions.length > 0 ? (
+                                    positions.map((position) => (
+                                        <ModeButton
+                                            key={position.id}
+                                            type="button"
+                                            $active={currentPosition === position.id}
+                                            onClick={() => onPositionChange(position.id)}
+                                        >
+                                            <FontAwesomeIcon icon={resolveIcon(position.icon, modeConfig.icon)} />
+                                            {position.name}
+                                        </ModeButton>
+                                    ))
+                                ) : (
+                                    <ModeButton type="button" $active>
+                                        <FontAwesomeIcon icon={modeConfig.icon} />
+                                        {modeConfig.shortLabel}
                                     </ModeButton>
-                                ))
-                            ) : (
-                                <ModeButton type="button" $active>
-                                    <FontAwesomeIcon icon={modeConfig.icon} />
-                                    {modeConfig.shortLabel}
-                                </ModeButton>
-                            )}
-                        </ModeSwitcher>
+                                )}
+                            </ModeSwitcher>
+                        )}
                     </ActionGroup>
                 </InfoSection>
             </ContentHelper>

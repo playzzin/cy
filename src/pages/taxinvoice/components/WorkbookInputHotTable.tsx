@@ -54,7 +54,7 @@ const WorkbookInputHotTable: React.FC<WorkbookInputHotTableProps> = ({
         beforeOnCellMouseDown={beforeOnCellMouseDown}
         copyPaste={true}
         imeFastEdit={true}
-        outsideClickDeselects={false}
+        outsideClickDeselects={true}
         className="excel-handsontable"
         cells={cells}
     />

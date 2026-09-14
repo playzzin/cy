@@ -21,7 +21,7 @@ describe('firebase security rules', () => {
 
   it('keeps Firestore broad fallback behind the locked collection guard', () => {
     expect(firestoreRules).not.toContain('allow read, write: if request.auth != null');
-    expect(firestoreRules).toContain('allow read, write: if isSignedIn() && !isLockedCollection(collectionId);');
+    expect(firestoreRules).toContain('allow read, write: if hasActiveUserProfile() && !isLockedCollection(collectionId);');
   });
 
   it('protects user profile reads and writes explicitly', () => {
@@ -71,7 +71,7 @@ describe('firebase security rules', () => {
 
   it('scopes client portal reads to the account-linked company records', () => {
     expect(firestoreRules).toContain('function hasLinkedClientCompany(companyId)');
-    expect(firestoreRules).toContain('function canReadClientSite()');
+    expect(firestoreRules).toContain('function canReadClientSite(siteId)');
     expect(firestoreRules).toContain('function canReadClientDailyReport()');
     expect(firestoreRules).toContain('function canReadClientProgressClaim()');
   });

@@ -606,11 +606,10 @@ const downloadReferenceEstimateExcel = async (
         result: totalQuantity
     };
     worksheet.getCell(`G${grandTotalRow}`).value = {
-        // 화면의 임대료형 총계는 인건비와 임대료를 합친 공급가액입니다.
-        // Excel이 파일을 열며 수식을 다시 계산해도 같은 값이 유지되도록
-        // 임대료 소계(I열)까지 수식에 직접 포함합니다.
-        formula: isRental ? sumFormula('G', 'I') : sumFormula('G'),
-        result: isRental ? totalLabor + totalRental : subtotal
+        // 임대형 견적도 열의 의미를 유지합니다. G열은 인건비 합계만 표시하고,
+        // 전체 공급가액은 상단 합계 금액 영역에서 별도로 확인합니다.
+        formula: sumFormula('G'),
+        result: isRental ? totalLabor : subtotal
     };
     if (isRental) {
         worksheet.getCell(`I${grandTotalRow}`).value = {

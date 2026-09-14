@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'cy-erp-pwa-v4';
+const CACHE_VERSION = 'cy-erp-pwa-v5';
 const APP_SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
 const APP_SHELL_URLS = ['/', '/index.html'];
@@ -24,11 +24,85 @@ const isPwaInstallAsset = (request) => {
 
 const fetchFresh = (request) => fetch(new Request(request, { cache: 'reload' }));
 
+const isHtmlResponse = (response) => (
+  response?.ok && /\btext\/html\b/i.test(response.headers.get('Content-Type') || '')
+);
+
+const isValidAsset = (request, response) => {
+  if (!response?.ok || response.status === 206 || response.redirected) return false;
+  const contentType = (response.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+  // Hosting rewrites missing chunks to index.html with status 200. Never
+  // persist that response under a script, stylesheet, or image URL.
+  if (!contentType || /html/.test(contentType)) return false;
+  if (['script', 'worker'].includes(request.destination)) {
+    return /^(text|application)\/(javascript|ecmascript|x-javascript)$/.test(contentType);
+  }
+  if (request.destination === 'style') return contentType === 'text/css';
+  if (request.destination === 'image') return contentType.startsWith('image/');
+  return true;
+};
+
+const isHashedAsset = (request) => (
+  /^\/static\/.*\.[a-f0-9]{8,}(?:\.chunk)?\.[^/]+$/i.test(new URL(request.url).pathname)
+);
+
+const readCache = async (name, request, validate) => {
+  try {
+    const cache = await caches.open(name);
+    const response = await cache.match(request);
+    if (response && validate(response)) return response;
+    if (response) await cache.delete(request);
+  } catch (_error) {
+    // Cache storage can be unavailable or full; online loading must still work.
+  }
+  return undefined;
+};
+
+const saveCache = (event, name, request, response) => {
+  const copy = response.clone();
+  event.waitUntil(caches.open(name).then((cache) => cache.put(request, copy)).catch(() => {}));
+};
+
+const loadNavigation = async (event) => {
+  try {
+    const response = await fetchFresh(event.request);
+    if (isHtmlResponse(response)) {
+      saveCache(event, APP_SHELL_CACHE, '/index.html', response);
+    } else if (response.status >= 500) {
+      const cached = await readCache(APP_SHELL_CACHE, '/index.html', isHtmlResponse);
+      if (cached) return cached;
+    }
+    return response;
+  } catch (_error) {
+    return (await readCache(APP_SHELL_CACHE, '/index.html', isHtmlResponse)) || Response.error();
+  }
+};
+
+const loadAsset = async (event, cacheFirst) => {
+  const { request } = event;
+  const validate = (response) => isValidAsset(request, response);
+  if (cacheFirst) {
+    const cached = await readCache(ASSET_CACHE, request, validate);
+    if (cached) return cached;
+  }
+  try {
+    // Also bypass poisoned entries retained in the browser's HTTP cache.
+    const response = await fetchFresh(request);
+    if (validate(response)) saveCache(event, ASSET_CACHE, request, response);
+    return response;
+  } catch (_error) {
+    return (await readCache(ASSET_CACHE, request, validate)) || Response.error();
+  }
+};
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(APP_SHELL_CACHE)
       .then((cache) => cache.addAll(APP_SHELL_URLS))
+      // Offline preloading is optional. A full or blocked cache must not keep
+      // a broken legacy worker active indefinitely.
+      .catch(() => {})
       .then(() => self.skipWaiting())
   );
 });
@@ -39,7 +113,7 @@ self.addEventListener('activate', (event) => {
       .keys()
       .then((cacheNames) => Promise.all(
         cacheNames
-          .filter((cacheName) => cacheName.startsWith('cy-erp-pwa-') && !cacheName.startsWith(CACHE_VERSION))
+          .filter((cacheName) => cacheName.startsWith('cy-erp-pwa-') && ![APP_SHELL_CACHE, ASSET_CACHE].includes(cacheName))
           .map((cacheName) => caches.delete(cacheName))
       ))
       .then(() => self.clients.claim())
@@ -51,39 +125,17 @@ self.addEventListener('fetch', (event) => {
   if (shouldIgnoreRequest(request)) return;
 
   if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(APP_SHELL_CACHE).then((cache) => cache.put('/index.html', copy));
-          return response;
-        })
-        .catch(() => caches.match('/index.html'))
-    );
+    event.respondWith(loadNavigation(event));
     return;
   }
 
   if (isPwaInstallAsset(request)) {
-    event.respondWith(
-      fetchFresh(request).catch(() => caches.match(request, { ignoreSearch: true }))
-    );
+    event.respondWith(loadAsset(event, false));
     return;
   }
 
   if (isStaticAsset(request)) {
-    event.respondWith(
-      caches.match(request).then((cachedResponse) => {
-        if (cachedResponse) return cachedResponse;
-
-        return fetch(request).then((response) => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(ASSET_CACHE).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        });
-      })
-    );
+    event.respondWith(loadAsset(event, isHashedAsset(request)));
   }
 });
 

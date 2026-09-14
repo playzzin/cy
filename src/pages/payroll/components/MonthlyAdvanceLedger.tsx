@@ -296,16 +296,16 @@ const isManualInputEffectivelyEmpty = (
     );
 };
 
-const toSafeAmount = (value: string): number => {
+const toSignedAmount = (value: string): number => {
     const normalized = String(value ?? '').replace(/,/g, '').trim();
     const parsed = Number(normalized);
-    if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-    return Math.floor(parsed);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.trunc(parsed);
 };
 
 const floorWon = (value: number): number => Math.floor(Number.isFinite(value) ? value : 0);
-const formatAmount = (value: number): string => (value > 0 ? value.toLocaleString('ko-KR') : '-');
-const formatInputAmount = (value: number): string => (value > 0 ? value.toLocaleString('ko-KR') : '');
+const formatAmount = (value: number): string => (value !== 0 ? value.toLocaleString('ko-KR') : '-');
+const formatInputAmount = (value: number): string => (value !== 0 ? value.toLocaleString('ko-KR') : '');
 const formatNetAmount = (value: number): string => (Number.isFinite(value) ? value.toLocaleString('ko-KR') : '-');
 const formatManDay = (value: number): string => (value > 0 ? value.toFixed(1) : '-');
 const getWorkerNameTextClassName = (name: string): string => {
@@ -337,6 +337,8 @@ const LedgerInputCell: React.FC<{
     className?: string;
     placeholder?: string;
 }> = ({ value, onChange, assignment, onAssignmentChange, className = '', placeholder = '-' }) => {
+    const [draftValue, setDraftValue] = useState<string | null>(null);
+
     // 부모 td의 색상에 맞춰 input 배경색을 동적으로 지정
     let inputBg = '';
     if (className.includes('bg-blue-100')) inputBg = 'bg-blue-100';
@@ -349,8 +351,20 @@ const LedgerInputCell: React.FC<{
                 <input
                     type="text"
                     inputMode="numeric"
-                    value={formatInputAmount(value)}
-                    onChange={(e) => onChange(toSafeAmount(e.target.value))}
+                    value={draftValue ?? formatInputAmount(value)}
+                    onFocus={() => setDraftValue(formatInputAmount(value))}
+                    onChange={(e) => {
+                        const nextDraft = e.target.value;
+                        setDraftValue(nextDraft);
+                        const normalized = nextDraft.replace(/,/g, '').trim();
+                        if (normalized === '' || /^-?\d+$/.test(normalized)) {
+                            onChange(toSignedAmount(nextDraft));
+                        }
+                    }}
+                    onBlur={() => {
+                        if (draftValue !== null) onChange(toSignedAmount(draftValue));
+                        setDraftValue(null);
+                    }}
                     className={`min-w-0 w-full ${inputBg} border border-transparent hover:border-slate-300 focus:border-blue-400 focus:bg-white rounded px-1.5 text-right text-[12px] font-mono tabular-nums outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-all ${className}`}
                     placeholder={placeholder}
                 />
@@ -1110,7 +1124,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                     const invoiceVal = toNumber(manual.invoice[field.key as keyof LedgerSideInput]);
                     const laborVal = toNumber(manual.labor[field.key as keyof LedgerSideInput]);
                     const itemTotal = invoiceVal + laborVal;
-                    if (itemTotal <= 0) return;
+                    if (itemTotal === 0) return;
 
                     const itemAssignment = manual.itemAssignments?.[field.key] ?? assignmentType;
                     if (itemAssignment === 'corporate') {

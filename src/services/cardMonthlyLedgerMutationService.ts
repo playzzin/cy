@@ -136,10 +136,14 @@ const recordOperationSafely = async (
   try {
     await recordOperation(input);
   } catch (error) {
-    console.error('[cardMonthlyLedgerMutationService] operation log failed', {
-      operationId: input.operationId,
-      status: input.status
-    }, error);
+    try {
+      reportSupportWriteError(error, {
+        domain: input.domain,
+        yearMonth: input.yearMonth,
+        operationId: input.operationId,
+        status: 'record-failed'
+      });
+    } catch { /* 진단 실패로 이미 완료된 업무 결과를 바꾸지 않는다. */ }
   }
 };
 
@@ -356,22 +360,28 @@ export const saveCardMonthlyLedgerMutation = async <TRow extends CardMonthlyLedg
 
   return result;
   } catch (error) {
-    const failedContext = {
-      domain: 'card' as const,
-      yearMonth,
-      operationId: resolvedOperationId,
-      affectedDocumentIds: attemptedAffectedDocumentIds,
-      errorMessage: getErrorMessage(error),
-      userMessage: SUPPORT_WRITE_RETRY_USER_MESSAGE
-    };
-    await recordOperationSafely(deps.recordOperation, {
-      ...failedContext,
-      status: 'failed'
-    });
-    reportSupportWriteError(error, {
-      ...failedContext,
-      status: 'failed'
-    });
+    try {
+      let errorMessage = 'unknown-error';
+      try {
+        errorMessage = getErrorMessage(error);
+      } catch { /* 오류 속성 getter가 실패하면 고정 대체값만 사용한다. */ }
+      const failedContext = {
+        domain: 'card' as const,
+        yearMonth,
+        operationId: resolvedOperationId,
+        affectedDocumentIds: attemptedAffectedDocumentIds,
+        errorMessage,
+        userMessage: SUPPORT_WRITE_RETRY_USER_MESSAGE
+      };
+      await recordOperationSafely(deps.recordOperation, {
+        ...failedContext,
+        status: 'failed'
+      });
+      reportSupportWriteError(error, {
+        ...failedContext,
+        status: 'failed'
+      });
+    } catch { /* 보고 함수 자체가 실패해도 원래 업무 오류를 보존한다. */ }
     throw error;
   }
 };

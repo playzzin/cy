@@ -130,10 +130,37 @@ export const TeamSettlementDailyReportSnapshotSchema = z.object({
 });
 export type TeamSettlementDailyReportSnapshot = z.infer<typeof TeamSettlementDailyReportSnapshotSchema>;
 
+export const TeamSettlementSupportDirectionSchema = z.enum([
+  '내부지원간곳',
+  '내부지원온곳',
+  '외부지원간곳',
+  '외부지원온곳'
+]);
+export type TeamSettlementSupportDirection = z.infer<typeof TeamSettlementSupportDirectionSchema>;
+
+export const TeamSettlementSupportDetailSnapshotSchema = z.object({
+  id: z.string().min(1),
+  direction: TeamSettlementSupportDirectionSchema,
+  date: z.string().min(1),
+  siteId: z.string().optional(),
+  siteName: z.string().min(1),
+  counterTeamId: z.string().optional(),
+  counterTeamName: z.string().optional(),
+  workerId: z.string(),
+  workerName: z.string().min(1),
+  workerTeamId: z.string().optional(),
+  workerTeamName: z.string().optional(),
+  manDay: NonNegativeNumberSchema,
+  unitPrice: NonNegativeNumberSchema,
+  amount: NonNegativeNumberSchema
+});
+export type TeamSettlementSupportDetailSnapshot = z.infer<typeof TeamSettlementSupportDetailSnapshotSchema>;
+
 export const TeamSettlementSourceSnapshotSchema = z.object({
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   capturedAt: z.string().datetime(),
   dailyReports: z.array(TeamSettlementDailyReportSnapshotSchema).default([]),
+  supportDetails: z.array(TeamSettlementSupportDetailSnapshotSchema).optional(),
   totals: TeamSettlementSourceTotalsSchema
 });
 export type TeamSettlementSourceSnapshot = z.infer<typeof TeamSettlementSourceSnapshotSchema>;

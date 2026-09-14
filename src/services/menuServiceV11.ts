@@ -160,6 +160,100 @@ export const renamePositionReferencesInMenuConfig = (
 
     return result;
 };
+
+const removePositionReferencesInItems = (
+    items: Array<MenuItem | string> | undefined,
+    positionName: string
+): { changed: boolean; removals: number } => {
+    if (!Array.isArray(items)) return { changed: false, removals: 0 };
+
+    let changed = false;
+    let removals = 0;
+
+    items.forEach((item) => {
+        if (typeof item === 'string') return;
+
+        if (Array.isArray(item.roles)) {
+            const nextRoles = item.roles
+                .map(normalizePositionName)
+                .filter((role) => {
+                    if (role === positionName) {
+                        removals += 1;
+                        return false;
+                    }
+                    return Boolean(role);
+                });
+            const dedupedRoles = Array.from(new Set(nextRoles));
+            if (!configsEqual(item.roles, dedupedRoles)) {
+                item.roles = dedupedRoles;
+                changed = true;
+            }
+        }
+
+        const subResult = removePositionReferencesInItems(item.sub, positionName);
+        if (subResult.changed) changed = true;
+        removals += subResult.removals;
+    });
+
+    return { changed, removals };
+};
+
+export const removePositionReferencesInMenuConfig = (
+    config: SiteDataType,
+    positionNameInput: string,
+    positionIdInput = ''
+): PositionReferenceRenameResult => {
+    const positionName = normalizePositionName(positionNameInput);
+    const positionId = normalizePositionName(positionIdInput);
+    const positionIds = new Set([
+        positionId,
+        positionId && positionId.startsWith('pos_') ? positionId.slice(4) : '',
+        positionId && !positionId.startsWith('pos_') ? `pos_${positionId}` : '',
+    ].filter(Boolean));
+    const result: PositionReferenceRenameResult = {
+        changed: false,
+        roleReferences: 0,
+        positionConfigs: 0,
+        siteLabels: 0,
+    };
+
+    if (!positionName || !config) return result;
+
+    Object.entries(config).forEach(([siteKey, site]: [string, any]) => {
+        if (!site || typeof site !== 'object') return;
+
+        MENU_ROLE_SURFACES.forEach((surface) => {
+            const itemsResult = removePositionReferencesInItems(site[surface], positionName);
+            if (itemsResult.changed) result.changed = true;
+            result.roleReferences += itemsResult.removals;
+        });
+
+        if (Array.isArray(site.positionConfig)) {
+            const beforeLength = site.positionConfig.length;
+            site.positionConfig = site.positionConfig.filter((position: any) => {
+                const nameMatches = normalizePositionName(position?.name) === positionName;
+                const idMatches = positionIds.has(normalizePositionName(position?.id));
+                return !nameMatches && !idMatches;
+            });
+            const removed = beforeLength - site.positionConfig.length;
+            if (removed > 0) {
+                result.positionConfigs += removed;
+                result.changed = true;
+            }
+        }
+
+        const isPositionSite = siteKey.startsWith('pos_');
+        const siteMatches = positionIds.has(siteKey)
+            || (isPositionSite && normalizePositionName(site.name) === positionName);
+        if (siteMatches) {
+            delete (config as any)[siteKey];
+            result.siteLabels += 1;
+            result.changed = true;
+        }
+    });
+
+    return result;
+};
 const NATION_SITE_NAME = '전국시스템인력';
 
 const MENU_TEXT_ALIASES: Record<string, string> = {
@@ -675,6 +769,7 @@ const getMenuItemPath = (item: MenuItem | string): string | undefined => {
 
 const LOG_MANAGEMENT_FOLDER_TEXT = '로그관리';
 const REQUIRED_LOG_MANAGEMENT_ITEMS: MenuItem[] = [
+    { text: '신분증 로그', icon: 'fa-id-card', path: '/database/identity-logs' },
     { text: '권한 변경 로그', icon: 'fa-shield-halved', path: '/admin/permission-change-logs' },
     { text: '엑셀 업로드·다운로드 로그', icon: 'fa-file-excel', path: '/admin/excel-transfer-logs' },
     { text: 'PDF 업로드·다운로드 로그', icon: 'fa-file-pdf', path: '/admin/pdf-transfer-logs' },
@@ -1331,6 +1426,35 @@ export const menuServiceV11 = {
             return result;
         } catch (error) {
             console.error('[MenuService] Position reference rename failed:', error);
+            throw error;
+        }
+    },
+
+    removePositionReferences: async (positionName: string, positionId = ''): Promise<PositionReferenceRenameResult> => {
+        const emptyResult: PositionReferenceRenameResult = {
+            changed: false,
+            roleReferences: 0,
+            positionConfigs: 0,
+            siteLabels: 0,
+        };
+
+        try {
+            const config = await menuServiceV11.getMenuConfig();
+            if (!config) return emptyResult;
+
+            const result = removePositionReferencesInMenuConfig(config, positionName, positionId);
+            if (result.changed) {
+                await menuServiceV11.saveMenuConfig(config);
+                console.log('[MenuService] Removed deleted position references from menu config.', {
+                    positionName,
+                    positionId,
+                    ...result,
+                });
+            }
+
+            return result;
+        } catch (error) {
+            console.error('[MenuService] Position reference removal failed:', error);
             throw error;
         }
     },

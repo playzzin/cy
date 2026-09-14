@@ -2,6 +2,7 @@ import { httpsCallable } from 'firebase/functions';
 import {
   collection,
   doc,
+  getDocs,
   onSnapshot,
   query,
   where,
@@ -76,6 +77,18 @@ const sortResults = (results: CardStatementImportResult[]): CardStatementImportR
   ));
 
 export const cardStatementImportService = {
+  async listUploadHistory(yearMonth: string): Promise<CardStatementImportFile[]> {
+    assertYearMonth(yearMonth);
+    const snapshot = await getDocs(query(collection(db, COLLECTIONS.files), where('yearMonth', '==', yearMonth)));
+    return snapshot.docs.map((entry) => ({ ...entry.data(), id: entry.id } as CardStatementImportFile))
+      .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0) || a.fileIndex - b.fileIndex);
+  },
+
+  async cancelStoredFile(fileId: string): Promise<void> {
+    const callable = httpsCallable<{ fileId: string }, { ok: boolean }>(functions, 'cancelCardStatementImportFile');
+    await callable({ fileId });
+  },
+
   async createUploadSession(
     input: CreateCardStatementImportUploadSessionInput,
   ): Promise<CreateCardStatementImportUploadSessionResult> {

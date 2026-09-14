@@ -10,6 +10,13 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
 import { resolvePayType, resolveWorkerPayType } from '../../utils/payType';
+import {
+    canOverrideInactiveLaborCheckCell,
+    getFirstOutputDateByWorker,
+    getManualReportedSiteName,
+    getVisibleLaborCheckWorkers,
+    isBeforeFirstOutputDate,
+} from './laborCheckUtils';
 
 // Keep the check grid deliberately spreadsheet-like: color and site name are the primary signals.
 type CellStatus = 'labor' | 'invoice' | 'unknown' | 'empty';
@@ -158,6 +165,10 @@ const LaborCheckPage: React.FC = () => {
         : formatMonth(new Date());
     const [selectedMonth, setSelectedMonth] = useState(initialMonth);
     const [selectedTeamId, setSelectedTeamId] = useState(searchParams.get('teamId') || '');
+    const [showOnlyWorkersWithOutput, setShowOnlyWorkersWithOutput] = useState(true);
+    const [inactiveCellEditingEnabled, setInactiveCellEditingEnabled] = useState(false);
+    const [selectedWorkerKeys, setSelectedWorkerKeys] = useState<Set<string>>(new Set());
+    const [payStatusFilter, setPayStatusFilter] = useState<'all' | 'direct'>('all');
     const [showRetired, setShowRetired] = useState(false);
     const [isTwoLineView, setIsTwoLineView] = useState(false);
     const [workers, setWorkers] = useState<Worker[]>([]);
@@ -230,19 +241,24 @@ const LaborCheckPage: React.FC = () => {
         setIsLoading(true);
         setErrorMessage('');
         try {
+            const reportedSiteRequest = dailyWorkerReportSiteService.getByDateRange(startDate, endDate)
+                .catch((error) => {
+                    console.warn('[LaborCheckPage] Failed to load reported sites; continuing with output data', error);
+                    return [] as DailyWorkerReportSite[];
+                });
             const [workersData, teamsData, companiesData, sitesData, reportData, reportedSiteData] = await Promise.all([
                 manpowerService.getWorkers(),
                 teamService.getTeams(),
                 companyService.getCompanies(),
                 siteService.getSites(),
                 dailyReportService.getReportWorkerRowsByRange({ startDate, endDate }),
-                dailyWorkerReportSiteService.getByDateRange(startDate, endDate),
+                reportedSiteRequest,
             ]);
             setWorkers(workersData);
             setTeams(teamsData);
             setCompanies(companiesData);
             setSites(sitesData);
-            setReportRows(reportData.filter((row) => !row.isEmptyReport));
+            setReportRows(reportData.filter((row) => !row.isEmptyReport && Number(row.manDay) > 0));
             setReportedSites(reportedSiteData);
         } catch (error) {
             console.error('[LaborCheckPage] Failed to load data', error);
@@ -259,6 +275,7 @@ const LaborCheckPage: React.FC = () => {
     useEffect(() => {
         setReportSiteDrafts({});
         setSaveFeedbackByKey({});
+        setSelectedWorkerKeys(new Set());
     }, [selectedMonth, selectedTeamId]);
 
     useEffect(() => {
@@ -336,9 +353,23 @@ const LaborCheckPage: React.FC = () => {
     ), [reportRows, teamMatches]);
 
     const visibleWorkers = useMemo(
-        () => checkWorkers.filter((worker) => !worker.retired || (showRetired && workerKeysWithOutput.has(worker.workerKey))),
-        [checkWorkers, showRetired, workerKeysWithOutput]
+        () => getVisibleLaborCheckWorkers(
+            checkWorkers.filter(worker => payStatusFilter === 'all' || worker.payStatus === 'direct'),
+            workerKeysWithOutput,
+            showRetired,
+            showOnlyWorkersWithOutput,
+        ),
+        [checkWorkers, payStatusFilter, showOnlyWorkersWithOutput, showRetired, workerKeysWithOutput]
     );
+
+    const firstOutputDateByWorker = useMemo(() => getFirstOutputDateByWorker(
+        reportRows
+            .filter((row) => teamMatches(row.workerTeamId, row.workerTeamName))
+            .map((row) => ({
+                workerKey: getWorkerKey(row.workerId, row.workerName, row.workerTeamName),
+                date: row.date,
+            }))
+    ), [reportRows, teamMatches]);
 
     const rowsByWorkerDate = useMemo(() => {
         const grouped = new Map<string, DailyReportWorkerRow[]>();
@@ -368,6 +399,20 @@ const LaborCheckPage: React.FC = () => {
             : laborSiteNames;
     }, [laborSiteNames, replacementSearch]);
 
+    const manualReportedSiteName = useMemo(
+        () => getManualReportedSiteName(replacementSearch),
+        [replacementSearch]
+    );
+
+    const toggleSelectedWorker = useCallback((workerKey: string) => {
+        setSelectedWorkerKeys((previous) => {
+            const next = new Set(previous);
+            if (next.has(workerKey)) next.delete(workerKey);
+            else next.add(workerKey);
+            return next;
+        });
+    }, []);
+
     const getCell = useCallback((worker: CheckWorker, date: string): { status: CellStatus; siteNames: string[]; hasInvoice: boolean } => {
         const rows = rowsByWorkerDate.get(buildRecordKey(worker.workerKey, date)) || [];
         const laborRows = rows.filter((row) => isLaborPayment(row.paymentType));
@@ -386,7 +431,18 @@ const LaborCheckPage: React.FC = () => {
 
     const saveReportedSite = useCallback(async (worker: CheckWorker, date: string, selectedSiteName?: string): Promise<boolean> => {
         const { status, hasInvoice } = getCell(worker, date);
-        if (worker.retired || (!hasInvoice && status !== 'empty')) return false;
+        const firstOutputDate = firstOutputDateByWorker.get(worker.workerKey);
+        const outsideOutputPeriod = !firstOutputDate || isBeforeFirstOutputDate(date, firstOutputDate);
+        const canOverrideInactiveCell = canOverrideInactiveLaborCheckCell(
+            inactiveCellEditingEnabled,
+            selectedWorkerKeys,
+            worker,
+        );
+        if (
+            worker.retired
+            || (outsideOutputPeriod && !canOverrideInactiveCell)
+            || (!hasInvoice && status !== 'empty')
+        ) return false;
 
         const recordKey = buildRecordKey(worker.workerKey, date);
         if (savingKeyRef.current.has(recordKey)) return false;
@@ -440,7 +496,7 @@ const LaborCheckPage: React.FC = () => {
                 return next;
             });
         }
-    }, [getCell, reportedSiteByWorkerDate, reportSiteDrafts, sites]);
+    }, [firstOutputDateByWorker, getCell, inactiveCellEditingEnabled, reportedSiteByWorkerDate, reportSiteDrafts, selectedWorkerKeys, sites]);
 
     const openReplacementPicker = useCallback((worker: CheckWorker, date: string) => {
         setReplacementSearch('');
@@ -461,18 +517,40 @@ const LaborCheckPage: React.FC = () => {
         const replacementSiteName = Object.prototype.hasOwnProperty.call(reportSiteDrafts, recordKey)
             ? reportSiteDrafts[recordKey]
             : savedRecord?.reportedSiteName || '';
-        const canEditReplacement = !worker.retired && (hasInvoice || status === 'empty');
+        const firstOutputDate = firstOutputDateByWorker.get(worker.workerKey);
+        const outsideOutputPeriod = !firstOutputDate || isBeforeFirstOutputDate(ymd, firstOutputDate);
+        const canOverrideInactiveCell = canOverrideInactiveLaborCheckCell(
+            inactiveCellEditingEnabled,
+            selectedWorkerKeys,
+            worker,
+        );
+        const canEditReplacement = !worker.retired
+            && (!outsideOutputPeriod || canOverrideInactiveCell)
+            && (hasInvoice || status === 'empty');
         const isSaving = savingKeys.has(recordKey);
 
-        const cellClass = hasInvoice
+        const cellClass = outsideOutputPeriod && !canOverrideInactiveCell
+            ? 'bg-slate-100'
+            : hasInvoice
             ? 'bg-sky-200'
             : status === 'empty'
                 ? 'bg-yellow-200'
                 : 'bg-white';
 
         return (
-            <td key={ymd} className={`h-[58px] border border-slate-900/80 p-0 align-middle ${cellClass}`}>
+            <td
+                key={ymd}
+                className={`h-[58px] border border-slate-900/80 p-0 align-middle ${cellClass}`}
+                title={outsideOutputPeriod
+                    ? canOverrideInactiveCell
+                        ? '선택한 작업자 · 비활성 칸 입력 가능'
+                        : firstOutputDate ? '첫 출역일 이전 · 신고 대상 아님' : '이번 달 출역 기록 없음'
+                    : undefined}
+            >
                 <div className="flex h-full min-h-[57px] flex-col justify-center px-1">
+                    {outsideOutputPeriod && !canOverrideInactiveCell && (
+                        <span className="sr-only">{firstOutputDate ? '첫 출역일 이전' : '이번 달 출역 기록 없음'}</span>
+                    )}
                     {cellSiteNames.length > 0 && !hasInvoice && (
                         <span className={`line-clamp-2 break-keep text-center text-[10px] font-bold leading-3 ${
                             status === 'unknown' ? 'text-amber-700' : 'text-red-600'
@@ -495,6 +573,11 @@ const LaborCheckPage: React.FC = () => {
                         >
                             <span className="block whitespace-normal break-words">{isSaving ? '저장 중' : replacementSiteName}</span>
                         </button>
+                    )}
+                    {!canEditReplacement && (hasInvoice || status === 'empty') && !outsideOutputPeriod && replacementSiteName && (
+                        <span className="block whitespace-normal break-words text-center text-[10px] font-bold leading-3 text-slate-700" title={replacementSiteName}>
+                            {replacementSiteName}
+                        </span>
                     )}
                 </div>
             </td>
@@ -545,7 +628,50 @@ const LaborCheckPage: React.FC = () => {
                             새로고침
                         </button>
                     </div>
+                    <div className="flex items-center gap-1" role="group" aria-label="직불 여부">
+                        {(['all', 'direct'] as const).map(value => (
+                            <button key={value} type="button" aria-pressed={payStatusFilter === value}
+                                onClick={() => setPayStatusFilter(value)}
+                                className={`rounded-md border px-3 py-1 text-xs font-bold ${payStatusFilter === value ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 bg-white text-slate-700'}`}>
+                                {value === 'all' ? '전체인원' : '직불가능인원'}
+                            </button>
+                        ))}
+                    </div>
                     <div role="group" aria-label="팀 선택" className="flex max-w-full flex-wrap items-center justify-end gap-1.5">
+                        <label className="mr-1 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-black text-emerald-800">
+                            <input
+                                type="checkbox"
+                                checked={showOnlyWorkersWithOutput}
+                                onChange={(event) => setShowOnlyWorkersWithOutput(event.target.checked)}
+                                className="h-3.5 w-3.5 accent-emerald-600"
+                            />
+                            이번 달 출역자만
+                        </label>
+                        <label className={`mr-1 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-[11px] font-black ${
+                            inactiveCellEditingEnabled
+                                ? 'border-amber-400 bg-amber-100 text-amber-900'
+                                : 'border-slate-300 bg-white text-slate-600'
+                        }`}>
+                            <input
+                                type="checkbox"
+                                checked={inactiveCellEditingEnabled}
+                                onChange={(event) => {
+                                    const enabled = event.target.checked;
+                                    setInactiveCellEditingEnabled(enabled);
+                                    if (!enabled) setSelectedWorkerKeys(new Set());
+                                }}
+                                className="h-3.5 w-3.5 accent-amber-600"
+                            />
+                            비활성 칸 입력
+                        </label>
+                        {inactiveCellEditingEnabled && (
+                            <span className="mr-1 rounded-full bg-amber-50 px-2 py-1 text-[11px] font-black text-amber-700">
+                                작업자 {selectedWorkerKeys.size}명 선택
+                            </span>
+                        )}
+                        <span className="mr-1 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-black text-slate-600">
+                            표시 {visibleWorkers.length}명
+                        </span>
                         <button
                             type="button"
                             onClick={() => setSelectedTeamId('')}
@@ -622,7 +748,7 @@ const LaborCheckPage: React.FC = () => {
                         </div>
                     ) : visibleWorkers.length === 0 ? (
                         <div className="flex h-64 items-center justify-center px-4 text-center text-sm font-bold text-slate-500">
-                            표시할 작업자가 없습니다.
+                            선택한 달의 출역 기록이 없습니다.
                         </div>
                     ) : (
                         <div
@@ -699,6 +825,16 @@ const LaborCheckPage: React.FC = () => {
                                                 className="sticky left-0 z-10 border border-slate-900 bg-white px-3 text-left"
                                             >
                                                 <span className="flex items-center gap-1 text-sm font-semibold text-slate-900">
+                                                    {inactiveCellEditingEnabled && (
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedWorkerKeys.has(worker.workerKey)}
+                                                            disabled={worker.retired}
+                                                            onChange={() => toggleSelectedWorker(worker.workerKey)}
+                                                            aria-label={`${worker.workerName} 비활성 칸 입력 대상`}
+                                                            className="h-4 w-4 shrink-0 accent-amber-600 disabled:cursor-not-allowed disabled:opacity-40"
+                                                        />
+                                                    )}
                                                     <span className="min-w-0 truncate">
                                                         {worker.workerName}{worker.retired ? ' (퇴사)' : ''}
                                                     </span>
@@ -747,22 +883,40 @@ const LaborCheckPage: React.FC = () => {
                     <section role="dialog" aria-modal="true" aria-labelledby="replacement-site-picker-title" className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
                         <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
                             <div>
-                                <h2 id="replacement-site-picker-title" className="text-sm font-black text-slate-900">대체 현장 선택</h2>
+                                <h2 id="replacement-site-picker-title" className="text-sm font-black text-slate-900">신고 현장 선택 또는 직접 입력</h2>
                                 <p className="mt-0.5 text-[11px] font-medium text-slate-500">{replacementPicker.worker.workerName} · {replacementPicker.date}</p>
                             </div>
                             <button type="button" onClick={() => setReplacementPicker(null)} className="rounded-md px-2 py-1 text-xs font-bold text-slate-500 hover:bg-slate-100" aria-label="대체 현장 선택 닫기">닫기</button>
                         </header>
                         <div className="border-b border-slate-100 p-3">
+                            <label htmlFor="reported-site-name" className="mb-1.5 block text-xs font-black text-slate-700">신고할 현장명</label>
                             <input
+                                id="reported-site-name"
                                 autoFocus
-                                type="search"
+                                type="text"
                                 value={replacementSearch}
                                 onChange={(event) => setReplacementSearch(event.target.value)}
-                                placeholder="노무 출역 현장 검색"
+                                onKeyDown={(event) => {
+                                    if (event.key !== 'Enter' || !manualReportedSiteName) return;
+                                    event.preventDefault();
+                                    void selectReplacementSite(manualReportedSiteName);
+                                }}
+                                maxLength={120}
+                                placeholder="현장명을 검색하거나 직접 입력"
                                 className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-medium outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                             />
+                            <button
+                                type="button"
+                                disabled={!manualReportedSiteName}
+                                onClick={() => void selectReplacementSite(manualReportedSiteName)}
+                                className="mt-2 h-10 w-full rounded-lg bg-sky-600 px-3 text-sm font-black text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+                            >
+                                {manualReportedSiteName ? `“${manualReportedSiteName}” 사용` : '입력한 현장명 사용'}
+                            </button>
+                            <p className="mt-1.5 text-[11px] font-medium text-slate-500">아래 목록에 없는 현장도 직접 입력해 신고할 수 있습니다.</p>
                         </div>
                         <div className="max-h-72 overflow-y-auto p-2">
+                            <p className="px-3 pb-1 pt-1 text-[11px] font-black text-slate-500">이번 달 노무 출역 현장</p>
                             {filteredLaborSiteNames.map((siteName) => (
                                 <button
                                     key={siteName}
@@ -773,7 +927,11 @@ const LaborCheckPage: React.FC = () => {
                                     <span className="whitespace-normal break-words">{siteName}</span>
                                 </button>
                             ))}
-                            {filteredLaborSiteNames.length === 0 && <p className="px-3 py-8 text-center text-sm font-medium text-slate-400">이번 달 노무 출역 현장이 없습니다.</p>}
+                            {filteredLaborSiteNames.length === 0 && (
+                                <p className="px-3 py-8 text-center text-sm font-medium text-slate-400">
+                                    {laborSiteNames.length === 0 ? '등록된 노무 출역 현장이 없습니다. 위에서 직접 입력해 주세요.' : '검색 결과가 없습니다.'}
+                                </p>
+                            )}
                         </div>
                         <footer className="border-t border-slate-100 p-3">
                             <button

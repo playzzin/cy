@@ -1,0 +1,26 @@
+/* 경비 요약과 펼친 상세표 모두 기존 글자 크기에서 1pt 확대한다. */
+.expense-ledger-page .text-\[10px\] {
+  font-size: calc(10px + 1pt);
+}
+
+.expense-ledger-page .text-\[11px\] {
+  font-size: calc(11px + 1pt);
+}
+
+.expense-ledger-page .text-xs {
+  font-size: calc(0.75rem + 1pt);
+  line-height: 1.5;
+}
+
+.expense-ledger-page .text-sm {
+  font-size: calc(0.875rem + 1pt);
+  line-height: 1.5;
+}
+
+.expense-ledger-page .text-base {
+  font-size: calc(1rem + 1pt);
+}
+
+.expense-ledger-page .text-lg {
+  font-size: calc(1.125rem + 1pt);
+}

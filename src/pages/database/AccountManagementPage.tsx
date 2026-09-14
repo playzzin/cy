@@ -127,6 +127,14 @@ const CUSTOM_CATEGORY_META: Record<CustomCategory, { title: string; description:
     },
 };
 
+const ACCOUNT_TABS: Array<{ key: AccountTab; label: string }> = [
+    { key: 'overview', label: '개요' },
+    { key: 'workers', label: '작업자 계좌' },
+    { key: 'teams', label: '팀 계좌' },
+    { key: 'companies', label: '회사 계좌' },
+    { key: 'custom', label: '매입/기타 계좌' },
+];
+
 const normalizeText = (value: unknown) => String(value ?? '').trim();
 
 const AccountNumberCopyButton: React.FC<{ value: unknown }> = ({ value }) => {
@@ -1805,9 +1813,13 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         }
     };
 
-    const renderToolbar = (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-3">
+    const renderStickyToolbar = (
+        <div
+            className="sticky z-30 -mx-2 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-white/90"
+            style={{ top: 'var(--header-height, 60px)' }}
+            aria-label="계좌번호 관리 고정 도구"
+        >
+            <div className="flex flex-col gap-2">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div className="relative w-full lg:max-w-md">
                         <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -1815,6 +1827,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                             value={searchTerm}
                             onChange={(event) => setSearchTerm(event.target.value)}
                             placeholder="작업자, 팀, 회사, 계좌번호, 예금주로 검색"
+                            aria-label="계좌번호 관리 검색"
                             className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
                         />
                     </div>
@@ -1852,6 +1865,33 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                     </div>
                 </div>
 
+                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-slate-50/90 p-1">
+                    <div className="flex min-w-max gap-1" role="tablist" aria-label="계좌 관리 영역">
+                        {ACCOUNT_TABS.map((tab) => (
+                            <button
+                                key={tab.key}
+                                type="button"
+                                role="tab"
+                                aria-selected={activeTab === tab.key}
+                                onClick={() => setActiveTab(tab.key)}
+                                className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                                    activeTab === tab.key
+                                        ? 'bg-indigo-600 text-white shadow-sm'
+                                        : 'text-slate-600 hover:bg-white'
+                                }`}
+                            >
+                                {tab.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+
+    const renderTransferToolbar = (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 p-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                         <div className="text-sm font-semibold text-slate-800">계좌 엑셀 업로드 / 다운로드</div>
@@ -2101,32 +2141,9 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 </div>
             </div>
 
-            {renderToolbar}
+            {renderStickyToolbar}
 
-            <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div className="flex min-w-max gap-1 p-2">
-                    {[
-                        { key: 'overview', label: '개요' },
-                        { key: 'workers', label: '작업자 계좌' },
-                        { key: 'teams', label: '팀 계좌' },
-                        { key: 'companies', label: '회사 계좌' },
-                        { key: 'custom', label: '매입/기타 계좌' },
-                    ].map((tab) => (
-                        <button
-                            key={tab.key}
-                            type="button"
-                            onClick={() => setActiveTab(tab.key as AccountTab)}
-                            className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
-                                activeTab === tab.key
-                                    ? 'bg-indigo-600 text-white shadow-sm'
-                                    : 'text-slate-600 hover:bg-slate-50'
-                            }`}
-                        >
-                            {tab.label}
-                        </button>
-                    ))}
-                </div>
-            </div>
+            {renderTransferToolbar}
 
             {loading ? (
                 <div className="rounded-2xl border border-slate-200 bg-white px-6 py-16 text-center text-sm text-slate-500 shadow-sm">

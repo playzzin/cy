@@ -4,6 +4,7 @@ import {
   setDoc
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
+import { noteSupportWriteRecordFailure, supportOwnValue, reportSupportWriteError } from '../utils/supportWriteErrorReporting';
 import type {
   CreateSupportWriteOperationLogInput,
   SupportWriteOperationActor,
@@ -88,13 +89,19 @@ export const supportWriteOperationLogService = {
   collectionName: SUPPORT_WRITE_OPERATIONS_COLLECTION,
 
   recordOperation: async (input: CreateSupportWriteOperationLogInput): Promise<SupportWriteOperationLog> => {
-    const log = buildSupportWriteOperationLog(input);
-    await setDoc(
-      doc(db, SUPPORT_WRITE_OPERATIONS_COLLECTION, log.id),
-      stripUndefinedDeep(log) as Record<string, unknown>,
-      { merge: true }
-    );
-    return log;
+    try {
+      const log = buildSupportWriteOperationLog(input);
+      await setDoc(
+        doc(db, SUPPORT_WRITE_OPERATIONS_COLLECTION, log.id),
+        stripUndefinedDeep(log) as Record<string, unknown>,
+        { merge: true }
+      );
+      return log;
+    } catch (error) {
+      // Never replace the original error or retry a financial write from observation.
+      try { noteSupportWriteRecordFailure(supportOwnValue(input, 'operationId')); } catch { /* Local observation only. */ }
+      throw error;
+    }
   }
 };
 
@@ -104,11 +111,6 @@ export const recordSupportWriteOperationSafely = async (
   try {
     await supportWriteOperationLogService.recordOperation(input);
   } catch (error) {
-    console.error('[supportWriteOperationLogService] record failed', {
-      domain: input.domain,
-      yearMonth: input.yearMonth,
-      operationId: input.operationId,
-      status: input.status
-    }, error);
+    reportSupportWriteError(error, input);
   }
 };

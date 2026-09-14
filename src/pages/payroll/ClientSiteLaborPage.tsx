@@ -1113,7 +1113,6 @@ const SiteLaborStatementPreview: React.FC<{
                     {primaryDayLabels.map((day) => (
                         <th key={day} className="w-6 border-2 border-slate-800 bg-sky-50 text-sky-700">{String(day).padStart(2, '0')}</th>
                     ))}
-                    {viewOptions.isSplitView && <th className="w-6 border-2 border-slate-800 bg-slate-50">X</th>}
                     <th className="w-16 border-2 border-slate-800 p-1.5" rowSpan={viewOptions.isSplitView ? 2 : 1}>출역</th>
                     <th className="w-24 border-2 border-slate-800 bg-emerald-100 p-1.5 text-emerald-950">청구단가</th>
                     {!viewOptions.isSplitView && (
@@ -1127,8 +1126,9 @@ const SiteLaborStatementPreview: React.FC<{
                     <tr className="bg-slate-100 font-black text-slate-800">
                         <th className="border-2 border-slate-800 p-1.5">전화번호</th>
                         {DAY_LABELS_SECOND.map((day) => (
-                            <th key={day} className="w-6 border-2 border-slate-800 bg-rose-50 text-rose-700">{day}</th>
+                            <th key={day} className="w-6 border-2 border-slate-800 bg-rose-50 text-rose-700">{String(day).padStart(2, '0')}</th>
                         ))}
+                        <th aria-label="날짜 빈 칸" className="w-6 border-2 border-slate-800 bg-slate-50" />
                         <th className="border-2 border-slate-800 bg-emerald-100 p-1.5 text-emerald-950">청구금액</th>
                     </tr>
                 )}
@@ -1153,7 +1153,6 @@ const SiteLaborStatementPreview: React.FC<{
                             {primaryDayLabels.map((day) => (
                                 <td key={day} className="border-2 border-slate-800 bg-sky-50/30 text-center">{formatStatementDayManDay(row.days[day - 1])}</td>
                             ))}
-                            {viewOptions.isSplitView && <td className="border-2 border-slate-800 bg-slate-50"></td>}
                             <td rowSpan={viewOptions.isSplitView ? 2 : 1} className="border-2 border-slate-800 bg-slate-50 text-center font-mono text-xs">{formatManDay(row.totalManDay)}</td>
                             <td className="border-2 border-slate-800 bg-emerald-50 px-2 text-right font-mono text-emerald-700">{formatNumber(row.unitPrice)}</td>
                             {!viewOptions.isSplitView && (
@@ -1172,6 +1171,7 @@ const SiteLaborStatementPreview: React.FC<{
                                 {DAY_LABELS_SECOND.map((day) => (
                                     <td key={day} className="border-2 border-slate-800 bg-rose-50/30 text-center">{formatStatementDayManDay(row.days[day - 1])}</td>
                                 ))}
+                                <td aria-label="날짜 빈 칸" className="border-2 border-slate-800 bg-slate-50" />
                                 <td className="border-2 border-slate-800 bg-emerald-50 px-2 text-right font-mono text-emerald-800">{formatNumber(row.totalAmount)}</td>
                             </tr>
                         )}
@@ -1180,9 +1180,8 @@ const SiteLaborStatementPreview: React.FC<{
                 <tr className="bg-slate-200 text-xs font-black">
                     <td colSpan={4} className="border-2 border-slate-800 py-2 text-center">합 계</td>
                     {primaryDayLabels.map((day) => (
-                        <td key={day} className="border-2 border-slate-800 text-center">{formatStatementDayManDay(dayTotals[day - 1])}</td>
+                        <td key={day} className="border-2 border-slate-800 bg-sky-100 text-center text-sky-900">{formatStatementDayManDay(dayTotals[day - 1])}</td>
                     ))}
-                    {viewOptions.isSplitView && <td className="border-2 border-slate-800"></td>}
                     <td rowSpan={viewOptions.isSplitView ? 2 : 1} className="border-2 border-slate-800 text-center font-mono">{formatManDay(preview.totalManDay)}</td>
                     <td className="border-2 border-slate-800 bg-emerald-100 px-2 text-right font-mono text-emerald-800">{formatNumber(averageUnitPrice)}</td>
                     {!viewOptions.isSplitView && (
@@ -1194,8 +1193,9 @@ const SiteLaborStatementPreview: React.FC<{
                     <tr className="bg-slate-200 text-xs font-black">
                         <td colSpan={4} className="border-2 border-slate-800 py-2 text-center">청구금액</td>
                         {DAY_LABELS_SECOND.map((day) => (
-                            <td key={day} className="border-2 border-slate-800 text-center">{formatStatementDayManDay(dayTotals[day - 1])}</td>
+                            <td key={day} className="border-2 border-slate-800 bg-rose-100 text-center text-rose-900">{formatStatementDayManDay(dayTotals[day - 1])}</td>
                         ))}
+                        <td aria-label="날짜 빈 칸" className="border-2 border-slate-800 bg-slate-50" />
                         <td className="border-2 border-slate-800 bg-emerald-100 px-2 text-right font-mono text-emerald-900">{formatNumber(preview.totalAmount)}</td>
                     </tr>
                 )}

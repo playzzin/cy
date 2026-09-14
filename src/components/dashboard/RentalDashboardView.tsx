@@ -88,6 +88,8 @@ const fetchByField = async <T,>(collectionName: string, field: string, values: s
 const loadRentalDashboardData = async (uid: string): Promise<RentalDashboardData> => {
     const profile = await userService.getUser(uid);
     const linkedCompanyIds = parseLinkedCompanyIds(profile?.linkedCompanyIds);
+    const linkedSiteIds = parseLinkedCompanyIds(profile?.linkedSiteIds);
+    const hasExplicitSiteScope = Array.isArray(profile?.linkedSiteIds);
     let companies: Company[] = [];
 
     if (linkedCompanyIds.length > 0) {
@@ -104,7 +106,12 @@ const loadRentalDashboardData = async (uid: string): Promise<RentalDashboardData
     }
 
     const companyIds = uniqueTexts(companies.map((company) => company.id));
-    const dispatches = await fetchByField<OutboundTransaction>('materialOutbounds', 'rentalCompanyId', companyIds);
+    const dispatches = (await fetchByField<OutboundTransaction>(
+        'materialOutbounds',
+        hasExplicitSiteScope ? 'siteId' : 'rentalCompanyId',
+        hasExplicitSiteScope ? linkedSiteIds : companyIds,
+    ))
+        .filter((dispatch) => companyIds.includes(String(dispatch.rentalCompanyId || '')));
     return { companies, dispatches };
 };
 

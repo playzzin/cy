@@ -1,3 +1,5 @@
+import { hasSupportWriteRecordFailure, subscribeSupportWriteRecordFailure } from '../utils/supportWriteErrorReporting';
+import { recordSupportWriteOperationSafely } from './supportWriteOperationLogService';
 import { doc, setDoc, Timestamp } from 'firebase/firestore';
 import {
   SUPPORT_WRITE_OPERATIONS_COLLECTION,
@@ -90,5 +92,57 @@ describe('supportWriteOperationLogService', () => {
       }),
       { merge: true }
     );
+  });
+});
+
+
+// Stage 1: baseline tests and their original SDK-fake boundary above are unchanged.
+
+
+
+describe('stage1 observation and preservation', () => {
+  beforeEach(() => {
+    // CRA resetMocks clears factory implementations before each test.
+    mockedTimestamp.now.mockReset().mockReturnValue(mockTimestamp);
+    mockedDoc.mockReset().mockImplementation((_db: unknown, collectionName: string, id: string) => ({ collectionName, id }));
+    mockedSetDoc.mockReset().mockResolvedValue(undefined as any);
+  });
+  it('rearms the default timestamp, reference and write implementation', async () => {
+    const log = await supportWriteOperationLogService.recordOperation({ domain: 'card', yearMonth: '2026-07', operationId: 'revision2-rearmed', status: 'success' });
+    expect(mockedTimestamp.now).toHaveBeenCalledTimes(1);
+    expect(mockedDoc).toHaveBeenCalledWith(expect.anything(), SUPPORT_WRITE_OPERATIONS_COLLECTION, log.id);
+    expect(mockedSetDoc).toHaveBeenCalledTimes(1);
+    expect(mockedSetDoc).toHaveBeenCalledWith({ collectionName: SUPPORT_WRITE_OPERATIONS_COLLECTION, id: log.id }, expect.objectContaining({ createdAtIso: '2026-07-04T00:00:00.000Z' }), { merge: true });
+    expect(hasSupportWriteRecordFailure('revision2-rearmed')).toBe(false);
+  });
+  it('preserves the thrown error and observes failure without retrying', async () => {
+    const error = new Error('record-unavailable');
+    mockedSetDoc.mockReset();
+    mockedSetDoc.mockRejectedValue(error);
+    const unsubscribe = subscribeSupportWriteRecordFailure(() => { throw new Error('observer'); });
+    try {
+      await expect(supportWriteOperationLogService.recordOperation({ domain: 'card', yearMonth: '2026-07', operationId: 'stage1-reject', status: 'success' })).rejects.toBe(error);
+      expect(hasSupportWriteRecordFailure('stage1-reject')).toBe(true);
+      expect(mockedSetDoc).toHaveBeenCalledTimes(1);
+    } finally { unsubscribe(); }
+  });
+  it('keeps the safe wrapper nonthrowing when console throws', async () => {
+    mockedSetDoc.mockReset();
+    mockedSetDoc.mockRejectedValue(new Error('private-error'));
+    const output = jest.spyOn(console, 'error').mockImplementation(() => { throw new Error('console'); });
+    try {
+      await expect(recordSupportWriteOperationSafely({ domain: 'vehicle', yearMonth: '2026-07', operationId: 'stage1-safe', status: 'failed' })).resolves.toBeUndefined();
+      expect(mockedSetDoc).toHaveBeenCalledTimes(1);
+      expect(hasSupportWriteRecordFailure('stage1-safe')).toBe(true);
+      expect(output).toHaveBeenCalledWith('[support-write-operation]', { domain: 'vehicle', errorCode: 'SUPPORT_WRITE_UNKNOWN' });
+    } finally { output.mockRestore(); }
+  });
+  it('preserves stored actor, messages, metadata and IDs', () => {
+    const metadata = { billingMutation: 'automatic-after-save', skippedBillingRows: [{ rowId: 'fixture' }] };
+    const log = buildSupportWriteOperationLog({ domain: 'card', yearMonth: '2026-07', operationId: 'stage1-contract', status: 'success', actor: { uid: 'fixture', name: 'Fixture' }, userMessage: 'legacy', affectedDocumentIds: ['fixture/ref', 'fixture/ref'], metadata }, mockTimestamp as any);
+    expect(log.actor.uid).toBe('fixture');
+    expect(log.userMessage).toBe('legacy');
+    expect(log.metadata).toBe(metadata);
+    expect(log.affectedDocumentIds).toEqual(['fixture/ref']);
   });
 });

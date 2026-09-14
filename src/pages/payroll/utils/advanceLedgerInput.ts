@@ -1,4 +1,5 @@
 import type { AdvancePayment } from '../../../services/advancePaymentService';
+import { STANDARD_DEDUCTION_FIELDS } from '../constants/payroll.constants';
 import type { LedgerManualInput } from '../types/payroll';
 
 const toNumber = (value: unknown): number => {
@@ -11,6 +12,93 @@ const toNumber = (value: unknown): number => {
 };
 
 const normalizeLabel = (value: unknown): string => String(value ?? '').replace(/\s+/g, '').trim();
+
+const normalizeTeamName = (value: unknown): string => String(value ?? '')
+  .replace(/\(.*?\)/g, '')
+  .replace(/\s+/g, '')
+  .trim();
+
+const normalizeSalaryModelLabel = (value: unknown): '월급제' | '일급제' | '용역팀' | '' => {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return '';
+  const lower = normalized.toLowerCase();
+  if (normalized.includes('용역') || lower === 'service' || lower.includes('service')) return '용역팀';
+  if (normalized.includes('월급') || lower === 'monthly' || lower.includes('monthly')) return '월급제';
+  if (normalized.includes('일급') || normalized.includes('일당') || lower === 'daily' || lower.includes('daily')) return '일급제';
+  return '';
+};
+
+export const pickAdvanceRecordForPayrollRow = (
+  records: AdvancePayment[],
+  yearMonth: string,
+  options: {
+    preferredTeamId?: string;
+    preferredTeamName?: string;
+    preferredSalaryModel?: string;
+  } = {}
+): AdvancePayment | undefined => {
+  const monthMatched = records.filter((record) => String(record.yearMonth ?? '') === yearMonth);
+  if (monthMatched.length === 0) return undefined;
+
+  const preferredTeamId = String(options.preferredTeamId ?? '').trim();
+  const preferredTeamNameKey = normalizeTeamName(options.preferredTeamName);
+  const preferredSalaryModel = normalizeSalaryModelLabel(options.preferredSalaryModel);
+
+  const exactTeamIdMatched = preferredTeamId
+    ? monthMatched.filter((record) => String(record.teamId ?? '').trim() === preferredTeamId)
+    : [];
+  const teamNameMatched = preferredTeamNameKey
+    ? monthMatched.filter((record) => normalizeTeamName(record.teamName) === preferredTeamNameKey)
+    : [];
+  const unscopedLegacyRecords = monthMatched.filter((record) => (
+    !String(record.teamId ?? '').trim() && !normalizeTeamName(record.teamName)
+  ));
+
+  // A payroll row belongs to the team recorded on that month's daily report.
+  // If no advance exists for that team, do not borrow the same worker's record
+  // from another team; that made transfers appear in both the former and new team.
+  const candidates = preferredTeamId || preferredTeamNameKey
+    ? (
+      exactTeamIdMatched.length > 0
+        ? exactTeamIdMatched
+        : (teamNameMatched.length > 0 ? teamNameMatched : unscopedLegacyRecords)
+    )
+    : monthMatched;
+
+  const salaryMatched = preferredSalaryModel
+    ? candidates.filter((record) => normalizeSalaryModelLabel(record.salaryModel) === preferredSalaryModel)
+    : [];
+  const legacySalaryMatched = preferredSalaryModel
+    ? candidates.filter((record) => !normalizeSalaryModelLabel(record.salaryModel))
+    : [];
+  const salaryScopedCandidates = preferredSalaryModel
+    ? (salaryMatched.length > 0 ? salaryMatched : legacySalaryMatched)
+    : candidates;
+  if (salaryScopedCandidates.length === 0) return undefined;
+
+  const getRecordValueScore = (record: AdvancePayment): number => {
+    const standardTotal = STANDARD_DEDUCTION_FIELDS.reduce(
+      (sum, { key }) => sum + Math.abs(toNumber(record[key])),
+      0
+    );
+    return Object.values(record.items ?? {}).reduce(
+      (sum, value) => sum + Math.abs(toNumber(value)),
+      standardTotal
+    );
+  };
+
+  return salaryScopedCandidates.reduce<AdvancePayment | undefined>((best, current) => {
+    if (!best) return current;
+
+    const bestScore = getRecordValueScore(best);
+    const currentScore = getRecordValueScore(current);
+    if (currentScore !== bestScore) return currentScore > bestScore ? current : best;
+
+    const bestTs = best.updatedAt instanceof Date ? best.updatedAt.getTime() : 0;
+    const currentTs = current.updatedAt instanceof Date ? current.updatedAt.getTime() : 0;
+    return currentTs > bestTs ? current : best;
+  }, undefined);
+};
 
 const createEmptySideInput = (): LedgerManualInput['invoice'] => ({
   carry: 0,

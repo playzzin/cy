@@ -9,6 +9,8 @@ import {
     faSpinner,
     faSitemap,
     faTag,
+    faLink,
+    faSearch,
     faUserGear
 } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
@@ -19,6 +21,7 @@ import { officeStaffService, OfficeStaff } from '../../services/officeStaffServi
 import { positionService, Position } from '../../services/positionService';
 import { userMenuPositionService, UserMenuPositionMap } from '../../services/userMenuPositionService';
 import { userAccessClaimsService } from '../../services/userAccessClaimsService';
+import { accountLinkService } from '../../services/accountLinkService';
 import { menuServiceV11 } from '../../services/menuServiceV11';
 import { permissionAuditService } from '../../services/permissionAuditService';
 import { SiteDataType } from '../../types/menu';
@@ -27,6 +30,10 @@ import IntegratedPositionManager from '../../components/admin/IntegratedPosition
 import { flattenMenuPermissions } from '../../features/permission-matrix/permissionMatrix';
 import { buildMenuAccessRoles, canAccessMenuRoles } from '../../utils/menuAccess';
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
+import { companyService, type Company } from '../../services/companyService';
+import type { AccountLink } from '../../types/accountLink';
+import { accessRoleLabel, normalizeAccessRole, selectPositionAccess, summarizeAccountConnections, userStatusLabel } from '../../utils/userManagementPresentation';
+import './UserManagementPage.css';
 
 type CanonicalSystemRole = 'admin' | 'manager' | 'user';
 type UserManagementSection = 'access' | 'account-links' | 'positions' | 'integrity';
@@ -37,12 +44,7 @@ const SYSTEM_ROLE_OPTIONS: Array<{ value: CanonicalSystemRole; label: string }> 
     { value: 'user', label: '일반' }
 ];
 
-const normalizeSystemRole = (role: unknown): CanonicalSystemRole => {
-    const raw = String(role || '').trim().toLowerCase();
-    if (['admin', '관리자', '사장', '실장'].includes(raw)) return 'admin';
-    if (['manager', '매니저', '메니저', '대표'].includes(raw)) return 'manager';
-    return 'user';
-};
+const normalizeSystemRole = normalizeAccessRole;
 
 const USER_MANAGEMENT_SECTIONS: Array<{
     id: UserManagementSection;
@@ -53,15 +55,15 @@ const USER_MANAGEMENT_SECTIONS: Array<{
 }> = [
     {
         id: 'access',
-        label: '사용자 권한',
+        label: '직책·권한',
         description: '사용자별 시스템 권한과 기본·추가 직책을 설정합니다.',
         path: '/admin/user-management',
         icon: faUserGear
     },
     {
         id: 'account-links',
-        label: '계정 연동',
-        description: '사용자 계정과 작업자·사무실 직원 정보를 연결합니다.',
+        label: '계정 연결',
+        description: '가입 요청을 승인하고 사용자 계정과 작업자·직원·회사를 안전하게 연결합니다.',
         path: '/admin/user-management/account-links',
         icon: faShieldHalved
     },
@@ -74,7 +76,7 @@ const USER_MANAGEMENT_SECTIONS: Array<{
     },
     {
         id: 'integrity',
-        label: '정합성 점검',
+        label: '점검',
         description: '사용자와 연동 인력의 직책·권한 데이터를 점검하고 보정합니다.',
         path: '/admin/user-management/integrity',
         icon: faCircleInfo
@@ -94,7 +96,6 @@ const UserManagementPage: React.FC = () => {
     const { currentUser } = useAuth();
     const devAdminMode = isDevAdminSessionEnabled();
     const activeSection = getUserManagementSection(location.pathname);
-    const activeSectionMeta = USER_MANAGEMENT_SECTIONS.find((section) => section.id === activeSection) || USER_MANAGEMENT_SECTIONS[0];
 
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -102,14 +103,21 @@ const UserManagementPage: React.FC = () => {
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
     const [positions, setPositions] = useState<Position[]>([]);
+    const [companies, setCompanies] = useState<Company[]>([]);
+    const [accountLinks, setAccountLinks] = useState<AccountLink[]>([]);
+    const [connectionError, setConnectionError] = useState(false);
     const [menuConfig, setMenuConfig] = useState<SiteDataType | null>(null);
     const [userPositionMap, setUserPositionMap] = useState<UserMenuPositionMap>({});
 
     const [search, setSearch] = useState('');
-    const [selectedUserId, setSelectedUserId] = useState('');
+    const requestedUserId = new URLSearchParams(location.search).get('user') || '';
+    const [selectedUserId, setSelectedUserId] = useState(requestedUserId);
+    const [userFilter, setUserFilter] = useState<'all' | 'pending' | 'issues'>('all');
+    const [integrityFilter, setIntegrityFilter] = useState('all');
+    const [advancedRole, setAdvancedRole] = useState(false);
 
     const [draftRole, setDraftRole] = useState<CanonicalSystemRole>('user');
-    const [draftPosition, setDraftPosition] = useState('일반');
+    const [draftPosition, setDraftPosition] = useState('');
     const [draftAdditionalPositions, setDraftAdditionalPositions] = useState<string[]>([]);
     const [syncLinkedWorkerRole, setSyncLinkedWorkerRole] = useState(false);
 
@@ -128,6 +136,16 @@ const UserManagementPage: React.FC = () => {
         setWorkers(workersData);
         setOfficeStaffRows(officeStaffData);
         setPositions(positionsData);
+        if (!isDevAdminSessionEnabled()) {
+            try {
+                const [companyRows, links] = await Promise.all([companyService.getCompanies(), accountLinkService.getAllLinks()]);
+                setCompanies(companyRows);
+                setAccountLinks(links);
+                setConnectionError(false);
+            } catch {
+                setConnectionError(true);
+            }
+        }
     }, []);
 
     useEffect(() => {
@@ -182,10 +200,14 @@ const UserManagementPage: React.FC = () => {
             workers.forEach((worker) => {
                 if (worker.uid === user.uid && worker.id) linked.set(String(worker.id), worker);
             });
+            accountLinks.filter((link) => link.uid === user.uid && link.entityType === 'worker' && link.status === 'active').forEach((link) => {
+                const worker = workerById.get(link.entityId);
+                if (worker?.id) linked.set(String(worker.id), worker);
+            });
             map.set(user.uid, Array.from(linked.values()));
         });
         return map;
-    }, [users, workers, workerById]);
+    }, [users, workers, workerById, accountLinks]);
 
     const linkedOfficeStaffByUserId = useMemo(() => {
         const map = new Map<string, OfficeStaff[]>();
@@ -198,10 +220,14 @@ const UserManagementPage: React.FC = () => {
             officeStaffRows.forEach((staff) => {
                 if (staff.uid === user.uid && staff.id) linked.set(String(staff.id), staff);
             });
+            accountLinks.filter((link) => link.uid === user.uid && link.entityType === 'office' && link.status === 'active').forEach((link) => {
+                const staff = officeStaffById.get(link.entityId);
+                if (staff?.id) linked.set(String(staff.id), staff);
+            });
             map.set(user.uid, Array.from(linked.values()));
         });
         return map;
-    }, [users, officeStaffRows, officeStaffById]);
+    }, [users, officeStaffRows, officeStaffById, accountLinks]);
 
     const validPositionNames = useMemo(() => {
         return new Set(positions.map((position) => String(position.name).trim()).filter(Boolean));
@@ -223,7 +249,9 @@ const UserManagementPage: React.FC = () => {
 
             const missingBasePosition = basePosition.length === 0;
             const invalidBasePosition = basePosition.length > 0 && !validPositionNames.has(basePosition);
-            const mismatchWithLinkedWorker = Boolean(basePosition && linkedRoles.length > 0 && !linkedRoles.includes(basePosition));
+            const mismatchWithLinkedWorker = Boolean(basePosition && linkedRoles.some((role) => role !== basePosition));
+            const configuredPosition = positions.find((position) => position.name === basePosition);
+            const roleMismatch = Boolean(configuredPosition && normalizeSystemRole(user.role) !== normalizeSystemRole(configuredPosition.systemRole));
 
             return {
                 uid: user.uid,
@@ -234,38 +262,52 @@ const UserManagementPage: React.FC = () => {
                 missingBasePosition,
                 invalidBasePosition,
                 mismatchWithLinkedWorker,
+                roleMismatch,
                 invalidAdditionalPositions
             };
         });
-    }, [users, linkedOfficeStaffByUserId, linkedWorkersByUserId, userPositionMap, validPositionNames]);
+    }, [users, positions, linkedOfficeStaffByUserId, linkedWorkersByUserId, userPositionMap, validPositionNames]);
 
     const integritySummary = useMemo(() => {
         return {
             missingBasePosition: integrityRows.filter((row) => row.missingBasePosition).length,
             invalidBasePosition: integrityRows.filter((row) => row.invalidBasePosition).length,
             mismatchWithLinkedWorker: integrityRows.filter((row) => row.mismatchWithLinkedWorker).length,
-            invalidAdditional: integrityRows.filter((row) => row.invalidAdditionalPositions.length > 0).length
+            invalidAdditional: integrityRows.filter((row) => row.invalidAdditionalPositions.length > 0).length,
+            roleMismatch: integrityRows.filter((row) => row.roleMismatch).length,
         };
     }, [integrityRows]);
 
+    const connectionsByUser = useMemo(() => new Map(users.map((user) => [user.uid,
+        summarizeAccountConnections(user, workers, officeStaffRows, companies, accountLinks),
+    ])), [users, workers, officeStaffRows, companies, accountLinks]);
+    const previewLinkData = useMemo(() => devAdminMode ? { companies: [], officeStaff: officeStaffRows, links: [] } : undefined, [devAdminMode, officeStaffRows]);
+
+    const issueRows = integrityRows.filter((row) => row.missingBasePosition || row.invalidBasePosition || row.mismatchWithLinkedWorker || row.invalidAdditionalPositions.length > 0 || row.roleMismatch);
+
     const filteredUsers = useMemo(() => {
         const q = search.trim().toLowerCase();
-        if (!q) return users;
         return users.filter((user) => {
-            const text = `${user.displayName || ''} ${user.email || ''} ${user.position || ''} ${user.role || ''}`.toLowerCase();
+            if (userFilter === 'pending' && user.status !== 'pending') return false;
+            if (userFilter === 'issues' && !integrityRows.some((row) => row.uid === user.uid && (row.missingBasePosition || row.invalidBasePosition || row.mismatchWithLinkedWorker || row.roleMismatch || row.invalidAdditionalPositions.length > 0))) return false;
+            const text = `${user.displayName || ''} ${user.email || ''} ${user.position || ''} ${accessRoleLabel(user.role)} ${(connectionsByUser.get(user.uid) || []).map((link) => link.name).join(' ')}`.toLowerCase();
             return text.includes(q);
         });
-    }, [users, search]);
+    }, [users, search, userFilter, integrityRows, connectionsByUser]);
 
     useEffect(() => {
-        if (filteredUsers.length === 0) {
-            setSelectedUserId('');
-            return;
+        if ((!selectedUserId || !users.some((u) => u.uid === selectedUserId)) && users.length > 0) {
+            setSelectedUserId(users[0].uid);
         }
-        if (!selectedUserId || !filteredUsers.some((u) => u.uid === selectedUserId)) {
-            setSelectedUserId(filteredUsers[0].uid);
+    }, [users, selectedUserId]);
+
+    useEffect(() => {
+        if (requestedUserId) {
+            setSelectedUserId(requestedUserId);
+            setSearch('');
+            setUserFilter('all');
         }
-    }, [filteredUsers, selectedUserId]);
+    }, [requestedUserId]);
 
     const selectedUser = useMemo(() => users.find((user) => user.uid === selectedUserId) || null, [users, selectedUserId]);
     const selectedUserIntegrity = useMemo(
@@ -284,9 +326,11 @@ const UserManagementPage: React.FC = () => {
     useEffect(() => {
         if (!selectedUser) return;
         setDraftRole(normalizeSystemRole(selectedUser.role));
-        setDraftPosition(String(selectedUser.position || selectedLinkedWorkers[0]?.role || selectedLinkedOfficeStaff[0]?.role || '일반'));
+        setDraftPosition(String(selectedUser.position || ''));
         setDraftAdditionalPositions(userPositionMap[selectedUser.uid] || []);
-    }, [selectedUser, selectedLinkedOfficeStaff, selectedLinkedWorkers, userPositionMap]);
+        setSyncLinkedWorkerRole(false);
+        setAdvancedRole(false);
+    }, [selectedUser, userPositionMap]);
 
     const refreshAll = async () => {
         setRefreshing(true);
@@ -294,6 +338,8 @@ const UserManagementPage: React.FC = () => {
             await loadAll();
             await userMenuPositionService.refresh();
             await menuServiceV11.refreshFromServer();
+        } catch {
+            Swal.fire('새로고침 실패', '데이터를 불러오지 못했습니다. 다시 시도해 주세요.', 'error');
         } finally {
             setRefreshing(false);
         }
@@ -395,6 +441,10 @@ const UserManagementPage: React.FC = () => {
 
     const handleSaveSelectedUserAccess = async () => {
         if (!selectedUser) return;
+        if (!draftPosition && selectedUser.uid === currentUser?.uid) {
+            Swal.fire('해제할 수 없음', '현재 로그인한 관리자 자신의 승인은 해제할 수 없습니다.', 'warning');
+            return;
+        }
         setSavingCore(true);
         setSavingAdditional(true);
         try {
@@ -406,20 +456,19 @@ const UserManagementPage: React.FC = () => {
             const afterAccess = {
                 systemRole: draftRole,
                 position: draftPosition,
-                additionalPositions: [...draftAdditionalPositions].sort(),
+                additionalPositions: draftPosition ? [...draftAdditionalPositions].sort() : [],
             };
-            await userService.updateUserRole(selectedUser.uid, draftRole);
-            await userService.updateUserProfile(selectedUser.uid, { position: draftPosition });
-            await userMenuPositionService.setPositions(selectedUser.uid, draftAdditionalPositions);
-            if (syncLinkedWorkerRole && draftPosition) {
-                await Promise.all([
-                    ...selectedLinkedWorkers.map((worker) => worker.id ? manpowerService.updateWorker(String(worker.id), { role: draftPosition }) : Promise.resolve()),
-                    ...selectedLinkedOfficeStaff.map((staff) => staff.id ? officeStaffService.updateOfficeStaff(String(staff.id), { role: draftPosition }) : Promise.resolve())
-                ]);
+            if (draftPosition) {
+                await accountLinkService.updateUserAccess({
+                    uid: selectedUser.uid,
+                    role: draftRole,
+                    position: draftPosition,
+                    additionalPositions: draftAdditionalPositions,
+                    syncLinkedProfiles: syncLinkedWorkerRole,
+                });
+            } else {
+                await accountLinkService.revokeUserAccessApproval(selectedUser.uid);
             }
-            await userAccessClaimsService.syncUser(selectedUser.uid).catch((claimError) => {
-                console.warn('[UserManagementPage] claim sync failed:', claimError);
-            });
             const accessChanged = JSON.stringify(beforeAccess) !== JSON.stringify(afterAccess);
             if (accessChanged) {
                 await permissionAuditService.log({
@@ -432,11 +481,19 @@ const UserManagementPage: React.FC = () => {
                         after: afterAccess,
                         syncedLinkedProfiles: syncLinkedWorkerRole,
                     },
+                }).catch((auditError) => {
+                    console.warn('[UserManagementPage] server update succeeded but client audit log failed:', auditError);
                 });
             }
             await loadAll();
             await userMenuPositionService.refresh();
-            Swal.fire('저장 완료', '사용자 권한, 기본 직책, 추가 직책을 저장했습니다.', 'success');
+            Swal.fire(
+                '저장 완료',
+                draftPosition
+                    ? '사용자 권한, 기본 직책, 추가 직책을 저장했습니다.'
+                    : '기본 직책과 접근 승인을 해제했습니다. 해당 사용자는 다시 승인될 때까지 승인 대기 화면이 표시됩니다.',
+                'success'
+            );
         } catch (error) {
             console.error('[UserManagementPage] save selected user access failed:', error);
             Swal.fire('오류', '저장에 실패했습니다.', 'error');
@@ -447,227 +504,153 @@ const UserManagementPage: React.FC = () => {
     };
 
     const savingUserAccess = savingCore || savingAdditional;
+    const configuredPosition = positions.find((position) => position.name === draftPosition);
+    const selectedConnections = connectionsByUser.get(selectedUserId) || [];
+    const hasChanges = Boolean(selectedUser && (draftRole !== normalizeSystemRole(selectedUser.role)
+        || draftPosition !== (selectedUser.position || '') || syncLinkedWorkerRole
+        || JSON.stringify([...draftAdditionalPositions].sort()) !== JSON.stringify([...(userPositionMap[selectedUserId] || [])].sort())));
+    const needsApproval = Boolean(selectedUser && selectedUser.status !== 'active' && draftPosition);
+    const canSaveAccess = hasChanges || needsApproval;
+    useEffect(() => {
+        if (!hasChanges) return;
+        const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+        window.addEventListener('beforeunload', beforeUnload);
+        return () => window.removeEventListener('beforeunload', beforeUnload);
+    }, [hasChanges]);
+    const canLeaveEditor = async () => !hasChanges || (await Swal.fire({
+        title: '저장하지 않은 변경이 있습니다', text: '변경을 버리고 이동할까요?', icon: 'question',
+        showCancelButton: true, confirmButtonText: '변경 버리고 이동', cancelButtonText: '계속 편집',
+    })).isConfirmed;
+    const resetDraft = () => {
+        if (!selectedUser) return;
+        setDraftRole(normalizeSystemRole(selectedUser.role)); setDraftPosition(selectedUser.position || '');
+        setDraftAdditionalPositions(userPositionMap[selectedUserId] || []); setSyncLinkedWorkerRole(false); setAdvancedRole(false);
+    };
+    const openSection = async (section: UserManagementSection, uid = selectedUserId) => {
+        if (savingUserAccess || !(await canLeaveEditor())) return;
+        resetDraft();
+        const target = USER_MANAGEMENT_SECTIONS.find((item) => item.id === section)!;
+        navigate(`${target.path}${uid ? `?user=${encodeURIComponent(uid)}` : ''}`);
+    };
+    const selectUser = async (uid: string) => {
+        if (uid === selectedUserId || savingUserAccess || !(await canLeaveEditor())) return;
+        setSelectedUserId(uid); navigate(`${location.pathname}?user=${encodeURIComponent(uid)}`, { replace: true });
+    };
+    const changePosition = (name: string) => {
+        const next = selectPositionAccess(positions.find((position) => position.name === name), draftAdditionalPositions);
+        setDraftPosition(next.position); setDraftRole(next.role); setDraftAdditionalPositions(next.additionalPositions); setAdvancedRole(false);
+    };
+    const saveAccess = async () => {
+        if (!selectedUser || !canSaveAccess) return;
+        const confirmed = await Swal.fire({
+            title: draftPosition ? '직책·권한을 저장할까요?' : '접근 승인을 해제할까요?',
+            text: `${selectedUser.displayName || selectedUser.email}: ${selectedUser.position || '미지정'} → ${draftPosition || '미지정'} · ${accessRoleLabel(draftRole)}. ${!draftPosition ? '다시 승인될 때까지 이 계정은 서비스를 사용할 수 없습니다.' : syncLinkedWorkerRole ? '연결된 인원 직책도 함께 변경됩니다.' : '추가 직책의 메뉴 권한도 함께 저장합니다.'}`,
+            icon: 'question', showCancelButton: true, confirmButtonText: draftPosition ? '저장' : '승인 해제', cancelButtonText: '취소',
+        });
+        if (confirmed.isConfirmed) await handleSaveSelectedUserAccess();
+    };
+    const confirmAutoFix = async (title: string, action: () => Promise<void>) => {
+        const result = await Swal.fire({ title, text: '전체 계정의 해당 데이터를 일괄 변경합니다. 점검 목록을 확인한 뒤 실행해 주세요.', icon: 'warning', showCancelButton: true, confirmButtonText: '일괄 적용', cancelButtonText: '취소' });
+        if (result.isConfirmed) await action();
+    };
+    const integrityOptions = [
+        { id: 'all', label: '전체 확인 필요', count: issueRows.length },
+        { id: 'missingBasePosition', label: '직책 미지정', count: integritySummary.missingBasePosition },
+        { id: 'invalidBasePosition', label: '삭제된 직책', count: integritySummary.invalidBasePosition },
+        { id: 'mismatchWithLinkedWorker', label: '연결 인원과 불일치', count: integritySummary.mismatchWithLinkedWorker },
+        { id: 'roleMismatch', label: '직책 권한과 다름', count: integritySummary.roleMismatch },
+        { id: 'invalidAdditional', label: '추가 직책 오류', count: integritySummary.invalidAdditional },
+    ];
+    const visibleIssues = issueRows.filter((row) => integrityFilter === 'all'
+        || (integrityFilter === 'invalidAdditional' ? row.invalidAdditionalPositions.length > 0 : Boolean(row[integrityFilter as keyof typeof row])));
 
-    if (loading) {
-        return <div className="p-10 text-center text-slate-500"><FontAwesomeIcon icon={faSpinner} spin className="mr-2" />로딩중...</div>;
-    }
-
+    if (loading) return <div className="p-6 text-center text-slate-500" role="status"><FontAwesomeIcon icon={faSpinner} spin /> 사용자 정보를 불러오는 중...</div>;
     return (
-        <div className="p-6 space-y-6">
-            <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                    <div>
-                        <h1 className="text-2xl font-extrabold text-slate-800 flex items-center gap-2"><FontAwesomeIcon icon={activeSectionMeta.icon} className="text-red-500" />사용자 관리</h1>
-                        <p className="text-sm text-slate-500 mt-1">{activeSectionMeta.description}</p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={refreshAll} className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold"><FontAwesomeIcon icon={refreshing ? faSpinner : faArrowsRotate} spin={refreshing} className="mr-2" />새로고침</button>
-                        <button type="button" onClick={() => navigate('/admin/role-menu')} className="px-3 py-2 rounded-lg bg-slate-800 text-white text-sm font-bold"><FontAwesomeIcon icon={faShieldHalved} className="mr-2" />메뉴 권한 설정</button>
-                    </div>
-                </div>
-                <nav aria-label="사용자 관리 메뉴" className="mt-5 border-t border-slate-100 pt-4">
-                    <div className="flex gap-2 overflow-x-auto pb-1">
-                        {USER_MANAGEMENT_SECTIONS.map((section) => {
-                            const isActive = section.id === activeSection;
-                            const hasIntegrityIssues = section.id === 'integrity' && Object.values(integritySummary).some((count) => count > 0);
-                            return (
-                                <button
-                                    key={section.id}
-                                    type="button"
-                                    onClick={() => navigate(section.path)}
-                                    aria-current={isActive ? 'page' : undefined}
-                                    className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-extrabold transition-colors ${isActive
-                                        ? 'border-indigo-600 bg-indigo-600 text-white shadow-sm'
-                                        : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700'
-                                    }`}
-                                >
-                                    <FontAwesomeIcon icon={section.icon} />
-                                    {section.label}
-                                    {hasIntegrityIssues && <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${isActive ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'}`}>확인</span>}
-                                </button>
-                            );
-                        })}
-                    </div>
+        <div className="user-management-page">
+            <header className="um-header">
+                <h1><FontAwesomeIcon icon={faUserGear} /> 사용자 관리</h1>
+                <nav aria-label="사용자 관리 메뉴" className="um-nav">
+                    {USER_MANAGEMENT_SECTIONS.filter((section) => section.id !== 'positions').map((section) => {
+                        const active = section.id === activeSection || (section.id === 'access' && activeSection === 'positions');
+                        return <button key={section.id} type="button" onClick={() => void openSection(section.id)} aria-current={active ? 'page' : undefined}>
+                            <FontAwesomeIcon icon={section.icon} /> {section.label}
+                            {section.id === 'integrity' && issueRows.length > 0 && <span className="um-count">{issueRows.length}</span>}
+                        </button>;
+                    })}
                 </nav>
-            </section>
-
-            {activeSection === 'integrity' && <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                    <h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
-                        <FontAwesomeIcon icon={faCircleInfo} className="text-amber-500" />
-                        정합성 자동 점검
-                    </h2>
-                    <div className="flex flex-wrap gap-2">
-                        <button
-                            type="button"
-                            onClick={handleAutoSyncUserPositionFromLinkedWorker}
-                            disabled={runningAutoFix}
-                            className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-bold disabled:opacity-60"
-                        >
-                            <FontAwesomeIcon icon={runningAutoFix ? faSpinner : faArrowsRotate} spin={runningAutoFix} className="mr-2" />
-                            사용자 직책 자동동기화
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleAutoSyncLinkedWorkerRoleFromUser}
-                            disabled={runningAutoFix}
-                            className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-bold disabled:opacity-60"
-                        >
-                            <FontAwesomeIcon icon={runningAutoFix ? faSpinner : faArrowsRotate} spin={runningAutoFix} className="mr-2" />
-                            연동 인원 직책 동기화
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleCleanInvalidAdditionalPositions}
-                            disabled={runningAutoFix}
-                            className="px-3 py-2 rounded-lg bg-rose-600 text-white text-sm font-bold disabled:opacity-60"
-                        >
-                            <FontAwesomeIcon icon={runningAutoFix ? faSpinner : faArrowsRotate} spin={runningAutoFix} className="mr-2" />
-                            잘못된 추가직책 정리
-                        </button>
-                    </div>
+                <div className="um-header-actions">
+                    <button type="button" className="um-button" onClick={async () => { if (await canLeaveEditor()) { resetDraft(); await refreshAll(); } }} disabled={refreshing || savingUserAccess} aria-label="사용자 정보 새로고침"><FontAwesomeIcon icon={refreshing ? faSpinner : faArrowsRotate} spin={refreshing} /></button>
+                    <button type="button" className="um-button" onClick={async () => { if (await canLeaveEditor()) navigate('/admin/role-menu'); }}>메뉴별 권한</button>
                 </div>
-
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                    <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
-                        <div className="text-[11px] text-slate-500">기본 직책 미지정</div>
-                        <div className="text-lg font-bold text-slate-800">{integritySummary.missingBasePosition}</div>
+            </header>
+            {(activeSection === 'access' || activeSection === 'positions') && <div className="um-subbar">
+                <div className="um-segment" aria-label="직책·권한 보기">
+                    <button type="button" aria-pressed={activeSection === 'access'} onClick={() => void openSection('access')}>사용자별 설정 <span>{users.length}</span></button>
+                    <button type="button" aria-pressed={activeSection === 'positions'} onClick={() => void openSection('positions')}>직책별 설정 <span>{positions.length}</span></button>
+                </div><p>직책을 선택하면 연결된 권한이 함께 적용됩니다.</p>
+            </div>}
+            {activeSection === 'account-links' && <AccountLinkManager users={users} workers={workers} loading={refreshing} selectedUserId={selectedUserId}
+                onSelectUser={setSelectedUserId} onChanged={loadAll} actorEmail={currentUser?.email || 'system'} embedded
+                onManageAccess={(uid) => void openSection('access', uid)} previewData={previewLinkData} />}
+            {activeSection === 'positions' && <IntegratedPositionManager positions={positions} users={users} workers={workers} officeStaffRows={officeStaffRows}
+                userPositionMap={userPositionMap} onChanged={async () => { await loadAll(); await userMenuPositionService.refresh(); }} />}
+            {activeSection === 'access' && <div className="um-workspace">
+                <aside className="um-panel um-users" aria-label="사용자 목록">
+                    <div className="um-list-tools">
+                        <div className="um-search"><FontAwesomeIcon icon={faSearch} /><input aria-label="사용자 검색" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="이름, 이메일, 직책, 연결 대상 검색" />{search && <button type="button" aria-label="검색 지우기" onClick={() => setSearch('')}>×</button>}</div>
+                        <div className="um-filters">{([['all', '전체'], ['pending', '승인 대기'], ['issues', '확인 필요']] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={userFilter === key} onClick={() => setUserFilter(key)}>{label}</button>)}<span>{filteredUsers.length}명</span></div>
                     </div>
-                    <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
-                        <div className="text-[11px] text-amber-700">기본 직책 유효성 오류</div>
-                        <div className="text-lg font-bold text-amber-800">{integritySummary.invalidBasePosition}</div>
+                    <div className="um-user-list">{filteredUsers.map((user) => {
+                        const links = connectionsByUser.get(user.uid) || [];
+                        return <button key={user.uid} type="button" aria-pressed={user.uid === selectedUserId} onClick={() => void selectUser(user.uid)} className="um-user-row">
+                            <div className="um-user-line"><strong>{user.displayName || '이름 없음'}</strong><span className={`um-badge ${user.status === 'active' ? 'um-good' : 'um-warning'}`}>{userStatusLabel(user.status)}</span></div>
+                            <div className="um-email">{user.email || '이메일 없음'}</div>
+                            <div className="um-user-line"><span className="um-badge">{user.position || '직책 미지정'}</span><span className="um-muted">{accessRoleLabel(user.role)}</span></div>
+                            <div className="um-connection-caption"><FontAwesomeIcon icon={faLink} /> {connectionError ? '연결 정보 확인 필요' : links.length ? links.map((link) => `${link.label} ${link.name}${link.status === 'pending' ? ' (승인 대기)' : ''}`).join(' · ') : '연결된 대상 없음'}</div>
+                        </button>;
+                    })}{filteredUsers.length === 0 && <div className="um-empty">검색 조건에 맞는 사용자가 없습니다.<button className="um-button" type="button" onClick={() => { setSearch(''); setUserFilter('all'); }}>필터 초기화</button></div>}</div>
+                </aside>
+                {!selectedUser ? <div className="um-panel um-empty">관리할 사용자를 선택해 주세요.</div> : <section className="um-panel um-editor" aria-label="선택 사용자 직책·권한">
+                    <div className="um-editor-heading"><div><div className="um-eyebrow">선택한 로그인 계정</div><h2>{selectedUser.displayName || '이름 없음'}</h2><p className="um-email">{selectedUser.email || '이메일 없음'}</p></div><span className={`um-badge ${selectedUser.status === 'active' ? 'um-good' : 'um-warning'}`}>{userStatusLabel(selectedUser.status)}</span></div>
+                    <div className="um-editor-section um-linked-overview">
+                        <div className="um-section-title"><h3><FontAwesomeIcon icon={faLink} /> 연결된 인원·회사</h3><button type="button" className="um-text-button" onClick={() => void openSection('account-links')}>연결 관리 →</button></div>
+                        {connectionError ? <p className="um-notice" role="status">연결 정보를 불러오지 못했습니다. 새로고침해 주세요.</p> : selectedConnections.length ? <div className="um-connection-list">{selectedConnections.map((link) => <div key={link.key} className="um-connection"><span className="um-badge">{link.label}</span><div><strong>{link.name}</strong>{link.detail && <small>{link.detail}</small>}</div><span className={`um-badge ${link.status === 'pending' || link.missing ? 'um-warning' : 'um-good'}`}>{link.status === 'pending' ? '승인 대기' : link.missing ? '대상 확인 필요' : '연결됨'}</span></div>)}</div> : <p className="um-muted">아직 연결된 대상이 없습니다. 연결 관리에서 인원이나 회사를 선택하세요.</p>}
                     </div>
-                    <div className="rounded-lg bg-indigo-50 border border-indigo-200 px-3 py-2">
-                        <div className="text-[11px] text-indigo-700">사용자-연동직책 불일치</div>
-                        <div className="text-lg font-bold text-indigo-800">{integritySummary.mismatchWithLinkedWorker}</div>
-                    </div>
-                    <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2">
-                        <div className="text-[11px] text-rose-700">잘못된 추가 직책</div>
-                        <div className="text-lg font-bold text-rose-800">{integritySummary.invalidAdditional}</div>
-                    </div>
-                </div>
-            </section>}
-
-            {activeSection === 'account-links' && (devAdminMode ? (
-                <section className="bg-sky-50 border border-sky-200 rounded-2xl p-4">
-                    <div className="flex items-start gap-3">
-                        <FontAwesomeIcon icon={faCircleInfo} className="text-sky-600 mt-1" />
-                        <div>
-                            <div className="font-bold text-sky-900">개발자 관리자 모드</div>
-                            <p className="text-sm text-sky-800 mt-1">
-                                계정 연동 승인/거절 패널은 실제 사용자, 인력, 내근직 데이터를 변경할 수 있어 개발 확인 모드에서는 비활성화했습니다.
-                                아래 권한 편집 영역은 샘플 데이터로 직접 테스트할 수 있습니다.
-                            </p>
+                    <fieldset disabled={savingUserAccess} className="um-editor-fields">
+                        <div className="um-editor-section">
+                            <div className="um-section-title"><h3><FontAwesomeIcon icon={faShieldHalved} /> 직책·권한 설정</h3><button type="button" className="um-text-button" onClick={() => void openSection('positions')}>직책 관리 →</button></div>
+                            <div className="um-position-choice">
+                                <label>기본 직책<select aria-label="기본 직책" value={draftPosition} onChange={(e) => changePosition(e.target.value)}><option value="">미지정 · 접근 승인 해제</option>{draftPosition && !configuredPosition && <option value={draftPosition}>{draftPosition} · 삭제된 직책</option>}{positions.map((position) => <option key={position.id || position.name} value={position.name}>{position.name} · {accessRoleLabel(position.systemRole)}</option>)}</select></label>
+                                <div className="um-derived-role"><span>적용 권한</span><strong><FontAwesomeIcon icon={faShieldHalved} /> {accessRoleLabel(draftRole)}</strong><small>{configuredPosition && normalizeSystemRole(configuredPosition.systemRole) !== draftRole ? '이 계정에 개별 설정됨' : '직책에 연결된 권한'}</small></div>
+                            </div>
+                            {configuredPosition && normalizeSystemRole(configuredPosition.systemRole) !== draftRole && <div className="um-notice"><span>직책의 기본 권한은 {accessRoleLabel(configuredPosition.systemRole)}입니다.</span><button className="um-text-button" type="button" onClick={() => setDraftRole(normalizeSystemRole(configuredPosition.systemRole))}>직책 권한으로 맞추기</button></div>}
+                            <button type="button" className="um-text-button um-advanced-toggle" aria-expanded={advancedRole} onClick={() => setAdvancedRole(!advancedRole)}>개별 권한 설정 {advancedRole ? '접기' : '펼치기'}</button>
+                            {advancedRole && <label className="um-field-label">이 계정의 권한만 다르게 설정<select aria-label="개별 시스템 권한" value={draftRole} onChange={(e) => setDraftRole(e.target.value as CanonicalSystemRole)}>{SYSTEM_ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
+                            {(selectedLinkedWorkers.length > 0 || selectedLinkedOfficeStaff.length > 0) && <label className="um-checkbox"><input type="checkbox" checked={syncLinkedWorkerRole} onChange={(e) => setSyncLinkedWorkerRole(e.target.checked)} disabled={!draftPosition} /><span>연결된 인원 {selectedLinkedWorkers.length + selectedLinkedOfficeStaff.length}명의 직책도 함께 맞추기</span></label>}
+                            {selectedUserIntegrity?.mismatchWithLinkedWorker && <p className="um-notice">현재 연결 인원의 직책({selectedUserIntegrity.linkedRole})이 계정과 다릅니다.</p>}
+                            {selectedUser.status !== 'active' && <p className="um-notice">직책을 저장하면 사용 가능한 상태로 승인됩니다.</p>}
+                            {!draftPosition && <p className="um-notice">미지정 상태로 저장하면 직책과 접근 승인이 해제됩니다.</p>}
                         </div>
-                    </div>
-                </section>
-            ) : (
-                <AccountLinkManager
-                    users={users}
-                    workers={workers}
-                    loading={refreshing}
-                    selectedUserId={selectedUserId}
-                    onSelectUser={setSelectedUserId}
-                    onChanged={loadAll}
-                    actorEmail={currentUser?.email || 'system'}
-                    embedded
-                />
-            ))}
-
-            {activeSection === 'positions' && <IntegratedPositionManager
-                positions={positions}
-                users={users}
-                workers={workers}
-                officeStaffRows={officeStaffRows}
-                userPositionMap={userPositionMap}
-                onChanged={async () => {
-                    await loadAll();
-                    await userMenuPositionService.refresh();
-                }}
-            />}
-
-            {activeSection === 'access' && <section className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-                <div className="xl:col-span-5 bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                    <div className="p-4 border-b border-slate-100"><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="사용자 검색" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
-                    <div className="max-h-[620px] overflow-y-auto divide-y divide-slate-100">
-                        {filteredUsers.map((user) => (
-                            <button key={user.uid} onClick={() => setSelectedUserId(user.uid)} className={`w-full text-left p-4 ${user.uid === selectedUserId ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
-                                <div className="font-bold text-slate-800">{user.displayName || '(이름없음)'}</div>
-                                <div className="text-xs text-slate-500">{user.email}</div>
-                                <div className="text-xs text-slate-400 mt-1">권한: {normalizeSystemRole(user.role)} / 기본직책: {user.position || '(미지정)'}</div>
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                <div className="xl:col-span-7 space-y-4">
-                    {!selectedUser ? (
-                        <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-slate-400">사용자를 선택하세요.</div>
-                    ) : (
-                        <>
-                            <section className="bg-white border border-slate-200 rounded-2xl p-4">
-                                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                                    <div className="flex flex-wrap gap-2 items-center">
-                                        <span className="text-xs font-bold text-slate-500">선택 사용자 점검</span>
-                                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${selectedUserIntegrity?.missingBasePosition ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                                            {selectedUserIntegrity?.missingBasePosition ? '기본직책 미지정' : '기본직책 정상'}
-                                        </span>
-                                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${selectedUserIntegrity?.mismatchWithLinkedWorker ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
-                                            {selectedUserIntegrity?.mismatchWithLinkedWorker ? '연동 직책 불일치' : '연동 직책 일치'}
-                                        </span>
-                                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${(selectedUserIntegrity?.invalidAdditionalPositions.length || 0) > 0 ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>
-                                            {(selectedUserIntegrity?.invalidAdditionalPositions.length || 0) > 0 ? `잘못된 추가직책 ${selectedUserIntegrity?.invalidAdditionalPositions.length}건` : '추가직책 정상'}
-                                        </span>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={handleSaveSelectedUserAccess}
-                                        disabled={savingUserAccess}
-                                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-extrabold text-white disabled:opacity-60"
-                                    >
-                                        <FontAwesomeIcon icon={savingUserAccess ? faSpinner : faCheck} spin={savingUserAccess} />
-                                        선택 사용자 권한 저장
-                                    </button>
-                                </div>
-                            </section>
-
-                            <section className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
-                                <div className="flex items-center justify-between"><h2 className="font-extrabold text-slate-800 flex items-center gap-2"><FontAwesomeIcon icon={faShieldHalved} className="text-indigo-500" />기본 권한/직책</h2></div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    <select value={draftRole} onChange={(e) => setDraftRole(e.target.value as CanonicalSystemRole)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm">{SYSTEM_ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label} ({option.value})</option>)}</select>
-                                    <select value={draftPosition} onChange={(e) => setDraftPosition(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm">{positions.map((position) => <option key={position.id || position.name} value={position.name}>{position.name} ({position.systemRole})</option>)}</select>
-                                </div>
-                                <label className="inline-flex items-start gap-2 text-sm text-slate-600"><input type="checkbox" checked={syncLinkedWorkerRole} onChange={(e) => setSyncLinkedWorkerRole(e.target.checked)} className="mt-0.5 rounded border-slate-300" /><span>연동 작업자/사무실 직원 직책도 변경 <span className="text-xs text-slate-400">(선택 시에만 인력 직책을 함께 변경합니다)</span></span></label>
-                            </section>
-
-                            <section className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
-                                <div className="flex items-center justify-between"><h2 className="font-extrabold text-slate-800 flex items-center gap-2"><FontAwesomeIcon icon={faTag} className="text-cyan-500" />추가 직책 권한</h2></div>
-                                <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-                                    {positions.map((position) => {
-                                        const isBase = position.name === draftPosition;
-                                        const isExtra = draftAdditionalPositions.includes(position.name);
-                                        return (
-                                            <button key={position.id || position.name} disabled={isBase} onClick={() => setDraftAdditionalPositions((prev) => prev.includes(position.name) ? prev.filter((v) => v !== position.name) : [...prev, position.name])} className={`px-3 py-2 rounded-lg border text-sm text-left ${isBase ? 'bg-green-50 border-green-200 text-green-700' : isExtra ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'}`}>
-                                                <div className="font-bold">{position.name}</div><div className="text-[11px] opacity-80">{isBase ? '기본 직책' : position.systemRole}</div>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </section>
-
-                            <section className="bg-white border border-slate-200 rounded-2xl p-5">
-                                <h2 className="font-extrabold text-slate-800 flex items-center gap-2"><FontAwesomeIcon icon={faCircleInfo} className="text-amber-500" />권한 연동 요약</h2>
-                                <div className="grid grid-cols-3 gap-2 mt-3">
-                                    <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2"><div className="text-[11px] text-slate-500">전체 메뉴</div><div className="text-lg font-bold text-slate-800">{previewSummary.total}</div></div>
-                                    <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2"><div className="text-[11px] text-emerald-700">접근 가능</div><div className="text-lg font-bold text-emerald-800">{previewSummary.allowed}</div></div>
-                                    <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2"><div className="text-[11px] text-rose-700">비접근</div><div className="text-lg font-bold text-rose-800">{previewSummary.blocked}</div></div>
-                                </div>
-                            </section>
-                        </>
-                    )}
-                </div>
+                        <details className="um-editor-section um-details" key={`additional-${selectedUserId}`}>
+                            <summary><FontAwesomeIcon icon={faTag} /> 추가 직책 <span className="um-badge">{draftAdditionalPositions.length}개</span><span className="um-muted">겸직·추가 메뉴가 필요할 때</span></summary>
+                            <p className="um-muted">기본 직책을 유지하면서 선택한 직책의 메뉴를 추가합니다.</p>
+                            <div className="um-position-chips">{positions.filter((position) => position.name !== draftPosition).map((position) => <button key={position.id || position.name} type="button" disabled={!draftPosition} aria-pressed={draftAdditionalPositions.includes(position.name)} onClick={() => setDraftAdditionalPositions((prev) => prev.includes(position.name) ? prev.filter((name) => name !== position.name) : [...prev, position.name])}>{draftAdditionalPositions.includes(position.name) && <FontAwesomeIcon icon={faCheck} />} {position.name}</button>)}</div>
+                            {draftAdditionalPositions.filter((name) => !validPositionNames.has(name)).map((name) => <button key={name} type="button" className="um-notice" onClick={() => setDraftAdditionalPositions((prev) => prev.filter((value) => value !== name))}>{name} · 삭제된 직책 제거 ×</button>)}
+                        </details>
+                        <details className="um-editor-section um-details"><summary><FontAwesomeIcon icon={faCircleInfo} /> 메뉴 미리보기 <span className="um-badge um-good">{previewSummary.allowed}개 표시</span><span className="um-muted">전체 {previewSummary.total}개</span></summary>
+                            <p className="um-muted">선택한 직책의 메뉴 표시 기준입니다. 실제 데이터 접근은 계정 승인과 서버 권한에 따릅니다.</p>
+                            <div className="um-menu-preview">{previewMenuRows.map((row, index) => <div key={`${row.id}:${index}`}><span>{row.menuPath}</span><span className={`um-badge ${canAccessMenuRoles(previewAccessRoles, row.roles) ? 'um-good' : ''}`}>{canAccessMenuRoles(previewAccessRoles, row.roles) ? '표시' : '숨김'}</span></div>)}</div>
+                        </details>
+                    </fieldset>
+                    <div className="um-savebar"><span role="status" className="um-muted">{hasChanges ? '저장하지 않은 변경이 있습니다' : needsApproval ? '저장하면 이 직책으로 사용을 승인합니다' : '저장된 설정입니다'}</span><div><button type="button" className="um-button" onClick={resetDraft} disabled={!hasChanges || savingUserAccess}>되돌리기</button><button type="button" className="um-button um-primary" onClick={() => void saveAccess()} disabled={!canSaveAccess || savingUserAccess}><FontAwesomeIcon icon={savingUserAccess ? faSpinner : faCheck} spin={savingUserAccess} /> 직책·권한 저장</button></div></div>
+                </section>}
+            </div>}
+            {activeSection === 'integrity' && <section className="um-panel um-integrity">
+                <div className="um-section-title"><div><h2>계정·직책 점검</h2><p className="um-muted">확인이 필요한 사용자를 선택해 직책과 권한을 함께 정리하세요.</p></div><span className={`um-badge ${issueRows.length ? 'um-warning' : 'um-good'}`}>{issueRows.length ? `${issueRows.length}명 확인 필요` : '모두 정상'}</span></div>
+                <div className="um-integrity-filters">{integrityOptions.map((option) => <button type="button" key={option.id} aria-pressed={integrityFilter === option.id} onClick={() => setIntegrityFilter(option.id)}>{option.label} <strong>{option.count}</strong></button>)}</div>
+                <div className="um-table-scroll"><table className="um-table"><thead><tr><th>사용자 계정</th><th>현재 직책</th><th>확인할 내용</th><th>관리</th></tr></thead><tbody>{visibleIssues.map((row) => <tr key={row.uid}><td><strong>{row.displayName || '이름 없음'}</strong><small>{row.email}</small></td><td>{row.basePosition || '미지정'}{row.linkedRole && <small>연결 인원: {row.linkedRole}</small>}</td><td><div className="um-issue-tags">{row.missingBasePosition && <span className="um-badge um-warning">직책 미지정</span>}{row.invalidBasePosition && <span className="um-badge um-warning">삭제된 기본 직책</span>}{row.mismatchWithLinkedWorker && <span className="um-badge um-warning">연결 인원과 직책 불일치</span>}{row.roleMismatch && <span className="um-badge um-warning">직책 권한과 다름 · 개별 설정 확인</span>}{row.invalidAdditionalPositions.length > 0 && <span className="um-badge um-warning">추가 직책 확인: {row.invalidAdditionalPositions.join(', ')}</span>}</div></td><td><button type="button" className="um-button" onClick={() => void openSection('access', row.uid)}>수정 →</button></td></tr>)}</tbody></table>{visibleIssues.length === 0 && <div className="um-empty"><FontAwesomeIcon icon={faCheck} /> 이 항목에서 확인할 문제가 없습니다.</div>}</div>
+                <details className="um-details um-bulk"><summary>일괄 정리 도구</summary><p className="um-muted">여러 계정을 같은 기준으로 맞춰야 할 때 사용하세요.</p><div className="um-bulk-actions"><button type="button" className="um-button" disabled={runningAutoFix} onClick={() => void confirmAutoFix('인원 기준으로 계정 직책 맞추기', handleAutoSyncUserPositionFromLinkedWorker)}>인원 → 계정 직책 맞추기</button><button type="button" className="um-button" disabled={runningAutoFix} onClick={() => void confirmAutoFix('계정 기준으로 인원 직책 맞추기', handleAutoSyncLinkedWorkerRoleFromUser)}>계정 → 인원 직책 맞추기</button><button type="button" className="um-button" disabled={runningAutoFix} onClick={() => void confirmAutoFix('잘못된 추가 직책 정리', handleCleanInvalidAdditionalPositions)}>삭제된 추가 직책 정리</button></div></details>
             </section>}
-
         </div>
     );
 };

@@ -633,13 +633,13 @@ export const buildReferenceConstructionPlanExcelWorkbook = async ({
   styleSectionBar(summary, 5, '문서 및 현장 기본정보');
   setInfoPair(summary, 6, '상호', companyName, '문서명', '시스템동바리 시공계획서');
   setInfoPair(summary, 7, '현장명', input.siteName, '공사명', input.projectName);
-  setInfoPair(summary, 8, '발주처', input.clientName, '원도급사', input.contractorName);
+  setInfoPair(summary, 8, '전문건설사', input.contractorName, '건축규모', input.applicationScope);
   setInfoPair(summary, 9, '현장주소', input.siteAddress, '공사기간', [input.constructionStartDate, input.constructionEndDate].filter(Boolean).join(' ~ '));
   setInfoPair(summary, 10, '문서번호', input.documentNo, '개정번호', input.revision);
-  setInfoPair(summary, 11, '작성일자', input.preparedDate, '적용범위', input.applicationScope);
-  setInfoPair(summary, 12, '구조검토번호', input.structuralReviewNo, '설치도면번호', input.installationDrawingNo);
-  setInfoPair(summary, 13, '동', input.buildings, '층', input.floors);
-  setInfoPair(summary, 14, '구간', input.zones, '표지 디자인', input.coverTemplate || 'blueprint');
+  setInfoPair(summary, 11, '작성일자', input.preparedDate, '건축면적', input.buildingArea);
+  setInfoPair(summary, 12, '연면적', input.totalFloorArea, '구조검토번호', input.structuralReviewNo);
+  setInfoPair(summary, 13, '설치도면번호', input.installationDrawingNo, '동·층', [input.buildings, input.floors].filter(Boolean).join(' · '));
+  setInfoPair(summary, 14, '작업 구간', input.zones, '표지 디자인', input.coverTemplate || 'blueprint');
   styleSectionBar(summary, 16, '문서 구성 요약');
   setInfoPair(summary, 17, '선택 목차', sections.length, '업로드 도면 파일', drawings.length);
   setInfoPair(summary, 18, '업로드 도면 페이지', drawingPageCount, '최종 PDF 예상 쪽수', totalPageCount);

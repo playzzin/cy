@@ -6,11 +6,17 @@ import {
     AccountRelationRole,
     AccountType,
     resolveAccountTypeFromCompanyType,
-    resolveEntitySubTypeFromCompanyType,
 } from '../types/accountLink';
 import { findBusinessPartnerPositionDefinition } from '../constants/businessPartnerPositions';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
-import { devUsers, updateDevUser } from '../utils/devAdminFixtures';
+import {
+    devOfficeStaff,
+    devUsers,
+    devWorkers,
+    updateDevOfficeStaff,
+    updateDevUser,
+    updateDevWorker,
+} from '../utils/devAdminFixtures';
 
 // In-memory cache for user data
 const userCache = new Map<string, { data: UserData; timestamp: number }>();
@@ -25,7 +31,9 @@ export interface UserData {
     linkedWorkerIds?: string[]; // Array of linked worker IDs
     linkedCompanyIds?: string[]; // Array of linked company IDs
     linkedOfficeStaffIds?: string[]; // Array of linked office staff IDs
+    linkedSiteIds?: string[]; // Explicit company/site access scope
     accountType?: AccountType;
+    requestedAccountType?: AccountType;
     status?: 'pending' | 'active' | 'rejected' | 'suspended';
     primaryLinkId?: string;
     role?: UserRole | string; // Allow string for legacy roles (e.g. '사장') or new UserRole enum
@@ -51,6 +59,31 @@ const parseLinkedWorkerIds = (raw?: any): string[] => {
 
 const serializeLinkedWorkerIds = (ids: string[]): string[] => {
     return Array.from(new Set(ids.map((v) => String(v)).filter(Boolean)));
+};
+
+const buildDevUnlinkUserPatch = (
+    existing: UserData,
+    updates: Pick<UserData, 'linkedWorkerIds' | 'linkedOfficeStaffIds' | 'linkedCompanyIds'>,
+    removedLinkId: string
+): Partial<UserData> => {
+    const hasRemainingLink = [
+        ...(updates.linkedWorkerIds || []),
+        ...(updates.linkedOfficeStaffIds || []),
+        ...(updates.linkedCompanyIds || []),
+    ].length > 0;
+
+    return {
+        ...updates,
+        primaryLinkId: existing.primaryLinkId === removedLinkId ? '' : existing.primaryLinkId,
+        ...(hasRemainingLink ? {} : {
+            position: '',
+            department: '',
+            status: 'pending',
+            primaryLinkId: '',
+            linkedSiteIds: [],
+            requestedAccountType: existing.accountType,
+        }),
+    };
 };
 
 const deriveExistingAccountDefaults = (existing: UserData | null | undefined): Partial<UserData> => {
@@ -146,6 +179,7 @@ export const userService = {
                 userData.linkedWorkerIds = [];
                 userData.linkedCompanyIds = [];
                 userData.linkedOfficeStaffIds = [];
+                userData.linkedSiteIds = [];
                 userData.status = 'pending';
             } else {
                 Object.assign(userData, deriveExistingAccountDefaults(existing));
@@ -160,14 +194,14 @@ export const userService = {
     },
 
     // Get a single user by UID
-    getUser: async (uid: string): Promise<UserData | null> => {
+    getUser: async (uid: string, forceRefresh = false): Promise<UserData | null> => {
         if (isDevAdminSessionEnabled()) {
             return devUsers.find((user) => user.uid === uid) || null;
         }
 
         const now = Date.now();
         const cached = userCache.get(uid);
-        if (cached && (now - cached.timestamp < CACHE_TTL)) {
+        if (!forceRefresh && cached && (now - cached.timestamp < CACHE_TTL)) {
             return cached.data;
         }
 
@@ -188,94 +222,42 @@ export const userService = {
     },
 
     // Link a user to a worker
-    linkUserToWorker: async (uid: string, workerId: string, actorEmail: string = 'system'): Promise<void> => {
+    linkUserToWorker: async (uid: string, workerId: string, _actorEmail: string = 'system'): Promise<void> => {
         try {
-            const { manpowerService, worker } = await resolveWorkerForLinking(workerId);
+            const { worker } = await resolveWorkerForLinking(workerId);
             if (!worker?.id) {
                 throw new Error('worker-not-found');
             }
-
-            const users = await userFirestoreService.getAllUsers();
             const workerKeys = getWorkerLinkKeys(workerId, worker);
-
-            const alreadyLinked = users.find((u: any) => {
-                const ids = parseLinkedWorkerIds(u?.linkedWorkerIds);
-                return ids.some((id) => workerKeys.includes(String(id)));
-            });
-
-            if (alreadyLinked && alreadyLinked.uid !== uid) {
-                throw new Error('worker-already-managed');
-            }
-
-            if (worker.uid && worker.uid !== uid) {
-                throw new Error('worker-already-managed');
-            }
-
-            const existing = await userFirestoreService.getUser(uid);
-            const existingLinked = parseLinkedWorkerIds(existing?.linkedWorkerIds);
-            const nextLinked = serializeLinkedWorkerIds([...existingLinked, worker.id]);
-
             const { accountLinkService } = await import('./accountLinkService');
-            const linkId = await accountLinkService.upsertLink({
+
+            if (isDevAdminSessionEnabled()) {
+                const alreadyLinked = devUsers.find((user) =>
+                    user.uid !== uid
+                    && parseLinkedWorkerIds(user.linkedWorkerIds).some((id) => workerKeys.includes(id))
+                );
+                if (alreadyLinked || (worker.uid && worker.uid !== uid)) throw new Error('worker-already-managed');
+                const existing = devUsers.find((user) => user.uid === uid);
+                if (!existing) throw new Error('user-not-found');
+                updateDevUser(uid, {
+                    linkedWorkerIds: serializeLinkedWorkerIds([...parseLinkedWorkerIds(existing.linkedWorkerIds), worker.id]),
+                    accountType: 'worker',
+                    status: 'active',
+                    primaryLinkId: accountLinkService.getLinkId(uid, 'worker', worker.id),
+                    position: worker.role || '일반',
+                    department: worker.teamName || '',
+                });
+                updateDevWorker(worker.id, { uid });
+                return;
+            }
+
+            await accountLinkService.linkConnection({
                 uid,
-                userEmail: existing?.email ?? null,
-                userDisplayName: existing?.displayName ?? null,
-                accountType: 'worker',
                 entityType: 'worker',
                 entityId: worker.id,
-                entityName: worker.name || '작업자',
-                entitySubType: '작업자',
                 relationRole: 'staff',
-                status: 'active',
-                requestedEntity: {
-                    name: worker.name,
-                    role: worker.role,
-                    department: worker.teamName,
-                },
             });
-
-            const nextUserData: Partial<UserData> = {
-                linkedWorkerIds: nextLinked,
-                accountType: 'worker',
-                status: 'active',
-                primaryLinkId: existing?.primaryLinkId || linkId,
-                displayName: existing?.displayName || worker.name,
-                phoneNumber: existing?.phoneNumber || worker.contact,
-                position: worker.role || existing?.position,
-                department: existing?.department || worker.teamName,
-            };
-
-            if (existing) {
-                await userFirestoreService.updateUser(uid, nextUserData);
-            } else {
-                await userFirestoreService.saveUser(uid, {
-                    uid,
-                    email: null,
-                    displayName: null,
-                    photoURL: null,
-                    lastLogin: Timestamp.now(),
-                    role: 'user',
-                    ...nextUserData,
-                });
-            }
-
-            await manpowerService.updateWorker(worker.id, { uid });
-            userCache.delete(uid); // Invalidate cache
-
-            // Audit Log (Fire and Forget)
-            try {
-                const { auditService } = await import('./auditService');
-                await auditService.log({
-                    action: 'LINK_USER_WORKER',
-                    category: 'USER',
-                    actorId: 'manager',
-                    actorEmail: actorEmail,
-                    targetId: uid,
-                    details: { workerId: worker.id, workerName: worker.name }
-                });
-            } catch (e) {
-                console.warn("Audit log failed", e);
-            }
+            userCache.delete(uid);
         } catch (error) {
             console.error("Error linking user to worker:", error);
             throw error;
@@ -283,43 +265,35 @@ export const userService = {
     },
 
     // Unlink a user from a worker
-    unlinkUserFromWorker: async (uid: string, workerId: string, actorEmail: string = 'system'): Promise<void> => {
+    unlinkUserFromWorker: async (uid: string, workerId: string, _actorEmail: string = 'system'): Promise<void> => {
         try {
-            const { manpowerService, worker } = await resolveWorkerForLinking(workerId);
+            const { worker } = await resolveWorkerForLinking(workerId);
             const workerKeys = getWorkerLinkKeys(workerId, worker);
-            const existing = await userFirestoreService.getUser(uid);
-            if (!existing) return;
-
-            const current = parseLinkedWorkerIds(existing.linkedWorkerIds);
-            const next = current.filter((id) => !workerKeys.includes(String(id)));
-
             const { accountLinkService } = await import('./accountLinkService');
-            await accountLinkService.deactivateLink(uid, 'worker', worker?.id || workerId).catch(() => undefined);
+            const canonicalWorkerId = worker?.id || workerId;
 
-            await userFirestoreService.updateUser(uid, {
-                linkedWorkerIds: next,
-                primaryLinkId: existing.primaryLinkId === accountLinkService.getLinkId(uid, 'worker', worker?.id || workerId)
-                    ? ''
-                    : existing.primaryLinkId,
+            if (isDevAdminSessionEnabled()) {
+                const existing = devUsers.find((user) => user.uid === uid);
+                if (!existing) return;
+                const linkedWorkerIds = parseLinkedWorkerIds(existing.linkedWorkerIds)
+                    .filter((id) => !workerKeys.includes(id));
+                updateDevUser(uid, buildDevUnlinkUserPatch(existing, {
+                    linkedWorkerIds,
+                    linkedOfficeStaffIds: parseLinkedWorkerIds(existing.linkedOfficeStaffIds),
+                    linkedCompanyIds: parseLinkedWorkerIds(existing.linkedCompanyIds),
+                }, accountLinkService.getLinkId(uid, 'worker', canonicalWorkerId)));
+                const devWorker = devWorkers.find((row) => workerKeys.includes(String(row.id || '')));
+                if (devWorker?.id && devWorker.uid === uid) updateDevWorker(devWorker.id, { uid: '' });
+                return;
+            }
+
+            await accountLinkService.unlinkConnection({
+                uid,
+                entityType: 'worker',
+                entityId: canonicalWorkerId,
+                entityIds: workerKeys,
             });
-            if (worker?.id && worker.uid === uid) {
-                await manpowerService.updateWorker(worker.id, { uid: '' });
-            }
-            userCache.delete(uid); // Invalidate cache
-
-            try {
-                const { auditService } = await import('./auditService');
-                await auditService.log({
-                    action: 'UNLINK_USER_WORKER',
-                    category: 'USER',
-                    actorId: 'manager',
-                    actorEmail,
-                    targetId: uid,
-                    details: { workerId: worker?.id || workerId, workerName: worker?.name }
-                });
-            } catch (e) {
-                console.warn("Audit log failed", e);
-            }
+            userCache.delete(uid);
         } catch (error) {
             console.error("Error unlinking user from worker:", error);
             throw error;
@@ -368,248 +342,132 @@ export const userService = {
     linkUserToOfficeStaff: async (
         uid: string,
         staffId: string,
-        actorEmail: string = 'system',
+        _actorEmail: string = 'system',
         relationRole: AccountRelationRole = 'staff',
-        status: 'pending' | 'active' = 'active'
+        _status: 'pending' | 'active' = 'active'
     ): Promise<void> => {
-        const { officeStaffService, staff } = await resolveOfficeStaffForLinking(staffId);
+        const { staff } = await resolveOfficeStaffForLinking(staffId);
         if (!staff?.id) {
             throw new Error('office-staff-not-found');
         }
-
-        const users = await userFirestoreService.getAllUsers();
         const staffKeys = getOfficeStaffLinkKeys(staffId, staff);
-        const alreadyLinked = users.find((user: any) => {
-            const ids = parseLinkedWorkerIds(user?.linkedOfficeStaffIds);
-            return ids.some((id) => staffKeys.includes(String(id)));
-        });
-
-        if (alreadyLinked && alreadyLinked.uid !== uid) {
-            throw new Error('office-staff-already-managed');
-        }
-
-        if (staff.uid && staff.uid !== uid) {
-            throw new Error('office-staff-already-managed');
-        }
-
-        const existing = await userFirestoreService.getUser(uid);
-        const linkedOfficeStaffIds = serializeLinkedWorkerIds([
-            ...parseLinkedWorkerIds(existing?.linkedOfficeStaffIds),
-            staff.id,
-        ]);
-
         const { accountLinkService } = await import('./accountLinkService');
-        const linkId = await accountLinkService.upsertLink({
+
+        if (isDevAdminSessionEnabled()) {
+            const alreadyLinked = devUsers.find((user) =>
+                user.uid !== uid
+                && parseLinkedWorkerIds(user.linkedOfficeStaffIds).some((id) => staffKeys.includes(id))
+            );
+            if (alreadyLinked || (staff.uid && staff.uid !== uid)) throw new Error('office-staff-already-managed');
+            const existing = devUsers.find((user) => user.uid === uid);
+            if (!existing) throw new Error('user-not-found');
+            updateDevUser(uid, {
+                linkedOfficeStaffIds: serializeLinkedWorkerIds([
+                    ...parseLinkedWorkerIds(existing.linkedOfficeStaffIds),
+                    staff.id,
+                ]),
+                accountType: 'office',
+                status: 'active',
+                primaryLinkId: accountLinkService.getLinkId(uid, 'office', staff.id),
+                position: staff.role || '사무실직원',
+                department: staff.department || '',
+            });
+            updateDevOfficeStaff(staff.id, { uid });
+            return;
+        }
+
+        await accountLinkService.linkConnection({
             uid,
-            userEmail: existing?.email ?? staff.email ?? null,
-            userDisplayName: existing?.displayName ?? staff.name ?? null,
-            accountType: 'office',
             entityType: 'office',
             entityId: staff.id,
-            entityName: staff.name || '사무실 직원',
-            entitySubType: '사무실',
             relationRole,
-            status,
-            requestedEntity: {
-                name: staff.name,
-                role: staff.role,
-                department: staff.department,
-            },
         });
-
-        const userPatch: Partial<UserData> = {
-            linkedOfficeStaffIds,
-            accountType: 'office',
-            status: status === 'active' ? 'active' : (existing?.status || 'pending'),
-            primaryLinkId: existing?.primaryLinkId || linkId,
-            displayName: existing?.displayName || staff.name,
-            phoneNumber: existing?.phoneNumber || staff.contact,
-            position: staff.role || existing?.position,
-            department: existing?.department || staff.department,
-        };
-
-        if (existing) {
-            await userFirestoreService.updateUser(uid, userPatch);
-        } else {
-            await userFirestoreService.saveUser(uid, {
-                uid,
-                email: staff.email ?? null,
-                displayName: staff.name ?? null,
-                photoURL: null,
-                lastLogin: Timestamp.now(),
-                role: 'user',
-                linkedWorkerIds: [],
-                linkedCompanyIds: [],
-                ...userPatch,
-            });
-        }
-
-        if (status === 'active') {
-            await officeStaffService.updateOfficeStaff(staff.id, {
-                uid,
-                email: staff.email || existing?.email || '',
-            });
-        }
         userCache.delete(uid);
-
-        try {
-            const { auditService } = await import('./auditService');
-            await auditService.log({
-                action: status === 'active' ? 'LINK_USER_OFFICE_STAFF' : 'REQUEST_USER_OFFICE_STAFF_LINK',
-                category: 'USER',
-                actorId: 'manager',
-                actorEmail,
-                targetId: uid,
-                details: { staffId: staff.id, staffName: staff.name, relationRole }
-            });
-        } catch (e) {
-            console.warn("Audit log failed", e);
-        }
     },
 
-    unlinkUserFromOfficeStaff: async (uid: string, staffId: string, actorEmail: string = 'system'): Promise<void> => {
-        const { officeStaffService, staff } = await resolveOfficeStaffForLinking(staffId);
-        const existing = await userFirestoreService.getUser(uid);
-        if (!existing) return;
-
+    unlinkUserFromOfficeStaff: async (uid: string, staffId: string, _actorEmail: string = 'system'): Promise<void> => {
+        const { staff } = await resolveOfficeStaffForLinking(staffId);
         const staffKeys = getOfficeStaffLinkKeys(staffId, staff);
-        const current = parseLinkedWorkerIds(existing.linkedOfficeStaffIds);
-        const next = current.filter((id) => !staffKeys.includes(String(id)));
-
         const { accountLinkService } = await import('./accountLinkService');
-        await accountLinkService.deactivateLink(uid, 'office', staff?.id || staffId).catch(() => undefined);
+        const canonicalStaffId = staff?.id || staffId;
 
-        await userFirestoreService.updateUser(uid, {
-            linkedOfficeStaffIds: next,
-            primaryLinkId: existing.primaryLinkId === accountLinkService.getLinkId(uid, 'office', staff?.id || staffId)
-                ? ''
-                : existing.primaryLinkId,
+        if (isDevAdminSessionEnabled()) {
+            const existing = devUsers.find((user) => user.uid === uid);
+            if (!existing) return;
+            const linkedOfficeStaffIds = parseLinkedWorkerIds(existing.linkedOfficeStaffIds)
+                .filter((id) => !staffKeys.includes(id));
+            updateDevUser(uid, buildDevUnlinkUserPatch(existing, {
+                linkedWorkerIds: parseLinkedWorkerIds(existing.linkedWorkerIds),
+                linkedOfficeStaffIds,
+                linkedCompanyIds: parseLinkedWorkerIds(existing.linkedCompanyIds),
+            }, accountLinkService.getLinkId(uid, 'office', canonicalStaffId)));
+            const devStaff = devOfficeStaff.find((row) => staffKeys.includes(String(row.id || '')));
+            if (devStaff?.id && devStaff.uid === uid) updateDevOfficeStaff(devStaff.id, { uid: '' });
+            return;
+        }
+
+        await accountLinkService.unlinkConnection({
+            uid,
+            entityType: 'office',
+            entityId: canonicalStaffId,
+            entityIds: staffKeys,
         });
-
-        if (staff?.id && staff.uid === uid) {
-            await officeStaffService.updateOfficeStaff(staff.id, { uid: '' });
-        }
         userCache.delete(uid);
-
-        try {
-            const { auditService } = await import('./auditService');
-            await auditService.log({
-                action: 'UNLINK_USER_OFFICE_STAFF',
-                category: 'USER',
-                actorId: 'manager',
-                actorEmail,
-                targetId: uid,
-                details: { staffId: staff?.id || staffId, staffName: staff?.name }
-            });
-        } catch (e) {
-            console.warn("Audit log failed", e);
-        }
     },
 
     linkUserToCompany: async (
         uid: string,
         company: { id?: string | null; name?: string | null; type?: string | null },
-        actorEmail: string = 'system',
+        _actorEmail: string = 'system',
         relationRole: AccountRelationRole = 'staff',
-        status: 'pending' | 'active' = 'active'
+        _status: 'pending' | 'active' = 'active'
     ): Promise<void> => {
         const companyId = String(company.id || '').trim();
         if (!companyId) throw new Error('company-not-found');
-
-        const existing = await userFirestoreService.getUser(uid);
-        const linkedCompanyIds = serializeLinkedWorkerIds([
-            ...parseLinkedWorkerIds(existing?.linkedCompanyIds),
-            companyId,
-        ]);
-        const accountType = resolveAccountTypeFromCompanyType(company.type);
-        const linkedPosition = findBusinessPartnerPositionDefinition(company.type, company.type)?.name;
-
         const { accountLinkService } = await import('./accountLinkService');
-        const linkId = await accountLinkService.upsertLink({
+
+        if (isDevAdminSessionEnabled()) {
+            const existing = devUsers.find((user) => user.uid === uid);
+            if (!existing) throw new Error('user-not-found');
+            const accountType = resolveAccountTypeFromCompanyType(company.type);
+            const position = findBusinessPartnerPositionDefinition(company.type, company.type)?.name
+                || String(company.type || '협력사');
+            updateDevUser(uid, {
+                linkedCompanyIds: serializeLinkedWorkerIds([
+                    ...parseLinkedWorkerIds(existing.linkedCompanyIds),
+                    companyId,
+                ]),
+                accountType,
+                status: 'active',
+                primaryLinkId: accountLinkService.getLinkId(uid, 'company', companyId),
+                position,
+            });
+            return;
+        }
+
+        await accountLinkService.linkConnection({
             uid,
-            userEmail: existing?.email ?? null,
-            userDisplayName: existing?.displayName ?? null,
-            accountType,
             entityType: 'company',
             entityId: companyId,
-            entityName: String(company.name || '회사'),
-            entitySubType: resolveEntitySubTypeFromCompanyType(company.type),
             relationRole,
-            status,
-            requestedEntity: {
-                name: company.name ?? undefined,
-                role: linkedPosition,
-            },
         });
-
-        const userPatch: Partial<UserData> = {
-            linkedCompanyIds,
-            accountType,
-            status: status === 'active' ? 'active' : (existing?.status || 'pending'),
-            primaryLinkId: existing?.primaryLinkId || linkId,
-            position: linkedPosition || existing?.position,
-        };
-
-        if (existing) {
-            await userFirestoreService.updateUser(uid, userPatch);
-        } else {
-            await userFirestoreService.saveUser(uid, {
-                uid,
-                email: null,
-                displayName: null,
-                photoURL: null,
-                lastLogin: Timestamp.now(),
-                role: 'user',
-                linkedWorkerIds: [],
-                ...userPatch,
-            });
-        }
         userCache.delete(uid);
-
-        try {
-            const { auditService } = await import('./auditService');
-            await auditService.log({
-                action: status === 'active' ? 'LINK_USER_COMPANY' : 'REQUEST_USER_COMPANY_LINK',
-                category: 'USER',
-                actorId: 'manager',
-                actorEmail,
-                targetId: uid,
-                details: { companyId, companyName: company.name, companyType: company.type, relationRole }
-            });
-        } catch (e) {
-            console.warn("Audit log failed", e);
-        }
     },
 
-    unlinkUserFromCompany: async (uid: string, companyId: string, actorEmail: string = 'system'): Promise<void> => {
-        const existing = await userFirestoreService.getUser(uid);
-        if (!existing) return;
-
-        const current = parseLinkedWorkerIds(existing.linkedCompanyIds);
-        const next = current.filter((id) => id !== companyId);
+    unlinkUserFromCompany: async (uid: string, companyId: string, _actorEmail: string = 'system'): Promise<void> => {
         const { accountLinkService } = await import('./accountLinkService');
-        await accountLinkService.deactivateLink(uid, 'company', companyId).catch(() => undefined);
-
-        await userFirestoreService.updateUser(uid, {
-            linkedCompanyIds: next,
-            primaryLinkId: existing.primaryLinkId === accountLinkService.getLinkId(uid, 'company', companyId)
-                ? ''
-                : existing.primaryLinkId,
-        });
-        userCache.delete(uid);
-
-        try {
-            const { auditService } = await import('./auditService');
-            await auditService.log({
-                action: 'UNLINK_USER_COMPANY',
-                category: 'USER',
-                actorId: 'manager',
-                actorEmail,
-                targetId: uid,
-                details: { companyId }
-            });
-        } catch (e) {
-            console.warn("Audit log failed", e);
+        if (isDevAdminSessionEnabled()) {
+            const existing = devUsers.find((user) => user.uid === uid);
+            if (!existing) return;
+            updateDevUser(uid, buildDevUnlinkUserPatch(existing, {
+                linkedWorkerIds: parseLinkedWorkerIds(existing.linkedWorkerIds),
+                linkedOfficeStaffIds: parseLinkedWorkerIds(existing.linkedOfficeStaffIds),
+                linkedCompanyIds: parseLinkedWorkerIds(existing.linkedCompanyIds).filter((id) => id !== companyId),
+            }, accountLinkService.getLinkId(uid, 'company', companyId)));
+            return;
         }
+
+        await accountLinkService.unlinkConnection({ uid, entityType: 'company', entityId: companyId });
+        userCache.delete(uid);
     }
 };

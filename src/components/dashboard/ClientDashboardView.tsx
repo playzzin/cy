@@ -123,6 +123,8 @@ const fetchByField = async <T extends object>(
 const loadClientDashboardData = async (uid: string): Promise<DashboardData> => {
     const profile = await userService.getUser(uid);
     const linkedCompanyIds = parseLinkedCompanyIds(profile?.linkedCompanyIds);
+    const linkedSiteIds = parseLinkedCompanyIds(profile?.linkedSiteIds);
+    const hasExplicitSiteScope = Array.isArray(profile?.linkedSiteIds);
     let companies: Company[] = [];
 
     if (linkedCompanyIds.length > 0) {
@@ -136,10 +138,16 @@ const loadClientDashboardData = async (uid: string): Promise<DashboardData> => {
     }
 
     const clientCompanyIds = uniqueTexts(companies.map((company) => company.id));
-    const sites = await fetchByField<Site>('sites', 'clientCompanyId', clientCompanyIds);
+    const sites = hasExplicitSiteScope
+        ? (await Promise.all(linkedSiteIds.map((siteId) => getDoc(doc(db, 'sites', siteId)))))
+            .filter((snapshot) => snapshot.exists())
+            .map((snapshot) => ({ id: snapshot.id, ...snapshot.data() } as Site))
+            .filter((site) => [site.clientCompanyId, site.constructorCompanyId, site.companyId]
+                .some((companyId) => clientCompanyIds.includes(String(companyId || ''))))
+        : await fetchByField<Site>('sites', 'clientCompanyId', clientCompanyIds);
     const siteIds = uniqueTexts(sites.map((site) => site.id));
     const [reports, claims] = await Promise.all([
-        fetchByField<DailyReport>('daily_reports', 'companyId', clientCompanyIds),
+        fetchByField<DailyReport>('daily_reports', 'siteId', siteIds),
         fetchByField<ProgressClaim>('progress_claims', 'siteId', siteIds),
     ]);
     return { companies, sites, reports, claims };

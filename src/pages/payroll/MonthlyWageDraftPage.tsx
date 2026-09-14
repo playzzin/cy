@@ -68,6 +68,17 @@ import {
 } from './utils/payslipIssue';
 import { filterRowsByWorkerName } from './utils/workerNameSearch';
 import { calculatePayslipPrintScale } from './utils/payslipPrintLayout';
+import {
+    makePayrollCalculationOptionsSignature,
+    resolveSavedPayrollCalculationOptions,
+} from './utils/payrollCalculationOptions';
+import {
+    filterPayslipRowsBySalaryModel,
+    resolvePayslipCalculationPolicy,
+    resolvePayslipSalaryModel,
+    type PayslipSalaryModelFilter,
+} from './utils/payslipSalaryModel';
+import { normalizePayrollBankKey, resolvePayrollBankCode } from './utils/payrollBankCode';
 
 import { usePayrollData } from './hooks/usePayrollData';
 import { PaymentData, MonthlyAdvanceLedgerRow, MonthlyAdvanceLedgerWorkEntry, LedgerManualInput, DeductionBreakdown, WorkerWorkEntry, DeductionLine, TaxRateSnapshot, LedgerUtilityInputLike, InsuranceAppliedSummary, InsuranceAppliedSiteSummary, InsuranceAppliedReason, WithholdingAppliedSummary, WithholdingAppliedSiteSummary, BusinessIncomeAppliedSummary, BusinessIncomeAppliedSiteSummary } from './types/payroll';
@@ -761,7 +772,7 @@ const rebuildDeductionBreakdown = (params: { standardLines: DeductionLine[]; add
         totalStandard,
         totalAdditional,
         total,
-        hasData: total > 0,
+        hasData: (params.standardLines ?? []).length > 0 || (params.additionalLines ?? []).length > 0,
     };
 };
 
@@ -880,7 +891,7 @@ const buildUtilityDeductionLines = (manual?: LedgerUtilityInputLike): DeductionL
         if (!shouldInclude) return acc;
 
         const amount = toNumber(manual?.invoice?.[field.key]) + toNumber(manual?.labor?.[field.key]);
-        if (amount <= 0) return acc;
+        if (amount === 0) return acc;
         
         acc.push({ label: field.label, amount });
         return acc;
@@ -892,7 +903,7 @@ const buildVisibleUtilityDeductionLines = (manual?: LedgerUtilityInputLike): Ded
 
     return APPLIED_UTILITY_FIELDS.reduce<DeductionLine[]>((acc, field) => {
         const amount = toNumber(manual?.invoice?.[field.key]) + toNumber(manual?.labor?.[field.key]);
-        if (amount <= 0) return acc;
+        if (amount === 0) return acc;
 
         acc.push({ label: field.label, amount });
         return acc;
@@ -916,7 +927,7 @@ const mergeDeductionBreakdownWithLines = (
     lines.forEach((line) => {
         const label = String(line.label ?? '').trim();
         const amount = toNumber(line.amount);
-        if (!label || amount <= 0) return;
+        if (!label || amount === 0) return;
 
         const standardIndex = standardLines.findIndex((existing) => existing.label === label);
         if (standardIndex >= 0) {
@@ -1586,7 +1597,7 @@ const buildDeductionBreakdownFromRecords = (
     const standardLines: DeductionLine[] = [];
     STANDARD_DEDUCTION_FIELDS.forEach(({ key, label }) => {
         const sum = deduped.reduce((acc, record) => acc + toNumber(record[key]), 0);
-        if (sum > 0) {
+        if (sum !== 0) {
             standardLines.push({ label, amount: sum });
         }
     });
@@ -1595,7 +1606,7 @@ const buildDeductionBreakdownFromRecords = (
     deduped.forEach((record) => {
         Object.entries(record.items ?? {}).forEach(([itemLabel, rawAmount]) => {
             const amount = toNumber(rawAmount);
-            if (amount <= 0) return;
+            if (amount === 0) return;
             additionalTotals.set(itemLabel, (additionalTotals.get(itemLabel) ?? 0) + amount);
         });
     });
@@ -1617,7 +1628,7 @@ const buildDeductionBreakdownFromRecords = (
         totalStandard,
         totalAdditional,
         total,
-        hasData: total > 0,
+        hasData: standardLines.length > 0 || additionalLines.length > 0,
     };
 };
 
@@ -1750,6 +1761,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [showKBPreview, setShowKBPreview] = useState<boolean>(false); // 국민은행용 미리보기
     const [showPayslipModal, setShowPayslipModal] = useState<boolean>(false);
     const [selectedPayslipRowKey, setSelectedPayslipRowKey] = useState<string>(''); // 
+    const [payslipSalaryModelFilter, setPayslipSalaryModelFilter] = useState<PayslipSalaryModelFilter>('all');
     const [payslipContractorOption, setPayslipContractorOption] = useState<string>(DEFAULT_PAYSLIP_CONTRACTOR_NAME);
     const [customPayslipContractorName, setCustomPayslipContractorName] = useState<string>('');
     const [showBankCodes, setShowBankCodes] = useState<boolean>(false); // 은행코드표
@@ -1819,6 +1831,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [payslipIssueMessage, setPayslipIssueMessage] = useState<string>('');
     const applyRunSeqRef = React.useRef(0);
     const applyWatchdogRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const restoredCalculationOptionsRef = React.useRef<string>('');
 
     const companyNameById = useMemo<Record<string, string>>(() => {
         const map: Record<string, string> = {};
@@ -2364,6 +2377,11 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         workerSearchText,
     ]);
 
+    const payslipPaymentData = useMemo(
+        () => filterPayslipRowsBySalaryModel(filteredPaymentData, payslipSalaryModelFilter),
+        [filteredPaymentData, payslipSalaryModelFilter]
+    );
+
     const kbSourcePaymentData = useMemo(() => {
         return filterKBPaymentRows(filteredPaymentData, {
             pageViewMode: pageViewMode === 'ledger' ? 'ledger' : 'standard',
@@ -2460,11 +2478,13 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 const workerTeamNameForMatch = workerTeam?.teamName || row.teamName;
 
                 const workEntriesForTax = buildWorkEntriesForLedgerRow(row);
+                const applyInsuranceForRow = rowSalaryModel === '일급제' && insuranceApplied;
+                const applyBusinessIncomeForRow = rowSalaryModel !== '일급제' && businessIncomeApplied;
                 const calculatedTax = calculateWorkEntryTaxBreakdown({
                     workEntries: workEntriesForTax,
                     payrollConfig,
-                    applyInsurance: insuranceApplied,
-                    applyBusinessIncome: businessIncomeApplied,
+                    applyInsurance: applyInsuranceForRow,
+                    applyBusinessIncome: applyBusinessIncomeForRow,
                     normalizeSiteName: normalizeTeamName,
                     withholdingThreshold: WITHHOLDING_MAX_MAN_DAY,
                     isInsuranceEligibleEntry: insuranceTeamSiteOnly
@@ -2834,12 +2854,12 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     }, []);
 
     const payslipTarget = useMemo(() => {
-        if (filteredPaymentData.length === 0) return null;
-        const defaultTarget = filteredPaymentData.find((item) => item.id.endsWith('__월급제')) ?? filteredPaymentData[0];
+        if (payslipPaymentData.length === 0) return null;
+        const defaultTarget = payslipPaymentData.find((item) => item.id.endsWith('__월급제')) ?? payslipPaymentData[0];
         const targetKey = selectedPayslipRowKey || defaultTarget.id;
-        const target = filteredPaymentData.find((item) => item.id === targetKey) ?? defaultTarget;
+        const target = payslipPaymentData.find((item) => item.id === targetKey) ?? defaultTarget;
         return target;
-    }, [filteredPaymentData, selectedPayslipRowKey]);
+    }, [payslipPaymentData, selectedPayslipRowKey]);
 
     useEffect(() => {
         let mounted = true;
@@ -3071,6 +3091,11 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 const taxCache = persistentTaxCacheRef.current;
 
                 const newPaymentData = basePD.map((item) => {
+                    const calculationPolicy = resolvePayslipCalculationPolicy(item, {
+                        applyInsurance: params.applyInsurance,
+                        applyBusinessIncome: params.applyBusinessIncome,
+                        applyDailyFee: params.applyDailyFee,
+                    });
                     const sourceDeductionBreakdownRaw = stripTemporaryDeductionLinesRef.current(item.deductionBreakdown);
                     const baseTaxBreakdown = stripTemporaryTaxLinesRef.current(item.taxBreakdown);
 
@@ -3116,7 +3141,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                         : [];
                     const dailyFeeLines = buildDailyFeeDeductionLines({
                         item,
-                        applyDailyFee: params.applyDailyFee,
+                        applyDailyFee: calculationPolicy.applyDailyFee,
                         dailyFeePerManDay,
                     });
                     const deductionAppliedLines = [...utilityLines, ...dailyFeeLines];
@@ -3143,17 +3168,17 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     let withholdingAppliedSummary: any = undefined;
                     let businessIncomeAppliedSummary: any = undefined;
 
-                    if (config && (params.applyInsurance || params.applyBusinessIncome)) {
+                    if (config && (calculationPolicy.applyInsurance || calculationPolicy.applyBusinessIncome)) {
                         const entriesLen = item.workEntries?.length ?? 0;
-                        const cacheKey = `${item.workerId}__${item.month}__${entriesLen}__${params.applyInsurance}__${params.applyBusinessIncome}__${params.applyInsuranceTeamSiteOnly}__${params.applyInsuranceTeamSiteOnly ? (item.teamId ?? '') : ''}`;
+                        const cacheKey = `${item.workerId}__${item.month}__${entriesLen}__${calculationPolicy.applyInsurance}__${calculationPolicy.applyBusinessIncome}__${params.applyInsuranceTeamSiteOnly}__${params.applyInsuranceTeamSiteOnly ? (item.teamId ?? '') : ''}`;
 
                         let calculatedTax = taxCache.get(cacheKey);
                         if (!calculatedTax) {
                             calculatedTax = calculateWorkEntryTaxBreakdownRef.current({
                                 workEntries: item.workEntries ?? [],
                                 payrollConfig: config,
-                                applyInsurance: params.applyInsurance,
-                                applyBusinessIncome: params.applyBusinessIncome,
+                                applyInsurance: calculationPolicy.applyInsurance,
+                                applyBusinessIncome: calculationPolicy.applyBusinessIncome,
                                 normalizeSiteName: normalizeTeamNameRef.current,
                                 withholdingThreshold: WITHHOLDING_MAX_MAN_DAY,
                                 isInsuranceEligibleEntry: params.applyInsuranceTeamSiteOnly
@@ -3228,6 +3253,43 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         setPaymentData,
     ]);
 
+    const savedCalculationOptions = useMemo(() => resolveSavedPayrollCalculationOptions(
+        savedPayrollSettlements,
+        monthRangeSet,
+        selectedTeamId || undefined
+    ), [monthRangeSet, savedPayrollSettlements, selectedTeamId]);
+
+    useEffect(() => {
+        if (loading || payrollSettlementLoading || !payrollConfig || !savedCalculationOptions) return;
+
+        const restorationKey = [
+            startMonth,
+            endMonth,
+            selectedTeamId || 'all',
+            makePayrollCalculationOptionsSignature(savedCalculationOptions),
+        ].join('|');
+        if (restoredCalculationOptionsRef.current === restorationKey) return;
+        restoredCalculationOptionsRef.current = restorationKey;
+
+        applyCalculatedDeductions({
+            applyInsurance: savedCalculationOptions.insuranceApplied,
+            applyInsuranceTeamSiteOnly: savedCalculationOptions.insuranceTeamSiteOnly,
+            applyBusinessIncome: savedCalculationOptions.businessIncomeApplied,
+            applyUtilities: savedCalculationOptions.utilitiesApplied,
+            applyDailyFee: savedCalculationOptions.dailyFeeApplied,
+            immediate: true,
+        });
+    }, [
+        applyCalculatedDeductions,
+        endMonth,
+        loading,
+        payrollConfig,
+        payrollSettlementLoading,
+        savedCalculationOptions,
+        selectedTeamId,
+        startMonth,
+    ]);
+
     const payslipContractorOptions = useMemo(() => {
         const names = new Set<string>(DEFAULT_PAYSLIP_CONTRACTOR_OPTIONS);
         companies.forEach((company) => {
@@ -3249,9 +3311,6 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         if (filteredPaymentData.length === 0) return;
 
         // 명세서 모달 오픈 직전 최신 공제/세금 상태를 강제로 반영해 미리보기 표시와 계산값을 동기화한다.
-        if (filteredPaymentData.length === 0) return;
-
-        // 명세서 모달 오픈 직전 최신 공제/세금 상태를 강제로 반영해 미리보기 표시와 계산값을 동기화한다.
         if (insuranceApplied || businessIncomeApplied || utilitiesApplied || dailyFeeApplied) {
             applyCalculatedDeductions({
                 applyInsurance: insuranceApplied,
@@ -3263,7 +3322,9 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             });
         }
 
-        const defaultTarget = filteredPaymentData.find((item) => item.id.endsWith('__월급제')) ?? filteredPaymentData[0];
+        const previewRows = payslipPaymentData.length > 0 ? payslipPaymentData : filteredPaymentData;
+        if (payslipPaymentData.length === 0) setPayslipSalaryModelFilter('all');
+        const defaultTarget = previewRows.find((item) => item.id.endsWith('__월급제')) ?? previewRows[0];
         setSelectedPayslipRowKey(defaultTarget.id);
         setShowPayslipModal(true);
     }, [
@@ -3273,6 +3334,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         filteredPaymentData,
         insuranceApplied,
         insuranceTeamSiteOnly,
+        payslipPaymentData,
         utilitiesApplied,
     ]);
 
@@ -3345,8 +3407,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     ]);
 
     const payslipIssueSummary = useMemo<PayslipIssueSummary>(
-        () => validateMonthlyPayslipRows(filteredPaymentData),
-        [filteredPaymentData]
+        () => validateMonthlyPayslipRows(payslipPaymentData),
+        [payslipPaymentData]
     );
 
     const selectedPayslipIssueSummary = useMemo<PayslipIssueSummary>(
@@ -3411,7 +3473,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             targetSubtitle: `${item.teamName || '-'} · ${item.month || '-'}`,
             clientCompanyName: resolvedPayslipContractorName || undefined,
             teamName: item.teamName || undefined,
-            documentTitle: '월급제 노임명세서',
+            documentTitle: `${resolvePayslipSalaryModel(item) === 'daily' ? '일급제' : '월급제'} 노임명세서`,
             payrollRunId: finalizedSnapshotByPaymentId.get(item.id)?.settlementId || undefined,
             amountSummary: {
                 manDay: item.totalManDay,
@@ -3560,23 +3622,23 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     }, [printPayslipRows, resolvedPayslipTarget]);
 
     const handleBatchPrintPayslips = useCallback(() => {
-        if (filteredPaymentData.length === 0) {
+        if (payslipPaymentData.length === 0) {
             alert('인쇄할 명세서가 없습니다.');
             return;
         }
         if (
-            filteredPaymentData.length > 50
-            && !window.confirm(`총 ${filteredPaymentData.length}명의 명세서를 인쇄합니다. 계속 진행하시겠습니까?`)
+            payslipPaymentData.length > 50
+            && !window.confirm(`총 ${payslipPaymentData.length}명의 명세서를 인쇄합니다. 계속 진행하시겠습니까?`)
         ) {
             return;
         }
 
         void printPayslipRows(
-            filteredPaymentData,
+            payslipPaymentData,
             '일괄 PDF',
-            `노임명세서_일괄_${rangeLabel || currentYearMonth}`
+            `노임명세서_${payslipSalaryModelFilter === 'all' ? '전체' : payslipSalaryModelFilter === 'daily' ? '일급제' : '월급제'}_${rangeLabel || currentYearMonth}`
         );
-    }, [currentYearMonth, filteredPaymentData, printPayslipRows, rangeLabel]);
+    }, [currentYearMonth, payslipPaymentData, payslipSalaryModelFilter, printPayslipRows, rangeLabel]);
 
     const handleSaveInsuranceSettings = useCallback(async () => {
         const config = payrollConfig;
@@ -4034,17 +4096,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         utilitiesApplied,
     ]);
 
-    const normalizeBankKey = useCallback((value: unknown): string => {
-        const collapsed = String(value ?? '')
-            .trim()
-            .replace(/\s+/g, '')
-            .replace(/[[\](){}]/g, '')
-            .toUpperCase();
-
-        return collapsed
-            .replace(/^\d{3}[-_]?/, '')
-            .replace(/[-_]?\d{3}$/, '');
-    }, []);
+    const normalizeBankKey = useCallback(normalizePayrollBankKey, []);
 
     const bankCodeByName = useMemo(() => {
         const map = new Map<string, string>();
@@ -4096,57 +4148,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         return entries;
     }, [normalizeBankKey]);
 
-    const resolveBankCode = useCallback((bankName?: string, bankCode?: string): string => {
-        const explicitCode = String(bankCode ?? '').trim();
-        if (/^\d{3}$/.test(explicitCode)) return explicitCode;
-
-        const rawBankName = String(bankName ?? '').trim();
-        if (/^\d{3}$/.test(rawBankName)) return rawBankName;
-
-        const normalizedName = normalizeBankKey(bankName);
-        if (!normalizedName) return '';
-
-        const exact = bankCodeByName.get(normalizedName);
-        if (exact) return exact;
-
-        const candidateCodes = new Set<string>();
-        bankNameKeyEntries.forEach(({ nameKey, code }) => {
-            if (!nameKey) return;
-            if (normalizedName.includes(nameKey) || nameKey.includes(normalizedName)) {
-                candidateCodes.add(code);
-            }
-        });
-
-        if (candidateCodes.size === 1) {
-            return Array.from(candidateCodes)[0];
-        }
-
-        if (candidateCodes.size > 1) {
-            const ranked = Array.from(candidateCodes)
-                .map((code) => {
-                    const officialName = String(BANK_CODES[code] ?? '');
-                    const officialKey = normalizeBankKey(officialName);
-
-                    let score = 0;
-                    if (/은행|뱅크/.test(officialName)) score += 40;
-                    if (/저축은행/.test(officialName)) score -= 15;
-                    if (/증권|선물/.test(officialName)) score -= 20;
-
-                    if (officialKey === normalizedName) score += 50;
-                    else if (officialKey.startsWith(normalizedName)) score += 20;
-                    else if (officialKey.includes(normalizedName)) score += 10;
-
-                    return { code, score };
-                })
-                .sort((a, b) => b.score - a.score);
-
-            if (ranked[0] && (ranked.length === 1 || ranked[0].score > ranked[1].score)) {
-                return ranked[0].code;
-            }
-        }
-
-        return '';
-    }, [bankCodeByName, bankNameKeyEntries, normalizeBankKey]);
+    const resolveBankCode = useCallback(resolvePayrollBankCode, []);
 
     const analyzeBankMapping = useCallback((bankName?: string, bankCode?: string): {
         code: string;
@@ -5026,14 +5028,14 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     }, [ensurePayslipIssueReady, resolvedPayslipContractorName, resolvedPayslipTarget]);
 
     const handleDownloadBatchIndividualPayslips = useCallback(async () => {
-        if (filteredPaymentData.length === 0 || batchExcelDownloading) {
-            if (filteredPaymentData.length === 0) alert('다운로드할 명세서가 없습니다.');
+        if (payslipPaymentData.length === 0 || batchExcelDownloading) {
+            if (payslipPaymentData.length === 0) alert('다운로드할 명세서가 없습니다.');
             return;
         }
-        if (!ensurePayslipIssueReady(filteredPaymentData, '일괄 개별 Excel 다운로드')) return;
+        if (!ensurePayslipIssueReady(payslipPaymentData, '일괄 개별 Excel 다운로드')) return;
         if (
-            filteredPaymentData.length > 50
-            && !window.confirm(`총 ${filteredPaymentData.length}명의 개별 Excel 명세서를 생성합니다. 계속 진행하시겠습니까?`)
+            payslipPaymentData.length > 50
+            && !window.confirm(`총 ${payslipPaymentData.length}명의 개별 Excel 명세서를 생성합니다. 계속 진행하시겠습니까?`)
         ) {
             return;
         }
@@ -5043,7 +5045,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             const zip = new JSZip();
             const { fileNames } = appendPayslipWorkbooksToZip(
                 zip,
-                filteredPaymentData,
+                payslipPaymentData,
                 resolvedPayslipContractorName
             );
             if (fileNames.length === 0) throw new Error('생성된 Excel 명세서가 없습니다.');
@@ -5056,7 +5058,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             const selectedTeamName = selectedTeamId
                 ? teams.find((team) => team.id === selectedTeamId)?.name || '선택팀'
                 : '전체';
-            const safeArchiveName = `노임명세서_일괄개별Excel_${rangeLabel || currentYearMonth}_${selectedTeamName}`
+            const salaryLabel = payslipSalaryModelFilter === 'all' ? '전체' : payslipSalaryModelFilter === 'daily' ? '일급제' : '월급제';
+            const safeArchiveName = `노임명세서_일괄개별Excel_${salaryLabel}_${rangeLabel || currentYearMonth}_${selectedTeamName}`
                 .replace(/[\\/:*?"<>|]/g, '_');
             saveAs(content, `${safeArchiveName}.zip`);
         } catch (error) {
@@ -5069,7 +5072,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         batchExcelDownloading,
         currentYearMonth,
         ensurePayslipIssueReady,
-        filteredPaymentData,
+        payslipPaymentData,
+        payslipSalaryModelFilter,
         rangeLabel,
         resolvedPayslipContractorName,
         selectedTeamId,
@@ -5080,8 +5084,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const batchRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
     const handleDownloadImage = async () => {
-        if (!printRef.current || !payslipTarget) return;
-        if (!ensurePayslipIssueReady([payslipTarget], '파일 저장')) return;
+        if (!printRef.current || !resolvedPayslipTarget) return;
+        if (!ensurePayslipIssueReady([resolvedPayslipTarget], '파일 저장')) return;
 
         try {
             const canvas = await (html2canvas as any)(printRef.current, {
@@ -5096,7 +5100,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     alert('이미지 생성에 실패했습니다.');
                     return;
                 }
-                saveAs(blob, `노임명세서_${payslipTarget.workerName}_${payslipTarget.month}.png`);
+                saveAs(blob, `노임명세서_${resolvedPayslipTarget.workerName}_${resolvedPayslipTarget.month}.png`);
             }, 'image/png');
         } catch (error) {
             console.error('Download failed:', error);
@@ -5105,16 +5109,16 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     };
 
     const handleBatchDownload = async () => {
-        if (filteredPaymentData.length === 0) {
+        if (payslipPaymentData.length === 0) {
             alert('다운로드할 데이터가 없습니다.');
             return;
         }
 
-        if (!ensurePayslipIssueReady(filteredPaymentData, '일괄 다운로드')) {
+        if (!ensurePayslipIssueReady(payslipPaymentData, '일괄 다운로드')) {
             return;
         }
 
-        if (filteredPaymentData.length > 50 && !window.confirm(`총 ${filteredPaymentData.length}명의 명세서를 생성합니다. 시간이 다소 소요될 수 있습니다. 진행하시겠습니까?`)) {
+        if (payslipPaymentData.length > 50 && !window.confirm(`총 ${payslipPaymentData.length}명의 명세서를 생성합니다. 시간이 다소 소요될 수 있습니다. 진행하시겠습니까?`)) {
             return;
         }
 
@@ -5129,7 +5133,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             let processedCount = 0;
 
             // Process sequentially to avoid browser freeze
-            for (const item of filteredPaymentData) {
+            for (const item of payslipPaymentData) {
                 const elementKey = item.id;
                 const element = batchRefs.current[elementKey];
                 if (!element) continue;
@@ -5156,7 +5160,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             }
 
             const content = await zip.generateAsync({ type: 'blob' });
-            saveAs(content, `노임명세서_${rangeLabel || currentYearMonth}_${selectedTeamId ? teams.find(t => t.id === selectedTeamId)?.name : '전체'}.zip`);
+            const salaryLabel = payslipSalaryModelFilter === 'all' ? '전체' : payslipSalaryModelFilter === 'daily' ? '일급제' : '월급제';
+            saveAs(content, `노임명세서_${salaryLabel}_${rangeLabel || currentYearMonth}_${selectedTeamId ? teams.find(t => t.id === selectedTeamId)?.name : '전체'}.zip`);
 
         } catch (error) {
             console.error('Batch download failed:', error);
@@ -5823,7 +5828,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             {/* Hidden Batch Rendering Container - 다운로드 시에만 렌더링 (평소 불필요한 재렌더링 방지) */}
             {batchDownloading && (
                 <div className="absolute left-[-9999px] top-0 pointer-events-none opacity-0 w-[1120px]">
-                    {filteredPaymentData.map(item => (
+                    {payslipPaymentData.map(item => (
                         <PayslipTemplate
                             key={`batch-${item.id}`}
                             ref={el => {
@@ -6934,7 +6939,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                 <div>
                                     <h3 className="text-lg font-bold text-slate-800">노임명세서 미리보기</h3>
                                     <p className="text-xs text-slate-500">
-                                        {rangeLabel || '-'} · 총 {filteredPaymentData.length}명 · 발행가능 {payslipIssueSummary.readyRows}명 · 오류 {payslipIssueSummary.errorCount}건 · 확인 {payslipIssueSummary.warningCount}건
+                                        {rangeLabel || '-'} · 총 {payslipPaymentData.length}명 · 발행가능 {payslipIssueSummary.readyRows}명 · 오류 {payslipIssueSummary.errorCount}건 · 확인 {payslipIssueSummary.warningCount}건
                                     </p>
                                 </div>
                             </div>
@@ -6947,9 +6952,29 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                         </div>
                         <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
                             <aside className="md:w-[170px] lg:w-[190px] xl:w-[210px] border-b md:border-b-0 md:border-r border-slate-200 flex-shrink-0 flex flex-col">
-                                <div className="p-3 border-b border-slate-100 text-xs font-semibold text-slate-500">지급 대상자</div>
+                                <div className="p-3 border-b border-slate-100">
+                                    <div className="mb-2 text-xs font-semibold text-slate-500">지급 대상자</div>
+                                    <div className="grid grid-cols-3 gap-1" role="group" aria-label="노임명세서 급여방식 필터">
+                                        {([
+                                            ['all', '전체'],
+                                            ['daily', '일급제'],
+                                            ['monthly', '월급제'],
+                                        ] as const).map(([value, label]) => (
+                                            <button
+                                                key={value}
+                                                type="button"
+                                                onClick={() => setPayslipSalaryModelFilter(value)}
+                                                className={`rounded-md px-2 py-1.5 text-[11px] font-bold transition ${payslipSalaryModelFilter === value
+                                                    ? 'bg-blue-600 text-white'
+                                                    : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                                            >
+                                                {label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
                                 <div className="flex-1 overflow-y-auto">
-                                    {filteredPaymentData.map(worker => (
+                                    {payslipPaymentData.map(worker => (
                                         <button
                                             key={worker.id}
                                             onClick={() => setSelectedPayslipRowKey(worker.id)}
@@ -6958,13 +6983,13 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                 : (worker.id.endsWith('__월급제') ? 'hover:bg-blue-50/40' : 'hover:bg-emerald-50/40')}`}
                                         >
                                             <span>{worker.workerName}</span>
-                                            <span className="text-xs text-slate-500">{worker.month} · {worker.teamName} · {worker.id.endsWith('__일급제') ? '일급제' : '월급제'}</span>
+                                            <span className="text-xs text-slate-500">{worker.month} · {worker.teamName} · {resolvePayslipSalaryModel(worker) === 'daily' ? '일급제' : '월급제'}</span>
                                             {payslipOutputIds[worker.id] && (
                                                 <span className="mt-1 inline-flex w-fit rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">발행완료</span>
                                             )}
                                         </button>
                                     ))}
-                                    {filteredPaymentData.length === 0 && (
+                                    {payslipPaymentData.length === 0 && (
                                         <div className="px-4 py-6 text-sm text-slate-500 text-center">표시할 작업자가 없습니다.</div>
                                     )}
                                 </div>
@@ -7097,11 +7122,11 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                         </button>
                                         <button
                                             onClick={handleBatchPrintPayslips}
-                                            disabled={filteredPaymentData.length === 0 || preparingPayslipPrint}
+                                            disabled={payslipPaymentData.length === 0 || preparingPayslipPrint}
                                             className="px-4 py-2 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700 font-bold flex items-center gap-2 disabled:opacity-50"
                                         >
                                             {preparingPayslipPrint ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faFilePdf} />}
-                                            일괄 PDF ({filteredPaymentData.length}명)
+                                            일괄 PDF ({payslipPaymentData.length}명)
                                         </button>
                                         <button
                                             onClick={handleDownloadIndividualPayslip}
@@ -7113,11 +7138,11 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                         </button>
                                         <button
                                             onClick={handleDownloadBatchIndividualPayslips}
-                                            disabled={filteredPaymentData.length === 0 || batchExcelDownloading}
+                                            disabled={payslipPaymentData.length === 0 || batchExcelDownloading}
                                             className="px-4 py-2 text-sm bg-green-700 text-white rounded-lg hover:bg-green-800 font-bold flex items-center gap-2 disabled:opacity-50"
                                         >
                                             {batchExcelDownloading ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faFileExcel} />}
-                                            일괄 개별 Excel ({filteredPaymentData.length}명)
+                                            일괄 개별 Excel ({payslipPaymentData.length}명)
                                         </button>
                                         <button
                                             onClick={handleDownloadImage}

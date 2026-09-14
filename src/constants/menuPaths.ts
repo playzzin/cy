@@ -299,6 +299,8 @@ export const MENU_PATHS: { [key: string]: string } = {
     "신분증 일괄 묶기": "/database/identity-bundle",
     "신분증 일괄묶기": "/database/identity-bundle",
     "identity-bundle": "/database/identity-bundle",
+    "신분증 로그": "/database/identity-logs",
+    "신분증로그": "/database/identity-logs",
     "\ud1b5\ud569DB \ub85c\uadf8": "/database/logs",
     "DB \ub85c\uadf8": "/database/logs",
     "\ub370\uc774\ud130\ubca0\uc774\uc2a4 \ub85c\uadf8": "/database/logs",

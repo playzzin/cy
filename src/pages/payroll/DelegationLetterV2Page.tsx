@@ -15,6 +15,12 @@ import { YearMonthPicker } from '../../components/common/YearMonthPicker';
 import SignatureGeneratorPage from './SignatureGeneratorPage';
 import { DEFAULT_DELEGATION_BODY_TEXT } from '../../constants/delegationLetter';
 import { delegationLetterTemplateService } from '../../services/delegationLetterTemplateService';
+import {
+    DEFAULT_DELEGATORS_PER_PAGE,
+    MAX_DELEGATORS_PER_PAGE,
+    clampDelegatorsPerPage,
+    paginateDelegators,
+} from './delegationLetterPagination';
 
 // --- Types ---
 interface DelegationWorker {
@@ -29,19 +35,6 @@ interface DelegationWorker {
 }
 
 const DELEGATION_BODY_STORAGE_KEY = 'delegationLetterV2:bodyText';
-
-const MAX_WORKERS_PER_PAGE = 24;
-const DEFAULT_WORKERS_PER_PAGE = 24;
-// The first page includes the mandatary block and the delegation text.  Reserve
-// enough room for those sections plus the physical A4 bottom margin. This
-// keeps the next worker row entirely on page 2 instead of clipping it at the
-// bottom edge of page 1.
-const FIRST_PAGE_RESERVED_ROWS = 10;
-
-const clampWorkersPerPage = (value: number): number => {
-    if (!Number.isFinite(value) || value <= 0) return 1;
-    return Math.min(Math.floor(value), MAX_WORKERS_PER_PAGE);
-};
 
 const shiftYearMonth = (yearMonth: string, offset: number): string => {
     const matched = String(yearMonth ?? '').match(/^(\d{4})-(\d{2})$/);
@@ -69,7 +62,7 @@ const DelegationLetterV2Page: React.FC = () => {
     });
     const [documentDate, setDocumentDate] = useState<string>(new Date().toISOString().slice(0, 10));
     const [showManDays, setShowManDays] = useState<boolean>(false);
-    const [workersPerPage, setWorkersPerPage] = useState<number>(DEFAULT_WORKERS_PER_PAGE);
+    const [workersPerPage, setWorkersPerPage] = useState<number>(DEFAULT_DELEGATORS_PER_PAGE);
 
     // --- State: Data ---
     const [allReports, setAllReports] = useState<DailyReport[]>([]);
@@ -420,15 +413,6 @@ const DelegationLetterV2Page: React.FC = () => {
         return `${year}. ${month}. ${day}`;
     };
 
-    const chunkArray = <T,>(items: T[], chunkSize: number) => {
-        const safeSize = Number.isFinite(chunkSize) && chunkSize > 0 ? Math.floor(chunkSize) : 1;
-        const chunks: T[][] = [];
-        for (let i = 0; i < items.length; i += safeSize) {
-            chunks.push(items.slice(i, i + safeSize));
-        }
-        return chunks;
-    };
-
     const normalizeCompanyNameKey = (value?: string | null): string =>
         String(value ?? '').replace(/\s+/g, '').toLowerCase();
 
@@ -592,27 +576,8 @@ const DelegationLetterV2Page: React.FC = () => {
     const totalManDays = finalDelegators.reduce((sum, w) => sum + w.manDays, 0);
 
     const pagedDelegators = useMemo(() => {
-        if (finalDelegators.length === 0) return [] as DelegationWorker[][];
-
-        const cappedWorkersPerPage = clampWorkersPerPage(workersPerPage);
-        const mandataryAddress = String(mandataryInfo?.address || '');
-        const firstPageReserve = Math.min(
-            cappedWorkersPerPage - 1,
-            FIRST_PAGE_RESERVED_ROWS +
-            (showManDays ? 1 : 0) +
-            (mandataryAddress.length > 35 || delegationText.length > 90 ? 2 : 0)
-        );
-        const firstPageWorkers = Math.max(1, cappedWorkersPerPage - firstPageReserve);
-
-        if (finalDelegators.length <= firstPageWorkers) {
-            return [finalDelegators];
-        }
-
-        const pages: DelegationWorker[][] = [finalDelegators.slice(0, firstPageWorkers)];
-        const rest = finalDelegators.slice(firstPageWorkers);
-        pages.push(...chunkArray(rest, cappedWorkersPerPage));
-        return pages;
-    }, [delegationText, finalDelegators, mandataryInfo, showManDays, workersPerPage]);
+        return paginateDelegators(finalDelegators, workersPerPage);
+    }, [finalDelegators, workersPerPage]);
 
     const allSitesLoaded = sites.length > 0;
 
@@ -803,9 +768,17 @@ const DelegationLetterV2Page: React.FC = () => {
                         word-break: break-word !important;
                         overflow-wrap: anywhere !important;
                     }
+                    .delegation-workers-table tbody tr {
+                        height: 7.1mm !important;
+                    }
+                    .delegation-workers-table tbody td {
+                        padding-top: 0.4mm !important;
+                        padding-bottom: 0.4mm !important;
+                        line-height: 1.15 !important;
+                    }
                     .delegation-signature-cell {
                         position: relative;
-                        height: 10mm !important;
+                        height: 7.1mm !important;
                         padding: 0 !important;
                         overflow: hidden !important;
                     }
@@ -1247,16 +1220,16 @@ const DelegationLetterV2Page: React.FC = () => {
                                 <div className="flex items-center justify-between gap-3">
                                     <div>
                                         <p className="text-white font-medium text-sm">페이지당 작업자 수</p>
-                                        <p className="text-slate-500 text-xs">2페이지 이후 기준입니다. 첫 페이지는 상단 정보 높이에 맞춰 자동으로 줄어듭니다.</p>
+                                        <p className="text-slate-500 text-xs">첫 페이지부터 한 페이지에 최대 20명까지 표시합니다.</p>
                                     </div>
                                     <input
                                         type="number"
                                         min={1}
-                                        max={MAX_WORKERS_PER_PAGE}
+                                        max={MAX_DELEGATORS_PER_PAGE}
                                         value={workersPerPage}
                                         onChange={(e) => {
                                             const next = Number(e.target.value);
-                                            setWorkersPerPage(clampWorkersPerPage(next));
+                                            setWorkersPerPage(clampDelegatorsPerPage(next));
                                         }}
                                         className="w-24 px-3 py-2 text-sm bg-slate-700/50 border border-slate-600/50 rounded-lg text-white text-right focus:border-purple-500 outline-none"
                                     />
@@ -1495,17 +1468,17 @@ const DelegationLetterV2Page: React.FC = () => {
 
                         .delegation-title {
                             text-align: center;
-                            font-size: 30px;
+                            font-size: 26px;
                             font-weight: 700;
                             letter-spacing: 0.55em;
-                            margin-bottom: 5mm;
+                            margin-bottom: 2mm;
                         }
 
                         .delegation-meta-table {
                             width: 100%;
                             border-collapse: collapse;
                             border: 1.5px solid #111;
-                            margin-bottom: 3.2mm;
+                            margin-bottom: 2mm;
                             font-size: 11px;
                         }
 
@@ -1541,15 +1514,15 @@ const DelegationLetterV2Page: React.FC = () => {
                         }
 
                         .delegation-mandatary-table tr {
-                            height: 11mm;
+                            height: 7mm;
                         }
 
                         .delegation-body-paragraph {
                             border: 1.5px solid #111;
-                            padding: 3.2mm 3.5mm;
+                            padding: 1.5mm 3mm;
                             margin-bottom: 3mm;
                             text-align: justify;
-                            line-height: 1.7;
+                            line-height: 1.2;
                             font-size: 11px;
                         }
 
@@ -1589,9 +1562,19 @@ const DelegationLetterV2Page: React.FC = () => {
                             overflow-wrap: anywhere;
                         }
 
+                        .delegation-workers-table tbody tr {
+                            height: 7.1mm;
+                        }
+
+                        .delegation-workers-table tbody td {
+                            padding-top: 0.4mm !important;
+                            padding-bottom: 0.4mm !important;
+                            line-height: 1.15 !important;
+                        }
+
                         .delegation-signature-cell {
                             position: relative;
-                            height: 10mm;
+                            height: 7.1mm;
                             padding: 0 !important;
                             overflow: hidden;
                         }

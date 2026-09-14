@@ -84,6 +84,10 @@ const renderPage = () => render(
 const enterRequiredProjectData = () => {
   fireEvent.change(screen.getByLabelText('현장명 *'), { target: { value: '테스트 신축공사 현장' } });
   fireEvent.change(screen.getByLabelText('현장주소 *'), { target: { value: '서울특별시 강남구 테헤란로 123' } });
+  fireEvent.change(screen.getByLabelText('전문건설사'), { target: { value: '테스트 전문건설' } });
+  fireEvent.change(screen.getByLabelText('건축규모'), { target: { value: '지하 2층 · 지상 20층 · 2개동' } });
+  fireEvent.change(screen.getByLabelText('건축면적'), { target: { value: '1,234.56 ㎡' } });
+  fireEvent.change(screen.getByLabelText('연면적'), { target: { value: '25,678.90 ㎡' } });
 };
 
 const goToSiteInput = () => {
@@ -148,6 +152,11 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
 
     goToSiteInput();
     expect(screen.getByLabelText('현장명 *')).toHaveValue('');
+    expect(screen.queryByLabelText('발주처')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('전문건설사')).toBeInTheDocument();
+    expect(screen.getByLabelText('건축규모')).toBeInTheDocument();
+    expect(screen.getByLabelText('건축면적')).toBeInTheDocument();
+    expect(screen.getByLabelText('연면적')).toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/현장명 또는 주소로 검색/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /다음: 목차 선택·미리보기/ })).toBeDisabled();
   });
@@ -178,7 +187,14 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
     fireEvent.click(screen.getByRole('button', { name: /다음: PDF 구성 확인/ }));
 
     await waitFor(() => expect(generatePdf).toHaveBeenCalledWith(
-      expect.objectContaining({ siteName: '테스트 신축공사 현장', companyName: '청연이엔지' }),
+      expect.objectContaining({
+        siteName: '테스트 신축공사 현장',
+        companyName: '청연이엔지',
+        contractorName: '테스트 전문건설',
+        applicationScope: '지하 2층 · 지상 20층 · 2개동',
+        buildingArea: '1,234.56 ㎡',
+        totalFloorArea: '25,678.90 ㎡',
+      }),
       expect.not.arrayContaining(['section-01']),
       [],
       REFERENCE_CONSTRUCTION_PLAN_SECTIONS,
@@ -230,6 +246,7 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
       new File(['one'], '구조-평면도.pdf', { type: 'application/pdf' }),
       new File(['two'], '동바리-상세도.pdf', { type: 'application/pdf' }),
     ];
+    // eslint-disable-next-line testing-library/no-node-access -- Verify the structural layout or hidden upload input directly.
     const drawingInput = document.querySelector<HTMLInputElement>('input[type="file"][multiple]');
     fireEvent.change(drawingInput as HTMLInputElement, { target: { files } });
 
@@ -267,12 +284,14 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
     goToTocSelection();
 
     const photo = new File(['photo'], 'A동-설치구간.jpg', { type: 'image/jpeg' });
+    // eslint-disable-next-line testing-library/no-node-access -- Verify the structural layout or hidden upload input directly.
     const drawingInput = document.querySelector<HTMLInputElement>('input[type="file"][multiple]');
     fireEvent.change(drawingInput as HTMLInputElement, { target: { files: [photo] } });
 
     await waitFor(() => expect(readDrawing).toHaveBeenCalledWith(photo));
     expect(await screen.findByDisplayValue('A동 설치구간 사진')).toBeInTheDocument();
     expect(screen.getByText('PDF 0개 · 사진 1장 · 총 1쪽 등록')).toBeInTheDocument();
+    // eslint-disable-next-line testing-library/no-node-access -- Verify the structural layout or hidden upload input directly.
     expect(screen.getByLabelText('1번 도면 제목').closest('label')).toHaveTextContent(
       '2400×1600px · 약 325DPI · A4 비율 유지 맞춤',
     );
@@ -312,6 +331,7 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
     fireEvent.click(screen.getByRole('button', { name: '이그제큐티브 블루 표지 선택' }));
     expect(screen.getByRole('button', { name: '이그제큐티브 블루 표지 선택' })).toHaveAttribute('aria-pressed', 'true');
     const file = new File(['logo'], 'company-logo.png', { type: 'image/png' });
+    // eslint-disable-next-line testing-library/no-node-access -- Verify the structural layout or hidden upload input directly.
     const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
     fireEvent.change(fileInput as HTMLInputElement, { target: { files: [file] } });
 
@@ -406,6 +426,7 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /다음: 목차 선택·미리보기/ }));
     const siteVisualOrder = screen.getByRole('button', { name: /현장 위치 지도.*지도 이미지 등록.*PDF 3쪽/ });
+    // eslint-disable-next-line testing-library/no-node-access -- Verify the structural layout or hidden upload input directly.
     expect(siteVisualOrder.closest('li')).toHaveClass('has-map');
   });
 
@@ -476,6 +497,7 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
     readLogo.mockRejectedValueOnce(new Error('construction-plan-brand-logo-type-invalid'));
     renderPage();
     const invalidFile = new File(['bad'], 'logo.svg', { type: 'image/svg+xml' });
+    // eslint-disable-next-line testing-library/no-node-access -- Verify the structural layout or hidden upload input directly.
     const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
     fireEvent.change(fileInput as HTMLInputElement, { target: { files: [invalidFile] } });
 

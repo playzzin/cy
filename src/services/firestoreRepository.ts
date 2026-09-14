@@ -6,6 +6,7 @@ import {
   onSnapshot,
   query,
   type DocumentData,
+  type FirestoreError,
   type QueryConstraint,
   type QueryDocumentSnapshot,
   type Unsubscribe,
@@ -69,11 +70,12 @@ export const createCollectionRepository = <T extends Record<string, any>>({
 
   const subscribe = (
     callback: (rows: T[]) => void,
-    constraints: QueryConstraint[] = []
+    constraints: QueryConstraint[] = [],
+    onError?: (error: FirestoreError) => void
   ): Unsubscribe => onSnapshot(buildCollectionQuery(constraints), (snapshot) => {
     cache.clear();
     callback(snapshot.docs.map((document) => mapDoc(document)));
-  });
+  }, onError);
 
   return {
     collectionName,

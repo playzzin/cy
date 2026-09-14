@@ -25,6 +25,7 @@ export {
     analyzeCardBillingStatement,
     analyzeCardStatementImportJob,
     cancelCardStatementImportUploadSession,
+    cancelCardStatementImportFile,
     commitCardStatementImportJob,
     completeCardStatementImportUpload,
     createCardStatementImportJob,
@@ -65,6 +66,18 @@ export {
     syncUserAccessClaims,
     syncUserAccessClaimsOnUserWrite,
 } from './roleClaims';
+export {
+    approveAccountLinkRequest,
+    getMyAccountLinkCandidate,
+    getMyAccountLinkStatus,
+    linkAccountConnection,
+    rejectAccountLinkRequest,
+    revokeUserAccessApproval,
+    searchAccountLinkCompanies,
+    submitAccountLinkRequest,
+    unlinkAccountConnection,
+    updateUserAccess,
+} from './accountAccess';
 export {
     ingestBankProviderWebhook,
     ingestBankSms,

@@ -216,6 +216,21 @@ const buildAccessClaims = async (uid: string): Promise<SyncClaimsResult> => {
     }
 
     const user = userSnapshot.data() || {};
+    const accountStatus = normalizeKey(user.status);
+    if (['pending', 'rejected', 'suspended'].includes(accountStatus)) {
+        return {
+            uid,
+            role: 'user',
+            position: '',
+            systemRole: '',
+            accountType: '',
+            additionalPositions: [],
+            roles: ['user'],
+            erpRoleGroups: ['user'],
+            syncedAt: new Date().toISOString(),
+        };
+    }
+
     const additionalMenuPositions = await readAdditionalMenuPositions(uid);
     const profileAdditionalPositions = asList(user.additionalPositions);
     const additionalPositions = unique([profileAdditionalPositions, additionalMenuPositions]);
@@ -291,6 +306,12 @@ const clearAccessClaims = async (uid: string): Promise<void> => {
     await admin.auth().setCustomUserClaims(uid, nextClaims);
 };
 
+export const refreshAccessClaimsForUid = async (uid: string): Promise<SyncClaimsResult> => {
+    const claims = await buildAccessClaims(uid);
+    await writeAccessClaims(claims);
+    return claims;
+};
+
 export const syncUserAccessClaims = protectedRegion.https.onCall(async (data, context) => {
     const actor = await requireCallableAdmin(context);
     const uid = normalize((data as { uid?: unknown } | undefined)?.uid);
@@ -298,8 +319,7 @@ export const syncUserAccessClaims = protectedRegion.https.onCall(async (data, co
         throw new functions.https.HttpsError('invalid-argument', 'uid is required.');
     }
 
-    const claims = await buildAccessClaims(uid);
-    await writeAccessClaims(claims);
+    const claims = await refreshAccessClaimsForUid(uid);
 
     await db.collection('audit_logs').doc(`claims:${uid}:${Date.now()}`).set({
         action: 'SYNC_USER_ACCESS_CLAIMS',
@@ -323,8 +343,7 @@ export const syncAllUserAccessClaims = protectedRegion.https.onCall(async (data,
     const results: SyncClaimsResult[] = [];
 
     for (const doc of snapshot.docs) {
-        const claims = await buildAccessClaims(doc.id);
-        await writeAccessClaims(claims);
+        const claims = await refreshAccessClaimsForUid(doc.id);
         results.push(claims);
     }
 
@@ -359,8 +378,7 @@ export const syncUserAccessClaimsOnUserWrite = protectedRegion.firestore
                 return;
             }
 
-            const claims = await buildAccessClaims(uid);
-            await writeAccessClaims(claims);
+            await refreshAccessClaimsForUid(uid);
         } catch (error) {
             functions.logger.warn('[roleClaims] User write claim sync failed.', { uid, error });
         }

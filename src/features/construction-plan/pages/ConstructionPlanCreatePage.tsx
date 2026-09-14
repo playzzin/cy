@@ -119,7 +119,6 @@ const INITIAL_FORM: ReferenceConstructionPlanInput = {
   siteName: '',
   projectName: '공동주택(아파트) 신축공사 - 시스템동바리 설치 및 해체공사',
   siteAddress: '',
-  clientName: '',
   contractorName: '',
   companyName: REFERENCE_CONSTRUCTION_PLAN_DEFAULT_COMPANY,
   documentNo: 'CY-SSP-001',
@@ -127,7 +126,9 @@ const INITIAL_FORM: ReferenceConstructionPlanInput = {
   preparedDate: today(),
   constructionStartDate: '',
   constructionEndDate: '',
-  applicationScope: '지하층 · 저층부 · 기준층 · 특수구간',
+  applicationScope: '',
+  buildingArea: '',
+  totalFloorArea: '',
   structuralReviewNo: '',
   installationDrawingNo: '',
   buildings: '',
@@ -773,10 +774,14 @@ export function ConstructionPlanCreatePage() {
     }
   };
 
-  const scopeSummary = [form.buildings, form.floors, form.zones]
+  const scopeSummary = [
+    form.applicationScope,
+    form.buildingArea?.trim() ? `건축면적 ${form.buildingArea.trim()}` : '',
+    form.totalFloorArea?.trim() ? `연면적 ${form.totalFloorArea.trim()}` : '',
+  ]
     .map((value) => value?.trim())
     .filter(Boolean)
-    .join(' · ') || form.applicationScope;
+    .join(' · ') || '[건축규모 기입]';
   const customBranding = Boolean(
     customLogoDataUrl
     || form.companyName.trim() !== REFERENCE_CONSTRUCTION_PLAN_DEFAULT_COMPANY,
@@ -874,12 +879,13 @@ export function ConstructionPlanCreatePage() {
                 <div className="cp-form-grid cp-form-grid--2">
                   <label className="cp-reference-span-2"><span>현장명 *</span><input value={form.siteName} onChange={(event) => updateText('siteName', event.target.value)} placeholder="예: 서울 ○○아파트 신축공사" autoFocus /></label>
                   <label className="cp-reference-span-2"><span>공사명 *</span><input value={form.projectName} onChange={(event) => updateText('projectName', event.target.value)} /></label>
-                  <label><span>발주처</span><input value={form.clientName} onChange={(event) => updateText('clientName', event.target.value)} placeholder="발주처 직접입력" /></label>
-                  <label><span>원청사</span><input value={form.contractorName} onChange={(event) => updateText('contractorName', event.target.value)} placeholder="원청사 직접입력" /></label>
+                  <label><span>전문건설사</span><input value={form.contractorName} onChange={(event) => updateText('contractorName', event.target.value)} placeholder="전문건설사 직접입력" /></label>
+                  <label><span>건축규모</span><input value={form.applicationScope} onChange={(event) => updateText('applicationScope', event.target.value)} placeholder="예: 지하 2층 · 지상 20층 · 2개동" /></label>
+                  <label><span>건축면적</span><input value={form.buildingArea ?? ''} onChange={(event) => updateText('buildingArea', event.target.value)} placeholder="예: 1,234.56 ㎡" /></label>
+                  <label><span>연면적</span><input value={form.totalFloorArea ?? ''} onChange={(event) => updateText('totalFloorArea', event.target.value)} placeholder="예: 25,678.90 ㎡" /></label>
                   <label><span>문서번호 *</span><input value={form.documentNo} onChange={(event) => updateText('documentNo', event.target.value)} /></label>
                   <label><span>Revision</span><input type="number" min="0" value={form.revision} onChange={(event) => updateRevision(event.target.value)} /></label>
                   <label><span>작성일자 *</span><input type="date" value={form.preparedDate} onChange={(event) => updateText('preparedDate', event.target.value)} /></label>
-                  <label><span>적용범위</span><input value={form.applicationScope} onChange={(event) => updateText('applicationScope', event.target.value)} /></label>
                   <label><span>공사 시작일</span><input type="date" value={form.constructionStartDate ?? ''} onChange={(event) => updateText('constructionStartDate', event.target.value)} /></label>
                   <label><span>공사 종료일</span><input type="date" value={form.constructionEndDate ?? ''} onChange={(event) => updateText('constructionEndDate', event.target.value)} /></label>
                 </div>
@@ -1322,6 +1328,7 @@ export function ConstructionPlanCreatePage() {
                           </>
                         )}
                         <div className="cp-reference-cover-cell is-project">{form.projectName}</div>
+                        <div className="cp-reference-cover-label is-building-scale">건축규모</div>
                         <div className="cp-reference-cover-cell is-scope">{scopeSummary} / 현장 승인도서 적용</div>
                         <div className="cp-reference-cover-cell is-company">{form.companyName} (가설안전사업부)</div>
                         <div className="cp-reference-cover-cell is-date">{form.preparedDate.replaceAll('-', '. ')}.</div>

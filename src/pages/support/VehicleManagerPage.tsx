@@ -22,6 +22,7 @@ import { faPlus, faCar, faChartPie, faTableCellsLarge, faRotateRight, faCircleEx
 import { VehicleMonthlyLedger } from '../../components/vehicle/VehicleMonthlyLedger';
 import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
 import { appendOfficeAssignmentTeam, isOfficeAssignmentReference, isOfficeAssignmentTeam, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
+import './VehicleManagerPage.css';
 
 interface VehicleManagerPageProps {
     embedded?: boolean;
@@ -440,7 +441,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
     }, [setupVehicle]);
 
     return (
-        <div className={`${embedded ? 'space-y-3 bg-transparent min-h-full w-full min-w-0 max-w-full overflow-x-hidden' : 'p-3 sm:p-6 space-y-5 sm:space-y-6 bg-slate-50 min-h-full w-full max-w-[calc(100vw-30px)] sm:max-w-full min-w-0 overflow-x-hidden'}`}>
+        <div className={`${activeTab === 'ledger' ? 'vehicle-ledger-view ' : ''}${embedded ? 'space-y-3 bg-transparent min-h-full w-full min-w-0 max-w-full overflow-x-hidden' : 'p-3 sm:p-6 space-y-5 sm:space-y-6 bg-slate-50 min-h-full w-full max-w-[calc(100vw-30px)] sm:max-w-full min-w-0 overflow-x-hidden'}`}>
             <SupportPageHeader
                 icon={faCar}
                 title="차량 통합관리"

@@ -271,6 +271,20 @@ class RolePermissionService {
         return result;
     }
 
+    public async removePositionKey(positionName: string): Promise<boolean> {
+        const key = normalizeRole(positionName);
+        if (!key) return false;
+
+        await this.refreshPermissions();
+        if (!this.permissions[key]) return false;
+
+        const nextPermissions: PermissionConfig = { ...this.permissions };
+        delete nextPermissions[key];
+        await this.savePermissions(nextPermissions);
+        this.notifyListeners();
+        return true;
+    }
+
     private async savePermissions(permissions: PermissionConfig): Promise<void> {
         if (isDevAdminSessionEnabled()) {
             this.permissions = permissions;

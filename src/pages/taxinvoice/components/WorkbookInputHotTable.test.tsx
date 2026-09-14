@@ -13,6 +13,7 @@ jest.mock('@handsontable/react', () => ({
             'data-modify-focused-element': String(typeof props.modifyFocusedElement),
             'data-grid-height': String(props.height),
             'data-fixed-columns': String(props.fixedColumnsStart),
+            'data-outside-click-deselects': String(props.outsideClickDeselects),
         })
     )),
 }));
@@ -46,5 +47,6 @@ describe('WorkbookInputHotTable', () => {
         expect(hotTable.getAttribute('data-modify-focused-element')).toBe('undefined');
         expect(hotTable.getAttribute('data-grid-height')).toBe('min(68vh, 760px)');
         expect(hotTable.getAttribute('data-fixed-columns')).toBe('2');
+        expect(hotTable.getAttribute('data-outside-click-deselects')).toBe('true');
     });
 });

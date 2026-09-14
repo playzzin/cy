@@ -34,6 +34,13 @@ interface DeductionBreakdown {
 
 const TEMP_WITHHOLDING_PREFIX = '[원천세]';
 
+const formatDeductionAmount = (value: number): string => {
+    const amount = Math.trunc(Number(value) || 0);
+    if (amount < 0) return `+${Math.abs(amount).toLocaleString('ko-KR')}원`;
+    if (amount > 0) return `-${amount.toLocaleString('ko-KR')}원`;
+    return '0원';
+};
+
 type InsuranceAppliedReason = 'site' | 'client' | 'threshold' | 'manual' | 'all-labor';
 
 interface InsuranceAppliedSiteSummary {
@@ -454,28 +461,28 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                                         {showUtilitySection && (
                                             <tr className="bg-rose-50">
                                                 <td className="px-3 py-2 border-b border-slate-100 font-bold text-rose-900">공과금 적용 내역</td>
-                                                <td className="px-3 py-2 border-b border-slate-100 text-right font-bold text-rose-700">-{utilitySectionTotal.toLocaleString()}원</td>
+                                                <td className="px-3 py-2 border-b border-slate-100 text-right font-bold text-rose-700">{formatDeductionAmount(utilitySectionTotal)}</td>
                                             </tr>
                                         )}
 
                                         {utilityDeductionLines.map((line: DeductionLine, idx: number) => (
                                             <tr key={`deduction-utility-${line.label}-${idx}`} className="odd:bg-white even:bg-rose-50/30">
                                                 <td className="px-3 py-2 border-b border-slate-100">{line.label}</td>
-                                                <td className="px-3 py-2 border-b border-slate-100 text-right text-red-600">-{line.amount.toLocaleString()}원</td>
+                                                <td className={`px-3 py-2 border-b border-slate-100 text-right ${line.amount < 0 ? 'text-blue-600' : 'text-red-600'}`}>{formatDeductionAmount(line.amount)}</td>
                                             </tr>
                                         ))}
 
                                         {nonUtilityDeductionLines.map((line: DeductionLine, idx: number) => (
                                             <tr key={`deduction-${line.label}-${idx}`} className="odd:bg-white even:bg-slate-50/60">
                                                 <td className="px-3 py-2 border-b border-slate-100">{line.label}</td>
-                                                <td className="px-3 py-2 border-b border-slate-100 text-right text-red-600">-{line.amount.toLocaleString()}원</td>
+                                                <td className={`px-3 py-2 border-b border-slate-100 text-right ${line.amount < 0 ? 'text-blue-600' : 'text-red-600'}`}>{formatDeductionAmount(line.amount)}</td>
                                             </tr>
                                         ))}
                                     </tbody>
                                     <tfoot>
                                         <tr className="bg-amber-100 font-bold text-amber-800">
                                             <td className="px-3 py-2 border-t border-slate-200">공제 합계</td>
-                                            <td className="px-3 py-2 border-t border-slate-200 text-right">-{deductionBreakdown.total.toLocaleString()}원</td>
+                                            <td className="px-3 py-2 border-t border-slate-200 text-right">{formatDeductionAmount(deductionBreakdown.total)}</td>
                                         </tr>
                                     </tfoot>
                                 </table>
@@ -782,7 +789,7 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                             </div>
                             <div className="flex items-center justify-between">
                                 <span className="font-bold text-slate-700">총 차감액(공제+세금)</span>
-                                <span className="font-mono font-bold text-red-700">-{data.totalDeduction.toLocaleString()}원</span>
+                                <span className="font-mono font-bold text-red-700">{formatDeductionAmount(data.totalDeduction)}</span>
                             </div>
                         </div>
                         {data.personalMemo && (

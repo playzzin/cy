@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import MonthlyAdvanceLedger, { type MonthlyAdvanceLedgerRow } from './MonthlyAdvanceLedger';
 import type { LedgerManualInput } from '../types/payroll';
 
@@ -114,6 +114,34 @@ describe('MonthlyAdvanceLedger 공제 분류', () => {
 
         const amountInput = screen.getByDisplayValue('1,414,100');
         expect(amountInput.className).toContain('min-w-0');
+        // eslint-disable-next-line testing-library/no-node-access -- Verify the structural layout or hidden upload input directly.
         expect(amountInput.closest('td')?.className).toContain('min-w-[128px]');
+    });
+
+    it('음수 기타 조정액을 표시하고 과태료와 상계한다', async () => {
+        const utilities = initialInput(0);
+        utilities[rows[0].rowKey].labor.fine = 32000;
+        utilities[rows[0].rowKey].labor.other = -32000;
+        const onComputedAmountsChange = jest.fn();
+
+        render(
+            <MonthlyAdvanceLedger
+                rows={rows}
+                payrollConfig={null}
+                withholdingThreshold={7}
+                applyUtilities
+                visibleSections={{ utilities: true, advances: false, taxes: false }}
+                initialInputs={utilities}
+                onComputedAmountsChange={onComputedAmountsChange}
+            />
+        );
+
+        expect(screen.getByDisplayValue('32,000')).toBeTruthy();
+        expect(screen.getByDisplayValue('-32,000')).toBeTruthy();
+        await waitFor(() => {
+            const calls = onComputedAmountsChange.mock.calls;
+            const latestRows = calls[calls.length - 1]?.[0];
+            expect(latestRows?.[0]?.personalNet).toBe(300000);
+        });
     });
 });

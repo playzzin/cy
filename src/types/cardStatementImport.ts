@@ -12,6 +12,7 @@ export type CardStatementImportJobStatus =
   | 'failed';
 
 export type CardStatementImportFileStatus =
+  | 'cancelled'
   | 'uploading'
   | 'uploaded'
   | 'analyzing'
@@ -131,6 +132,7 @@ export interface CardStatementImportResult {
   duplicateSourceSha256?: string;
   duplicateSourceOwnerJobId?: string;
   duplicateSourceOwnerFileId?: string;
+  exclusionReason?: string;
   originalFileName?: string;
   committedAt?: Timestamp;
   createdAt?: Timestamp;

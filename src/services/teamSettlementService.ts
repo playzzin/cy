@@ -31,7 +31,8 @@ import {
   type TeamSettlementDeductionItem,
   type TeamSettlementDocument,
   type TeamSettlementPurchaseItem,
-  type TeamSettlementSalesItem
+  type TeamSettlementSalesItem,
+  type TeamSettlementSupportDetailSnapshot
 } from '../types/teamSettlement';
 import type { TeamExpenseClaim, TeamExpenseClaimCategory } from '../types/teamExpenseLedger';
 import { resolveHistoricalResponsibleTeam } from '../utils/dailyReportHistoricalSite';
@@ -44,6 +45,7 @@ import {
   type SupportMonthlyRateOverrides
 } from '../utils/teamSettlementSupportRateOverrides';
 import { getTeamSettlementConfirmationIssues } from '../utils/teamSettlementDraft';
+import { repairLegacyScopedCardBillingDuplicates } from '../utils/teamSettlementBillingSnapshot';
 
 export type {
   SupportMonthlyRateOverridePatch,
@@ -56,22 +58,7 @@ const SUPPORT_RATE_OVERRIDE_CONFIG_ID_PREFIX = 'team_settlement_support_rate_ove
 
 export type TeamSettlementSupportDirection = '내부지원간곳' | '내부지원온곳' | '외부지원간곳' | '외부지원온곳';
 
-export type TeamSettlementSupportDetailRow = {
-  id: string;
-  direction: TeamSettlementSupportDirection;
-  date: string;
-  siteId?: string;
-  siteName: string;
-  counterTeamId?: string;
-  counterTeamName?: string;
-  workerId: string;
-  workerName: string;
-  workerTeamId?: string;
-  workerTeamName?: string;
-  manDay: number;
-  unitPrice: number;
-  amount: number;
-};
+export type TeamSettlementSupportDetailRow = TeamSettlementSupportDetailSnapshot;
 
 type SystemConfigRow = {
   id?: unknown;
@@ -1003,7 +990,8 @@ export const teamSettlementService = {
     // 저장된 스냅샷은 명시적인 재집계 전까지 그대로 사용한다.
     // 확정된 구 문서도 현재 마스터 데이터로 다시 계산하지 않아 과거 정산을 보호한다.
     if (savedDoc?.sourceSnapshot || savedDoc?.confirmedAt) {
-      return stripSupportOriginalLines(savedDoc);
+      const stableDocument = stripSupportOriginalLines(savedDoc);
+      return repairLegacyScopedCardBillingDuplicates(stableDocument).document;
     }
 
     const autoDoc = await this.calculateAutoSettlement({
@@ -1371,6 +1359,7 @@ export const teamSettlementService = {
         amountFee: number;
       }
     >();
+    const supportDetailSnapshots: TeamSettlementSupportDetailSnapshot[] = [];
 
     const getWorkerRowResponsibleTeamId = (row: (typeof workerRows)[number]): string => {
       const rawSiteId = row.siteId ? String(row.siteId) : '';
@@ -1452,11 +1441,15 @@ export const teamSettlementService = {
       const siteId = rawSiteId || (site?.id ? String(site.id) : undefined);
       const siteName = rawSiteName || (site?.name ? String(site.name) : '현장 미지정');
 
-      const siteConstructorCompanyId = String(report.constructorCompanyId ?? report.companyId ?? '').trim();
-      const siteConstructorCompanyName = String(report.constructorCompanyName ?? report.companyName ?? '').trim();
+      const siteConstructorCompanyId = String(
+        report.constructorCompanyId ?? report.companyId ?? site?.constructorCompanyId ?? site?.companyId ?? ''
+      ).trim();
+      const siteConstructorCompanyName = String(
+        report.constructorCompanyName ?? report.companyName ?? site?.constructorCompanyName ?? site?.companyName ?? ''
+      ).trim();
       const siteIsCheongyeon = isCheongyeonCompany(siteConstructorCompanyId, siteConstructorCompanyName);
 
-      (Array.isArray(report.workers) ? report.workers : []).forEach((reportWorker) => {
+      (Array.isArray(report.workers) ? report.workers : []).forEach((reportWorker, workerIndex) => {
         const reportWorkerTeamId = String(reportWorker.teamId ?? '').trim();
         const reportWorkerTeamName = String(reportWorker.workerTeamName ?? '').trim();
         const fallbackSourceTeam = findTeamByIdentity(undefined, reportWorkerTeamName);
@@ -1557,6 +1550,7 @@ export const teamSettlementService = {
         const sourceTeamSupportRate = toPositiveRate(resolvedSourceTeam?.supportRate);
         const baseSupportRate = configuredSupportRate ?? sourceTeamSupportRate ?? toPositiveRate(reportWorker.unitPrice) ?? DEFAULT_SUPPORT_UNIT_PRICE;
         const manDay = toFiniteNumberOrZero(reportWorker.manDay);
+        if (manDay <= 0) return;
 
         entries.forEach((entry) => {
           const isSelectedViewTeam = matchesTeam(entry.viewTeamId) || isSameTeamIdentity(entry.viewTeamId, entry.viewTeamName, params.teamId, params.teamName);
@@ -1572,6 +1566,23 @@ export const teamSettlementService = {
           const targetMap = entry.direction === '외부지원간곳' || entry.direction === '내부지원간곳'
             ? supportSalesGrouped
             : supportPurchasesGrouped;
+
+          supportDetailSnapshots.push({
+            id: `${report.id ?? report.date}:${workerIndex}:${entry.direction}:${siteId ?? siteName}:${reportWorker.workerId ?? reportWorker.name ?? 'worker'}`,
+            direction: entry.direction,
+            date: report.date,
+            siteId,
+            siteName,
+            counterTeamId: entry.counterTeamId,
+            counterTeamName: entry.counterTeamName,
+            workerId: String(reportWorker.workerId ?? ''),
+            workerName: String(reportWorker.name ?? '이름 미상'),
+            workerTeamId: sourceTeamId,
+            workerTeamName: sourceTeamName,
+            manDay,
+            unitPrice: supportUnitPrice,
+            amount: calculateSupportLaborAmount(manDay, supportUnitPrice)
+          });
 
           addSupportSettlementLine(targetMap, { manDay, unitPrice: reportWorker.unitPrice }, entry, siteId, siteName, supportUnitPrice);
         });
@@ -2399,9 +2410,10 @@ export const teamSettlementService = {
         deposit: 0
       },
       sourceSnapshot: {
-        version: 1,
+        version: 2,
         capturedAt: nowIso,
         dailyReports: relevantReportSnapshots,
+        supportDetails: supportDetailSnapshots,
         totals: sourceTotals
       },
       confirmedAt: null,

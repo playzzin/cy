@@ -955,7 +955,7 @@ const buildSupportLaborStatementColumns = (
             { key: 'name', width: widths.name },
             { key: 'identity', width: widths.identity },
             { key: 'address', width: widths.address },
-            ...Array.from({ length: DAY_LABELS_FIRST.length + 1 }, (_, index) => ({
+            ...Array.from({ length: Math.max(DAY_LABELS_FIRST.length, DAY_LABELS_SECOND.length) }, (_, index) => ({
                 key: `day-${index}`,
                 width: widths.day,
             })),
@@ -4112,7 +4112,7 @@ const SupportLaborStatementPanel: React.FC<{
         }))
     }), [aggregate, statementPreviews, statementTotalAmount, statementTotalManDay]);
     const [statusMessage, setStatusMessage] = useState('');
-    const [busyAction, setBusyAction] = useState<'copy' | 'send' | null>(null);
+    const [busyAction, setBusyAction] = useState<'copy' | 'send' | 'excel' | null>(null);
     const [activePreviewIndex, setActivePreviewIndex] = useState(0);
     const statementSheetRef = useRef<HTMLDivElement | null>(null);
     const statementText = useMemo(
@@ -4381,6 +4381,31 @@ const SupportLaborStatementPanel: React.FC<{
         }
     };
 
+    const handleExcelDownload = async () => {
+        if (statementPreviews.length === 0) {
+            setStatusMessage('엑셀로 저장할 노임명세 데이터가 없습니다.');
+            return;
+        }
+
+        try {
+            setBusyAction('excel');
+            await generateLaborStatementExcel(
+                statementPreviews.map(buildLaborStatementExcelBlock),
+                yearMonth,
+                {
+                    fileName: `노무내역서_${sanitizeFileNamePart(yearMonth)}_${sanitizeFileNamePart(aggregate.companyName)}.xlsx`,
+                    showBankColumn,
+                }
+            );
+            setStatusMessage('현재 노임명세 설정을 적용한 엑셀 파일을 저장했습니다.');
+        } catch (error) {
+            console.error('[SupportTeamPaymentPage] labor statement excel download failed:', error);
+            setStatusMessage('노임명세 엑셀 파일을 생성하지 못했습니다.');
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
     return (
         <div className="space-y-5 rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm" onClick={(event) => event.stopPropagation()}>
             <div className="flex flex-col gap-3 border-b border-emerald-100 pb-3 sm:flex-row sm:items-center sm:justify-between">
@@ -4630,6 +4655,17 @@ const SupportLaborStatementPanel: React.FC<{
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-h-[20px] text-sm font-bold text-emerald-700">{statusMessage}</div>
                     <div className="flex flex-wrap justify-end gap-2">
+                        <button
+                            type="button"
+                            aria-label="노무비 지급 명세서 엑셀 다운로드"
+                            title="현재 설정으로 엑셀 다운로드"
+                            onClick={handleExcelDownload}
+                            disabled={busyAction !== null}
+                            className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700 shadow-sm transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            <FontAwesomeIcon icon={busyAction === 'excel' ? faSpinner : faFileExcel} spin={busyAction === 'excel'} />
+                            엑셀 다운로드
+                        </button>
                         <button
                             type="button"
                             aria-label="노무비 지급 명세서 표 복사"
@@ -4901,7 +4937,7 @@ const LaborStatementPreview: React.FC<{
     const statementColumns = buildSupportLaborStatementColumns(viewOptions);
     const statementTableMinWidth = statementColumns.reduce((sum, column) => sum + column.width, 0);
     const statementSheetMinWidth = statementTableMinWidth + 82;
-    const footerRowSpan = viewOptions.isSplitView && viewOptions.showBillingColumns ? 2 : 1;
+    const footerRowSpan = viewOptions.isSplitView ? 2 : 1;
     const getPaymentLabel = (payType?: SupportStatementPayType) => payType === 'delegate' ? '위임' : '직불';
     const formatBankInfo = (row: SupportLaborExcelRow) =>
         [row.bankName, row.accountHolder, row.accountNumber].filter(Boolean).join(' / ');
@@ -4942,7 +4978,6 @@ const LaborStatementPreview: React.FC<{
                         {primaryDayLabels.map((day) => (
                             <th key={day} className="border-2 border-slate-800 bg-sky-50 text-sky-700">{String(day).padStart(2, '0')}</th>
                         ))}
-                        {viewOptions.isSplitView && <th className="border-2 border-slate-800 bg-slate-50">X</th>}
                         <th className="border-2 border-slate-800 p-2" rowSpan={viewOptions.isSplitView ? 2 : 1}>출역</th>
                         {viewOptions.showBillingColumns && (
                             <th className="border-2 border-slate-800 bg-emerald-100 p-2 text-emerald-950">청구단가</th>
@@ -4960,8 +4995,9 @@ const LaborStatementPreview: React.FC<{
                         <tr className="bg-slate-100 font-black text-slate-800">
                             <th className="border-2 border-slate-800 p-2">전화번호</th>
                             {DAY_LABELS_SECOND.map((day) => (
-                                <th key={day} className="border-2 border-slate-800 bg-rose-50 text-rose-700">{day}</th>
+                                <th key={day} className="border-2 border-slate-800 bg-rose-50 text-rose-700">{String(day).padStart(2, '0')}</th>
                             ))}
+                            <th aria-label="날짜 빈 칸" className="border-2 border-slate-800 bg-slate-50" />
                             {viewOptions.showBillingColumns && (
                                 <th className="border-2 border-slate-800 bg-emerald-100 p-2 text-emerald-950">청구금액</th>
                             )}
@@ -4991,7 +5027,6 @@ const LaborStatementPreview: React.FC<{
                                     {primaryDayLabels.map((day) => (
                                         <td key={day} className="border-2 border-slate-800 bg-sky-50/30 py-1.5 text-center">{formatStatementDayManDay(row.days[day - 1])}</td>
                                     ))}
-                                    {viewOptions.isSplitView && <td className="border-2 border-slate-800 bg-slate-50 py-1.5"></td>}
                                     <td rowSpan={viewOptions.isSplitView ? 2 : 1} className="border-2 border-slate-800 bg-slate-50 py-1.5 text-center font-mono text-[13px]">{formatStatementDayManDay(row.totalManDay)}</td>
                                     {viewOptions.showBillingColumns && (
                                         <td className="border-2 border-slate-800 bg-emerald-50 px-2 py-1.5 text-right font-mono text-emerald-700">{formatNumber(row.billingUnitPrice)}</td>
@@ -5012,6 +5047,7 @@ const LaborStatementPreview: React.FC<{
                                         {DAY_LABELS_SECOND.map((day) => (
                                             <td key={day} className="border-2 border-slate-800 bg-rose-50/30 py-1.5 text-center">{formatStatementDayManDay(row.days[day - 1])}</td>
                                         ))}
+                                        <td aria-label="날짜 빈 칸" className="border-2 border-slate-800 bg-slate-50 py-1.5" />
                                         {viewOptions.showBillingColumns && (
                                             <td className="border-2 border-slate-800 bg-emerald-50 px-2 py-1.5 text-right font-mono text-emerald-800">{formatNumber(row.billingAmount)}</td>
                                         )}
@@ -5023,9 +5059,8 @@ const LaborStatementPreview: React.FC<{
                     <tr className="bg-slate-200 text-[13px] font-black">
                         <td colSpan={4} className="border-2 border-slate-800 py-2.5 text-center">합 계</td>
                         {primaryDayLabels.map((day) => (
-                            <td key={day} className="border-2 border-slate-800 py-2.5 text-center">{formatStatementDayManDay(dayTotals[day - 1])}</td>
+                            <td key={day} className="border-2 border-slate-800 bg-sky-100 py-2.5 text-center text-sky-900">{formatStatementDayManDay(dayTotals[day - 1])}</td>
                         ))}
-                        {viewOptions.isSplitView && <td className="border-2 border-slate-800 py-2.5"></td>}
                         <td rowSpan={footerRowSpan} className="border-2 border-slate-800 py-2.5 text-center font-mono">{formatStatementDayManDay(totalManDay)}</td>
                         {viewOptions.showBillingColumns && (
                             <td className="border-2 border-slate-800 bg-emerald-100 px-2 py-2.5 text-right font-mono text-emerald-800">{formatNumber(avgBillingPrice)}</td>
@@ -5035,13 +5070,16 @@ const LaborStatementPreview: React.FC<{
                         )}
                         {viewOptions.showBankColumn && <td rowSpan={footerRowSpan} className="border-2 border-slate-800 bg-yellow-100 py-2.5"></td>}
                     </tr>
-                    {viewOptions.isSplitView && viewOptions.showBillingColumns && (
+                    {viewOptions.isSplitView && (
                         <tr className="bg-slate-200 text-[13px] font-black">
-                            <td colSpan={4} className="border-2 border-slate-800 py-2.5 text-center">청구금액</td>
+                            <td colSpan={4} className="border-2 border-slate-800 py-2.5 text-center">{viewOptions.showBillingColumns ? '청구금액' : '합 계'}</td>
                             {DAY_LABELS_SECOND.map((day) => (
-                                <td key={day} className="border-2 border-slate-800 py-2.5 text-center">{formatStatementDayManDay(dayTotals[day - 1])}</td>
+                                <td key={day} className="border-2 border-slate-800 bg-rose-100 py-2.5 text-center text-rose-900">{formatStatementDayManDay(dayTotals[day - 1])}</td>
                             ))}
-                            <td className="border-2 border-slate-800 bg-emerald-100 px-2 py-2.5 text-right font-mono text-emerald-900">{formatNumber(totalBillingAmount)}</td>
+                            <td aria-label="날짜 빈 칸" className="border-2 border-slate-800 bg-slate-50 py-2.5" />
+                            {viewOptions.showBillingColumns && (
+                                <td className="border-2 border-slate-800 bg-emerald-100 px-2 py-2.5 text-right font-mono text-emerald-900">{formatNumber(totalBillingAmount)}</td>
+                            )}
                         </tr>
                     )}
                 </tbody>

@@ -27,6 +27,10 @@ import { manpowerService, type Worker } from '../../services/manpowerService';
 import { teamService, type Team } from '../../services/teamService';
 import { storageService } from '../../services/storageService';
 import { toast } from '../../utils/swal';
+import {
+  normalizeDailyAdvanceSalaryType,
+  resolveDailyAdvanceRowSalaryType,
+} from './utils/dailyAdvanceSalaryType';
 
 // 인원DB/일급제/용역팀 등에서 공통적으로 사용하는 엔트리 타입 (WorkerMasterRow와 동일 구조)
 type WorkbookEntry = {
@@ -1051,19 +1055,6 @@ const getReportAmountForEntry = (entry: WorkbookEntry, manDay: number): number =
   return manDay * Math.max(0, reportUnitPrice || 0);
 };
 
-const getSalaryTypeLabel = (...values: Array<unknown>): string => {
-  const labels = values.map((value) => displayText(value)).filter(Boolean);
-  const matched = labels.find((label) => isStrictDailyWageLabel(label) || isStrictServiceTeamLabel(label));
-  return matched || labels[0] || '일급제';
-};
-
-const getNormalizedSalaryTypeLabel = (...values: Array<unknown>): string => {
-  const label = getSalaryTypeLabel(...values);
-  if (isStrictServiceTeamLabel(label)) return '용역팀';
-  if (isStrictDailyWageLabel(label)) return '일급제';
-  return label || '일급제';
-};
-
 const resolveWorkerStableId = (worker?: Partial<Worker> | null): string => {
   if (!worker) return '';
   return (
@@ -1458,12 +1449,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         workerByName.get(normalizeText(row.workerName || row.name));
 
       const getRowSalaryType = (row: any, worker?: Worker | null) =>
-        getNormalizedSalaryTypeLabel(
-          row.salaryModel,
-          row.payType,
-          worker?.salaryModel,
-          worker?.payType
-        );
+        resolveDailyAdvanceRowSalaryType(row, worker);
 
       const getStableIdForRow = (row: any) => {
         const worker = getWorkerForRow(row);
@@ -1800,7 +1786,11 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           teamKey,
           teamName,
           workerName: displayText(worker.name),
-          salaryType: getNormalizedSalaryTypeLabel(worker.salaryModel, worker.payType, workerEntries[0]?.salaryType),
+          salaryType: normalizeDailyAdvanceSalaryType(
+            workerEntries[0]?.salaryType,
+            worker.salaryModel,
+            worker.payType
+          ),
           idNumber: displayText(worker.idNumber || ''),
           address: displayText(worker.address || ''),
           contact: displayText(worker.contact || ''),

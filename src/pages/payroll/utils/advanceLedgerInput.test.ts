@@ -2,6 +2,7 @@ import type { AdvancePayment } from '../../../services/advancePaymentService';
 import type { LedgerManualInput } from '../types/payroll';
 import {
   buildManualInputFromAdvanceRecord,
+  pickAdvanceRecordForPayrollRow,
   resolveInitialLedgerManualInput,
 } from './advanceLedgerInput';
 
@@ -80,6 +81,53 @@ describe('가불관리 → 통합급여 입력 변환', () => {
     expect(result?.labor.currentAdvance).toBe(500000);
     expect(result?.labor.currentAdvanceSecond).toBe(1000000);
     expect(result?.itemAssignments?.other).toBe('labor');
+  });
+
+  it('과태료와 음수 기타 조정액을 함께 가져와 상계할 수 있다', () => {
+    const result = buildManualInputFromAdvanceRecord(
+      advanceRecord({
+        fines: 32000,
+        items: { customOtherDeduction: -32000 },
+        itemAssignments: { customOtherDeduction: 'labor' },
+      }),
+      { customOtherDeduction: '기타' }
+    );
+
+    expect(result?.labor.fine).toBe(32000);
+    expect(result?.labor.other).toBe(-32000);
+  });
+
+  it('팀 이동 전후 가불을 각각 당시 팀의 급여 행에 연결한다', () => {
+    const formerTeamRecord = advanceRecord({
+      id: 'team-old_worker-1_2026-07_monthly',
+      teamId: 'team-old',
+      teamName: '김진민팀',
+      items: { laborAdvance3: 200000 },
+    });
+    const currentTeamRecord = advanceRecord({
+      id: 'team-new_worker-1_2026-07_monthly',
+      teamId: 'team-new',
+      teamName: '이재욱팀',
+      items: { laborAdvance3: 500000 },
+    });
+
+    expect(pickAdvanceRecordForPayrollRow(
+      [formerTeamRecord, currentTeamRecord],
+      '2026-07',
+      { preferredTeamId: 'team-old', preferredTeamName: '김진민팀', preferredSalaryModel: '월급제' }
+    )).toBe(formerTeamRecord);
+
+    expect(pickAdvanceRecordForPayrollRow(
+      [formerTeamRecord, currentTeamRecord],
+      '2026-07',
+      { preferredTeamId: 'team-new', preferredTeamName: '이재욱팀', preferredSalaryModel: '월급제' }
+    )).toBe(currentTeamRecord);
+
+    expect(pickAdvanceRecordForPayrollRow(
+      [currentTeamRecord],
+      '2026-07',
+      { preferredTeamId: 'team-old', preferredTeamName: '김진민팀', preferredSalaryModel: '월급제' }
+    )).toBeUndefined();
   });
 
   it('가불관리 변경이 급여 초안보다 최신이면 최신 원본을 우선한다', () => {

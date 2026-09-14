@@ -74,11 +74,37 @@ const getFileStatusTone = (status: string): string => {
 };
 
 const getFileStatusLabel = (status: string): string => {
+  if (status === 'cancelled') return '취소됨';
   if (status === 'completed') return '완료';
   if (status === 'failed') return '실패';
   if (status === 'analyzing') return '분석 중';
   if (status === 'uploaded') return '대기';
   return status || '-';
+};
+
+const getSaveResultMessage = (saved: CardStatementImportJobPayload, fallbackMonth: string): string => {
+  const results = saved.results ?? [];
+  const committed = results.filter((result) => result.status === 'committed');
+  const excludedCount = results.filter((result) => result.status === 'excluded').length;
+  const remainingCount = results.length - committed.length - excludedCount;
+  const failedFileCount = (saved.files ?? []).filter((file) => file.status === 'failed').length;
+  if (committed.length === 0) {
+    return '저장된 내역이 없습니다.\n\n중복으로 제외되었거나 확인이 필요한 항목이 있는지 화면의 안내를 확인해 주세요.';
+  }
+  const needsAttention = remainingCount > 0 || failedFileCount > 0 || saved.job.status !== 'completed';
+  const month = saved.job.yearMonth || fallbackMonth;
+  const lines = [
+    needsAttention ? `${month} 일부 내역만 저장되었습니다.` : `${month} 카드 청구서 저장이 완료되었습니다.`,
+    '',
+    `저장된 내역: ${committed.length.toLocaleString('ko-KR')}건`,
+    `저장 금액: ${formatAmount(committed.reduce((sum, result) => sum + Number(result.subtotalAmount || 0), 0))}`,
+  ];
+  if (remainingCount > 0) lines.push(`추가 확인이 필요한 내역: ${remainingCount.toLocaleString('ko-KR')}건`);
+  if (failedFileCount > 0) lines.push(`처리하지 못한 PDF: ${failedFileCount.toLocaleString('ko-KR')}개`);
+  if (excludedCount > 0) lines.push(`중복 또는 사용자 제외 내역: ${excludedCount.toLocaleString('ko-KR')}건 (저장 대상 제외)`);
+  if (needsAttention) lines.push('남은 항목은 화면의 안내를 확인해 주세요.');
+  lines.push('', '금액과 PDF가 카드 원장에 임시저장되었습니다.', '청구 확정은 별도로 진행해 주세요.');
+  return lines.join('\n');
 };
 
 export const CardStatementImportModal: React.FC<CardStatementImportModalProps> = ({
@@ -100,6 +126,7 @@ export const CardStatementImportModal: React.FC<CardStatementImportModalProps> =
   const [expandedResultIds, setExpandedResultIds] = useState<Set<string>>(() => new Set());
   const [errorMessage, setErrorMessage] = useState('');
   const recoveryAttemptedJobIdsRef = useRef<Set<string>>(new Set());
+  const commitInFlightRef = useRef(false);
 
   const activeResults = useMemo(
     () => (payload?.results ?? []).filter((result) => result.status !== 'excluded'),
@@ -134,6 +161,8 @@ export const CardStatementImportModal: React.FC<CardStatementImportModalProps> =
   const jobStatus = payload?.job?.status ?? '';
   const analysisRunning = jobStatus === 'analyzing';
   const actionBusy = processing || analysisRunning || analysisRecovering;
+  const hasPendingSave = activeResults.some((result) => result.status === 'matched');
+  const allActiveResultsSaved = activeResults.length > 0 && activeResults.every((result) => result.status === 'committed');
   const fileRows = payload?.files ?? [];
   const totalFileCount = Number(payload?.job?.totalFiles ?? fileRows.length ?? 0);
   const processedFileCount = Math.min(
@@ -324,17 +353,21 @@ export const CardStatementImportModal: React.FC<CardStatementImportModalProps> =
   };
 
   const handleCommit = async () => {
-    if (!payload?.job?.id || analysisRunning || summary.needsReviewCount > 0 || activeResults.length === 0) return;
+    if (!payload?.job?.id || actionBusy || commitInFlightRef.current || summary.needsReviewCount > 0 || !hasPendingSave) return;
+    commitInFlightRef.current = true;
     setProcessing(true);
     setErrorMessage('');
     try {
       const committed = await cardStatementImportService.commitJob(payload.job.id);
+      if (!committed.ok) throw new Error('저장 결과를 확인하지 못했습니다. 잠시 후 다시 확인해 주세요.');
       setPayload(committed);
+      window.alert(getSaveResultMessage(committed, yearMonth));
       onCompleted?.();
     } catch (error) {
       console.error('[CardStatementImportModal] commit failed', error);
       setErrorMessage(error instanceof Error ? error.message : '원장 반영에 실패했습니다.');
     } finally {
+      commitInFlightRef.current = false;
       setProcessing(false);
     }
   };
@@ -680,6 +713,12 @@ export const CardStatementImportModal: React.FC<CardStatementImportModalProps> =
                           </select>
                         </td>
                         <td className="px-4 py-3">
+                          {result.status === 'excluded' && (
+                            <div className="mb-2 max-w-[320px] whitespace-normal rounded-lg bg-amber-50 p-2 text-xs font-bold leading-relaxed text-amber-900">
+                              {result.exclusionReason || '저장 대상에서 제외된 내역입니다.'}
+                              {result.duplicateSourceOwnerJobId && <p className="mt-1">월을 잘못 선택했다면 창을 닫고, 기존 월의 ‘업로드 내역’에서 취소한 뒤 올바른 월에 PDF를 새로 등록해 주세요.</p>}
+                            </div>
+                          )}
                           {(result.warnings ?? []).length === 0 ? (
                             <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600">
                               <FontAwesomeIcon icon={faCheckCircle} />
@@ -843,12 +882,12 @@ export const CardStatementImportModal: React.FC<CardStatementImportModalProps> =
               <button
                 type="button"
                 onClick={() => void handleCommit()}
-                disabled={actionBusy || !payload?.job?.id || summary.needsReviewCount > 0 || activeResults.length === 0}
+                disabled={actionBusy || !payload?.job?.id || summary.needsReviewCount > 0 || !hasPendingSave}
                 className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-extrabold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                 title={summary.needsReviewCount > 0 ? '확인 필요 항목을 먼저 매칭하거나 제외하세요.' : '금액과 PDF를 원장에 임시저장합니다. 청구처리는 실행하지 않습니다.'}
               >
                 <FontAwesomeIcon icon={faCheckCircle} />
-                {processing ? '저장 중...' : '금액·PDF 임시저장'}
+                {processing ? '저장 중...' : allActiveResultsSaved ? '저장 완료' : '금액·PDF 임시저장'}
               </button>
             )}
           </div>

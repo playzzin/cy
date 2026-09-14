@@ -47,4 +47,14 @@ describe('companyDataScope', () => {
         expect(scope.mode).toBe('blocked');
         expect(companyDataScopeMatchesMaterialTransaction(scope, { rentalCompanyId: 'rental-a' })).toBe(false);
     });
+
+    it('승인 대기 계정은 회사 연결 값이 있어도 차단한다', () => {
+        const scope = resolveCompanyDataScope(profile({
+            status: 'pending',
+            accountType: 'construction_company',
+            linkedCompanyIds: ['client-a'],
+        }));
+
+        expect(scope.mode).toBe('blocked');
+    });
 });

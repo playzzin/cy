@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -21,6 +21,10 @@ import { companyService } from '../../services/companyService';
 import { AccommodationAssignment } from '../../types/accommodationAssignment';
 import { accommodationBillingTargetService } from '../../services/accommodationBillingTargetService';
 import { AccommodationBillingTarget } from '../../types/accommodationBillingTarget';
+import {
+    isCurrentAccommodationAssignment,
+    matchesCurrentAccommodationTeamScope
+} from '../../utils/accommodationStatusScope';
 import { menuServiceV11 } from '../../services/menuServiceV11';
 import { userMenuPositionService } from '../../services/userMenuPositionService';
 import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
@@ -35,6 +39,8 @@ import { SupportCancellationHistory } from '../../components/support/SupportCanc
 import { SupportCancellationModal, type SupportCancellationFormValue } from '../../components/support/SupportCancellationModal';
 import { supportCancellationLogService } from '../../services/supportCancellationLogService';
 import { getContrastingTextColor } from '../../utils/color';
+import { getSupportManagementYearMonth, subscribeSupportManagementYearMonth } from '../../utils/supportManagementState';
+import { getAccommodationMonthSummary, overlapsAccommodationMonth } from '../../utils/accommodationMonthSummary';
 import type { SiteDataType } from '../../types/menu';
 
 interface AccommodationManagerProps {
@@ -117,6 +123,9 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     const [billingTargets, setBillingTargets] = useState<AccommodationBillingTarget[]>([]);
     const [currentMonthLedgerRecords, setCurrentMonthLedgerRecords] = useState<UtilityRecord[]>([]);
     const [loading, setLoading] = useState(true);
+    const [summaryMonth, setSummaryMonth] = useState(getSupportManagementYearMonth);
+    const loadSequence = useRef(0);
+    useEffect(() => subscribeSupportManagementYearMonth(setSummaryMonth), []);
 
     const [showForm, setShowForm] = useState(false);
     const [editingItem, setEditingItem] = useState<Accommodation | undefined>(undefined);
@@ -254,9 +263,9 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
 
     useEffect(() => {
         if (canUseAccommodationManager !== true) return;
-        if (activeTab !== 'status') return;
+        if (activeTab === 'history') return;
         loadData();
-    }, [canUseAccommodationManager, activeTab]);
+    }, [canUseAccommodationManager, activeTab, summaryMonth]);
 
     const getCurrentYearMonth = (): string => {
         const now = new Date();
@@ -264,9 +273,10 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     };
 
     const loadData = async () => {
+        const sequence = ++loadSequence.current;
         try {
             setLoading(true);
-            const targetYearMonth = getCurrentYearMonth();
+            const targetYearMonth = summaryMonth;
             const [accommodationList, teamList, companies, assignmentList, ledgerList, billingTargetList] = await Promise.all([
                 accommodationService.listAllAccommodations(),
                 teamService.getTeams(),
@@ -282,6 +292,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                 })
             ]);
 
+            if (sequence !== loadSequence.current) return;
             const allowedTeams = buildCheongyeonEngTeams(teamList, companies);
             const sortedTeams = teamList
                 .slice()
@@ -296,7 +307,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
         } catch (error) {
             console.error("Failed to load accommodations", error);
         } finally {
-            setLoading(false);
+            if (sequence === loadSequence.current) setLoading(false);
         }
     };
 
@@ -461,18 +472,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     };
 
     const isActiveAssignmentForStatusBoard = (assignment: AccommodationAssignment): boolean => {
-        if ((assignment.status ?? 'active') === 'ended') return false;
-
-        const rawEndDate = normalizeKey(assignment.endDate);
-        if (!rawEndDate) return true;
-
-        const endDate = new Date(rawEndDate);
-        if (Number.isNaN(endDate.getTime())) return true;
-
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        endDate.setHours(0, 0, 0, 0);
-        return endDate >= today;
+        return isCurrentAccommodationAssignment(assignment);
     };
 
     const activeAssignmentsByAccommodationId = useMemo(() => {
@@ -647,12 +647,12 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
 
         return accommodations.filter((accommodation) => {
             const activeAssignments = getActiveAssignmentsForAccommodation(accommodation);
-            if (activeAssignments.some(assignmentMatchesSelectedTeam)) return true;
-
-            const allAssignments = getAssignmentsForAccommodation(accommodation);
-            if (allAssignments.some(assignmentMatchesSelectedTeam)) return true;
-
-            return getBillingTargetsForAccommodation(accommodation).some(billingTargetMatchesSelectedTeam);
+            return matchesCurrentAccommodationTeamScope(
+                activeAssignments,
+                getBillingTargetsForAccommodation(accommodation),
+                assignmentMatchesSelectedTeam,
+                billingTargetMatchesSelectedTeam
+            );
         });
     }, [
         accommodations,
@@ -660,7 +660,6 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
         selectedTeamCanonicalId,
         selectedTeamCanonicalName,
         activeAssignmentsByAccommodationId,
-        assignmentsByAccommodationId,
         billingTargets,
         accommodationByAnyId,
         teamByAnyId,
@@ -1309,12 +1308,18 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     )).length;
     const occupiedCount = selectedTeamScopedAccommodations.filter(a => a.status === 'active').reduce((acc, _) => acc + 1, 0); // safe count
     const vacantCount = selectedTeamScopedAccommodations.filter(a => a.status === 'inactive').reduce((acc, _) => acc + 1, 0);
-    const totalRent = selectedTeamScopedAccommodations
-        .filter(a => a.status === 'active')
-        .reduce((sum, a: any) => sum + getAccommodationRent(a), 0);
-    const totalDeposit = selectedTeamScopedAccommodations
-        .filter(a => a.status === 'active')
-        .reduce((sum, a: any) => sum + getAccommodationDeposit(a), 0);
+    const monthScopedAccommodations = accommodations.filter(accommodation => {
+        if (!selectedTeamId) return true;
+        const monthAssignments = getAssignmentsForAccommodation(accommodation)
+            .filter(assignment => overlapsAccommodationMonth(assignment, summaryMonth));
+        if (monthAssignments.length) return monthAssignments.some(assignmentMatchesSelectedTeam);
+        return getBillingTargetsForAccommodation(accommodation)
+            .filter(target => overlapsAccommodationMonth(target, summaryMonth))
+            .some(billingTargetMatchesSelectedTeam);
+    });
+    const { rent: totalRent, deposit: totalDeposit } = getAccommodationMonthSummary(
+        monthScopedAccommodations, summaryMonth, currentMonthLedgerRecords,
+    );
 
     // Calculate Alerts (Rent Due Soon)
     const today = new Date();
@@ -1707,7 +1712,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                     <div className="relative z-10">
                                         <p className="text-xs font-bold text-indigo-600/70 uppercase tracking-wider mb-2">총 월세 지출액</p>
                                         <div className="flex items-baseline gap-2">
-                                            <h3 className="text-3xl font-extrabold text-slate-800">{totalRent.toLocaleString()}</h3>
+                                            <h3 className="text-3xl font-extrabold text-slate-800">{loading ? '집계 중…' : totalRent.toLocaleString()}</h3>
                                             <span className="text-sm font-bold text-slate-400">원</span>
                                         </div>
                                         <div className="mt-4 flex items-center gap-2 text-xs font-medium text-indigo-700 bg-indigo-50 w-fit px-2 py-1 rounded-lg">
@@ -1721,7 +1726,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                     <div className="relative z-10">
                                         <p className="text-xs font-bold text-blue-600/70 uppercase tracking-wider mb-2">총 예치 보증금</p>
                                         <div className="flex items-baseline gap-2">
-                                            <h3 className="text-3xl font-extrabold text-slate-800">{totalDeposit.toLocaleString()}</h3>
+                                            <h3 className="text-3xl font-extrabold text-slate-800">{loading ? '집계 중…' : totalDeposit.toLocaleString()}</h3>
                                             <span className="text-sm font-bold text-slate-400">원</span>
                                         </div>
                                         <div className="mt-4 flex items-center gap-2 text-xs font-medium text-blue-700 bg-blue-50 w-fit px-2 py-1 rounded-lg">

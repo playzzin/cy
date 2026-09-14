@@ -1,6 +1,10 @@
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { DEFAULT_MENU_CONFIG } from '../constants/defaultMenu';
-import { MENU_DOCUMENT_ID, menuServiceV11 } from './menuServiceV11';
+import {
+  MENU_DOCUMENT_ID,
+  menuServiceV11,
+  removePositionReferencesInMenuConfig,
+} from './menuServiceV11';
 import { permissionAuditService } from './permissionAuditService';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import {
@@ -89,6 +93,22 @@ describe('menuServiceV11 canonical Firestore document', () => {
     expect(mockedDoc).not.toHaveBeenCalledWith(expect.anything(), 'settings', 'menus_v11');
     expect(mockedDoc).not.toHaveBeenCalledWith(expect.anything(), 'settings', 'menus_v10');
     expect(mockedGetDoc).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds identity history to existing nested log folders without duplicating or replacing other logs', async () => {
+    const legacy = JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG));
+    legacy.admin.menu = [{ text: '설정', sub: [{ text: '로그관리', sub: ['로그인 로그', { text: '기존 로그', path: '/custom-log' }] }] }];
+    mockedGetDoc.mockResolvedValue(existingDoc(legacy) as any);
+    const config = await menuServiceV11.getMenuConfig();
+    const folder = (config!.admin.menu[0] as any).sub[0];
+    expect(folder.sub).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: '로그인 로그' }), expect.objectContaining({ path: '/custom-log' }),
+      expect.objectContaining({ text: '신분증 로그', path: '/database/identity-logs' }),
+    ]));
+    mockedGetDoc.mockResolvedValue(existingDoc(config) as any);
+    const again = await menuServiceV11.getMenuConfig();
+    expect((again!.admin.menu[0] as any).sub[0].sub.filter((item: any) => item.path === '/database/identity-logs')).toHaveLength(1);
+    expect(mockedSetDoc).not.toHaveBeenCalled();
   });
 
   it('migrates a legacy item named 바이백 to the standalone buyback page', async () => {
@@ -203,5 +223,42 @@ describe('menuServiceV11 canonical Firestore document', () => {
     );
 
     unsubscribe();
+  });
+});
+
+describe('removePositionReferencesInMenuConfig', () => {
+  it('removes deleted position roles, configuration rows, and its position site', () => {
+    const config: any = {
+      admin: {
+        name: '관리자',
+        positionConfig: [
+          { id: 'position-team-lead', name: '팀장' },
+          { id: 'full', name: '전체' },
+        ],
+        menu: [
+          {
+            id: 'root',
+            text: '루트',
+            roles: ['팀장', '일반'],
+            sub: [{ id: 'child', text: '하위', roles: ['팀장'] }],
+          },
+        ],
+      },
+      'pos_position-team-lead': {
+        name: '팀장',
+        menu: [{ id: 'position-only', text: '직책 메뉴', roles: ['팀장'] }],
+      },
+    };
+
+    const result = removePositionReferencesInMenuConfig(config, '팀장', 'position-team-lead');
+
+    expect(result.changed).toBe(true);
+    expect(result.roleReferences).toBe(3);
+    expect(result.positionConfigs).toBe(1);
+    expect(result.siteLabels).toBe(1);
+    expect(config.admin.positionConfig).toEqual([{ id: 'full', name: '전체' }]);
+    expect(config.admin.menu[0].roles).toEqual(['일반']);
+    expect(config.admin.menu[0].sub[0].roles).toEqual([]);
+    expect(config['pos_position-team-lead']).toBeUndefined();
   });
 });

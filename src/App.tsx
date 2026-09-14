@@ -114,6 +114,7 @@ const OfficeTeamSettlementManagementPage = React.lazy(() => import('./pages/offi
 const OperationalWorkflowPage = React.lazy(() => import('./pages/office/OperationalWorkflowPage'));
 const IntegratedDatabase = React.lazy(() => import('./pages/database/ManpowerDatabase'));
 const DatabaseLogPage = React.lazy(() => import('./pages/database/DatabaseLogPage'));
+const IdentityLogPage = React.lazy(() => import('./pages/database/IdentityLogPage'));
 const ManualPage = React.lazy(() => import('./pages/manual'));
 const ProfilePage = React.lazy(() => import('./pages/profile/ProfilePage'));
 const WorkerDelegationSignaturePage = React.lazy(() => import('./pages/worker/WorkerDelegationSignaturePage'));
@@ -365,6 +366,7 @@ const App: React.FC = () => {
               <Route path="partner-photo-registration" element={<PartnerPhotoRegistrationPage />} />
               <Route path="business-card-contacts" element={<BusinessCardContactsPage />} />
               <Route path="identity-bundle" element={<IdentityBundlePage />} />
+              <Route path="identity-logs" element={<IdentityLogPage />} />
             </Route>
 
             {/* Restricted internal compliance records */}

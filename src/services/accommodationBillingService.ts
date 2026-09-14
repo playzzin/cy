@@ -690,7 +690,9 @@ export const accommodationBillingService = {
                 source: 'accommodationBillingService.upsertBillingDocument'
             });
         } catch (logError) {
-            console.warn('[accommodationBillingService] accommodation billing log failed:', logError);
+            try {
+                reportSupportWriteError(logError, { domain: 'accommodation', status: 'failed' });
+            } catch { /* Diagnostics must not turn a successful save into a failure. */ }
         }
 
         await recordSupportWriteOperationSafely({
@@ -708,22 +710,26 @@ export const accommodationBillingService = {
 
         return docData.id;
         } catch (error) {
-            const failedContext = {
-                domain: 'accommodation' as const,
-                yearMonth: docData.yearMonth,
-                operationId,
-                affectedDocumentIds,
-                errorMessage: getErrorMessage(error),
-                userMessage: SUPPORT_WRITE_RETRY_USER_MESSAGE
-            };
-            await recordSupportWriteOperationSafely({
-                ...failedContext,
-                status: 'failed'
-            });
-            reportSupportWriteError(error, {
-                ...failedContext,
-                status: 'failed'
-            });
+            try {
+                const failedContext = {
+                    domain: 'accommodation' as const,
+                    yearMonth: docData.yearMonth,
+                    operationId,
+                    affectedDocumentIds,
+                    errorMessage: 'SUPPORT_WRITE_UNKNOWN',
+                    userMessage: SUPPORT_WRITE_RETRY_USER_MESSAGE
+                };
+                try {
+                    await recordSupportWriteOperationSafely({
+                        ...failedContext,
+                        status: 'failed'
+                    });
+                } catch { /* A diagnostic record failure must not replace the business error. */ }
+                reportSupportWriteError(error, {
+                    ...failedContext,
+                    status: 'failed'
+                });
+            } catch { /* Context construction and reporting are observation only. */ }
             throw error;
         }
     },

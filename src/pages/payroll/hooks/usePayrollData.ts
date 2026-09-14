@@ -12,7 +12,10 @@ import { advancePaymentService, AdvancePayment } from '../../../services/advance
 import { PaymentData, MonthlyAdvanceLedgerRow, DeductionBreakdown, WorkerWorkEntry, DeductionLine } from '../types/payroll';
 import { BANK_CODES, STANDARD_DEDUCTION_FIELDS } from '../constants/payroll.constants';
 import { resolveReportPayType } from '../../../utils/payType';
-import { buildManualInputFromAdvanceRecord } from '../utils/advanceLedgerInput';
+import {
+  buildManualInputFromAdvanceRecord,
+  pickAdvanceRecordForPayrollRow,
+} from '../utils/advanceLedgerInput';
 
 // Helper: Convert any value to number safely
 const toNumber = (value: unknown): number => {
@@ -161,87 +164,6 @@ const buildDeductionLabelMap = (
   return base;
 };
 
-const pickPreferredAdvanceRecord = (
-  records: AdvancePayment[],
-  yearMonth: string,
-  options: {
-    preferredTeamId?: string;
-    preferredTeamName?: string;
-    preferredSalaryModel?: string;
-  } = {}
-): AdvancePayment | undefined => {
-  const monthMatched = records.filter((record) => String(record.yearMonth ?? '') === yearMonth);
-  if (monthMatched.length === 0) return undefined;
-
-  const preferredTeamId = String(options.preferredTeamId ?? '').trim();
-  const preferredTeamNameKey = normalizeTeamName(options.preferredTeamName);
-  const preferredSalaryModel = normalizeSalaryModelLabel(options.preferredSalaryModel);
-
-  const exactTeamIdMatched = preferredTeamId
-    ? monthMatched.filter((record) => String(record.teamId ?? '').trim() === preferredTeamId)
-    : [];
-
-  const teamNameMatched = preferredTeamNameKey
-    ? monthMatched.filter((record) => normalizeTeamName(record.teamName) === preferredTeamNameKey)
-    : [];
-
-  const getRecordValueScore = (record: AdvancePayment): number => {
-    const standardTotal = STANDARD_DEDUCTION_FIELDS.reduce(
-      (sum, { key }) => sum + toNumber((record as any)[key]),
-      0
-    );
-    const itemsTotal = Object.values(record.items ?? {}).reduce((sum, value) => sum + toNumber(value), 0);
-    return standardTotal + itemsTotal;
-  };
-
-  const candidates =
-    exactTeamIdMatched.length > 0
-      ? exactTeamIdMatched
-      : (teamNameMatched.length > 0 ? teamNameMatched : monthMatched);
-
-  const salaryMatched = preferredSalaryModel
-    ? candidates.filter((record) => normalizeSalaryModelLabel(record.salaryModel) === preferredSalaryModel)
-    : [];
-  const legacySalaryMatched = preferredSalaryModel
-    ? candidates.filter((record) => !normalizeSalaryModelLabel(record.salaryModel))
-    : [];
-  const salaryScopedCandidates = preferredSalaryModel
-    ? (salaryMatched.length > 0 ? salaryMatched : legacySalaryMatched)
-    : candidates;
-  if (salaryScopedCandidates.length === 0) return undefined;
-
-  const getPreferenceRank = (record: AdvancePayment): number => {
-    const recordTeamId = String(record.teamId ?? '').trim();
-    const recordTeamNameKey = normalizeTeamName(record.teamName);
-    if (preferredTeamId && recordTeamId === preferredTeamId) return 3;
-    if (preferredTeamNameKey && recordTeamNameKey === preferredTeamNameKey) return 2;
-    return 1;
-  };
-
-  return salaryScopedCandidates.reduce<AdvancePayment | undefined>((best, current) => {
-    if (!best) return current;
-
-    const bestPreferenceRank = getPreferenceRank(best);
-    const currentPreferenceRank = getPreferenceRank(current);
-    if (currentPreferenceRank !== bestPreferenceRank) {
-      return currentPreferenceRank > bestPreferenceRank ? current : best;
-    }
-
-    const bestScore = getRecordValueScore(best);
-    const currentScore = getRecordValueScore(current);
-    const bestHasValue = bestScore > 0;
-    const currentHasValue = currentScore > 0;
-    if (currentHasValue !== bestHasValue) return currentHasValue ? current : best;
-    if (currentScore !== bestScore) return currentScore > bestScore ? current : best;
-
-    const bestTs = best.updatedAt instanceof Date ? best.updatedAt.getTime() : 0;
-    const currentTs = current.updatedAt instanceof Date ? current.updatedAt.getTime() : 0;
-    if (currentTs !== bestTs) return currentTs > bestTs ? current : best;
-
-    return best;
-  }, undefined);
-};
-
 const buildDeductionBreakdownFromRecords = (
   records: AdvancePayment[],
   deductionLabelMap: Record<string, string> = {}
@@ -255,7 +177,7 @@ const buildDeductionBreakdownFromRecords = (
 
   STANDARD_DEDUCTION_FIELDS.forEach(({ key, label }: { key: string; label: string }) => {
     const sum = deduped.reduce((acc, record) => acc + toNumber((record as any)[key]), 0);
-    if (sum > 0) {
+    if (sum !== 0) {
       standardLines.push({ label, amount: sum });
     }
   });
@@ -264,7 +186,7 @@ const buildDeductionBreakdownFromRecords = (
   deduped.forEach((record) => {
     Object.entries(record.items ?? {}).forEach(([itemLabel, rawAmount]) => {
       const amount = toNumber(rawAmount);
-      if (amount <= 0) return;
+      if (amount === 0) return;
       additionalTotals.set(itemLabel, (additionalTotals.get(itemLabel) ?? 0) + amount);
     });
   });
@@ -285,7 +207,7 @@ const buildDeductionBreakdownFromRecords = (
     standardLines,
     additionalLines,
     total,
-    hasData: total > 0,
+    hasData: standardLines.length > 0 || additionalLines.length > 0,
   };
 };
 
@@ -667,7 +589,7 @@ export const usePayrollData = (
           teamId: canonicalTeamId,
           teamName: agg.teamName || w?.teamName,
         });
-        const selectedAdvanceRecord = pickPreferredAdvanceRecord(
+        const selectedAdvanceRecord = pickAdvanceRecordForPayrollRow(
           advanceCandidates,
           agg.month,
           {
@@ -746,7 +668,7 @@ export const usePayrollData = (
           teamId: canonicalTeamId,
           teamName: agg.teamName || w?.teamName,
         });
-        const selectedAdvanceRecord = pickPreferredAdvanceRecord(
+        const selectedAdvanceRecord = pickAdvanceRecordForPayrollRow(
           advanceCandidates,
           agg.month,
           {

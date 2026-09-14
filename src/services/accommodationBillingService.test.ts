@@ -4,6 +4,7 @@ import {
   isProtectedAccommodationBillingStatus
 } from './accommodationBillingService';
 import { recordSupportWriteOperationSafely } from './supportWriteOperationLogService';
+import * as supportWriteReporting from '../utils/supportWriteErrorReporting';
 import {
   createAccommodationBillingDocument,
   createAccommodationBillingLineItem,
@@ -45,12 +46,6 @@ jest.mock('./accommodationBillingLogService', () => ({
 
 jest.mock('./supportWriteOperationLogService', () => ({
   recordSupportWriteOperationSafely: jest.fn()
-}));
-
-jest.mock('../utils/supportWriteErrorReporting', () => ({
-  SUPPORT_WRITE_RETRY_USER_MESSAGE: 'retry later',
-  getErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error),
-  reportSupportWriteError: jest.fn()
 }));
 
 const mockedListDocs = listAllAccommodationBillingDocuments as jest.MockedFunction<typeof listAllAccommodationBillingDocuments>;
@@ -112,6 +107,8 @@ const buildDocument = (lineItems: AccommodationBillingLineItem[]): Omit<Accommod
 describe('accommodationBillingService.upsertBillingDocument line item safety', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     mockedListDocs.mockResolvedValue({ data: { accommodationBillingDocuments: [buildStoredDoc()] } } as any);
     mockedListItems.mockResolvedValue({ data: { accommodationBillingLineItems: [] } } as any);
     mockedUpdateDoc.mockResolvedValue({ data: { accommodationBillingDocument_update: { id: BILLING_ID } } } as any);
@@ -126,6 +123,10 @@ describe('accommodationBillingService.upsertBillingDocument line item safety', (
     mockedUpdateAdvance.mockResolvedValue({ data: { advancePayment_update: { id: 'advance-1' } } } as any);
     mockedCreateLog.mockResolvedValue({} as any);
     mockedRecordOperation.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it('updates changed line items without deleting or recreating unrelated existing items', async () => {
@@ -182,9 +183,10 @@ describe('accommodationBillingService.upsertBillingDocument line item safety', (
     mockedListItems.mockResolvedValue({ data: { accommodationBillingLineItems: [
       buildStoredItem({ id: 'utility-rent', label: 'Rent', amount: 100 })
     ] } } as any);
-    mockedCreateItem.mockRejectedValueOnce(new Error('create failed'));
+    const originalError = new Error('create failed');
+    mockedCreateItem.mockRejectedValueOnce(originalError);
 
-    await expect(accommodationBillingService.upsertBillingDocument(buildDocument([
+    const failedUpsert = accommodationBillingService.upsertBillingDocument(buildDocument([
       {
         id: 'utility-rent',
         label: 'Rent',
@@ -203,7 +205,9 @@ describe('accommodationBillingService.upsertBillingDocument line item safety', (
         sourceAccommodationId: 'acc-1',
         sourceUtilityRecordId: 'utility-1'
       }
-    ]))).rejects.toThrow('create failed');
+    ]));
+    await expect(failedUpsert).rejects.toBe(originalError);
+    await expect(failedUpsert).rejects.toThrow('create failed');
 
     expect(mockedDeleteItem).not.toHaveBeenCalled();
     expect(mockedUpdateItem).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -214,7 +218,7 @@ describe('accommodationBillingService.upsertBillingDocument line item safety', (
       domain: 'accommodation',
       status: 'failed',
       affectedDocumentIds: expect.arrayContaining(['utility-rent', 'utility-water', BILLING_ID]),
-      errorMessage: 'create failed'
+      errorMessage: 'SUPPORT_WRITE_UNKNOWN'
     }));
   });
 
@@ -456,5 +460,145 @@ describe('accommodationBillingService.upsertBillingDocument line item safety', (
       confirmedAt: null,
       postedAdvancePaymentId: null
     }));
+  });
+
+  it.each([false, true])('preserves success ID and business call order when history fails (console throws: %s)', async (consoleThrows) => {
+    const historyError = new Error('private history failure');
+    mockedCreateLog.mockRejectedValueOnce(historyError);
+    const reportSpy = jest.spyOn(supportWriteReporting, 'reportSupportWriteError');
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {
+      if (consoleThrows) throw new Error('console unavailable');
+    });
+    const consoleWarn = jest.spyOn(console, 'warn').mockImplementation(() => {
+      throw new Error('legacy warning must not run');
+    });
+
+    await expect(accommodationBillingService.upsertBillingDocument(buildDocument([])))
+      .resolves.toBe(BILLING_ID);
+
+    expect(reportSpy).toHaveBeenCalledTimes(1);
+    expect(reportSpy.mock.calls[0][0]).toBe(historyError);
+    expect(reportSpy.mock.calls[0][1]).toEqual({ domain: 'accommodation', status: 'failed' });
+    expect(consoleWarn).not.toHaveBeenCalled();
+    expect(consoleError.mock.calls).toEqual([[
+      '[support-write-operation]', { domain: 'accommodation', errorCode: 'SUPPORT_WRITE_UNKNOWN' }
+    ]]);
+    expect(mockedRecordOperation).toHaveBeenCalledTimes(1);
+    expect(mockedRecordOperation).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'success', operationId: `accommodation-billing:2026-07:${BILLING_ID}`,
+      affectedDocumentIds: [BILLING_ID]
+    }));
+    const order = [
+      ...mockedListDocs.mock.invocationCallOrder.map(index => ({ index, name: 'read-docs' })),
+      ...mockedListItems.mock.invocationCallOrder.map(index => ({ index, name: 'read-items' })),
+      ...mockedUpdateDoc.mock.invocationCallOrder.map(index => ({ index, name: 'update-doc' })),
+      ...mockedCreateLog.mock.invocationCallOrder.map(index => ({ index, name: 'history' })),
+      ...mockedRecordOperation.mock.invocationCallOrder.map(index => ({ index, name: 'record' }))
+    ].sort((left, right) => left.index - right.index).map(entry => entry.name);
+    expect(order).toEqual([
+      'read-docs', 'read-items', 'update-doc', 'read-docs', 'read-items', 'read-items', 'history', 'record'
+    ]);
+    expect(mockedCreateDoc).not.toHaveBeenCalled();
+    expect(mockedCreateItem).not.toHaveBeenCalled();
+    expect(mockedUpdateItem).not.toHaveBeenCalled();
+    expect(mockedDeleteItem).not.toHaveBeenCalled();
+    expect(mockedDeleteDoc).not.toHaveBeenCalled();
+    expect(mockedUpdateAdvance).not.toHaveBeenCalled();
+  });
+
+  it.each(['error', 'plain-object'] as const)('direct upsert preserves %s identity without reading diagnostic getters', async (kind) => {
+    const originalError = kind === 'error' ? new Error('private failure') : {};
+    const getter = jest.fn(() => { throw new Error('diagnostic getter must not run'); });
+    for (const key of ['message', 'code', 'name', 'toString', Symbol.toPrimitive]) {
+      Object.defineProperty(originalError, key, { configurable: true, get: getter });
+    }
+    mockedListDocs.mockRejectedValueOnce(originalError);
+    const reportSpy = jest.spyOn(supportWriteReporting, 'reportSupportWriteError');
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => { throw new Error('console unavailable'); });
+
+    await expect(accommodationBillingService.upsertBillingDocument(buildDocument([])))
+      .rejects.toBe(originalError);
+
+    expect(getter).not.toHaveBeenCalled();
+    expect(reportSpy).toHaveBeenCalledTimes(1);
+    expect(reportSpy.mock.calls[0][0]).toBe(originalError);
+    expect(mockedRecordOperation).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed', errorMessage: 'SUPPORT_WRITE_UNKNOWN',
+      userMessage: supportWriteReporting.SUPPORT_WRITE_RETRY_USER_MESSAGE,
+      affectedDocumentIds: [BILLING_ID]
+    }));
+    expect(consoleError.mock.calls).toEqual([[
+      '[support-write-operation]', { domain: 'accommodation', errorCode: 'SUPPORT_WRITE_UNKNOWN' }
+    ]]);
+    expect(mockedUpdateDoc).not.toHaveBeenCalled();
+    expect(mockedCreateDoc).not.toHaveBeenCalled();
+    expect(mockedCreateItem).not.toHaveBeenCalled();
+    expect(mockedUpdateItem).not.toHaveBeenCalled();
+    expect(mockedDeleteItem).not.toHaveBeenCalled();
+  });
+
+  it('direct upsert retains the original error when failure-context construction hits a getter', async () => {
+    const originalError = new Error('business failure');
+    const document = buildDocument([]);
+    const getter = jest.fn(() => { throw new Error('context getter failure'); });
+    mockedListDocs.mockImplementationOnce(async () => {
+      Object.defineProperty(document, 'yearMonth', { get: getter });
+      throw originalError;
+    });
+    await expect(accommodationBillingService.upsertBillingDocument(document)).rejects.toBe(originalError);
+    expect(getter).toHaveBeenCalledTimes(1);
+    expect(mockedRecordOperation).not.toHaveBeenCalled();
+    expect(mockedUpdateDoc).not.toHaveBeenCalled();
+    expect(mockedCreateDoc).not.toHaveBeenCalled();
+  });
+
+  it.each(['sync', 'async'] as const)('direct upsert retains original error after %s diagnostic record failure', async (kind) => {
+    const originalError = new Error('business failure');
+    mockedListDocs.mockRejectedValueOnce(originalError);
+    if (kind === 'sync') {
+      mockedRecordOperation.mockImplementationOnce(() => { throw new Error('record failure'); });
+    } else {
+      mockedRecordOperation.mockRejectedValueOnce(new Error('record failure'));
+    }
+    const reportSpy = jest.spyOn(supportWriteReporting, 'reportSupportWriteError');
+    await expect(accommodationBillingService.upsertBillingDocument(buildDocument([]))).rejects.toBe(originalError);
+    expect(mockedRecordOperation).toHaveBeenCalledTimes(1);
+    expect(reportSpy).toHaveBeenCalledTimes(1);
+    expect(reportSpy.mock.calls[0][0]).toBe(originalError);
+    expect(mockedUpdateDoc).not.toHaveBeenCalled();
+  });
+
+  it.each(['history', 'failure'] as const)('protects the %s report call itself even after the real reporter ran', async (stage) => {
+    const originalError = new Error('original failure');
+    const realReport = supportWriteReporting.reportSupportWriteError;
+    const reportSpy = jest.spyOn(supportWriteReporting, 'reportSupportWriteError').mockImplementation((error, context) => {
+      realReport(error, context);
+      throw new Error('report boundary failure');
+    });
+    if (stage === 'history') mockedCreateLog.mockRejectedValueOnce(originalError);
+    else mockedListDocs.mockRejectedValueOnce(originalError);
+    const pending = accommodationBillingService.upsertBillingDocument(buildDocument([]));
+    const result = await pending.then(value => ({ status: 'fulfilled', value }), error => ({ status: 'rejected', value: error }));
+    expect(result.status).toBe(stage === 'history' ? 'fulfilled' : 'rejected');
+    expect(result.value).toBe(stage === 'history' ? BILLING_ID : originalError);
+    expect(reportSpy).toHaveBeenCalledTimes(1);
+    expect(reportSpy.mock.calls[0][0]).toBe(originalError);
+  });
+
+  it('uses the unchanged real legacy extractor for a plain-object protected race', async () => {
+    const originalError = { code: 'accommodation-billing-protected-modification-blocked', name: 'Race', message: 'confirmed' };
+    mockedListDocs
+      .mockResolvedValueOnce({ data: { accommodationBillingDocuments: [buildStoredDoc('draft')] } } as any)
+      .mockRejectedValueOnce(originalError)
+      .mockResolvedValueOnce({ data: { accommodationBillingDocuments: [buildStoredDoc('confirmed')] } } as any);
+    await expect(accommodationBillingService.upsertDraftBillingDocument(buildDocument([]))).resolves.toEqual({
+      id: BILLING_ID, action: 'skipped-protected', protectedStatus: 'confirmed'
+    });
+    expect(mockedListDocs).toHaveBeenCalledTimes(3);
+    expect(mockedUpdateDoc).not.toHaveBeenCalled();
+    expect(mockedCreateDoc).not.toHaveBeenCalled();
+    expect(mockedCreateItem).not.toHaveBeenCalled();
+    expect(mockedUpdateItem).not.toHaveBeenCalled();
+    expect(mockedDeleteItem).not.toHaveBeenCalled();
   });
 });

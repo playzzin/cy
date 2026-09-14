@@ -1,3 +1,7 @@
+import { cardService } from './cardService';
+import { cardBillingService, isPostedCardBillingStatus } from './cardBillingService';
+import { supportWriteOperationLogService } from './supportWriteOperationLogService';
+import { reportSupportWriteError } from '../utils/supportWriteErrorReporting';
 import {
   saveCardMonthlyLedgerMutation,
   type CardMonthlyLedgerMutationDependencies,
@@ -27,11 +31,67 @@ jest.mock('./supportWriteOperationLogService', () => ({
   }
 }));
 
-jest.mock('../utils/supportWriteErrorReporting', () => ({
-  SUPPORT_WRITE_RETRY_USER_MESSAGE: 'retry later',
-  getErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error),
-  reportSupportWriteError: jest.fn()
+jest.mock('../utils/supportWriteErrorReporting', () => {
+  const actual = jest.requireActual<typeof import('../utils/supportWriteErrorReporting')>(
+    '../utils/supportWriteErrorReporting'
+  );
+  return { ...actual, reportSupportWriteError: jest.fn() };
+});
+
+// 이 파일의 기존 서비스 경계를 유지한다. SDK는 가짜 성공도 허용하지 않는다.
+jest.mock('firebase/firestore', () => new Proxy({}, {
+  get: () => { throw new Error('검사 범위 밖 Firestore 접근'); }
 }));
+jest.mock('firebase/app', () => new Proxy({}, {
+  get: () => { throw new Error('검사 범위 밖 Firebase 앱 접근'); }
+}));
+jest.mock('firebase/auth', () => new Proxy({}, {
+  get: () => { throw new Error('검사 범위 밖 인증 접근'); }
+}));
+jest.mock('firebase/storage', () => new Proxy({}, {
+  get: () => { throw new Error('검사 범위 밖 저장소 접근'); }
+}));
+jest.mock('firebase/functions', () => new Proxy({}, {
+  get: () => { throw new Error('검사 범위 밖 원격 함수 접근'); }
+}));
+jest.mock('../config/firebase', () => new Proxy({}, {
+  get: () => { throw new Error('검사 범위 밖 실제 설정 접근'); }
+}));
+
+const actualReporting = jest.requireActual<typeof import('../utils/supportWriteErrorReporting')>(
+  '../utils/supportWriteErrorReporting'
+);
+const mockApply = cardService.applyCardTransactionChanges as jest.MockedFunction<
+  typeof cardService.applyCardTransactionChanges
+>;
+const mockRecord = supportWriteOperationLogService.recordOperation as jest.MockedFunction<
+  typeof supportWriteOperationLogService.recordOperation
+>;
+const mockReport = reportSupportWriteError as jest.MockedFunction<typeof reportSupportWriteError>;
+const mockPosted = isPostedCardBillingStatus as jest.MockedFunction<typeof isPostedCardBillingStatus>;
+const mockBilling = cardBillingService.saveBilling as jest.MockedFunction<typeof cardBillingService.saveBilling>;
+
+beforeEach(() => {
+  jest.resetAllMocks();
+  // resetMocks 설정 뒤 모든 호출 경계를 매 검사마다 재무장한다.
+  // doc/time은 사용하지 않으며 위 SDK 전체 차단이 매 검사에 유지된다.
+  mockApply.mockImplementation(async (..._args: Parameters<typeof cardService.applyCardTransactionChanges>) => {
+    throw new Error('금융 호출 결과를 검사에서 명시해야 함');
+  });
+  mockRecord.mockImplementation(async (..._args: Parameters<typeof supportWriteOperationLogService.recordOperation>) => {
+    throw new Error('기록 호출 결과를 검사에서 명시해야 함');
+  });
+  mockReport.mockImplementation(actualReporting.reportSupportWriteError);
+  mockPosted.mockImplementation((...args: Parameters<typeof isPostedCardBillingStatus>) => (
+    ['CONFIRMED', 'PAID', 'OVERDUE'].includes(String(args[0] ?? '').toUpperCase())
+  ));
+  mockBilling.mockImplementation(async (..._args: Parameters<typeof cardBillingService.saveBilling>) => {
+    throw new Error('월원장 검사에서 청구 저장 금지');
+  });
+  jest.spyOn(console, 'error').mockImplementation(() => undefined);
+});
+
+afterEach(() => { jest.restoreAllMocks(); });
 
 const buildRow = (patch: Partial<CardMonthlyLedgerMutationRow> = {}): CardMonthlyLedgerMutationRow => ({
   id: 'row-1',
@@ -324,5 +384,205 @@ describe('saveCardMonthlyLedgerMutation', () => {
     })).rejects.toThrow('invalid-ledger-period:row-1');
 
     expect(dependencies.applyTransactionChanges).not.toHaveBeenCalled();
+  });
+});
+
+
+// 금융 어댑터/SDK commit 검사가 아니라 기존 금융 서비스 호출 경계의 진단 회귀검사다.
+// 실제 staged/committed 검사는 추가 의존 범위를 승인받은 뒤 별도로 수행한다.
+describe('카드 진단 실패 격리', () => {
+  type ApplyArgs = Parameters<typeof cardService.applyCardTransactionChanges>;
+  type SaveInput = Parameters<typeof saveCardMonthlyLedgerMutation>[0];
+  const operationId = 'diagnostic-fixture-operation';
+  const fuelId = 'card-ledger__2026-07__card-1__2026-07-01__2026-07-31__FUEL';
+  const tollId = 'card-ledger__2026-07__card-1__2026-07-01__2026-07-31__TOLL';
+  let events: string[];
+  let applied: ApplyArgs[0][];
+  const recordedLog = (
+    ...args: Parameters<typeof supportWriteOperationLogService.recordOperation>
+  ): Awaited<ReturnType<typeof supportWriteOperationLogService.recordOperation>> => ({
+    ...args[0], id: 'synthetic-log', affectedDocumentIds: args[0].affectedDocumentIds ?? [],
+    actor: { uid: 'synthetic-actor', name: '검사용 사용자' }
+  });
+
+  const input = (): SaveInput => ({
+    yearMonth: '2026-07',
+    operationId,
+    visibleRows: [{ row: buildRow() }],
+    originalTransactions: [buildTransaction({ id: 'visible-tx' })],
+    categories: ['FUEL', 'TOLL'],
+    getBillingDocumentsForRow: () => []
+  });
+  const expectedChanges = (): ApplyArgs[0] => ({
+    upserts: [
+      { id: fuelId, cardId: 'card-1', cardLabel: '법인카드(1234)', date: '2026-07-01',
+        yearMonth: '2026-07', merchant: 'Monthly ledger', category: 'FUEL', amount: 10000,
+        memo: '월원장 메모', status: 'ACTIVE', operationId, lastOperationId: operationId },
+      { id: tollId, cardId: 'card-1', cardLabel: '법인카드(1234)', date: '2026-07-01',
+        yearMonth: '2026-07', merchant: 'Monthly ledger', category: 'TOLL', amount: 5000,
+        memo: '월원장 메모', status: 'ACTIVE', operationId, lastOperationId: operationId }
+    ],
+    cancelIds: ['visible-tx'], operationId
+  });
+  const expectedResult = () => ({
+    operationId, upsertedTransactionCount: 2, cancelledTransactionCount: 1,
+    savedBillingCount: 0, cancelledBillingCount: 0, skippedBillingCount: 0,
+    transactionUpsertIds: [fuelId, tollId], transactionCancelIds: ['visible-tx'],
+    billingSaveIds: [], billingCancelIds: [], skippedBillingRows: []
+  });
+  const expectedSuccessRecord = () => ({
+    domain: 'card', yearMonth: '2026-07', operationId, status: 'success',
+    affectedDocumentIds: [fuelId, tollId, 'visible-tx'],
+    metadata: { upsertedTransactionCount: 2, cancelledTransactionCount: 1,
+      savedBillingCount: 0, cancelledBillingCount: 0, skippedBillingCount: 0,
+      skippedBillingRows: [] }
+  });
+  const expectSingleFinancialCall = () => {
+    expect(mockApply.mock.calls).toEqual([[expectedChanges()]]);
+    expect(mockBilling).not.toHaveBeenCalled();
+  };
+  const expectSafeConsole = (count: number) => {
+    expect(console.error).toHaveBeenCalledTimes(count);
+    for (let index = 1; index <= count; index += 1) {
+      expect(console.error).toHaveBeenNthCalledWith(index, '[support-write-operation]', {
+        domain: 'card', errorCode: 'SUPPORT_WRITE_UNKNOWN'
+      });
+    }
+  };
+  const failBusinessWith = (error: unknown) => {
+    mockApply.mockImplementation(async (..._args: ApplyArgs) => {
+      events.push('금융 실패');
+      throw error;
+    });
+  };
+  const failLog = () => {
+    mockRecord.mockImplementation(async (..._args: Parameters<typeof supportWriteOperationLogService.recordOperation>) => {
+      events.push('기록 실패');
+      throw new Error('원시 기록 오류 노출 금지');
+    });
+  };
+  beforeEach(() => {
+    events = [];
+    applied = [];
+    mockApply.mockImplementation(async (...args: ApplyArgs) => {
+      events.push('금융 성공');
+      applied.push(args[0]);
+    });
+    // 실제 반환 계약을 만족하는 합성 기록이며 원본 로그 서비스는 실행하지 않는다.
+    mockRecord.mockImplementation(async (...args: Parameters<typeof supportWriteOperationLogService.recordOperation>) => recordedLog(...args));
+  });
+
+  it('정상 대조: 금융 입력 전체와 순서, 결과, 기록 metadata를 유지한다', async () => {
+    mockRecord.mockImplementation(async (...args: Parameters<typeof supportWriteOperationLogService.recordOperation>) => {
+      events.push('기록 성공');
+      return recordedLog(...args);
+    });
+    expect(await saveCardMonthlyLedgerMutation(input())).toEqual(expectedResult());
+    expectSingleFinancialCall();
+    expect(applied).toEqual([expectedChanges()]);
+    expect(events).toEqual(['금융 성공', '기록 성공']);
+    expect(mockRecord.mock.calls).toEqual([[expectedSuccessRecord()]]);
+    expect(mockReport).not.toHaveBeenCalled();
+    expectSafeConsole(0);
+  });
+
+  it.each(['기록만 실패', '실제 보고의 console 실패', '보고 함수 자체 실패'])(
+    '성공 후 %s여도 성공 결과와 금융 호출을 바꾸지 않는다', async (mode) => {
+      failLog();
+      if (mode === '실제 보고의 console 실패') {
+        jest.spyOn(console, 'error').mockImplementation(() => { throw new Error('출력 실패'); });
+      }
+      if (mode === '보고 함수 자체 실패') {
+        mockReport.mockImplementation(() => { throw new Error('보고 실패'); });
+      }
+      expect(await saveCardMonthlyLedgerMutation(input())).toEqual(expectedResult());
+      expectSingleFinancialCall();
+      expect(applied).toEqual([expectedChanges()]);
+      expect(events).toEqual(['금융 성공', '기록 실패']);
+      expect(mockRecord.mock.calls).toEqual([[expectedSuccessRecord()]]);
+      expect(mockReport).toHaveBeenCalledTimes(1);
+      expectSafeConsole(mode === '보고 함수 자체 실패' ? 0 : 1);
+    }
+  );
+
+  it('정상 업무 실패 대조: 실패 기록과 실제 공통 보고를 거쳐 동일 오류를 전달한다', async () => {
+    const error = new Error('batch failed');
+    failBusinessWith(error);
+    await expect(saveCardMonthlyLedgerMutation(input())).rejects.toBe(error);
+    expectSingleFinancialCall();
+    expect(applied).toEqual([]);
+    const context = { domain: 'card', yearMonth: '2026-07', operationId,
+      affectedDocumentIds: [fuelId, tollId, 'visible-tx'], errorMessage: 'batch failed',
+      userMessage: actualReporting.SUPPORT_WRITE_RETRY_USER_MESSAGE, status: 'failed' };
+    expect(mockRecord.mock.calls).toEqual([[context]]);
+    expect(mockReport.mock.calls).toEqual([[error, context]]);
+    expectSafeConsole(1);
+  });
+
+  it.each(['Error.message', 'object.code', 'object.name', 'object.message'])(
+    '%s getter가 던져도 원래 오류를 동일 참조로 보존한다', async (kind) => {
+      const getterError = new Error('속성 추출 실패');
+      const error: object = kind === 'Error.message' ? new Error('원본 오류') : {};
+      const getter = jest.fn(() => { throw getterError; });
+      Object.defineProperty(error, kind.split('.')[1], { get: getter });
+      failBusinessWith(error);
+      await expect(saveCardMonthlyLedgerMutation(input())).rejects.toBe(error);
+      expect(getter).toHaveBeenCalledTimes(1);
+      expectSingleFinancialCall();
+      expect(applied).toEqual([]);
+      expect(mockRecord).toHaveBeenCalledTimes(1);
+      expect(mockRecord.mock.calls[0][0]).toEqual({
+        domain: 'card', yearMonth: '2026-07', operationId,
+        affectedDocumentIds: [fuelId, tollId, 'visible-tx'], errorMessage: 'unknown-error',
+        userMessage: actualReporting.SUPPORT_WRITE_RETRY_USER_MESSAGE, status: 'failed'
+      });
+      expect(mockReport.mock.calls[0][0]).toBe(error);
+      expectSafeConsole(1);
+    }
+  );
+
+  it('일반 객체의 정상 추출값과 오류 참조를 유지한다', async () => {
+    const error = { code: 'denied', name: 'SyntheticFailure', message: 'synthetic message' };
+    failBusinessWith(error);
+    await expect(saveCardMonthlyLedgerMutation(input())).rejects.toBe(error);
+    expectSingleFinancialCall();
+    expect(applied).toEqual([]);
+    expect(mockRecord.mock.calls[0][0].errorMessage).toBe('denied SyntheticFailure synthetic message');
+    expectSafeConsole(1);
+  });
+
+  it.each(['실제 보고의 console 실패', '보고 함수 자체 실패'])(
+    '업무·기록 실패와 %s가 겹쳐도 추가 금융 호출 없이 원래 오류를 보존한다', async (mode) => {
+      const error = new Error('원래 업무 실패');
+      failBusinessWith(error);
+      failLog();
+      if (mode === '보고 함수 자체 실패') {
+        mockReport.mockImplementation(() => { throw new Error('보고 실패'); });
+      } else {
+        jest.spyOn(console, 'error').mockImplementation(() => { throw new Error('출력 실패'); });
+      }
+      await expect(saveCardMonthlyLedgerMutation(input())).rejects.toBe(error);
+      expectSingleFinancialCall();
+      expect(applied).toEqual([]);
+      expect(events).toEqual(['금융 실패', '기록 실패']);
+      expect(mockRecord).toHaveBeenCalledTimes(1);
+      expect(mockReport).toHaveBeenCalledTimes(2);
+      expect(mockReport.mock.calls[1][0]).toBe(error);
+      expectSafeConsole(mode === '보고 함수 자체 실패' ? 0 : 2);
+    }
+  );
+
+  it('getter·기록·보고 실패가 모두 겹쳐도 동일 업무 오류를 보존한다', async () => {
+    const error = Object.defineProperty({}, 'code', { get: () => { throw new Error('추출 실패'); } });
+    failBusinessWith(error);
+    failLog();
+    mockReport.mockImplementation(() => { throw new Error('보고 실패'); });
+    await expect(saveCardMonthlyLedgerMutation(input())).rejects.toBe(error);
+    expectSingleFinancialCall();
+    expect(applied).toEqual([]);
+    expect(mockRecord).toHaveBeenCalledTimes(1);
+    expect(mockReport).toHaveBeenCalledTimes(2);
+    expect(mockReport.mock.calls[1][0]).toBe(error);
+    expectSafeConsole(0);
   });
 });

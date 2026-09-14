@@ -6,6 +6,19 @@ const REACT_DATEPICKER_MODULE = /[\\/]react-datepicker[\\/]dist[\\/]index(?:\.es
 const FORK_TS_CHECKER_PLUGIN = 'ForkTsCheckerWebpackPlugin';
 const DEFAULT_TYPE_CHECKER_MEMORY_MB = 4096;
 
+function configureReadableType(rules) {
+  for (const rule of rules || []) {
+    configureReadableType(rule.oneOf);
+    configureReadableType(rule.rules);
+    for (const loader of Array.isArray(rule.use) ? rule.use : []) {
+      const plugins = loader?.options?.postcssOptions?.plugins;
+      if (Array.isArray(plugins)) {
+        plugins.push(require.resolve('./postcss-readable-type'));
+      }
+    }
+  }
+}
+
 function isTruthyEnvironmentValue(value) {
   return /^(?:1|true|yes|on)$/i.test(String(value || '').trim());
 }
@@ -66,6 +79,14 @@ function patchReactScriptsWebpack() {
     ignoreWarnings.push((warning) => shouldIgnoreReactDatepickerWarning(warning));
     config.ignoreWarnings = ignoreWarnings;
     configureTypeChecker(config);
+    configureReadableType(config.module?.rules);
+    if (config.cache && typeof config.cache === 'object') {
+      config.cache.version = `${config.cache.version || ''}|readable-type-v1`;
+      config.cache.buildDependencies = {
+        ...config.cache.buildDependencies,
+        readableType: [__filename, require.resolve('./postcss-readable-type')],
+      };
+    }
 
     return config;
   };

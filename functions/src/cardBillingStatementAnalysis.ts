@@ -2,6 +2,7 @@ import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { requireCallableAuth } from './auth';
 import { getServerGeminiSettings } from './serverAiSettings';
+import { cancelStoredCardStatementFile } from './cardStatementImportCancellation';
 import {
     buildCardStatementSourceClaimDocumentId,
     buildCardStatementTransactionDocumentId,
@@ -2760,6 +2761,7 @@ const getSortedImportFileDocs = async (jobId: string) => {
     const filesSnap = await admin.firestore().collection(COLLECTIONS.files).where('jobId', '==', jobId).get();
     return filesSnap.docs
         .map((doc) => ({ ref: doc.ref, id: doc.id, data: doc.data() }))
+        .filter((file) => file.data.status !== 'cancelled')
         .sort((a, b) => Number(a.data.fileIndex ?? 0) - Number(b.data.fileIndex ?? 0));
 };
 
@@ -2831,6 +2833,7 @@ const findLegacyCardStatementSourceOwner = async (
         .get();
     for (const transactionDoc of transactionSnap.docs) {
         const data = transactionDoc.data() || {};
+        if (asString(data.status).toUpperCase() === 'CANCELLED' || Number(data.amount) === 0) continue;
         const ownerJobId = parseImportJobIdFromOperation(data.operationId || data.lastOperationId);
         if (ownerJobId === currentJobId) continue;
         return {
@@ -2849,7 +2852,7 @@ const findLegacyCardStatementSourceOwner = async (
         : db.collection(COLLECTIONS.files).where('sha256', 'in', hashVariants);
     const legacyFilesSnap = await filesQuery.limit(20).get();
     const legacyFiles = legacyFilesSnap.docs
-        .filter((fileDoc) => asString(fileDoc.data().jobId) !== currentJobId)
+        .filter((fileDoc) => asString(fileDoc.data().jobId) !== currentJobId && fileDoc.data().status !== 'cancelled')
         .sort((left, right) => left.id.localeCompare(right.id));
 
     for (const fileDoc of legacyFiles) {
@@ -2881,6 +2884,7 @@ const findLegacyCardStatementSourceOwner = async (
             .get();
         const sourceTransactions = legacyTransactionsSnap.docs.filter((transactionDoc) => {
             const data = transactionDoc.data() || {};
+            if (asString(data.status).toUpperCase() === 'CANCELLED' || Number(data.amount) === 0) return false;
             return asString(data.evidenceUrl) === storagePath ||
                 asStringList(data.statementAttachmentPaths).includes(storagePath);
         });
@@ -2897,7 +2901,7 @@ const findLegacyCardStatementSourceOwner = async (
     return null;
 };
 
-const claimCardStatementImportSources = async (params: {
+export const claimCardStatementImportSources = async (params: {
     db: FirebaseFirestore.Firestore;
     jobId: string;
     yearMonth: string;
@@ -2933,11 +2937,24 @@ const claimCardStatementImportSources = async (params: {
         }));
         const snapshots: FirebaseFirestore.DocumentSnapshot[] = [];
         for (const entry of entries) snapshots.push(await transaction.get(entry.ref));
+        const currentJobRef = db.collection(COLLECTIONS.jobs).doc(jobId);
+        const currentJob = await transaction.get(currentJobRef);
+        if (!currentJob.exists || ['uploading', 'queued', 'analyzing', 'committing'].includes(asString(currentJob.data()?.status))) {
+            throw new functions.https.HttpsError('failed-precondition', '파일을 처리 중입니다. 잠시 후 다시 저장해 주세요.');
+        }
+        for (const file of params.files) {
+            const currentFile = await transaction.get(file.ref);
+            if (!currentFile.exists || currentFile.data()?.status === 'cancelled') {
+                throw new functions.https.HttpsError('failed-precondition', '취소된 업로드가 있습니다. 창을 닫고 PDF를 다시 등록해 주세요.');
+            }
+        }
+        // Serialize cancellation and commit before either can change source ownership.
+        transaction.update(currentJobRef, { status: 'committing', updatedAt: safeTimestamp() });
 
         return entries.map((entry, index): CardStatementSourceClaimOwner => {
             const snapshot = snapshots[index];
             const existing = snapshot.data() || {};
-            if (snapshot.exists) {
+            if (snapshot.exists && existing.state !== 'released') {
                 const existingOwnerJobId = asString(existing.ownerJobId);
                 const existingOwnerFileId = asString(existing.ownerFileId);
                 const owner: CardStatementSourceClaimOwner = {
@@ -2961,7 +2978,8 @@ const claimCardStatementImportSources = async (params: {
                 return owner;
             }
 
-            const legacyOwner = legacyOwners.get(entry.file.sourceSha256);
+            // A released claim was checked atomically by cancellation; ignore its historical owner.
+            const legacyOwner = existing.state === 'released' ? null : legacyOwners.get(entry.file.sourceSha256);
             const owner: CardStatementSourceClaimOwner = legacyOwner || {
                 sourceSha256: entry.file.sourceSha256,
                 ownerJobId: jobId,
@@ -3035,7 +3053,7 @@ const excludeDuplicateSourceResults = async (params: {
 
         batch.set(result.ref, stripUndefinedDeep({
             status: 'excluded',
-            exclusionReason: '같은 원본 PDF가 이미 저장되어 중복 반영을 건너뛰었습니다.',
+            exclusionReason: '같은 PDF가 이미 저장되어 중복 반영을 막았습니다. 잘못된 월에 등록했다면 그 월에서 해당 카드 금액을 0으로 전체 저장한 뒤, 업로드 내역에서 파일을 취소하고 올바른 월에 다시 등록해 주세요.',
             duplicateSourceSha256: sourceSha256,
             duplicateSourceOwnerJobId: owner?.ownerJobId || undefined,
             duplicateSourceOwnerFileId: owner?.ownerFileId || undefined,
@@ -3087,11 +3105,24 @@ const startCardStatementImportAnalysis = async (jobId: string): Promise<Record<s
         throw new functions.https.HttpsError('failed-precondition', 'At least one PDF file is still uploading.');
     }
 
-    await deleteResultsForJob(jobId);
-
     const analysisRunId = buildAnalysisRunId();
-    const batch = db.batch();
-    batch.set(jobRef, {
+    await db.runTransaction(async (transaction) => {
+    const currentJob = await transaction.get(jobRef);
+    if (asString(currentJob.data()?.status) !== jobStatus) {
+        throw new functions.https.HttpsError('failed-precondition', '작업 상태가 변경되었습니다. 다시 시도해 주세요.');
+    }
+    for (const fileDoc of fileDocs) {
+        const currentFile = await transaction.get(fileDoc.ref);
+        if (!currentFile.exists || currentFile.data()?.status === 'cancelled') {
+            throw new functions.https.HttpsError('failed-precondition', '취소된 파일이 있습니다. PDF를 다시 등록해 주세요.');
+        }
+    }
+    const previousResults = await transaction.get(db.collection(COLLECTIONS.results).where('jobId', '==', jobId));
+    if (previousResults.size + fileDocs.length > 440) {
+        throw new functions.https.HttpsError('failed-precondition', '재분석할 내역이 많습니다. 새 업로드 작업으로 나누어 등록해 주세요.');
+    }
+    previousResults.docs.forEach((result) => transaction.delete(result.ref));
+    transaction.set(jobRef, {
         status: 'analyzing',
         analysisRunId,
         analysisRequestedAt: safeTimestamp(),
@@ -3114,7 +3145,7 @@ const startCardStatementImportAnalysis = async (jobId: string): Promise<Record<s
     }, { merge: true });
 
     for (const fileDoc of fileDocs) {
-        batch.set(fileDoc.ref, {
+        transaction.set(fileDoc.ref, {
             status: 'uploaded',
             statementMonth: admin.firestore.FieldValue.delete(),
             grandTotalAmount: admin.firestore.FieldValue.delete(),
@@ -3126,7 +3157,7 @@ const startCardStatementImportAnalysis = async (jobId: string): Promise<Record<s
         }, { merge: true });
     }
 
-    await batch.commit();
+    });
     return getJobStatusPayload(jobId);
 };
 
@@ -3437,6 +3468,18 @@ export const getCardStatementImportJobStatus = functions
         }
     });
 
+export const cancelCardStatementImportFile = functions
+    .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 10 })
+    .region('asia-northeast3')
+    .https.onCall(async (data: { fileId?: string }, context) => {
+        try {
+            const auth = await requireCardStatementAccess(context) as NonNullable<functions.https.CallableContext['auth']>;
+            return await cancelStoredCardStatementFile(admin.firestore(), asString(data?.fileId), auth.uid);
+        } catch (error) {
+            throw toHttpsError(error);
+        }
+    });
+
 export const updateCardStatementImportResultReview = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 10 })
     .region('asia-northeast3')
@@ -3510,6 +3553,10 @@ export const updateCardStatementImportResultReview = functions
                 }
 
                 const result = resultSnap.data() || {};
+                const sourceFile = await transaction.get(db.collection(COLLECTIONS.files).doc(asString(result.fileId)));
+                if (!sourceFile.exists || sourceFile.data()?.status === 'cancelled') {
+                    throw new functions.https.HttpsError('failed-precondition', '취소된 업로드는 수정할 수 없습니다. PDF를 다시 등록해 주세요.');
+                }
                 jobId = asString(result.jobId);
                 if (!jobId) {
                     throw new functions.https.HttpsError('failed-precondition', 'Import result has no job id.');
@@ -3617,6 +3664,7 @@ export const commitCardStatementImportJob = functions
         let skippedResultsForOperationLog = 0;
         let attemptedBillingDocumentCountForOperationLog = 0;
         let committedBillingDocumentCountForOperationLog = 0;
+        let commitLockAcquired = false;
         const protectedBillingIdsForOperationLog: string[] = [];
         const affectedDocumentIdsForOperationLog: string[] = [];
         try {
@@ -3662,6 +3710,7 @@ export const commitCardStatementImportJob = functions
                 files: verifiedSourceFiles,
                 actor: actorForOperationLog,
             });
+            commitLockAcquired = true;
             const duplicateSourceResultCount = await excludeDuplicateSourceResults({
                 db,
                 jobId,
@@ -3878,7 +3927,7 @@ export const commitCardStatementImportJob = functions
         } catch (error) {
             const message = getErrorMessage(error);
             const jobId = asString((data as CommitCardStatementImportJobRequest)?.jobId);
-            if (jobId) {
+            if (jobId && commitLockAcquired) {
                 const db = admin.firestore();
                 const failureOperationId = operationIdForOperationLog || `card-statement-import:${jobId}:commit`;
                 let failureAffectedDocumentIds = uniqueStrings([

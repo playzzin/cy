@@ -31,7 +31,15 @@ jobs:
       - name: Verify project health
         run: npm run verify:project
 
+      # Quality-only build; production deployment uses the local production environment.
       - name: Build hosting app
+        env:
+          REACT_APP_FIREBASE_API_KEY: demo-ci-build-key
+          REACT_APP_FIREBASE_AUTH_DOMAIN: demo-cy-quality.firebaseapp.com
+          REACT_APP_FIREBASE_PROJECT_ID: demo-cy-quality
+          REACT_APP_FIREBASE_STORAGE_BUCKET: demo-cy-quality.appspot.com
+          REACT_APP_FIREBASE_MESSAGING_SENDER_ID: '1234567890'
+          REACT_APP_FIREBASE_APP_ID: '1:1234567890:web:quality-build'
         run: npm run build
 
       - name: Verify hosting build

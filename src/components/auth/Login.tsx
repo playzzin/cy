@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { enableDevAdminSession, isDevAdminAllowed } from '../../utils/devAdminSession';
+import { getGoogleAuthErrorMessage } from '../../utils/firebaseAuthError';
 
 type LoginLocationState = {
   from?: string | {
@@ -64,7 +65,7 @@ const Login: React.FC = () => {
       await loginWithGoogle();
       navigate(returnPath, { replace: true });
     } catch (err) {
-      setError('Google 로그인에 실패했습니다.');
+      setError(getGoogleAuthErrorMessage(err));
       console.error(err);
     } finally {
       setLoading(false);
@@ -123,7 +124,11 @@ const Login: React.FC = () => {
               <p className="mb-6 text-sm text-slate-300">이메일과 비밀번호를 입력해 시스템에 접속하세요.</p>
 
               {error && (
-                <div className="mb-4 rounded-lg border border-rose-700/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-300">
+                <div
+                  role="alert"
+                  aria-live="polite"
+                  className="mb-4 rounded-lg border border-rose-700/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-300"
+                >
                   {error}
                 </div>
               )}

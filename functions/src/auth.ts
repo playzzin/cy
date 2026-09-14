@@ -44,6 +44,12 @@ const hasAdminRoleValue = (value: unknown): boolean => {
 export async function requireCallableAdmin(context: functions.https.CallableContext): Promise<functions.https.CallableContext['auth']> {
     const auth = requireCallableAuth(context);
     const token = (auth.token || {}) as Record<string, unknown>;
+    const userSnap = await admin.firestore().collection('users').doc(auth.uid).get();
+    const user = userSnap.data() || {};
+    const accountStatus = String(user.status || '').trim().toLowerCase();
+    if (['pending', 'rejected', 'suspended'].includes(accountStatus)) {
+        throw new functions.https.HttpsError('permission-denied', '활성 관리자 계정이 필요합니다.');
+    }
 
     if (
         hasAdminRoleValue(token.role)
@@ -55,8 +61,6 @@ export async function requireCallableAdmin(context: functions.https.CallableCont
         return auth;
     }
 
-    const userSnap = await admin.firestore().collection('users').doc(auth.uid).get();
-    const user = userSnap.data() || {};
     if (
         hasAdminRoleValue(user.role)
         || hasAdminRoleValue(user.position)

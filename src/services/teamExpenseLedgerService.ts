@@ -11,7 +11,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { recordSupportWriteOperationSafely } from './supportWriteOperationLogService';
-import { getErrorMessage, reportSupportWriteError, SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../utils/supportWriteErrorReporting';
+import { reportSupportWriteError, SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../utils/supportWriteErrorReporting';
 import type {
   TeamExpenseClaim,
   TeamExpenseClaimAttachment,
@@ -347,37 +347,43 @@ export const teamExpenseLedgerService = {
         { merge: true }
       );
 
-      await recordSupportWriteOperationSafely({
-        domain: 'teamExpense',
-        yearMonth: input.yearMonth,
-        operationId,
-        status: 'success',
-        affectedDocumentIds: [id],
-        metadata: {
-          claimType: input.claimType,
-          status: nextStatus,
-          amount: normalizeAmount(input.amount)
-        }
-      });
+      try {
+        await recordSupportWriteOperationSafely({
+          domain: 'teamExpense',
+          yearMonth: input.yearMonth,
+          operationId,
+          status: 'success',
+          affectedDocumentIds: [id],
+          metadata: {
+            claimType: input.claimType,
+            status: nextStatus,
+            amount: normalizeAmount(input.amount)
+          }
+        });
+      } catch { /* Diagnostics must not turn a committed save into a failure. */ }
 
       return id;
     } catch (error) {
-      const failedContext = {
-        domain: 'teamExpense' as const,
-        yearMonth: input.yearMonth,
-        operationId,
-        affectedDocumentIds: [id],
-        errorMessage: getErrorMessage(error),
-        userMessage: SUPPORT_WRITE_RETRY_USER_MESSAGE
-      };
-      await recordSupportWriteOperationSafely({
-        ...failedContext,
-        status: 'failed'
-      });
-      reportSupportWriteError(error, {
-        ...failedContext,
-        status: 'failed'
-      });
+      try {
+        const monthDescriptor = Object.getOwnPropertyDescriptor(input, 'yearMonth');
+        const monthValue = monthDescriptor && 'value' in monthDescriptor ? monthDescriptor.value : undefined;
+        const failedContext = {
+          domain: 'teamExpense' as const,
+          yearMonth: typeof monthValue === 'string' && /^\d{4}-\d{2}$/.test(monthValue) ? monthValue : '',
+          operationId,
+          affectedDocumentIds: [id],
+          errorMessage: 'SUPPORT_WRITE_UNKNOWN',
+          userMessage: SUPPORT_WRITE_RETRY_USER_MESSAGE
+        };
+        await recordSupportWriteOperationSafely({
+          ...failedContext,
+          status: 'failed'
+        });
+        reportSupportWriteError(error, {
+          ...failedContext,
+          status: 'failed'
+        });
+      } catch { /* Preserve the original business error reference. */ }
       throw error;
     }
   },

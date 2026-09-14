@@ -53,7 +53,9 @@ const LayoutBottomPanel: React.FC<LayoutBottomPanelProps> = ({
 
             <div className="panel-content p-4 overflow-y-auto custom-scrollbar bg-[#1e1e1e]">
                 {activeTool === 'calculator' && <Calculator />}
-                {isOpen && activeTool === 'camera' && <QuickCameraCapture />}
+                <div hidden={!isOpen || activeTool !== 'camera'}>
+                    <QuickCameraCapture active={isOpen && activeTool === 'camera'} />
+                </div>
             </div>
         </aside>
     );

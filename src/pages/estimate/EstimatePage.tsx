@@ -653,13 +653,15 @@ const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdit, upda
                                     <td colSpan={3} style={{ ...labelCellStyle(), border: BORDER_THICK, fontSize: '10pt', fontWeight: 950, letterSpacing: '1.5em', textAlign: 'center', backgroundColor: '#f8fafc', color: '#000' }}>총&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;계</td>
                                     <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '9.5pt' }}>{totalQty ? formatDecimal(totalQty) : '0'}</td>
                                     <td style={{ ...cellStyle(), border: BORDER_THICK }}></td>
-                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, color: '#000', fontSize: '10pt', backgroundColor: '#ffff00' }}>{formatCurrency(subtotal)}</td>
+                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, color: '#000', fontSize: '10pt', backgroundColor: '#ffff00' }}>
+                                        {formatCurrency(isRental ? totalLabor : subtotal)}
+                                    </td>
                                     
                                     {isRental ? (
                                         <>
                                             <td style={{ ...cellStyle(), border: BORDER_THICK }}></td>
                                             <td style={{ ...cellStyle(), border: BORDER_THICK }}></td>
-                                            <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '9.5pt' }}>{totalRental ? formatCurrency(totalRental) : '0'}</td>
+                                            <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '9.5pt', backgroundColor: '#ffff00' }}>{totalRental ? formatCurrency(totalRental) : '0'}</td>
                                         </>
                                     ) : (
                                         <>

@@ -40,6 +40,12 @@ Thumbs.db
 *.swp
 *.swo
 
+# Obsidian local workspace and private attachments
+/docs/.obsidian/
+/docs/.trash/
+/docs/99-Private/
+/docs/attachments/private/
+
 # Firebase and generated caches
 .firebase/
 
@@ -84,3 +90,8 @@ cyee/
 **/*.pack
 service-account.json
 backups/
+
+# Local deployment snapshots and archives
+/.deploy_*/
+/.deploy_*.tar
+/.deploy_*.zip

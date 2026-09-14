@@ -1,6 +1,5 @@
 const CACHE_PREFIX = 'cy-erp-pwa-';
-const SERVICE_WORKER_REFRESH_KEY = 'cy-erp-service-worker-refresh-at';
-const SERVICE_WORKER_REFRESH_GUARD_MS = 15000;
+const UPDATE_CHECK_INTERVAL_MS = 60 * 1000;
 
 async function clearAppCaches() {
   if (!('caches' in window)) return;
@@ -13,14 +12,22 @@ async function clearAppCaches() {
   );
 }
 
-async function clearDevelopmentServiceWorkers() {
+async function registerDevelopmentServiceWorker() {
+  const publicUrl = process.env.PUBLIC_URL || '';
+  const workerUrl = new URL(`${publicUrl}/pwa-development-worker.js`, window.location.origin).href;
   const registrations = await navigator.serviceWorker.getRegistrations();
-  const hadController = Boolean(navigator.serviceWorker.controller);
+  const previousController = navigator.serviceWorker.controller;
+  const hadLegacyController = previousController && previousController.scriptURL !== workerUrl;
 
-  await Promise.all(registrations.map((registration) => registration.unregister()));
+  await Promise.all(registrations
+    .filter((registration) =>
+      (registration.active || registration.waiting || registration.installing)?.scriptURL !== workerUrl)
+    .map((registration) => registration.unregister()));
   await clearAppCaches();
+  const registration = await navigator.serviceWorker.register(workerUrl, { updateViaCache: 'none' });
+  await registration.update();
 
-  if (hadController && registrations.length > 0) {
+  if (hadLegacyController && registrations.length > 0) {
     window.location.reload();
   }
 }
@@ -31,43 +38,47 @@ export function registerServiceWorker() {
   }
 
   if (process.env.NODE_ENV !== 'production') {
-    window.addEventListener('load', () => {
-      clearDevelopmentServiceWorkers().catch((error) => {
-        console.warn('Development service worker cleanup failed:', error);
+    const registerForDevelopment = () => {
+      registerDevelopmentServiceWorker().catch((error) => {
+        console.warn('Development PWA service worker registration failed:', error);
       });
-    });
+    };
+    if (document.readyState === 'complete') registerForDevelopment();
+    else window.addEventListener('load', registerForDevelopment, { once: true });
     return;
   }
 
-  const hadControllerAtStartup = Boolean(navigator.serviceWorker.controller);
-  let refreshingForNewController = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!hadControllerAtStartup || refreshingForNewController) return;
-
-    const now = Date.now();
-    const lastRefreshAt = Number(
-      window.sessionStorage.getItem(SERVICE_WORKER_REFRESH_KEY) ?? 0
-    );
-    if (now - lastRefreshAt < SERVICE_WORKER_REFRESH_GUARD_MS) return;
-
-    refreshingForNewController = true;
-    window.sessionStorage.setItem(SERVICE_WORKER_REFRESH_KEY, String(now));
-    window.location.reload();
-  });
-
-  window.addEventListener('load', () => {
+  const registerForProduction = () => {
     const publicUrl = process.env.PUBLIC_URL || '';
     const serviceWorkerUrl = `${publicUrl}/service-worker.js`;
 
     navigator.serviceWorker
       .register(serviceWorkerUrl, { updateViaCache: 'none' })
       .then((registration) => {
-        registration.update().catch((error) => {
-          console.warn('Service worker update check failed:', error);
+        let lastCheckAt = 0;
+        let updating = false;
+        const checkForUpdate = (force = false) => {
+          if (updating || navigator.onLine === false) return;
+          const now = Date.now();
+          if (!force && now - lastCheckAt < UPDATE_CHECK_INTERVAL_MS) return;
+          updating = true;
+          lastCheckAt = now;
+          void registration.update()
+            .catch((error) => console.warn('Service worker update check failed:', error))
+            .finally(() => { updating = false; });
+        };
+        checkForUpdate(true);
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') checkForUpdate();
         });
+        window.addEventListener('online', () => checkForUpdate(true));
+        // New workers can serve the current document's hashed assets. Reload
+        // only on an actual chunk failure, preserving healthy forms and drafts.
       })
       .catch((error) => {
         console.warn('Service worker registration failed:', error);
       });
-  });
+  };
+  if (document.readyState === 'complete') registerForProduction();
+  else window.addEventListener('load', registerForProduction, { once: true });
 }

@@ -24,9 +24,26 @@ describe('referenceConstructionPlanPdfService', () => {
     expect(normalized.siteName).toBe('서울 / 테스트 현장');
     expect(normalized.projectName).toBe('시스템동바리 설치 공사');
     expect(normalized.companyName).toBe(REFERENCE_CONSTRUCTION_PLAN_DEFAULT_COMPANY);
-    expect(normalized.applicationScope).toBe('지하층 · 저층부 · 기준층 · 특수구간');
+    expect(normalized.applicationScope).toBe('[건축규모 기입]');
     expect(normalized.coverTemplate).toBe('blueprint');
     expect(REFERENCE_CONSTRUCTION_PLAN_PAGE_COUNT).toBe(42);
+  });
+
+  it('keeps the document basic building information without requiring an ordering client', () => {
+    const normalized = normalizeReferenceConstructionPlanInput({
+      ...baseInput,
+      clientName: undefined,
+      contractorName: '전문건설 주식회사',
+      applicationScope: '지하 2층 · 지상 20층 · 2개동',
+      buildingArea: '1,234.56 ㎡',
+      totalFloorArea: '25,678.90 ㎡',
+    });
+
+    expect(normalized.clientName).toBe('');
+    expect(normalized.contractorName).toBe('전문건설 주식회사');
+    expect(normalized.applicationScope).toBe('지하 2층 · 지상 20층 · 2개동');
+    expect(normalized.buildingArea).toBe('1,234.56 ㎡');
+    expect(normalized.totalFloorArea).toBe('25,678.90 ㎡');
   });
 
   it('keeps a supported premium cover and falls back from an unknown cover', () => {

@@ -91,6 +91,7 @@ const resolveExternalCompanyMode = (profile: UserData): CompanyDataScopeMode | n
  */
 export const resolveCompanyDataScope = (profile: UserData | null): CompanyDataScope => {
     if (!profile) return createBlockedCompanyDataScope();
+    if (profile.status && profile.status !== 'active') return createBlockedCompanyDataScope(profile);
     if (profileBypassesCompanyDataScope(profile)) return buildScope('all', profile);
 
     const mode = resolveExternalCompanyMode(profile);

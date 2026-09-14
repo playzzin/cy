@@ -37,8 +37,6 @@ const formatManDay = (value: number): string =>
 
 const toText = (value: unknown): string => String(value ?? '').trim();
 
-const normalizeEmail = (value: unknown): string => toText(value).toLowerCase();
-
 const getWorkerKeys = (worker: Worker): string[] =>
     Array.from(new Set([worker.id, worker.legacyId].map(toText).filter(Boolean)));
 
@@ -137,8 +135,8 @@ const ProfilePage: React.FC = () => {
 
         try {
             await userService.unlinkUserFromWorker(currentUser.uid, workerId);
-            setLinkedWorkers(prev => prev.filter(w => w.id !== workerId));
-            setSuccess('연결이 해제되었습니다.');
+            await loadUserData();
+            setSuccess('연결과 직책이 해제되었습니다.');
             setTimeout(() => setSuccess(null), 3000);
         } catch (err) {
             console.error('연결 해제 실패:', err);
@@ -150,8 +148,8 @@ const ProfilePage: React.FC = () => {
 
         try {
             await userService.unlinkUserFromOfficeStaff(currentUser.uid, staffId);
-            setLinkedOfficeStaff(prev => prev.filter(staff => staff.id !== staffId));
-            setSuccess('연결이 해제되었습니다.');
+            await loadUserData();
+            setSuccess('연결과 직책이 해제되었습니다.');
             setTimeout(() => setSuccess(null), 3000);
         } catch (err) {
             console.error('사무실 직원 연결 해제 실패:', err);
@@ -246,8 +244,6 @@ const ProfilePage: React.FC = () => {
             const selectedWorkers = new Map<string, Worker>();
             const officeStaffByKey = new Map<string, OfficeStaff>();
             const selectedOfficeStaff = new Map<string, OfficeStaff>();
-            const currentEmail = normalizeEmail(currentUser.email);
-
             const addSelectedWorker = (worker?: Worker | null) => {
                 if (!worker?.id) return;
                 selectedWorkers.set(String(worker.id), worker);
@@ -262,11 +258,6 @@ const ProfilePage: React.FC = () => {
 
                 if (worker.uid === currentUser.uid) {
                     addSelectedWorker(worker);
-                    return;
-                }
-
-                if (currentEmail && normalizeEmail(worker.email) === currentEmail) {
-                    addSelectedWorker(worker);
                 }
             });
 
@@ -274,11 +265,6 @@ const ProfilePage: React.FC = () => {
                 getOfficeStaffKeys(staff).forEach((key) => officeStaffByKey.set(key, staff));
 
                 if (staff.uid === currentUser.uid) {
-                    addSelectedOfficeStaff(staff);
-                    return;
-                }
-
-                if (currentEmail && normalizeEmail(staff.email) === currentEmail) {
                     addSelectedOfficeStaff(staff);
                 }
             });

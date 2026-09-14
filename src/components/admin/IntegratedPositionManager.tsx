@@ -29,6 +29,8 @@ import { manpowerService, type Worker } from '../../services/manpowerService';
 import { officeStaffService, type OfficeStaff } from '../../services/officeStaffService';
 import { positionService, type Position } from '../../services/positionService';
 import { userMenuPositionService, type UserMenuPositionMap } from '../../services/userMenuPositionService';
+import { userAccessClaimsService } from '../../services/userAccessClaimsService';
+import { accountLinkService } from '../../services/accountLinkService';
 import { userService, type UserData } from '../../services/userService';
 import { ACCOUNT_TYPE_LABELS } from '../../types/accountLink';
 import { UserRole } from '../../types/roles';
@@ -109,6 +111,11 @@ const getAccountTypeLabel = (accountType?: UserData['accountType']): string =>
 const replacePositionName = (values: string[], oldName: string, newName: string): string[] =>
   Array.from(new Set(values.map((value) => (normalize(value) === oldName ? newName : normalize(value))).filter(Boolean)));
 
+const getUserAdditionalPositions = (user: UserData, positionMap: UserMenuPositionMap): string[] => Array.from(new Set([
+  ...(positionMap[user.uid] || []),
+  ...(Array.isArray(user.additionalPositions) ? user.additionalPositions : []),
+].map(normalize).filter(Boolean)));
+
 const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
   positions,
   users,
@@ -124,6 +131,7 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
   const [savingId, setSavingId] = useState('');
   const [assignmentSavingId, setAssignmentSavingId] = useState('');
   const [assignmentSearch, setAssignmentSearch] = useState('');
+  const [positionSearch, setPositionSearch] = useState('');
   const [iconPickerTarget, setIconPickerTarget] = useState<string | null>(null);
   const [expandedPositionKey, setExpandedPositionKey] = useState<string | null>(null);
 
@@ -142,7 +150,7 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
     orderedPositions.forEach((position) => {
       const name = normalize(position.name);
       const baseUsers = users.filter((user) => normalize(user.position) === name).length;
-      const extraUsers = users.filter((user) => (userPositionMap[user.uid] || []).map(normalize).includes(name)).length;
+      const extraUsers = users.filter((user) => getUserAdditionalPositions(user, userPositionMap).includes(name)).length;
       const workerCount = workers.filter((worker) => normalize(worker.role) === name).length;
       const officeCount = officeStaffRows.filter((staff) => normalize(staff.role) === name).length;
       map.set(name, {
@@ -165,7 +173,7 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
 
     users.forEach((user) => {
       const basePosition = normalize(user.position);
-      const additionalPositions = new Set((userPositionMap[user.uid] || []).map(normalize).filter(Boolean));
+      const additionalPositions = new Set(getUserAdditionalPositions(user, userPositionMap));
 
       const baseAssignments = assignments.get(basePosition);
       if (baseAssignments) {
@@ -414,25 +422,129 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
     }
   };
 
+  const syncAccessClaims = async (uids: Iterable<string>) => {
+    await Promise.all(Array.from(new Set(uids)).filter(Boolean).map((uid) =>
+      userAccessClaimsService.syncUser(uid).catch((error) => {
+        console.warn('[IntegratedPositionManager] access claim sync failed after position release.', { uid, error });
+      })
+    ));
+  };
+
+  const handleReleaseUserAssignment = async (
+    assignment: PositionUserAssignment,
+    positionName: string,
+  ) => {
+    const { user, isBasePosition, isAdditionalPosition } = assignment;
+    const assignmentKey = `user:${user.uid}:${positionName}`;
+    const labels = [isBasePosition ? '기본 직책' : '', isAdditionalPosition ? '추가 직책' : ''].filter(Boolean).join('과 ');
+    const result = await Swal.fire({
+      title: `'${positionName}' 배정 해제`,
+      text: `${user.displayName || user.email || user.uid} 계정의 ${labels} 배정을 해제할까요?`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: '직책 해제',
+      cancelButtonText: '취소',
+      confirmButtonColor: '#dc2626',
+    });
+    if (!result.isConfirmed) return;
+
+    setAssignmentSavingId(assignmentKey);
+    try {
+      const profileAdditionalPositions = Array.isArray(user.additionalPositions)
+        ? user.additionalPositions.map(normalize).filter(Boolean)
+        : [];
+      const updates: Partial<UserData> = {};
+      if (profileAdditionalPositions.includes(positionName)) {
+        updates.additionalPositions = profileAdditionalPositions.filter((value) => value !== positionName);
+      }
+      if (Object.keys(updates).length > 0) {
+        await userService.updateUserProfile(user.uid, updates);
+      }
+      if (isBasePosition) {
+        await accountLinkService.revokeUserAccessApproval(user.uid);
+      }
+      if (isAdditionalPosition) {
+        await userMenuPositionService.removePosition(user.uid, positionName);
+      }
+      await syncAccessClaims([user.uid]);
+      await refresh();
+      showToast('사용자 직책 배정을 해제했습니다.');
+    } catch (error) {
+      console.error('[IntegratedPositionManager] user position release failed:', error);
+      await Swal.fire('오류', '사용자 직책 배정 해제에 실패했습니다.', 'error');
+    } finally {
+      setAssignmentSavingId('');
+    }
+  };
+
+  const releaseAllPositionAssignments = async (positionName: string): Promise<number> => {
+    const affectedUids = new Set<string>();
+    const targetWorkers = workers.filter((worker) => worker.id && normalize(worker.role) === positionName);
+    const targetOfficeStaff = officeStaffRows.filter((staff) => staff.id && normalize(staff.role) === positionName);
+    const targetUsers = users.filter((user) =>
+      normalize(user.position) === positionName
+      || getUserAdditionalPositions(user, userPositionMap).includes(positionName)
+    );
+
+    await Promise.all(targetWorkers.map(async (worker) => {
+      await manpowerService.updateWorker(String(worker.id), { role: '' });
+      const linkedUser = (worker.uid ? usersByUid.get(String(worker.uid)) : undefined)
+        || linkedUserByWorkerId.get(normalize(worker.id))
+        || linkedUserByWorkerId.get(normalize(worker.legacyId));
+      if (linkedUser) affectedUids.add(linkedUser.uid);
+    }));
+
+    await Promise.all(targetOfficeStaff.map(async (staff) => {
+      await officeStaffService.updateOfficeStaff(String(staff.id), { role: '' });
+      const linkedUser = (staff.uid ? usersByUid.get(String(staff.uid)) : undefined)
+        || linkedUserByOfficeStaffId.get(normalize(staff.id))
+        || linkedUserByOfficeStaffId.get(normalize(staff.legacyId));
+      if (linkedUser) affectedUids.add(linkedUser.uid);
+    }));
+
+    await Promise.all(targetUsers.map(async (user) => {
+      const hasBasePosition = normalize(user.position) === positionName;
+      const profileAdditionalPositions = Array.isArray(user.additionalPositions)
+        ? user.additionalPositions.map(normalize).filter(Boolean)
+        : [];
+      const updates: Partial<UserData> = {};
+      if (profileAdditionalPositions.includes(positionName)) {
+        updates.additionalPositions = profileAdditionalPositions.filter((value) => value !== positionName);
+      }
+      if (Object.keys(updates).length > 0) {
+        await userService.updateUserProfile(user.uid, updates);
+      }
+      if (hasBasePosition) {
+        await accountLinkService.revokeUserAccessApproval(user.uid);
+      }
+      affectedUids.add(user.uid);
+    }));
+
+    const additionalPositionUids = await userMenuPositionService.removePositionFromAllUsers(positionName);
+    additionalPositionUids.forEach((uid) => affectedUids.add(uid));
+    await syncAccessClaims(affectedUids);
+
+    return targetWorkers.length + targetOfficeStaff.length + targetUsers.length;
+  };
+
   const handleDeletePosition = async (position: Position) => {
     if (!position.id) return;
-    const name = normalize(position.name);
-    const usage = usageByPosition.get(name);
-    if (usage && usage.total > 0) {
-      await Swal.fire(
-        '삭제할 수 없습니다',
-        `현재 ${usage.total}건의 사용자/인력 배정이 이 직책을 사용 중입니다. 배정을 먼저 다른 직책으로 변경하세요.`,
-        'warning',
-      );
+    if (orderedPositions.length <= 1) {
+      await Swal.fire('삭제할 수 없습니다', '최소 한 개의 직책은 유지해야 합니다.', 'warning');
       return;
     }
 
+    const name = normalize(position.name);
+    const usage = usageByPosition.get(name);
+    const hasAssignments = Boolean(usage && usage.total > 0);
     const result = await Swal.fire({
       title: `'${name}' 삭제`,
-      text: '이 직책을 삭제할까요?',
+      html: hasAssignments
+        ? `이 직책은 현재 <b>${usage!.total}건</b> 사용 중입니다.<br />사용자 ${usage!.users}명 · 추가 직책 ${usage!.extras}명 · 작업자 ${usage!.workers}명 · 사무실 ${usage!.office}명<br /><br />모든 배정을 해제한 뒤 직책을 삭제할까요?`
+        : '이 직책을 삭제할까요?',
       icon: 'warning',
       showCancelButton: true,
-      confirmButtonText: '삭제',
+      confirmButtonText: hasAssignments ? '배정 해제 후 삭제' : '삭제',
       cancelButtonText: '취소',
       confirmButtonColor: '#dc2626',
     });
@@ -440,12 +552,15 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
 
     setSavingId(position.id);
     try {
-      await positionService.deletePosition(position.id);
+      if (hasAssignments) {
+        await releaseAllPositionAssignments(name);
+      }
+      await positionService.deletePositionWithSync(position.id, name);
       await refresh();
-      showToast('직책을 삭제했습니다.');
+      showToast(hasAssignments ? '배정을 해제하고 직책을 삭제했습니다.' : '직책을 삭제했습니다.');
     } catch (error) {
       console.error('[IntegratedPositionManager] delete position failed:', error);
-      await Swal.fire('오류', '직책 삭제에 실패했습니다.', 'error');
+      await Swal.fire('오류', '직책 배정 해제 또는 삭제에 실패했습니다. 새로고침 후 상태를 확인해 주세요.', 'error');
     } finally {
       setSavingId('');
     }
@@ -538,41 +653,61 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
   };
 
   const handlePersonnelRoleChange = async (row: PersonnelRow, nextRole: string) => {
-    if (!nextRole || row.role === nextRole) return;
+    if (row.role === nextRole) return;
+    if (!nextRole && row.role) {
+      const result = await Swal.fire({
+        title: '직책 배정 해제',
+        text: `${row.name}님의 '${row.role}' 직책을 해제할까요?`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: '직책 해제',
+        cancelButtonText: '취소',
+        confirmButtonColor: '#dc2626',
+      });
+      if (!result.isConfirmed) return;
+    }
+
     setAssignmentSavingId(`${row.type}:${row.id}`);
     try {
+      const linkedUser = (row.uid ? usersByUid.get(String(row.uid)) : undefined)
+        || (row.type === 'worker'
+          ? linkedUserByWorkerId.get(normalize(row.id))
+          : linkedUserByOfficeStaffId.get(normalize(row.id)));
       if (row.type === 'worker') {
         await manpowerService.updateWorker(row.id, { role: nextRole });
       } else {
         await officeStaffService.updateOfficeStaff(row.id, { role: nextRole });
       }
-      if (row.uid) {
-        await userService.updateUserProfile(row.uid, { position: nextRole });
+      if (linkedUser && normalize(linkedUser.position) === row.role) {
+        if (nextRole) {
+          await userService.updateUserProfile(linkedUser.uid, { position: nextRole });
+        } else {
+          await accountLinkService.revokeUserAccessApproval(linkedUser.uid);
+        }
+        await syncAccessClaims([linkedUser.uid]);
       }
       await refresh();
-      showToast('직책 배정을 변경했습니다.');
+      showToast(nextRole ? '직책 배정을 변경했습니다.' : '직책 배정을 해제했습니다.');
     } catch (error) {
       console.error('[IntegratedPositionManager] personnel role change failed:', error);
-      await Swal.fire('오류', '직책 배정 변경에 실패했습니다.', 'error');
+      await Swal.fire('오류', nextRole ? '직책 배정 변경에 실패했습니다.' : '직책 배정 해제에 실패했습니다.', 'error');
     } finally {
       setAssignmentSavingId('');
     }
   };
 
   return (
-    <section id="position-settings" className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-      <div className="border-b border-slate-100 bg-slate-50 px-5 py-4">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+    <section id="position-settings" className="um-position-manager bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="border-b border-slate-100 bg-slate-50 px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
               <FontAwesomeIcon icon={faUserTag} className="text-indigo-500" />
-              직책 색상/아이콘 통합 관리
+              직책별 권한·배정
             </h2>
-            <p className="mt-1 text-sm text-slate-500">
-              직책 추가, 색상, 아이콘, 권한 그룹, 순서, 인력 배정을 이 화면에서 바로 관리합니다.
-            </p>
+
           </div>
-          <div className="flex flex-wrap gap-2">
+<details className="um-details um-position-tools"><summary>관리 도구</summary><div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => navigate('/admin/role-menu')}
@@ -599,13 +734,13 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
               <FontAwesomeIcon icon={savingId === 'dedupe' ? faSpinner : faBroom} spin={savingId === 'dedupe'} />
               중복 직책 정리
             </button>
-          </div>
+          </div></details>
         </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-0">
-        <div className="xl:col-span-8 border-b xl:border-b-0 xl:border-r border-slate-100 p-5 space-y-5">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <div className="xl:col-span-8 border-b xl:border-b-0 xl:border-r border-slate-100 p-3 space-y-3">
+          <details className="um-details um-new-position rounded-lg border border-slate-200 bg-slate-50 p-3"><summary>+ 새 직책 등록</summary><div className="pt-3">
             <div className="mb-3">
               <h3 className="font-extrabold text-slate-800">새 직책 등록</h3>
               <p className="mt-1 text-sm text-slate-500">직책명과 권한만 선택하세요. 색상과 아이콘은 권한에 맞춰 자동으로 적용됩니다.</p>
@@ -645,24 +780,14 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
               </button>
             </div>
           </div>
-
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-            <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2.5">
-              <div className="text-xs font-extrabold text-emerald-800">인력 직책</div>
-              <p className="mt-1 text-xs leading-5 text-emerald-700">작업자·사무실 직원의 직책이 기준이며, 연결 계정의 기본 직책과 비교합니다.</p>
-            </div>
-            <div className="rounded-xl border border-sky-100 bg-sky-50 px-3 py-2.5">
-              <div className="text-xs font-extrabold text-sky-800">외부 계정 유형</div>
-              <p className="mt-1 text-xs leading-5 text-sky-700">발주사·임대사·소개소는 회사 소속과 메뉴 권한을 위한 외부 계정 유형으로 표시합니다.</p>
-            </div>
-            <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2.5">
-              <div className="text-xs font-extrabold text-indigo-800">추가 직책 권한</div>
-              <p className="mt-1 text-xs leading-5 text-indigo-700">추가 직책은 메뉴 접근 확장용이며 작업자·사무실 인사 직책은 바꾸지 않습니다.</p>
-            </div>
+          </details>
+          <div className="relative">
+            <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-3 text-slate-400" />
+            <input value={positionSearch} onChange={(event) => setPositionSearch(event.target.value)} aria-label="직책 검색" placeholder="직책 이름 또는 권한 검색" className="h-10 w-full rounded-lg border border-slate-200 pl-9 pr-3 text-sm" />
           </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div className="um-position-grid">
             {orderedPositions.map((position, index) => {
+              if (positionSearch.trim() && ![position.name, getRoleLabel(position.systemRole)].join(' ').includes(positionSearch.trim())) return null;
               const key = getPositionKey(position);
               const draftName = nameDrafts[key] ?? position.name;
               const color = getColorOption(position.color);
@@ -677,7 +802,7 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
               const accordionId = `position-users-${position.id || index}`;
 
               return (
-                <div key={key} className="rounded-xl border border-slate-200 bg-white p-4">
+                <div key={key} className="um-position-card rounded-lg border border-slate-200 bg-white p-3">
                   <div className="flex items-start gap-3">
                     <div className="flex flex-col gap-1">
                       <button
@@ -711,10 +836,10 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
                       <FontAwesomeIcon icon={resolveIcon(position.icon || position.iconKey, faUser)} />
                     </button>
 
-                    <div className="min-w-0 flex-1 space-y-3">
+                    <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex gap-2">
                         <input
-                          value={draftName}
+                          aria-label={`${position.name} 직책명`} value={draftName}
                           onChange={(event) => setNameDrafts((prev) => ({ ...prev, [key]: event.target.value }))}
                           className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 px-3 text-sm font-extrabold text-slate-800 outline-none focus:border-indigo-500"
                         />
@@ -731,7 +856,7 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
 
                       <div className="flex flex-wrap items-center gap-2">
                         <select
-                          value={position.systemRole || UserRole.GENERAL}
+                          aria-label={`${position.name} 적용 권한`} value={position.systemRole || UserRole.GENERAL}
                           onChange={(event) => position.id && handleUpdatePosition(position.id, { systemRole: event.target.value as UserRole }, '시스템 권한을 변경했습니다.')}
                           disabled={!position.id || isSaving}
                           className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none focus:border-indigo-500"
@@ -749,7 +874,7 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
                         </span>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-1">
+                      <details className="um-details"><summary className="text-xs text-slate-400">색상</summary><div className="flex flex-wrap items-center gap-1 pt-2">
                         <FontAwesomeIcon icon={faPalette} className="mr-1 text-xs text-slate-400" />
                         {COLOR_OPTIONS.map((option) => (
                           <button
@@ -762,7 +887,7 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
                             title={option.label}
                           />
                         ))}
-                      </div>
+                      </div></details>
                     </div>
 
                     <div className="flex flex-col gap-1">
@@ -791,7 +916,7 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
                     onClick={() => setExpandedPositionKey((current) => (current === key ? null : key))}
                     aria-expanded={isUserListExpanded}
                     aria-controls={accordionId}
-                    className="mt-4 flex w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm font-bold text-slate-700 transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+                    className="mt-2 flex w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm font-bold text-slate-700 transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
                   >
                     <span className="inline-flex items-center gap-2">
                       <FontAwesomeIcon icon={faUsers} className="text-indigo-500" />
@@ -818,7 +943,10 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
                             <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">배정된 사용자 계정이 없습니다.</div>
                           ) : (
                             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-100">
-                              {positionUsers.map(({ user, isBasePosition, isAdditionalPosition }) => (
+                              {positionUsers.map((assignment) => {
+                                const { user, isBasePosition, isAdditionalPosition } = assignment;
+                                const isReleasing = assignmentSavingId === `user:${user.uid}:${normalize(position.name)}`;
+                                return (
                                 <li key={user.uid} className="flex items-center gap-3 px-3 py-2.5">
                                   {user.photoURL ? (
                                     <img
@@ -832,16 +960,25 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
                                     </div>
                                   )}
                                   <div className="min-w-0 flex-1">
-                                    <div className="truncate text-sm font-extrabold text-slate-800">{user.displayName || '이름 없음'}</div>
+                                    <button type="button" className="um-text-button truncate" onClick={() => navigate(`/admin/user-management?user=${encodeURIComponent(user.uid)}`)}>{user.displayName || '이름 없음'} · 직책·권한 →</button>
                                     <div className="truncate text-xs text-slate-500">{user.email || user.uid}</div>
                                   </div>
                                   <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{getAccountTypeLabel(user.accountType)}</span>
+                                    <button type="button" className="um-text-button" onClick={() => navigate(`/admin/user-management/account-links?user=${encodeURIComponent(user.uid)}`)}>계정 연결</button>
                                     {isBasePosition && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">기본</span>}
                                     {isAdditionalPosition && <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700">추가</span>}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleReleaseUserAssignment(assignment, normalize(position.name))}
+                                      disabled={Boolean(assignmentSavingId)}
+                                      className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-extrabold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                                    >
+                                      {isReleasing ? <FontAwesomeIcon icon={faSpinner} spin /> : '해제'}
+                                    </button>
                                   </div>
                                 </li>
-                              ))}
+                                );
+                              })}
                             </ul>
                           )}
                         </section>
@@ -872,6 +1009,14 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
                                   ) : (
                                     <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">계정 미연결</span>
                                   )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePersonnelRoleChange({ type: 'worker', id, name, subText, role: normalize(position.name) }, '')}
+                                    disabled={Boolean(assignmentSavingId)}
+                                    className="shrink-0 rounded-lg bg-rose-50 px-2 py-1 text-[10px] font-extrabold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                                  >
+                                    {assignmentSavingId === `worker:${id}` ? <FontAwesomeIcon icon={faSpinner} spin /> : '해제'}
+                                  </button>
                                 </li>
                               ))}
                             </ul>
@@ -904,6 +1049,14 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
                                   ) : (
                                     <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">계정 미연결</span>
                                   )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePersonnelRoleChange({ type: 'office', id, name, subText, role: normalize(position.name) }, '')}
+                                    disabled={Boolean(assignmentSavingId)}
+                                    className="shrink-0 rounded-lg bg-rose-50 px-2 py-1 text-[10px] font-extrabold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                                  >
+                                    {assignmentSavingId === `office:${id}` ? <FontAwesomeIcon icon={faSpinner} spin /> : '해제'}
+                                  </button>
                                 </li>
                               ))}
                             </ul>
@@ -918,7 +1071,7 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
           </div>
         </div>
 
-        <div className="xl:col-span-4 p-5 space-y-4">
+        <div className="xl:col-span-4 p-3 space-y-3">
           <div>
             <h3 className="font-extrabold text-slate-800 flex items-center gap-2">
               <FontAwesomeIcon icon={faPen} className="text-emerald-500" />
@@ -961,12 +1114,12 @@ const IntegratedPositionManager: React.FC<IntegratedPositionManagerProps> = ({
                     {isSaving && <FontAwesomeIcon icon={faSpinner} spin className="text-slate-400" />}
                   </div>
                   <select
-                    value={positionNames.has(row.role) ? row.role : ''}
+                    aria-label={`${row.name} 직책 배정`} value={positionNames.has(row.role) ? row.role : ''}
                     onChange={(event) => handlePersonnelRoleChange(row, event.target.value)}
-                    disabled={isSaving || orderedPositions.length === 0}
+                    disabled={isSaving}
                     className="mt-2 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700 outline-none focus:border-indigo-500 disabled:opacity-60"
                   >
-                    <option value="" disabled>직책 선택</option>
+                    <option value="">직책 없음 (배정 해제)</option>
                     {orderedPositions.map((position) => (
                       <option key={getPositionKey(position)} value={position.name}>
                         {position.name} ({getRoleLabel(position.systemRole)})

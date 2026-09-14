@@ -1,3 +1,5 @@
+import { resolvePayrollBankCode } from './payrollBankCode';
+
 export const PAYSLIP_ISSUE_RULE_VERSION = 'monthly-wage-payslip-v1';
 
 export type PayslipIssueSeverity = 'error' | 'warning';
@@ -207,7 +209,7 @@ export const validateMonthlyPayslipRows = (rows: MonthlyPayslipRowLike[]): Paysl
         if (Math.abs(grossAmount - totalDeduction - totalAmount) > 1) addIssue(issues, row, 'error', 'netMismatch', '세전-공제-실지급 계산이 맞지 않습니다.');
 
         if (!hasText(row.bankName)) addIssue(issues, row, 'warning', 'missingBankName', '은행명이 없습니다.');
-        if (!hasText(row.bankCode)) addIssue(issues, row, 'warning', 'missingBankCode', '은행코드가 없습니다.');
+        if (!resolvePayrollBankCode(row.bankName, row.bankCode)) addIssue(issues, row, 'warning', 'missingBankCode', '은행코드가 없습니다.');
         if (!hasText(row.accountNumber)) addIssue(issues, row, 'warning', 'missingAccountNumber', '계좌번호가 없습니다.');
         if (!hasText(row.accountHolder)) addIssue(issues, row, 'warning', 'missingAccountHolder', '예금주가 없습니다.');
         if (!row.taxRateSnapshot || Object.keys(row.taxRateSnapshot).length === 0) addIssue(issues, row, 'warning', 'missingTaxSnapshot', '세율 스냅샷이 없습니다.');

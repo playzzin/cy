@@ -17,17 +17,20 @@ import QuickCameraCapture, {
     waitForCapturedFrame
 } from './QuickCameraCapture';
 import LayoutBottomPanel from '../layout/LayoutBottomPanel';
+import * as frameReadiness from './captureFrameReadiness';
 
 jest.mock('html2canvas', () => jest.fn());
 
 const html2canvasMock = html2canvas as jest.MockedFunction<typeof html2canvas>;
 const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
 const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+const originalPixelRatio = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
 const originalMediaDevices = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
 const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
 const originalClipboardItem = Object.getOwnPropertyDescriptor(window, 'ClipboardItem');
 const originalElementsFromPoint = Object.getOwnPropertyDescriptor(document, 'elementsFromPoint');
 const originalRequestAnimationFrame = Object.getOwnPropertyDescriptor(window, 'requestAnimationFrame');
+const originalCancelAnimationFrame = Object.getOwnPropertyDescriptor(window, 'cancelAnimationFrame');
 const originalCreateObjectURL = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
 const originalRevokeObjectURL = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
 const originalCanvasGetContext = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'getContext');
@@ -66,7 +69,8 @@ class ClipboardItemMock {
 describe('capture geometry', () => {
     it('requests at least 2x pixels for the explicit full-board export', () => {
         expect(getPermissionFreeCaptureScale({ width: 800, height: 600 }, 1)).toBe(2);
-        expect(getPermissionFreeCaptureScale({ width: 3840, height: 2160 }, 2)).toBe(2);
+        const largeScale = getPermissionFreeCaptureScale({ width: 3840, height: 2160 }, 2);
+        expect(3840 * 2160 * largeScale * largeScale).toBeLessThanOrEqual(12_000_001);
     });
 
     it('requests a high-resolution source for the optional shared-screen mode', () => {
@@ -187,6 +191,7 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
     let drawImage: jest.Mock;
     let stopTrack: jest.Mock;
     let applyConstraints: jest.Mock;
+    let getTrackConstraints: jest.Mock;
     let addTrackEventListener: jest.Mock;
     let removeTrackEventListener: jest.Mock;
     let toBlob: jest.Mock;
@@ -199,18 +204,22 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
         drawImage = jest.fn();
         stopTrack = jest.fn();
         applyConstraints = jest.fn().mockResolvedValue(undefined);
+        getTrackConstraints = jest.fn().mockReturnValue({ width: { ideal: 1600 }, height: { ideal: 1200 }, frameRate: { ideal: 30, max: 30 }, resizeMode: 'none' });
         addTrackEventListener = jest.fn();
         removeTrackEventListener = jest.fn();
         toBlob = jest.fn((callback: BlobCallback) => {
             callback(new Blob(['fast-capture'], { type: 'image/png' }));
         });
+        let captureHandle = '';
         const track = {
             readyState: 'live',
             stop: stopTrack,
             applyConstraints,
+            getConstraints: getTrackConstraints,
             addEventListener: addTrackEventListener,
             removeEventListener: removeTrackEventListener,
-            getSettings: () => ({ displaySurface: 'browser' })
+            getSettings: () => ({ displaySurface: 'browser' }),
+            getCaptureHandle: () => ({ handle: captureHandle })
         };
         getDisplayMedia.mockResolvedValue({
             getTracks: () => [track],
@@ -218,7 +227,7 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
         });
         Object.defineProperty(navigator, 'mediaDevices', {
             configurable: true,
-            value: { getDisplayMedia }
+            value: { getDisplayMedia, setCaptureHandleConfig: (config: { handle: string }) => { captureHandle = config.handle; } }
         });
         Object.defineProperty(navigator, 'clipboard', {
             configurable: true,
@@ -239,6 +248,7 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
                 return 1;
             })
         });
+        Object.defineProperty(window, 'cancelAnimationFrame', { configurable: true, value: jest.fn() });
         Object.defineProperty(URL, 'createObjectURL', {
             configurable: true,
             value: jest.fn(() => 'blob:quick-camera-preview')
@@ -293,11 +303,13 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
         html2canvasMock.mockReset();
         restoreProperty(window, 'innerWidth', originalInnerWidth);
         restoreProperty(window, 'innerHeight', originalInnerHeight);
+        restoreProperty(window, 'devicePixelRatio', originalPixelRatio);
         restoreProperty(navigator, 'mediaDevices', originalMediaDevices);
         restoreProperty(navigator, 'clipboard', originalClipboard);
         restoreProperty(window, 'ClipboardItem', originalClipboardItem);
         restoreProperty(document, 'elementsFromPoint', originalElementsFromPoint);
         restoreProperty(window, 'requestAnimationFrame', originalRequestAnimationFrame);
+        restoreProperty(window, 'cancelAnimationFrame', originalCancelAnimationFrame);
         restoreProperty(URL, 'createObjectURL', originalCreateObjectURL);
         restoreProperty(URL, 'revokeObjectURL', originalRevokeObjectURL);
         restoreProperty(HTMLCanvasElement.prototype, 'getContext', originalCanvasGetContext);
@@ -312,6 +324,147 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
         jest.restoreAllMocks();
     });
 
+    const chooseRectangle = async () => {
+        const overlay = await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' });
+        fireEvent(overlay, new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 120 }));
+        fireEvent(window, new MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 400, clientY: 320 }));
+    };
+
+    it('starts with sharp capture instead of shrinking a high-DPI display by default', () => {
+        render(<QuickCameraCapture />);
+        expect(screen.getByRole('combobox', { name: '캡처 화질' })).toHaveValue('high');
+    });
+
+    it.each(['screen', 'scroll'])('preserves source pixels while hiding the cursor for %s capture', async (mode) => {
+        let sourceWidth = 1600;
+        Object.defineProperty(HTMLVideoElement.prototype, 'videoWidth', { configurable: true, get: () => sourceWidth });
+        Object.defineProperty(HTMLVideoElement.prototype, 'videoHeight', { configurable: true, get: () => sourceWidth * 0.75 });
+        // applyConstraints replaces constraints, including omitted dimensions.
+        applyConstraints.mockImplementation((constraints: MediaTrackConstraints) => {
+            sourceWidth = (constraints.width as ConstrainULongRange)?.ideal as number || 800;
+            return Promise.resolve();
+        });
+        render(<QuickCameraCapture />);
+        fireEvent.change(screen.getByRole('combobox', { name: '캡처 화질' }), { target: { value: 'high' } });
+        if (mode === 'scroll') fireEvent.click(screen.getByRole('radio', { name: /긴 화면 구간/ }));
+        fireEvent.click(screen.getByRole('button', { name: mode === 'scroll' ? '스크롤 구간 선택 시작' : '실제 영역 선택 시작' }));
+        const overlay = await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' });
+        fireEvent(overlay, new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 120 }));
+        fireEvent(mode === 'scroll' ? overlay : window, new MouseEvent(mode === 'scroll' ? 'pointerdown' : 'pointerup', { bubbles: true, button: 0, clientX: 400, clientY: 320 }));
+        if (mode === 'screen') fireEvent.click(screen.getByRole('button', { name: '캡처 후 클립보드 복사' }));
+        expect(await screen.findByAltText('최근 캡처 미리보기')).toBeInTheDocument();
+        expect(sourceWidth).toBe(1600);
+        expect(screen.getByText('600 × 400 px')).toBeInTheDocument();
+        expect(applyConstraints).toHaveBeenCalledWith(expect.objectContaining({
+            width: { ideal: 1600 }, height: { ideal: 1200 }, resizeMode: 'none', cursor: 'never'
+        }));
+    });
+
+    it('preserves the native 4K frame before cropping small text at the default quality', async () => {
+        setWindowNumber('innerWidth', 1920);
+        setWindowNumber('innerHeight', 1080);
+        Object.defineProperty(HTMLVideoElement.prototype, 'videoWidth', { configurable: true, get: () => 3840 });
+        Object.defineProperty(HTMLVideoElement.prototype, 'videoHeight', { configurable: true, get: () => 2160 });
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        await chooseRectangle();
+        expect(drawImage).toHaveBeenCalledWith(expect.any(HTMLVideoElement), 0, 0, 3840, 2160);
+        fireEvent.click(screen.getByRole('button', { name: '캡처 후 클립보드 복사' }));
+        await screen.findByAltText('최근 캡처 미리보기');
+        expect(screen.getByText('600 × 400 px')).toBeInTheDocument();
+    });
+
+    it('does not leave future captures at reduced quality after a temporary preparation timeout', async () => {
+        jest.spyOn(frameReadiness, 'prepareCaptureVideo')
+            .mockRejectedValueOnce(new Error('video-load-timeout')).mockResolvedValue(undefined);
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        await chooseRectangle();
+        fireEvent.click(screen.getByRole('button', { name: '캡처 후 클립보드 복사' }));
+        await screen.findByAltText('최근 캡처 미리보기');
+        expect(screen.getByRole('combobox', { name: '캡처 화질' })).toHaveValue('high');
+        expect(screen.getByText(/이번 캡처만 표준 화질/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '새 실제 영역 선택' }));
+        await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' });
+        expect(getDisplayMedia).toHaveBeenCalledTimes(2);
+        expect(getDisplayMedia.mock.calls[1][0].video).toMatchObject({ width: { ideal: 1600 }, height: { ideal: 1200 }, resizeMode: 'none' });
+    });
+
+    it('rejects a different browser tab before selection opens', async () => {
+        jest.spyOn(navigator.mediaDevices as MediaDevices & { setCaptureHandleConfig: (config: unknown) => void }, 'setCaptureHandleConfig').mockImplementation(() => {});
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        expect(await screen.findByText(/다른 탭이 선택되었습니다/)).toBeInTheDocument();
+        expect(screen.queryByRole('dialog', { name: '화면 캡처 영역 선택' })).not.toBeInTheDocument();
+        expect(stopTrack).toHaveBeenCalledTimes(1);
+    });
+
+    it('requires visible source confirmation on browsers without capture identity', async () => {
+        Object.defineProperty(navigator.mediaDevices, 'setCaptureHandleConfig', { value: undefined });
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        await chooseRectangle();
+        expect(screen.getByRole('button', { name: '캡처 후 클립보드 복사' })).toBeDisabled();
+        expect(clipboardWrite).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: '현재 앱 화면이 맞습니다' }));
+        fireEvent.click(screen.getByRole('button', { name: '캡처 후 클립보드 복사' }));
+        expect(await screen.findByAltText('최근 캡처 미리보기')).toBeInTheDocument();
+    });
+
+    it('invalidates selection when browser geometry changes', async () => {
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        await chooseRectangle();
+        setWindowNumber('innerWidth', 900);
+        fireEvent(window, new Event('resize'));
+        expect(screen.queryByRole('dialog', { name: '화면 캡처 영역 선택' })).not.toBeInTheDocument();
+        expect(screen.getByText(/화면 크기 또는 배율이 바뀌었습니다/)).toBeInTheDocument();
+        expect(clipboardWrite).not.toHaveBeenCalled();
+    });
+
+    it('keeps the PNG accessible even when clipboard writing never settles', async () => {
+        clipboardWrite.mockReturnValue(new Promise(() => {}));
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        await chooseRectangle();
+        fireEvent.click(screen.getByRole('button', { name: '캡처 후 클립보드 복사' }));
+        expect(await screen.findByAltText('최근 캡처 미리보기')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^PNG 저장$/ })).toBeEnabled();
+        expect(await screen.findByText(/복사 응답이 지연되고 있습니다/, {}, { timeout: 4500 })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '새 실제 영역 선택' })).toBeEnabled();
+    }, 10000);
+
+    it('keeps history and the last region across camera panel close and reopen', async () => {
+        const props = { togglePanel: jest.fn(), activeTool: 'camera' as const };
+        const view = render(<LayoutBottomPanel {...props} isOpen />);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        await chooseRectangle();
+        fireEvent.click(screen.getByRole('button', { name: '캡처 후 클립보드 복사' }));
+        await waitFor(() => expect(screen.getByRole('button', { name: '마지막 영역 다시 캡처' })).toBeEnabled());
+        view.rerender(<LayoutBottomPanel {...props} isOpen={false} />);
+        expect(stopTrack).toHaveBeenCalledTimes(1);
+        view.rerender(<LayoutBottomPanel {...props} isOpen />);
+        expect(screen.getByAltText('최근 캡처 미리보기')).toBeVisible();
+        fireEvent.click(screen.getByRole('button', { name: '마지막 영역 다시 캡처' }));
+        expect(await screen.findByRole('button', { name: '캡처 후 클립보드 복사' })).toBeInTheDocument();
+        expect(document.querySelector('[data-selection-box="true"]')).toHaveStyle({ left: '100px', top: '120px', width: '300px', height: '200px' });
+        expect(getDisplayMedia).toHaveBeenCalledTimes(2);
+    });
+
+    it('prepares a fresh frame with the last region during continuous capture', async () => {
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('checkbox', { name: /캡처 후 다음 화면 준비/ }));
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        await chooseRectangle();
+        fireEvent.click(screen.getByRole('button', { name: '캡처 후 클립보드 복사' }));
+        expect(await screen.findByRole('button', { name: '캡처 후 클립보드 복사' })).toBeInTheDocument();
+        expect(clipboardWrite).toHaveBeenCalledTimes(1);
+        expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+        fireEvent.keyDown(window, { key: 'Escape' });
+        expect(screen.queryByRole('dialog', { name: '화면 캡처 영역 선택' })).not.toBeInTheDocument();
+    });
+
     it('selects from a frozen real frame and crops the matching source pixels', async () => {
         render(
             <aside data-capture-exclude="true">
@@ -323,9 +476,9 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
         const overlay = await waitFor(() => {
             const element = document.querySelector<HTMLElement>('[data-capture-overlay="true"]');
             expect(element).toBeInTheDocument();
-            expect(document.querySelector('[data-frozen-capture-preview="true"]')).toBeInTheDocument();
             return element as HTMLElement;
         });
+        expect(document.querySelector('[data-frozen-capture-preview="true"]')).toBeInTheDocument();
         expect(toBlob).not.toHaveBeenCalled();
         expect(document.querySelector<HTMLElement>('[data-capture-exclude="true"]')?.style.visibility).toBe('hidden');
 
@@ -359,9 +512,9 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
 
         await waitFor(() => {
             expect(clipboardWrite).toHaveBeenCalledTimes(1);
-            expect(document.querySelector('[data-capture-overlay="true"]')).not.toBeInTheDocument();
-            expect(document.querySelector<HTMLElement>('[data-capture-exclude="true"]')?.style.visibility).toBe('');
         });
+        expect(document.querySelector('[data-capture-overlay="true"]')).not.toBeInTheDocument();
+        expect(document.querySelector<HTMLElement>('[data-capture-exclude="true"]')?.style.visibility).toBe('');
 
         expect(html2canvasMock).not.toHaveBeenCalled();
         expect(drawImage).toHaveBeenCalledWith(
@@ -415,7 +568,7 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
         fireEvent.click(screen.getByRole('radio', { name: /긴 화면 구간/ }));
         fireEvent.click(screen.getByRole('button', { name: '스크롤 구간 선택 시작' }));
 
-        const overlay = document.querySelector<HTMLElement>('[data-capture-overlay="true"]');
+        const overlay = await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' });
         expect(overlay).toBeInTheDocument();
 
         fireEvent(overlay as HTMLElement, new MouseEvent('pointerdown', {
@@ -439,7 +592,32 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
         });
     });
 
-    it('keeps the long-page selection open after a too-small range so it can be retried', () => {
+    it('captures a long range when the sharing UI changes viewport height during permission', async () => {
+        const originalRequest = getDisplayMedia.getMockImplementation()!;
+        getDisplayMedia.mockImplementation(() => {
+            // Chromium can lay out a sharing infobar when sharing starts.
+            setWindowNumber('innerHeight', 550);
+            window.dispatchEvent(new Event('resize'));
+            return originalRequest();
+        });
+        Object.defineProperty(HTMLVideoElement.prototype, 'videoHeight', {
+            configurable: true, get: () => window.innerHeight * 2
+        });
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('radio', { name: /긴 화면 구간/ }));
+        fireEvent.click(screen.getByRole('button', { name: '스크롤 구간 선택 시작' }));
+        const overlay = await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' });
+        fireEvent(overlay, new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 120 }));
+        fireEvent(overlay, new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 400, clientY: 320 }));
+        expect(await screen.findByText(/선택한 긴 화면을 끝까지 확인해 PNG로 만들고 복사했습니다/)).toBeInTheDocument();
+        expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+        expect(stopTrack).toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: '마지막 캡처 복사' }));
+        await waitFor(() => expect(clipboardWrite).toHaveBeenCalledTimes(2));
+        expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the long-page selection open after a too-small range so it can be retried', async () => {
         render(
             <aside data-capture-exclude="true">
                 <QuickCameraCapture />
@@ -448,7 +626,7 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
 
         fireEvent.click(screen.getByRole('radio', { name: /긴 화면 구간/ }));
         fireEvent.click(screen.getByRole('button', { name: '스크롤 구간 선택 시작' }));
-        const overlay = document.querySelector<HTMLElement>('[data-capture-overlay="true"]');
+        const overlay = await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' });
 
         fireEvent(overlay as HTMLElement, new MouseEvent('pointerdown', {
             bubbles: true,
@@ -465,10 +643,10 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
 
         expect(document.querySelector('[data-capture-overlay="true"]')).toBeInTheDocument();
         expect(screen.getAllByText(/선택 화면을 유지했으니 시작점을 다시 지정/)).toHaveLength(2);
-        expect(getDisplayMedia).not.toHaveBeenCalled();
+        expect(getDisplayMedia).toHaveBeenCalledTimes(1);
     });
 
-    it('offers an on-screen cancel action for long-page selection', () => {
+    it('offers an on-screen cancel action for long-page selection', async () => {
         render(
             <aside data-capture-exclude="true">
                 <QuickCameraCapture />
@@ -477,10 +655,76 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
 
         fireEvent.click(screen.getByRole('radio', { name: /긴 화면 구간/ }));
         fireEvent.click(screen.getByRole('button', { name: '스크롤 구간 선택 시작' }));
-        fireEvent.click(screen.getByRole('button', { name: '긴 화면 구간 선택 취소' }));
+        fireEvent.click(await screen.findByRole('button', { name: '긴 화면 구간 선택 취소' }));
 
         expect(document.querySelector('[data-capture-overlay="true"]')).not.toBeInTheDocument();
         expect(document.querySelector<HTMLElement>('[data-capture-exclude="true"]')?.style.visibility).toBe('');
+        expect(stopTrack).toHaveBeenCalled();
+    });
+
+    it.each(['resize', 'dpi'])('invalidates long-range coordinates after a real %s change', async (change) => {
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('radio', { name: /긴 화면 구간/ }));
+        fireEvent.click(screen.getByRole('button', { name: '스크롤 구간 선택 시작' }));
+        const overlay = await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' });
+        fireEvent(overlay, new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 120 }));
+        if (change === 'resize') setWindowNumber('innerHeight', 550);
+        else Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 1.25 });
+        // Even a browser that does not dispatch resize before the next pointer
+        // gesture must never use the stale start point.
+        fireEvent(overlay, new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 400, clientY: 320 }));
+        expect(screen.queryByRole('dialog', { name: '화면 캡처 영역 선택' })).not.toBeInTheDocument();
+        expect(screen.getByText(/화면 크기 또는 배율이 바뀌었습니다/)).toBeInTheDocument();
+        expect(toBlob).not.toHaveBeenCalled();
+        expect(stopTrack).toHaveBeenCalled();
+    });
+
+    it('discards the image when the viewport changes while a long-range frame is arriving', async () => {
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('radio', { name: /긴 화면 구간/ }));
+        fireEvent.click(screen.getByRole('button', { name: '스크롤 구간 선택 시작' }));
+        const overlay = await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' });
+        Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', {
+            configurable: true, value: jest.fn((callback) => {
+                setWindowNumber('innerHeight', 550);
+                window.setTimeout(() => callback(0, {}), 0);
+                return 1;
+            })
+        });
+        fireEvent(overlay, new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 120 }));
+        fireEvent(overlay, new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 400, clientY: 320 }));
+        expect(await screen.findByText(/화면 크기 또는 배율이 바뀌었습니다/)).toBeInTheDocument();
+        expect(URL.createObjectURL).not.toHaveBeenCalled();
+        expect(stopTrack).toHaveBeenCalled();
+    });
+
+    it('cancels delayed long-range permission and stops its late stream without closing a retry', async () => {
+        let resolveOld!: (stream: MediaStream) => void;
+        getDisplayMedia.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('radio', { name: /긴 화면 구간/ }));
+        fireEvent.click(screen.getByRole('button', { name: '스크롤 구간 선택 시작' }));
+        expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+        expect(screen.queryByRole('dialog', { name: '화면 캡처 영역 선택' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '긴 화면 캡처 취소' }));
+        await screen.findByText('긴 화면 캡처를 취소했습니다.');
+        fireEvent.click(screen.getByRole('button', { name: '스크롤 구간 선택 시작' }));
+        await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' });
+        const stopOldTrack = jest.fn();
+        resolveOld({ getTracks: () => [{ stop: stopOldTrack }] } as unknown as MediaStream);
+        await waitFor(() => expect(stopOldTrack).toHaveBeenCalledTimes(1));
+        expect(screen.getByRole('dialog', { name: '화면 캡처 영역 선택' })).toBeInTheDocument();
+        expect(stopTrack).not.toHaveBeenCalled();
+    });
+
+    it('rejects a different tab before opening long-range selection', async () => {
+        jest.spyOn(navigator.mediaDevices as MediaDevices & { setCaptureHandleConfig: (config: unknown) => void }, 'setCaptureHandleConfig').mockImplementation(() => {});
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('radio', { name: /긴 화면 구간/ }));
+        fireEvent.click(screen.getByRole('button', { name: '스크롤 구간 선택 시작' }));
+        expect(await screen.findByText(/다른 탭이 선택되었습니다/)).toBeInTheDocument();
+        expect(screen.queryByRole('dialog', { name: '화면 캡처 영역 선택' })).not.toBeInTheDocument();
+        expect(stopTrack).toHaveBeenCalled();
     });
 
     it('uses an already drawable frame when the browser frame callback stalls', async () => {
@@ -535,6 +779,131 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
         expect(document.querySelector('[data-capture-overlay="true"]')).toBeInTheDocument();
     });
 
+    it('shows preparation cancellation and protects a retry from a late permission result', async () => {
+        let resolveOldRequest!: (stream: MediaStream) => void;
+        getDisplayMedia.mockImplementationOnce(() => new Promise((resolve) => { resolveOldRequest = resolve; }));
+        const oldStop = jest.fn();
+        render(<aside data-capture-exclude="true"><QuickCameraCapture /></aside>);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        expect(screen.getByRole('button', { name: '화면 캡처 준비 취소' })).toBeVisible();
+        fireEvent.click(screen.getByRole('button', { name: '화면 캡처 준비 취소' }));
+        expect(screen.getByRole('button', { name: '실제 영역 선택 시작' })).toBeVisible();
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        const overlay = await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' });
+        resolveOldRequest({ getTracks: () => [{ stop: oldStop }] } as unknown as MediaStream);
+        await waitFor(() => expect(oldStop).toHaveBeenCalledTimes(1));
+        expect(overlay).toBeInTheDocument();
+        expect(stopTrack).not.toHaveBeenCalled();
+        expect(getDisplayMedia).toHaveBeenCalledTimes(2);
+        expect(document.querySelector<HTMLElement>('[data-capture-exclude="true"]')?.style.visibility).toBe('hidden');
+    });
+
+    it('cancels pending video playback with Escape and starts a fresh attempt', async () => {
+        const play = HTMLMediaElement.prototype.play as jest.Mock;
+        play.mockImplementationOnce(() => new Promise(() => {}));
+        render(<aside data-capture-exclude="true"><QuickCameraCapture /></aside>);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        await waitFor(() => expect(play).toHaveBeenCalledTimes(1));
+        fireEvent.keyDown(window, { key: 'Escape' });
+        expect(stopTrack).toHaveBeenCalledTimes(1);
+        expect(screen.getByRole('button', { name: '실제 영역 선택 시작' })).toBeEnabled();
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        expect(await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' })).toBeInTheDocument();
+        expect(stopTrack).toHaveBeenCalledTimes(1);
+    });
+
+    it('waits for delayed first-frame data before enabling selection', async () => {
+        let frameReady = false;
+        Object.defineProperty(HTMLMediaElement.prototype, 'readyState', {
+            configurable: true,
+            get: () => frameReady ? HTMLMediaElement.HAVE_CURRENT_DATA : HTMLMediaElement.HAVE_METADATA
+        });
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalled());
+        expect(screen.queryByRole('dialog', { name: '화면 캡처 영역 선택' })).not.toBeInTheDocument();
+        expect(drawImage).not.toHaveBeenCalled();
+        frameReady = true;
+        expect(await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' })).toBeInTheDocument();
+    });
+
+    it('continues selection when optional cursor constraints stop responding', async () => {
+        applyConstraints.mockReturnValue(new Promise(() => {}));
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        expect(await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' }, { timeout: 2200 })).toBeInTheDocument();
+    });
+
+    it('keeps a valid drag selection when the browser briefly loses focus', async () => {
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        const overlay = await waitFor(() => {
+            const element = document.querySelector<HTMLElement>('[data-capture-overlay="true"]');
+            expect(element).toBeInTheDocument();
+            return element as HTMLElement;
+        });
+
+        fireEvent(overlay, new MouseEvent('pointerdown', {
+            bubbles: true,
+            button: 0,
+            clientX: 100,
+            clientY: 120
+        }));
+        fireEvent(window, new MouseEvent('pointermove', {
+            bubbles: true,
+            clientX: 420,
+            clientY: 340
+        }));
+        fireEvent(window, new Event('blur'));
+
+        expect(await screen.findByRole('button', { name: '캡처 후 클립보드 복사' })).toBeInTheDocument();
+        expect(screen.getByText('포인터가 중단되었지만 마지막 유효 영역을 유지했습니다.')).toBeInTheDocument();
+        const selectionBox = document.querySelector<HTMLElement>('[data-selection-box="true"]');
+        expect(selectionBox).toHaveStyle({
+            left: '100px',
+            top: '120px',
+            width: '320px',
+            height: '220px'
+        });
+    });
+
+    it('ignores pointercancel from a different pointer while dragging', async () => {
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        const overlay = await waitFor(() => {
+            const element = document.querySelector<HTMLElement>('[data-capture-overlay="true"]');
+            expect(element).toBeInTheDocument();
+            return element as HTMLElement;
+        });
+
+        const pointerDown = new MouseEvent('pointerdown', {
+            bubbles: true,
+            button: 0,
+            clientX: 100,
+            clientY: 120
+        });
+        Object.defineProperty(pointerDown, 'pointerId', { value: 7 });
+        fireEvent(overlay, pointerDown);
+
+        const pointerMove = new MouseEvent('pointermove', {
+            bubbles: true,
+            clientX: 420,
+            clientY: 340
+        });
+        Object.defineProperty(pointerMove, 'pointerId', { value: 7 });
+        fireEvent(window, pointerMove);
+
+        const unrelatedCancel = new Event('pointercancel');
+        Object.defineProperty(unrelatedCancel, 'pointerId', { value: 8 });
+        fireEvent(window, unrelatedCancel);
+
+        expect(screen.queryByRole('button', { name: '캡처 후 클립보드 복사' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '영역 선택 중...' })).toBeDisabled();
+
+        fireEvent(window, new Event('blur'));
+        expect(await screen.findByRole('button', { name: '캡처 후 클립보드 복사' })).toBeInTheDocument();
+    });
+
     it('restores an actionable state when browser activation is rejected', async () => {
         const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
         getDisplayMedia.mockRejectedValueOnce(
@@ -582,18 +951,18 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
         }));
         fireEvent.click(await screen.findByRole('button', { name: '캡처 후 클립보드 복사' }));
         await waitFor(() => {
-            expect(document.querySelector('[data-capture-overlay="true"]')).not.toBeInTheDocument();
-            expect(clipboardWrite).toHaveBeenCalledTimes(1);
             expect(screen.getByRole('button', { name: '새 실제 영역 선택' })).toBeEnabled();
         });
+        expect(document.querySelector('[data-capture-overlay="true"]')).not.toBeInTheDocument();
+        expect(clipboardWrite).toHaveBeenCalledTimes(1);
 
         fireEvent.click(screen.getByRole('button', { name: '새 실제 영역 선택' }));
         overlay = await waitFor(() => {
             const element = document.querySelector<HTMLElement>('[data-capture-overlay="true"]');
             expect(element).toBeInTheDocument();
-            expect(document.querySelector('[data-frozen-capture-preview="true"]')).toBeInTheDocument();
             return element as HTMLElement;
         });
+        expect(document.querySelector('[data-frozen-capture-preview="true"]')).toBeInTheDocument();
 
         expect(overlay).toBeInTheDocument();
         expect(getDisplayMedia).toHaveBeenCalledTimes(1);
@@ -649,8 +1018,8 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
                 windowWidth: 800,
                 windowHeight: 1200
             }));
-            expect(clipboardWrite).toHaveBeenCalledTimes(1);
         });
+        await waitFor(() => expect(clipboardWrite).toHaveBeenCalledTimes(1));
         expect(getDisplayMedia).toHaveBeenCalledTimes(1);
         fullBoard.remove();
     });

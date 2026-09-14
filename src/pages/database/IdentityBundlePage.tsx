@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import JSZip from 'jszip';
+import { Link } from 'react-router-dom';
 import {
   AlertCircle,
   ArrowRight,
@@ -29,6 +30,7 @@ import {
 } from 'lucide-react';
 import IdentityCropEditor from '../../components/identity/IdentityCropEditor';
 import { identityBundleService } from '../../services/identityBundleService';
+import { identityBundleLogService, IDENTITY_LOG_PATH, type IdentityLogInput } from '../../services/identityBundleLogService';
 import { manpowerService, type Worker } from '../../services/manpowerService';
 import { storageService } from '../../services/storageService';
 import type {
@@ -161,6 +163,7 @@ const getPersonnelDetails = (group: IdentityPersonGroup): Array<{ label: string;
 const IdentityBundlePage: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const itemsRef = useRef<IdentityUploadItem[]>([]);
+  const groupNameBeforeEdit = useRef('');
   const [items, setItems] = useState<IdentityUploadItem[]>([]);
   const [assignments, setAssignments] = useState<Record<number, string>>({});
   const [groupNames, setGroupNames] = useState<Record<string, string>>({});
@@ -179,6 +182,7 @@ const IdentityBundlePage: React.FC = () => {
   const [progressText, setProgressText] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [logWarning, setLogWarning] = useState('');
   const [outputOptions, setOutputOptions] = useState<IdentityBundleOutputOptions>({
     preset: 'A4_300',
     includeHeader: false,
@@ -237,17 +241,31 @@ const IdentityBundlePage: React.FC = () => {
     setProgressText('');
   };
 
+  const recordLog = (input: IdentityLogInput) => {
+    void identityBundleLogService.log(input).then((recorded) => {
+      if (!recorded) setLogWarning('작업은 처리했지만 신분증 로그 저장에 실패했습니다. 로그인과 연결 상태를 확인해 주세요.');
+    });
+  };
+
+  const groupLogDetails = (group: IdentityPersonGroup) => ({
+    personNames: [group.personName], personCount: 1,
+    fileNames: group.documents.map((document) => document.originalFileName), fileCount: group.documents.length,
+  });
+
   const addFiles = (selected: File[]) => {
     if (selected.length === 0) return;
     const existingKeys = new Set(items.map((item) => `${item.file.name}:${item.file.size}:${item.file.lastModified}`));
     const accepted = selected.filter((file) => !existingKeys.has(`${file.name}:${file.size}:${file.lastModified}`));
+    if (accepted.length === 0) return;
     if (items.length + accepted.length > 60) {
+      recordLog({ action: 'files_added', status: 'failure', fileCount: accepted.length, reason: 'too_many_files' });
       setErrorMessage('한 번에 최대 60장까지 올릴 수 있습니다. 파일 수를 줄여 주세요.');
       return;
     }
     try {
       identityBundleService.validateFiles([...items.map((item) => item.file), ...accepted]);
     } catch (error) {
+      recordLog({ action: 'files_added', status: 'failure', fileCount: accepted.length, reason: 'invalid_files' });
       setErrorMessage(error instanceof Error ? error.message : '파일을 추가하지 못했습니다.');
       return;
     }
@@ -258,17 +276,21 @@ const IdentityBundlePage: React.FC = () => {
       status: 'queued',
     }));
     resetAnalysis([...items, ...created]);
+    recordLog({ action: 'files_added', status: 'success', fileNames: accepted.map((file) => file.name), fileCount: accepted.length });
   };
 
   const removeItem = (id: string) => {
     if (busy) return;
     const target = items.find((item) => item.id === id);
+    if (!target) return;
     if (target) URL.revokeObjectURL(target.previewUrl);
     resetAnalysis(items.filter((item) => item.id !== id));
+    recordLog({ action: 'files_removed', status: 'success', fileNames: [target.file.name], fileCount: 1 });
   };
 
   const clearAll = () => {
-    if (busy) return;
+    if (busy || items.length === 0) return;
+    recordLog({ action: 'files_removed', status: 'success', fileNames: items.map((item) => item.file.name), fileCount: items.length });
     items.forEach((item) => URL.revokeObjectURL(item.previewUrl));
     resetAnalysis([]);
   };
@@ -306,7 +328,12 @@ const IdentityBundlePage: React.FC = () => {
       setVerifiedGroupIds({});
       setProgressText('');
       setSuccessMessage(`${documents.length}장 빠른 묶기 완료 · ${autoGroups.length}명으로 분류했습니다. 묶음사진을 미리본 뒤 필요한 사람만 상세 분석하세요.`);
+      recordLog({ action: 'analysis', status: documents.length === items.length ? 'success' : documents.length > 0 ? 'partial' : 'failure',
+        fileNames: items.map((item) => item.file.name), fileCount: items.length,
+        personNames: autoGroups.map((group) => group.personName), personCount: autoGroups.length,
+        ...(documents.length !== items.length ? { reason: 'missing_results' as const } : {}) });
     } catch (error) {
+      recordLog({ action: 'analysis', status: 'failure', fileNames: items.map((item) => item.file.name), fileCount: items.length, reason: 'processing_failed' });
       setItems((current) => current.map((item) => ({ ...item, status: 'failed' })));
       setProgressText('');
       setErrorMessage(error instanceof Error ? error.message : '신분증 분석에 실패했습니다.');
@@ -316,6 +343,9 @@ const IdentityBundlePage: React.FC = () => {
   };
 
   const moveDocument = (document: IdentityDocumentAnalysis, sourceGroupId: string, nextGroupId: string) => {
+    recordLog({ action: nextGroupId === '__new__' ? 'group_split' : 'group_moved', status: 'success',
+      fileNames: [document.originalFileName], fileCount: 1,
+      personNames: [groupNames[sourceGroupId], groupNames[nextGroupId], document.personName].filter(Boolean) });
     if (nextGroupId === '__new__') {
       const newGroupId = `manual-${Date.now()}-${document.fileIndex}`;
       setAssignments((current) => ({ ...current, [document.fileIndex]: newGroupId }));
@@ -361,6 +391,8 @@ const IdentityBundlePage: React.FC = () => {
         : item
     )));
     const affectedGroupId = assignments[fileIndex];
+    recordLog({ action: 'crop_updated', status: 'success', fileNames: [items[fileIndex]?.file.name || ''], fileCount: 1,
+      personNames: [groupNames[affectedGroupId] || ''], correctionMode });
     if (affectedGroupId) setVerifiedGroupIds((current) => ({ ...current, [affectedGroupId]: false }));
     setEditingFileIndex(null);
     setSuccessMessage(correctionMode === 'MANUAL'
@@ -394,7 +426,9 @@ const IdentityBundlePage: React.FC = () => {
         analysisComplete: false,
         analysisError: '',
       });
+      recordLog({ action: 'preview_created', status: 'success', ...groupLogDetails(group) });
     } catch (error) {
+      recordLog({ action: 'preview_created', status: 'failure', ...groupLogDetails(group), reason: 'processing_failed' });
       setErrorMessage(error instanceof Error ? error.message : '미리보기 이미지를 만들지 못했습니다.');
     } finally {
       setPreviewLoadingGroupId('');
@@ -431,6 +465,9 @@ const IdentityBundlePage: React.FC = () => {
       const name = analysis.name || preview.name;
       const match = resolveWorkerMatch(workerRows, name, analysis.idNumber);
       setWorkers(workerRows);
+      recordLog({ action: 'detail_analysis', status: 'success', personNames: [name], personCount: 1,
+        fileCount: groups.find((group) => group.id === preview.groupId)?.documents.length || 0,
+        workerId: match.worker?.id });
       setRegistrationPreview((current) => current?.groupId === preview.groupId ? {
         ...current,
         name,
@@ -445,6 +482,7 @@ const IdentityBundlePage: React.FC = () => {
       setRegistrationProgress('');
     } catch (error) {
       const message = error instanceof Error ? error.message : '묶음사진 인적정보 분석에 실패했습니다.';
+      recordLog({ action: 'detail_analysis', status: 'failure', personNames: [preview.name], personCount: 1, reason: 'processing_failed' });
       setRegistrationPreview((current) => current?.groupId === preview.groupId ? {
         ...current,
         analysisComplete: false,
@@ -483,6 +521,7 @@ const IdentityBundlePage: React.FC = () => {
     setRegistrationProgress('저장용 이미지를 가볍게 변환하고 있습니다.');
     let uploadedPath = '';
     let databaseCommitted = false;
+    let savedWorkerId = registrationPreview.workerId;
     try {
       const compressed = await compressIdentityImageForStorage(
         registrationPreview.blob,
@@ -508,7 +547,7 @@ const IdentityBundlePage: React.FC = () => {
       uploadedPath = uploadResult.fullPath;
 
       if (registrationPreview.mode === 'new') {
-        await manpowerService.addWorker({
+        savedWorkerId = await manpowerService.addWorker({
           name,
           idNumber: registrationPreview.idNumber.trim(),
           address: registrationPreview.address.trim(),
@@ -526,6 +565,9 @@ const IdentityBundlePage: React.FC = () => {
         await manpowerService.updateWorker(registrationPreview.workerId, updates);
       }
       databaseCommitted = true;
+      recordLog({ action: registrationPreview.mode === 'new' ? 'worker_created' : 'worker_updated', status: 'success',
+        personNames: [name], personCount: 1, workerId: savedWorkerId,
+        fileCount: groups.find((group) => group.id === registrationPreview.groupId)?.documents.length || 0 });
 
       const reduction = registrationPreview.blob.size > 0
         ? Math.max(0, Math.round((1 - compressed.file.size / registrationPreview.blob.size) * 100))
@@ -539,6 +581,8 @@ const IdentityBundlePage: React.FC = () => {
         console.warn('Worker registration succeeded but worker cache refresh failed:', refreshError);
       }
     } catch (error) {
+      recordLog({ action: registrationPreview.mode === 'new' ? 'worker_created' : 'worker_updated', status: 'failure',
+        personNames: [name], personCount: 1, workerId: savedWorkerId, reason: 'processing_failed' });
       if (uploadedPath && !databaseCommitted) {
         try {
           await storageService.deleteFile(uploadedPath);
@@ -559,7 +603,9 @@ const IdentityBundlePage: React.FC = () => {
     try {
       const blob = await renderIdentityBundleBlob(group, filesByIndex, outputOptions);
       downloadBlob(blob, `${sanitizeIdentityBundleFileName(group.personName)}_신분증묶음.jpg`);
+      recordLog({ action: 'download_image', status: 'success', ...groupLogDetails(group) });
     } catch (error) {
+      recordLog({ action: 'download_image', status: 'failure', ...groupLogDetails(group), reason: 'processing_failed' });
       setErrorMessage(error instanceof Error ? error.message : '결과 이미지를 만들지 못했습니다.');
     } finally {
       setDownloadingGroupId('');
@@ -605,7 +651,12 @@ const IdentityBundlePage: React.FC = () => {
       );
       downloadBlob(archive, `신분증_묶음사진_${new Date().toISOString().slice(0, 10)}.zip`);
       setSuccessMessage(`${groups.length}명의 묶음사진을 ZIP으로 만들었습니다.`);
+      recordLog({ action: 'download_zip', status: 'success', personNames: groups.map((group) => group.personName),
+        personCount: groups.length, fileNames: groups.flatMap((group) => group.documents.map((document) => document.originalFileName)),
+        fileCount: analyzedDocuments.length });
     } catch (error) {
+      recordLog({ action: 'download_zip', status: 'failure', personNames: groups.map((group) => group.personName),
+        personCount: groups.length, fileCount: analyzedDocuments.length, reason: 'processing_failed' });
       setErrorMessage(error instanceof Error ? error.message : 'ZIP 파일을 만들지 못했습니다.');
     } finally {
       setProgressText('');
@@ -626,11 +677,13 @@ const IdentityBundlePage: React.FC = () => {
 
   return (
     <main className="identity-bundle-page">
+      {logWarning && <div role="alert" className="border-b border-amber-200 bg-amber-50 px-6 py-3 text-sm text-amber-900">{logWarning}</div>}
       <section className="identity-bundle-hero">
         <div className="identity-bundle-hero__glow" />
         <div className="identity-bundle-hero__content">
           <div className="identity-bundle-eyebrow"><Sparkles size={14} /> AI DOCUMENT STUDIO</div>
           <h1>신분증 묶음사진</h1>
+          <Link to={IDENTITY_LOG_PATH} className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-teal-200 underline underline-offset-4">신분증 로그 보기 <ArrowRight size={14} /></Link>
           <p>1차 AI로 사진을 빠르게 묶고 완성 이미지를 먼저 확인하세요.<br className="identity-desktop-break" /> DB 등록할 묶음만 2차 AI가 인적정보를 상세 분석합니다.</p>
           <div className="identity-bundle-hero__chips">
             <span><Check size={14} /> 최대 60장</span>
@@ -693,6 +746,7 @@ const IdentityBundlePage: React.FC = () => {
               ref={fileInputRef}
               className="identity-file-input"
               type="file"
+              aria-label="신분증 사진 선택"
               accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
               multiple
               onChange={(event) => {
@@ -812,6 +866,12 @@ const IdentityBundlePage: React.FC = () => {
                       <input
                         value={group.personName}
                         aria-label="사람 이름"
+                        onFocus={() => { groupNameBeforeEdit.current = group.personName; }}
+                        onBlur={() => {
+                          if (groupNameBeforeEdit.current !== group.personName) {
+                            recordLog({ action: 'name_changed', status: 'success', ...groupLogDetails(group), personNames: [groupNameBeforeEdit.current, group.personName] });
+                          }
+                        }}
                         onChange={(event) => {
                           setGroupNames((current) => ({ ...current, [group.id]: event.target.value }));
                           setVerifiedGroupIds((current) => ({ ...current, [group.id]: false }));
@@ -887,7 +947,10 @@ const IdentityBundlePage: React.FC = () => {
                   <button
                     type="button"
                     className={`identity-verify-button ${verifiedGroupIds[group.id] ? 'is-verified' : ''}`}
-                    onClick={() => setVerifiedGroupIds((current) => ({ ...current, [group.id]: !current[group.id] }))}
+                    onClick={() => {
+                      recordLog({ action: verifiedGroupIds[group.id] ? 'identity_unconfirmed' : 'identity_confirmed', status: 'success', ...groupLogDetails(group) });
+                      setVerifiedGroupIds((current) => ({ ...current, [group.id]: !current[group.id] }));
+                    }}
                   >
                     {verifiedGroupIds[group.id]
                       ? <><CheckCircle2 size={16} /> 동일인 확인 완료 · 다시 확인하기</>

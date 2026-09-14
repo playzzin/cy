@@ -2,11 +2,28 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, Check, ClipboardCheck, Download, MousePointerSquareDashed, RotateCcw, Trash2, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import html2canvas from 'html2canvas';
+import { createCaptureDiagnostics, CaptureDiagnosticRun, CAPTURE_STAGE_LABELS } from './captureDiagnostics';
+import { createCaptureIdentity } from './captureIdentity';
+import { captureScrollRangeParts, CaptureImagePart, encodeCapturePng } from './scrollCapturePipeline';
+import CaptureImageEditor from './CaptureImageEditor';
+import {
+    CaptureQuality, CaptureViewport, readCaptureViewport, isSameCaptureViewport,
+    fitCaptureSize, getCaptureConstraints, retainCaptureHistory, CAPTURE_HISTORY_LIMIT
+} from './capturePolicy';
+import {
+    prepareCaptureVideo,
+    waitForCaptureOperation,
+    waitForCapturePaint,
+    waitForCapturedFrame,
+    waitForStableCaptureViewport
+} from './captureFrameReadiness';
 import {
     createScrollStitchSlice,
     getScrollStitchBoundaryContentY,
     ScrollStitchSegmentGeometry
 } from './scrollCaptureStitching';
+
+export { waitForCapturedFrame } from './captureFrameReadiness';
 
 type Rect = {
     left: number;
@@ -41,15 +58,16 @@ type CaptureHistoryItem = {
     createdAt: number;
     width: number;
     height: number;
-    clipboardStatus: 'pending' | 'copied' | 'blocked' | 'unsupported' | 'failed';
+    clipboardStatus: 'pending' | 'copied' | 'blocked' | 'unsupported' | 'failed' | 'timeout';
     downloadRequested: boolean;
+    parts?: CaptureImagePart[];
 };
 
 type ClipboardCopyResult =
     | { ok: true }
     | {
         ok: false;
-        reason: 'unsupported' | 'blocked' | 'failed';
+        reason: 'unsupported' | 'blocked' | 'failed' | 'timeout';
     };
 
 type ClipboardWriteReservation = {
@@ -72,6 +90,8 @@ type FrozenScreenFrame = {
     canvas: HTMLCanvasElement;
     width: number;
     height: number;
+    viewport: CaptureViewport;
+    tabVerified: boolean;
 };
 
 type ScrollCaptureRange = {
@@ -238,16 +258,10 @@ const getAdjustedSelectionRect = (
     };
 };
 
-const waitNextPaint = (): Promise<void> => {
-    return new Promise((resolve) => {
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => resolve());
-        });
-    });
-};
+const waitNextPaint = waitForCapturePaint;
 
 const toPngBlob = (canvas: HTMLCanvasElement): Promise<Blob> => {
-    return new Promise((resolve, reject) => {
+    return waitForCaptureOperation(new Promise<Blob>((resolve, reject) => {
         canvas.toBlob((blob) => {
             if (!blob) {
                 reject(new Error('이미지 생성 실패'));
@@ -255,7 +269,7 @@ const toPngBlob = (canvas: HTMLCanvasElement): Promise<Blob> => {
             }
             resolve(blob);
         }, 'image/png');
-    });
+    }), 10000, 'png-timeout');
 };
 
 const saveBlobAsFile = (blob: Blob, fileName: string) => {
@@ -294,6 +308,8 @@ const getClipboardStatusLabel = (status: CaptureHistoryItem['clipboardStatus']):
             return '클립보드 미지원';
         case 'blocked':
             return '클립보드 차단됨';
+        case 'timeout':
+            return '복사 응답 지연';
         default:
             return '클립보드 미복사';
     }
@@ -316,6 +332,7 @@ type CaptureHistoryActionsProps = {
     onCopy: (item: CaptureHistoryItem) => void;
     onDownload: (item: CaptureHistoryItem) => void;
     onRemove: (itemId: string) => void;
+    onEdit: (item: CaptureHistoryItem) => void;
 };
 
 const CaptureHistoryActions: React.FC<CaptureHistoryActionsProps> = ({
@@ -324,7 +341,8 @@ const CaptureHistoryActions: React.FC<CaptureHistoryActionsProps> = ({
     label,
     onCopy,
     onDownload,
-    onRemove
+    onRemove,
+    onEdit
 }) => (
     <div
         role="group"
@@ -339,16 +357,15 @@ const CaptureHistoryActions: React.FC<CaptureHistoryActionsProps> = ({
             className="col-span-2 inline-flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-emerald-500/40 bg-emerald-500/15 px-3 py-2 text-[11px] font-semibold text-emerald-100 hover:bg-emerald-500/25 disabled:opacity-50"
         >
             <ClipboardCheck className="h-3.5 w-3.5 shrink-0" />
-            {item.clipboardStatus === 'copied' ? '클립보드에 다시 복사' : '클립보드 복사'}
+            {item.parts ? '첫 장 클립보드 복사' : item.clipboardStatus === 'copied' ? '클립보드에 다시 복사' : '클립보드 복사'}
         </button>
         <button
             type="button"
             onClick={() => onDownload(item)}
-            disabled={disabled}
             className="inline-flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-white/20 px-2 py-2 text-[11px] font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-50"
         >
             <Download className="h-3.5 w-3.5 shrink-0" />
-            PNG 저장
+            {item.parts ? `PNG 묶음 저장 (${item.parts.length}장)` : 'PNG 저장'}
         </button>
         <button
             type="button"
@@ -359,10 +376,13 @@ const CaptureHistoryActions: React.FC<CaptureHistoryActionsProps> = ({
             <Trash2 className="h-3.5 w-3.5 shrink-0" />
             삭제
         </button>
+        <button type="button" onClick={() => onEdit(item)} disabled={disabled} className="col-span-2 rounded-md border border-sky-400/30 px-3 py-2 text-xs font-semibold text-sky-200 disabled:opacity-50">이미지 편집</button>
+        {item.parts && <p className="col-span-2 text-[10px] text-slate-400">분할 {item.parts.length}장 · 첫 장 미리보기 · 전체는 PNG 묶음으로 저장</p>}
     </div>
 );
 
 const getClipboardFailureResult = (error: unknown): ClipboardCopyResult => {
+    if (error instanceof Error && error.message === 'clipboard-timeout') return { ok: false, reason: 'timeout' };
     if (
         (error instanceof DOMException && (
             error.name === 'NotAllowedError'
@@ -395,11 +415,11 @@ const copyBlobToClipboard = async (blob: Blob): Promise<ClipboardCopyResult> => 
             return { ok: false, reason: 'unsupported' };
         }
 
-        await clipboard.write([
+        await waitForCaptureOperation(clipboard.write([
             new ClipboardItemCtor({
                 'image/png': blob
             })
-        ]);
+        ]), 3500, 'clipboard-timeout');
         return { ok: true };
     } catch (error) {
         return getClipboardFailureResult(error);
@@ -431,14 +451,22 @@ const reserveClipboardWrite = (): ClipboardWriteReservation | null => {
         resolveBlob = resolve;
         rejectBlob = reject;
     });
+    void blobPromise.catch(() => {});
 
     try {
         const clipboardItem = new ClipboardItemCtor({
             'image/png': blobPromise
         });
-        const result = clipboard.write([clipboardItem])
+        const writeResult = clipboard.write([clipboardItem])
             .then<ClipboardCopyResult>(() => ({ ok: true }))
             .catch((error: unknown) => getClipboardFailureResult(error));
+        // Encoding or scrolling can take longer than a clipboard operation.
+        // Start this deadline only after the PNG has been supplied.
+        const result = blobPromise.then(
+            () => waitForCaptureOperation(writeResult, 3500, 'clipboard-timeout')
+                .catch((error: unknown) => getClipboardFailureResult(error)),
+            (error: unknown) => getClipboardFailureResult(error)
+        );
 
         return {
             complete: (blob) => {
@@ -464,6 +492,7 @@ const reserveClipboardWrite = (): ClipboardWriteReservation | null => {
 };
 
 const hideExcludedRoots = () => {
+    let restored = false;
     const excludedRoots = Array.from(document.querySelectorAll<HTMLElement>(CAPTURE_EXCLUDE_SELECTOR));
     const prevInlineStyles = excludedRoots.map((el) => ({
         el,
@@ -479,6 +508,8 @@ const hideExcludedRoots = () => {
     });
 
     return () => {
+        if (restored) return;
+        restored = true;
         prevInlineStyles.forEach(({ el, visibility, opacity, pointerEvents }) => {
             el.style.visibility = visibility;
             el.style.opacity = opacity;
@@ -600,10 +631,14 @@ html[${QUICK_CAMERA_CURSOR_HIDE_ATTR}='true'] * {
     };
 };
 
-const applyNoCursorCaptureConstraint = async (track: MediaStreamTrack) => {
+const applyNoCursorCaptureConstraint = async (track: MediaStreamTrack, signal?: AbortSignal) => {
     try {
-        const constraints: DisplayMediaTrackConstraints = { cursor: 'never' };
-        await track.applyConstraints(constraints);
+        // applyConstraints replaces the complete set. A cursor-only request
+        // clears width/height/resizeMode and can silently reduce text resolution.
+        // CSS already hides our cursor when reading constraints is unsupported.
+        if (!track.getConstraints) return;
+        const constraints: DisplayMediaTrackConstraints = { ...track.getConstraints(), cursor: 'never' };
+        await waitForCaptureOperation(track.applyConstraints(constraints), 800, 'cursor-constraint-timeout', signal);
     } catch {
         // Some browsers ignore display-capture cursor constraints. CSS cursor hiding is still applied.
     }
@@ -668,19 +703,16 @@ export const getHighResolutionDisplayMediaConstraints = (
 
 export const getPermissionFreeCaptureScale = (
     viewport: ViewportMetrics,
-    devicePixelRatio = window.devicePixelRatio || 1
+    devicePixelRatio = window.devicePixelRatio || 1,
+    quality: CaptureQuality = 'high'
 ): number => {
-    const desiredScale = Math.min(
-        MAX_SCREEN_CAPTURE_SOURCE_SCALE,
-        Math.max(MIN_SCREEN_CAPTURE_SOURCE_SCALE, devicePixelRatio)
-    );
-    const supportedScale = Math.max(1, Math.min(
-        MAX_SCREEN_CAPTURE_SOURCE_SCALE,
+    const desiredScale = quality === 'high' ? Math.min(3, Math.max(2, devicePixelRatio)) : 1;
+    return Math.min(
+        desiredScale,
         MAX_SCREEN_CAPTURE_SOURCE_WIDTH / viewport.width,
-        MAX_SCREEN_CAPTURE_SOURCE_HEIGHT / viewport.height
-    ));
-
-    return Math.min(desiredScale, supportedScale);
+        16384 / viewport.height,
+        Math.sqrt((quality === 'high' ? 12_000_000 : 4_000_000) / (viewport.width * viewport.height))
+    );
 };
 
 const getFullContentCaptureTarget = () => (
@@ -779,11 +811,13 @@ const getVideoSourceRect = (
 
 const cropVideoFrameToCanvas = (
     video: HTMLVideoElement,
-    crop: { sourceX: number; sourceY: number; sourceW: number; sourceH: number }
+    crop: { sourceX: number; sourceY: number; sourceW: number; sourceH: number },
+    quality: CaptureQuality
 ) => {
+    const size = fitCaptureSize(crop.sourceW, crop.sourceH, quality === 'high' ? 12_000_000 : 4_000_000);
     const canvas = document.createElement('canvas');
-    canvas.width = crop.sourceW;
-    canvas.height = crop.sourceH;
+    canvas.width = size.width;
+    canvas.height = size.height;
     const ctx = canvas.getContext('2d');
     if (!ctx) {
         throw new Error('캔버스 컨텍스트 생성 실패');
@@ -797,23 +831,24 @@ const cropVideoFrameToCanvas = (
         crop.sourceH,
         0,
         0,
-        crop.sourceW,
-        crop.sourceH
+        canvas.width,
+        canvas.height
     );
 
     return canvas;
 };
 
-const freezeVideoFrameToCanvas = (video: HTMLVideoElement) => {
+const freezeVideoFrameToCanvas = (video: HTMLVideoElement, quality: CaptureQuality) => {
+    const size = fitCaptureSize(video.videoWidth, video.videoHeight, quality === 'high' ? 12_000_000 : 4_000_000);
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = size.width;
+    canvas.height = size.height;
     const ctx = canvas.getContext('2d');
     if (!ctx) {
         throw new Error('캔버스 컨텍스트 생성 실패');
     }
 
-    ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     return canvas;
 };
 
@@ -1143,7 +1178,7 @@ export const resolveScrollRangeCapturePlan = (anchor: ScrollSelectionAnchor, end
 
 const getSelectionPromptMessage = (mode: CaptureMode) => {
     if (mode === 'scroll') {
-        return '\uc2dc\uc791\uc810\uc744 \ud074\ub9ad\ud55c \ub4a4 \uc2a4\ud06c\ub864\ud558\uace0, \ub9c8\uc9c0\ub9c9 \uc120\ud0dd\uc810\uc744 \ud074\ub9ad\ud558\uc138\uc694. \uc800\uc7a5\ud560 \ub54c\ub294 \ud604\uc7ac \ube0c\ub77c\uc6b0\uc800 \ud0ed\uc744 \uc120\ud0dd\ud574\uc57c \ud569\ub2c8\ub2e4. (ESC \ucde8\uc18c)';
+        return '현재 탭을 허용한 뒤 시작점을 클릭하고 스크롤해 마지막 지점을 클릭하세요. 끝점을 누르면 캡처합니다. (ESC 취소)';
     }
     return '고정된 실제 화면 위에서 저장할 영역을 드래그하세요. 테두리를 조절한 뒤 “캡처 후 클립보드 복사”를 누르세요. (ESC 취소)';
 };
@@ -1194,92 +1229,7 @@ const getScrollCaptureRisk = (plan: ScrollCapturePlan): {
     };
 };
 
-const waitForVideoReady = (video: HTMLVideoElement): Promise<void> => {
-    return new Promise((resolve, reject) => {
-        let timeoutId = 0;
-        const cleanup = () => {
-            window.clearTimeout(timeoutId);
-            video.removeEventListener('loadedmetadata', handleLoadedMetadata);
-            video.removeEventListener('error', handleError);
-        };
-
-        const handleLoadedMetadata = () => {
-            cleanup();
-            resolve();
-        };
-
-        const handleError = () => {
-            cleanup();
-            reject(new Error('video-load-failed'));
-        };
-
-        if (video.readyState >= HTMLMediaElement.HAVE_METADATA && video.videoWidth > 0 && video.videoHeight > 0) {
-            resolve();
-            return;
-        }
-
-        video.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
-        video.addEventListener('error', handleError, { once: true });
-        timeoutId = window.setTimeout(() => {
-            cleanup();
-            reject(new Error('video-load-timeout'));
-        }, 10000);
-    });
-};
-
-const hasUsableCapturedFrame = (video: HTMLVideoElement) => (
-    video.videoWidth > 0
-    && video.videoHeight > 0
-    && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
-    && !video.error
-);
-
 const isCaptureTrackEnded = (track: MediaStreamTrack) => track.readyState === 'ended';
-
-export const waitForCapturedFrame = async (
-    video: HTMLVideoElement,
-    frameTimeoutMs = 5000,
-    allowExistingFrameOnTimeout = false
-) => {
-    if ('requestVideoFrameCallback' in video) {
-        const receivedFreshFrame = await new Promise<boolean>((resolve) => {
-            const timeoutId = window.setTimeout(() => {
-                resolve(false);
-            }, frameTimeoutMs);
-            const requestFrame = (video as HTMLVideoElement & {
-                requestVideoFrameCallback?: (callback: () => void) => number;
-            }).requestVideoFrameCallback;
-
-            if (!requestFrame) {
-                window.clearTimeout(timeoutId);
-                resolve(false);
-                return;
-            }
-
-            requestFrame.call(video, () => {
-                window.clearTimeout(timeoutId);
-                resolve(true);
-            });
-        });
-
-        // Some Chromium/extension combinations stop delivering
-        // requestVideoFrameCallback while a perfectly drawable compositor
-        // frame is already present. Do not discard that valid frame.
-        if (
-            receivedFreshFrame
-            || (allowExistingFrameOnTimeout && hasUsableCapturedFrame(video))
-        ) {
-            return;
-        }
-
-        throw new Error('video-frame-timeout');
-    }
-
-    await new Promise((resolve) => window.setTimeout(resolve, 120));
-    if (allowExistingFrameOnTimeout && !hasUsableCapturedFrame(video)) {
-        throw new Error('video-frame-timeout');
-    }
-};
 
 const scrollToFreshCapturedFrame = async (
     target: HTMLElement,
@@ -1314,17 +1264,18 @@ const scrollToFreshCapturedFrame = async (
 
 const waitForCursorlessCaptureFrame = async (
     video: HTMLVideoElement,
-    allowExistingFrameOnTimeout = false
+    allowExistingFrameOnTimeout = false,
+    signal?: AbortSignal
 ) => {
     // Give the browser two paints to apply the cursor/panel hiding styles, then
     // wait for one compositor frame. Waiting for two long frame callbacks made
     // a healthy existing capture look unresponsive for up to five seconds on
     // Chromium/extension combinations that stop delivering callbacks.
-    await waitNextPaint();
+    await waitForCapturePaint(signal);
     const timeoutMs = allowExistingFrameOnTimeout
         ? SCREEN_FRAME_REFRESH_TIMEOUT_MS
         : 2500;
-    await waitForCapturedFrame(video, timeoutMs, allowExistingFrameOnTimeout);
+    await waitForCapturedFrame(video, timeoutMs, allowExistingFrameOnTimeout, signal);
 };
 
 type DisplayCaptureSupportIssue = 'insecure-context' | 'unsupported' | null;
@@ -1342,6 +1293,10 @@ export const getScreenCaptureFailureMessage = (error: unknown): string => {
                 return '현재 앱 화면을 고정하려면 공유창에서 “현재 탭”을 선택해 주세요. 창 또는 전체 화면은 저장하지 않았습니다.';
             case 'screen-aspect-mismatch':
                 return '선택한 탭의 화면 비율이 현재 앱과 달라 정확한 픽셀 좌표를 보장할 수 없습니다. 공유창에서 현재 탭을 선택해 주세요.';
+            case 'screen-tab-mismatch':
+                return '다른 탭이 선택되었습니다. 공유창에서 지금 카메라를 사용하는 앱 탭을 선택해 주세요.';
+            case 'capture-viewport-changed':
+                return '화면 크기 또는 배율이 바뀌었습니다. 현재 화면에서 영역을 다시 선택해 주세요.';
             case 'unsupported':
                 return '이 브라우저는 실제 화면 캡처를 지원하지 않습니다. 최신 Chrome 또는 Edge에서 다시 시도해 주세요.';
             case 'insecure-context':
@@ -1349,6 +1304,8 @@ export const getScreenCaptureFailureMessage = (error: unknown): string => {
             case 'video-load-timeout':
             case 'video-frame-timeout':
                 return '공유 화면의 영상 프레임이 늦게 도착했습니다. 현재 탭이 보이는 상태에서 다시 시도해 주세요.';
+            case 'capture-paint-timeout':
+                return '현재 탭의 화면 갱신이 중단되었습니다. 앱 탭을 앞으로 가져온 뒤 다시 시도해 주세요.';
             case 'no-track':
             case 'track-ended':
                 return '화면 공유가 종료되었습니다. “새 실제 영역 선택”을 눌러 현재 탭 공유를 다시 허용해 주세요.';
@@ -1381,12 +1338,24 @@ export const getScreenCaptureFailureMessage = (error: unknown): string => {
 export const getScrollCaptureFailureMessage = (error: unknown): string => {
     if (error instanceof Error) {
         switch (error.message) {
+            case 'screen-tab-mismatch':
+            case 'screen-browser-only':
+            case 'capture-viewport-changed':
+                return getScreenCaptureFailureMessage(error);
+            case 'scroll-identity-unsupported':
+                return '이 브라우저에서는 공유한 탭을 확인할 수 없어 자동 스크롤을 시작하지 않았습니다. 최신 Chrome·Edge를 이용하거나 현재 화면 영역으로 캡처해 주세요.';
+            case 'scroll-content-changing':
+                return '스크롤 중 표의 내용이나 높이가 바뀌었습니다. 로딩이 끝난 뒤 구간을 다시 선택해 주세요.';
+            case 'scroll-frame-unchanged':
+                return '스크롤해도 같은 영상이 반복되어 중단했습니다. 내용이 다른 구간으로 나누거나 현재 화면 영역으로 캡처해 주세요.';
             case 'capture-aborted':
                 return '긴 화면 캡처를 취소했습니다.';
             case 'scroll-browser-only':
                 return '긴 화면 캡처는 공유창에서 반드시 “현재 탭”을 선택해야 합니다.';
             case 'scroll-tab-hidden':
                 return '현재 탭이 보이는 상태에서만 긴 화면을 캡처할 수 있습니다. 이 탭으로 돌아와 다시 시도해 주세요.';
+            case 'capture-viewport-unsettled':
+                return '공유 화면의 크기가 아직 안정되지 않았습니다. 현재 탭에서 창 크기 조절을 마친 뒤 다시 시작해 주세요.';
             case 'selection-too-small':
                 return '선택 구간이 너무 작습니다. 시작점과 마지막 지점을 더 넓게 지정해 주세요.';
             case 'empty-scroll-range':
@@ -1427,7 +1396,14 @@ export const getScrollCaptureFailureMessage = (error: unknown): string => {
     return '긴 화면 캡처 중 오류가 발생했습니다. 현재 탭을 선택해 다시 시도해 주세요.';
 };
 
-const QuickCameraCapture: React.FC = () => {
+const QuickCameraCapture: React.FC<{ active?: boolean }> = ({ active = true }) => {
+    const [editorItem, setEditorItem] = useState<CaptureHistoryItem | null>(null);
+    const [lastSelection, setLastSelection] = useState<{ rect: Rect; viewport: CaptureViewport } | null>(null);
+    const [continuousCapture, setContinuousCapture] = useState(false);
+    const [currentViewport, setCurrentViewport] = useState(readCaptureViewport);
+    const [quality, setQuality] = useState<CaptureQuality>('high');
+    const [sourceConfirmed, setSourceConfirmed] = useState(false);
+    const [qualityNotice, setQualityNotice] = useState('');
     const [captureMode, setCaptureMode] = useState<CaptureMode>('screen');
     const [isSelecting, setIsSelecting] = useState(false);
     const [selectionRect, setSelectionRect] = useState<Rect | null>(null);
@@ -1453,8 +1429,10 @@ const QuickCameraCapture: React.FC = () => {
     const selectionScrollTargetRef = useRef<HTMLElement | null>(null);
     const hiddenPanelRestoreRef = useRef<(() => void) | null>(null);
     const scrollCapturePlanRef = useRef<ScrollCapturePlan | null>(null);
+    const scrollSelectionViewportRef = useRef<CaptureViewport | null>(null);
     const abortProcessingRef = useRef(false);
     const activeStreamRef = useRef<MediaStream | null>(null);
+    const activeStreamQualityRef = useRef<CaptureQuality | null>(null);
     const activeVideoRef = useRef<HTMLVideoElement | null>(null);
     const activeTrackCleanupRef = useRef<(() => void) | null>(null);
     const cursorPointRef = useRef<Point | null>(null);
@@ -1463,9 +1441,34 @@ const QuickCameraCapture: React.FC = () => {
     const captureHistoryRef = useRef<CaptureHistoryItem[]>([]);
     const captureOperationInFlightRef = useRef(false);
     const screenSessionIdRef = useRef(0);
+    const screenPreparationAbortRef = useRef<AbortController | null>(null);
     const screenCapturePhaseRef = useRef<ScreenCapturePhase>('idle');
     const screenCaptureUiRestoreRef = useRef<(() => void) | null>(null);
+    const scrollCaptureUiRestoreRef = useRef<(() => void) | null>(null);
     const frozenScreenFrameRef = useRef<FrozenScreenFrame | null>(null);
+    const diagnosticsRef = useRef(createCaptureDiagnostics());
+    const activeDiagnosticRef = useRef<CaptureDiagnosticRun | null>(null);
+    const captureIdentityRef = useRef<ReturnType<typeof createCaptureIdentity> | null>(null);
+    const repeatSelectionRef = useRef(false);
+    const lastSelectionRef = useRef<{ rect: Rect; viewport: CaptureViewport } | null>(null);
+    const downloadInFlightRef = useRef(new Set<string>());
+    useEffect(() => {
+        const identity = createCaptureIdentity();
+        captureIdentityRef.current = identity;
+        return () => { identity.dispose(); captureIdentityRef.current = null; };
+    }, []);
+    useEffect(() => {
+        const update = () => setCurrentViewport(readCaptureViewport());
+        const dpiQuery = window.matchMedia?.(`(resolution: ${currentViewport.pixelRatio}dppx)`);
+        window.addEventListener('resize', update);
+        window.visualViewport?.addEventListener('resize', update);
+        dpiQuery?.addEventListener?.('change', update);
+        return () => {
+            window.removeEventListener('resize', update);
+            window.visualViewport?.removeEventListener('resize', update);
+            dpiQuery?.removeEventListener?.('change', update);
+        };
+    }, [currentViewport.pixelRatio]);
 
     const renderFrozenFramePreview = useCallback((canvas: HTMLCanvasElement | null) => {
         if (!canvas) return;
@@ -1488,6 +1491,7 @@ const QuickCameraCapture: React.FC = () => {
 
     const requestProcessingCancel = useCallback(() => {
         abortProcessingRef.current = true;
+        screenPreparationAbortRef.current?.abort();
         setProcessingStatusText('스크롤 캡처를 취소하는 중입니다...');
     }, []);
 
@@ -1500,6 +1504,7 @@ const QuickCameraCapture: React.FC = () => {
     }, [selectionRect]);
 
     const stopActiveCaptureResources = useCallback(() => {
+        activeStreamQualityRef.current = null;
         activeTrackCleanupRef.current?.();
         activeTrackCleanupRef.current = null;
 
@@ -1516,8 +1521,11 @@ const QuickCameraCapture: React.FC = () => {
     }, []);
 
     const clearFrozenScreenFrame = useCallback(() => {
+        const canvas = frozenScreenFrameRef.current?.canvas;
+        if (canvas) { canvas.width = 0; canvas.height = 0; }
         frozenScreenFrameRef.current = null;
         setFrozenFramePreviewReady(false);
+        setSourceConfirmed(false);
     }, []);
 
     const restoreScreenCaptureUi = useCallback(() => {
@@ -1527,8 +1535,14 @@ const QuickCameraCapture: React.FC = () => {
     }, []);
 
     const endScreenCaptureSession = useCallback(() => {
-        restoreScreenCaptureUi();
+        activeDiagnosticRef.current?.finish('cancelled');
         screenSessionIdRef.current += 1;
+        screenPreparationAbortRef.current?.abort();
+        screenPreparationAbortRef.current = null;
+        scrollSelectionViewportRef.current = null;
+        restoreScreenCaptureUi();
+        scrollCaptureUiRestoreRef.current?.();
+        scrollCaptureUiRestoreRef.current = null;
         screenCapturePhaseRef.current = 'idle';
         captureOperationInFlightRef.current = false;
         stopActiveCaptureResources();
@@ -1602,6 +1616,30 @@ const QuickCameraCapture: React.FC = () => {
         setScrollAnchorPoint(null);
         clearProcessingGuide();
     };
+
+    const cancelScreenPreparation = useCallback(() => {
+        endScreenCaptureSession();
+        clearFrozenScreenFrame();
+        setIsSelecting(false);
+        restoreHiddenPanel();
+        setIsProcessing(false);
+        clearProcessingGuide();
+        setMessage('화면 캡처 준비를 취소했습니다. 다시 시작할 수 있습니다. 공유창이 남아 있으면 닫아 주세요.');
+        setIsSuccess(null);
+    }, [endScreenCaptureSession, restoreHiddenPanel, clearProcessingGuide, clearFrozenScreenFrame]);
+
+    useEffect(() => {
+        if (active) return;
+        setEditorItem(null);
+        endScreenCaptureSession();
+        clearFrozenScreenFrame();
+        restoreHiddenPanel();
+        repeatSelectionRef.current = false;
+        setIsSelecting(false);
+        setSelectionReady(false);
+        setIsProcessing(false);
+        setCaptureHistory((items) => items.map((item) => item.clipboardStatus === 'pending' ? { ...item, clipboardStatus: 'failed' } : item));
+    }, [active, endScreenCaptureSession, clearFrozenScreenFrame, restoreHiddenPanel]);
 
     const startSelection = useCallback(() => {
         const returnFocus = document.activeElement instanceof HTMLElement
@@ -1683,7 +1721,7 @@ const QuickCameraCapture: React.FC = () => {
         setMessage('“실제 영역 선택 시작”을 누르고 최초 한 번 현재 탭을 허용하세요. 이후 고정된 실제 화면에서 범위를 드래그하면 됩니다.');
     }, [captureMode, clearFrozenScreenFrame]);
 
-    const pushCaptureHistory = useCallback((blob: Blob, width: number, height: number) => {
+    const pushCaptureHistory = useCallback((blob: Blob, width: number, height: number, parts?: CaptureImagePart[]) => {
         const previewUrl = URL.createObjectURL(blob);
         const item: CaptureHistoryItem = {
             id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1693,14 +1731,13 @@ const QuickCameraCapture: React.FC = () => {
             width,
             height,
             clipboardStatus: 'pending',
-            downloadRequested: false
+            downloadRequested: false,
+            parts
         };
 
         setCaptureHistory((prev) => {
-            const next = [item, ...prev].slice(0, 3);
-            if (prev.length >= 3) {
-                prev.slice(2).forEach((old) => URL.revokeObjectURL(old.previewUrl));
-            }
+            const next = retainCaptureHistory([item, ...prev]);
+            prev.filter((old) => !next.includes(old)).forEach((old) => URL.revokeObjectURL(old.previewUrl));
             return next;
         });
         return item;
@@ -1759,6 +1796,8 @@ const QuickCameraCapture: React.FC = () => {
         setMessage(
             result.reason === 'unsupported'
                 ? `영역 캡처 완료 · 클립보드 미복사 · ${item.width}×${item.height} PNG. 이 환경에서는 이미지 클립보드를 지원하지 않아 아래에서 PNG를 다운로드할 수 있습니다.`
+                : result.reason === 'timeout'
+                    ? `영역 캡처 완료 · 복사 응답이 지연되고 있습니다. ${item.width}×${item.height} PNG는 보관했으니 저장하거나 다시 복사해 주세요.`
                 : result.reason === 'blocked'
                     ? `영역 캡처 완료 · 클립보드 미복사 · ${item.width}×${item.height} PNG. 아래 “클립보드 복사 재시도”를 눌러 주세요.`
                     : `영역 캡처 완료 · 클립보드 미복사 · ${item.width}×${item.height} PNG. 다시 복사하거나 PNG를 다운로드해 주세요.`
@@ -1766,7 +1805,9 @@ const QuickCameraCapture: React.FC = () => {
         setIsSuccess(false);
     }, []);
 
-    const prepareFrozenScreenFrame = useCallback(async (sessionId: number) => {
+    const prepareFrozenScreenFrame = useCallback(async (sessionId: number, signal: AbortSignal) => {
+        const diagnostic = activeDiagnosticRef.current;
+        let effectiveQuality = quality;
         setIsProcessing(true);
         setProcessingStatusText('화면 캡처를 준비하는 중입니다.');
         setMessage('현재 탭의 화면을 준비하고 있습니다. 공유창이 열리면 “현재 탭”을 선택해 주세요.');
@@ -1776,6 +1817,7 @@ const QuickCameraCapture: React.FC = () => {
         const assertCurrentCaptureSession = (stream?: MediaStream) => {
             if (
                 screenSessionIdRef.current !== sessionId
+                || signal.aborted
                 || screenCapturePhaseRef.current !== 'capturing'
             ) {
                 stream?.getTracks().forEach((track) => track.stop());
@@ -1794,22 +1836,23 @@ const QuickCameraCapture: React.FC = () => {
                 stream
                 && video
                 && track
+                && activeStreamQualityRef.current === quality
                 && stream.active !== false
                 && track.readyState !== 'ended'
-                && !track.muted
                 && !video.ended
-                && hasUsableCapturedFrame(video)
+                && !video.error
             );
 
             if (!canReuseCurrentTab) {
                 stopActiveCaptureResources();
+                diagnostic?.mark('permission');
 
                 setProcessingStatusText('공유창에서 “현재 탭”을 선택해 주세요.');
                 // Invoke getDisplayMedia before the first await in this click
                 // path. Browsers require transient user activation and some
                 // reject a request that is deferred until after a paint/timer.
                 const displayMediaRequest = navigator.mediaDevices.getDisplayMedia({
-                    video: getHighResolutionDisplayMediaConstraints(),
+                    video: getCaptureConstraints(quality, getViewportMetrics()),
                     audio: false,
                     preferCurrentTab: true,
                     selfBrowserSurface: 'include',
@@ -1819,14 +1862,13 @@ const QuickCameraCapture: React.FC = () => {
                 stream = await displayMediaRequest;
                 assertCurrentCaptureSession(stream);
                 activeStreamRef.current = stream;
+                activeStreamQualityRef.current = quality;
 
                 video = document.createElement('video');
-                video.srcObject = stream;
                 video.muted = true;
                 video.playsInline = true;
+                video.srcObject = stream;
                 activeVideoRef.current = video;
-                await waitForVideoReady(video);
-                await video.play();
             }
 
             if (!stream || !video) {
@@ -1840,14 +1882,23 @@ const QuickCameraCapture: React.FC = () => {
             if (isCaptureTrackEnded(track)) {
                 throw new Error('track-ended');
             }
-            const displaySurface = track.getSettings?.().displaySurface;
-            if (displaySurface && displaySurface !== 'browser') {
-                throw new Error('screen-browser-only');
+            diagnostic?.mark('identity');
+            const tabVerified = captureIdentityRef.current?.verify(track) ?? false;
+            setProcessingStatusText('공유 영상의 첫 화면을 기다리고 있습니다.');
+            diagnostic?.mark('video');
+            try {
+                await prepareCaptureVideo(video, signal);
+            } catch (error) {
+                if (quality !== 'high' || signal.aborted || !(error instanceof Error) || error.message !== 'video-load-timeout') throw error;
+                setProcessingStatusText('표준 화질로 낮춰 영상을 다시 준비하고 있습니다.');
+                await waitForCaptureOperation(track.applyConstraints(getCaptureConstraints('standard', getViewportMetrics())), 2000, 'video-load-timeout', signal);
+                effectiveQuality = 'standard';
+                activeStreamQualityRef.current = 'standard';
+                setQualityNotice('영상 준비가 지연되어 이번 캡처만 표준 화질로 처리합니다. 다음 캡처는 고화질로 다시 시도합니다.');
+                await prepareCaptureVideo(video, signal);
             }
-            await applyNoCursorCaptureConstraint(track);
-            if (video.paused) {
-                await video.play();
-            }
+            assertCurrentCaptureSession(stream);
+            await applyNoCursorCaptureConstraint(track, signal);
             assertCurrentCaptureSession(stream);
 
             if (!canReuseCurrentTab) {
@@ -1882,11 +1933,12 @@ const QuickCameraCapture: React.FC = () => {
                     ? '허용된 현재 탭에서 새 화면 프레임을 가져오는 중입니다.'
                     : '현재 화면 프레임을 확인하는 중입니다.'
             );
+            diagnostic?.mark('frame');
 
             // Keep the progress message visible while permission/video setup is
             // pending. Hide capture chrome only for the short compositor refresh
             // immediately before freezing the bitmap.
-            await waitNextPaint();
+            await waitForCapturePaint(signal);
             assertCurrentCaptureSession(stream);
             const restoreCursorForCapture = hideDocumentCursorForCapture();
             const restoreExcludedRoots = hideExcludedRoots();
@@ -1895,13 +1947,15 @@ const QuickCameraCapture: React.FC = () => {
                 restoreExcludedRoots();
             };
             screenCaptureUiRestoreRef.current = restoreCaptureUi;
-            await waitForCursorlessCaptureFrame(video, true);
+            await waitForCursorlessCaptureFrame(video, true, signal);
             assertCurrentCaptureSession(stream);
             if (isCaptureTrackEnded(track)) {
                 throw new Error('track-ended');
             }
 
-            const frozenCanvas = freezeVideoFrameToCanvas(video);
+            captureIdentityRef.current?.verify(track);
+            const frozenCanvas = freezeVideoFrameToCanvas(video, effectiveQuality);
+            if (frozenCanvas.width < video.videoWidth) setQualityNotice('메모리 사용을 줄이기 위해 화면을 비율에 맞춰 축소했습니다. 표시된 해상도로 저장됩니다.');
             if (!isFrameAspectCompatible(
                 frozenCanvas.width,
                 frozenCanvas.height,
@@ -1914,9 +1968,12 @@ const QuickCameraCapture: React.FC = () => {
             const frozenFrame: FrozenScreenFrame = {
                 canvas: frozenCanvas,
                 width: frozenCanvas.width,
-                height: frozenCanvas.height
+                height: frozenCanvas.height,
+                viewport: readCaptureViewport(),
+                tabVerified
             };
             frozenScreenFrameRef.current = frozenFrame;
+            setSourceConfirmed(tabVerified);
             setFrozenFramePreviewReady(true);
 
             // Selection is performed against this immutable bitmap, while the
@@ -1928,12 +1985,25 @@ const QuickCameraCapture: React.FC = () => {
             restoreCaptureUi = null;
 
             screenCapturePhaseRef.current = 'selecting';
+            screenPreparationAbortRef.current = null;
             captureOperationInFlightRef.current = false;
             setIsProcessing(false);
             clearProcessingGuide();
             startSelection();
+            const repeatedSelection = lastSelectionRef.current;
+            if (repeatSelectionRef.current && repeatedSelection && isSameCaptureViewport(repeatedSelection.viewport, frozenFrame.viewport)) {
+                selectionRectRef.current = repeatedSelection.rect;
+                setSelectionRect(repeatedSelection.rect);
+                setSelectionReady(true);
+            }
+            repeatSelectionRef.current = false;
+            diagnostic?.mark('selection');
             setMessage(`실제 화면 ${frozenFrame.width}×${frozenFrame.height}px을 고정했습니다. 이 화면 위에서 범위를 드래그하면 선택한 픽셀이 그대로 저장됩니다.`);
         } catch (error) {
+            diagnostic?.finish(signal.aborted ? 'cancelled' : 'failed', error);
+            // A cancelled permission/playback request can finish after a new
+            // attempt starts. It must never stop that attempt's stream or UI.
+            if (screenSessionIdRef.current !== sessionId) return;
             if (
                 restoreCaptureUi
                 && screenCaptureUiRestoreRef.current === restoreCaptureUi
@@ -1943,9 +2013,7 @@ const QuickCameraCapture: React.FC = () => {
             stopActiveCaptureResources();
             restoreHiddenPanel();
 
-            if (screenSessionIdRef.current !== sessionId) {
-                return;
-            }
+            screenPreparationAbortRef.current = null;
             screenCapturePhaseRef.current = 'idle';
             captureOperationInFlightRef.current = false;
             setIsProcessing(false);
@@ -1968,7 +2036,8 @@ const QuickCameraCapture: React.FC = () => {
         restoreHiddenPanel,
         restoreScreenCaptureUi,
         startSelection,
-        stopActiveCaptureResources
+        stopActiveCaptureResources,
+        quality
     ]);
 
     const captureScreenSelection = useCallback(async (
@@ -1978,6 +2047,7 @@ const QuickCameraCapture: React.FC = () => {
         clipboardReservation?: ClipboardWriteReservation | null
     ) => {
         const sessionId = screenSessionIdRef.current;
+        const diagnostic = activeDiagnosticRef.current;
         if (screenCapturePhaseRef.current !== 'capturing') {
             return;
         }
@@ -1988,6 +2058,7 @@ const QuickCameraCapture: React.FC = () => {
         setIsSuccess(null);
 
         let shouldResumeSelection = false;
+        let prepareNextFrame = false;
         try {
             const frozenFrame = frozenScreenFrameRef.current;
             if (!frozenFrame) {
@@ -2006,6 +2077,7 @@ const QuickCameraCapture: React.FC = () => {
                 captureRect,
                 previewViewport
             );
+            diagnostic?.mark('encoding');
             const exportCanvas = cropFrozenFrameToCanvas(frozenFrame.canvas, sourceRect);
             const blob = await toPngBlob(exportCanvas);
 
@@ -2016,17 +2088,28 @@ const QuickCameraCapture: React.FC = () => {
                 throw new Error('capture-aborted');
             }
 
+            const historyItem = pushCaptureHistory(blob, exportCanvas.width, exportCanvas.height);
+            lastSelectionRef.current = { rect: captureRect, viewport: frozenFrame.viewport };
+            setLastSelection(lastSelectionRef.current);
+            restoreHiddenPanel();
+            setProcessingStatusText('이미지 생성 완료 · 클립보드 응답을 확인하고 있습니다. PNG 저장도 가능합니다.');
+            diagnostic?.mark('clipboard');
             clipboardReservation?.complete(blob);
             const clipboardResult = clipboardReservation
                 ? await clipboardReservation.result
                 : await copyBlobToClipboard(blob);
-            const historyItem = pushCaptureHistory(blob, exportCanvas.width, exportCanvas.height);
+            if (screenSessionIdRef.current !== sessionId) return;
             applyClipboardCopyResult(
                 clipboardResult,
                 historyItem,
                 `고정 미리보기 영역 캡처 완료 · 클립보드 복사 완료 · ${exportCanvas.width}×${exportCanvas.height} PNG · 원본 픽셀 1:1`
             );
+            diagnostic?.finish(clipboardResult.ok ? 'success' : 'failed', clipboardResult.ok ? undefined : new Error(clipboardResult.reason === 'timeout' ? 'clipboard-timeout' : clipboardResult.reason));
+            prepareNextFrame = continuousCapture && clipboardResult.ok;
+            exportCanvas.width = 0;
+            exportCanvas.height = 0;
         } catch (error) {
+            diagnostic?.finish('failed', error);
             clipboardReservation?.cancel(error);
             if (screenSessionIdRef.current !== sessionId) {
                 return;
@@ -2063,6 +2146,18 @@ const QuickCameraCapture: React.FC = () => {
             clearFrozenScreenFrame();
             completeScreenCaptureSession();
             restoreHiddenPanel();
+            const track = activeStreamRef.current?.getVideoTracks()[0];
+            if (prepareNextFrame && active && track?.readyState === 'live' && activeVideoRef.current && !activeVideoRef.current.error) {
+                const nextSessionId = ++screenSessionIdRef.current;
+                const controller = new AbortController();
+                screenPreparationAbortRef.current = controller;
+                screenCapturePhaseRef.current = 'capturing';
+                captureOperationInFlightRef.current = true;
+                repeatSelectionRef.current = true;
+                activeDiagnosticRef.current = diagnosticsRef.current.start('screen', quality);
+                hideHostPanel();
+                void prepareFrozenScreenFrame(nextSessionId, controller.signal);
+            }
         }
     }, [
         applyClipboardCopyResult,
@@ -2070,7 +2165,8 @@ const QuickCameraCapture: React.FC = () => {
         clearProcessingGuide,
         completeScreenCaptureSession,
         pushCaptureHistory,
-        restoreHiddenPanel
+        restoreHiddenPanel,
+        active, continuousCapture, quality, hideHostPanel, prepareFrozenScreenFrame
     ]);
 
     const capturePermissionFreeFullContent = useCallback(async (
@@ -2078,6 +2174,7 @@ const QuickCameraCapture: React.FC = () => {
         clipboardReservation?: ClipboardWriteReservation | null
     ) => {
         const sessionId = screenSessionIdRef.current;
+        const diagnostic = activeDiagnosticRef.current;
         if (screenCapturePhaseRef.current !== 'capturing') return;
 
         setIsProcessing(true);
@@ -2086,6 +2183,8 @@ const QuickCameraCapture: React.FC = () => {
         setIsSuccess(null);
 
         const restoreExcludedRoots = hideExcludedRoots();
+        screenCaptureUiRestoreRef.current = restoreExcludedRoots;
+        diagnostic?.mark('encoding');
         try {
             await waitNextPaint();
             if (!target.isConnected) {
@@ -2097,9 +2196,9 @@ const QuickCameraCapture: React.FC = () => {
                 throw new Error('selection-too-small');
             }
 
-            const fullCanvas = await html2canvas(target, {
+            const fullCanvas = await waitForCaptureOperation(Promise.resolve(html2canvas(target, {
                 backgroundColor: '#f8fafc',
-                scale: getPermissionFreeCaptureScale(dimensions),
+                scale: getPermissionFreeCaptureScale(dimensions, window.devicePixelRatio || 1, quality),
                 useCORS: true,
                 allowTaint: false,
                 logging: false,
@@ -2131,7 +2230,7 @@ const QuickCameraCapture: React.FC = () => {
                     || element.closest(CAPTURE_EXCLUDE_SELECTOR) !== null
                     || (element as HTMLElement).dataset?.html2canvasIgnore === 'true'
                 )
-            } as unknown as Parameters<typeof html2canvas>[1]);
+            } as unknown as Parameters<typeof html2canvas>[1])), 20000, 'png-timeout');
             const blob = await toPngBlob(fullCanvas);
 
             if (
@@ -2141,17 +2240,26 @@ const QuickCameraCapture: React.FC = () => {
                 throw new Error('capture-aborted');
             }
 
+            const historyItem = pushCaptureHistory(blob, fullCanvas.width, fullCanvas.height);
+            restoreExcludedRoots();
+            restoreHiddenPanel();
+            setProcessingStatusText('이미지 생성 완료 · 클립보드 응답을 확인하고 있습니다.');
             clipboardReservation?.complete(blob);
+            diagnostic?.mark('clipboard');
             const clipboardResult = clipboardReservation
                 ? await clipboardReservation.result
                 : await copyBlobToClipboard(blob);
-            const historyItem = pushCaptureHistory(blob, fullCanvas.width, fullCanvas.height);
+            if (screenSessionIdRef.current !== sessionId) return;
             applyClipboardCopyResult(
                 clipboardResult,
                 historyItem,
                 `보드 전체 캡처 완료 · 아래쪽 카드 포함 · ${fullCanvas.width}×${fullCanvas.height} PNG`
             );
+            diagnostic?.finish(clipboardResult.ok ? 'success' : 'failed', clipboardResult.ok ? undefined : new Error(clipboardResult.reason === 'timeout' ? 'clipboard-timeout' : clipboardResult.reason));
+            fullCanvas.width = 0;
+            fullCanvas.height = 0;
         } catch (error) {
+            diagnostic?.finish('failed', error);
             clipboardReservation?.cancel(error);
             if (screenSessionIdRef.current !== sessionId) return;
             if (error instanceof Error && error.message === 'capture-aborted') return;
@@ -2176,459 +2284,210 @@ const QuickCameraCapture: React.FC = () => {
         clearProcessingGuide,
         endScreenCaptureSession,
         pushCaptureHistory,
-        restoreHiddenPanel
+        restoreHiddenPanel,
+        quality
     ]);
 
-    const captureScrollSelection = useCallback(async (rect: Rect) => {
-        const persistedPlan = scrollCapturePlanRef.current;
-        const plan = persistedPlan && (!persistedPlan.target || persistedPlan.target.isConnected)
-            ? persistedPlan
-            : resolveScrollCapturePlan(rect, selectionScrollTargetRef.current);
-        scrollCapturePlanRef.current = plan;
-        const captureRect = plan.captureRect;
-        const risk = getScrollCaptureRisk(plan);
-
-        if (risk.level === 'block') {
-            setMessage(risk.message);
-            setIsSuccess(false);
-            restoreHiddenPanel();
-            return;
-        }
-
-        if (risk.level === 'warn' && !window.confirm([
-            risk.message.replace(' 계속할까요?', ''),
-            '',
-            '공유창에서는 반드시 “현재 탭”을 선택해야 합니다.',
-            '계속할까요?'
-        ].join('\n'))) {
-            setMessage('스크롤 캡처를 시작하지 않았습니다.');
-            setIsSuccess(null);
-            restoreHiddenPanel();
-            return;
-        }
-
+    const prepareScrollSelection = useCallback(async (sessionId: number, signal: AbortSignal) => {
+        const diagnostic = activeDiagnosticRef.current!;
+        let localStream: MediaStream | null = null;
+        const assertCurrent = () => {
+            if (signal.aborted || screenSessionIdRef.current !== sessionId) throw new Error('capture-aborted');
+        };
         setIsProcessing(true);
-        setProcessingStatusText('1/4 공유 창에서 현재 탭을 선택해 주세요. 창/화면 전체 선택 시 중단됩니다.');
-        setMessage('공유 창에서 현재 탭을 선택해야 스크롤 캡처가 진행됩니다.');
-        setIsSuccess(null);
-        abortProcessingRef.current = false;
-
-        let captureInterferenceRestore: { hiddenCount: number; restore: () => void } | null = null;
-        let restoreCursorForCapture: (() => void) | null = null;
-        let restoreScrollBehavior: (() => void) | null = null;
-        let clipboardReservation: ClipboardWriteReservation | null = null;
-        let hiddenInterferenceCount = 0;
-        let restoreScrollFailed = false;
-
-        const copyCapturedBlob = async (blob: Blob): Promise<ClipboardCopyResult> => {
-            clipboardReservation?.complete(blob);
-            return clipboardReservation
-                ? await clipboardReservation.result
-                : await copyBlobToClipboard(blob);
-        };
-
-        const ensureNotAborted = (track?: MediaStreamTrack) => {
-            if (abortProcessingRef.current) {
-                throw new Error('capture-aborted');
-            }
-            if (track && track.getSettings().displaySurface !== 'browser') {
-                throw new Error('scroll-browser-only');
-            }
-            if (document.visibilityState !== 'visible') {
-                throw new Error('scroll-tab-hidden');
-            }
-        };
-
+        setProcessingStatusText('공유창에서 현재 앱 탭을 선택해 주세요. 준비가 끝나면 구간을 선택합니다.');
         try {
-            if (!navigator.mediaDevices?.getDisplayMedia) {
-                throw new Error('unsupported');
-            }
-
-            // Start the browser permission request in the same click stack as
-            // the second range-selection click. Waiting for a paint first can
-            // consume Chromium's transient user activation and reject an
-            // otherwise valid request with InvalidStateError.
-            const displayMediaRequest = navigator.mediaDevices.getDisplayMedia({
-                video: getHighResolutionDisplayMediaConstraints(),
-                audio: false,
-                preferCurrentTab: true,
-                selfBrowserSurface: 'include',
-                surfaceSwitching: 'exclude',
-                monitorTypeSurfaces: 'exclude'
+            const supportIssue = getDisplayCaptureSupportIssue();
+            if (supportIssue) throw new Error(supportIssue);
+            stopActiveCaptureResources();
+            diagnostic.mark('permission');
+            // Keep permission in the start button gesture, before any await.
+            // Starting sharing after selection can move/reflow its coordinates.
+            const request = navigator.mediaDevices.getDisplayMedia({
+                video: getCaptureConstraints(quality, getViewportMetrics()), audio: false,
+                preferCurrentTab: true, selfBrowserSurface: 'include', surfaceSwitching: 'exclude', monitorTypeSurfaces: 'exclude'
             } as DisplayMediaOptions);
-            // Reserve the clipboard write while the range-end click still has
-            // user activation. A long stitch may otherwise finish after the
-            // browser's clipboard gesture window has expired.
-            clipboardReservation = reserveClipboardWrite();
-            restoreCursorForCapture = hideDocumentCursorForCapture();
-            await waitNextPaint();
-
-            const stream = await displayMediaRequest;
-            // Own the stream immediately so every validation/initialization
-            // failure below is covered by the shared finally cleanup.
-            activeStreamRef.current = stream;
-
-            const [track] = stream.getVideoTracks();
-            if (!track) {
-                throw new Error('no-track');
-            }
-            await applyNoCursorCaptureConstraint(track);
-
-            setProcessingStatusText('2/4 현재 탭 공유 여부를 확인하는 중입니다.');
-            if (track.getSettings().displaySurface !== 'browser') {
-                throw new Error('scroll-browser-only');
-            }
-
+            const observedRequest = request.then((stream) => {
+                if (signal.aborted || screenSessionIdRef.current !== sessionId) {
+                    stream.getTracks().forEach((track) => track.stop());
+                    throw new Error('capture-aborted');
+                }
+                return stream;
+            });
+            localStream = await waitForCaptureOperation(observedRequest, 120000, 'video-load-timeout', signal);
+            assertCurrent();
+            activeStreamRef.current = localStream;
+            const track = localStream.getVideoTracks()[0];
+            if (!track) throw new Error('no-track');
+            diagnostic.mark('identity');
+            if (!captureIdentityRef.current?.verify(track)) throw new Error('scroll-identity-unsupported');
             const video = document.createElement('video');
-            video.srcObject = stream;
             video.muted = true;
             video.playsInline = true;
+            video.srcObject = localStream;
             activeVideoRef.current = video;
-
-            await waitForVideoReady(video);
-            await video.play();
-
-            captureInterferenceRestore = hideCaptureInterference(plan.target);
-            hiddenInterferenceCount = captureInterferenceRestore.hiddenCount;
-            if (plan.target) {
-                restoreScrollBehavior = forceInstantScrollBehavior(plan.target);
-            }
-            ensureNotAborted(track);
-
-            setProcessingStatusText(
-                plan.canScroll
-                    ? `3/4 스크롤 캡처 준비 중 1/${plan.estimatedSteps}`
-                    : '스크롤 대상이 없어 현재 화면만 캡처하는 중입니다.'
-            );
-            await waitForCursorlessCaptureFrame(video);
-
-            if (plan.range && plan.target) {
-                const scrollTarget = plan.target;
-                const range = plan.range;
-                const rangeHeightCss = range.bottomContentY - range.topContentY;
-
-                if (range.width < MIN_SIZE || rangeHeightCss < MIN_SIZE) {
-                    throw new Error('selection-too-small');
-                }
-
-                let currentScrollTop = await scrollToFreshCapturedFrame(
-                    scrollTarget,
-                    Math.min(plan.maxScrollTop, Math.max(0, range.startScrollTop)),
-                    video
-                );
-                ensureNotAborted(track);
-
-                const targetRectForScale = getVisibleRectForScrollableTarget(scrollTarget);
-                const scaleProbe = getVideoSourceRect(video, {
-                    left: range.left,
-                    top: targetRectForScale.top,
-                    width: range.width,
-                    height: Math.min(1, Math.max(1, targetRectForScale.height))
-                });
-                const sourceWidth = Math.max(1, scaleProbe.sourceW);
-                const sourceHeight = Math.max(1, Math.round(rangeHeightCss * scaleProbe.scaleY));
-                const outputScale = getSafeScrollCanvasScale(sourceWidth, sourceHeight);
-                const stitchedCanvas = document.createElement('canvas');
-                stitchedCanvas.width = Math.max(1, Math.round(sourceWidth * outputScale));
-                stitchedCanvas.height = Math.max(1, Math.round(sourceHeight * outputScale));
-                const stitchedCtx = stitchedCanvas.getContext('2d');
-                if (!stitchedCtx) {
-                    throw new Error('canvas-context-failed');
-                }
-                stitchedCtx.imageSmoothingEnabled = true;
-                stitchedCtx.imageSmoothingQuality = 'high';
-
-                let capturedUntilContentY = range.topContentY;
-                let outputOffsetY = 0;
-                let loopCount = 0;
-                let committedUntilContentY = range.topContentY;
-                let pendingSegment: (ScrollStitchSegmentGeometry & {
-                    canvas: HTMLCanvasElement;
-                }) | null = null;
-                const maxLoopCount = Math.min(
-                    MAX_SCROLL_CAPTURE_STEPS,
-                    Math.max(12, plan.estimatedSteps + 8)
-                );
-                const drawPendingSegmentThrough = (endContentY: number) => {
-                    if (!pendingSegment) return;
-
-                    const slice = createScrollStitchSlice(
-                        pendingSegment,
-                        committedUntilContentY,
-                        endContentY,
-                        range.topContentY,
-                        range.bottomContentY,
-                        stitchedCanvas.height
-                    );
-                    committedUntilContentY = endContentY;
-                    if (!slice) return;
-
-                    stitchedCtx.drawImage(
-                        pendingSegment.canvas,
-                        0,
-                        slice.sourceY,
-                        pendingSegment.canvas.width,
-                        slice.sourceHeight,
-                        0,
-                        slice.destY,
-                        stitchedCanvas.width,
-                        slice.destHeight
-                    );
-                    outputOffsetY = slice.destY + slice.destHeight;
-                };
-
-                while (capturedUntilContentY < range.bottomContentY - 0.5 && loopCount < maxLoopCount) {
-                    ensureNotAborted(track);
-                    loopCount += 1;
-
-                    const targetRect = getVisibleRectForScrollableTarget(scrollTarget);
-                    const visibleTopContentY = currentScrollTop;
-                    const visibleBottomContentY = currentScrollTop + targetRect.height;
-                    const segmentTopContentY = Math.max(
-                        range.topContentY,
-                        visibleTopContentY
-                    );
-                    const segmentBottomContentY = Math.min(range.bottomContentY, visibleBottomContentY);
-                    const segmentHeightCss = segmentBottomContentY - segmentTopContentY;
-
-                    if (segmentHeightCss >= 0.5 && segmentBottomContentY > capturedUntilContentY + 0.2) {
-                        const segmentRect = {
-                            left: range.left,
-                            top: targetRect.top + (segmentTopContentY - currentScrollTop),
-                            width: range.width,
-                            height: segmentHeightCss
-                        };
-                        const segmentCrop = getVideoSourceRect(video, segmentRect);
-                        const segmentCanvas = cropVideoFrameToCanvas(video, segmentCrop);
-                        const currentSegment = {
-                            canvas: segmentCanvas,
-                            topContentY: segmentTopContentY,
-                            bottomContentY: segmentBottomContentY,
-                            sourceHeight: segmentCanvas.height
-                        };
-
-                        if (pendingSegment) {
-                            if (currentSegment.topContentY > pendingSegment.bottomContentY + 0.5) {
-                                throw new Error('scroll-frame-gap');
-                            }
-                            const seamContentY = getScrollStitchBoundaryContentY(
-                                pendingSegment,
-                                currentSegment
-                            );
-                            drawPendingSegmentThrough(seamContentY);
-                        }
-
-                        pendingSegment = currentSegment;
-                        capturedUntilContentY = Math.max(capturedUntilContentY, segmentBottomContentY);
-                        const progressPercent = Math.min(
-                            100,
-                            Math.max(1, Math.round(((capturedUntilContentY - range.topContentY) / rangeHeightCss) * 100))
-                        );
-                        setProcessingStatusText(`3/4 스크롤 구간 캡처 중 ${progressPercent}% · ESC 또는 취소 버튼으로 중단`);
-                    }
-
-                    if (capturedUntilContentY >= range.bottomContentY - 0.5) {
-                        break;
-                    }
-
-                    const nextScrollTop = Math.min(
-                        plan.maxScrollTop,
-                        Math.max(currentScrollTop + 1, capturedUntilContentY - SCROLL_CAPTURE_OVERLAP_CSS)
-                    );
-                    if (nextScrollTop <= currentScrollTop + 0.5) {
-                        break;
-                    }
-
-                    const actualScrollTop = await scrollToFreshCapturedFrame(
-                        scrollTarget,
-                        nextScrollTop,
-                        video
-                    );
-                    ensureNotAborted(track);
-                    if (actualScrollTop <= currentScrollTop + 0.5) {
-                        break;
-                    }
-
-                    currentScrollTop = actualScrollTop;
-                }
-
-                if (capturedUntilContentY < range.bottomContentY - 0.5) {
-                    throw new Error('scroll-range-too-long');
-                }
-
-                if (!pendingSegment) {
-                    throw new Error('empty-scroll-range');
-                }
-                drawPendingSegmentThrough(range.bottomContentY);
-
-                if (
-                    outputOffsetY !== stitchedCanvas.height
-                    || stitchedCanvas.width <= 0
-                    || stitchedCanvas.height <= 0
-                ) {
-                    throw new Error('empty-scroll-range');
-                }
-
-                setProcessingStatusText('4/4 이미지 병합 중입니다.');
-                const blob = await toPngBlob(stitchedCanvas);
-                const historyItem = pushCaptureHistory(blob, stitchedCanvas.width, stitchedCanvas.height);
-                const interferenceNotice = hiddenInterferenceCount > 0
-                    ? ` 고정 UI ${hiddenInterferenceCount}개를 제외했습니다.`
-                    : '';
-
-                const clipboardResult = await copyCapturedBlob(blob);
-                applyClipboardCopyResult(
-                    clipboardResult,
-                    historyItem,
-                    outputScale < 1
-                        ? `\uad6c\uac04\uc774 \uae38\uc5b4 \uc804\uccb4\uac00 \ub4e4\uc5b4\uac00\ub3c4\ub85d ${Math.round(outputScale * 100)}%\ub85c \ucd95\uc18c\ud574 \ud074\ub9bd\ubcf4\ub4dc\uc5d0 \uc800\uc7a5\ud588\uc2b5\ub2c8\ub2e4.${interferenceNotice}`
-                        : `\uc2dc\uc791\uc810\ubd80\ud130 \ub9c8\uc9c0\ub9c9 \uc120\ud0dd\uc810\uae4c\uc9c0 \uc774\uc5b4\ubd99\uc5ec \ud074\ub9bd\ubcf4\ub4dc\uc5d0 \uc800\uc7a5\ud588\uc2b5\ub2c8\ub2e4.${interferenceNotice}`
-                );
-                return;
-            }
-
-            const crop = getVideoSourceRect(video, captureRect);
-            const firstCanvas = cropVideoFrameToCanvas(video, crop);
-
-            if (!plan.target || !plan.canScroll) {
-                const singleBlob = await toPngBlob(firstCanvas);
-                const historyItem = pushCaptureHistory(singleBlob, firstCanvas.width, firstCanvas.height);
-                const interferenceNotice = hiddenInterferenceCount > 0
-                    ? ` 고정 UI ${hiddenInterferenceCount}개를 제외했습니다.`
-                    : '';
-                const clipboardResult = await copyCapturedBlob(singleBlob);
-                applyClipboardCopyResult(
-                    clipboardResult,
-                    historyItem,
-                    `스크롤 대상이 없어 현재 보이는 영역만 복사했습니다.${interferenceNotice}`
-                );
-                return;
-            }
-
-            const segments: Array<{ canvas: HTMLCanvasElement; cropTop: number; cropHeight: number }> = [
-                { canvas: firstCanvas, cropTop: 0, cropHeight: firstCanvas.height }
-            ];
-            const scrollTarget = plan.target;
-            const movingTopPx = Math.max(0, Math.round((plan.movingRect.top - captureRect.top) * crop.scaleY));
-            const movingHeightPx = Math.max(
-                1,
-                Math.min(
-                    firstCanvas.height - movingTopPx,
-                    Math.round(plan.movingRect.height * crop.scaleY)
-                )
-            );
-            let totalHeight = firstCanvas.height;
-            let currentScrollTop = scrollTarget.scrollTop;
-            let loopCount = 0;
-
-            while (currentScrollTop < plan.maxScrollTop - 1 && loopCount < 160) {
-                ensureNotAborted(track);
-                const previousScrollTop = currentScrollTop;
-                currentScrollTop = await scrollToFreshCapturedFrame(
-                    scrollTarget,
-                    Math.min(plan.maxScrollTop, previousScrollTop + plan.scrollStepCss),
-                    video
-                );
-                ensureNotAborted(track);
-
-                const deltaCss = currentScrollTop - previousScrollTop;
-                if (deltaCss < 1) {
-                    break;
-                }
-
-                const nextCanvas = cropVideoFrameToCanvas(video, crop);
-                const deltaPx = Math.max(1, Math.min(movingHeightPx, Math.round(deltaCss * crop.scaleY)));
-                segments.push({
-                    canvas: nextCanvas,
-                    cropTop: Math.max(movingTopPx, movingTopPx + movingHeightPx - deltaPx),
-                    cropHeight: deltaPx
-                });
-                totalHeight += deltaPx;
-                loopCount += 1;
-                setProcessingStatusText(`3/4 스크롤 캡처 중 ${Math.min(plan.estimatedSteps, segments.length)}/${plan.estimatedSteps} · ESC 또는 취소 버튼으로 중단`);
-            }
-
-            setProcessingStatusText('4/4 이미지 병합 중입니다.');
-            const stitchedCanvas = document.createElement('canvas');
-            stitchedCanvas.width = crop.sourceW;
-            stitchedCanvas.height = totalHeight;
-            const stitchedCtx = stitchedCanvas.getContext('2d');
-            if (!stitchedCtx) {
-                throw new Error('캔버스 컨텍스트 생성 실패');
-            }
-
-            let offsetY = 0;
-            segments.forEach((segment) => {
-                stitchedCtx.drawImage(
-                    segment.canvas,
-                    0,
-                    segment.cropTop,
-                    segment.canvas.width,
-                    segment.cropHeight,
-                    0,
-                    offsetY,
-                    stitchedCanvas.width,
-                    segment.cropHeight
-                );
-                offsetY += segment.cropHeight;
-            });
-
-            const blob = await toPngBlob(stitchedCanvas);
-            const historyItem = pushCaptureHistory(blob, stitchedCanvas.width, stitchedCanvas.height);
-            const interferenceNotice = hiddenInterferenceCount > 0
-                ? ` 고정 UI ${hiddenInterferenceCount}개를 제외했습니다.`
-                : '';
-
-            const clipboardResult = await copyCapturedBlob(blob);
-            applyClipboardCopyResult(
-                clipboardResult,
-                historyItem,
-                currentScrollTop < plan.maxScrollTop - 1
-                    ? `스크롤 캡처가 길어서 일부만 이어붙였습니다.${interferenceNotice}`
-                    : `스크롤 영역을 아래까지 이어붙여 클립보드에 저장했습니다.${interferenceNotice}`
-            );
-        } catch (error) {
-            clipboardReservation?.cancel(error);
-            const wasUserCancellation = (
-                error instanceof DOMException
-                && (error.name === 'NotAllowedError' || error.name === 'AbortError')
-            ) || (
-                error instanceof Error
-                && error.message === 'capture-aborted'
-            );
-            if (!wasUserCancellation) {
-                console.error('[QuickCameraCapture] scroll capture failed', error);
-            }
-            setMessage(getScrollCaptureFailureMessage(error));
-            setIsSuccess(wasUserCancellation ? null : false);
-        } finally {
-            if (plan.target) {
-                try {
-                    scrollElementTo(plan.target, plan.restoreScrollTop);
-                    await waitNextPaint();
-                    restoreScrollFailed = Math.abs(getScrollTop(plan.target) - plan.restoreScrollTop) > 2;
-                } catch {
-                    restoreScrollFailed = true;
-                }
-            }
-            restoreScrollBehavior?.();
-            restoreCursorForCapture?.();
-            captureInterferenceRestore?.restore();
-            stopActiveCaptureResources();
-            restoreHiddenPanel();
-            clearProcessingGuide();
+            diagnostic.mark('video');
+            setProcessingStatusText('공유 영상과 화면 크기가 안정될 때까지 준비하고 있습니다.');
+            await prepareCaptureVideo(video, signal);
+            await applyNoCursorCaptureConstraint(track, signal);
+            const viewport = await waitForStableCaptureViewport(video, signal);
+            assertCurrent();
+            if (track.readyState === 'ended') throw new Error('track-ended');
+            if (!captureIdentityRef.current?.verify(track)) throw new Error('scroll-identity-unsupported');
+            scrollSelectionViewportRef.current = viewport;
+            const onEnded = () => {
+                if (screenSessionIdRef.current !== sessionId || screenCapturePhaseRef.current !== 'selecting') return;
+                diagnostic.finish('failed', new Error('track-ended'));
+                endScreenCaptureSession();
+                setIsSelecting(false);
+                restoreHiddenPanel();
+                setMessage(getScrollCaptureFailureMessage(new Error('track-ended')));
+                setIsSuccess(false);
+            };
+            track.addEventListener('ended', onEnded);
+            activeTrackCleanupRef.current = () => track.removeEventListener('ended', onEnded);
+            screenCapturePhaseRef.current = 'selecting';
+            captureOperationInFlightRef.current = false;
             setIsProcessing(false);
-            if (restoreScrollFailed) {
-                setMessage((prev) => `${prev} 이전 스크롤 위치 복원에 실패했습니다.`);
-            }
+            diagnostic.mark('selection');
+            startSelection();
+        } catch (error) {
+            const wasCancelled = signal.aborted;
+            diagnostic.finish(wasCancelled ? 'cancelled' : 'failed', error);
+            if (screenSessionIdRef.current === sessionId) {
+                // Also invalidate timed-out permission promises so their late
+                // streams are stopped without disturbing a subsequent attempt.
+                endScreenCaptureSession();
+                restoreHiddenPanel();
+                clearProcessingGuide();
+                setIsProcessing(false);
+                setMessage(getScrollCaptureFailureMessage(error));
+                setIsSuccess(wasCancelled ? null : false);
+            } else localStream?.getTracks().forEach((track) => track.stop());
         }
-    }, [
-        applyClipboardCopyResult,
-        clearProcessingGuide,
-        pushCaptureHistory,
-        restoreHiddenPanel,
-        stopActiveCaptureResources
-    ]);
+    }, [quality, startSelection, stopActiveCaptureResources, endScreenCaptureSession, restoreHiddenPanel, clearProcessingGuide]);
+
+    const captureScrollSelection = useCallback(async (rect: Rect) => {
+        const persisted = scrollCapturePlanRef.current;
+        const plan = persisted && (!persisted.target || persisted.target.isConnected)
+            ? persisted : resolveScrollCapturePlan(rect, selectionScrollTargetRef.current);
+        scrollCapturePlanRef.current = plan;
+        const risk = getScrollCaptureRisk(plan);
+        if (risk.level === 'block') { endScreenCaptureSession(); setMessage(risk.message); setIsSuccess(false); restoreHiddenPanel(); return; }
+        const sessionId = screenSessionIdRef.current;
+        const signal = screenPreparationAbortRef.current?.signal;
+        const diagnostic = activeDiagnosticRef.current;
+        const initialViewport = scrollSelectionViewportRef.current;
+        const localStream = activeStreamRef.current;
+        const video = activeVideoRef.current;
+        if (!signal || !diagnostic || !initialViewport || !localStream || !video) {
+            endScreenCaptureSession();
+            restoreHiddenPanel();
+            setMessage('긴 화면 구간 선택을 다시 시작해 주세요. 공유 화면을 준비한 다음 범위를 선택합니다.');
+            setIsSuccess(false);
+            return;
+        }
+        screenCapturePhaseRef.current = 'capturing';
+        setIsProcessing(true);
+        setProcessingStatusText('선택한 구간의 공유 영상과 표의 내용을 확인하고 있습니다.');
+        setIsSuccess(null);
+        abortProcessingRef.current = false;
+        let restoreInterference: (() => void) | undefined;
+        let restoreCursor: (() => void) | undefined;
+        let restoreBehavior: (() => void) | undefined;
+        let reservation: ClipboardWriteReservation | null = null;
+        let restoreScrollUi: (() => void) | undefined;
+        const validate = () => {
+            if (signal.aborted || screenSessionIdRef.current !== sessionId) throw new Error('capture-aborted');
+            if (!isSameCaptureViewport(initialViewport, readCaptureViewport())) throw new Error('capture-viewport-changed');
+            if (document.visibilityState !== 'visible') throw new Error('scroll-tab-hidden');
+            const track = localStream?.getVideoTracks()[0];
+            if (track?.readyState === 'ended') throw new Error('track-ended');
+            if (track && !captureIdentityRef.current?.verify(track)) throw new Error('scroll-identity-unsupported');
+        };
+        try {
+            validate();
+            // The endpoint gesture reserves clipboard access; sharing is already ready.
+            reservation = reserveClipboardWrite();
+            restoreCursor = hideDocumentCursorForCapture();
+            restoreInterference = hideFixedAndStickyInterference(plan.target).restore;
+            if (plan.target) restoreBehavior = forceInstantScrollBehavior(plan.target);
+            let restored = false;
+            restoreScrollUi = () => {
+                if (restored) return;
+                restored = true;
+                if (plan.target?.isConnected) scrollElementTo(plan.target, plan.restoreScrollTop);
+                restoreBehavior?.();
+                restoreCursor?.();
+                restoreInterference?.();
+            };
+            scrollCaptureUiRestoreRef.current = restoreScrollUi;
+            const hideFrameUi = () => {
+                const restore = hideExcludedRoots();
+                screenCaptureUiRestoreRef.current = restore;
+                return () => {
+                    restore();
+                    if (screenCaptureUiRestoreRef.current === restore) screenCaptureUiRestoreRef.current = null;
+                };
+            };
+            let parts: CaptureImagePart[];
+            if (plan.range && plan.target) {
+                diagnostic.mark('scroll');
+                const target = plan.target;
+                parts = await captureScrollRangeParts({
+                    video, target, range: plan.range, quality, signal,
+                    getVisibleRect: () => getVisibleRectForScrollableTarget(target),
+                    scrollTo: (top) => scrollElementTo(target, top),
+                    getScrollTop: () => getScrollTop(target), validate, hideCaptureUi: hideFrameUi,
+                    onProgress: (percent) => setProcessingStatusText(`긴 화면 캡처 ${percent}% · 큰 결과는 PNG 여러 장으로 나눠 보관합니다.`)
+                });
+            } else {
+                diagnostic.mark('encoding');
+                const restoreUi = hideFrameUi();
+                try {
+                    await waitForCursorlessCaptureFrame(video, false, signal);
+                    const crop = getVideoSourceRect(video, plan.captureRect);
+                    const canvas = cropVideoFrameToCanvas(video, crop, quality);
+                    try { parts = [{ blob: await encodeCapturePng(canvas, signal), width: canvas.width, height: canvas.height }]; }
+                    finally { canvas.width = 0; canvas.height = 0; }
+                } finally { restoreUi(); }
+            }
+            validate();
+            const first = parts[0];
+            const item = pushCaptureHistory(first.blob, first.width, first.height, parts.length > 1 ? parts : undefined);
+            restoreHiddenPanel();
+            setProcessingStatusText('이미지 생성 완료 · 클립보드 응답을 확인하고 있습니다.');
+            diagnostic.mark('clipboard');
+            reservation?.complete(first.blob);
+            const result = reservation ? await reservation.result : await copyBlobToClipboard(first.blob);
+            if (screenSessionIdRef.current !== sessionId) return;
+            applyClipboardCopyResult(result, item, parts.length > 1
+                ? `긴 화면을 PNG ${parts.length}장으로 나눠 보관했습니다. 첫 장은 복사했고, 전체는 “PNG 묶음 저장”으로 받을 수 있습니다.`
+                : '선택한 긴 화면을 끝까지 확인해 PNG로 만들고 복사했습니다.');
+            diagnostic.finish(result.ok ? 'success' : 'failed', result.ok ? undefined : new Error(result.reason === 'timeout' ? 'clipboard-timeout' : result.reason));
+        } catch (error) {
+            reservation?.cancel(error);
+            diagnostic.finish(signal.aborted ? 'cancelled' : 'failed', error);
+            if (screenSessionIdRef.current === sessionId) {
+                setMessage(getScrollCaptureFailureMessage(error));
+                setIsSuccess(signal.aborted ? null : false);
+            }
+        } finally {
+            // Restore synchronously: an old request must not resume a paint later
+            // and alter a newer request's page or shared resources.
+            restoreScrollUi?.();
+            if (scrollCaptureUiRestoreRef.current === restoreScrollUi) scrollCaptureUiRestoreRef.current = null;
+            if (screenSessionIdRef.current === sessionId) {
+                screenPreparationAbortRef.current = null;
+                scrollSelectionViewportRef.current = null;
+                screenCapturePhaseRef.current = 'idle';
+                stopActiveCaptureResources();
+                restoreHiddenPanel();
+                clearProcessingGuide();
+                setIsProcessing(false);
+            } else localStream?.getTracks().forEach((track) => track.stop());
+        }
+    }, [quality, pushCaptureHistory, applyClipboardCopyResult, stopActiveCaptureResources, endScreenCaptureSession, restoreHiddenPanel, clearProcessingGuide]);
 
     const copySelectionToClipboard = useCallback(async (
         rect: Rect,
@@ -2656,15 +2515,22 @@ const QuickCameraCapture: React.FC = () => {
         }
     }, [captureMode, captureScreenSelection, captureScrollSelection]);
 
-    const startCaptureSelection = () => {
-        if (captureMode === 'scroll') {
-            startSelection();
+    const startCaptureSelection = (repeatLast = false) => {
+        if (!active) return;
+        if (captureOperationInFlightRef.current) return;
+        if (repeatLast && (!lastSelection || !isSameCaptureViewport(lastSelection.viewport, readCaptureViewport()))) {
+            setMessage('화면 크기 또는 배율이 달라졌습니다. 새 영역을 선택해 주세요.');
+            setIsSuccess(false);
             return;
         }
-        if (captureOperationInFlightRef.current) return;
+        repeatSelectionRef.current = repeatLast;
+        activeDiagnosticRef.current = diagnosticsRef.current.start(captureMode, quality);
+        setQualityNotice('');
 
         const sessionId = screenSessionIdRef.current + 1;
         screenSessionIdRef.current = sessionId;
+        const preparationController = new AbortController();
+        screenPreparationAbortRef.current = preparationController;
         screenCapturePhaseRef.current = 'capturing';
         captureOperationInFlightRef.current = true;
         clearFrozenScreenFrame();
@@ -2678,17 +2544,24 @@ const QuickCameraCapture: React.FC = () => {
             ? document.activeElement
             : null;
         hideHostPanel();
-        void prepareFrozenScreenFrame(sessionId);
+        if (captureMode === 'scroll') void prepareScrollSelection(sessionId, preparationController.signal);
+        else void prepareFrozenScreenFrame(sessionId, preparationController.signal);
     };
 
     const recopyHistoryItem = useCallback(async (item: CaptureHistoryItem) => {
         if (captureOperationInFlightRef.current) return;
         captureOperationInFlightRef.current = true;
+        const sessionId = screenSessionIdRef.current;
+        const diagnostic = diagnosticsRef.current.start('copy', quality);
+        activeDiagnosticRef.current = diagnostic;
+        diagnostic.mark('clipboard');
         setIsProcessing(true);
         setIsSuccess(null);
         setMessage('히스토리 이미지를 클립보드에 복사 중...');
         try {
             const result = await copyBlobToClipboard(item.blob);
+            if (sessionId !== screenSessionIdRef.current) return;
+            diagnostic.finish(result.ok ? 'success' : 'failed', result.ok ? undefined : new Error(result.reason === 'timeout' ? 'clipboard-timeout' : result.reason));
             setCaptureHistory((current) => current.map((historyItem) => (
                 historyItem.id === item.id
                     ? {
@@ -2713,11 +2586,15 @@ const QuickCameraCapture: React.FC = () => {
                 setMessage(
                     result.reason === 'unsupported'
                         ? `영역 캡처 완료 · 클립보드 미복사 · ${item.width}×${item.height} PNG. PNG 다운로드를 이용해 주세요.`
+                        : result.reason === 'timeout'
+                        ? `복사 응답이 지연되고 있습니다. ${item.width}×${item.height} PNG는 보관되어 있으니 저장하거나 다시 복사해 주세요.`
                         : `영역 캡처 완료 · 클립보드 미복사 · ${item.width}×${item.height} PNG. 브라우저 권한을 허용한 뒤 다시 눌러 주세요.`
                 );
                 setIsSuccess(false);
             }
-        } catch {
+        } catch (error) {
+            diagnostic.finish('failed', error);
+            if (sessionId !== screenSessionIdRef.current) return;
             setCaptureHistory((current) => current.map((historyItem) => (
                 historyItem.id === item.id
                     ? { ...historyItem, clipboardStatus: 'failed' }
@@ -2726,20 +2603,38 @@ const QuickCameraCapture: React.FC = () => {
             setMessage('히스토리 재복사 중 오류가 발생했습니다.');
             setIsSuccess(false);
         } finally {
-            setIsProcessing(false);
-            captureOperationInFlightRef.current = false;
+            if (sessionId === screenSessionIdRef.current) {
+                setIsProcessing(false);
+                captureOperationInFlightRef.current = false;
+            }
         }
-    }, []);
+    }, [quality]);
 
-    const downloadHistoryItem = useCallback((item: CaptureHistoryItem) => {
-        saveBlobAsFile(item.blob, `capture-${item.createdAt}.png`);
+    const downloadHistoryItem = useCallback(async (item: CaptureHistoryItem) => {
+        if (downloadInFlightRef.current.has(item.id)) return;
+        downloadInFlightRef.current.add(item.id);
+        try {
+            if (item.parts) {
+                const { default: JSZip } = await import('jszip');
+                const zip = new JSZip();
+                item.parts.forEach((part, index) => zip.file(`capture-${String(index + 1).padStart(2, '0')}.png`, part.blob));
+                const blob = await waitForCaptureOperation(zip.generateAsync({ type: 'blob', compression: 'STORE' }), 15000, 'png-timeout');
+                saveBlobAsFile(blob, `capture-${item.createdAt}-${item.parts.length}parts.zip`);
+            } else saveBlobAsFile(item.blob, `capture-${item.createdAt}.png`);
+        } catch {
+            setMessage('파일을 준비하지 못했습니다. 이미지는 보관되어 있으니 다시 저장해 주세요.');
+            setIsSuccess(false);
+            return;
+        } finally {
+            downloadInFlightRef.current.delete(item.id);
+        }
         setCaptureHistory((current) => current.map((historyItem) => (
             historyItem.id === item.id
                 ? { ...historyItem, downloadRequested: true }
                 : historyItem
         )));
         setMessage(
-            `영역 캡처 완료 · ${item.width}×${item.height} PNG 다운로드를 요청했습니다.${
+            `영역 캡처 완료 · ${item.parts ? `${item.parts.length}장 PNG 묶음` : `${item.width}×${item.height} PNG`} 다운로드를 요청했습니다.${
                 item.clipboardStatus === 'copied' ? ' 클립보드 복사도 완료된 상태입니다.' : ''
             }`
         );
@@ -2843,6 +2738,21 @@ const QuickCameraCapture: React.FC = () => {
         if (screenCapturePhaseRef.current !== 'selecting') {
             return;
         }
+        if (!sourceConfirmed) {
+            setMessage('미리보기가 현재 앱 화면인지 먼저 확인해 주세요.');
+            setIsSuccess(false);
+            return;
+        }
+        const frame = frozenScreenFrameRef.current;
+        if (!frame || !isSameCaptureViewport(frame.viewport, readCaptureViewport())) {
+            endScreenCaptureSession();
+            clearFrozenScreenFrame();
+            setIsSelecting(false);
+            restoreHiddenPanel();
+            setMessage(getScreenCaptureFailureMessage(new Error('capture-viewport-changed')));
+            setIsSuccess(false);
+            return;
+        }
         if (!rect) {
             setMessage('먼저 영역을 선택해 주세요.');
             setIsSuccess(false);
@@ -2883,7 +2793,7 @@ const QuickCameraCapture: React.FC = () => {
             selectedScroll,
             clipboardReservation
         );
-    }, [copySelectionToClipboard]);
+    }, [copySelectionToClipboard, sourceConfirmed, endScreenCaptureSession, clearFrozenScreenFrame, restoreHiddenPanel]);
 
     const finishFullContentCapture = useCallback(async () => {
         if (screenCapturePhaseRef.current !== 'selecting') {
@@ -2966,6 +2876,15 @@ const QuickCameraCapture: React.FC = () => {
         }
 
         if (captureMode === 'scroll') {
+            const selectedViewport = scrollSelectionViewportRef.current;
+            if (!selectedViewport || !isSameCaptureViewport(selectedViewport, readCaptureViewport())) {
+                endScreenCaptureSession();
+                setIsSelecting(false);
+                restoreHiddenPanel();
+                setMessage(getScrollCaptureFailureMessage(new Error('capture-viewport-changed')));
+                setIsSuccess(false);
+                return;
+            }
             const existingAnchor = scrollSelectionAnchorRef.current;
 
             if (!existingAnchor) {
@@ -3012,9 +2931,8 @@ const QuickCameraCapture: React.FC = () => {
 
             setSelectionRect(rect);
             setIsSelecting(false);
-            // Keep this call synchronous with the pointer gesture until the
-            // display-media request has been created. The capture function
-            // handles UI hiding and waits for a clean frame afterwards.
+            // Reserve clipboard access in this pointer gesture using the
+            // stream that was prepared before selecting the start point.
             void copySelectionToClipboard(rect);
             return;
         }
@@ -3123,17 +3041,34 @@ const QuickCameraCapture: React.FC = () => {
         if (!isSelecting) return;
 
         const handleViewportResize = () => {
+            const frame = frozenScreenFrameRef.current;
+            const selectedViewport = captureMode === 'scroll' ? scrollSelectionViewportRef.current : frame?.viewport;
+            if (selectedViewport && !isSameCaptureViewport(selectedViewport, readCaptureViewport())) {
+                endScreenCaptureSession();
+                clearFrozenScreenFrame();
+                setIsSelecting(false);
+                restoreHiddenPanel();
+                setMessage(getScreenCaptureFailureMessage(new Error('capture-viewport-changed')));
+                setIsSuccess(false);
+                return;
+            }
             setSelectionRect((current) => current ? normalizeRectToViewport(current) : current);
             setCursorPoint((current) => current
                 ? clampPointToViewport(current.x, current.y)
                 : current);
         };
 
+        const dpiQuery = window.matchMedia?.(`(resolution: ${currentViewport.pixelRatio}dppx)`);
         window.addEventListener('resize', handleViewportResize);
+        window.visualViewport?.addEventListener('resize', handleViewportResize);
+        dpiQuery?.addEventListener?.('change', handleViewportResize);
+        handleViewportResize();
         return () => {
             window.removeEventListener('resize', handleViewportResize);
+            window.visualViewport?.removeEventListener('resize', handleViewportResize);
+            dpiQuery?.removeEventListener?.('change', handleViewportResize);
         };
-    }, [isSelecting]);
+    }, [isSelecting, captureMode, currentViewport, endScreenCaptureSession, clearFrozenScreenFrame, restoreHiddenPanel]);
 
     useEffect(() => {
         if (!isSelecting) return;
@@ -3186,7 +3121,9 @@ const QuickCameraCapture: React.FC = () => {
             setCursorPoint(point);
             const adjustment = selectionAdjustmentRef.current;
             if (captureMode === 'screen' && adjustment) {
-                setSelectionRect(getAdjustedSelectionRect(adjustment, point));
+                const adjustedRect = getAdjustedSelectionRect(adjustment, point);
+                selectionRectRef.current = adjustedRect;
+                setSelectionRect(adjustedRect);
                 return;
             }
             if (captureMode === 'scroll' && scrollSelectionAnchorRef.current) {
@@ -3194,7 +3131,9 @@ const QuickCameraCapture: React.FC = () => {
                 return;
             }
             if (!draggingRef.current || !dragStartRef.current) return;
-            setSelectionRect(buildRect(dragStartRef.current, point));
+            const dragRect = buildRect(dragStartRef.current, point);
+            selectionRectRef.current = dragRect;
+            setSelectionRect(dragRect);
         };
 
         const handlePointerUp = (e: PointerEvent) => {
@@ -3253,15 +3192,45 @@ const QuickCameraCapture: React.FC = () => {
             setIsSuccess(null);
         };
 
-        const cancelPointerInteraction = () => {
+        const cancelPointerInteraction = (event?: Event) => {
+            const activePointerId = activeSelectionPointerIdRef.current;
+            const cancelledPointerId = event?.type === 'pointercancel'
+                ? Number((event as PointerEvent).pointerId)
+                : null;
+            if (
+                cancelledPointerId !== null
+                && Number.isFinite(cancelledPointerId)
+                && activePointerId !== null
+                && cancelledPointerId !== activePointerId
+            ) {
+                return;
+            }
+
             const adjustment = selectionAdjustmentRef.current;
-            const hadActiveInteraction = activeSelectionPointerIdRef.current !== null
+            const hadActiveInteraction = activePointerId !== null
                 || draggingRef.current
                 || !!adjustment;
             if (!hadActiveInteraction) return;
 
+            if (activePointerId !== null) {
+                try {
+                    selectionOverlayRef.current?.releasePointerCapture?.(activePointerId);
+                } catch {
+                    // The browser may already have released capture before blur/pointercancel.
+                }
+            }
+
             const previousSelection = previousSelectionRectRef.current;
-            const rectToRestore = adjustment?.startRect ?? previousSelection;
+            const draftSelection = draggingRef.current && selectionRectRef.current
+                ? normalizeRectToViewport(selectionRectRef.current)
+                : null;
+            const validDraftSelection = draftSelection
+                && draftSelection.width >= MIN_SIZE
+                && draftSelection.height >= MIN_SIZE
+                ? draftSelection
+                : null;
+            const rectToRestore = adjustment?.startRect ?? previousSelection ?? validDraftSelection;
+            const preservedCurrentDrag = !adjustment && !previousSelection && !!validDraftSelection;
 
             activeSelectionPointerIdRef.current = null;
             draggingRef.current = false;
@@ -3270,11 +3239,18 @@ const QuickCameraCapture: React.FC = () => {
             previousSelectionRectRef.current = null;
 
             if (rectToRestore) {
-                setSelectionRect(normalizeRectToViewport(rectToRestore));
+                const normalizedRect = normalizeRectToViewport(rectToRestore);
+                selectionRectRef.current = normalizedRect;
+                setSelectionRect(normalizedRect);
                 setSelectionReady(true);
-                setMessage('포인터 조작이 중단되어 이전 선택 범위를 유지했습니다.');
+                setMessage(
+                    preservedCurrentDrag
+                        ? '포인터가 중단되었지만 마지막 유효 영역을 유지했습니다.'
+                        : '포인터 조작이 중단되어 이전 선택 범위를 유지했습니다.'
+                );
                 setIsSuccess(null);
             } else {
+                selectionRectRef.current = null;
                 setSelectionRect(null);
                 setSelectionReady(false);
             }
@@ -3396,6 +3372,7 @@ const QuickCameraCapture: React.FC = () => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key !== 'Escape') return;
             abortProcessingRef.current = true;
+            screenPreparationAbortRef.current?.abort();
             setProcessingStatusText('스크롤 캡처를 취소하는 중입니다...');
         };
 
@@ -3404,6 +3381,18 @@ const QuickCameraCapture: React.FC = () => {
             window.removeEventListener('keydown', handleKeyDown);
         };
     }, [captureMode, isProcessing]);
+
+    useEffect(() => {
+        if (!isProcessing || captureMode !== 'screen' || !screenPreparationAbortRef.current) return;
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                cancelScreenPreparation();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [captureMode, isProcessing, cancelScreenPreparation]);
 
     const viewport = getViewportMetrics();
     const scrollPreviewEndPoint = captureMode === 'scroll' && scrollAnchorPoint
@@ -3501,8 +3490,31 @@ const QuickCameraCapture: React.FC = () => {
             </div>
 
             <p className="mt-3 text-xs leading-relaxed text-slate-400">
-                캡처할 방식만 고른 뒤 화면에서 범위를 지정하세요. 결과는 자동으로 클립보드에 복사되고 최근 3개까지 미리보기로 보관됩니다.
+                범위를 지정하면 이미지를 만들고 클립보드에 복사합니다. 최근 결과는 메모리 한도 안에서 최대 {CAPTURE_HISTORY_LIMIT}개까지 보관됩니다.
             </p>
+
+            <label className="mt-3 flex items-center justify-between gap-2 text-xs text-slate-300">
+                캡처 화질
+                <select
+                    aria-label="캡처 화질"
+                    value={quality}
+                    disabled={isProcessing || isSelecting}
+                    className="rounded-md border border-white/20 bg-slate-900 px-2 py-1.5 text-white"
+                    onChange={(event) => {
+                        endScreenCaptureSession();
+                        setQuality(event.target.value as CaptureQuality);
+                        setQualityNotice('');
+                    }}
+                >
+                    <option value="high">고화질 · 작은 글자 선명하게 (권장)</option>
+                    <option value="standard">표준 · 용량 우선 (축소될 수 있음)</option>
+                </select>
+            </label>
+            {qualityNotice && <p role="status" className="mt-2 text-xs text-amber-200">{qualityNotice}</p>}
+            {captureMode === 'screen' && <label className="mt-2 flex items-center gap-2 text-xs text-slate-300">
+                <input type="checkbox" checked={continuousCapture} disabled={isProcessing || isSelecting} onChange={(event) => setContinuousCapture(event.target.checked)} />
+                캡처 후 다음 화면 준비 · Esc로 종료
+            </label>}
 
             {displayCaptureSupportMessage && (
                 <div
@@ -3560,7 +3572,7 @@ const QuickCameraCapture: React.FC = () => {
                         <span className="text-sm font-semibold">긴 화면 구간</span>
                         <span className="rounded-full bg-emerald-400/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-200">이어붙이기</span>
                     </div>
-                    <div className="mt-1 text-[11px] leading-relaxed text-slate-400">시작점과 끝점을 찍으면 그 사이를 자동 스크롤해 한 장으로 만듭니다.</div>
+                    <div className="mt-1 text-[11px] leading-relaxed text-slate-400">시작점과 끝점 사이를 자동으로 캡처합니다. 긴 이미지는 나누어 저장합니다.</div>
                 </button>
             </div>
 
@@ -3581,8 +3593,8 @@ const QuickCameraCapture: React.FC = () => {
                     </div>
                 ) : (
                     <div>
-                        <span className="font-semibold text-emerald-200">첫 지점 클릭 → 화면을 아래로 스크롤 → 마지막 지점 클릭</span>
-                        <span className="ml-1 text-slate-400">순서로 선택하세요. 공유창에서는 반드시 “현재 탭”을 선택해야 합니다.</span>
+                        <span className="font-semibold text-emerald-200">현재 탭 허용 → 첫 지점 클릭 → 스크롤 → 마지막 지점 클릭</span>
+                        <span className="ml-1 text-slate-400">공유 화면이 준비된 뒤 구간을 선택합니다. 끝점을 누르면 바로 캡처합니다.</span>
                     </div>
                 )}
             </div>
@@ -3618,26 +3630,21 @@ const QuickCameraCapture: React.FC = () => {
                     <button
                         type="button"
                         onClick={() => {
-                        if (!selectionRect) {
-                            setMessage('먼저 영역을 선택해 주세요.');
-                            setIsSuccess(false);
-                            return;
-                        }
-                        const normalized = normalizeRectToViewport(selectionRect);
-                        if (normalized.width < MIN_SIZE || normalized.height < MIN_SIZE) {
-                            setSelectionRect(null);
-                            setMessage('화면 크기가 바뀌어 기존 선택 범위가 너무 작아졌습니다. 영역을 다시 선택해 주세요.');
-                            setIsSuccess(false);
-                            return;
-                        }
-                        setSelectionRect(normalized);
-                        void copySelectionToClipboard(normalized, getViewportMetrics());
+                            if (captureHistory[0]) void recopyHistoryItem(captureHistory[0]);
                         }}
-                        disabled={isProcessing || !selectionRect}
+                        disabled={isProcessing || isSelecting || !captureHistory.length}
                         className="inline-flex items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                         <ClipboardCheck className="h-4 w-4" />
-                        클립보드 저장
+                        마지막 캡처 복사
+                    </button>
+                )}
+                {captureMode === 'screen' && lastSelection && (
+                    <button type="button" onClick={() => startCaptureSelection(true)}
+                        disabled={isProcessing || isSelecting || !isSameCaptureViewport(lastSelection.viewport, currentViewport)}
+                        title="현재 화면을 새로 가져와 마지막 선택 범위를 적용합니다. 화면 크기나 배율이 바뀌면 새 영역을 선택하세요."
+                        className="rounded-md border border-sky-400/40 px-3 py-2 text-xs font-semibold text-sky-200 disabled:opacity-50">
+                        마지막 영역 다시 캡처
                     </button>
                 )}
                 {isProcessing && captureMode === 'scroll' && (
@@ -3693,10 +3700,25 @@ const QuickCameraCapture: React.FC = () => {
                 </div>
             )}
 
+            <details className="mt-3 rounded-md border border-white/10 p-2 text-xs text-slate-400">
+                <summary className="cursor-pointer">문제 진단</summary>
+                <p className="mt-2">최근 20회 작업의 단계·시간·브라우저·화면 크기만 이 탭의 메모리에 기록합니다. 화면 내용과 사용자 정보는 포함하지 않습니다.</p>
+                {diagnosticsRef.current.snapshot().records.slice(-1).map((record) => (
+                    <p key={record.startedAt} className="mt-2">
+                        마지막 단계: {CAPTURE_STAGE_LABELS[record.stages.slice(-1)[0]?.stage] || '시작'}
+                        {record.durationMs !== undefined && ` · ${(record.durationMs / 1000).toFixed(1)}초`}
+                        {record.errorCode && ` · ${record.errorCode}`}
+                    </p>
+                ))}
+                <button type="button" className="mt-2 rounded border border-white/20 px-2 py-1 text-slate-200" onClick={() => {
+                    saveBlobAsFile(new Blob([JSON.stringify(diagnosticsRef.current.snapshot(), null, 2)], { type: 'application/json' }), 'camera-diagnostics.json');
+                }}>진단 파일 저장</button>
+            </details>
+
             {captureHistory.length > 0 && (
                 <div className="mt-4 space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                        <div className="text-xs font-semibold text-slate-300">최근 캡처 (최대 3개)</div>
+                        <div className="text-xs font-semibold text-slate-300">최근 캡처 (최대 {CAPTURE_HISTORY_LIMIT}개)</div>
                         <button
                             type="button"
                             onClick={clearCaptureHistory}
@@ -3753,6 +3775,7 @@ const QuickCameraCapture: React.FC = () => {
                             onCopy={(item) => { void recopyHistoryItem(item); }}
                             onDownload={downloadHistoryItem}
                             onRemove={removeHistoryItem}
+                            onEdit={setEditorItem}
                         />
                     </div>
 
@@ -3812,6 +3835,7 @@ const QuickCameraCapture: React.FC = () => {
                                             onCopy={(historyItem) => { void recopyHistoryItem(historyItem); }}
                                             onDownload={downloadHistoryItem}
                                             onRemove={removeHistoryItem}
+                                            onEdit={setEditorItem}
                                         />
                                     </div>
                                 );
@@ -3822,6 +3846,38 @@ const QuickCameraCapture: React.FC = () => {
             )}
 
         </div>
+        {editorItem && active && <CaptureImageEditor
+            parts={editorItem.parts || [{ blob: editorItem.blob, width: editorItem.width, height: editorItem.height }]}
+            onClose={() => setEditorItem(null)}
+            onSave={(part) => {
+                const item = pushCaptureHistory(part.blob, part.width, part.height);
+                setCaptureHistory((items) => items.map((entry) => entry.id === item.id ? { ...entry, clipboardStatus: 'failed' } : entry));
+                setPendingClipboardCopy(null);
+                setEditorItem(null);
+                setMessage('편집본을 새 이미지로 보관했습니다. 클립보드 복사 또는 PNG 저장을 이용하세요.');
+                setIsSuccess(true);
+            }}
+        />}
+        {isProcessing && (screenPreparationAbortRef.current || screenCapturePhaseRef.current === 'capturing') && createPortal(
+            <div
+                data-capture-exclude="true"
+                data-capture-preparation="true"
+                role="status"
+                aria-live="polite"
+                className="fixed bottom-6 left-1/2 z-[100000] flex max-w-[calc(100vw-24px)] -translate-x-1/2 items-center gap-4 rounded-xl border border-white/20 bg-slate-950 px-4 py-3 text-sm text-white shadow-2xl"
+            >
+                <span>{processingStatusText || '화면 캡처를 준비하는 중입니다.'}</span>
+                <button
+                    type="button"
+                    className="shrink-0 rounded-md border border-white/30 px-3 py-2 hover:bg-white/10"
+                    onClick={captureMode === 'scroll' ? requestProcessingCancel : cancelScreenPreparation}
+                    aria-label={captureMode === 'scroll' ? '긴 화면 캡처 취소' : '화면 캡처 준비 취소'}
+                >
+                    취소
+                </button>
+            </div>,
+            document.body
+        )}
         {isSelecting && createPortal(
             <div
                 ref={selectionOverlayRef}
@@ -3843,6 +3899,13 @@ const QuickCameraCapture: React.FC = () => {
                         data-frozen-capture-preview="true"
                         className="pointer-events-none absolute inset-0 h-full w-full select-none object-fill"
                     />
+                )}
+                {captureMode === 'screen' && !sourceConfirmed && (
+                    <div className="absolute left-1/2 top-20 z-40 w-max max-w-[calc(100vw-24px)] -translate-x-1/2 rounded-lg border border-amber-400/60 bg-slate-950 p-3 text-sm text-white" onPointerDown={(event) => event.stopPropagation()}>
+                        <p>이 브라우저에서는 현재 탭을 자동 확인할 수 없습니다. 미리보기를 확인해 주세요.</p>
+                        <button type="button" className="mt-2 rounded bg-sky-600 px-3 py-2 font-semibold" onClick={() => setSourceConfirmed(true)}>현재 앱 화면이 맞습니다</button>
+                        <button type="button" className="ml-2 rounded border border-white/30 px-3 py-2" onClick={() => { resetSelection(); setMessage('현재 앱 탭을 선택해 다시 시작해 주세요.'); }}>다시 선택</button>
+                    </div>
                 )}
                 {captureMode === 'scroll' && scrollAnchorPoint && (
                     <>
@@ -4037,6 +4100,7 @@ const QuickCameraCapture: React.FC = () => {
                             type="button"
                             className="inline-flex items-center gap-1 rounded-md bg-sky-600 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-500"
                             onClick={() => { void finishScreenSelection(selectionRect); }}
+                            disabled={!sourceConfirmed}
                         >
                             <Check className="h-3.5 w-3.5" />
                             캡처 후 클립보드 복사

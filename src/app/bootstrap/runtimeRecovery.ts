@@ -1,8 +1,11 @@
 const APP_CACHE_PREFIX = 'cy-erp-pwa-';
 const CHUNK_RECOVERY_KEY = 'cy-erp-chunk-recovery-at';
+const CHUNK_RECOVERY_RUNTIME_KEY = 'cy-erp-chunk-recovery-runtime';
 const CHUNK_RECOVERY_GUARD_MS = 15000;
+const ASSET_REFRESH_TIMEOUT_MS = 4000;
 
 let inMemoryLastRecoveryAt = 0;
+let recoveryStarted = false;
 
 const errorText = (error: unknown, seen = new WeakSet<object>()): string => {
   if (typeof error === 'string') return error;
@@ -18,7 +21,7 @@ const errorText = (error: unknown, seen = new WeakSet<object>()): string => {
 };
 
 export const isChunkLoadError = (error: unknown): boolean => (
-  /ChunkLoadError|Loading chunk .* failed|Failed to fetch dynamically imported module|Importing a module script failed/i.test(
+  /ChunkLoadError|CSS_CHUNK_LOAD_FAILED|Loading (?:CSS )?chunk .* failed|Failed to fetch dynamically imported module|Importing a module script failed/i.test(
     errorText(error),
   )
 );
@@ -31,14 +34,29 @@ const readLastRecoveryAt = (): number => {
   }
 };
 
-const writeLastRecoveryAt = (value: number) => {
-  inMemoryLastRecoveryAt = value;
+const currentRuntime = (): string => (
+  Array.from(document.scripts).find((script) => /\/static\/js\/main\.[^/]+\.js(?:\?|$)/.test(script.src))?.src
+    || window.location.origin
+);
+
+const reserveRecovery = (now: number, manual: boolean): boolean => {
+  if (recoveryStarted || (!manual && navigator.onLine === false)) return false;
   try {
-    window.sessionStorage.setItem(CHUNK_RECOVERY_KEY, String(value));
+    const runtime = currentRuntime();
+    // A time-only guard loops when a slow page takes longer than the guard
+    // to load. Attempt automatic recovery only once per runtime in this tab.
+    if (!manual && (window.sessionStorage.getItem(CHUNK_RECOVERY_RUNTIME_KEY) === runtime
+      || now - readLastRecoveryAt() < CHUNK_RECOVERY_GUARD_MS)) return false;
+    window.sessionStorage.setItem(CHUNK_RECOVERY_KEY, String(now));
+    window.sessionStorage.setItem(CHUNK_RECOVERY_RUNTIME_KEY, runtime);
   } catch {
-    // Some privacy modes block sessionStorage. The in-memory guard still
-    // prevents a reload loop for the lifetime of the current document.
+    // Without persistent tab storage we cannot prevent an automatic reload
+    // loop across documents. The explicit recovery button remains available.
+    if (!manual) return false;
   }
+  inMemoryLastRecoveryAt = now;
+  recoveryStarted = true;
+  return true;
 };
 
 const refreshRuntimeAssets = async () => {
@@ -60,7 +78,9 @@ const refreshRuntimeAssets = async () => {
         registrations
           .filter((registration) => {
             try {
-              return new URL(registration.scope).origin === window.location.origin;
+              const worker = registration.active || registration.waiting || registration.installing;
+              const expected = new URL(`${process.env.PUBLIC_URL || ''}/service-worker.js`, window.location.origin);
+              return Boolean(worker && new URL(worker.scriptURL).href === expected.href);
             } catch {
               return false;
             }
@@ -73,16 +93,17 @@ const refreshRuntimeAssets = async () => {
   await Promise.allSettled(tasks);
 };
 
-export const recoverFromChunkLoadError = (): boolean => {
+export const recoverFromChunkLoadError = (options: { manual?: boolean } = {}): boolean => {
   if (typeof window === 'undefined') return false;
 
-  const now = Date.now();
-  if (now - readLastRecoveryAt() < CHUNK_RECOVERY_GUARD_MS) {
-    return false;
-  }
+  if (!reserveRecovery(Date.now(), options.manual === true)) return false;
 
-  writeLastRecoveryAt(now);
-  void refreshRuntimeAssets().finally(() => {
+  let timeout: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<void>((resolve) => {
+    timeout = setTimeout(resolve, ASSET_REFRESH_TIMEOUT_MS);
+  });
+  void Promise.race([refreshRuntimeAssets(), deadline]).finally(() => {
+    clearTimeout(timeout);
     window.location.reload();
   });
   return true;

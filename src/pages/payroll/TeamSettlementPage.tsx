@@ -47,6 +47,14 @@ import {
   createTeamSettlementDraftFingerprint,
   getTeamSettlementConfirmationIssues
 } from '../../utils/teamSettlementDraft';
+import {
+  getTeamSettlementSupportDetailConsistency,
+  resolveTeamSettlementSupportDetails
+} from '../../utils/teamSettlementSupportDetails';
+import {
+  buildTeamSettlementTransactionSummary,
+  formatTeamSettlementSummaryManDay
+} from '../../utils/teamSettlementTransactionSummary';
 import { DEFAULT_SUPPORT_UNIT_PRICE } from '../../utils/teamSettlementSupportRateOverrides';
 import type { UtilityRecord } from '../../types/accommodation';
 import type { AccommodationAssignment } from '../../types/accommodationAssignment';
@@ -972,6 +980,10 @@ export const TeamSettlementPage: React.FC = () => {
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' });
   const [detailRows, setDetailRows] = useState<DailyReportWorkerRow[]>([]);
   const [supportDetailRows, setSupportDetailRows] = useState<TeamSettlementSupportDetailRow[]>([]);
+  const supportDetailData = useMemo(
+    () => resolveTeamSettlementSupportDetails(doc?.sourceSnapshot, supportDetailRows),
+    [doc?.sourceSnapshot, supportDetailRows]
+  );
   const [laborExchangeSummary, setLaborExchangeSummary] = useState<TeamExchangeSummary | null>(null);
   const [expandedLineIds, setExpandedLineIds] = useState<Set<string>>(() => new Set());
   const [expandedSiteKeys, setExpandedSiteKeys] = useState<Set<string>>(() => new Set());
@@ -1121,12 +1133,15 @@ export const TeamSettlementPage: React.FC = () => {
       }
       try {
         const range = buildMonthRange(yearMonth);
+        const snapshotSupportRows = doc.sourceSnapshot?.supportDetails;
         const [rows, supportRows] = await Promise.all([
           dailyReportService.getReportWorkerRowsByRange({
             startDate: range.startDate,
             endDate: range.endDate
           }),
-          selectedTeamId
+          snapshotSupportRows
+            ? Promise.resolve(snapshotSupportRows)
+            : selectedTeamId
             ? teamSettlementService.getSupportSettlementDetailRows({ yearMonth, teamId: selectedTeamId })
             : Promise.resolve([] as TeamSettlementSupportDetailRow[])
         ]);
@@ -2121,7 +2136,7 @@ export const TeamSettlementPage: React.FC = () => {
     const matchesSiteByIdOrName = (row: TeamSettlementSupportDetailRow): boolean => {
       if (!lineSiteId && !lineSiteName) return true;
       const rowSiteId = String(row.siteId ?? '').trim();
-      if (lineSiteId && rowSiteId && lineSiteId === rowSiteId) return true;
+      if (lineSiteId && rowSiteId) return lineSiteId === rowSiteId;
       const rowSiteName = String(row.siteName ?? '').trim();
       return Boolean(lineSiteName && rowSiteName && normalizeRateLookupKey(lineSiteName) === normalizeRateLookupKey(rowSiteName));
     };
@@ -2129,16 +2144,16 @@ export const TeamSettlementPage: React.FC = () => {
     const matchesCounterByIdOrName = (row: TeamSettlementSupportDetailRow): boolean => {
       if (!lineCounterId && !lineCounterName) return true;
       const rowCounterId = String(row.counterTeamId ?? '').trim();
-      if (lineCounterId && rowCounterId && lineCounterId === rowCounterId) return true;
+      if (lineCounterId && rowCounterId) return lineCounterId === rowCounterId;
       const rowCounterName = String(row.counterTeamName ?? '').trim();
       return Boolean(lineCounterName && rowCounterName && normalizeRateLookupKey(lineCounterName) === normalizeRateLookupKey(rowCounterName));
     };
 
-    return supportDetailRows.filter((row) => {
+    return supportDetailData.rows.filter((row) => {
       if (!supportDirections.includes(row.direction)) return false;
       return matchesSiteByIdOrName(row) && matchesCounterByIdOrName(row);
     });
-  }, [getSupportDirectionsForLine, supportDetailRows]);
+  }, [getSupportDirectionsForLine, supportDetailData.rows]);
 
   const unifiedLines = useMemo<SettlementUnifiedLine[]>(() => {
     if (!doc) return [];
@@ -3174,11 +3189,14 @@ export const TeamSettlementPage: React.FC = () => {
             };
           });
 
-        const targetAmount = Math.round(safeNumber(line.amount));
-        const currentAmount = rows.reduce((sum, row) => sum + safeNumber(row.amount), 0);
-        const diff = Math.round(targetAmount - currentAmount);
-        if (rows.length > 0 && diff !== 0) {
-          rows[rows.length - 1].amount = safeNumber(rows[rows.length - 1].amount) + diff;
+        const consistency = getTeamSettlementSupportDetailConsistency(safeNumber(line.manDay), rows);
+        if (consistency.matches) {
+          const targetAmount = Math.round(safeNumber(line.amount));
+          const currentAmount = rows.reduce((sum, row) => sum + safeNumber(row.amount), 0);
+          const diff = Math.round(targetAmount - currentAmount);
+          if (rows.length > 0 && diff !== 0) {
+            rows[rows.length - 1].amount = safeNumber(rows[rows.length - 1].amount) + diff;
+          }
         }
 
         return rows;
@@ -3663,6 +3681,8 @@ export const TeamSettlementPage: React.FC = () => {
       const supportRateAvg = isSupportFeeLine ? supportUnitPrice : null;
       const showSiteRateColumn = lineIsSupportOrigin && line.kind === '지원';
       const siteDetailColSpan = showSiteRateColumn ? 6 : 5;
+      const supportDetailConsistency = getTeamSettlementSupportDetailConsistency(safeNumber(line.manDay), detail);
+      const hasSupportDetailMismatch = lineIsSupportOrigin && detail.length > 0 && !supportDetailConsistency.matches;
 
       const siteSummaries = (() => {
         if (detail.length === 0) return [] as Array<{ key: string; siteId?: string; siteName: string; manDay: number; amount: number; rows: LineDetailRow[] }>;
@@ -3863,6 +3883,27 @@ export const TeamSettlementPage: React.FC = () => {
                       ? `총 ${detail.length}건 / ${siteSummaries.length}개 현장`
                       : '상세 데이터 없음 (수기 항목이거나 필터 조건에 해당 없음)'}
                   </div>
+
+                  {hasSupportDetailMismatch && (
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
+                      <div>
+                        <div className="text-sm font-black text-rose-900">지원 공수 요약과 상세가 일치하지 않습니다.</div>
+                        <div className="mt-0.5 text-xs font-semibold text-rose-700">
+                          요약 {formatManDay1(supportDetailConsistency.expectedManDay)}공수 · 상세 {formatManDay1(supportDetailConsistency.detailManDay)}공수
+                          {supportDetailData.source === 'live'
+                            ? ' · 저장 후 일보가 변경된 구 스냅샷입니다.'
+                            : ' · 저장된 상세 스냅샷을 다시 생성해야 합니다.'}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded-md border border-rose-300 bg-white px-3 py-1.5 text-xs font-black text-rose-800 hover:bg-rose-100"
+                        onClick={() => void handleRecalculate()}
+                      >
+                        재집계해서 맞추기
+                      </button>
+                    </div>
+                  )}
 
                   {editableManual && (
                     <div className="mt-3">
@@ -4653,16 +4694,48 @@ export const TeamSettlementPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 text-sm">
-              <div>
-                <div className="team-settlement-page__transaction-total-label text-slate-600">거래내역 합계 (매출 / 매입)</div>
-                <div className="team-settlement-page__transaction-total-value mt-1 font-bold text-slate-800">
-                  {formatCurrency(totals.salesTotal)}원 / {formatCurrency(totals.purchasesTotal)}원
-                  <span className="mx-2 text-slate-300">·</span>
-                  {formatManDay1(transactionSectionTotals.salesTotal.manDay)}공 / {formatManDay1(transactionSectionTotals.purchasesTotal.manDay)}공
+            <div className="mt-5 border-t border-slate-200 pt-4">
+              <div className="team-settlement-page__transaction-total-label mb-2 text-xs font-black tracking-wide text-slate-600">
+                거래내역 합계
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2" aria-label="매출·매입 거래내역 합계">
+                <div
+                  className="flex min-h-[68px] flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-blue-300 bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-3 shadow-sm"
+                  aria-label={buildTeamSettlementTransactionSummary(
+                    '매출',
+                    transactionSectionTotals.salesTotal.amount,
+                    transactionSectionTotals.salesTotal.manDay
+                  )}
+                >
+                  <span className="rounded-md bg-blue-600 px-2.5 py-1 text-sm font-black text-white shadow-sm">매출</span>
+                  <span className="font-black text-blue-300" aria-hidden="true">-</span>
+                  <span className="text-lg font-black tracking-tight text-blue-950 sm:text-xl">
+                    {formatCurrency(transactionSectionTotals.salesTotal.amount)}원
+                  </span>
+                  <span className="text-sm font-black text-blue-700">
+                    ({formatTeamSettlementSummaryManDay(transactionSectionTotals.salesTotal.manDay)}공수)
+                  </span>
+                </div>
+
+                <div
+                  className="flex min-h-[68px] flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-orange-300 bg-gradient-to-r from-orange-50 to-amber-50 px-4 py-3 shadow-sm"
+                  aria-label={buildTeamSettlementTransactionSummary(
+                    '매입',
+                    transactionSectionTotals.purchasesTotal.amount,
+                    transactionSectionTotals.purchasesTotal.manDay
+                  )}
+                >
+                  <span className="rounded-md bg-orange-600 px-2.5 py-1 text-sm font-black text-white shadow-sm">매입</span>
+                  <span className="font-black text-orange-300" aria-hidden="true">-</span>
+                  <span className="text-lg font-black tracking-tight text-orange-950 sm:text-xl">
+                    {formatCurrency(transactionSectionTotals.purchasesTotal.amount)}원
+                  </span>
+                  <span className="text-sm font-black text-orange-700">
+                    ({formatTeamSettlementSummaryManDay(transactionSectionTotals.purchasesTotal.manDay)}공수)
+                  </span>
                 </div>
               </div>
-              <div className="text-xs font-medium text-slate-500">
+              <div className="mt-2 text-right text-xs font-medium text-slate-500">
                 전체 변경사항은 상단 작업 표시줄에서 한 번에 저장됩니다.
               </div>
             </div>

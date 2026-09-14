@@ -2899,11 +2899,20 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [applyInputGridDerivedValuesForRows, baseYear]);
 
     const handleSelectedTeamChange = useCallback((value: string) => {
-        const changed = value !== selectedTeamRef.current;
+        // Keep typing local to the input. Updating React state for every key press
+        // re-renders Handsontable, which takes focus back from this field.
         selectedTeamRef.current = value;
+    }, []);
+
+    const commitSelectedTeamInput = useCallback(() => {
+        const value = selectedTeamInputRef.current?.value ?? selectedTeamRef.current;
+        const changed = value !== selectedTeam;
+        selectedTeamRef.current = value;
+
+        if (!changed) return;
         setSelectedTeam(value);
-        if (changed && inputRowsRef.current.some(hasInputContent)) markInputDirty();
-    }, [markInputDirty]);
+        if (inputRowsRef.current.some(hasInputContent)) markInputDirty();
+    }, [markInputDirty, selectedTeam]);
 
     const handleBaseYearChange = useCallback((value: string) => {
         baseYearInputRef.current && (baseYearInputRef.current.value = value);
@@ -2939,9 +2948,9 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [markInputDirty]);
 
     const syncTopInputRefs = useCallback(() => {
-        selectedTeamRef.current = selectedTeamInputRef.current?.value ?? selectedTeamRef.current;
+        commitSelectedTeamInput();
         commitBaseYearInput();
-    }, [commitBaseYearInput]);
+    }, [commitBaseYearInput, commitSelectedTeamInput]);
 
     const getInputGridPasteStartColumn = useCallback((coords: unknown) => {
         if (Array.isArray(coords) && coords.length > 0) {
@@ -7105,12 +7114,15 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
                 <div className="workbook-input-control-grid">
                     <label className="workbook-input-field" htmlFor={`workbook-team-${tenantKey}`}>
-                        <span>팀 명</span>
+                        <span>팀명</span>
                         <input
                             id={`workbook-team-${tenantKey}`}
+                            data-testid="workbook-team-input"
                             ref={selectedTeamInputRef}
                             defaultValue={selectedTeam}
                             onChange={(event) => handleSelectedTeamChange(event.target.value)}
+                            onBlur={commitSelectedTeamInput}
+                            list="workbook-team-options"
                             placeholder="팀명 입력 또는 선택"
                             autoComplete="off"
                         />

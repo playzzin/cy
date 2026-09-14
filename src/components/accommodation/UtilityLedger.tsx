@@ -30,6 +30,7 @@ import { iconMap } from '../../constants/iconMap';
 import AccommodationQuickAssignmentModal from './QuickAssignmentModal';
 import { DEFAULT_SUPPORT_BILLING_START_DATE } from '../../utils/supportBillingPeriod';
 import { getContrastingTextColor } from '../../utils/color';
+import { formatNumberForDisplay } from '../../utils/zeroDisplay';
 import {
     getSupportManagementMonthDate,
     rememberSupportManagementYearMonth,
@@ -2491,7 +2492,7 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
                         <button onClick={() => handleMonthChange(-1)} className="w-8 h-8 flex items-center justify-center hover:bg-white hover:shadow-sm rounded-full transition text-slate-500">
                             <FontAwesomeIcon icon={faChevronLeft} />
                         </button>
-                        <span className="px-4 font-bold text-slate-700 font-mono text-lg">{yearMonth}</span>
+                        <span className="px-4 font-bold text-slate-700 font-sans tabular-nums text-lg">{yearMonth}</span>
                         <button onClick={() => handleMonthChange(1)} className="w-8 h-8 flex items-center justify-center hover:bg-white hover:shadow-sm rounded-full transition text-slate-500">
                             <FontAwesomeIcon icon={faChevronRight} />
                         </button>
@@ -2844,12 +2845,12 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
                                             />
 
                                             {/* Total */}
-                                            <td className={`px-4 py-3 border-r border-indigo-50 text-right font-extrabold font-mono text-base ${
+                                            <td className={`px-4 py-3 border-r border-indigo-50 text-right font-extrabold font-sans tabular-nums text-base ${
                                                 overchargeSummary
                                                     ? 'bg-rose-100/70 text-rose-700'
                                                     : 'bg-indigo-50/30 text-indigo-700 group-hover:bg-indigo-50/60'
                                             }`}>
-                                                {rec.costs.total.toLocaleString()}
+                                                {formatNumberForDisplay(rec.costs.total)}
                                             </td>
 
                                             {/* Overcharge */}
@@ -2902,14 +2903,14 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
                             <tfoot className="bg-slate-800 text-white font-bold text-sm tracking-wide sticky bottom-0 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                                 <tr>
                                     <td colSpan={4} className="p-4 border-r border-slate-600 text-center">합계</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-mono text-amber-300">{records.reduce((sum, r) => sum + (r.costs.rent || 0), 0).toLocaleString()}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-mono">{records.reduce((sum, r) => sum + (r.costs.electricity || 0), 0).toLocaleString()}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-mono">{records.reduce((sum, r) => sum + (r.costs.gas || 0), 0).toLocaleString()}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-mono">{records.reduce((sum, r) => sum + (r.costs.water || 0), 0).toLocaleString()}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-mono">{records.reduce((sum, r) => sum + (r.costs.internet || 0), 0).toLocaleString()}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-mono">{records.reduce((sum, r) => sum + (r.costs.maintenance || 0), 0).toLocaleString()}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-mono">{records.reduce((sum, r) => sum + (r.costs.other || 0), 0).toLocaleString()}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-mono text-indigo-300 text-lg">{records.reduce((sum, r) => sum + (r.costs.total || 0), 0).toLocaleString()}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-amber-300">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.rent || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.electricity || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.gas || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.water || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.internet || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.maintenance || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.other || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-indigo-300 text-lg">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.total || 0), 0))}</td>
                                     <td colSpan={2} className="bg-slate-900 border-l border-slate-700"></td>
                                 </tr>
                             </tfoot>

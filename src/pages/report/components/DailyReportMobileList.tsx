@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { formatTextForDisplay, formatNumberForDisplay } from '../../../utils/zeroDisplay';
 
 export interface DailyReportMobileRow {
     key: string;
@@ -36,8 +37,10 @@ const MOBILE_INITIAL_ROW_COUNT = 40;
 const MOBILE_ROW_INCREMENT = 40;
 
 const formatGroupDate = (value: string): string => {
+    const displayValue = formatTextForDisplay(value);
+    if (displayValue === '-') return displayValue;
     const [year, month, day] = value.split('-').map(Number);
-    if (!year || !month || !day) return value;
+    if (!year || !month || !day) return displayValue;
 
     const date = new Date(year, month - 1, day);
     const weekday = new Intl.DateTimeFormat('ko-KR', { weekday: 'short' }).format(date);
@@ -116,7 +119,7 @@ const DailyReportMobileList: React.FC<DailyReportMobileListProps> = ({ rows, sor
                         </div>
                         <div className="daily-report-v2-mobile-group-total">
                             <span>{group.rows.length}건</span>
-                            <strong>{group.totalManDay.toFixed(1)} 공수</strong>
+                            <strong>{formatNumberForDisplay(group.totalManDay, (value) => value.toFixed(1))} 공수</strong>
                         </div>
                     </header>
                     <div role="list">
@@ -158,9 +161,9 @@ const MobileReportCard: React.FC<MobileReportCardProps> = ({ row, formatNumber, 
                 <p>{row.workerTeamName || '소속팀 미지정'}</p>
             </div>
             <div className="daily-report-v2-mobile-card-amount">
-                <strong>{row.isEmptyReport ? '-' : row.manDay.toFixed(1)}</strong>
+                <strong>{row.isEmptyReport ? '-' : formatNumberForDisplay(row.manDay, (value) => value.toFixed(1))}</strong>
                 <span>공수</span>
-                <b>{row.isEmptyReport ? '-' : `${formatNumber(Math.round(row.amount))}원`}</b>
+                <b>{row.isEmptyReport ? '-' : (row.amount === 0 ? '-' : `${formatNumber(Math.round(row.amount))}원`)}</b>
             </div>
         </div>
         <div className="daily-report-v2-mobile-card-tags">
@@ -171,7 +174,7 @@ const MobileReportCard: React.FC<MobileReportCardProps> = ({ row, formatNumber, 
         <details className="daily-report-v2-mobile-card-details">
             <summary>상세 보기</summary>
             <dl>
-                <div><dt>단가</dt><dd>{row.isEmptyReport ? '-' : `${formatNumber(Math.round(row.unitPrice))}원`}</dd></div>
+                <div><dt>단가</dt><dd>{row.isEmptyReport ? '-' : (row.unitPrice === 0 ? '-' : `${formatNumber(Math.round(row.unitPrice))}원`)}</dd></div>
                 <div><dt>급여방식</dt><dd>{row.salaryModel || '-'}</dd></div>
                 <div><dt>작업내용</dt><dd>{row.workContent || '-'}</dd></div>
             </dl>

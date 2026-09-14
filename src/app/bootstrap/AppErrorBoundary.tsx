@@ -25,6 +25,10 @@ class AppErrorBoundary extends React.Component<AppErrorBoundaryProps, AppErrorBo
   }
 
   private reload = () => {
+    if (isChunkLoadError(this.state.error)) {
+      recoverFromChunkLoadError({ manual: true });
+      return;
+    }
     window.location.reload();
   };
 
@@ -64,7 +68,7 @@ class AppErrorBoundary extends React.Component<AppErrorBoundaryProps, AppErrorBo
           </h1>
           <p style={{ color: '#475569', lineHeight: 1.6, margin: '0 0 24px' }}>
             {chunkLoadFailed
-              ? '업데이트된 화면 파일을 다시 불러오는 중입니다. 잠시 후에도 그대로라면 아래 버튼을 눌러 주세요.'
+              ? '업데이트 또는 연결 문제로 화면을 열지 못했습니다. 인터넷 연결을 확인한 뒤 아래 버튼을 눌러 주세요.'
               : '일시적인 실행 오류가 발생했습니다. 입력하던 내용은 확인한 뒤 화면을 새로 불러와 주세요.'}
           </p>
           <button

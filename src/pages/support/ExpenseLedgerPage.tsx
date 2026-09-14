@@ -1,29 +1,32 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faUsers } from '@fortawesome/free-solid-svg-icons';
 import {
   ArrowDownLeft,
   ArrowUpRight,
   Building2,
   Car,
+  ChevronDown,
   CreditCard,
   Landmark,
+  PanelRightOpen,
   ReceiptText,
   RefreshCw,
   Sigma,
   type LucideIcon
 } from 'lucide-react';
 import MonthNavigator from '../../components/common/MonthNavigator';
-import { ExpenseLedgerDetailBoard } from './components/ExpenseLedgerDetailBoard';
+import SupportTeamFilterTabs from '../../components/support/SupportTeamFilterTabs';
+import './ExpenseLedgerPage.css';
+import {
+  ExpenseLedgerDetailBoard,
+  type ExpenseLedgerDetailItemKey,
+} from './components/ExpenseLedgerDetailBoard';
 import {
   formatCurrency,
   getSummaryTotal,
   hexToRgba,
-  normalizeColor,
   useExpenseLedgerData
 } from './hooks/useExpenseLedgerData';
-import type { BillingScope, LedgerSummary } from './hooks/useExpenseLedgerData';
-import { resolveIcon } from '../../constants/iconMap';
+import type { BillingScope } from './hooks/useExpenseLedgerData';
 import {
   getSupportManagementYearMonth,
   rememberSupportManagementYearMonth,
@@ -34,7 +37,7 @@ interface ExpenseLedgerPageProps {
   embedded?: boolean;
 }
 
-const tableColumns: Array<{ key: keyof LedgerSummary | 'total'; label: string; className?: string }> = [
+const tableColumns: Array<{ key: ExpenseLedgerDetailItemKey | 'total'; label: string; className?: string }> = [
   { key: 'accommodation', label: '숙소비' },
   { key: 'privateRoom', label: '개인숙소' },
   { key: 'electricity', label: '전기세' },
@@ -57,6 +60,10 @@ const tableColumns: Array<{ key: keyof LedgerSummary | 'total'; label: string; c
   { key: 'total', label: '합계', className: 'font-black text-slate-950' }
 ];
 
+const detailItemColumns = tableColumns.filter(
+  (column): column is { key: ExpenseLedgerDetailItemKey; label: string; className?: string } => column.key !== 'total'
+);
+
 type SummaryCard = {
   label: string;
   amount: number;
@@ -64,34 +71,10 @@ type SummaryCard = {
   tone: string;
 };
 
-const SUMMARY_HIGHLIGHT_STORAGE_PREFIX = 'expense-ledger-summary-highlights-v1';
-
-const getSummaryHighlightStorageKey = (yearMonth: string, teamId: string): string =>
-  `${SUMMARY_HIGHLIGHT_STORAGE_PREFIX}:${yearMonth}:${teamId}`;
-
-const loadSummaryHighlights = (yearMonth: string, teamId: string): Set<string> => {
-  if (typeof window === 'undefined' || teamId === 'all') return new Set();
-  try {
-    const saved = JSON.parse(window.localStorage.getItem(getSummaryHighlightStorageKey(yearMonth, teamId)) ?? '[]');
-    return new Set(Array.isArray(saved) ? saved.filter((item): item is string => typeof item === 'string') : []);
-  } catch {
-    return new Set();
-  }
-};
-
-const saveSummaryHighlights = (yearMonth: string, teamId: string, itemKeys: Set<string>): void => {
-  if (typeof window === 'undefined' || teamId === 'all') return;
-  try {
-    window.localStorage.setItem(getSummaryHighlightStorageKey(yearMonth, teamId), JSON.stringify([...itemKeys]));
-  } catch {
-    // 저장 공간을 사용할 수 없을 때에도 화면 선택 동작은 유지한다.
-  }
-};
-
 const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false }) => {
   const [yearMonth, setYearMonth] = useState(getSupportManagementYearMonth);
   const [selectedTeamId, setSelectedTeamId] = useState('all');
-  const [highlightedSummaryItemKeys, setHighlightedSummaryItemKeys] = useState<Set<string>>(() => new Set());
+  const [selectedDetailItemKey, setSelectedDetailItemKey] = useState<ExpenseLedgerDetailItemKey | null>(null);
   const billingScope: BillingScope = 'posted';
 
   useEffect(() => {
@@ -126,21 +109,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
     statusCounts.claimSettled;
 
   const selectedSummary = summaries[0];
-  const selectedTeamColor = normalizeColor(selectedSummary?.color || '#94a3b8');
-
-  useEffect(() => {
-    setHighlightedSummaryItemKeys(loadSummaryHighlights(yearMonth, selectedTeamId));
-  }, [selectedTeamId, yearMonth]);
-
-  const toggleSummaryItemHighlight = (itemKey: string) => {
-    setHighlightedSummaryItemKeys((previous) => {
-      const next = new Set(previous);
-      if (next.has(itemKey)) next.delete(itemKey);
-      else next.add(itemKey);
-      saveSummaryHighlights(yearMonth, selectedTeamId, next);
-      return next;
-    });
-  };
+  const activeDetailItemKey = selectedDetailItemKey;
   const allSummaryColumnTotals = useMemo(
     () =>
       tableColumns.reduce((acc, column) => {
@@ -177,7 +146,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
   );
 
   return (
-    <div className={embedded ? 'min-h-0 w-full' : 'min-h-screen bg-slate-50 p-4 xl:p-6'}>
+    <div className={`expense-ledger-page ${embedded ? 'min-h-0 w-full' : 'min-h-screen bg-slate-50 p-4 xl:p-6'}`}>
       <div className="mx-auto w-full min-w-0 max-w-full space-y-4">
         <div className={`flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm lg:flex-row lg:items-center lg:justify-between ${embedded ? 'gap-2 px-3 py-2' : 'gap-3 p-4'}`}>
           <div>
@@ -223,81 +192,18 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
           </div>
         </div>
 
-        <div className="support-scroll-x rounded-lg border border-slate-200 bg-white p-1 shadow-sm" role="tablist" aria-label="경비내역 팀 선택">
-          <div className="support-scroll-inner inline-flex gap-1">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={selectedTeamId === 'all'}
-              onClick={() => {
-                setSelectedTeamId('all');
-                setHighlightedSummaryItemKeys(new Set());
-              }}
-              className={`h-10 rounded-md border px-4 text-sm font-extrabold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
-                selectedTeamId === 'all'
-                  ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
-                  : 'border-transparent bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              }`}
-            >
-              전체 집계
-            </button>
-            {teamOptions.map((team) => {
-              const id = String(team.id ?? team.legacyId ?? '');
-              if (!id) return null;
-              const isSelected = selectedTeamId === id;
-              const teamColor = normalizeColor(team.color);
-              const teamIcon = resolveIcon(team.iconKey || team.icon || 'fa-users', faUsers);
-              const tabStyle: React.CSSProperties = isSelected
-                ? {
-                    borderColor: hexToRgba(teamColor, 0.45),
-                    backgroundColor: hexToRgba(teamColor, 0.12),
-                    color: '#0f172a',
-                    boxShadow: `0 8px 18px -16px ${teamColor}`
-                  }
-                : {
-                    borderColor: hexToRgba(teamColor, 0.28),
-                    backgroundColor: '#fff'
-                  };
-
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  role="tab"
-                  aria-selected={isSelected}
-                  onClick={() => {
-                    setSelectedTeamId(id);
-                    setHighlightedSummaryItemKeys(new Set());
-                  }}
-                  className="h-10 rounded-md border px-4 text-sm font-extrabold text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-                  style={tabStyle}
-                  title={team.name}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <span
-                      className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-[11px] shadow-sm"
-                      style={{
-                        borderColor: hexToRgba(teamColor, 0.35),
-                        backgroundColor: hexToRgba(teamColor, 0.12),
-                        color: teamColor,
-                      }}
-                      aria-hidden="true"
-                      data-team-visual="true"
-                      title={`팀 색상 ${teamColor}`}
-                    >
-                      <FontAwesomeIcon icon={teamIcon} data-testid="team-icon" />
-                      <span
-                        className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-white"
-                        style={{ backgroundColor: teamColor }}
-                      />
-                    </span>
-                    <span className="whitespace-nowrap">{team.name}</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <SupportTeamFilterTabs
+          teams={teamOptions}
+          selectedTeamId={selectedTeamId === 'all' ? '' : selectedTeamId}
+          onChange={(teamId) => {
+            setSelectedTeamId(teamId || 'all');
+            setSelectedDetailItemKey(null);
+          }}
+          disabled={loading}
+          allLabel="전체 집계"
+          ariaLabel="경비내역 팀 선택"
+          showTeamIcons
+        />
 
         {loading && (
           <div role="status" className="flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">
@@ -306,19 +212,21 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
           </div>
         )}
 
-        <div className="relative z-0 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-8">
-          {summaryCards.map(({ label, amount, icon: Icon, tone }) => (
-            <div key={label} className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm" style={{ boxShadow: `inset 3px 0 0 ${tone}` }}>
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-xs font-black text-slate-500">{label}</div>
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: hexToRgba(tone, 0.1), color: tone }}>
-                  <Icon size={16} />
-                </span>
+        {selectedTeamId === 'all' && (
+          <div className="relative z-0 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-8">
+            {summaryCards.map(({ label, amount, icon: Icon, tone }) => (
+              <div key={label} className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm" style={{ boxShadow: `inset 3px 0 0 ${tone}` }}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-black text-slate-500">{label}</div>
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: hexToRgba(tone, 0.1), color: tone }}>
+                    <Icon size={16} />
+                  </span>
+                </div>
+                <div className="mt-2 text-lg font-black tabular-nums text-slate-950">{formatCurrency(amount)}</div>
               </div>
-              <div className="mt-2 text-lg font-black tabular-nums text-slate-950">{formatCurrency(amount)}</div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         {selectedTeamId === 'all' ? (
           <>
@@ -436,75 +344,136 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
             </section>
           </>
         ) : (
-          <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-            <section className="flex h-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm" aria-busy={loading}>
+          <div className="grid min-w-0 items-start gap-2 xl:grid-cols-[35%_minmax(0,1fr)]">
+            <section
+              className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+              aria-busy={loading}
+              aria-label={`${selectedSummary?.teamName || '팀'} 상세 항목 선택`}
+            >
               <div
-                className="border-b border-slate-200 px-4 py-3 text-center text-sm font-black text-slate-900"
+                className="relative flex items-center justify-center gap-3 border-b border-slate-200 px-4 py-3 text-center"
                 style={{ backgroundColor: hexToRgba(selectedSummary?.color || '#94a3b8', 0.16) }}
               >
-                {selectedSummary?.teamName || '팀'} 요약표
+                <div>
+                  <div className="text-lg font-black text-slate-950">{selectedSummary?.teamName || '팀'} 상세 항목</div>
+                  <div className="mt-0.5 text-xs font-bold text-slate-600">상세 버튼을 누르면 항목 아래에 내역이 펼쳐집니다.</div>
+                </div>
+                <span className="absolute right-4 shrink-0 rounded-full bg-white/80 px-2.5 py-1 text-sm font-black text-slate-600 shadow-sm">
+                  {detailItemColumns.length}개
+                </span>
               </div>
-              <div className="overflow-auto">
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 text-xs text-slate-600">
-                      <th className="border border-slate-200 px-3 py-2 text-left">항목</th>
-                      <th className="border border-slate-200 px-3 py-2 text-right">금액</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {loading ? (
-                      <tr>
-                        <td colSpan={2} className="border border-slate-200 px-4 py-8 text-center font-bold text-slate-500">
-                          경비내역을 불러오는 중입니다.
-                        </td>
-                      </tr>
-                      ) : tableColumns.filter((column) => column.key !== 'total').map((column) => {
-                      const amount = selectedSummary ? Number(selectedSummary[column.key as keyof LedgerSummary] ?? 0) : 0;
-                      const isHighlighted = highlightedSummaryItemKeys.has(column.key);
 
-                      return (
-                        <tr
-                          key={column.key}
-                          className={isHighlighted ? 'transition-colors' : 'hover:bg-slate-50 transition-colors'}
-                          style={isHighlighted ? {
-                            backgroundColor: hexToRgba(selectedTeamColor, 0.2),
-                            boxShadow: `inset 4px 0 0 ${selectedTeamColor}`
-                          } : undefined}
+              <div className="grid grid-cols-[minmax(5rem,1fr)_minmax(6rem,1fr)_4rem] border-b border-slate-300 bg-slate-100 text-sm font-black text-slate-600">
+                <span className="border-r border-slate-300 px-3 py-2.5 text-center">항목</span>
+                <span className="border-r border-slate-300 px-3 py-2.5 text-center">금액</span>
+                <span className="px-1.5 py-2 text-center">상세</span>
+              </div>
+
+              <div className="grid auto-rows-min grid-cols-1 overflow-hidden">
+                {detailItemColumns.map((column) => {
+                  const amount = selectedSummary ? Number(selectedSummary[column.key] ?? 0) : 0;
+                  const isSelected = activeDetailItemKey === column.key;
+                  return (
+                    <React.Fragment key={column.key}>
+                      <div
+                        className={`grid min-h-10 min-w-0 grid-cols-[minmax(5rem,1fr)_minmax(6rem,1fr)_4rem] items-stretch border-b border-slate-200 text-left transition ${
+                          isSelected
+                            ? 'bg-blue-50 text-slate-950'
+                            : 'bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                        style={isSelected ? { boxShadow: `inset 4px 0 0 ${selectedSummary?.color || '#64748b'}` } : undefined}
+                      >
+                        <span className="flex min-w-0 items-center justify-center truncate border-r border-slate-200 px-3 text-center text-sm font-black leading-tight">
+                          {column.label}
+                        </span>
+                        <span className={`flex min-w-0 items-center justify-center truncate border-r border-slate-200 px-3 text-center text-sm font-black leading-tight tabular-nums ${
+                          amount ? column.className ?? 'text-slate-950' : 'text-slate-400'
+                        }`}>
+                          {amount ? formatCurrency(amount) : '-'}
+                        </span>
+                        <button
+                          type="button"
+                          aria-expanded={isSelected}
+                          aria-controls={`expense-ledger-accordion-${column.key}`}
+                          aria-label={`${column.label} 상세 ${isSelected ? '닫기' : '보기'}`}
+                          onClick={() => setSelectedDetailItemKey((current) => current === column.key ? null : column.key)}
+                          className={`m-1 inline-flex min-w-0 items-center justify-center gap-0.5 rounded-md border px-1.5 text-xs font-black transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
+                            isSelected
+                              ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                              : 'border-slate-300 bg-white text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700'
+                          }`}
                         >
-                          <td className="border border-slate-200 px-3 py-2 font-semibold text-slate-700">
-                            <label className="inline-flex cursor-pointer items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={isHighlighted}
-                                onChange={() => toggleSummaryItemHighlight(column.key)}
-                                className="h-4 w-4 rounded border-slate-300"
-                                style={{ accentColor: selectedTeamColor }}
-                                aria-label={`${column.label} 팀색상 표시`}
-                              />
-                              <span>{column.label}</span>
-                            </label>
-                          </td>
-                          <td className="border border-slate-200 px-3 py-2 text-right font-bold tabular-nums text-slate-900">
-                            {amount ? formatCurrency(amount) : '-'}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t-2 border-slate-300 bg-slate-100">
-                      <td className="border border-slate-200 px-3 py-3 font-black text-slate-900">총 합계</td>
-                      <td className="border border-slate-200 px-3 py-3 text-right text-base font-black tabular-nums text-red-600">
-                        {selectedSummary ? formatCurrency(totals.total) : '0'}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
+                          <span>{isSelected ? '닫기' : '상세'}</span>
+                          <ChevronDown
+                            size={13}
+                            aria-hidden="true"
+                            className={`transition-transform ${isSelected ? 'rotate-180' : ''}`}
+                          />
+                        </button>
+                      </div>
+
+                      {isSelected && (
+                        <div
+                          id={`expense-ledger-accordion-${column.key}`}
+                          role="region"
+                          aria-label={`${column.label} 아코디언 상세내역`}
+                          className="min-w-0 border-b border-slate-300 bg-slate-50 p-2.5 shadow-inner"
+                        >
+                          <ExpenseLedgerDetailBoard
+                            teamName={selectedSummary?.teamName || '팀 미지정'}
+                            color={selectedSummary?.color || '#cbd5e1'}
+                            accommodationDocs={selectedRawDocs.accommodationDocs}
+                            vehicleDocs={selectedRawDocs.vehicleDocs}
+                            cardDocs={selectedRawDocs.cardDocs}
+                            receivableClaims={selectedClaims.receivable}
+                            payableClaims={selectedClaims.payable}
+                            otherClaims={selectedClaims.other}
+                            officeClaims={selectedClaims.office}
+                            categoryOptions={allCategoryOptions}
+                            selectedItemKey={column.key}
+                            fitWidth
+                            centerContent
+                          />
+                        </div>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+
+              <div className="grid grid-cols-[minmax(5rem,1fr)_minmax(6rem,1fr)_4rem] border-t-2 border-slate-300 bg-slate-100">
+                <span className="flex items-center justify-center border-r border-slate-300 px-3 py-2.5 text-center text-sm font-black text-slate-800">총 합계</span>
+                <span className="border-r border-slate-300 px-3 py-2.5 text-center text-lg font-black tabular-nums text-rose-700">
+                  {selectedSummary ? formatCurrency(totals.total) : '0'}
+                </span>
+                <span aria-hidden="true" />
               </div>
             </section>
 
-            <section className="flex h-full min-h-[600px] flex-col bg-slate-50">
+            <section
+              className="flex min-w-0 flex-col gap-3"
+              aria-label={`${selectedSummary?.teamName || '팀'} 전체 상세내역`}
+            >
+              <div
+                className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 shadow-sm"
+                style={{ backgroundColor: hexToRgba(selectedSummary?.color || '#94a3b8', 0.12) }}
+              >
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-blue-600 shadow-sm">
+                    <PanelRightOpen size={18} aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0 flex-1 text-center">
+                    <div className="truncate text-base font-black text-slate-950">
+                      {selectedSummary?.teamName || '팀'} 전체 상세내역
+                    </div>
+                    <div className="mt-0.5 text-xs font-bold text-slate-600">숙소·차량·카드·기타청구·후청구 전체</div>
+                  </div>
+                </div>
+                <span className="shrink-0 text-base font-black tabular-nums text-rose-700">
+                  {selectedSummary ? formatCurrency(totals.total) : '0'}
+                </span>
+              </div>
+
               {loading ? loadingDetailState : (
                 <ExpenseLedgerDetailBoard
                   teamName={selectedSummary?.teamName || '팀 미지정'}
@@ -517,6 +486,8 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
                   otherClaims={selectedClaims.other}
                   officeClaims={selectedClaims.office}
                   categoryOptions={allCategoryOptions}
+                  fitWidth
+                  centerContent
                 />
               )}
             </section>

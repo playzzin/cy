@@ -178,24 +178,6 @@ const writeDefaultPosition = async (position: Omit<Position, 'id'>): Promise<voi
     }, { merge: true });
 };
 
-const ensureDefaultPositionsPresent = async (positions: Position[]): Promise<boolean> => {
-    const existingKeys = new Set(positions.flatMap(getPositionIdentityKeys));
-    const missingDefaults = DEFAULT_POSITIONS.filter((position) =>
-        !getPositionIdentityKeys(position).some((key) => existingKeys.has(key))
-    );
-
-    if (missingDefaults.length === 0) return false;
-
-    try {
-        await Promise.all(missingDefaults.map(writeDefaultPosition));
-        cachedPositions = null;
-        return true;
-    } catch (error) {
-        console.error('Error ensuring default positions:', error);
-        return false;
-    }
-};
-
 export const positionService = {
     getPositions: async (forceRefresh: boolean = false): Promise<Position[]> => {
         if (isDevAdminSessionEnabled()) {
@@ -213,11 +195,6 @@ export const positionService = {
             if (mapped.length === 0) {
                 await positionService.initializeDefaults();
                 return await positionService.getPositions(true); // Retry after initialization
-            }
-
-            const addedMissingDefaults = await ensureDefaultPositionsPresent(mapped);
-            if (addedMissingDefaults) {
-                return await positionService.getPositions(true);
             }
 
             const uniquePositions = dedupePositions(mapped);
@@ -381,6 +358,25 @@ export const positionService = {
             console.error("Error deleting position:", error);
             throw error;
         }
+    },
+
+    deletePositionWithSync: async (id: string, name: string): Promise<void> => {
+        await positionService.deletePosition(id);
+
+        const cleanupResults = await Promise.allSettled([
+            import('./menuServiceV11').then(({ menuServiceV11 }) =>
+                menuServiceV11.removePositionReferences(name, id)
+            ),
+            import('./rolePermissionService').then(({ rolePermissionService }) =>
+                rolePermissionService.removePositionKey(name)
+            ),
+        ]);
+
+        cleanupResults.forEach((result) => {
+            if (result.status === 'rejected') {
+                console.warn('[positionService] Position reference cleanup failed after deletion.', result.reason);
+            }
+        });
     },
 
     initializeDefaults: async (): Promise<void> => {

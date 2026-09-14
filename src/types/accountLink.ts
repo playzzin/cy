@@ -51,6 +51,8 @@ export interface AccountLink {
     entitySubType: AccountEntitySubType;
     relationRole: AccountRelationRole;
     status: AccountLinkStatus;
+    siteIds?: string[];
+    approvalMode?: 'manual' | 'invite' | 'verified_email' | 'verified_domain';
     requestedEntity?: RequestedEntitySnapshot;
     memo?: string;
     createdAt?: any;
@@ -62,6 +64,10 @@ export interface AccountLink {
     rejectedAt?: any;
     rejectedBy?: string;
     rejectedByEmail?: string | null;
+    rejectionReason?: string;
+    accessRevokedAt?: any;
+    accessRevokedBy?: string;
+    accessRevokedByEmail?: string | null;
 }
 
 export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {

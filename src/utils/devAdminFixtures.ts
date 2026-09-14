@@ -206,8 +206,21 @@ export const restoreDevPositions = (): void => {
 
 export const buildDevClaimSyncResult = (uid: string): SyncUserAccessClaimsResult => {
   const user = devUsers.find((row) => row.uid === uid);
+  if (['pending', 'rejected', 'suspended'].includes(String(user?.status || ''))) {
+    return {
+      uid,
+      role: 'user',
+      position: '',
+      systemRole: '',
+      accountType: '',
+      additionalPositions: [],
+      roles: ['user'],
+      erpRoleGroups: ['user'],
+      syncedAt: new Date().toISOString(),
+    };
+  }
   const additionalPositions = devUserPositionMap[uid] || [];
-  const position = String(user?.position || '일반');
+  const position = String(user?.position || '');
   const role = String(user?.role || 'user');
   const roles = Array.from(new Set([role, position, ...additionalPositions, 'user'].filter(Boolean)));
 

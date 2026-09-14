@@ -24,6 +24,11 @@ import {
   loadLaborStatementDefaults,
   saveLaborStatementDefaults
 } from '../../utils/payrollLaborStatementDefaults';
+import {
+  applyLaborStatementDayPeriodFills,
+  applyLaborStatementDelegateHighlight,
+  getLaborStatementSplitPoint,
+} from '../../utils/laborCostStatementExcelStyles';
 
 // --- Types ---
 type PayType = 'direct' | 'delegate';
@@ -931,21 +936,20 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     // 공수는 반드시 숫자로 내보내야 엑셀에서 드래그 합계가 셀 개수로
     // 표시되지 않고 실제 공수 합계로 계산된다.
     const manDayCellFormat = '#,##0.0##';
+    const dailyTotalCellFormat = '#,##0.0##;-#,##0.0##;';
     const moneyNumberFormat = '#,##0';
     const blackArgb = 'FF000000';
     const sundayArgb = 'FFE60012';
     const headerFillArgb = 'FFE8E6F0';
     const totalFillArgb = 'FFDCEFF4';
-    const delegateFillArgb = 'FFFFF5A6';
     const trailingHeaders = showBankDetailsColumn
       ? ['은행', '예금주', '계좌번호', '지급구분']
       : ['지급구분'];
 
-    const daySplitPoint = isSplitView ? Math.ceil(lastDay / 2) : lastDay;
+    const daySplitPoint = isSplitView ? getLaborStatementSplitPoint(lastDay) : lastDay;
     const dayColCount = daySplitPoint;
     const totalColumns = fixedInfoColumnCount + dayColCount + 3 + trailingHeaders.length;
     const summaryStartCol = fixedInfoColumnCount + dayColCount + 1;
-    const paymentTypeColumn = summaryStartCol + (showBankDetailsColumn ? 6 : 3);
     const toExcelColumnName = (columnNumber: number) => {
       let current = columnNumber;
       let name = '';
@@ -1198,12 +1202,21 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
               cell.alignment = { horizontal: 'right', vertical: 'middle' };
               cell.font = { size: 9, bold: colNum === summaryStartCol + 2, color: { argb: blackArgb } };
             }
-
-            if (r.payType === 'delegate' && colNum === paymentTypeColumn) {
-              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: delegateFillArgb } };
-            }
           });
         });
+
+        applyLaborStatementDayPeriodFills(row1, dayStartColumn, 1, dayColCount, lastDay);
+        applyLaborStatementDayPeriodFills(
+          row2,
+          dayStartColumn,
+          daySplitPoint + 1,
+          dayColCount,
+          lastDay
+        );
+
+        if (r.payType === 'delegate') {
+          applyLaborStatementDelegateHighlight(row1, summaryStartCol, showBankDetailsColumn);
+        }
       } else {
         const d: any[] = [idx + 1, formatWorkerNameCell(r, showTeamUnderName, false), formatWorkerIdentityCell(r), formatAddressCell(r, showBankUnderAddress)];
         for (let i = 0; i < lastDay; i++) {
@@ -1245,11 +1258,13 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
             cell.alignment = { horizontal: 'right', vertical: 'middle' };
             cell.font = { size: 9, bold: colNum === fixedInfoColumnCount + lastDay + 3, color: { argb: blackArgb } };
           }
-
-          if (r.payType === 'delegate' && colNum === paymentTypeColumn) {
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: delegateFillArgb } };
-          }
         });
+
+        applyLaborStatementDayPeriodFills(dr, dayStartColumn, 1, lastDay, lastDay);
+
+        if (r.payType === 'delegate') {
+          applyLaborStatementDelegateHighlight(dr, summaryStartCol, showBankDetailsColumn);
+        }
       }
     });
 
@@ -1309,7 +1324,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
           };
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
           if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
-            cell.numFmt = manDayCellFormat;
+            cell.numFmt = dailyTotalCellFormat;
           }
           if (colNum >= summaryStartCol && colNum <= summaryStartCol + 2) {
             cell.numFmt = colNum === summaryStartCol ? manDayCellFormat : moneyNumberFormat;
@@ -1352,7 +1367,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
         if (colNum >= dayStartColumn && colNum < dayStartColumn + lastDay) {
-          cell.numFmt = manDayCellFormat;
+          cell.numFmt = dailyTotalCellFormat;
         }
         if (colNum >= fixedInfoColumnCount + lastDay + 1 && colNum <= fixedInfoColumnCount + lastDay + 3) {
           cell.numFmt = colNum === fixedInfoColumnCount + lastDay + 1 ? manDayCellFormat : moneyNumberFormat;
@@ -1454,7 +1469,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   }, [month, statementPeriod.end]);
 
   const primaryDayNumbers = useMemo(() => {
-    const visibleDayCount = isSplitView ? Math.floor(statementLastDay / 2) : statementLastDay;
+    const visibleDayCount = isSplitView ? getLaborStatementSplitPoint(statementLastDay) : statementLastDay;
     return Array.from({ length: visibleDayCount }, (_, idx) => idx + 1);
   }, [isSplitView, statementLastDay]);
 
@@ -1791,7 +1806,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
               <div className="w-px h-3 bg-slate-200"></div>
               <label className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity select-none">
                 <input type="checkbox" checked={isSplitView} onChange={(e) => setIsSplitView(e.target.checked)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-gray-300" />
-                <span className="text-sm font-bold text-slate-700">2줄 보기 (1~15 / 16~말일)</span>
+                <span className="text-sm font-bold text-slate-700">2줄 보기 (1~16 / 17~말일)</span>
               </label>
               <div className="w-px h-3 bg-slate-200"></div>
               <label className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity select-none">

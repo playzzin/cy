@@ -12,6 +12,7 @@ import {
   isPostedTeamExpenseClaimStatus,
   teamExpenseLedgerService
 } from './teamExpenseLedgerService';
+import { reportSupportWriteError } from '../utils/supportWriteErrorReporting';
 import { recordSupportWriteOperationSafely } from './supportWriteOperationLogService';
 
 const mockNowTimestamp = {
@@ -27,22 +28,16 @@ jest.mock('./supportWriteOperationLogService', () => ({
   recordSupportWriteOperationSafely: jest.fn()
 }));
 
-jest.mock('../utils/supportWriteErrorReporting', () => ({
-  SUPPORT_WRITE_RETRY_USER_MESSAGE: 'retry later',
-  getErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error),
-  reportSupportWriteError: jest.fn()
-}));
-
 jest.mock('firebase/firestore', () => ({
   Timestamp: {
     now: jest.fn(() => mockNowTimestamp),
-    fromDate: jest.fn((date: Date) => ({
+    fromDate: jest.fn((date: Parameters<typeof Timestamp.fromDate>[0]) => ({
       toMillis: () => date.getTime(),
       toDate: () => date
     }))
   },
   collection: jest.fn((_db, collectionName: string) => ({ collectionName })),
-  doc: jest.fn((_db, collectionName: string, id: string) => ({ collectionName, id })),
+  doc: jest.fn((...args: Parameters<typeof doc>) => ({ collectionName: args[1], id: args[2] })),
   getDoc: jest.fn(),
   getDocs: jest.fn(),
   query: jest.fn((...args: unknown[]) => ({ args })),
@@ -93,21 +88,24 @@ const buildInput = (patch: Partial<TeamExpenseClaimInput> = {}): TeamExpenseClai
 
 describe('teamExpenseLedgerService save consistency', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
     mockedTimestamp.now.mockReturnValue(mockNowTimestamp);
-    mockedTimestamp.fromDate.mockImplementation((date: Date) => ({
+    mockedTimestamp.fromDate.mockImplementation((date: Parameters<typeof Timestamp.fromDate>[0]) => ({
       toMillis: () => date.getTime(),
       toDate: () => date
     }));
-    mockedDoc.mockImplementation((_db: unknown, collectionName: string, id: string) => ({
-      collectionName,
-      id
+    mockedDoc.mockImplementation((...args: Parameters<typeof doc>) => ({
+      collectionName: args[1],
+      id: args[2]
     }));
     mockedGetDoc.mockResolvedValue(missingDoc() as any);
     mockedSetDoc.mockResolvedValue(undefined as any);
     mockedDeleteDoc.mockResolvedValue(undefined as any);
     mockedRecordOperation.mockResolvedValue(undefined);
   });
+
+  afterEach(() => { jest.restoreAllMocks(); });
 
   it('uses an operationId-backed deterministic id for retried saves', async () => {
     const input = buildInput({ operationId: 'expense-op-1' });
@@ -182,10 +180,12 @@ describe('teamExpenseLedgerService save consistency', () => {
     expect(mockedSetDoc).not.toHaveBeenCalled();
     expect(mockedRecordOperation).toHaveBeenCalledWith(expect.objectContaining({
       domain: 'teamExpense',
+      yearMonth: '2026-07',
       operationId: 'team-expense-claim:claim-1',
       status: 'failed',
       affectedDocumentIds: ['claim-1'],
-      errorMessage: 'team-expense-claim-posted-modification-blocked'
+      // Diagnostic text is deliberately fixed; the business rejection above stays exact.
+      errorMessage: 'SUPPORT_WRITE_UNKNOWN'
     }));
   });
 
@@ -247,4 +247,115 @@ describe('teamExpenseLedgerService save consistency', () => {
     expect(isLockedTeamExpenseClaimStatus('settled')).toBe(true);
     expect(isLockedTeamExpenseClaimStatus('draft')).toBe(false);
   });
+
+  it.each(['yearMonth', 'claimType', 'amount'] as const)(
+    'keeps committed ID when success diagnostic %s getter throws', async (key) => {
+      const input = { ...buildInput(), id: 'claim-boundary' };
+      const diagnosticError = new Error('diagnostic getter');
+      const getter = jest.fn(() => { throw diagnosticError; });
+      mockedSetDoc.mockImplementationOnce(async () => {
+        Object.defineProperty(input, key, { configurable: true, get: getter });
+      });
+      await expect(teamExpenseLedgerService.saveClaim(input)).resolves.toBe('claim-boundary');
+      expect(getter).toHaveBeenCalledTimes(1);
+      expect(mockedGetDoc).toHaveBeenCalledTimes(1);
+      expect(mockedSetDoc).toHaveBeenCalledTimes(1);
+      expect(mockedDeleteDoc).not.toHaveBeenCalled();
+      expect(mockedRecordOperation).not.toHaveBeenCalled();
+      expect(console.error).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['throw', 'reject'] as const)(
+    'keeps committed ID when success recorder %s fails', async (mode) => {
+      const diagnosticError = new Error('record diagnostic');
+      if (mode === 'throw') mockedRecordOperation.mockImplementationOnce(() => { throw diagnosticError; });
+      else mockedRecordOperation.mockRejectedValueOnce(diagnosticError);
+      await expect(teamExpenseLedgerService.saveClaim({ ...buildInput(), id: 'claim-boundary' }))
+        .resolves.toBe('claim-boundary');
+      expect(mockedSetDoc).toHaveBeenCalledTimes(1);
+      expect(mockedDeleteDoc).not.toHaveBeenCalled();
+      expect(mockedRecordOperation).toHaveBeenCalledTimes(1);
+      expect(mockedRecordOperation).toHaveBeenCalledWith(expect.objectContaining({ status: 'success' }));
+      expect(console.error).not.toHaveBeenCalled();
+    }
+  );
+
+  it('never reevaluates failed input or error getters and throws the original reference', async () => {
+    const input = { ...buildInput(), id: 'claim-boundary' };
+    const errorGetter = jest.fn(() => { throw new Error('must not inspect error'); });
+    const originalError = Object.defineProperty({}, 'message', { get: errorGetter });
+    const inputGetter = jest.fn(() => { throw new Error('must not inspect input'); });
+    mockedSetDoc.mockImplementationOnce(async () => {
+      Object.defineProperty(input, 'yearMonth', { get: inputGetter });
+      throw originalError;
+    });
+    await expect(teamExpenseLedgerService.saveClaim(input)).rejects.toBe(originalError);
+    expect(inputGetter).not.toHaveBeenCalled();
+    expect(errorGetter).not.toHaveBeenCalled();
+    expect(mockedSetDoc).toHaveBeenCalledTimes(1);
+    expect(mockedDeleteDoc).not.toHaveBeenCalled();
+    expect(mockedRecordOperation).toHaveBeenCalledTimes(1);
+    expect(mockedRecordOperation).toHaveBeenCalledWith(expect.objectContaining({
+      domain: 'teamExpense', yearMonth: '', status: 'failed', errorMessage: 'SUPPORT_WRITE_UNKNOWN',
+      operationId: 'team-expense-claim:claim-boundary', affectedDocumentIds: ['claim-boundary']
+    }));
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith('[support-write-operation]', {
+      domain: 'teamExpense', errorCode: 'SUPPORT_WRITE_UNKNOWN'
+    });
+  });
+
+  it.each(['throw', 'reject', 'console'] as const)(
+    'preserves original failure reference across %s diagnostic failure', async (mode) => {
+      const originalError = new Error('business original');
+      const secondaryError = new Error('diagnostic secondary');
+      mockedGetDoc.mockRejectedValueOnce(originalError);
+      if (mode === 'throw') mockedRecordOperation.mockImplementationOnce(() => { throw secondaryError; });
+      if (mode === 'reject') mockedRecordOperation.mockRejectedValueOnce(secondaryError);
+      if (mode === 'console') jest.spyOn(console, 'error').mockImplementation(() => { throw secondaryError; });
+      await expect(teamExpenseLedgerService.saveClaim({ ...buildInput(), id: 'claim-boundary' }))
+        .rejects.toBe(originalError);
+      expect(mockedGetDoc).toHaveBeenCalledTimes(1);
+      expect(mockedSetDoc).not.toHaveBeenCalled();
+      expect(mockedDeleteDoc).not.toHaveBeenCalled();
+      expect(mockedRecordOperation).toHaveBeenCalledTimes(1);
+      expect(mockedRecordOperation).toHaveBeenCalledWith(expect.objectContaining({
+        domain: 'teamExpense', yearMonth: '2026-07', status: 'failed',
+        errorMessage: 'SUPPORT_WRITE_UNKNOWN',
+        operationId: 'team-expense-claim:claim-boundary', affectedDocumentIds: ['claim-boundary']
+      }));
+    }
+  );
+
+  it('preserves the original read failure when the month descriptor trap throws', async () => {
+    const originalError = new Error('business read failure');
+    const descriptorError = new Error('diagnostic descriptor failure');
+    const descriptorTrap = jest.fn(() => { throw descriptorError; });
+    const target = { ...buildInput(), id: 'claim-boundary' };
+    const input = new Proxy(target, {
+      getOwnPropertyDescriptor: descriptorTrap
+    });
+    mockedGetDoc.mockRejectedValueOnce(originalError);
+    await expect(teamExpenseLedgerService.saveClaim(input)).rejects.toBe(originalError);
+    expect(descriptorTrap).toHaveBeenCalledTimes(1);
+    expect(descriptorTrap).toHaveBeenCalledWith(target, 'yearMonth');
+    expect(mockedGetDoc).toHaveBeenCalledTimes(1);
+    expect(mockedSetDoc).not.toHaveBeenCalled();
+    expect(mockedDeleteDoc).not.toHaveBeenCalled();
+    expect(mockedRecordOperation).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it('connects the actual pure reporter with an exact sanitized output', () => {
+    const getter = jest.fn(() => { throw new Error('no raw exception access'); });
+    const error = Object.defineProperty({}, 'message', { get: getter });
+    reportSupportWriteError(error, { domain: 'teamExpense', errorMessage: 'private-marker' });
+    expect(getter).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith('[support-write-operation]', {
+      domain: 'teamExpense', errorCode: 'SUPPORT_WRITE_UNKNOWN'
+    });
+  });
+
 });

@@ -1,3 +1,4 @@
+import { saveCardMonthlyLedger } from '../../services/cardMonthlyLedgerSaveCoordinator';
 import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -12,6 +13,7 @@ import {
     faUpload
 } from '@fortawesome/free-solid-svg-icons';
 import { FileText, Sparkles } from 'lucide-react';
+import { CardStatementImportHistoryModal } from './CardStatementImportHistoryModal';
 import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 import {
     Card,
@@ -32,6 +34,7 @@ import {
     getCardIdsWithProtectedOrphanBillings,
     mergeCardLedgerWithPreservedManualLineItems
 } from '../../services/cardMonthlyLedgerAutoBillingService';
+import { formatNumberForDisplay } from '../../utils/zeroDisplay';
 import { teamSettlementProtectionService } from '../../services/teamSettlementProtectionService';
 import { Team } from '../../services/teamService';
 import { Worker, manpowerService } from '../../services/manpowerService';
@@ -349,6 +352,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
     const [billingDocuments, setBillingDocuments] = useState<CardBillingDocument[]>([]);
     const [statementUploadingRowId, setStatementUploadingRowId] = useState('');
     const [isStatementImportOpen, setIsStatementImportOpen] = useState(false);
+    const [isStatementHistoryOpen, setIsStatementHistoryOpen] = useState(false);
     const originalTxsRef = useRef<CardTransaction[]>([]);
 
     const teamInfoMap = useMemo(() => {
@@ -1353,19 +1357,44 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 }
             });
 
-            const result = await cardMonthlyLedgerMutationService.saveMonthlyLedger({
-                yearMonth,
-                visibleRows: eligibleRows.map((row) => ({ row })),
-                originalTransactions: originalTxsRef.current,
-                categories: CATEGORIES,
-                getBillingDocumentsForRow: (row) => (
-                    getAllBillingDocumentsForRow(row, freshBillingDocuments)
-                )
+            const outcome = await saveCardMonthlyLedger({
+                ledgerInput: {
+                    yearMonth,
+                    visibleRows: eligibleRows.map((row) => ({ row })),
+                    originalTransactions: originalTxsRef.current,
+                    categories: CATEGORIES,
+                    getBillingDocumentsForRow: (row) => getAllBillingDocumentsForRow(row, freshBillingDocuments)
+                },
+                eligibleRowIds, allRowsByCardId, sourceFullyEligibleCardIds
+            }, {
+                saveMonthlyLedger: cardMonthlyLedgerMutationService.saveMonthlyLedger,
+                loadPersistedSnapshot: loadData,
+                onLedgerSaved: () => setIsDirty(false),
+                getConfirmedTeamSettlementKeys: teamSettlementProtectionService.getConfirmedTeamSettlementKeys,
+                isConfirmedTarget: teamSettlementProtectionService.isConfirmedTarget,
+                resolveCardBillingTarget, getAllBillingDocumentsForRow, buildBillingDocumentForRow,
+                getCardLedgerStructureFingerprint, normalizeKey,
+                getCardIdsWithProtectedOrphanBillings, assignCardLedgerOrphanDrafts,
+                reconcileSavedBillings: cardMonthlyLedgerAutoBillingService.reconcileSavedBillings,
+                replaceDraftBilling: (billing, staleIds) => cardBillingService.replaceDraftBilling(billing, staleIds),
+                deleteDraftBillings: (ids) => cardBillingService.deleteDraftBillings(ids),
+                reportDiagnostic: (error) => console.error('[CardMonthlyLedger] post-save settlement protection read failed', { yearMonth }, error)
             });
-
-            setIsDirty(false);
-            const persistedSnapshot = await loadData({ strictBillingRead: true });
-            if (!persistedSnapshot) {
+            const { result } = outcome;
+            if (outcome.status === 'partial') {
+                setSaveFeedback({
+                    status: 'warning',
+                    title: '저장 완료 · 일부 행 확인 필요',
+                    message: outcome.stage === 'final-read'
+                        ? '최종 저장 결과를 다시 불러오지 못함(저장 재시도로 중복 없이 확인 가능)'
+                        : outcome.stage === 'stored-read'
+                            ? '저장된 데이터를 다시 불러오지 못해 팀별 경비 자동 반영을 중단했습니다. 잠시 후 저장을 다시 누르면 중복 없이 재시도됩니다.'
+                            : '대장은 저장됐지만 자동 반영을 확인하지 못했습니다.',
+                    operationId: result.operationId
+                });
+                return;
+            }
+            if (outcome.status === 'snapshot-unavailable') {
                 setSaveFeedback({
                     status: 'warning',
                     title: '대장은 저장됐지만 자동 반영을 확인하지 못했습니다.',
@@ -1374,41 +1403,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 });
                 return;
             }
-
-            const postSaveRowsByCardId = new Map<string, CardLedgerRow[]>();
-            persistedSnapshot.rows.forEach((row) => {
-                const cardId = normalizeKey(row.card.id);
-                const cardRows = postSaveRowsByCardId.get(cardId) ?? [];
-                cardRows.push(row);
-                postSaveRowsByCardId.set(cardId, cardRows);
-            });
-            const postSaveStructureChangedCardIds = new Set<string>();
-            sourceFullyEligibleCardIds.forEach((cardId) => {
-                const beforeFingerprints = (allRowsByCardId.get(cardId) ?? [])
-                    .map(getCardLedgerStructureFingerprint)
-                    .sort();
-                const afterFingerprints = (postSaveRowsByCardId.get(cardId) ?? [])
-                    .map(getCardLedgerStructureFingerprint)
-                    .sort();
-                if (JSON.stringify(beforeFingerprints) !== JSON.stringify(afterFingerprints)) {
-                    postSaveStructureChangedCardIds.add(cardId);
-                }
-            });
-            const persistedEligibleRows = persistedSnapshot.rows.filter((row) => (
-                eligibleRowIds.has(row.id) &&
-                !postSaveStructureChangedCardIds.has(normalizeKey(row.card.id))
-            ));
-            let postSaveConfirmedSettlementKeys: Awaited<ReturnType<
-                typeof teamSettlementProtectionService.getConfirmedTeamSettlementKeys
-            >>;
-            try {
-                // Re-read immediately after the ledger commit. If a team was
-                // confirmed between preflight and commit, do not create a new
-                // DRAFT billing for that now-protected settlement.
-                postSaveConfirmedSettlementKeys = await teamSettlementProtectionService
-                    .getConfirmedTeamSettlementKeys(yearMonth);
-            } catch (error) {
-                console.error('[CardMonthlyLedger] post-save settlement protection read failed', { yearMonth }, error);
+            if (outcome.status === 'settlement-unavailable') {
                 setSaveFeedback({
                     status: 'warning',
                     title: '대장은 저장됐지만 팀별 경비 반영을 중단했습니다.',
@@ -1417,90 +1412,8 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 });
                 return;
             }
-            const postSaveSettlementProtectedRowIds = new Set(
-                persistedEligibleRows
-                    .filter((row) => {
-                        const target = resolveCardBillingTarget(row);
-                        return Boolean(target && teamSettlementProtectionService.isConfirmedTarget(
-                            postSaveConfirmedSettlementKeys,
-                            { teamId: target.teamId, teamName: target.teamName }
-                        ));
-                    })
-                    .map((row) => row.id)
-            );
-            const candidateAutoBillingRows = persistedEligibleRows.filter((row) => (
-                !postSaveSettlementProtectedRowIds.has(row.id)
-            ));
-            const claimedBillingIds = new Set(
-                persistedSnapshot.rows.flatMap((row) => (
-                    getAllBillingDocumentsForRow(row, persistedSnapshot.billings)
-                        .map((document) => document.id)
-                        .filter(Boolean)
-                ))
-            );
-            const postSaveProtectedOrphanCardIds = getCardIdsWithProtectedOrphanBillings({
-                yearMonth,
-                billings: persistedSnapshot.billings,
-                claimedBillingIds,
-                currentCardIds: new Set(
-                    candidateAutoBillingRows.map((row) => normalizeKey(row.card.id)).filter(Boolean)
-                ),
-                isProtectedTarget: (document) => teamSettlementProtectionService.isConfirmedTarget(
-                    postSaveConfirmedSettlementKeys,
-                    { teamId: document.teamId, teamName: document.teamName }
-                )
-            });
-            const autoBillingRows = candidateAutoBillingRows.filter((row) => (
-                !postSaveProtectedOrphanCardIds.has(normalizeKey(row.card.id))
-            ));
-            const autoBillingRowIds = new Set(autoBillingRows.map((row) => row.id));
-            const persistedRowsByCardId = new Map<string, CardLedgerRow[]>();
-            persistedSnapshot.rows.forEach((row) => {
-                const cardId = normalizeKey(row.card.id);
-                const cardRows = persistedRowsByCardId.get(cardId) ?? [];
-                cardRows.push(row);
-                persistedRowsByCardId.set(cardId, cardRows);
-            });
-            const fullyEligibleCardIds = new Set<string>();
-            persistedRowsByCardId.forEach((cardRows, cardId) => {
-                if (cardRows.length > 0 && cardRows.every((row) => autoBillingRowIds.has(row.id))) {
-                    fullyEligibleCardIds.add(cardId);
-                }
-            });
-            const orphanDraftsByOwnerRowId = assignCardLedgerOrphanDrafts({
-                yearMonth,
-                rows: autoBillingRows.map((row) => ({
-                    id: row.id,
-                    cardId: row.card.id,
-                    total: row.total
-                })),
-                billings: persistedSnapshot.billings,
-                claimedBillingIds,
-                fullyEligibleCardIds,
-                isProtectedTarget: (document) => teamSettlementProtectionService.isConfirmedTarget(
-                    postSaveConfirmedSettlementKeys,
-                    { teamId: document.teamId, teamName: document.teamName }
-                )
-            });
-            const autoBillingResult = await cardMonthlyLedgerAutoBillingService.reconcileSavedBillings(
-                autoBillingRows,
-                {
-                    getAtomicScopeKey: (row) => normalizeKey(row.card.id),
-                    getBillingDocumentsForRow: (row) => {
-                        const documents = [
-                            ...getAllBillingDocumentsForRow(row, persistedSnapshot.billings),
-                            ...(orphanDraftsByOwnerRowId.get(row.id) ?? [])
-                        ];
-                        return documents.filter((document, index, list) => (
-                            Boolean(document.id) && list.findIndex((item) => item.id === document.id) === index
-                        ));
-                    },
-                    buildBillingDocumentForRow
-                }
-            );
-
-            // Reflect the billing documents actually committed by reconciliation.
-            const finalSnapshot = await loadData({ strictBillingRead: true });
+            const { autoBillingResult, finalSnapshot, postSaveSettlementProtectedRowIds,
+                postSaveProtectedOrphanCardIds, postSaveStructureChangedCardIds } = outcome;
             const protectedCount = Math.max(
                 result.skippedBillingCount,
                 autoBillingResult.protectedCount,
@@ -1744,7 +1657,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                         >
                             <FontAwesomeIcon icon={faChevronLeft} />
                         </button>
-                        <span className="px-4 font-bold text-slate-700 font-mono text-lg">{yearMonth}</span>
+                        <span className="px-4 font-bold text-slate-700 font-sans tabular-nums text-lg">{yearMonth}</span>
                         <button
                             type="button"
                             onClick={() => handleMonthChange(1)}
@@ -1772,7 +1685,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 <div className="flex w-full flex-wrap gap-2 sm:gap-3 items-center justify-start 2xl:w-auto 2xl:justify-end">
                     <div className="mr-0 min-w-[110px] text-left sm:text-right">
                         <div className="text-xs text-slate-500 font-bold uppercase">총 합계</div>
-                        <div className="text-2xl font-extrabold text-indigo-700 font-mono">{totals.total.toLocaleString()}</div>
+                        <div className="text-2xl font-extrabold text-indigo-700 font-sans tabular-nums">{formatNumberForDisplay(totals.total)}</div>
                     </div>
                     <div className="flex w-full items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm sm:w-auto" aria-label="카드 PDF AI 등록">
                         <span className="hidden items-center gap-1.5 whitespace-nowrap px-2 text-[11px] font-extrabold text-slate-500 xl:inline-flex">
@@ -1789,6 +1702,11 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                         >
                             <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
                             카드 PDF
+                        </button>
+                        <button type="button" onClick={() => setIsStatementHistoryOpen(true)} disabled={isDirty || saving || loading}
+                            title={isDirty ? '변경사항을 먼저 전체 저장해 주세요.' : '이 월에 올린 PDF 확인 및 취소'}
+                            className="h-8 whitespace-nowrap rounded-md border border-slate-200 px-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+                            업로드 내역
                         </button>
                     </div>
                     <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border border-indigo-100 hover:bg-gray-50 h-[46px] shadow-sm whitespace-nowrap">
@@ -1982,7 +1900,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                             <td className="px-4 py-3 border-r border-indigo-50 font-bold text-slate-700 bg-white group-hover:bg-blue-50/40">
                                                 <div>
                                                     {row.card.name} ({row.card.last4})
-                                                    <div className="text-[10px] text-slate-400 font-normal mt-0.5 font-mono">
+                                                    <div className="text-[10px] text-slate-400 font-normal mt-0.5 font-sans tabular-nums">
                                                         {row.card.issuer} · {row.card.cardType === 'CREDIT' ? '신용' : '체크'}
                                                     </div>
                                                     {shouldShowPeriod && (
@@ -1995,7 +1913,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                 value={row.total}
                                                 onCommit={(numValue) => handleTotalCommit(idx, numValue)}
                                                 tdClassName="p-1 border-r border-indigo-50/50 bg-indigo-50/30 group-hover:bg-indigo-50/60"
-                                                className={`w-full text-right p-2 focus:outline-none transition rounded-lg text-base font-extrabold font-mono
+                                                className={`w-full text-right p-2 focus:outline-none transition rounded-lg text-base font-extrabold font-sans tabular-nums
                                                     text-indigo-700 bg-transparent hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-100
                                                     ${row.total > 500000 ? 'text-red-500' : ''}
                                                 `}
@@ -2076,8 +1994,8 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                             <tfoot className="bg-slate-800 text-white font-bold text-sm tracking-wide sticky bottom-0 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                                 <tr>
                                     <td colSpan={4} className="p-4 border-r border-slate-600 text-center">합계</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-mono text-amber-300 text-lg">
-                                        {totals.total.toLocaleString()}
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-amber-300 text-lg">
+                                        {formatNumberForDisplay(totals.total)}
                                     </td>
                                     <td colSpan={2} className="bg-slate-900 border-l border-slate-700"></td>
                                 </tr>
@@ -2110,6 +2028,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 onClose={() => setIsStatementImportOpen(false)}
                 onCompleted={() => void loadData()}
             />
+            <CardStatementImportHistoryModal isOpen={isStatementHistoryOpen} yearMonth={yearMonth} onClose={() => setIsStatementHistoryOpen(false)} onCancelled={() => void loadData()} />
         </div>
     );
 };

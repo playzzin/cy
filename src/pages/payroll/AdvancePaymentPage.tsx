@@ -27,9 +27,11 @@ import type { AccommodationAssignment } from '../../types/accommodationAssignmen
 import type { AccommodationBillingTarget } from '../../types/accommodationBillingTarget';
 import type { UtilityRecord } from '../../types/accommodation';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSave, faSearch, faSpinner, faCalculator, faFloppyDisk, faTrash, faRotateRight, faArrowUp, faArrowDown } from '@fortawesome/free-solid-svg-icons';
+import { faSave, faSearch, faSpinner, faCalculator, faFloppyDisk, faTrash, faRotateRight, faArrowUp, faArrowDown, faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { useSearchParams } from 'react-router-dom';
+import { shiftYearMonth } from '../../components/common/MonthNavigator';
+import './AdvancePaymentPage.css';
 
 // 임시저장 데이터 타입
 type AdvanceTempData = {
@@ -2475,8 +2477,8 @@ const AdvancePaymentPage: React.FC = () => {
 
     // 5. Render
     return (
-        <div className="flex flex-col h-full bg-slate-100 p-4">
-            <div className="flex justify-between items-center mb-4 shrink-0">
+        <div className="advance-payment-page flex flex-col h-full min-w-0 bg-slate-100 p-4">
+            <div className="flex flex-wrap gap-3 justify-between items-center mb-4 shrink-0">
                 <h1 className="text-2xl font-bold flex items-center gap-2">
                     <FontAwesomeIcon icon={faCalculator} className="text-blue-600" />
                     가불 및 공제 관리
@@ -2571,24 +2573,45 @@ const AdvancePaymentPage: React.FC = () => {
                     </select>
                 </div>
 
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">조회 월</label>
-                    <input
-                        type="month"
-                        value={selectedMonth}
-                        onChange={(e) => setSelectedMonth(e.target.value)}
-                        className="border border-slate-300 rounded px-2 py-1.5 text-sm"
-                        disabled={loading && !autoSearchRequested}
-                    />
-                </div>
-
-                <div className="flex-1"></div>
-
-                <div className="flex items-end gap-2">
+                <div className="flex flex-wrap items-end gap-2" role="group" aria-label="월 선택 및 조회">
+                    <div>
+                        <label htmlFor="advance-payment-month" className="block text-xs font-bold text-slate-500 mb-1">조회 월</label>
+                        <div className="flex items-center gap-1">
+                            <button
+                                type="button"
+                                onClick={() => setSelectedMonth((month) => shiftYearMonth(month, -1))}
+                                disabled={loading || !selectedMonth}
+                                aria-label="이전 달"
+                                title="이전 달"
+                                className="flex h-10 w-9 shrink-0 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 focus-visible:outline-blue-500 disabled:opacity-50"
+                            >
+                                <FontAwesomeIcon icon={faChevronLeft} />
+                            </button>
+                            <input
+                                id="advance-payment-month"
+                                type="month"
+                                value={selectedMonth}
+                                onChange={(e) => setSelectedMonth(e.target.value)}
+                                className="h-10 min-w-0 border border-slate-300 rounded px-2 py-1.5 text-sm"
+                                disabled={loading && !autoSearchRequested}
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setSelectedMonth((month) => shiftYearMonth(month, 1))}
+                                disabled={loading || !selectedMonth}
+                                aria-label="다음 달"
+                                title="다음 달"
+                                className="flex h-10 w-9 shrink-0 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 focus-visible:outline-blue-500 disabled:opacity-50"
+                            >
+                                <FontAwesomeIcon icon={faChevronRight} />
+                            </button>
+                        </div>
+                    </div>
                     <button
+                        type="button"
                         onClick={() => void handleSearch()}
                         disabled={loading}
-                        className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-1.5 rounded flex items-center gap-2 text-sm"
+                        className="h-10 bg-slate-800 hover:bg-slate-900 text-white px-4 py-1.5 rounded flex items-center gap-2 text-sm disabled:opacity-50"
                     >
                         <FontAwesomeIcon icon={loading ? faSpinner : faSearch} spin={loading} />
                         조회

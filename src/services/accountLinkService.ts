@@ -8,7 +8,18 @@ import {
     updateDoc,
     where,
 } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { auth, db, functions } from '../config/firebase';
+import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
+import {
+    devOfficeStaff,
+    devUsers,
+    devWorkers,
+    setDevUserPositions,
+    updateDevOfficeStaff,
+    updateDevUser,
+    updateDevWorker,
+} from '../utils/devAdminFixtures';
 import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 import {
     AccountEntitySubType,
@@ -52,6 +63,86 @@ export interface UpsertAccountLinkInput {
     memo?: string;
 }
 
+export interface SubmitAccountLinkRequestInput {
+    accountType: AccountType;
+    entityId?: string;
+    entityName?: string;
+    companyType?: string;
+    relationRole?: AccountRelationRole;
+    requestedEntity?: RequestedEntitySnapshot;
+    memo?: string;
+    workerPhone?: string;
+}
+
+export interface SubmitAccountLinkRequestResult {
+    linkId: string;
+    status: 'pending';
+    entityId: string;
+    entityName: string;
+    accountType: AccountType;
+}
+
+export interface MyAccountLinkStatusResult {
+    user: {
+        uid: string;
+        status: 'pending' | 'active' | 'rejected' | 'suspended';
+        accountType: AccountType | null;
+        requestedAccountType: AccountType | null;
+        linkedCompanyIds: string[];
+        linkedSiteIds: string[];
+    };
+    links: AccountLink[];
+}
+
+export interface AccountLinkWorkerCandidate {
+    id: string;
+    name: string;
+    teamName: string;
+}
+
+export interface AccountLinkCompanyCandidate {
+    id: string;
+    name: string;
+    code: string;
+    type: string;
+    businessNumber: string;
+    ceoName: string;
+    phone: string;
+}
+
+export interface RevokeUserAccessApprovalResult {
+    uid: string;
+    status: 'pending';
+    requeuedLinks: number;
+}
+
+export interface UnlinkAccountConnectionResult {
+    uid: string;
+    entityType: AccountEntityType;
+    entityId: string;
+    status: 'pending' | 'active';
+    position: string;
+    remainingActiveLinkCount: number;
+}
+
+export interface LinkAccountConnectionResult {
+    uid: string;
+    linkId: string;
+    entityType: AccountEntityType;
+    entityId: string;
+    accountType: AccountType;
+    position: string;
+    status: 'active';
+}
+
+export interface UpdateUserAccessResult {
+    uid: string;
+    role: string;
+    position: string;
+    additionalPositions: string[];
+    status: 'pending' | 'active' | 'rejected' | 'suspended';
+}
+
 export const accountLinkService = {
     getLinkId(uid: string, entityType: AccountEntityType, entityId: string): string {
         return buildLinkId(uid, entityType, entityId);
@@ -63,6 +154,9 @@ export const accountLinkService = {
     },
 
     async getLinksByUid(uid: string): Promise<AccountLink[]> {
+        if (auth.currentUser?.uid === uid) {
+            return (await accountLinkService.getMyStatus()).links;
+        }
         const q = query(collection(db, COLLECTION_NAME), where('uid', '==', uid));
         const snap = await getDocs(q);
         return sortByUpdatedDesc(snap.docs.map((item) => ({ id: item.id, ...item.data() } as AccountLink)));
@@ -76,6 +170,46 @@ export const accountLinkService = {
         const q = query(collection(db, COLLECTION_NAME), where('status', '==', 'pending'));
         const snap = await getDocs(q);
         return sortByUpdatedDesc(snap.docs.map((item) => ({ id: item.id, ...item.data() } as AccountLink)));
+    },
+
+    async getMyStatus(): Promise<MyAccountLinkStatusResult> {
+        const callable = httpsCallable<Record<string, never>, MyAccountLinkStatusResult>(
+            functions,
+            'getMyAccountLinkStatus'
+        );
+        const response = await callable({});
+        return response.data;
+    },
+
+    async getMyWorkerCandidate(params: { phone: string }): Promise<AccountLinkWorkerCandidate | null> {
+        const callable = httpsCallable<typeof params, { candidate: AccountLinkWorkerCandidate | null }>(
+            functions,
+            'getMyAccountLinkCandidate'
+        );
+        const response = await callable(params);
+        return response.data.candidate;
+    },
+
+    async searchCompanies(params: {
+        accountType: AccountType;
+        searchTerm?: string;
+        businessNumber?: string;
+    }): Promise<AccountLinkCompanyCandidate[]> {
+        const callable = httpsCallable<typeof params, { companies: AccountLinkCompanyCandidate[] }>(
+            functions,
+            'searchAccountLinkCompanies'
+        );
+        const response = await callable(params);
+        return response.data.companies;
+    },
+
+    async submitRequest(input: SubmitAccountLinkRequestInput): Promise<SubmitAccountLinkRequestResult> {
+        const callable = httpsCallable<SubmitAccountLinkRequestInput, SubmitAccountLinkRequestResult>(
+            functions,
+            'submitAccountLinkRequest'
+        );
+        const response = await callable(input);
+        return response.data;
     },
 
     async upsertLink(input: UpsertAccountLinkInput): Promise<string> {
@@ -120,7 +254,6 @@ export const accountLinkService = {
         userDisplayName?: string | null;
         officeStaffId?: string;
         staffName?: string;
-        idNumber?: string;
         address?: string;
         department?: string;
         position?: string;
@@ -128,40 +261,51 @@ export const accountLinkService = {
         employmentType?: string;
         salaryModel?: string;
         unitPrice?: number;
-        bankName?: string;
-        accountNumber?: string;
-        accountHolder?: string;
         memo?: string;
     }): Promise<string> {
         const officeEntityName = params.staffName || params.userDisplayName || params.department || '사무실';
-
-        return accountLinkService.upsertLink({
-            uid: params.uid,
-            userEmail: params.userEmail,
-            userDisplayName: params.userDisplayName,
+        const result = await accountLinkService.submitRequest({
             accountType: 'office',
-            entityType: 'office',
-            entityId: params.officeStaffId || 'office',
+            entityId: params.officeStaffId,
             entityName: officeEntityName,
-            entitySubType: '사무실',
             relationRole: 'staff',
-            status: 'pending',
             requestedEntity: {
                 name: officeEntityName,
-                idNumber: params.idNumber,
                 address: params.address,
                 department: params.department,
                 role: params.position,
                 employmentType: params.employmentType,
                 salaryModel: params.salaryModel,
                 unitPrice: params.unitPrice,
-                bankName: params.bankName,
-                accountNumber: params.accountNumber,
-                accountHolder: params.accountHolder,
                 phone: params.phoneNumber,
                 memo: [params.position, params.memo].filter(Boolean).join(' / '),
             },
         });
+        return result.linkId;
+    },
+
+    async requestWorkerLink(params: {
+        entityId?: string;
+        name?: string;
+        phone?: string;
+        identityPhone?: string;
+        address?: string;
+        memo?: string;
+    }): Promise<string> {
+        const result = await accountLinkService.submitRequest({
+            accountType: 'worker',
+            entityId: params.entityId,
+            entityName: params.name,
+            relationRole: 'staff',
+            workerPhone: params.identityPhone,
+            requestedEntity: {
+                name: params.name,
+                phone: params.phone,
+                address: params.address,
+                memo: params.memo,
+            },
+        });
+        return result.linkId;
     },
 
     async requestCompanyLink(params: {
@@ -174,19 +318,15 @@ export const accountLinkService = {
         relationRole?: AccountRelationRole;
         memo?: string;
     }): Promise<string> {
-        return accountLinkService.upsertLink({
-            uid: params.uid,
-            userEmail: params.userEmail,
-            userDisplayName: params.userDisplayName,
+        const result = await accountLinkService.submitRequest({
             accountType: resolveAccountTypeFromCompanyType(params.companyType),
-            entityType: 'company',
             entityId: params.companyId,
             entityName: params.companyName,
-            entitySubType: resolveEntitySubTypeFromCompanyType(params.companyType),
+            companyType: params.companyType,
             relationRole: params.relationRole || 'staff',
-            status: 'pending',
             memo: params.memo,
         });
+        return result.linkId;
     },
 
     async requestNewCompanyLink(params: {
@@ -198,43 +338,138 @@ export const accountLinkService = {
         relationRole?: AccountRelationRole;
         memo?: string;
     }): Promise<string> {
-        const tempId = `new_${params.uid}_${Date.now()}`;
-        return accountLinkService.upsertLink({
-            uid: params.uid,
-            userEmail: params.userEmail,
-            userDisplayName: params.userDisplayName,
+        const result = await accountLinkService.submitRequest({
             accountType: resolveAccountTypeFromCompanyType(params.companyType),
-            entityType: 'company',
-            entityId: tempId,
             entityName: params.requestedEntity.name || '신규 회사 요청',
-            entitySubType: resolveEntitySubTypeFromCompanyType(params.companyType),
+            companyType: params.companyType,
             relationRole: params.relationRole || 'staff',
-            status: 'pending',
             requestedEntity: params.requestedEntity,
             memo: params.memo,
         });
+        return result.linkId;
     },
 
     async approveLink(link: AccountLink, actor: { uid?: string; email?: string | null }): Promise<void> {
         if (!link.id) throw new Error('account-link-id-required');
-        await updateDoc(doc(db, COLLECTION_NAME, link.id), stripUndefinedFields({
-            status: 'active',
-            approvedAt: serverTimestamp(),
-            approvedBy: actor.uid || 'system',
-            approvedByEmail: actor.email ?? null,
-            updatedAt: serverTimestamp(),
-        }));
+        const callable = httpsCallable<{ linkId: string; siteIds?: string[] }, { status: 'active' }>(
+            functions,
+            'approveAccountLinkRequest'
+        );
+        await callable({ linkId: link.id, siteIds: link.siteIds });
     },
 
-    async rejectLink(link: AccountLink, actor: { uid?: string; email?: string | null }): Promise<void> {
+    async rejectLink(link: AccountLink, actor: { uid?: string; email?: string | null }, reason?: string): Promise<void> {
         if (!link.id) throw new Error('account-link-id-required');
-        await updateDoc(doc(db, COLLECTION_NAME, link.id), stripUndefinedFields({
-            status: 'rejected',
-            rejectedAt: serverTimestamp(),
-            rejectedBy: actor.uid || 'system',
-            rejectedByEmail: actor.email ?? null,
-            updatedAt: serverTimestamp(),
-        }));
+        const callable = httpsCallable<{ linkId: string; reason?: string }, { status: 'rejected' }>(
+            functions,
+            'rejectAccountLinkRequest'
+        );
+        await callable({ linkId: link.id, reason: reason?.trim() || undefined });
+    },
+
+    async revokeUserAccessApproval(uid: string): Promise<RevokeUserAccessApprovalResult> {
+        const normalizedUid = String(uid || '').trim();
+        if (!normalizedUid) throw new Error('uid is required');
+
+        if (isDevAdminSessionEnabled()) {
+            const user = devUsers.find((row) => row.uid === normalizedUid);
+            updateDevUser(normalizedUid, {
+                position: '',
+                department: '',
+                additionalPositions: [],
+                status: 'pending',
+                requestedAccountType: user?.accountType,
+                linkedSiteIds: [],
+            });
+            setDevUserPositions(normalizedUid, []);
+            return { uid: normalizedUid, status: 'pending', requeuedLinks: 0 };
+        }
+
+        const callable = httpsCallable<{ uid: string }, RevokeUserAccessApprovalResult>(
+            functions,
+            'revokeUserAccessApproval'
+        );
+        const response = await callable({ uid: normalizedUid });
+        return response.data;
+    },
+
+    async unlinkConnection(params: {
+        uid: string;
+        entityType: AccountEntityType;
+        entityId: string;
+        entityIds?: string[];
+    }): Promise<UnlinkAccountConnectionResult> {
+        const uid = String(params.uid || '').trim();
+        const entityId = String(params.entityId || '').trim();
+        if (!uid || !entityId) throw new Error('account-link-target-required');
+
+        const callable = httpsCallable<typeof params, UnlinkAccountConnectionResult>(
+            functions,
+            'unlinkAccountConnection'
+        );
+        const response = await callable({
+            ...params,
+            uid,
+            entityId,
+            entityIds: Array.from(new Set((params.entityIds || []).map(String).filter(Boolean))),
+        });
+        return response.data;
+    },
+
+    async linkConnection(params: {
+        uid: string;
+        entityType: AccountEntityType;
+        entityId: string;
+        relationRole?: AccountRelationRole;
+    }): Promise<LinkAccountConnectionResult> {
+        const uid = String(params.uid || '').trim();
+        const entityId = String(params.entityId || '').trim();
+        if (!uid || !entityId) throw new Error('account-link-target-required');
+
+        const callable = httpsCallable<typeof params, LinkAccountConnectionResult>(
+            functions,
+            'linkAccountConnection'
+        );
+        const response = await callable({ ...params, uid, entityId });
+        return response.data;
+    },
+
+    async updateUserAccess(params: {
+        uid: string;
+        role: string;
+        position: string;
+        additionalPositions: string[];
+        syncLinkedProfiles?: boolean;
+    }): Promise<UpdateUserAccessResult> {
+        const uid = String(params.uid || '').trim();
+        const position = String(params.position || '').trim();
+        if (!uid || !position) throw new Error('user-access-target-required');
+
+        if (isDevAdminSessionEnabled()) {
+            const user = devUsers.find((row) => row.uid === uid);
+            if (!user) throw new Error('user-not-found');
+            const additionalPositions = Array.from(new Set(params.additionalPositions.map(String).filter((value) => value && value !== position)));
+            updateDevUser(uid, { role: params.role, position, additionalPositions });
+            setDevUserPositions(uid, additionalPositions);
+            if (params.syncLinkedProfiles) {
+                devWorkers.filter((row) => row.uid === uid && row.id).forEach((row) => updateDevWorker(String(row.id), { role: position }));
+                devOfficeStaff.filter((row) => row.uid === uid && row.id).forEach((row) => updateDevOfficeStaff(String(row.id), { role: position }));
+            }
+            return {
+                uid,
+                role: params.role,
+                position,
+                additionalPositions,
+                status: user.status || 'pending',
+            };
+        }
+
+        const callable = httpsCallable<typeof params, UpdateUserAccessResult>(
+            functions,
+            'updateUserAccess'
+        );
+        const response = await callable({ ...params, uid, position });
+        return response.data;
     },
 
     async deactivateLink(uid: string, entityType: AccountEntityType, entityId: string): Promise<void> {

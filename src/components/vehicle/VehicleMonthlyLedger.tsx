@@ -1,3 +1,4 @@
+import { saveVehicleMonthlyLedgerWithBilling } from '../../services/vehicleMonthlyLedgerSaveCoordinator';
 import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBuilding, faCar, faChevronLeft, faChevronRight, faFileInvoiceDollar, faSave, faExclamationTriangle, faUsers, faUser } from '@fortawesome/free-solid-svg-icons';
@@ -27,6 +28,7 @@ import {
 } from '../../utils/supportManagementState';
 import { normalizeVehicleExpenseType } from '../../utils/vehicleExpenseType';
 import { SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../../utils/supportWriteErrorReporting';
+import { formatNumberForDisplay } from '../../utils/zeroDisplay';
 
 // ── 독립 EditableCell 컴포넌트 ──
 interface EditableCellProps {
@@ -1791,74 +1793,27 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
             }
             attemptedRowIds = rowsToSave.map(({ row }) => row.id);
 
-            const result = await vehicleMonthlyLedgerMutationService.saveMonthlyLedger({
+            const result = await saveVehicleMonthlyLedgerWithBilling({
                 yearMonth,
                 visibleRows: rowsToSave,
                 originalExpenses: originalExpensesRef.current,
                 expenseTypes: EXPENSE_TYPES
+            }, {
+                saveMonthlyLedger: (input) => vehicleMonthlyLedgerMutationService.saveMonthlyLedger(input),
+                getExpensesByMonth: (month) => vehicleService.getExpensesByMonth(month),
+                getBillingsByMonth: (month, options) => vehicleBillingService.getBillingsByMonth(month, options),
+                getConfirmedTeamSettlementKeys: (month) => teamSettlementProtectionService.getConfirmedTeamSettlementKeys(month),
+                loadStoredBillingRow,
+                getAutoBillingValidationMessage,
+                getAllBillingDocumentsForRow,
+                getBlockingUnmanagedDocumentsForRow,
+                isRowTeamSettlementConfirmed,
+                applyDraftBillingForStoredRow
             });
-            operationId = result.operationId;
+            operationId = result.ledgerResult.operationId;
             ledgerSaved = true;
-
-            // Billing must be derived from the records that actually reached
-            // persistence, never from the editable screen snapshot.
-            const [storedExpenses, storedBillingDocuments, refreshedSettlementKeys] = await Promise.all([
-                vehicleService.getExpensesByMonth(yearMonth),
-                vehicleBillingService.getBillingsByMonth(yearMonth, { throwOnError: true }),
-                teamSettlementProtectionService.getConfirmedTeamSettlementKeys(yearMonth)
-            ]);
-
-            let workingDocuments = storedBillingDocuments;
-            let syncedCount = 0;
-            let zeroAmountCount = 0;
-            const failedRowIds: string[] = [];
-            const newlyProtectedRowIds: string[] = [];
-
-            for (const { row } of rowsToSave) {
-                try {
-                    const storedRow = await loadStoredBillingRow(row, storedExpenses);
-                    const validationMessage = getAutoBillingValidationMessage(storedRow);
-                    if (validationMessage) throw new Error(validationMessage);
-
-                    const existingDocuments = getAllBillingDocumentsForRow(storedRow, workingDocuments);
-                    if (getBlockingUnmanagedDocumentsForRow(storedRow, workingDocuments).length > 0) {
-                        newlyProtectedRowIds.push(row.id);
-                        continue;
-                    }
-                    if (isRowTeamSettlementConfirmed(storedRow, existingDocuments, refreshedSettlementKeys)) {
-                        newlyProtectedRowIds.push(row.id);
-                        continue;
-                    }
-                    const syncResult = await applyDraftBillingForStoredRow(storedRow, existingDocuments);
-                    if (syncResult.status === 'skipped-posted') {
-                        newlyProtectedRowIds.push(row.id);
-                        continue;
-                    }
-
-                    syncedCount += 1;
-                    if (storedRow.total <= 0) zeroAmountCount += 1;
-
-                    const removedIds = new Set(syncResult.deletedDraftIds);
-                    const savedDocuments = syncResult.desiredDocuments.map((document, index) => ({
-                        ...document,
-                        id: syncResult.savedIds[index] || document.id,
-                        status: 'DRAFT' as const,
-                        confirmedAt: undefined
-                    }));
-                    const savedIds = new Set(savedDocuments.map((document) => document.id));
-                    workingDocuments = [
-                        ...workingDocuments.filter((document) => !removedIds.has(document.id) && !savedIds.has(document.id)),
-                        ...savedDocuments
-                    ];
-                } catch (error) {
-                    console.error('[VehicleMonthlyLedger] automatic billing sync failed', {
-                        yearMonth,
-                        rowId: row.id,
-                        vehicleId: row.vehicle.id
-                    }, error);
-                    failedRowIds.push(row.id);
-                }
-            }
+            if (result.billingStatus === 'snapshot-failed') throw result.error;
+            const { syncedCount, zeroAmountCount, failedRowIds, newlyProtectedRowIds } = result;
 
             const retryIds = new Set([...failedRowIds, ...newlyProtectedRowIds]);
             const attemptedIds = new Set(rowsToSave.map(({ row }) => row.id));
@@ -2076,7 +2031,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                         >
                             <FontAwesomeIcon icon={faChevronLeft} />
                         </button>
-                        <span className="px-4 font-bold text-slate-700 font-mono text-lg">{yearMonth}</span>
+                        <span className="px-4 font-bold text-slate-700 font-sans tabular-nums text-lg">{yearMonth}</span>
                         <button
                             onClick={() => handleMonthChange(1)}
                             className="w-8 h-8 flex items-center justify-center hover:bg-white hover:shadow-sm rounded-full transition text-slate-500"
@@ -2106,7 +2061,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                 <div className="flex w-full flex-wrap gap-2 sm:gap-3 items-center justify-start 2xl:w-auto 2xl:justify-end">
                     <div className="mr-0 min-w-[110px] text-left sm:text-right">
                         <div className="text-xs text-slate-500 font-bold uppercase">총 합계</div>
-                        <div className="text-2xl font-extrabold text-indigo-700 font-mono">{totals.total.toLocaleString()}</div>
+                        <div className="text-2xl font-extrabold text-indigo-700 font-sans tabular-nums">{formatNumberForDisplay(totals.total)}</div>
                     </div>
                     <div className="flex w-full items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm sm:w-auto" aria-label="차량 PDF AI 등록">
                         <span className="hidden items-center gap-1.5 whitespace-nowrap px-2 text-[11px] font-extrabold text-slate-500 xl:inline-flex">
@@ -2333,11 +2288,11 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                         <td className="px-4 py-3 border-l border-indigo-50 text-slate-600 bg-white">{row.vehicle.model}</td>
 
                                         {/* 고정비 (읽기 전용) */}
-                                        <td className="px-2 py-3 border-l border-indigo-50 text-right font-mono text-slate-500 bg-slate-50">
-                                            {row.rentFee.toLocaleString()}
+                                        <td className="px-2 py-3 border-l border-indigo-50 text-right font-sans tabular-nums text-slate-500 bg-slate-50">
+                                            {formatNumberForDisplay(row.rentFee)}
                                         </td>
-                                        <td className="px-2 py-3 border-l border-indigo-50 text-right font-mono text-slate-500 bg-slate-50">
-                                            {row.leaseFee.toLocaleString()}
+                                        <td className="px-2 py-3 border-l border-indigo-50 text-right font-sans tabular-nums text-slate-500 bg-slate-50">
+                                            {formatNumberForDisplay(row.leaseFee)}
                                         </td>
 
                                         {/* 변동비 (편집 가능) */}
@@ -2355,8 +2310,8 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                         ))}
 
                                         {/* 합계 */}
-                                        <td className="px-2 py-3 border-l border-indigo-50 text-right font-mono font-extrabold text-indigo-700 bg-indigo-50/30">
-                                            {row.total.toLocaleString()}
+                                        <td className="px-2 py-3 border-l border-indigo-50 text-right font-sans tabular-nums font-extrabold text-indigo-700 bg-indigo-50/30">
+                                            {formatNumberForDisplay(row.total)}
                                         </td>
 
                                         <td className="px-2 py-3 border-l border-indigo-50 bg-white">
@@ -2404,15 +2359,15 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                             <tfoot className="bg-slate-800 text-white font-bold text-sm tracking-wide sticky bottom-0 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                                 <tr>
                                     <td colSpan={5} className="p-4 border-r border-slate-600 text-center">합계</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-mono text-amber-200/70">{totals.rentFee.toLocaleString()}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-mono text-amber-200/70">{totals.leaseFee.toLocaleString()}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-amber-200/70">{formatNumberForDisplay(totals.rentFee)}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-amber-200/70">{formatNumberForDisplay(totals.leaseFee)}</td>
                                     {EXPENSE_TYPES.map(type => (
-                                        <td key={type} className="p-4 border-r border-slate-600 text-right font-mono">
-                                            {totals[type].toLocaleString()}
+                                        <td key={type} className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">
+                                            {formatNumberForDisplay(totals[type])}
                                         </td>
                                     ))}
-                                    <td className="p-4 border-r border-slate-600 text-right font-mono text-amber-300 text-lg">
-                                        {totals.total.toLocaleString()}
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-amber-300 text-lg">
+                                        {formatNumberForDisplay(totals.total)}
                                     </td>
                                     <td colSpan={2} className="bg-slate-900 border-l border-slate-700"></td>
                                 </tr>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">청연ENG ERP</string>
+    <string name="open_erp">ERP 열기</string>
+    <string name="browser_required">접속하려면 Chrome 등 웹 브라우저를 설치해 주세요.</string>
+</resources>

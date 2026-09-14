@@ -1,13 +1,17 @@
 import React from 'react';
 import { Outlet } from 'react-router-dom';
+import { doc, onSnapshot } from 'firebase/firestore';
 import DashboardLayout from '../components/layout/DashboardLayout';
 import AppIntroScreen from '../components/common/AppIntroScreen';
 import ProfileSetup from '../components/auth/ProfileSetup';
+import AccountApprovalStatus from '../components/auth/AccountApprovalStatus';
 import { MasterDataProvider } from '../contexts/MasterDataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkerTeamIdMigration } from '../hooks/useWorkerTeamIdMigration';
-import { userService, type UserData } from '../services/userService';
+import type { UserData } from '../services/userService';
+import { db } from '../config/firebase';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
+import { resolveAccountOnboardingMode } from '../utils/accountOnboardingState';
 
 const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { status, result } = useWorkerTeamIdMigration();
@@ -65,33 +69,48 @@ const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({ childr
   const [loading, setLoading] = React.useState(true);
   const [profile, setProfile] = React.useState<UserData | null>(null);
   const [refreshKey, setRefreshKey] = React.useState(0);
+  const [retrySetup, setRetrySetup] = React.useState(false);
 
   React.useEffect(() => {
+    if (isDevAdminSessionEnabled()) {
+      setLoading(false);
+      return undefined;
+    }
+
     let alive = true;
-    const loadProfile = async () => {
-      if (!currentUser?.uid) {
-        if (alive) {
-          setProfile(null);
-          setLoading(false);
-        }
-        return;
-      }
+    if (!currentUser?.uid) {
+      setProfile(null);
+      setLoading(false);
+      return () => {
+        alive = false;
+      };
+    }
 
-      setLoading(true);
-      try {
-        const loaded = await userService.getUser(currentUser.uid);
-        if (alive) setProfile(loaded);
-      } catch (error) {
-        console.error('[AccountOnboardingGate] Failed to load user profile:', error);
-        if (alive) setProfile(null);
-      } finally {
-        if (alive) setLoading(false);
+    setLoading(true);
+    const unsubscribe = onSnapshot(doc(db, 'users', currentUser.uid), async (snapshot) => {
+      const loaded = snapshot.exists()
+        ? ({ uid: snapshot.id, ...snapshot.data() } as UserData)
+        : null;
+      if (loaded?.status === 'active') {
+        await currentUser.getIdToken(true).catch((error) => {
+          console.warn('[AccountOnboardingGate] Failed to refresh the access token.', error);
+        });
       }
-    };
+      if (alive) {
+        setProfile(loaded);
+        setLoading(false);
+      }
+    }, (error) => {
+      console.error('[AccountOnboardingGate] Failed to subscribe to user profile:', error);
+      if (alive) {
+        setProfile(null);
+        setLoading(false);
+      }
+    });
 
-    void loadProfile();
     return () => {
       alive = false;
+      unsubscribe();
     };
   }, [currentUser?.uid, refreshKey]);
 
@@ -103,19 +122,30 @@ const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({ childr
     return <AppIntroScreen message="계정 정보를 확인하는 중" />;
   }
 
-  const linkedWorkerCount = Array.isArray(profile?.linkedWorkerIds) ? profile?.linkedWorkerIds.length || 0 : 0;
-  const shouldSetup =
-    Boolean(currentUser?.uid) &&
-    !isAdminLike(profile) &&
-    profile?.status !== 'active' &&
-    !profile?.accountType &&
-    linkedWorkerCount === 0;
+  const onboardingMode = resolveAccountOnboardingMode({
+    profile,
+    retrySetup,
+    adminLike: isAdminLike(profile),
+  });
 
-  if (shouldSetup) {
+  if (Boolean(currentUser?.uid) && onboardingMode === 'setup') {
     return (
       <div className="min-h-screen bg-slate-50 px-4 py-8">
-        <ProfileSetup onComplete={() => setRefreshKey((prev) => prev + 1)} />
+        <ProfileSetup onComplete={() => {
+          setRetrySetup(false);
+          setRefreshKey((prev) => prev + 1);
+        }} />
       </div>
+    );
+  }
+
+  if (onboardingMode === 'status' && profile) {
+    return (
+      <AccountApprovalStatus
+        profile={profile}
+        onRefresh={() => setRefreshKey((prev) => prev + 1)}
+        onRetry={() => setRetrySetup(true)}
+      />
     );
   }
 
@@ -123,13 +153,13 @@ const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({ childr
 };
 
 const ProtectedRouteShell: React.FC = () => (
-  <MigrationRunner>
-    <MasterDataProvider>
-      <AccountOnboardingGate>
+  <AccountOnboardingGate>
+    <MigrationRunner>
+      <MasterDataProvider>
         <DashboardLayoutWrapper />
-      </AccountOnboardingGate>
-    </MasterDataProvider>
-  </MigrationRunner>
+      </MasterDataProvider>
+    </MigrationRunner>
+  </AccountOnboardingGate>
 );
 
 export default ProtectedRouteShell;

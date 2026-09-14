@@ -9,7 +9,12 @@ interface PayslipExcelPrintTemplateProps {
 }
 
 const formatMoney = (value: number): string => `${Math.floor(Number(value) || 0).toLocaleString('ko-KR')}원`;
-const formatDeduction = (value: number): string => `-${Math.abs(Math.floor(Number(value) || 0)).toLocaleString('ko-KR')}원`;
+const formatDeduction = (value: number): string => {
+    const amount = Math.trunc(Number(value) || 0);
+    if (amount < 0) return `+${Math.abs(amount).toLocaleString('ko-KR')}원`;
+    if (amount > 0) return `-${amount.toLocaleString('ko-KR')}원`;
+    return '0원';
+};
 
 /** 브라우저 인쇄와 PDF 저장에 공통으로 쓰는 A4 가로 명세서 스타일. */
 export const PAYSLIP_PRINT_STYLES = `

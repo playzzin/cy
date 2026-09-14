@@ -139,7 +139,7 @@ describe('downloadEstimateExcel', () => {
         expect(sheet!.pageSetup.fitToWidth).toBe(1);
     });
 
-    it('includes the rental subtotal in the rental estimate grand total formula', async () => {
+    it('keeps labor and rental grand totals separate across estimate categories', async () => {
         const draft = {
             ...getEmptyDraft('estimate'),
             estimateMode: 'rental' as const,
@@ -149,7 +149,7 @@ describe('downloadEstimateExcel', () => {
             supplierCompany: '청연이엔지(주)',
             scopeNotes: ''
         };
-        const item = {
+        const shoringItem = {
             ...createItem({
                 category: '시스템 동바리',
                 section: '설치/해체',
@@ -162,8 +162,21 @@ describe('downloadEstimateExcel', () => {
             rentalAmount: 1000,
             amount: 3000
         };
+        const scaffoldItem = {
+            ...createItem({
+                category: '시스템 비계',
+                section: '설치/해체',
+                unit: '㎡',
+                quantity: 1,
+                laborUnitPrice: 3000,
+                rentalUnitPrice: 2000
+            }),
+            laborAmount: 3000,
+            rentalAmount: 2000,
+            amount: 5000
+        };
 
-        await downloadEstimateExcel(draft, [item], 3000, 0, 3000, 'estimate', { freezePanes: false });
+        await downloadEstimateExcel(draft, [shoringItem, scaffoldItem], 8000, 0, 8000, 'estimate', { freezePanes: false });
 
         const output = mockedSaveAs.mock.calls[0]?.[0] as Blob;
         const outputBuffer = await blobToArrayBuffer(output);
@@ -172,9 +185,10 @@ describe('downloadEstimateExcel', () => {
         const sheet = workbook.getWorksheet('견적서');
 
         expect(sheet).toBeDefined();
-        expect(sheet!.getCell('G21').formula).toBe('SUM(G20,I20)');
-        expect(sheet!.getCell('G21').result).toBe(3000);
-        expect(sheet!.getCell('I21').result).toBe(1000);
+        expect(sheet!.getCell('G26').formula).toBe('SUM(G20,G25)');
+        expect(sheet!.getCell('G26').result).toBe(5000);
+        expect(sheet!.getCell('I26').formula).toBe('SUM(I20,I25)');
+        expect(sheet!.getCell('I26').result).toBe(3000);
     });
 
     it('exports standard transactions in the attached B-to-K layout with a visible note column', async () => {

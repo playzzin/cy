@@ -39,6 +39,8 @@ export type ReferenceConstructionPlanInput = {
   constructionStartDate?: string;
   constructionEndDate?: string;
   applicationScope: string;
+  buildingArea?: string;
+  totalFloorArea?: string;
   structuralReviewNo?: string;
   installationDrawingNo?: string;
   buildings?: string;
@@ -92,11 +94,18 @@ const dottedDate = (value: string): string => {
 };
 
 const scopeLabel = (input: ReferenceConstructionPlanInput): string => {
+  const buildingScale = [
+    clean(input.applicationScope),
+    input.buildingArea ? `건축면적 ${clean(input.buildingArea)}` : '',
+    input.totalFloorArea ? `연면적 ${clean(input.totalFloorArea)}` : '',
+  ].filter(Boolean).join(' · ');
+  if (buildingScale) return buildingScale;
+
   const detailed = [input.buildings, input.floors, input.zones]
     .map((value) => clean(value))
     .filter(Boolean)
     .join(' · ');
-  return detailed || clean(input.applicationScope, '지하층 · 저층부 · 기준층 · 특수구간');
+  return detailed || '[건축규모 기입]';
 };
 
 export const normalizeReferenceConstructionPlanInput = (
@@ -116,7 +125,9 @@ export const normalizeReferenceConstructionPlanInput = (
   preparedDate: clean(input.preparedDate),
   constructionStartDate: clean(input.constructionStartDate),
   constructionEndDate: clean(input.constructionEndDate),
-  applicationScope: clean(input.applicationScope, '지하층 · 저층부 · 기준층 · 특수구간'),
+  applicationScope: clean(input.applicationScope, '[건축규모 기입]'),
+  buildingArea: clean(input.buildingArea),
+  totalFloorArea: clean(input.totalFloorArea),
   structuralReviewNo: clean(input.structuralReviewNo),
   installationDrawingNo: clean(input.installationDrawingNo),
   buildings: clean(input.buildings),
@@ -230,6 +241,42 @@ const projectCell = (
     minSize: 6.4,
     color: '#34495e',
     weight: 500,
+  });
+};
+
+const projectLabelCell = (
+  context: CanvasContext,
+  label: string,
+  x: number,
+  top: number,
+  width: number,
+  alternate: boolean,
+): void => {
+  context.fillStyle = alternate ? '#f0f5f9' : '#ffffff';
+  context.fillRect(x + 0.6, top + 0.6, width - 1.2, 23.6);
+  fittedText(context, label, x + 5, top + 12.6, width - 10, {
+    size: 8.1,
+    minSize: 6.2,
+    color: '#34495e',
+    weight: 650,
+  });
+};
+
+const coverLabel = (
+  context: CanvasContext,
+  label: string,
+  top: number,
+): void => {
+  context.fillStyle = '#031a2e';
+  context.fillRect(38, top, 99, 26);
+  context.strokeStyle = '#285b7e';
+  context.lineWidth = 0.7;
+  context.strokeRect(38.4, top + 0.4, 98.2, 25.2);
+  fittedText(context, label, 65, top + 13, 65, {
+    size: 7.8,
+    minSize: 6.2,
+    color: '#dbeafe',
+    weight: 650,
   });
 };
 
@@ -353,6 +400,7 @@ const drawBlueprintCover = (
     });
   }
   coverCell(context, input.projectName, 554);
+  coverLabel(context, '건축규모', 581);
   coverCell(context, `${scopeLabel(input)} / 현장 승인도서 적용`, 581);
   coverCell(context, `${input.companyName} (가설안전사업부)`, 609);
   coverCell(context, dottedDate(input.preparedDate), 637);
@@ -723,16 +771,11 @@ const buildDocumentControlOverlay = async (
   projectCell(context, input.documentNo, rightX, rows[0], rightWidth, false);
   projectCell(context, input.projectName, leftX, rows[1], leftWidth, true);
   projectCell(context, String(input.revision), rightX, rows[1], rightWidth, true);
-  projectCell(
-    context,
-    [input.clientName, input.contractorName].filter(Boolean).join(' / ') || '[기입]',
-    leftX,
-    rows[2],
-    leftWidth,
-    false,
-  );
+  projectLabelCell(context, '전문건설사', 30, rows[2], 100, false);
+  projectCell(context, input.contractorName || '[기입]', leftX, rows[2], leftWidth, false);
   projectCell(context, dottedDate(input.preparedDate), rightX, rows[2], rightWidth, false);
   projectCell(context, input.companyName, leftX, rows[3], leftWidth, true);
+  projectLabelCell(context, '건축규모', 324.5, rows[3], 105.5, true);
   projectCell(context, scopeLabel(input), rightX, rows[3], rightWidth, true);
   projectCell(context, input.structuralReviewNo || '[기입]', leftX, rows[4], leftWidth, false);
   projectCell(context, input.installationDrawingNo || '[기입]', rightX, rows[4], rightWidth, false);

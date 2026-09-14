@@ -10,10 +10,30 @@ export type BeforeInstallPromptEvent = Event & {
 
 type Listener = () => void;
 
-let deferredPrompt: BeforeInstallPromptEvent | null = null;
-let installed = false;
-let captureSetup = false;
-const listeners = new Set<Listener>();
+type InstallPromptState = {
+  deferredPrompt: BeforeInstallPromptEvent | null;
+  installed: boolean;
+  captureSetup: boolean;
+  listeners: Set<Listener>;
+};
+
+declare global {
+  interface Window {
+    __cyPwaInstallState?: InstallPromptState;
+  }
+}
+
+const fallbackState: InstallPromptState = {
+  deferredPrompt: null,
+  installed: false,
+  captureSetup: false,
+  listeners: new Set<Listener>()
+};
+
+const getState = () => {
+  if (typeof window === 'undefined') return fallbackState;
+  return window.__cyPwaInstallState ?? (window.__cyPwaInstallState = fallbackState);
+};
 const PWA_CACHE_PREFIX = 'cy-erp-pwa-';
 const PWA_INSTALL_ASSET_PATHS = [
   '/manifest.json',
@@ -24,7 +44,7 @@ const PWA_INSTALL_ASSET_PATHS = [
 ];
 
 const notify = () => {
-  listeners.forEach((listener) => listener());
+  getState().listeners.forEach((listener) => listener());
 };
 
 export const isRunningAsStandaloneApp = () => {
@@ -39,14 +59,20 @@ export const isRunningAsStandaloneApp = () => {
 };
 
 export const isAppInstalled = () => {
-  if (installed) return true;
+  if (getState().installed) return true;
 
   return isRunningAsStandaloneApp();
 };
 
-export const getInstallPrompt = () => deferredPrompt;
+export const getInstallPrompt = () => getState().deferredPrompt;
+
+export const getPwaInstallStatus = () => {
+  if (isAppInstalled()) return 'installed' as const;
+  return getInstallPrompt() ? 'ready' as const : 'waiting' as const;
+};
 
 export const subscribeToInstallPrompt = (listener: Listener) => {
+  const { listeners } = getState();
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
@@ -117,37 +143,37 @@ export const refreshPwaInstallAssets = async () => {
 };
 
 export const setupPwaInstallPromptCapture = () => {
-  if (typeof window === 'undefined' || captureSetup) return;
-  captureSetup = true;
+  if (typeof window === 'undefined') return;
+  const state = getState();
+  if (state.captureSetup) return;
+  state.captureSetup = true;
 
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
-    deferredPrompt = event as BeforeInstallPromptEvent;
+    state.deferredPrompt = event as BeforeInstallPromptEvent;
+    state.installed = false;
     notify();
   });
 
   window.addEventListener('appinstalled', () => {
-    installed = true;
-    deferredPrompt = null;
+    state.installed = true;
+    state.deferredPrompt = null;
     notify();
   });
 };
 
 export const promptPwaInstall = async () => {
-  if (!deferredPrompt) {
+  const state = getState();
+  if (!state.deferredPrompt) {
     return 'unavailable' as const;
   }
 
-  const promptEvent = deferredPrompt;
-  deferredPrompt = null;
+  const promptEvent = state.deferredPrompt;
+  state.deferredPrompt = null;
   notify();
 
   await promptEvent.prompt();
   const choice = await promptEvent.userChoice;
-  if (choice.outcome === 'accepted') {
-    installed = true;
-  }
-
   notify();
   return choice.outcome;
 };

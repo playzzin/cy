@@ -1,0 +1,24 @@
+/* 입력 금액, 표 머리글, 보조 정보와 조회 조건을 기존보다 2pt 확대한다. */
+.advance-payment-page {
+  font-size: calc(1rem + 2pt);
+}
+
+.advance-payment-page .text-\[10px\] {
+  font-size: calc(10px + 2pt);
+}
+
+.advance-payment-page .text-xs {
+  font-size: calc(0.75rem + 2pt);
+  line-height: 1.5;
+}
+
+.advance-payment-page .text-sm {
+  font-size: calc(0.875rem + 2pt);
+  line-height: 1.5;
+}
+
+.advance-payment-page #table-container input,
+.advance-payment-page #table-container textarea {
+  font-size: inherit;
+  line-height: 1.5;
+}

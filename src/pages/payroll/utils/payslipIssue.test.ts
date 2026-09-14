@@ -86,6 +86,26 @@ describe('payslipIssue utilities', () => {
         expect(summary.warningCount).toBeGreaterThan(0);
     });
 
+    it('accepts a standard bank name when the raw bank code field is empty', () => {
+        const summary = validateMonthlyPayslipRows([{
+            ...validRow,
+            bankCode: '',
+            bankName: 'KB국민은행',
+        }]);
+
+        expect(summary.issues.some((issue) => issue.code === 'missingBankCode')).toBe(false);
+    });
+
+    it('keeps the warning when neither code nor bank-name mapping is valid', () => {
+        const summary = validateMonthlyPayslipRows([{
+            ...validRow,
+            bankCode: '',
+            bankName: '확인필요은행',
+        }]);
+
+        expect(summary.issues.some((issue) => issue.code === 'missingBankCode')).toBe(true);
+    });
+
     it('creates stable checksums for the same snapshot payload', () => {
         const checksumA = createPayslipChecksum({ id: 'a', amount: 1000 });
         const checksumB = createPayslipChecksum({ id: 'a', amount: 1000 });

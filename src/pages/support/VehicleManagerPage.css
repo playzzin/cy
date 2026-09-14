@@ -1,0 +1,37 @@
+/* Use fixed targets so the global readability pass does not enlarge these twice. */
+.vehicle-ledger-view {
+    --vehicle-ledger-detail-size: 0.875rem;
+    --vehicle-ledger-label-size: 0.8125rem;
+    --vehicle-ledger-body-size: 1rem;
+    --vehicle-ledger-action-size: 1.125rem;
+}
+
+@media screen {
+    /* Keep the table and its inherited typography exactly as before. */
+    .vehicle-ledger-view :is(button, input, select, textarea):not(:where(table, table *, [role="grid"], [role="grid"] *)) {
+        font-size: var(--vehicle-ledger-action-size);
+    }
+
+    .vehicle-ledger-view :is(.text-\[11px\]):not(:where(table, table *, svg, svg *, [role="grid"], [role="grid"] *)):not(:has(table, [role="grid"])) {
+        font-size: var(--vehicle-ledger-label-size);
+        line-height: 1.5;
+    }
+
+    .vehicle-ledger-view .text-xs:not(:where(table, table *, svg, svg *, [role="grid"], [role="grid"] *)):not(:has(table, [role="grid"])) {
+        font-size: var(--vehicle-ledger-detail-size);
+        line-height: 1.5;
+    }
+
+    .vehicle-ledger-view .text-sm:not(:where(table, table *, svg, svg *, [role="grid"], [role="grid"] *)):not(:has(table, [role="grid"])) {
+        font-size: var(--vehicle-ledger-body-size);
+        line-height: 1.5;
+    }
+
+    .vehicle-ledger-view .text-base:not(:where(table, table *, svg, svg *, [role="grid"], [role="grid"] *)):not(:has(table, [role="grid"])) {
+        font-size: var(--vehicle-ledger-action-size);
+    }
+
+    .vehicle-ledger-view p.text-xs:not(:where(table *, [role="grid"] *)) {
+        line-height: 1.75;
+    }
+}
