@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "cyee-9c1e4"
+    "default": "cyee-9c1e4",
+    "staging": "cy-erp-staging-9c1e4"
   }
 }

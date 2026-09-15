@@ -524,10 +524,11 @@ export const accommodationBillingService = {
     async getBillingDocuments(params: {
         teamId: string;
         yearMonth: string;
+        strict?: boolean;
     }): Promise<AccommodationBillingDocument[]> {
         const [docsRes, itemsRes] = await Promise.all([
-            listAllAccommodationBillingDocuments(),
-            listAllAccommodationBillingLineItems()
+            listAllAccommodationBillingDocuments({ limit: Number.MAX_SAFE_INTEGER, offset: 0 }),
+            listAllAccommodationBillingLineItems({ limit: Number.MAX_SAFE_INTEGER, offset: 0 })
         ]);
 
         const docs = (docsRes as any)?.data?.accommodationBillingDocuments ?? [];
@@ -561,6 +562,7 @@ export const accommodationBillingService = {
                 .filter((li: any) => getLineItemBillingDocumentId(li) === String(d?.id ?? ''))
                 .filter(isActiveLineItemRow)
                 .map((li: any) => {
+                    if (params.strict && (typeof li.amount !== "number" || !Number.isFinite(li.amount))) throw new Error("숙소 청구 금액 형식을 확인할 수 없습니다.");
                     return {
                         id: String(li?.id ?? ''),
                         label: li?.label ? String(li.label) : '',

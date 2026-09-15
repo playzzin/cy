@@ -1,4 +1,5 @@
 import { getApps, initializeApp } from 'firebase/app';
+import { assertDeploymentEnvironment } from './deploymentEnvironment';
 
 const REQUIRED_ENV_KEYS = [
   'REACT_APP_FIREBASE_API_KEY',
@@ -21,7 +22,11 @@ const requireEnv = (key: RequiredEnvKey): string => {
 
 export const app = (() => {
   const existing = getApps();
-  if (existing.length > 0) return existing[0];
+  if (existing.length > 0) {
+    if (existing[0].options?.projectId) assertDeploymentEnvironment(existing[0].options.projectId, typeof window === 'undefined' ? '' : window.location.hostname);
+    return existing[0];
+  }
+  assertDeploymentEnvironment(requireEnv('REACT_APP_FIREBASE_PROJECT_ID'), typeof window === 'undefined' ? '' : window.location.hostname);
 
   const measurementId = process.env.REACT_APP_FIREBASE_MEASUREMENT_ID;
   const firebaseConfig = {

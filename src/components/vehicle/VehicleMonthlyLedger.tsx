@@ -1,4 +1,6 @@
 import { saveVehicleMonthlyLedgerWithBilling } from '../../services/vehicleMonthlyLedgerSaveCoordinator';
+import { SupportLedgerReview } from '../support/SupportLedgerReview';
+import { vehicleReviewBill } from '../../utils/supportLedgerReviewAdapters';
 import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBuilding, faCar, faChevronLeft, faChevronRight, faFileInvoiceDollar, faSave, faExclamationTriangle, faUsers, faUser } from '@fortawesome/free-solid-svg-icons';
@@ -345,6 +347,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
     const [currentDate, setCurrentDate] = useState(getSupportManagementMonthDate);
     const [yearMonth, setYearMonth] = useState('');
     const [loading, setLoading] = useState(false);
+    const [reviewLoadError, setReviewLoadError] = useState(false);
     const [saving, setSaving] = useState(false);
     const [isDirty, setIsDirty] = useState(false);
     const [saveFeedback, setSaveFeedback] = useState<SupportSaveFeedbackState | null>(null);
@@ -789,12 +792,13 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
     const loadData = useCallback(async () => {
         if (!yearMonth) return;
         setLoading(true);
+        setReviewLoadError(false);
         try {
             const [expenses, assignmentList, billingTargetList, billings] = await Promise.all([
                 vehicleService.getExpensesByMonth(yearMonth),
-                vehicleService.listAllVehicleAssignments().catch(() => [] as VehicleAssignmentRecord[]),
-                vehicleService.listAllVehicleBillingTargets().catch(() => [] as VehicleBillingTargetRecord[]),
-                vehicleBillingService.getBillingsByMonth(yearMonth).catch(() => [] as VehicleBillingDocument[])
+                vehicleService.listAllVehicleAssignments(),
+                vehicleService.listAllVehicleBillingTargets(),
+                vehicleBillingService.getBillingsByMonth(yearMonth, { throwOnError: true })
             ]);
             originalExpensesRef.current = expenses;
             setBillingDocuments(billings);
@@ -867,6 +871,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         } catch (e) {
             console.error(e);
             setRows([]);
+            setReviewLoadError(true);
         } finally {
             setLoading(false);
         }
@@ -2010,6 +2015,24 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
 
     return (
         <div className="flex flex-col h-full w-full min-w-0 space-y-5">
+            <SupportLedgerReview kind="vehicle" month={yearMonth} blocked={loading || saving || isDirty || reviewLoadError} revision={rows} billingRevision={billingDocuments} reload={loadData} prepare={() => {
+                const sourceForLine = (doc: VehicleBillingDocument, line: VehicleBillingCostItem) => {
+                    if (line.sourceType === 'manual') return undefined;
+                    const matched = rows.filter(row => row.vehicle.id === doc.vehicleId && (
+                        line.sourceLedgerRowId ? line.sourceLedgerRowId === row.id :
+                        Boolean(line.sourceSegmentId && line.sourceSegmentId === row.segment.id && line.sourceStartDate === row.segment.startDate && line.sourceEndDate === row.segment.endDate)
+                    ));
+                    return matched.length === 1 ? matched[0].id : undefined;
+                };
+                return {
+                    sources: rows.map(row => {
+                        const expected = buildBillingDocumentsForRow(row).flatMap(doc => vehicleReviewBill(doc, line => sourceForLine(doc, line)).charges);
+                        return { id: row.id, entityId: row.vehicle.id, startDate: row.segment.startDate, endDate: row.segment.endDate, label: `${row.vehicle.licensePlate} · ${row.segment.startDate}~${row.segment.endDate}`, amount: row.total, expected,
+                            missingTarget: row.total > 0 && expected.length === 0 };
+                    }),
+                    bills: billingDocuments.map(doc => vehicleReviewBill(doc, line => sourceForLine(doc, line))),
+                };
+            }} />
             {/* Toolbar */}
             <div className="flex flex-col 2xl:flex-row 2xl:flex-wrap 2xl:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl border border-indigo-100 shadow-sm">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6 min-w-0">

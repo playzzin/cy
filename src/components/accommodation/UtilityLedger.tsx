@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, memo, useMemo } from 'react';
+import { SupportLedgerReview } from '../support/SupportLedgerReview';
+import { accommodationReviewBill } from '../../utils/supportLedgerReviewAdapters';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBuilding, faSave, faChevronLeft, faChevronRight, faExclamationTriangle, faFileInvoiceDollar, faUsers, faUser } from '@fortawesome/free-solid-svg-icons';
 import { accommodationService } from '../../services/accommodationService';
@@ -290,6 +292,7 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
         lineItems: AccommodationBillingLineItem[];
     } | null>(null);
     const [loading, setLoading] = useState(false);
+    const [reviewLoadError, setReviewLoadError] = useState(false);
     const [saving, setSaving] = useState(false);
     const [isDirty, setIsDirty] = useState(false);
     const [billingSyncRetryCount, setBillingSyncRetryCount] = useState(0);
@@ -469,17 +472,18 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
 
     const loadLedger = async () => {
         setLoading(true);
+        setReviewLoadError(false);
         try {
             // Load Accommodations first to get profiles
             // Also load teams and assignments for coloring
             const [accList, teamList, workerList, assignmentList, ledger, billingTargetList, billingDocList] = await Promise.all([
                 accommodationService.getAccommodations(),
                 teamService.getTeams(),
-                manpowerService.getWorkers().catch(() => [] as Worker[]),
+                manpowerService.getWorkers(),
                 accommodationAssignmentService.getAllAssignments(),
                 accommodationService.getMonthlyLedger(yearMonth),
                 accommodationBillingTargetService.listTargets(),
-                accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth }).catch(() => [] as AccommodationBillingDocument[])
+                accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth, strict: true })
             ]);
 
             setAccommodations(accList);
@@ -506,6 +510,7 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
         } catch (error) {
             console.error(error);
             alert("데이터를 불러오는데 실패했습니다.");
+            setReviewLoadError(true);
         } finally {
             setLoading(false);
         }
@@ -2485,6 +2490,20 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
 
     return (
         <div className="flex flex-col h-full space-y-5 min-w-0">
+            <SupportLedgerReview kind="accommodation" month={yearMonth} blocked={loading || saving || isDirty || reviewLoadError} revision={records} billingRevision={billingDocuments} reload={loadLedger} prepare={() => {
+                const sourceForLine = (line: AccommodationBillingLineItem) => {
+                    const matched = records.filter(record => matchesAccommodationRecordLineItem(line, record));
+                    return matched.length === 1 ? matched[0].id : undefined;
+                };
+                return {
+                    sources: records.map(record => {
+                        const plan = buildAutomaticBillingPlan(record, []);
+                        return { id: record.id, entityId: record.accommodationId, label: record.accommodationName, amount: record.costs.total, missingTarget: plan.missingTarget,
+                            expected: plan.nextDocuments.flatMap(doc => accommodationReviewBill(doc, sourceForLine).charges).filter(line => line.sourceId === record.id) };
+                    }),
+                    bills: billingDocuments.map(doc => accommodationReviewBill(doc, sourceForLine)),
+                };
+            }} />
             {/* Toolbar */}
             <div className="flex flex-col 2xl:flex-row 2xl:flex-wrap 2xl:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl border border-indigo-100 shadow-sm">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6 min-w-0">

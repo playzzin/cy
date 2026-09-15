@@ -110,7 +110,10 @@
     "todo:codex-dry-run": "node scripts/todo-codex-worker.mjs --dry-run",
     "todo:codex-auto": "node scripts/todo-codex-worker.mjs --watch",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "build:staging": "node scripts/build-staging.cjs",
+    "staging:config": "node scripts/staging-project.cjs config",
+    "staging:deploy": "node scripts/deploy-staging.cjs"
   },
   "eslintConfig": {
     "extends": [

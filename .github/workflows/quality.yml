@@ -32,7 +32,7 @@ jobs:
         run: npm run verify:project
 
       - name: Verify release comparison
-        run: node --test scripts/release-manifest.test.cjs
+        run: node --test scripts/release-manifest.test.cjs scripts/staging-isolation.test.cjs
 
       # Quality-only build; production deployment uses the local production environment.
       - name: Build hosting app

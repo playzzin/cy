@@ -10,7 +10,7 @@ const groups = {
   functions: ['functions/src/', 'functions/package.json', 'functions/package-lock.json', 'functions/tsconfig.json'],
   firestore: ['firestore.rules', 'firestore.indexes.json'],
   storage: ['storage.rules'],
-  deployment: ['firebase.json', '.firebaserc'],
+  deployment: ['firebase.json', 'firebase.staging.json', '.firebaserc'],
 };
 const buildStartPath = path.join(root, '.firebase', 'release-source-start.json');
 function sourceState() {
@@ -38,14 +38,17 @@ function sameSourceState(start, end) {
 }
 function beginBuild() {
   fs.mkdirSync(path.dirname(buildStartPath), { recursive: true });
-  fs.writeFileSync(buildStartPath, JSON.stringify(sourceState()));
+  fs.writeFileSync(buildStartPath, JSON.stringify({ ...sourceState(), deployment: {
+    environment: process.env.REACT_APP_DEPLOYMENT_ENV || 'production',
+    projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  } }));
 }
 function writeManifest() {
   const state = sourceState();
   const started = JSON.parse(fs.readFileSync(buildStartPath, 'utf8'));
   if (!sameSourceState(started, state)) throw new Error('빌드 중 코드가 바뀌었습니다. 현재 코드를 다시 빌드해 주세요.');
   const assetManifestHash = hash(fs.readFileSync(path.join(root, 'build', 'asset-manifest.json')));
-  const manifest = { schemaVersion: 1, ...state, builtAt: new Date().toISOString(), assetManifestHash };
+  const manifest = { schemaVersion: 1, ...state, deployment: started.deployment, builtAt: new Date().toISOString(), assetManifestHash };
   fs.writeFileSync(path.join(root, 'build', 'release.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   fs.unlinkSync(buildStartPath);
   console.log(`배포 확인 기록 생성: ${state.commit.slice(0, 8)}${state.dirty ? ' (커밋 전 변경 포함)' : ''}`);
