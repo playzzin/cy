@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
     addDoc,
     collection,
@@ -12,6 +13,7 @@ import {
     writeBatch
 } from 'firebase/firestore';
 import {
+    Bell,
     Check as LucideCheck,
     CheckSquare as LucideCheckSquare,
     Clock3 as LucideClock3,
@@ -36,6 +38,11 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { MemoCardActionMenu } from '../components/MemoCardActionMenu';
 import { MemoUndoToast } from '../components/MemoUndoToast';
 import { MemoViewToolbar } from '../components/MemoViewToolbar';
+import { MemoReminderDialog } from '../components/MemoReminderDialog';
+import { useMemoReminders } from '../hooks/useMemoReminders';
+import { formatReminderTime, reminderRepeatLabels } from '../services/memoReminderService';
+import { canViewAllSmartMemos } from '../utils/memoAccess';
+import { buildMemoAuthorLookup, buildMemoAuthorOptions, getMemoAuthor, memoAuthorFilterValue, MemoAuthor } from '../utils/memoAuthors';
 
 const MEMO_COLLECTION = 'smart_memos';
 const CATEGORY_COLLECTION = 'smart_memo_categories';
@@ -576,7 +583,28 @@ const writeLocalCategories = (items: CategoryRecord[]) => {
 
 export function MemoPage() {
     const { currentUser } = useAuth();
+    const location = useLocation();
+    const requestedMemoId = new URLSearchParams(location.search).get('memoId');
+    const handledMemoLinkRef = useRef('');
+    const { reminders, error: reminderLoadError } = useMemoReminders(currentUser?.uid);
+    const remindersByMemo = useMemo(() => new Map(reminders.map(reminder => [reminder.memoId, reminder])), [reminders]);
+    const [reminderTarget, setReminderTarget] = useState<{ uid: string; memoId: string } | null>(null);
     const isLocalMemoMode = currentUser?.uid === 'dev-admin';
+    const [viewerAccess, setViewerAccess] = useState({ uid: '', canViewAll: false });
+    const canViewAllMemos = viewerAccess.uid === currentUser?.uid && viewerAccess.canViewAll;
+    const [authorFilter, setAuthorFilter] = useState<{ viewerUid: string; value: string } | null>(null);
+    const activeAuthorFilter = canViewAllMemos && authorFilter && authorFilter.viewerUid === currentUser?.uid ? authorFilter.value : '';
+    const [authorDirectory, setAuthorDirectory] = useState<{ viewerUid: string; authors: Map<string, MemoAuthor> }>({
+        viewerUid: '', authors: new Map()
+    });
+    const memoAuthors = useMemo(() => (
+        canViewAllMemos && authorDirectory.viewerUid === currentUser?.uid ? authorDirectory.authors : new Map<string, MemoAuthor>()
+    ), [authorDirectory, canViewAllMemos, currentUser?.uid]);
+    const canEditMemo = useCallback((memo: MemoRecord) => (
+        memo.scope === 'public' || memo.userId === currentUser?.uid ||
+        Boolean(currentUser?.email && memo.userId === currentUser.email) ||
+        (isLocalMemoMode && !memo.userId)
+    ), [currentUser?.uid, currentUser?.email, isLocalMemoMode]);
 
     const [memos, setMemos] = useState<MemoRecord[]>([]);
     const [personalCategories, setPersonalCategories] = useState<CategoryRecord[]>([]);
@@ -626,6 +654,50 @@ export function MemoPage() {
     const checklistItemInputRefs = useRef(new Map<string, HTMLInputElement>());
 
     useEffect(() => {
+        const uid = currentUser?.uid;
+        setViewerAccess({ uid: '', canViewAll: false });
+        if (!uid || isLocalMemoMode) return;
+        let active = true;
+        const unsubscribe = onSnapshot(doc(db, 'users', uid), snapshot => {
+            if (active) {
+                setViewerAccess({ uid, canViewAll: canViewAllSmartMemos(snapshot.data()) });
+            }
+        }, error => {
+            if (!active) return;
+            console.error('Failed to load memo access:', error);
+            setViewerAccess({ uid, canViewAll: false });
+        });
+        return () => {
+            active = false;
+            unsubscribe();
+        };
+    }, [currentUser?.uid, isLocalMemoMode]);
+
+    useEffect(() => {
+        setAuthorDirectory({ viewerUid: '', authors: new Map() });
+        const viewerUid = currentUser?.uid;
+        if (!viewerUid || !canViewAllMemos || isLocalMemoMode) return;
+        let active = true;
+        const unsubscribe = onSnapshot(query(collection(db, 'users')), snapshot => {
+            if (!active) return;
+            const authors = buildMemoAuthorLookup(snapshot.docs.map(userDoc => ({ id: userDoc.id, data: userDoc.data() })));
+            setAuthorDirectory({ viewerUid, authors });
+        }, error => {
+            if (!active) return;
+            console.error('Failed to load memo authors:', error);
+            setAuthorDirectory({ viewerUid: '', authors: new Map() });
+        });
+        return () => {
+            active = false;
+            unsubscribe();
+        };
+    }, [canViewAllMemos, currentUser?.uid, isLocalMemoMode]);
+
+    useEffect(() => {
+        setAuthorFilter(null);
+    }, [canViewAllMemos, currentUser?.uid]);
+
+    useEffect(() => {
         writeLocalPreference(MEMO_VIEW_MODE_STORAGE_KEY, viewMode);
     }, [viewMode]);
 
@@ -638,6 +710,17 @@ export function MemoPage() {
     }, [sortMode]);
 
     useEffect(() => {
+        setMemos([]);
+        setPersonalCategories([]);
+        setSelectedMemoId(null);
+        setCheckedMemoIds([]);
+        setDeletedMemoSnapshots([]);
+        draftSourceMemoIdRef.current = null;
+        hasDraftChangesRef.current = false;
+        if (autoSaveTimerRef.current !== null) {
+            window.clearTimeout(autoSaveTimerRef.current);
+            autoSaveTimerRef.current = null;
+        }
         if (!currentUser?.uid) {
             setMemos([]);
             setPersonalCategories([]);
@@ -661,18 +744,19 @@ export function MemoPage() {
             collection(db, CATEGORY_COLLECTION),
             where('userId', '==', currentUser.uid)
         );
-        const personalMemoQuery = query(
-            collection(db, MEMO_COLLECTION),
-            where('userId', '==', currentUser.uid)
-        );
+        const personalMemoQuery = canViewAllMemos
+            ? query(collection(db, MEMO_COLLECTION))
+            : query(collection(db, MEMO_COLLECTION), where('userId', '==', currentUser.uid));
         const sharedMemoQuery = query(
             collection(db, MEMO_COLLECTION),
             where('scope', '==', 'public')
         );
 
+        let active = true;
         const unsubscribeCategories = onSnapshot(
             categoryQuery,
             snapshot => {
+                if (!active) return;
                 const nextCategories = snapshot.docs
                     .map((categoryDoc, index) => normalizeCategory(categoryDoc.id, categoryDoc.data(), index))
                     .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, 'ko-KR'));
@@ -680,6 +764,7 @@ export function MemoPage() {
                 setPersonalCategories(nextCategories);
             },
             error => {
+                if (!active) return;
                 console.error('Failed to load memo categories:', error);
                 setErrorMessage('카테고리를 불러오지 못했습니다.');
             }
@@ -688,9 +773,10 @@ export function MemoPage() {
         let personalMemos: MemoRecord[] = [];
         let sharedMemos: MemoRecord[] = [];
         let hasLoadedPersonalMemos = false;
-        let hasLoadedSharedMemos = false;
+        let hasLoadedSharedMemos = canViewAllMemos;
 
         const publishMemos = () => {
+            if (!active) return;
             const byId = new Map<string, MemoRecord>();
             personalMemos.forEach(memo => byId.set(memo.id, memo));
             sharedMemos.forEach(memo => byId.set(memo.id, memo));
@@ -708,14 +794,16 @@ export function MemoPage() {
                 publishMemos();
             },
             error => {
+                if (!active) return;
                 console.error('Failed to load personal memos:', error);
-                setErrorMessage('개인 메모를 불러오지 못했습니다.');
+                setErrorMessage(canViewAllMemos ? '전체 사용자 메모를 불러오지 못했습니다.' : '개인 메모를 불러오지 못했습니다.');
+                personalMemos = [];
                 hasLoadedPersonalMemos = true;
                 publishMemos();
             }
         );
 
-        const unsubscribeSharedMemos = onSnapshot(
+        const unsubscribeSharedMemos = canViewAllMemos ? () => undefined : onSnapshot(
             sharedMemoQuery,
             snapshot => {
                 sharedMemos = snapshot.docs.map(memoDoc => normalizeMemo(memoDoc.id, {
@@ -727,19 +815,22 @@ export function MemoPage() {
                 publishMemos();
             },
             error => {
+                if (!active) return;
                 console.error('Failed to load shared memos:', error);
                 setErrorMessage('공통 메모를 불러오지 못했습니다.');
+                sharedMemos = [];
                 hasLoadedSharedMemos = true;
                 publishMemos();
             }
         );
 
         return () => {
+            active = false;
             unsubscribeCategories();
             unsubscribePersonalMemos();
             unsubscribeSharedMemos();
         };
-    }, [currentUser?.uid, isLocalMemoMode]);
+    }, [currentUser?.uid, isLocalMemoMode, canViewAllMemos]);
 
     useEffect(() => {
         return () => {
@@ -772,22 +863,27 @@ export function MemoPage() {
         }, {});
     }, [categories]);
 
+    const authorOptions = useMemo(() => canViewAllMemos ? buildMemoAuthorOptions(memos, memoAuthors) : [], [canViewAllMemos, memos, memoAuthors]);
+    const authorFilteredMemos = useMemo(() => activeAuthorFilter
+        ? memos.filter(memo => memoAuthorFilterValue(memo.userId, memoAuthors) === activeAuthorFilter)
+        : memos, [activeAuthorFilter, memos, memoAuthors]);
+
     const categoryCounts = useMemo(() => {
         const counts = new Map<string, number>();
 
-        memos.forEach(memo => {
+        authorFilteredMemos.forEach(memo => {
             if (!memo.categoryId) return;
 
             counts.set(memo.categoryId, (counts.get(memo.categoryId) ?? 0) + 1);
         });
 
         return counts;
-    }, [memos]);
+    }, [authorFilteredMemos]);
 
     const filteredMemos = useMemo(() => {
         const queryText = searchQuery.trim().toLowerCase();
 
-        const matchingMemos = memos.filter(memo => {
+        const matchingMemos = authorFilteredMemos.filter(memo => {
             const matchesCategory =
                 selectedCategoryId === 'all' ||
                 memo.categoryId === selectedCategoryId;
@@ -801,30 +897,40 @@ export function MemoPage() {
                 memo.title.toLowerCase().includes(queryText) ||
                 memo.content.toLowerCase().includes(queryText) ||
                 checklistText.includes(queryText) ||
+                (canViewAllMemos && getMemoAuthor(memo.userId, memoAuthors).searchText.includes(queryText)) ||
                 (memo.categoryId ? categoryNameById[memo.categoryId]?.toLowerCase().includes(queryText) : false)
             );
         });
 
         return sortVisibleMemos(matchingMemos, sortMode);
-    }, [categoryNameById, memos, searchQuery, selectedCategoryId, sortMode]);
+    }, [canViewAllMemos, categoryNameById, memoAuthors, authorFilteredMemos, searchQuery, selectedCategoryId, sortMode]);
 
     const selectedMemo = useMemo(
         () => memos.find(memo => memo.id === selectedMemoId) ?? null,
         [memos, selectedMemoId]
     );
+    const reminderMemo = reminderTarget?.uid === currentUser?.uid
+        ? memos.find(memo => memo.id === reminderTarget?.memoId) : undefined;
+    const openReminder = (memo: MemoRecord) => {
+        if (currentUser?.uid) setReminderTarget({ uid: currentUser.uid, memoId: memo.id });
+    };
 
     const checkedMemoIdSet = useMemo(() => new Set(checkedMemoIds), [checkedMemoIds]);
     const filteredMemoIds = useMemo(() => filteredMemos.map(memo => memo.id), [filteredMemos]);
-    const allFilteredChecked = filteredMemoIds.length > 0 && filteredMemoIds.every(id => checkedMemoIdSet.has(id));
+    const editableFilteredMemoIds = useMemo(
+        () => filteredMemos.filter(canEditMemo).map(memo => memo.id),
+        [filteredMemos, canEditMemo]
+    );
+    const allFilteredChecked = editableFilteredMemoIds.length > 0 && editableFilteredMemoIds.every(id => checkedMemoIdSet.has(id));
 
     useEffect(() => {
-        const liveMemoIds = new Set(memos.map(memo => memo.id));
+        const liveMemoIds = new Set(memos.filter(canEditMemo).map(memo => memo.id));
 
         setCheckedMemoIds(previous => {
             const next = previous.filter(id => liveMemoIds.has(id));
             return next.length === previous.length ? previous : next;
         });
-    }, [memos]);
+    }, [memos, canEditMemo]);
 
     useEffect(() => {
         const filteredIdSet = new Set(filteredMemoIds);
@@ -841,6 +947,23 @@ export function MemoPage() {
             return filteredMemoIds[0] ?? null;
         });
     }, [autoSaveState, filteredMemoIds]);
+
+    useEffect(() => {
+        if (!requestedMemoId) { handledMemoLinkRef.current = ''; return; }
+        const linkKey = `${currentUser?.uid}:${location.key}:${requestedMemoId}`;
+        if (isLoading || handledMemoLinkRef.current === linkKey || !memos.some(memo => memo.id === requestedMemoId)) return;
+        if (selectedCategoryId !== 'all' || searchQuery || activeAuthorFilter) {
+            setSelectedCategoryId('all');
+            setSearchQuery('');
+            setAuthorFilter(null);
+            return;
+        }
+        // Keep an unfinished edit intact until its autosave has completed.
+        if (hasDraftChangesRef.current && selectedMemoId !== requestedMemoId) return;
+        handledMemoLinkRef.current = linkKey;
+        setSelectedMemoId(requestedMemoId);
+        setMobilePane('editor');
+    }, [currentUser?.uid, location.key, requestedMemoId, isLoading, memos, selectedCategoryId, searchQuery, selectedMemoId, autoSaveState, activeAuthorFilter]);
 
     const parsedDraft = useMemo(() => parseMemoText(draftText), [draftText]);
     const draftTextParts = useMemo(() => {
@@ -870,7 +993,7 @@ export function MemoPage() {
                 !checklistItemsEqual(draftChecklistItems, memo.checklistItems))
     ), [draftCategoryId, draftChecklistItems, draftMemoType, draftTitle, parsedDraft.content, parsedDraft.title]);
 
-    const hasDraftChanges = Boolean(selectedMemo && isDraftDirtyForMemo(selectedMemo));
+    const hasDraftChanges = Boolean(selectedMemo && canEditMemo(selectedMemo) && isDraftDirtyForMemo(selectedMemo));
     hasDraftChangesRef.current = hasDraftChanges;
 
 
@@ -886,7 +1009,7 @@ export function MemoPage() {
         }
 
         const isSameMemo = draftSourceMemoIdRef.current === selectedMemo.id;
-        if (isSameMemo && isDraftDirtyForMemo(selectedMemo)) {
+        if (isSameMemo && canEditMemo(selectedMemo) && isDraftDirtyForMemo(selectedMemo)) {
             return;
         }
 
@@ -1008,6 +1131,32 @@ export function MemoPage() {
             ? 'text-amber-700'
             : 'text-emerald-700';
 
+    const renderMemoAuthor = (memo: MemoRecord) => {
+        const author = getMemoAuthor(memo.userId, memoAuthors);
+        const reminder = remindersByMemo.get(memo.id);
+        const suffix = !canEditMemo(memo) ? ' · 읽기 전용' : memo.userId === currentUser?.uid ? ' · 나' : '';
+        return (
+            <>
+            {(canViewAllMemos || !canEditMemo(memo)) && (
+            <span className="mt-1 block min-w-0 truncate text-xs font-semibold text-slate-600" title={`작성자: ${author.description}${suffix}`}>
+                작성자: {author.label}{suffix}
+            </span>
+            )}
+            {reminder && <span className="mt-1 block text-xs font-semibold text-blue-700">
+                {reminder.status === 'sent' ? '내 알림 도착' : `내 알림: ${formatReminderTime(reminder.remindAt)} · ${reminderRepeatLabels[reminder.repeat]}`}
+            </span>}
+            </>
+        );
+    };
+
+    const renderReminderButton = (memo: MemoRecord, selected = false) => (
+        <button type="button" onClick={() => openReminder(memo)} title="알림 설정"
+            aria-label={`${selected ? '선택한 메모' : memo.title} 알림 설정`}
+            className={`inline-flex h-11 shrink-0 items-center justify-center gap-1 rounded-lg border border-blue-200 bg-white px-2 text-xs font-bold text-blue-700 hover:bg-blue-50 sm:h-9 ${selected ? '' : 'w-11 sm:w-9'}`}>
+            <Bell className="h-4 w-4" /><span className={selected ? '' : 'sr-only'}>알림 설정</span>
+        </button>
+    );
+
     const renderStickyMemoBody = (memo: MemoRecord) => {
         if (memo.type === 'checklist') {
             if (memo.checklistItems.length === 0) {
@@ -1027,9 +1176,16 @@ export function MemoPage() {
                             >
                                 ✓
                             </span>
-                            <span className={item.isChecked ? 'text-slate-400 line-through' : 'text-slate-700'}>
-                                {item.text || '빈 항목'}
-                            </span>
+                            <div className="min-w-0">
+                                <span className={item.isChecked ? 'text-slate-400 line-through' : 'text-slate-700'}>
+                                    {item.text || '빈 항목'}
+                                </span>
+                                {item.comments?.map(comment => (
+                                    <p key={comment.id} className="mt-1 whitespace-pre-wrap break-words text-xs text-slate-500">
+                                        {comment.text}
+                                    </p>
+                                ))}
+                            </div>
                         </li>
                     ))}
                 </ul>
@@ -1118,6 +1274,7 @@ export function MemoPage() {
 
     const deleteMemosByIds = async (memoIds: string[], successMessage: string) => {
         if (memoIds.length === 0) return;
+        if (memoIds.some(id => !memos.some(memo => memo.id === id && canEditMemo(memo)))) return;
         if (!beginSaving()) return;
 
         setErrorMessage('');
@@ -1161,6 +1318,7 @@ export function MemoPage() {
     const moveMemosToCategory = async (memoIds: string[], targetCategoryId: string | null) => {
         if (!currentUser?.uid || memoIds.length === 0) return;
         const selectedMemos = memos.filter(memo => memoIds.includes(memo.id));
+        if (selectedMemos.length !== new Set(memoIds).size || selectedMemos.some(memo => !canEditMemo(memo))) return;
         if (
             targetCategoryId !== SHARED_CATEGORY_ID &&
             selectedMemos.some(memo => memo.scope === 'public')
@@ -1284,6 +1442,7 @@ export function MemoPage() {
             }
 
             draftSourceMemoIdRef.current = memoId;
+            setAuthorFilter(null);
             setSelectedMemoId(memoId);
             setViewMode(current => current === 'sticky' ? 'sticky' : 'split');
             setMobilePane('editor');
@@ -1309,7 +1468,7 @@ export function MemoPage() {
     };
 
     const saveMemo = async (mode: 'manual' | 'auto' = 'manual'): Promise<boolean> => {
-        if (!currentUser?.uid || !selectedMemo) return false;
+        if (!currentUser?.uid || !selectedMemo || !canEditMemo(selectedMemo)) return false;
         if (!beginSaving()) {
             if (mode === 'auto' && autoSaveTimerRef.current === null) {
                 setAutoSaveState('pending');
@@ -1528,6 +1687,15 @@ export function MemoPage() {
         });
     };
 
+    const changeMemoAuthor = async (value: string) => {
+        if (!currentUser?.uid || !canViewAllMemos || !(await saveDraftBeforeMemoChange())) return;
+        setAuthorFilter({ viewerUid: currentUser.uid, value });
+        setSelectedMemoId(null);
+        setSelectedCategoryId('all');
+        setCheckedMemoIds([]);
+        setExpandedStickyMemoId(null);
+    };
+
     const selectStickyMemo = async (memo: MemoRecord) => {
         if (memo.id !== selectedMemoId && !(await saveDraftBeforeMemoChange())) return;
 
@@ -1552,6 +1720,7 @@ export function MemoPage() {
     };
 
     const deleteMemoRecord = async (memo: MemoRecord) => {
+        if (!canEditMemo(memo)) return;
         if (!window.confirm(`"${memo.title}" 메모를 삭제할까요?`)) return;
         await deleteMemosByIds([memo.id], '메모를 삭제했습니다.');
     };
@@ -1574,7 +1743,7 @@ export function MemoPage() {
     };
 
     const toggleMemoPinned = async (memo: MemoRecord) => {
-        if (!currentUser?.uid || !beginSaving()) return;
+        if (!currentUser?.uid || !canEditMemo(memo) || !beginSaving()) return;
 
         const nextPinned = !memo.isPinned;
         setErrorMessage('');
@@ -1740,6 +1909,7 @@ export function MemoPage() {
     };
 
     const toggleMemoChecked = (memoId: string) => {
+        if (!memos.some(memo => memo.id === memoId && canEditMemo(memo))) return;
         setCheckedMemoIds(previous =>
             previous.includes(memoId) ? previous.filter(id => id !== memoId) : [...previous, memoId]
         );
@@ -1747,12 +1917,12 @@ export function MemoPage() {
 
     const toggleFilteredChecked = () => {
         setCheckedMemoIds(previous => {
-            const filteredIdSet = new Set(filteredMemoIds);
+            const filteredIdSet = new Set(editableFilteredMemoIds);
             if (allFilteredChecked) {
                 return previous.filter(id => !filteredIdSet.has(id));
             }
 
-            return Array.from(new Set([...previous, ...filteredMemoIds]));
+            return Array.from(new Set([...previous, ...editableFilteredMemoIds]));
         });
     };
 
@@ -1927,7 +2097,7 @@ export function MemoPage() {
                         selectedCategoryId === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
                     }`}
                 >
-                    {memos.length}
+                    {authorFilteredMemos.length}
                 </span>
             </button>
             {categories.map(category => {
@@ -2054,7 +2224,7 @@ export function MemoPage() {
             >
                 전체보기
                 <span className={selectedCategoryId === 'all' ? 'text-white/80' : 'text-slate-400'}>
-                    {memos.length.toLocaleString('ko-KR')}
+                    {authorFilteredMemos.length.toLocaleString('ko-KR')}
                 </span>
             </button>
             {categories.map(category => {
@@ -2172,7 +2342,7 @@ export function MemoPage() {
                                         backgroundColor: cardTheme.surface
                                     }}
                                 >
-                                    {isSelected ? (
+                                    {isSelected && canEditMemo(memo) ? (
                                         <div className="flex h-full min-h-0 flex-col">
                                             <div
                                                 className="shrink-0 border-b px-3 py-3"
@@ -2209,6 +2379,7 @@ export function MemoPage() {
                                                     </button>
                                                     <MemoCardActionMenu
                                                         memoTitle={memo.title}
+                                                        onReminder={() => openReminder(memo)}
                                                         isPinned={memo.isPinned}
                                                         disabled={isSaving}
                                                         onTogglePinned={() => void toggleMemoPinned(memo)}
@@ -2217,6 +2388,7 @@ export function MemoPage() {
                                                     />
                                                 </div>
                                                 <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+                                                    {renderMemoAuthor(memo)}
                                                     <select
                                                         value={draftCategoryId}
                                                         onChange={event => setDraftCategoryId(event.target.value)}
@@ -2367,10 +2539,11 @@ export function MemoPage() {
                                                         {memo.isPinned && <Pin className="h-3.5 w-3.5 shrink-0 text-amber-700" aria-label="중요 메모" />}
                                                         <h3 className="truncate text-sm font-bold text-slate-950">{memo.title}</h3>
                                                     </div>
+                                                    {renderMemoAuthor(memo)}
                                                     <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
                                                         <span className="inline-flex max-w-[160px] items-center gap-1.5 rounded-full border bg-white px-2 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">
                                                             <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: categoryColor }} />
-                                                            <span className="truncate">{getCategoryLabel(memo.categoryId)}</span>
+                                                            <span className="truncate">{canEditMemo(memo) ? getCategoryLabel(memo.categoryId) : '개인 메모'}</span>
                                                         </span>
                                                         {memo.type === 'checklist' && (
                                                             <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-bold text-emerald-700 shadow-sm">
@@ -2394,8 +2567,10 @@ export function MemoPage() {
                                                 </button>
                                                 <MemoCardActionMenu
                                                     memoTitle={memo.title}
+                                                    onReminder={() => openReminder(memo)}
                                                     isPinned={memo.isPinned}
                                                     disabled={isSaving}
+                                                    readOnly={!canEditMemo(memo)}
                                                     compact
                                                     onTogglePinned={() => void toggleMemoPinned(memo)}
                                                     onCopy={() => void copyMemoToClipboard(memo)}
@@ -2429,6 +2604,11 @@ export function MemoPage() {
                         <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                                 <h1 className="text-2xl font-bold tracking-normal text-slate-950">스마트 메모</h1>
+                                {canViewAllMemos && (
+                                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                                        DEV · 전체 사용자 메모 조회
+                                    </span>
+                                )}
                                 <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                                     {filteredMemos.length.toLocaleString('ko-KR')}개
                                 </span>
@@ -2438,6 +2618,7 @@ export function MemoPage() {
 
                         <MemoViewToolbar
                             searchQuery={searchQuery}
+                            searchIncludesAuthors={canViewAllMemos}
                             sortMode={sortMode}
                             viewMode={viewMode}
                             isCreateMenuOpen={isCreateMenuOpen}
@@ -2451,8 +2632,30 @@ export function MemoPage() {
                             onCreateMemo={type => void createMemo(type)}
                         />
                     </div>
+                    {canViewAllMemos && (
+                        <div className="mt-3 flex flex-col gap-2 border-t border-slate-100 pt-3 sm:flex-row sm:items-center">
+                            <label htmlFor="memo-author-filter" className="shrink-0 text-sm font-bold text-slate-700">사용자 선택</label>
+                            <select id="memo-author-filter" aria-label="메모 사용자 선택" value={activeAuthorFilter}
+                                onChange={event => void changeMemoAuthor(event.target.value)} disabled={isSaving || isLoading}
+                                className="h-11 w-full min-w-0 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-50 sm:max-w-md">
+                                <option value="">전체 사용자 · {memos.length}개</option>
+                                {activeAuthorFilter && !authorOptions.some(option => option.value === activeAuthorFilter) && (
+                                    <option value={activeAuthorFilter}>사용자 ID: {activeAuthorFilter.slice('author:'.length)} · 0개</option>
+                                )}
+                                {authorOptions.map(option => <option key={option.value} value={option.value}>{option.label} · {option.count}개</option>)}
+                            </select>
+                        </div>
+                    )}
                 </header>
 
+                {reminderLoadError && <p role="alert" className="mt-2 text-sm text-red-700">알림 설정을 불러오지 못했습니다. 잠시 후 다시 확인해 주세요.</p>}
+                {requestedMemoId && !isLoading && !memos.some(memo => memo.id === requestedMemoId) && (
+                    <p role="alert" className="mt-2 text-sm text-amber-700">알림의 메모를 찾을 수 없거나 조회 권한이 없습니다.</p>
+                )}
+                {reminderMemo && <MemoReminderDialog key={`${currentUser?.uid}:${reminderMemo.id}`}
+                    memoId={reminderMemo.id} memoTitle={reminderMemo.title} reminder={remindersByMemo.get(reminderMemo.id)}
+                    onClose={() => setReminderTarget(null)}
+                    onSaved={cancelled => showStatus(cancelled ? '알림을 해제했습니다.' : '알림을 설정했습니다.')} />}
                 {isCategoryComposerOpen && (
                     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4" role="presentation">
                         <section
@@ -2566,7 +2769,7 @@ export function MemoPage() {
                                 <button
                                     type="button"
                                     onClick={toggleFilteredChecked}
-                                    disabled={filteredMemos.length === 0 || isSaving}
+                                    disabled={editableFilteredMemoIds.length === 0 || isSaving}
                                     className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     <CheckSquare className="h-4 w-4" />
@@ -2658,6 +2861,7 @@ export function MemoPage() {
                                                         onChange={() => toggleMemoChecked(memo.id)}
                                                         className="mt-1.5 h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600"
                                                         title="메모 선택"
+                                                        disabled={!canEditMemo(memo)}
                                                         aria-label={`${memo.title} 선택`}
                                                     />
                                                     <button
@@ -2681,7 +2885,7 @@ export function MemoPage() {
                                                         <h3 className="truncate text-sm font-bold text-slate-950">{memo.title}</h3>
                                                             <span className="inline-flex max-w-[130px] shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">
                                                                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: categoryColor }} />
-                                                                <span className="truncate">{getCategoryLabel(memo.categoryId)}</span>
+                                                                <span className="truncate">{canEditMemo(memo) ? getCategoryLabel(memo.categoryId) : '개인 메모'}</span>
                                                             </span>
                                                             {memo.type === 'checklist' && (
                                                                 <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-bold text-emerald-700 shadow-sm">
@@ -2689,11 +2893,13 @@ export function MemoPage() {
                                                                 </span>
                                                             )}
                                                         </div>
+                                                        {renderMemoAuthor(memo)}
                                                     </button>
+                                                    {renderReminderButton(memo)}
                                                     <button
                                                         type="button"
                                                         onClick={() => void toggleMemoPinned(memo)}
-                                                        disabled={isSaving}
+                                                        disabled={isSaving || !canEditMemo(memo)}
                                                         className={`grid h-11 w-11 shrink-0 place-items-center rounded-lg border bg-white opacity-100 transition sm:h-8 sm:w-8 lg:opacity-0 lg:group-hover:opacity-100 ${
                                                             memo.isPinned
                                                                 ? 'border-amber-300 text-amber-700 hover:bg-amber-50 lg:opacity-100'
@@ -2717,7 +2923,7 @@ export function MemoPage() {
                                                     <button
                                                         type="button"
                                                         onClick={() => void deleteMemoRecord(memo)}
-                                                        disabled={isSaving}
+                                                        disabled={isSaving || !canEditMemo(memo)}
                                                         className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-red-200 bg-white text-red-700 opacity-100 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8 lg:opacity-0 lg:group-hover:opacity-100"
                                                         title="삭제"
                                                         aria-label="메모 삭제"
@@ -2741,7 +2947,29 @@ export function MemoPage() {
                             backgroundColor: draftAccentTheme.surface
                         }}
                     >
-                        {selectedMemo ? (
+                        {selectedMemo && !canEditMemo(selectedMemo) ? (
+                            <div className="flex h-full min-h-0 flex-col" aria-label="다른 사용자 메모 읽기 전용">
+                                <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-4">
+                                    <div className="min-w-0">
+                                        {renderMemoAuthor(selectedMemo)}
+                                        <h2 className="mt-2 whitespace-pre-wrap break-words text-lg font-bold text-slate-950">{selectedMemo.title}</h2>
+                                        <p className="mt-1 text-xs text-slate-500">{formatDate(selectedMemo.updatedAt || selectedMemo.createdAt)}</p>
+                                    </div>
+                                    {renderReminderButton(selectedMemo, true)}
+                                    <button
+                                        type="button"
+                                        onClick={() => void copyMemoToClipboard(selectedMemo)}
+                                        className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600"
+                                        aria-label="선택한 메모 복사"
+                                    >
+                                        <Copy className="h-4 w-4" />
+                                    </button>
+                                </div>
+                                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                                    {renderStickyMemoBody(selectedMemo)}
+                                </div>
+                            </div>
+                        ) : selectedMemo ? (
                             <div className="flex h-full min-h-0 flex-col">
                                 <div
                                     className="border-b px-4 py-4"
@@ -2754,6 +2982,7 @@ export function MemoPage() {
                                         <div className="min-w-0">
                                             <div className="flex flex-wrap items-center gap-2">
                                                 <h2 className="text-sm font-bold text-emerald-950">메모 본문</h2>
+                                                {renderMemoAuthor(selectedMemo)}
                                                 <span
                                                     className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full border bg-white px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm"
                                                     style={{ borderColor: draftAccentTheme.border }}
@@ -2816,6 +3045,7 @@ export function MemoPage() {
                                                 <Save className="h-4 w-4" />
                                                 저장
                                             </button>
+                                            {renderReminderButton(selectedMemo, true)}
                                             <button
                                                 type="button"
                                                 onClick={() => void toggleMemoPinned(selectedMemo)}

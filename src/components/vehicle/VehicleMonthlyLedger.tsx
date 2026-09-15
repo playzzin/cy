@@ -1446,17 +1446,6 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         setSaveFeedback(null);
     }, []);
 
-    const handleNoteChange = useCallback((index: number, rowId: string, note: string) => {
-        setRows(prev => {
-            const newRows = [...prev];
-            newRows[index] = { ...newRows[index], note };
-            return newRows;
-        });
-        setIsDirty(true);
-        setDirtyRowIds((current) => new Set(current).add(rowId));
-        setSaveFeedback(null);
-    }, []);
-
     const buildLineItemsForRow = (
         row: VehicleLedgerRow,
         target: 'billingTarget' | 'driverFine' = 'billingTarget'
@@ -2145,7 +2134,6 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                 ))}
                                 <col style={{ width: '5.5%' }} />
                                 <col style={{ width: '7%' }} />
-                                <col style={{ width: '9%' }} />
                             </colgroup>
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
@@ -2163,7 +2151,6 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                     ))}
                                     <th className="px-2 py-4 text-center w-32 border-l border-indigo-400 bg-indigo-500">합계</th>
                                     <th className="px-2 py-4 text-center w-36 border-l border-indigo-500">과태료 대상</th>
-                                    <th className="px-4 py-4 text-center w-40 border-l border-indigo-500">비고 (메모)</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-indigo-50">
@@ -2332,22 +2319,12 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                             </div>
                                         </td>
 
-                                        {/* 메모 */}
-                                        <td className="p-1 border-l border-indigo-50 bg-white">
-                                            <input
-                                                type="text"
-                                                value={row.note}
-                                                onChange={(e) => handleNoteChange(idx, row.id, e.target.value)}
-                                                className={`w-full p-2 focus:outline-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-200 rounded-lg text-xs bg-transparent text-center ${row.note ? 'text-red-600 font-extrabold' : 'text-slate-600'}`}
-                                                placeholder=""
-                                            />
-                                        </td>
                                     </tr>
                                     );
                                 })}
                                 {visibleLedgerRows.length === 0 && (
                                     <tr>
-                                        <td colSpan={EXPENSE_TYPES.length + 10} className="p-20 text-center text-slate-400 bg-slate-50/50">
+                                        <td colSpan={EXPENSE_TYPES.length + 9} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">
                                                 <FontAwesomeIcon icon={faCar} className="text-4xl text-slate-300" />
                                                 <p>조건에 맞는 차량 대장 행이 없습니다.</p>
@@ -2369,7 +2346,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                     <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-amber-300 text-lg">
                                         {formatNumberForDisplay(totals.total)}
                                     </td>
-                                    <td colSpan={2} className="bg-slate-900 border-l border-slate-700"></td>
+                                    <td className="bg-slate-900 border-l border-slate-700"></td>
                                 </tr>
                             </tfoot>
                         </table>

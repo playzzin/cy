@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { MemoPage } from './MemoPage';
+jest.mock('react-router-dom', () => ({ useLocation: () => ({ search: '', key: 'test' }) }));
 
 jest.mock('../../../contexts/AuthContext', () => ({
     useAuth: () => ({ currentUser: { uid: 'dev-admin' } })

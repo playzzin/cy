@@ -1262,16 +1262,6 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         setSaveFeedback(null);
     }, []);
 
-    const handleMemoChange = useCallback((index: number, memo: string) => {
-        setRows(prev => {
-            const newRows = [...prev];
-            newRows[index] = { ...newRows[index], memo };
-            return newRows;
-        });
-        setIsDirty(true);
-        setSaveFeedback(null);
-    }, []);
-
     const handleSave = async () => {
         setSaving(true);
         try {
@@ -1756,7 +1746,6 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                 <col style={{ width: '17%' }} />
                                 <col style={{ width: '13%' }} />
                                 <col style={{ width: '12%' }} />
-                                <col style={{ width: '15%' }} />
                             </colgroup>
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
@@ -1766,7 +1755,6 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                     <th className="px-4 py-4 text-left w-48 tracking-wider bg-indigo-700">카드</th>
                                     <th className="px-2 py-4 text-center w-40 border-l border-indigo-400 bg-indigo-500">총금액</th>
                                     <th className="px-2 py-4 text-center w-40 border-l border-indigo-500">사용내역서</th>
-                                    <th className="px-4 py-4 text-left border-l border-indigo-500">메모</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-indigo-50">
@@ -1962,27 +1950,12 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                 )}
                                             </td>
 
-                                            <td className="p-1">
-                                                <input
-                                                    type="text"
-                                                    value={row.memo}
-                                                    onChange={(e) => handleMemoChange(idx, e.target.value)}
-                                                    className={`w-full rounded-lg p-2 text-xs focus:outline-none focus:ring-2 ${
-                                                        isPdfImportMemo(row.memo)
-                                                            ? 'bg-blue-50/80 text-blue-700 font-extrabold focus:bg-blue-50 focus:ring-blue-200'
-                                                            : row.memo
-                                                                ? 'bg-amber-50 text-rose-700 font-black ring-1 ring-amber-200 focus:bg-amber-50 focus:ring-rose-200'
-                                                                : 'bg-transparent text-slate-600 focus:bg-indigo-50 focus:ring-indigo-200'
-                                                    }`}
-                                                    placeholder=""
-                                                />
-                                            </td>
                                         </tr>
                                     );
                                 })}
                                 {rows.length === 0 && (
                                     <tr>
-                                        <td colSpan={7} className="p-20 text-center text-slate-400 bg-slate-50/50">
+                                        <td colSpan={6} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">
                                                 <FontAwesomeIcon icon={faReceipt} className="text-4xl text-slate-300" />
                                                 <p>카드 대장 행이 없습니다.</p>
@@ -1997,7 +1970,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                     <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-amber-300 text-lg">
                                         {formatNumberForDisplay(totals.total)}
                                     </td>
-                                    <td colSpan={2} className="bg-slate-900 border-l border-slate-700"></td>
+                                    <td className="bg-slate-900 border-l border-slate-700"></td>
                                 </tr>
                             </tfoot>
                         </table>

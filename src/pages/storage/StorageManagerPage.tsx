@@ -1,11 +1,12 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { storageService, StorageItem } from '../../services/storageService';
+import { getStorageErrorMessage } from './storageErrorMessage';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faFolder, faFile, faFileImage, faFilePdf, faFileWord, faFileExcel, faCloudUploadAlt,
     faTrash, faDownload, faHdd, faChevronRight, faHome, faEllipsisV,
-    faThLarge, faList, faSearch, faPencilAlt, faFolderOpen
+    faThLarge, faList, faSearch, faPencilAlt, faFolderOpen, faSyncAlt, faExclamationTriangle
 } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -59,7 +60,7 @@ const StorageItemCard = ({ item, viewMode, onClick, onContextMenu, isDragOverlay
 
     // Class Names
     const baseClasses = `
-        group relative cursor - pointer select - none transition - all duration - 200
+        group relative cursor-pointer select-none transition-all duration-200
         ${viewMode === 'grid'
             ? 'p-4 flex flex-col items-center text-center rounded-2xl border bg-white'
             : 'px-4 py-3 flex items-center gap-4 rounded-xl border-b border-slate-50 hover:bg-slate-50'
@@ -73,12 +74,18 @@ const StorageItemCard = ({ item, viewMode, onClick, onContextMenu, isDragOverlay
         <div
             ref={setRef}
             className={baseClasses}
-            {...listeners}
-            {...attributes}
+            {...(!item.isFolder ? listeners : {})}
+            {...(!item.isFolder ? attributes : { role: 'button', tabIndex: 0 })}
+            onKeyDown={event => {
+                if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault();
+                    onClick?.();
+                }
+            }}
             onClick={onClick}
             onContextMenu={onContextMenu}
         >
-            <div className={`relative ${viewMode === 'grid' ? 'text-5xl mb-3 mt-2' : 'text-2xl w-8 text-center'} text - slate - 500 transition - transform duration - 300 ${isFolderOpen ? 'scale-110' : ''} `}>
+            <div className={`relative ${viewMode === 'grid' ? 'text-5xl mb-3 mt-2' : 'text-2xl w-8 text-center'} text-slate-500 transition-transform duration-300 ${isFolderOpen ? 'scale-110' : ''} `}>
                 <FontAwesomeIcon
                     icon={item.isFolder ? (isFolderOpen ? faFolderOpen : faFolder) : getFileIcon(item.name)}
                     className={`
@@ -97,8 +104,8 @@ const StorageItemCard = ({ item, viewMode, onClick, onContextMenu, isDragOverlay
                 )}
             </div>
 
-            <div className={`flex - 1 min - w - 0 ${viewMode === 'grid' ? 'w-full' : 'flex justify-between items-center'} `}>
-                <div className={`font - semibold text - slate - 700 truncate w - full ${viewMode === 'grid' ? 'text-sm' : 'text-base'} `}>
+            <div className={`flex-1 min-w-0 ${viewMode === 'grid' ? 'w-full' : 'flex justify-between items-center'} `}>
+                <div title={item.name} className={`font-semibold text-slate-700 truncate w-full ${viewMode === 'grid' ? 'text-sm' : 'text-base'} `}>
                     {item.name}
                 </div>
                 {viewMode === 'list' && (
@@ -110,9 +117,14 @@ const StorageItemCard = ({ item, viewMode, onClick, onContextMenu, isDragOverlay
             </div>
 
             {/* Quick Actions (Hover) */}
-            {!isDragOverlay && (
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-indigo-600">
+            {!isDragOverlay && item.name !== '..' && (
+                <div className="absolute top-2 right-2 opacity-100 md:opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <button
+                        aria-label={`${item.name} 작업 메뉴`}
+                        onPointerDown={e => e.stopPropagation()}
+                        onClick={e => { e.stopPropagation(); onContextMenu?.(e); }}
+                        className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-indigo-600"
+                    >
                         <FontAwesomeIcon icon={faEllipsisV} />
                     </button>
                 </div>
@@ -129,7 +141,7 @@ const DroppableBreadcrumb = ({ path, name, isLast, onClick }: any) => {
     });
 
     return (
-        <div ref={setNodeRef} className={`relative flex items - center transition - all duration - 200 ${isOver ? 'z-10' : ''} `}>
+        <div ref={setNodeRef} className={`relative flex items-center transition-all duration-200 ${isOver ? 'z-10' : ''} `}>
 
             {isOver && (
                 <motion.div
@@ -141,13 +153,13 @@ const DroppableBreadcrumb = ({ path, name, isLast, onClick }: any) => {
             )}
 
             {!name ? (
-                <button onClick={onClick} className={`px - 2 py - 1 rounded - md transition - colors ${isOver ? 'text-indigo-700 font-bold' : 'text-slate-500 hover:bg-indigo-50 hover:text-indigo-600'} `}>
+                <button aria-label="저장소 홈" onClick={onClick} className={`px-2 py-1 rounded-md transition-colors ${isOver ? 'text-indigo-700 font-bold' : 'text-slate-500 hover:bg-indigo-50 hover:text-indigo-600'} `}>
                     <FontAwesomeIcon icon={faHome} />
                 </button>
             ) : (
                 <>
                     <FontAwesomeIcon icon={faChevronRight} className="mx-2 text-[10px] text-slate-300" />
-                    <button onClick={onClick} className={`font - medium px - 2 py - 1 rounded - md transition - colors ${isOver ? 'text-indigo-700 font-bold' : 'text-slate-600 hover:bg-indigo-50 hover:text-indigo-600'} `}>
+                    <button onClick={onClick} className={`font-medium px-2 py-1 rounded-md transition-colors ${isOver ? 'text-indigo-700 font-bold' : 'text-slate-600 hover:bg-indigo-50 hover:text-indigo-600'} `}>
                         {name}
                     </button>
                 </>
@@ -171,7 +183,8 @@ const StorageSkeleton = () => (
 const StorageManagerPage: React.FC = () => {
     const [currentPath, setCurrentPath] = useState('');
     const [items, setItems] = useState<StorageItem[]>([]);
-    const [loading, setLoading] = useState(false); // Initial Load
+    const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [isProcessing, setIsProcessing] = useState(false); // Background Ops
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
     const [searchText, setSearchText] = useState('');
@@ -183,6 +196,9 @@ const StorageManagerPage: React.FC = () => {
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, item: StorageItem } | null>(null);
+    const loadRequestRef = useRef(0);
+    const currentPathRef = useRef(currentPath);
+    currentPathRef.current = currentPath;
 
 
 
@@ -192,9 +208,29 @@ const StorageManagerPage: React.FC = () => {
         useSensor(TouchSensor)
     );
 
+    const loadItems = useCallback(async (path: string) => {
+        if (path !== currentPathRef.current) return;
+        const requestId = ++loadRequestRef.current;
+        setLoading(true);
+        setLoadError(null);
+        setContextMenu(null);
+        setItems([]);
+        try {
+            const fileList = await storageService.listFiles(path);
+            if (requestId !== loadRequestRef.current) return;
+            setItems(fileList.filter(item => item.name !== '.keep'));
+        } catch (error: unknown) {
+            if (requestId !== loadRequestRef.current) return;
+            setLoadError(getStorageErrorMessage(error));
+        } finally {
+            if (requestId === loadRequestRef.current) setLoading(false);
+        }
+    }, []);
+
     useEffect(() => {
-        loadItems(currentPath);
-    }, [currentPath]);
+        void loadItems(currentPath);
+        return () => { loadRequestRef.current += 1; };
+    }, [currentPath, loadItems]);
 
     useEffect(() => {
         const handleClick = () => setContextMenu(null);
@@ -202,23 +238,10 @@ const StorageManagerPage: React.FC = () => {
         return () => window.removeEventListener('click', handleClick);
     }, []);
 
-    const loadItems = async (path: string) => {
-        setLoading(true);
-        try {
-            const fileList = await storageService.listFiles(path);
-            setItems(fileList.filter(item => item.name !== '.keep'));
-        } catch (error: any) {
-            console.error('Storage Error:', error);
-            Swal.fire('오류', '파일 목록 로드 실패', 'error');
-        } finally {
-            setLoading(false);
-        }
-    };
-
     // --- Actions ---
 
     const handleUploadFiles = async (files: FileList | File[]) => {
-        if (!files || files.length === 0) return;
+        if (!files || files.length === 0 || isProcessing || loading || loadError) return;
         setIsProcessing(true);
         const total = files.length;
         // Optimistic: We can't easily show file before upload without a fake item. 
@@ -232,7 +255,7 @@ const StorageManagerPage: React.FC = () => {
             Toast.fire({ icon: 'success', title: 'Upload Complete' });
             loadItems(currentPath);
         } catch (error) {
-            Swal.fire('실패', '업로드 중 오류가 발생했습니다.', 'error');
+            Swal.fire('업로드 실패', getStorageErrorMessage(error), 'error');
         } finally {
             setIsProcessing(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
@@ -246,7 +269,7 @@ const StorageManagerPage: React.FC = () => {
     const handleDragEnd = async (event: DragEndEvent) => {
         const { active, over } = event;
         setActiveDragItem(null);
-        if (!over) return;
+        if (!over || isProcessing || loading || loadError) return;
 
         const activeItem = active.data.current?.item as StorageItem;
         const targetType = over.data.current?.type;
@@ -310,7 +333,7 @@ const StorageManagerPage: React.FC = () => {
             Swal.fire({
                 icon: 'error',
                 title: 'Move Failed',
-                text: 'Could not move the file. Restoring...',
+                text: getStorageErrorMessage(error),
                 toast: true,
                 position: 'bottom-end',
                 timer: 3000
@@ -332,7 +355,7 @@ const StorageManagerPage: React.FC = () => {
                 await storageService.createFolder(currentPath, folderName);
                 loadItems(currentPath);
             } catch (error) {
-                Swal.fire('오류', '폴더 생성 실패', 'error');
+                Swal.fire('폴더 생성 실패', getStorageErrorMessage(error), 'error');
             }
         }
     };
@@ -344,8 +367,7 @@ const StorageManagerPage: React.FC = () => {
                 setCurrentPath(parentPath);
                 return;
             }
-            const newPath = currentPath ? `${currentPath}/${item.name}` : item.name;
-            setCurrentPath(newPath);
+            setCurrentPath(item.fullPath);
         } else {
             handleFileAction(item);
         }
@@ -357,7 +379,7 @@ const StorageManagerPage: React.FC = () => {
             const url = await storageService.getDownloadUrl(item.fullPath);
             window.open(url, '_blank');
         } catch (e) {
-            Swal.fire('Error', 'Link Error', 'error');
+            Swal.fire('파일 열기 실패', getStorageErrorMessage(e), 'error');
         }
     };
 
@@ -381,7 +403,7 @@ const StorageManagerPage: React.FC = () => {
                 await storageService.deleteFile(item.fullPath);
             } catch (e) {
                 setItems(prev); // Rollback
-                Swal.fire('오류', '삭제 실패', 'error');
+                Swal.fire('삭제 실패', getStorageErrorMessage(e), 'error');
             }
         }
     };
@@ -429,7 +451,7 @@ const StorageManagerPage: React.FC = () => {
             } catch (error) {
                 setItems(prev); // Rollback
                 console.error(error);
-                Swal.fire('오류', '이름 변경 실패', 'error');
+                Swal.fire('이름 변경 실패', getStorageErrorMessage(error), 'error');
             }
         }
     };
@@ -449,7 +471,7 @@ const StorageManagerPage: React.FC = () => {
     }
 
     const sortedItems = displayItems.filter(item =>
-        item.name.toLowerCase().includes(searchText.toLowerCase())
+        item.name === '..' || item.name.toLowerCase().includes(searchText.trim().toLowerCase())
     ).sort((a, b) => {
         if (a.name === '..') return -1;
         if (b.name === '..') return 1;
@@ -482,29 +504,29 @@ const StorageManagerPage: React.FC = () => {
 
     return (
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-            <div className="bg-slate-50 min-h-screen p-6 flex gap-6 relative overflow-hidden">
+            <div className="bg-slate-50 min-h-screen p-4 sm:p-6 flex flex-col lg:flex-row gap-6 relative overflow-hidden">
 
                 {/* Background Decoration */}
                 <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-indigo-50/50 to-transparent pointer-events-none" />
 
                 {/* Left Sidebar (Compact) */}
-                <div className="hidden lg:flex w-64 flex-col gap-6 shrink-0 z-10">
+                <div className="flex w-full lg:w-64 flex-col gap-6 shrink-0 z-10">
                     <div className="bg-white/80 backdrop-blur-xl p-6 rounded-3xl border border-white/60 shadow-xl sticky top-6">
                         <div className="flex items-center gap-3 mb-8">
                             <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-3 rounded-2xl shadow-lg shadow-indigo-200 text-white">
                                 <FontAwesomeIcon icon={faHdd} className="text-xl" />
                             </div>
                             <div>
-                                <h2 className="font-bold text-slate-800 text-lg">My Cloud</h2>
-                                <p className="text-xs text-slate-400 font-medium">102.4 GB Used</p>
+                                <h2 className="font-bold text-slate-800 text-lg">파일 저장소</h2>
+                                <p className="text-xs text-slate-400 font-medium">{loading ? '목록 확인 중' : loadError ? '목록 조회 실패' : `현재 폴더 ${items.length}개 항목`}</p>
                             </div>
                         </div>
 
-                        <button onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95 flex items-center justify-center gap-3 mb-4 text-sm group">
-                            <FontAwesomeIcon icon={faCloudUploadAlt} className="group-hover:animate-bounce" /> Upload File
+                        <button disabled={loading || isProcessing || !!loadError} onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95 flex items-center justify-center gap-3 mb-4 text-sm group disabled:opacity-50 disabled:cursor-not-allowed">
+                            <FontAwesomeIcon icon={faCloudUploadAlt} className="group-hover:animate-bounce" /> {isProcessing ? '처리 중…' : '파일 업로드'}
                         </button>
-                        <button onClick={handleCreateFolder} className="w-full py-4 bg-white border border-slate-200 hover:border-indigo-200 hover:bg-indigo-50 text-slate-700 rounded-2xl font-bold transition-all active:scale-95 flex items-center justify-center gap-3 text-sm">
-                            <FontAwesomeIcon icon={faFolder} className="text-yellow-500" /> New Folder
+                        <button disabled={loading || isProcessing || !!loadError} onClick={handleCreateFolder} className="w-full py-4 bg-white border border-slate-200 hover:border-indigo-200 hover:bg-indigo-50 text-slate-700 rounded-2xl font-bold transition-all active:scale-95 flex items-center justify-center gap-3 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                            <FontAwesomeIcon icon={faFolder} className="text-yellow-500" /> 새 폴더
                         </button>
                     </div>
                 </div>
@@ -517,7 +539,8 @@ const StorageManagerPage: React.FC = () => {
                         <div className="relative w-full max-w-xl">
                             <input
                                 type="text"
-                                placeholder="Search everything..."
+                                aria-label="현재 폴더 검색"
+                                placeholder="현재 폴더 검색..."
                                 value={searchText}
                                 onChange={e => setSearchText(e.target.value)}
                                 className="w-full pl-12 pr-4 py-4 bg-white/80 backdrop-blur-md border border-white/60 rounded-2xl focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all shadow-sm text-slate-700 placeholder:text-slate-400"
@@ -526,11 +549,14 @@ const StorageManagerPage: React.FC = () => {
                         </div>
 
                         <div className="flex gap-2 ml-4">
+                            <button aria-label="새로고침" title="새로고침" disabled={loading || isProcessing} onClick={() => void loadItems(currentPath)} className="p-3 rounded-xl border border-slate-200 bg-white text-slate-600 disabled:opacity-50">
+                                <FontAwesomeIcon icon={faSyncAlt} spin={loading} />
+                            </button>
                             <div className="bg-white p-1 rounded-xl border border-slate-200 flex shadow-sm">
-                                <button onClick={() => setViewMode('grid')} className={`p-3 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
+                                <button aria-label="격자 보기" aria-pressed={viewMode === 'grid'} onClick={() => setViewMode('grid')} className={`p-3 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
                                     <FontAwesomeIcon icon={faThLarge} />
                                 </button>
-                                <button onClick={() => setViewMode('list')} className={`p-3 rounded-lg transition-all ${viewMode === 'list' ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
+                                <button aria-label="목록 보기" aria-pressed={viewMode === 'list'} onClick={() => setViewMode('list')} className={`p-3 rounded-lg transition-all ${viewMode === 'list' ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
                                     <FontAwesomeIcon icon={faList} />
                                 </button>
                             </div>
@@ -545,7 +571,7 @@ const StorageManagerPage: React.FC = () => {
                         {/* Native DnD Zone */}
                         <div
                             className="h-full"
-                            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                            onDragOver={(e) => { e.preventDefault(); if (!loading && !isProcessing && !loadError && e.dataTransfer.types.includes('Files')) setIsDragOver(true); }}
                             onDragLeave={(e) => { e.preventDefault(); setIsDragOver(false); }}
                             onDrop={(e) => {
                                 e.preventDefault();
@@ -571,17 +597,24 @@ const StorageManagerPage: React.FC = () => {
                             </AnimatePresence>
 
                             {/* Content */}
-                            {loading ? (
+                            {loadError ? (
+                                <div role="alert" className="flex flex-col items-center justify-center min-h-[320px] rounded-3xl border border-red-200 bg-red-50 p-8 text-center">
+                                    <FontAwesomeIcon icon={faExclamationTriangle} className="text-3xl text-red-500 mb-4" />
+                                    <h3 className="font-bold text-lg text-slate-800">파일 목록을 불러오지 못했습니다</h3>
+                                    <p className="mt-3 max-w-lg text-sm text-slate-600">{loadError}</p>
+                                    <button onClick={() => void loadItems(currentPath)} className="mt-6 px-5 py-3 rounded-xl bg-indigo-600 text-white font-semibold">다시 시도</button>
+                                </div>
+                            ) : loading ? (
                                 <div className={`grid gap-4 ${viewMode === 'grid' ? 'grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid-cols-1'}`}>
                                     {[...Array(12)].map((_, i) => <StorageSkeleton key={i} />)}
                                 </div>
-                            ) : items.length === 0 && !currentPath ? (
+                            ) : sortedItems.every(item => item.name === '..') ? (
                                 <div className="flex flex-col items-center justify-center h-[60vh] text-slate-400 border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50/50">
                                     <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mb-6 shadow-sm">
                                         <FontAwesomeIcon icon={faCloudUploadAlt} className="text-4xl text-indigo-200" />
                                     </div>
-                                    <p className="font-bold text-lg text-slate-500">Your cloud is empty</p>
-                                    <p className="text-sm">Drag and drop files to get started</p>
+                                    <p className="font-bold text-lg text-slate-500">{searchText.trim() ? '검색 결과가 없습니다' : '이 폴더는 비어 있습니다'}</p>
+                                    <p className="text-sm">{searchText.trim() ? '다른 검색어를 입력해 주세요.' : '파일을 끌어다 놓거나 업로드 버튼을 눌러 주세요.'}</p>
                                 </div>
                             ) : (
                                 <div className={viewMode === 'grid' ? "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4" : "flex flex-col gap-2"}>
@@ -599,7 +632,7 @@ const StorageManagerPage: React.FC = () => {
                                                     item={item}
                                                     viewMode={viewMode}
                                                     onClick={() => handleItemClick(item)}
-                                                    onContextMenu={(e: any) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, item }); }}
+                                                    onContextMenu={(e: React.MouseEvent) => { e.preventDefault(); if (item.name !== '..') setContextMenu({ x: Math.min(e.clientX, window.innerWidth - 220), y: Math.min(e.clientY, window.innerHeight - 190), item }); }}
                                                 />
                                             </motion.div>
                                         ))}
@@ -628,7 +661,7 @@ const StorageManagerPage: React.FC = () => {
                             {contextMenu.item.name}
                         </div>
 
-                        <button onClick={() => { handleFileAction(contextMenu.item); setContextMenu(null); }} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 flex items-center gap-3 transition-colors">
+                        <button onClick={() => { handleItemClick(contextMenu.item); setContextMenu(null); }} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 flex items-center gap-3 transition-colors">
                             <FontAwesomeIcon icon={faDownload} /> Open / Download
                         </button>
                         <button onClick={() => { processRename(contextMenu.item); setContextMenu(null); }} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 flex items-center gap-3 transition-colors">

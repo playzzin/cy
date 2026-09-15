@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useMessageNotifications } from '../../hooks/useMessageInbox';
 import { messageService } from '../../services/messageService';
 import type { ErpMessage } from '../../types/erpMessage';
+import { messageDestination } from '../../utils/messageNavigation';
 import './MessageSystem.css';
 
 const formatRelativeTime = (message: ErpMessage): string => {
@@ -48,7 +49,7 @@ export const MessageIndicator: React.FC = () => {
       await messageService.markAsRead(message.id, currentUser.uid);
     }
     setOpen(false);
-    navigate(`/messages?messageId=${message.id}`);
+    navigate(messageDestination(message));
   };
 
   const markAllAsRead = async () => {

@@ -40,7 +40,7 @@ import { SupportCancellationModal, type SupportCancellationFormValue } from '../
 import { supportCancellationLogService } from '../../services/supportCancellationLogService';
 import { getContrastingTextColor } from '../../utils/color';
 import { getSupportManagementYearMonth, subscribeSupportManagementYearMonth } from '../../utils/supportManagementState';
-import { getAccommodationMonthSummary, overlapsAccommodationMonth } from '../../utils/accommodationMonthSummary';
+import { getAccommodationMonthSummary, getAccommodationMonthSummaryByOwnership, overlapsAccommodationMonth } from '../../utils/accommodationMonthSummary';
 import type { SiteDataType } from '../../types/menu';
 
 interface AccommodationManagerProps {
@@ -1320,6 +1320,15 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     const { rent: totalRent, deposit: totalDeposit } = getAccommodationMonthSummary(
         monthScopedAccommodations, summaryMonth, currentMonthLedgerRecords,
     );
+    const ownershipMonthSummary = getAccommodationMonthSummaryByOwnership(
+        monthScopedAccommodations, summaryMonth, currentMonthLedgerRecords,
+    );
+    const ownershipSummaryRows = [
+        { label: '청연', ...ownershipMonthSummary.Cheongyeon },
+        { label: '개인(사모님)', ...ownershipMonthSummary.Individual },
+        ...(ownershipMonthSummary.Dawon.rent || ownershipMonthSummary.Dawon.deposit
+            ? [{ label: '다원', ...ownershipMonthSummary.Dawon }] : []),
+    ];
 
     // Calculate Alerts (Rent Due Soon)
     const today = new Date();
@@ -1716,8 +1725,16 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                             <span className="text-sm font-bold text-slate-400">원</span>
                                         </div>
                                         <div className="mt-4 flex items-center gap-2 text-xs font-medium text-indigo-700 bg-indigo-50 w-fit px-2 py-1 rounded-lg">
-                                            <FontAwesomeIcon icon={faWonSign} /> 매월 고정 지출
+                                            <FontAwesomeIcon icon={faWonSign} /> {summaryMonth} 기준
                                         </div>
+                                        <dl className="mt-3 space-y-2 border-t border-indigo-100 pt-3 text-sm" aria-label="명의별 월세 지출액">
+                                            {ownershipSummaryRows.map(row => (
+                                                <div key={row.label} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                                                    <dt className="text-slate-600">{row.label}</dt>
+                                                    <dd className="font-bold tabular-nums text-slate-800">{loading ? '집계 중…' : `${row.rent.toLocaleString()}원`}</dd>
+                                                </div>
+                                            ))}
+                                        </dl>
                                     </div>
                                 </div>
 
@@ -1730,8 +1747,16 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                             <span className="text-sm font-bold text-slate-400">원</span>
                                         </div>
                                         <div className="mt-4 flex items-center gap-2 text-xs font-medium text-blue-700 bg-blue-50 w-fit px-2 py-1 rounded-lg">
-                                            <FontAwesomeIcon icon={faWonSign} /> 자산 (반환 예정)
+                                            <FontAwesomeIcon icon={faWonSign} /> {summaryMonth} 기준 · 반환 예정
                                         </div>
+                                        <dl className="mt-3 space-y-2 border-t border-blue-100 pt-3 text-sm" aria-label="명의별 예치 보증금">
+                                            {ownershipSummaryRows.map(row => (
+                                                <div key={row.label} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                                                    <dt className="text-slate-600">{row.label}</dt>
+                                                    <dd className="font-bold tabular-nums text-slate-800">{loading ? '집계 중…' : `${row.deposit.toLocaleString()}원`}</dd>
+                                                </div>
+                                            ))}
+                                        </dl>
                                     </div>
                                 </div>
 

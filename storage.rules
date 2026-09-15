@@ -71,6 +71,12 @@ service firebase.storage {
       return hasTokenRole(adminRoles());
     }
 
+    // /storage starts by listing the bucket root. The request-path guard grants
+    // only that directory listing; protected descendants retain their rules.
+    match /{rootPath=**} {
+      allow list: if request.path == /b/$(bucket)/o && isAdmin();
+    }
+
     function canAccessCardBillingStatements() {
       return isAdmin()
         || hasTokenRole(officeRoles())

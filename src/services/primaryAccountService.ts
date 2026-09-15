@@ -1,4 +1,5 @@
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
+import type { FirestoreError } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
 const SETTINGS_COLLECTION = 'settings';
@@ -38,6 +39,12 @@ const normalizePrimaryAccount = (value: unknown): PrimaryAccountSetting | null =
 };
 
 export const primaryAccountService = {
+    subscribe(onChange: (account: PrimaryAccountSetting | null) => void, onError: (error: FirestoreError) => void) {
+        return onSnapshot(doc(db, SETTINGS_COLLECTION, PRIMARY_ACCOUNT_DOCUMENT_ID), snapshot => {
+            onChange(snapshot.exists() ? normalizePrimaryAccount(snapshot.data()) : null);
+        }, onError);
+    },
+
     async getPrimaryAccount(): Promise<PrimaryAccountSetting | null> {
         const snapshot = await getDoc(doc(db, SETTINGS_COLLECTION, PRIMARY_ACCOUNT_DOCUMENT_ID));
         return snapshot.exists() ? normalizePrimaryAccount(snapshot.data()) : null;

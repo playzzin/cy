@@ -19,6 +19,9 @@ import { noticeService } from '../../services/noticeService';
 import { messageService } from '../../services/messageService';
 import type { Notice } from '../../types/notice';
 import type { ErpMessage } from '../../types/erpMessage';
+import { useAuth } from '../../contexts/AuthContext';
+import { useMessageInbox } from '../../hooks/useMessageInbox';
+import { messageDestination } from '../../utils/messageNavigation';
 
 const emptySummary: OfficeRequestSummary = {
     total: 0,
@@ -47,10 +50,11 @@ const timestampText = (value: unknown) => {
 
 export default function OfficeDashboardPage() {
     const navigate = useNavigate();
+    const { currentUser } = useAuth();
+    const { messages, summary: messageSummary } = useMessageInbox(currentUser?.uid, 5);
     const [summary, setSummary] = useState<OfficeRequestSummary>(emptySummary);
     const [recentRequests, setRecentRequests] = useState<OfficeRequestItem[]>([]);
     const [notices, setNotices] = useState<Notice[]>([]);
-    const [messages, setMessages] = useState<ErpMessage[]>([]);
     const [loading, setLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState('');
 
@@ -58,14 +62,12 @@ export default function OfficeDashboardPage() {
         setLoading(true);
         setErrorMessage('');
         try {
-            const [requestRows, requestSummary, recentMessages] = await Promise.all([
+            const [requestRows, requestSummary] = await Promise.all([
                 officeRequestCenterService.listRequests({ limit: 8 }),
                 officeRequestCenterService.getSummary(),
-                messageService.getRecentMessages(5).catch(() => []),
             ]);
             setRecentRequests(requestRows);
             setSummary(requestSummary);
-            setMessages(recentMessages);
         } catch (error) {
             console.error('[OfficeDashboardPage] failed to load dashboard', error);
             setErrorMessage('운영 대시보드를 불러오지 못했습니다.');
@@ -73,6 +75,13 @@ export default function OfficeDashboardPage() {
             setLoading(false);
         }
     }, []);
+
+    const openMessage = async (message: ErpMessage) => {
+        if (currentUser?.uid && !messageService.isReadBy(message, currentUser.uid)) {
+            await messageService.markAsRead(message.id, currentUser.uid);
+        }
+        navigate(messageDestination(message));
+    };
 
     useEffect(() => {
         void loadData();
@@ -235,6 +244,7 @@ export default function OfficeDashboardPage() {
                             <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
                                 <MessageSquare className="h-4 w-4 text-cyan-600" />
                                 <h2 className="text-sm font-black text-slate-900">최근 메시지</h2>
+                                <span className="text-xs font-bold text-cyan-700">안 읽음 {messageSummary.unread}건</span>
                             </div>
                             <div className="divide-y divide-slate-100">
                                 {messages.length === 0 ? (
@@ -243,7 +253,7 @@ export default function OfficeDashboardPage() {
                                     <button
                                         key={message.id}
                                         type="button"
-                                        onClick={() => navigate('/messages')}
+                                        onClick={() => void openMessage(message)}
                                         className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
                                     >
                                         <span className="truncate text-sm font-bold text-slate-800">{message.title}</span>

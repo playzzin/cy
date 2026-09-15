@@ -824,7 +824,8 @@ service cloud.firestore {
         || isCardExpenseAuditCollection(collectionId)
         || collectionId in ['cards', 'cardAssignments', 'cardBillingTargets']
         || collectionId == 'vehicleExpenseImportIdentities'
-        || collectionId == 'erp_messages';
+        || collectionId == 'erp_messages'
+        || collectionId == 'smart_memo_reminders';
     }
 
     function isConstructionPlanEditableStatus(status) {
@@ -1228,6 +1229,10 @@ service cloud.firestore {
         );
     }
 
+    function isMemoReminderMessage(data) {
+      return data is map && data.get('senderId', '') == 'system:smart-memo-reminder';
+    }
+
     function canReadBankSystemMessage(data) {
       return isAdmin()
         || ('recipientIds' in data && data.recipientIds is list && request.auth.uid in data.recipientIds);
@@ -1554,6 +1559,11 @@ service cloud.firestore {
     // General ERP messages retain their existing signed-in behavior, while
     // server-authored bank alerts are visible only to configured recipients
     // and may only receive the current recipient's read receipt.
+    match /smart_memo_reminders/{reminderId} {
+      allow read: if hasActiveUserProfile() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
     match /erp_messages/{messageId} {
       allow read: if hasActiveUserProfile()
         && (
@@ -1562,14 +1572,18 @@ service cloud.firestore {
         );
       allow create: if hasActiveUserProfile()
         && !isBankSystemMessage(request.resource.data)
+        && !isMemoReminderMessage(request.resource.data)
         && request.resource.data.senderId == request.auth.uid
         && request.resource.data.type in ['direct', 'broadcast'];
       allow update: if hasActiveUserProfile()
         && (
           (isBankSystemMessage(resource.data) && isValidErpMessageReadReceiptUpdate())
+          || (isMemoReminderMessage(resource.data) && isValidErpMessageReadReceiptUpdate())
           || (
             !isBankSystemMessage(resource.data)
             && !isBankSystemMessage(request.resource.data)
+            && !isMemoReminderMessage(resource.data)
+            && !isMemoReminderMessage(request.resource.data)
             && request.resource.data.type in ['direct', 'broadcast']
             && (
               isAdmin()
@@ -1580,6 +1594,7 @@ service cloud.firestore {
         );
       allow delete: if hasActiveUserProfile()
         && !isBankSystemMessage(resource.data)
+        && !isMemoReminderMessage(resource.data)
         && (isAdmin() || ('senderId' in resource.data && resource.data.senderId == request.auth.uid));
     }
 

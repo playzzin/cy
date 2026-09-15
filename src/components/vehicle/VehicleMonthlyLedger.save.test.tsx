@@ -193,13 +193,15 @@ async function ready(vehicles: Vehicle[] = [vehicle('A')]) {
     successfulExpenseReads, successfulBillingReads, successfulAssignmentReads, successfulTargetReads
   ].every(count => count > 0)).toBe(true));
   expect(screen.queryByText('데이터를 불러오는 중입니다...')).toBeNull();
+  expect(screen.queryByRole('columnheader', { name: /메모/ })).toBeNull();
 }
-function editNote(id = 'A') {
+function editAmount(id = 'A') {
   // eslint-disable-next-line testing-library/no-node-access -- Verify the structural layout or hidden upload input directly.
   const row = screen.getByText(`TEST-${id}`).closest('tr');
   if (!row) throw new Error('fixture row absent');
   const inputs = within(row).getAllByRole('textbox');
-  fireEvent.change(inputs[inputs.length - 1], { target: { value: 'SYNTHETIC NOTE' } });
+  fireEvent.change(inputs[0], { target: { value: '25' } });
+  fireEvent.blur(inputs[0]);
   expect(screen.getByText('● 수정사항 있음')).toBeTruthy();
 }
 async function save() {
@@ -221,7 +223,7 @@ function noCompleteNotice() {
 it('successful reads: full real screen delegates once and preserves normal completion feedback', async () => {
   await ready();
   const previousReads = resolvedReadCounts();
-  editNote();
+  editAmount();
   await save();
   expect(coordinator).toHaveBeenCalledTimes(1); // baseline lacks wiring: intended valid failure
   expect(ledger).toHaveBeenCalledTimes(1);
@@ -239,7 +241,7 @@ it('successful reads: full real screen delegates once and preserves normal compl
 });
 
 it('partial snapshot response preserves ledger acknowledgement and forbids total completion', async () => {
-  await ready(); editNote();
+  await ready(); editAmount();
   const previousReads = resolvedReadCounts();
   snapshotFailure = true;
   await save();
@@ -276,7 +278,7 @@ it('successful snapshot with row failure and newly protected row retains existin
 });
 
 it('dirty preflight settlement protection keeps coordinator and ledger uncalled', async () => {
-  await ready(); editNote();
+  await ready(); editAmount();
   confirmed.mockImplementation(() => true);
   await save();
   expect(screen.getByText('저장을 중단했습니다.')).toBeTruthy();
@@ -291,7 +293,7 @@ it('dirty preflight settlement protection keeps coordinator and ledger uncalled'
 it('preflight target validation remains ahead of coordinator', async () => {
   const unassigned = vehicle('A');
   delete unassigned.currentAssigneeId; delete unassigned.currentAssigneeName; delete unassigned.currentAssigneeType;
-  await ready([unassigned]); editNote(); await save();
+  await ready([unassigned]); editAmount(); await save();
   expect(screen.getByText(/청구대상을 먼저 지정해 주세요/)).toBeTruthy();
   expect(coordinator).not.toHaveBeenCalled();
   expect(ledger).not.toHaveBeenCalled();
@@ -299,7 +301,7 @@ it('preflight target validation remains ahead of coordinator', async () => {
 });
 
 it('strict preflight read rejection is not treated as successful empty query', async () => {
-  await ready(); editNote();
+  await ready(); editAmount();
   billings.mockRejectedValueOnce(new Error('TEST strict read failure'));
   await save();
   expect(billings).toHaveBeenCalledWith('2026-09', { throwOnError: true });
@@ -313,7 +315,7 @@ it('strict preflight read rejection is not treated as successful empty query', a
 
 // Existing contract regression; no intentional product failure and no real commit claim.
 it('ledger rejection preserves the original error, failure feedback and zero post-ledger work', async () => {
-  await ready(); editNote();
+  await ready(); editAmount();
   const originalError = new Error('TEST ledger rejection');
   let readsAtLedger: number[] = [];
   ledger.mockImplementationOnce(async () => {

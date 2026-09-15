@@ -123,6 +123,9 @@ const DashboardPage: React.FC = () => {
             />
 
             <main className="relative z-10 mx-auto -mt-12 min-w-0 w-full max-w-none overflow-hidden px-3 pb-28 sm:-mt-16 sm:px-5 md:pb-12 lg:px-8 2xl:px-10">
+                <Suspense fallback={<DashboardSectionFallback minHeight="min-h-[128px]" label="메시지 위젯을 준비하는 중입니다." />}>
+                    <DashboardMessageWidget />
+                </Suspense>
                 {isClientDashboard ? (
                     <Suspense fallback={<DashboardSectionFallback minHeight="min-h-[520px]" label="건설 현황을 준비하고 있습니다." />}>
                         <ClientDashboardView />
@@ -145,9 +148,6 @@ const DashboardPage: React.FC = () => {
                     </Suspense>
                 ) : (
                     <>
-                <Suspense fallback={<DashboardSectionFallback minHeight="min-h-[128px]" label="메시지 위젯을 준비하는 중입니다." />}>
-                    <DashboardMessageWidget />
-                </Suspense>
                 <div className="mb-6">
                     <Suspense fallback={<DashboardSectionFallback minHeight="min-h-[220px]" label="일정 위젯을 준비하는 중입니다." />}>
                         <TomorrowScheduleWidget />

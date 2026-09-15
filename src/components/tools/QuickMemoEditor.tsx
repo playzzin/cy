@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMemoStore } from '../../features/smart-memo/store/useMemoStore';
 import { debounce } from 'lodash';
@@ -10,116 +10,117 @@ const COLORS: MemoColor[] = ['white', 'red', 'orange', 'yellow', 'green', 'blue'
 
 export const QuickMemoEditor: React.FC = () => {
     const { currentUser } = useAuth();
-    const { memos, addMemo, updateMemo, subscribeMemos } = useMemoStore();
+    return currentUser ? <QuickMemoSession key={currentUser.uid} userId={currentUser.uid} email={currentUser.email || ''} /> : null;
+};
 
-    const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading');
-    const [memoId, setMemoId] = useState<string | null>(null);
-    const [content, setContent] = useState('');
-    const [color, setColor] = useState<MemoColor>('yellow'); // Default to yellow for "Post-it" feel
+type QuickDraft = { id: string | null; content: string; color: MemoColor; dirty: boolean; revision: number };
+const emptyDraft = (): QuickDraft => ({ id: null, content: '', color: 'yellow', dirty: false, revision: 0 });
+const updatedMillis = (value: any): number => value?.toMillis?.() ||
+    (typeof value?.seconds === 'number' ? value.seconds * 1000 : typeof value === 'number' ? value : Date.parse(value) || 0);
+
+const QuickMemoSession: React.FC<{ userId: string; email: string }> = ({ userId, email }) => {
+    const { memos, addMemo, updateMemo, subscribeMemos } = useMemoStore();
+    const [status, setStatus] = useState<'ready' | 'saving' | 'error'>('ready');
+    const [draft, setDraft] = useState<QuickDraft>(emptyDraft);
+    const draftRef = useRef(draft);
+    const saveInFlightRef = useRef<Promise<boolean> | null>(null);
+    const mountedRef = useRef(true);
+    const newDraftRef = useRef(false);
+    const { content, color } = draft;
+    const publishDraft = useCallback((next: QuickDraft) => {
+        draftRef.current = next;
+        if (mountedRef.current) setDraft(next);
+    }, []);
 
     // Ensure we are subscribed to memos when this component is active
     useEffect(() => {
-        if (!currentUser) return;
-        const unsubscribe = subscribeMemos(currentUser.uid);
+        const unsubscribe = subscribeMemos({ uid: userId, email });
         return () => {
             unsubscribe();
         };
-    }, [currentUser, subscribeMemos]);
+    }, [userId, email, subscribeMemos]);
 
-    // Find or Create "Quick Note"
+    // Snapshot arrival order must never create a note. Empty drafts stay local.
     useEffect(() => {
-        if (!currentUser) return;
-        if (memos.length === 0) return; // Wait for memos to load
-
-        // Try to find existing Quick Note (Pick the latest one)
-        const quickMemos = memos.filter(m => m.title === 'Quick Note' && !m.isPinned);
-        // Sort by updatedAt desc (assuming timestamp objects or numbers)
-        quickMemos.sort((a, b) => {
-            const timeA = a.updatedAt?.seconds ? a.updatedAt.seconds : (a.updatedAt || 0);
-            const timeB = b.updatedAt?.seconds ? b.updatedAt.seconds : (b.updatedAt || 0);
-            return timeB - timeA;
-        });
-
+        if (draftRef.current.id || draftRef.current.dirty || newDraftRef.current) return;
+        const quickMemos = memos.filter(m => m.title === 'Quick Note' && !m.isPinned && m.scope !== 'public' &&
+            (m.userId === userId || Boolean(email && m.userId?.toLowerCase() === email.toLowerCase())));
+        quickMemos.sort((a, b) => updatedMillis(b.updatedAt) - updatedMillis(a.updatedAt));
         const quickMemo = quickMemos[0];
-
         if (quickMemo) {
-            setMemoId(quickMemo.id);
-            setContent(quickMemo.content);
-            setColor(quickMemo.color);
-            setStatus('ready');
-        } else {
-            // Create new one
-            const createInit = async () => {
-                try {
-                    const newId = await addMemo({
-                        title: 'Quick Note',
-                        content: '',
-                        color: 'yellow',
-                        type: 'text',
-                        isPinned: false,
-                        scope: 'private',
-                        order: 0,
-                        x: 0,
-                        y: 0,
-                        w: 4,
-                        h: 4,
-                        checklistItems: [],
-                        tags: [],
-                        categoryId: null,
-                        isCollapsed: false,
-                    }, currentUser.uid);
-                    setMemoId(newId);
-                    setStatus('ready');
-                } catch (e) {
-                    console.error("Failed to create quick memo", e);
-                    setStatus('error');
-                }
-            };
-            // Prevent multiple creations if re-renders happen fast
-            // Check if we already have a pending creation? 
-            // Simplified: just strictly check again inside
-            createInit();
+            publishDraft({ id: quickMemo.id, content: quickMemo.content || '', color: quickMemo.color, dirty: false, revision: 0 });
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [currentUser, memos.length === 0]); // Run once when memos load
+    }, [memos, userId, email, publishDraft]);
 
-    // Debounced Save
-    const saveContent = useMemo(
-        () => debounce(async (id: string, newContent: string, newColor: MemoColor) => {
-            setStatus('saving');
+    const persistDraft = useCallback((): Promise<boolean> => {
+        if (saveInFlightRef.current) return saveInFlightRef.current;
+        const initial = draftRef.current;
+        if (!initial.dirty || (!initial.id && !initial.content.trim())) return Promise.resolve(true);
+        const task = (async () => {
+            if (mountedRef.current) setStatus('saving');
             try {
-                await updateMemo(id, { content: newContent, color: newColor });
-                setStatus('ready');
-            } catch (e) {
-                setStatus('error');
+                // Edits made during creation update the same document once its ID arrives.
+                while (draftRef.current.dirty) {
+                    const saving = draftRef.current;
+                    let id = saving.id;
+                    if (id) {
+                        await updateMemo(id, { content: saving.content, color: saving.color });
+                    } else {
+                        id = await addMemo({
+                            title: 'Quick Note', content: saving.content, color: saving.color,
+                            type: 'text', isPinned: false, scope: 'private', order: 0,
+                            x: 0, y: 0, w: 4, h: 4, checklistItems: [], tags: [],
+                            categoryId: null, isCollapsed: false
+                        }, userId);
+                    }
+                    const latest = draftRef.current;
+                    publishDraft({ ...latest, id, dirty: latest.revision !== saving.revision });
+                }
+                if (mountedRef.current) setStatus('ready');
+                return true;
+            } catch {
+                if (mountedRef.current) setStatus('error');
+                return false;
             }
-        }, 1000),
-        [updateMemo]
+        })();
+        saveInFlightRef.current = task;
+        void task.finally(() => { saveInFlightRef.current = null; });
+        return task;
+    }, [addMemo, updateMemo, userId, publishDraft]);
+
+    const saveContent = useMemo(
+        () => debounce(() => { void persistDraft(); }, 700),
+        [persistDraft]
     );
 
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+            saveContent.cancel();
+            void persistDraft();
+        };
+    }, [persistDraft, saveContent]);
+
     const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const val = e.target.value;
-        setContent(val);
-        if (memoId) {
-            saveContent(memoId, val, color);
-        }
+        const current = draftRef.current;
+        publishDraft({ ...current, content: e.target.value, dirty: true, revision: current.revision + 1 });
+        saveContent();
     };
 
     const handleColorChange = (c: MemoColor) => {
-        setColor(c);
-        if (memoId) {
-            saveContent(memoId, content, c);
-        }
+        const current = draftRef.current;
+        publishDraft({ ...current, color: c, dirty: true, revision: current.revision + 1 });
+        saveContent();
     };
 
-    // If still initial loading
-    if ((status === 'loading' || !memoId) && memos.length === 0) {
-        return (
-            <div className="flex h-full items-center justify-center p-8">
-                <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
-            </div>
-        );
-    }
+    const startNewDraft = async () => {
+        saveContent.cancel();
+        if (!(await persistDraft()) || !mountedRef.current) return;
+        newDraftRef.current = true;
+        publishDraft(emptyDraft());
+        setStatus('ready');
+    };
 
     return (
         <div className={cn(
@@ -156,36 +157,8 @@ export const QuickMemoEditor: React.FC = () => {
                     ))}
                     <div className="w-px h-3 bg-slate-300 mx-1.5" />
                     <button
-                        onClick={async () => {
-                            if (!currentUser) return;
-                            setStatus('saving');
-                            try {
-                                const newId = await addMemo({
-                                    title: 'Quick Note',
-                                    content: '',
-                                    color: 'yellow',
-                                    type: 'text',
-                                    isPinned: false,
-                                    scope: 'private',
-                                    order: 0,
-                                    x: 0,
-                                    y: 0,
-                                    w: 4,
-                                    h: 4,
-                                    checklistItems: [],
-                                    tags: [],
-                                    categoryId: null,
-                                    isCollapsed: false,
-                                }, currentUser.uid);
-                                setMemoId(newId);
-                                setContent('');
-                                setColor('yellow');
-                                setStatus('ready');
-                            } catch (e) {
-                                console.error("Failed to create new quick memo", e);
-                                setStatus('error');
-                            }
-                        }}
+                        onClick={() => void startNewDraft()}
+                        disabled={status === 'saving'}
                         className="p-1 hover:bg-slate-200 rounded-full text-slate-500 hover:text-slate-700 transition-colors"
                         title="새 메모 작성"
                     >
@@ -201,9 +174,9 @@ export const QuickMemoEditor: React.FC = () => {
                     ) : status === 'ready' ? (
                         <>
                             <Save className="w-3 h-3" />
-                            <span>저장됨</span>
+                            <span>{draft.dirty ? '입력 중...' : draft.id ? '저장됨' : '입력하면 자동 저장'}</span>
                         </>
-                    ) : null}
+                    ) : <button type="button" className="text-red-600" onClick={() => void persistDraft()}>다시 저장</button>}
                 </div>
             </div>
 

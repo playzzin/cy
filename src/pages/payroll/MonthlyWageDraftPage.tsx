@@ -1773,6 +1773,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [showCalculationLabor, setShowCalculationLabor] = useState<boolean>(false);
     const [companies, setCompanies] = useState<Company[]>([]);
     const [primaryAccount, setPrimaryAccount] = useState<PrimaryAccountSetting | null>(null);
+    const [primaryAccountLoadError, setPrimaryAccountLoadError] = useState(false);
     const [workerSearchText, setWorkerSearchText] = useState<string>('');
     const [filterMode, setFilterMode] = useState<'team' | 'worker'>('team');
     const [pageViewMode, setPageViewMode] = useState<'simple' | 'standard' | 'ledger'>('ledger');
@@ -2870,23 +2871,17 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     fetchedWorkers,
                     fetchedCompanies,
                     fetchedSites,
-                    fetchedPrimaryAccount,
                 ] = await Promise.all([
                     teamService.getTeams(),
                     manpowerService.getWorkers(),
                     companyService.getCompanies(),
                     siteService.getSites(),
-                    primaryAccountService.getPrimaryAccount().catch((error) => {
-                        console.warn('Failed to load primary account for KB preview:', error);
-                        return null;
-                    }),
                 ]);
                 if (!mounted) return;
                 setAllTeams(fetchedTeams);
                 setAllWorkers(fetchedWorkers);
                 setCompanies(fetchedCompanies);
                 setAllSites(fetchedSites);
-                setPrimaryAccount(fetchedPrimaryAccount);
             } catch (error) {
                 if (!mounted) return;
                 console.error('Failed to load initial data:', error);
@@ -2903,6 +2898,15 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             mounted = false;
         };
     }, []);
+
+    useEffect(() => primaryAccountService.subscribe(account => {
+        setPrimaryAccount(account);
+        setPrimaryAccountLoadError(false);
+    }, error => {
+        console.warn('Failed to load primary account for KB preview:', error);
+        setPrimaryAccount(null);
+        setPrimaryAccountLoadError(true);
+    }), []);
 
     useEffect(() => {
         let mounted = true;
@@ -6597,7 +6601,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                 <div>
                                     <div className="text-xs font-black uppercase tracking-[0.12em] text-amber-300">작업자 입금계좌 변경</div>
                                     <div className="mt-1 text-sm font-bold text-white">
-                                        대표계좌: {primaryAccount ? formatKBPrimaryAccountLabel(primaryAccount) : '미설정'}
+                                        대표계좌: {primaryAccountLoadError ? '불러오지 못했습니다. 새로고침 후 다시 확인해 주세요.' : primaryAccount ? formatKBPrimaryAccountLabel(primaryAccount) : '미설정'}
                                     </div>
                                     <div className="mt-1 text-xs text-slate-300">
                                         아래 작업자를 선택한 뒤 대표계좌 적용을 누르면 해당 작업자의 국민은행 이체 계좌만 변경됩니다.

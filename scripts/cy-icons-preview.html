@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>CY 업무 아이콘</title>
+  <style>
+    :root {color-scheme:light;--bg:#f5f7fa;--surface:#fff;--ink:#15283f;--muted:#617187;--line:#dee5ec;--brand:#2563eb;--accent:#0891b2;--soft:#edf4ff;--shadow:0 16px 45px #15283f08;font-family:'Pretendard','Malgun Gothic',sans-serif}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink)}button,input,select{font:inherit}button,a,input,select{-webkit-tap-highlight-color:transparent}button{cursor:pointer}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #38bdf8;outline-offset:4px}svg{flex-shrink:0;vertical-align:middle}.wrap{max-width:1264px;margin:auto;padding:0 40px}header{border-bottom:1px solid var(--line);background:var(--surface)}.topbar{height:82px;display:flex;align-items:center;justify-content:space-between;gap:20px}.brand{display:flex;align-items:center;gap:13px}.brand-mark{background:#112b47;color:#fff;width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-size:15px;font-weight:800;letter-spacing:-1px}.brand strong{font-size:14px;letter-spacing:1.5px}.brand span{font-size:12px;color:var(--muted);display:block;margin-top:4px;letter-spacing:0}.top-meta{color:var(--muted);font-size:12px}.hero{padding:53px 0 32px;display:flex;justify-content:space-between;gap:32px;align-items:center}.eyebrow{color:var(--brand);font-size:11px;font-weight:800;letter-spacing:2px;margin:0 0 16px}.hero h1{font-size:38px;letter-spacing:-1.8px;line-height:1.25;margin:0 0 17px}.hero p{color:var(--muted);font-size:14px;line-height:1.85;margin:0}.specs{display:flex;gap:26px;align-items:center}.specs strong{display:block;font-size:28px;letter-spacing:-1px}.specs span{display:block;font-size:11px;color:var(--muted);margin-top:8px}.specs>div+div{padding-left:26px;border-left:1px solid var(--line)}
+    .context{display:grid;grid-template-columns:1.2fr 1fr;margin:6px 0 30px;border:1px solid var(--line);border-radius:18px;background:var(--surface);overflow:hidden;box-shadow:var(--shadow)}.context-nav{background:#11253c;color:#e0eaf7;padding:22px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.context-label{font-size:10px;color:#91a8c1;letter-spacing:1px;width:100%;margin:0 0 2px}.nav-item{display:flex;align-items:center;gap:8px;font-size:12px;padding:10px 12px;border-radius:8px;color:#c1d0e2}.nav-item.active{background:#234569;color:#fff}.context-action{display:flex;align-items:center;justify-content:space-between;padding:22px 26px;gap:20px}.context-action strong{display:block;font-size:14px;margin-bottom:6px}.context-action small{color:var(--muted);font-size:12px}.sample-action{background:var(--brand);color:#fff;display:flex;align-items:center;gap:8px;padding:12px 15px;border-radius:9px;font-size:12px;white-space:nowrap}
+    .toolbar{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:22px;flex-wrap:wrap}.search{position:relative;flex:1;min-width:180px;max-width:335px}.search svg{position:absolute;left:13px;top:13px;color:var(--muted)}.search input{width:100%;height:44px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);padding:0 14px 0 42px;font-size:13px}.controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.segments{display:flex;gap:3px;padding:4px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}.segments button{border:0;background:transparent;color:var(--muted);padding:8px 12px;border-radius:7px;font-size:12px}.segments button[aria-pressed=true]{background:var(--soft);color:var(--brand);font-weight:700}.size{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px}.size select{height:42px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);padding:0 10px}.theme{border:1px solid var(--line);height:42px;border-radius:10px;padding:0 13px;background:var(--surface);color:var(--ink);font-size:12px}.section-heading{display:flex;justify-content:space-between;align-items:center;margin:27px 0 13px}.section-heading h2{font-size:13px;font-weight:700;margin:0}.section-heading span{font-size:11px;color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:10px}.icon-card{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:150px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);padding:18px 5px;transition:border-color .15s,transform .15s,box-shadow .15s}.icon-card:hover{border-color:#7bafff;transform:translateY(-3px);box-shadow:0 10px 22px #2563eb0c}.icon-art{display:flex;align-items:center;justify-content:center;height:56px;color:var(--brand);--cy-icon-accent:var(--accent);margin-bottom:10px}.icon-label{font-size:12px;font-weight:600}.icon-name{font-size:9px;color:var(--muted);margin-top:6px;font-family:Consolas,monospace}.empty{border:1px dashed var(--line);padding:50px;text-align:center;color:var(--muted)}footer{padding:30px 0 34px;margin-top:25px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:18px;color:var(--muted);font-size:11px;line-height:1.8}.footer-note{max-width:590px}
+    dialog{border:1px solid var(--line);border-radius:20px;background:var(--surface);color:var(--ink);width:min(500px,calc(100% - 32px));padding:28px;box-shadow:0 30px 100px #0003}dialog::backdrop{background:#091b35a3}.dialog-head{display:flex;align-items:center;justify-content:space-between}.dialog-head h2{margin:0;font-size:19px}.close{border:0;background:var(--soft);color:var(--ink);border-radius:8px;padding:7px 12px;font-size:18px}.detail-art{display:flex;justify-content:center;align-items:center;gap:28px;padding:35px 0;color:var(--brand);--cy-icon-accent:var(--accent)}.detail-art span{display:flex;flex-direction:column;gap:13px;align-items:center}.detail-art small{font-size:10px;color:var(--muted)}.detail-code{background:var(--bg);border:1px solid var(--line);padding:14px;border-radius:10px;font:12px/1.7 Consolas,monospace;overflow:auto;white-space:pre-wrap;word-break:break-word}.dialog-actions{display:flex;gap:8px;flex-wrap:wrap}.dialog-actions button,.dialog-actions a{padding:11px 14px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;font-size:12px;text-decoration:none}.dialog-actions button.primary{background:var(--brand);color:#fff;border-color:var(--brand)}.copy-status{min-height:20px;font-size:12px;color:var(--muted);margin-top:15px}
+    body.dark{color-scheme:dark;--bg:#0b1421;--surface:#122033;--ink:#e7effb;--muted:#9cb0c8;--line:#2b3b52;--brand:#77aaff;--accent:#53d2e7;--soft:#1d3451}.dark .sample-action,.dark .dialog-actions button.primary{color:#08172a}
+    @media(max-width:1050px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}.context{grid-template-columns:1fr}.context-nav{padding:18px 22px}.specs{gap:18px}.specs>div+div{padding-left:18px}.hero h1{font-size:32px}}
+    @media(max-width:600px){.wrap{padding:0 20px}.topbar{height:70px}.top-meta{display:none}.hero{padding:32px 0 26px;display:block}.hero h1{font-size:29px}.specs{margin-top:23px}.specs strong{font-size:23px}.context-action{padding:20px}.context-nav{gap:3px;padding:15px}.nav-item{padding:8px;font-size:11px}.search{max-width:none}.controls{gap:8px}.segments button{padding:8px 10px}.grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.icon-card{min-height:136px}.icon-label{font-size:11px}.icon-name{font-size:8px}.toolbar{gap:12px}.hero p{font-size:12px}footer{flex-direction:column}.context-action small{font-size:11px}.sample-action{padding:11px;font-size:11px}}
+    @media(prefers-reduced-motion:reduce){*{transition:none!important}.icon-card:hover{transform:none}}
+  </style>
+</head>
+<body>
+  <header><div class="wrap topbar"><div class="brand"><div class="brand-mark">CY</div><div><strong>CHEONGYEON<span>청연ENG · 업무 아이콘</span></strong></div></div><div class="top-meta">CY ERP / ICON LIBRARY 01</div></div></header>
+  <main class="wrap">
+    <section class="hero"><div><div class="eyebrow">BUILT FOR EVERYDAY WORK</div><h1>업무를 한눈에, 더 명확하게.</h1><p>현장에서 정산까지, 청연의 업무를 담은 32개의 아이콘.<br>정돈된 선과 은은한 색으로 어느 화면에서나 자연스럽게 어울립니다.</p></div><div class="specs"><div><strong>32</strong><span>업무 아이콘</span></div><div><strong>24</strong><span>기준 크기 · px</span></div><div><strong>02</strong><span>라인 / 듀오톤</span></div></div></section>
+    <section class="context" aria-label="화면 적용 예시"><div class="context-nav"><p class="context-label">메뉴 적용 예시</p><span class="nav-item active" data-example="dashboard">대시보드</span><span class="nav-item" data-example="worker">인력 관리</span><span class="nav-item" data-example="daily-report">작업 일보</span><span class="nav-item" data-example="payroll">급여 관리</span></div><div class="context-action"><div><strong>일일 작업 현황</strong><small>작은 메뉴부터 주요 버튼까지 같은 디자인으로</small></div><span class="sample-action" data-example="add">일보 작성</span></div></section>
+    <div class="toolbar"><label class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg><input id="search" type="search" aria-label="아이콘 검색" placeholder="아이콘 검색 · 현장, 급여, upload…"></label><div class="controls"><div class="segments" aria-label="아이콘 스타일"><button type="button" data-variant="duotone" aria-pressed="true">듀오톤</button><button type="button" data-variant="outline" aria-pressed="false">라인</button></div><label class="size">크기<select id="size"><option value="16">16 px</option><option value="20">20 px</option><option value="24">24 px</option><option value="32" selected>32 px</option><option value="48">48 px</option></select></label><button class="theme" id="theme" aria-pressed="false" type="button">어두운 배경</button></div></div>
+    <div id="results"></div>
+    <footer><div class="footer-note">아이콘을 선택하면 크기별로 확인하고 SVG를 저장할 수 있습니다.<br>배경이 투명한 벡터 원본으로, 색상과 크기를 자유롭게 바꿀 수 있습니다.</div><div>CY ICONS · 24 × 24 GRID · 1.75 px STROKE</div></footer>
+  </main>
+  <dialog id="detail" aria-labelledby="detail-title"><div class="dialog-head"><h2 id="detail-title"></h2><button type="button" class="close" id="close" aria-label="닫기">×</button></div><div id="detail-art" class="detail-art"></div><pre class="detail-code" id="detail-code"></pre><div class="dialog-actions"><button type="button" class="primary" id="copy-svg">SVG 복사</button><button type="button" id="copy-react">React 코드 복사</button><a id="download">SVG 저장</a></div><div class="copy-status" id="copy-status" role="status" aria-live="polite"></div></dialog>
+  <script>
+    /* __CY_ICON_CATALOG__ */
+    const entries = Object.entries(catalog);
+    const categories = [...new Set(entries.map(([,icon]) => icon.category))];
+    let variant = 'duotone';
+    let size = 32;
+    let selected = null;
+    const byId = (id) => document.getElementById(id);
+    function svg(name, pixels, downloadable = false) {
+      const icon = catalog[name];
+      const paths = icon.paths.map((part) => {
+        const color = variant === 'duotone' && part.accent ? 'var(--cy-icon-accent, currentColor)' : 'currentColor';
+        const fill = variant === 'duotone' && part.filled ? `fill="${color}" fill-opacity="0.12"` : 'fill="none"';
+        return `<path d="${part.d}" stroke="${color}" ${fill}/>`;
+      }).join('');
+      const accessibility = downloadable ? `role="img" aria-label="${icon.label}"` : 'aria-hidden="true" focusable="false"';
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${pixels}" height="${pixels}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" ${accessibility}>${paths}</svg>`;
+    }
+    function render() {
+      const query = byId('search').value.toLowerCase().trim();
+      const filtered = entries.filter(([name, icon]) => `${name} ${icon.label} ${icon.category}`.toLowerCase().includes(query));
+      byId('results').innerHTML = categories.map((category) => {
+        const items = filtered.filter(([, icon]) => icon.category === category);
+        if (!items.length) return '';
+        return `<section><div class="section-heading"><h2>${category}</h2><span>${String(items.length).padStart(2,'0')} ICONS</span></div><div class="grid">${items.map(([name, icon]) => `<button class="icon-card" type="button" data-icon="${name}" aria-label="${icon.label} 아이콘 보기"><span class="icon-art">${svg(name,size)}</span><span class="icon-label">${icon.label}</span><span class="icon-name">${name}</span></button>`).join('')}</div></section>`;
+      }).join('') || '<div class="empty" role="status">검색한 아이콘이 없습니다. 다른 이름으로 검색해 주세요.</div>';
+      document.querySelectorAll('[data-example]').forEach((el) => {
+        el.querySelector('svg')?.remove();
+        el.insertAdjacentHTML('afterbegin', svg(el.dataset.example, 18));
+      });
+    }
+    function reactCode() {
+      return `<CyIcon name="${selected}" size={${size}} variant="${variant}" />`;
+    }
+    function openDetail(name) {
+      selected = name;
+      byId('detail-title').textContent = catalog[name].label;
+      byId('detail-art').innerHTML = [16,24,32,48].map((pixels) => `<span>${svg(name,pixels)}<small>${pixels} px</small></span>`).join('');
+      byId('detail-code').textContent = `import { CyIcon } from './components/icons';\n\n${reactCode()}`;
+      byId('copy-status').textContent = '';
+      byId('download').href = `${variant}/${name}.svg`;
+      byId('download').download = `cy-${name}-${variant}.svg`;
+      byId('detail').showModal();
+    }
+    async function copy(value, label) {
+      try {
+        await navigator.clipboard.writeText(value);
+        byId('copy-status').textContent = `${label}를 복사했습니다.`;
+      } catch {
+        byId('detail-code').textContent = value;
+        const range = document.createRange();
+        range.selectNodeContents(byId('detail-code'));
+        const selection = window.getSelection();
+        selection.removeAllRanges(); selection.addRange(range);
+        byId('copy-status').textContent = '선택된 코드를 Ctrl+C로 복사해 주세요.';
+      }
+    }
+    byId('results').addEventListener('click', (event) => { const card = event.target.closest('[data-icon]'); if (card) openDetail(card.dataset.icon); });
+    byId('search').addEventListener('input', render);
+    byId('size').addEventListener('change', (event) => { size = Number(event.target.value); render(); });
+    document.querySelectorAll('[data-variant]').forEach((button) => button.addEventListener('click', () => {
+      variant = button.dataset.variant;
+      document.querySelectorAll('[data-variant]').forEach((other) => other.setAttribute('aria-pressed', String(other === button)));
+      render();
+    }));
+    byId('theme').addEventListener('click', () => {
+      const dark = document.body.classList.toggle('dark');
+      byId('theme').setAttribute('aria-pressed',String(dark));
+      byId('theme').textContent = dark ? '밝은 배경' : '어두운 배경';
+    });
+    byId('close').addEventListener('click', () => byId('detail').close());
+    byId('copy-svg').addEventListener('click', () => copy(svg(selected,24,true),'SVG'));
+    byId('copy-react').addEventListener('click', () => copy(reactCode(),'React 코드'));
+    render();
+  </script>
+</body>
+</html>

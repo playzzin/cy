@@ -2627,7 +2627,7 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
                             <p>데이터를 불러오는 중입니다...</p>
                         </div>
                     ) : (
-                        <table className="support-compact-table support-compact-ledger w-full min-w-[1320px] table-fixed text-[11px] lg:text-xs">
+                        <table className="support-compact-table support-compact-ledger w-full table-fixed text-[11px] lg:text-xs" style={{ minWidth: 1800 }}>
                             <colgroup>
                                 <col style={{ width: '8%' }} />
                                 <col style={{ width: '6%' }} />
@@ -2642,7 +2642,7 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
                                 <col style={{ width: '3.7%' }} />
                                 <col style={{ width: '5.1%' }} />
                                 <col style={{ width: '4.5%' }} />
-                                <col style={{ width: '10%' }} />
+                                <col style={{ width: '16%' }} />
                             </colgroup>
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
@@ -2869,10 +2869,17 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
                                                 )}
                                             </td>
 
-                                            {/* Memo */}
-                                            <td className="p-1">
-                                                <input
-                                                    type="text"
+                                            {/* Keep the shared accommodation memo separate from the editable monthly memo. */}
+                                            <td className="p-1 align-top">
+                                                {matchedAccommodation?.memo?.trim() && (
+                                                    <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 p-2">
+                                                        <p className="mb-1 text-[10px] font-bold text-amber-800">숙소 공통 메모</p>
+                                                        <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-800">{matchedAccommodation.memo}</p>
+                                                    </div>
+                                                )}
+                                                <textarea
+                                                    rows={3}
+                                                    aria-label={rec.accommodationName + ' ' + yearMonth + ' 월별 메모'}
                                                     value={rec.memo || ''}
                                                     title={rec.memo || undefined}
                                                     onChange={(e) => {
@@ -2882,8 +2889,8 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
                                                         setRecords(newRecords);
                                                         setIsDirty(true);
                                                     }}
-                                                    className="w-full p-2 focus:outline-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-200 rounded-lg text-xs font-medium text-slate-700 bg-transparent"
-                                                    placeholder=""
+                                                    className="w-full resize-y rounded-lg border border-slate-200 bg-white p-2 text-xs font-medium leading-relaxed text-slate-800 focus:outline-none focus:bg-indigo-50 focus:ring-2 focus:ring-indigo-300"
+                                                    placeholder="월별 메모 입력"
                                                 />
                                             </td>
                                         </tr>

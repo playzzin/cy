@@ -8,6 +8,14 @@ export const overlapsAccommodationMonth = (range: { startDate?: string; endDate?
         && (!range.endDate || range.endDate.slice(0, 10) >= first);
 };
 
+export const getAccommodationMonthSummaryByOwnership = (
+    accommodations: Accommodation[], yearMonth: string, records: UtilityRecord[],
+) => ({
+    Cheongyeon: getAccommodationMonthSummary(accommodations.filter(room => !room.ownership || room.ownership === 'Cheongyeon'), yearMonth, records),
+    Individual: getAccommodationMonthSummary(accommodations.filter(room => room.ownership === 'Individual'), yearMonth, records),
+    Dawon: getAccommodationMonthSummary(accommodations.filter(room => room.ownership === 'Dawon'), yearMonth, records),
+});
+
 export const getAccommodationMonthSummary = (
     accommodations: Accommodation[], yearMonth: string, records: UtilityRecord[],
 ): { rent: number; deposit: number } => {

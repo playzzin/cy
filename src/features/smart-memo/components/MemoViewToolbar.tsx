@@ -15,6 +15,7 @@ type MemoType = 'text' | 'checklist';
 
 type MemoViewToolbarProps = {
     searchQuery: string;
+    searchIncludesAuthors?: boolean;
     sortMode: MemoSortMode;
     viewMode: MemoViewMode;
     isCreateMenuOpen: boolean;
@@ -30,6 +31,7 @@ type MemoViewToolbarProps = {
 
 export function MemoViewToolbar({
     searchQuery,
+    searchIncludesAuthors = false,
     sortMode,
     viewMode,
     isCreateMenuOpen,
@@ -50,7 +52,7 @@ export function MemoViewToolbar({
                     value={searchQuery}
                     onChange={event => onSearchQueryChange(event.target.value)}
                     className="h-11 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none transition focus:border-slate-500 focus:bg-white focus:ring-2 focus:ring-slate-200"
-                    placeholder="제목, 내용, 카테고리 검색"
+                    placeholder={searchIncludesAuthors ? '제목, 내용, 작성자, 카테고리 검색' : '제목, 내용, 카테고리 검색'}
                     aria-label="메모 검색"
                 />
             </label>

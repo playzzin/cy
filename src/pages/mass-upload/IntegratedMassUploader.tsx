@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -27,6 +27,44 @@ import { resetCollection } from '../../services/backupService';
 import { useAuth } from '../../contexts/AuthContext';
 import { normalizeLooseDateText } from '../../utils/dateNormalization';
 import Swal from 'sweetalert2';
+import { officeStaffService } from '../../services/officeStaffService';
+import { settlementTargetService } from '../../services/settlementTargetService';
+import { MASTER_DEFINITIONS, MASTER_TYPES, MasterType, MasterSnapshot, ImportRecord, planMasterImport, executeMasterImport } from './masterDataImport';
+import { readIntegratedWorkbook, WorkbookSheetSummary } from './integratedWorkbook';
+import { companyFirestoreService } from '../../services/companyFirestoreService';
+import { teamFirestoreService } from '../../services/teamFirestoreService';
+import { siteFirestoreService } from '../../services/siteFirestoreService';
+
+const loadMasterSnapshot = async (data: Partial<MasterSnapshot>): Promise<MasterSnapshot> => {
+    const [Company, Team, Site, Worker, OfficeStaff, SettlementTarget] = await Promise.all([
+        companyFirestoreService.getCompanies(), teamFirestoreService.getTeams(), siteFirestoreService.getSites(), manpowerService.getWorkers(true),
+        data.OfficeStaff?.length ? officeStaffService.getOfficeStaff(true) : Promise.resolve([]),
+        data.SettlementTarget?.length ? settlementTargetService.getTargets(true) : Promise.resolve([]),
+    ]);
+    return { Company, Team, Site, Worker, OfficeStaff, SettlementTarget };
+};
+const masterWriter = {
+    create: async (type: MasterType, data: ImportRecord): Promise<string> => {
+        switch (type) {
+            case 'Company': return companyService.addCompany(data as any);
+            case 'Team': return teamService.addTeam(data as any);
+            case 'Site': return siteService.addSite(data as any);
+            case 'Worker': return manpowerService.addWorker(data);
+            case 'OfficeStaff': return officeStaffService.addOfficeStaff(data);
+            case 'SettlementTarget': return settlementTargetService.addTarget(data);
+        }
+    },
+    update: async (type: MasterType, id: string, data: ImportRecord): Promise<void> => {
+        switch (type) {
+            case 'Company': return companyService.updateCompany(id, data);
+            case 'Team': return teamService.updateTeam(id, data);
+            case 'Site': return siteService.updateSite(id, data);
+            case 'Worker': return manpowerService.updateWorker(id, data);
+            case 'OfficeStaff': return officeStaffService.updateOfficeStaff(id, data);
+            case 'SettlementTarget': return settlementTargetService.updateTarget(id, data);
+        }
+    },
+};
 
 interface LogItem {
     step: string;
@@ -35,7 +73,7 @@ interface LogItem {
     count?: number;
 }
 
-type SheetType = 'Company' | 'Team' | 'Site' | 'Worker' | 'DailyReport';
+type SheetType = MasterType | 'DailyReport';
 
 type MappingStatus = 'NEW' | 'UPDATE' | 'UNCHANGED' | 'CONFLICT';
 
@@ -59,10 +97,12 @@ interface MappedRow {
 }
 
 const SHEET_CONFIG: { [key in SheetType]: { name: string; icon: any; keywords: string[] } } = {
-    'Company': { name: '회사', icon: faBuilding, keywords: ['회사'] },
-    'Team': { name: '팀', icon: faUsers, keywords: ['팀'] },
-    'Site': { name: '현장', icon: faMapMarkerAlt, keywords: ['현장'] },
-    'Worker': { name: '작업자', icon: faUser, keywords: ['작업자'] },
+    'Company': { name: '회사', icon: faBuilding, keywords: MASTER_DEFINITIONS.Company.keywords },
+    'Team': { name: '팀', icon: faUsers, keywords: MASTER_DEFINITIONS.Team.keywords },
+    'Site': { name: '현장', icon: faMapMarkerAlt, keywords: MASTER_DEFINITIONS.Site.keywords },
+    'Worker': { name: '작업자', icon: faUser, keywords: MASTER_DEFINITIONS.Worker.keywords },
+    'OfficeStaff': { name: '사무실 직원', icon: faUser, keywords: MASTER_DEFINITIONS.OfficeStaff.keywords },
+    'SettlementTarget': { name: '정산 대상자', icon: faUsers, keywords: MASTER_DEFINITIONS.SettlementTarget.keywords },
     'DailyReport': {
         name: '출력일보',
         icon: faClipboard,
@@ -74,7 +114,7 @@ const formatExcelDate = (val: any): string => {
     return normalizeLooseDateText(val);
 };
 
-type TemplateSheetType = 'Company' | 'Team' | 'Site' | 'Worker' | 'DailyReport';
+type TemplateSheetType = SheetType;
 
 type TemplateField = {
     label: string;
@@ -86,63 +126,7 @@ type TemplateField = {
 };
 
 const TEMPLATE_FIELDS: Record<TemplateSheetType, { sheetName: string; fields: TemplateField[] }> = {
-    Company: {
-        sheetName: '회사',
-        fields: [
-            { label: '회사명', required: true, aliases: ['상호', '업체명'], example: '(주)청연ENG', description: '회사(거래처) 이름 (중복 체크 기준)' },
-            { label: '구분', aliases: [], example: '시공사', description: '회사 구분 (시공사/발주사/협력사 등)', allowedValues: ['시공사', '발주사', '협력사', '건설사', '기타'] },
-            { label: '대표자', aliases: [], example: '김대한', description: '대표자 성명' },
-            { label: '사업자번호', aliases: [], example: '123-45-67890', description: '사업자등록번호 (하이픈 포함 가능)' },
-            { label: '주소', aliases: [], example: '서울시 강남구 테헤란로 123', description: '회사 주소' },
-            { label: '연락처', aliases: ['전화번호', '대표전화'], example: '02-1234-5678', description: '회사 연락처' }
-        ]
-    },
-    Team: {
-        sheetName: '팀',
-        fields: [
-            { label: '팀명', required: true, aliases: [], example: '1공구팀', description: '팀 이름 (중복 체크 기준)' },
-            { label: '회사명', aliases: ['소속회사'], example: '(주)대한건설', description: '팀 소속 회사명 (회사 시트와 연결, 선택)' },
-            { label: '팀장명', aliases: ['팀장'], example: '김팀장', description: '팀장 성명 (작업자 시트와 매칭 시 자동 팀장 연결)' },
-            { label: '직종', aliases: [], example: '철근', description: '주요 직종/공종' }
-        ]
-    },
-    Site: {
-        sheetName: '현장',
-        fields: [
-            { label: '현장명', required: true, aliases: ['현장', '공사명'], example: '강남역 복합개발', description: '현장/프로젝트 이름 (중복 체크 기준)' },
-            { label: '발주사', aliases: ['발주처'], example: '삼성엔지니어링', description: '발주사명 (회사 DB와 매칭)' },
-            { label: '시공사', aliases: ['건설사', '회사명'], example: '(주)청연ENG', description: '시공사명 (회사 DB와 매칭)' },
-            { label: '협력사', aliases: ['협력업체', '파트너'], example: '다원파트너스', description: '협력사명 (회사 DB와 매칭)' },
-            { label: '해당팀', aliases: ['현장담당'], example: '1공구팀', description: '현장 담당 팀명. 코드상 "해당팀" 또는 "현장담당"을 읽음' },
-            { label: '발주사연락처', aliases: ['발주처연락처', '발주사전화번호', '발주처전화번호', '발주사대표전화', '발주처대표전화'], example: '02-1111-2222', description: '발주사 연락처 (회사 연락처 보강용, 선택)' },
-            { label: '시공사연락처', aliases: ['건설사연락처', '회사연락처', '시공사전화번호', '건설사전화번호', '회사전화번호', '시공사대표전화', '건설사대표전화', '회사대표전화'], example: '02-3333-4444', description: '시공사 연락처 (회사 연락처 보강용, 선택)' },
-            { label: '협력사연락처', aliases: ['협력업체연락처', '파트너연락처', '협력사전화번호', '협력업체전화번호', '파트너전화번호', '협력사대표전화', '협력업체대표전화', '파트너대표전화'], example: '031-555-6666', description: '협력사 연락처 (회사 연락처 보강용, 선택)' },
-            { label: '현장코드', aliases: [], example: 'GN-001', description: '현장 내부 코드 (선택)' },
-            { label: '주소', aliases: [], example: '서울시 강남구 역삼동 123', description: '현장 주소 (선택)' },
-            { label: '착공일', aliases: [], example: '2024-01-01', description: '착공일 (YYYY-MM-DD 권장, Excel 날짜도 가능)' },
-            { label: '준공일', aliases: [], example: '2024-12-31', description: '준공일 (YYYY-MM-DD 권장, Excel 날짜도 가능)' },
-            { label: '현장구분', aliases: ['구분', '현장유형'], example: '도급', description: '현장 구분', allowedValues: ['도급', '직영', '지원'] },
-            { label: '결제구분', aliases: ['결제방식', 'paymentType', 'paymentMethod'], example: '계산서', description: '결제 구분', allowedValues: ['계산서', '노무'] }
-        ]
-    },
-    Worker: {
-        sheetName: '작업자',
-        fields: [
-            { label: '이름', required: true, aliases: ['성명', '작업자명'], example: '홍길동', description: '작업자 성명 (중복 체크 기준)' },
-            { label: '소속팀', aliases: ['팀명', '팀'], example: '1공구팀', description: '소속 팀명 (팀 시트와 연결). 별칭: 팀명/팀' },
-            { label: '회사명', aliases: ['소속회사'], example: '삼성엔지니어링', description: '소속 회사명 (회사 시트와 연결). 별칭: 소속회사' },
-            { label: '직종', aliases: ['역할'], example: '철근', description: '직종/역할. 코드상 직종 또는 역할을 읽음' },
-            { label: '연락처', aliases: ['휴대폰'], example: '010-1234-5678', description: '연락처. 코드상 연락처 또는 휴대폰을 읽음' },
-            { label: '주민번호', aliases: [], example: '900101-1234567', description: '민감정보(선택). 정확한 형식으로만 입력(마스킹 입력 금지 권장)' },
-            { label: '주소', aliases: [], example: '서울시 강남구 역삼동 123', description: '주소(선택)' },
-            { label: '단가', aliases: ['일당', '임금', '급여'], example: '180000', description: '단가/일당/임금/급여 중 하나로 입력 가능. 숫자만 입력 권장' },
-            { label: '급여방식', aliases: ['구분', '급여구분', '급여형태', '급여모델'], example: '일급제', description: '급여 방식', allowedValues: ['일급제', '주급제', '월급제', '지원팀', '용역팀', '가지급'] },
-            { label: '은행명', aliases: ['은행', 'bankName', 'bank'], example: '국민은행', description: '은행명(선택)' },
-            { label: '계좌번호', aliases: ['계좌', '계좌번호(숫자)', 'accountNumber', 'account', 'accountNo', 'account_number'], example: '123-456-789012', description: '계좌번호(선택)' },
-            { label: '예금주', aliases: ['예금주명', '계좌주', 'accountHolder', 'holder'], example: '홍길동', description: '예금주(선택)' },
-            { label: '팀구분', aliases: [], example: '일용직', description: '팀 구분(선택). 작업자 생성 시 teamType으로 저장' }
-        ]
-    },
+    ...MASTER_DEFINITIONS,
     DailyReport: {
         sheetName: '출력일보',
         fields: [
@@ -178,6 +162,8 @@ const TEMPLATE_FIELDS: Record<TemplateSheetType, { sheetName: string; fields: Te
 };
 
 const TEMPLATE_SAMPLE_ROWS: Record<TemplateSheetType, Array<Record<string, string>>> = {
+    OfficeStaff: [{ 이름: '예시직원', 부서: '관리부', 상태: '재직', 고용형태: '정규직', 급여방식: '월급제', 급여: '3000000' }],
+    SettlementTarget: [{ 이름: '예시관계자', 대상유형: '관계자', 회사명: '삼성엔지니어링', 세후지급률: '75%', 상태: '사용', 바이백사용: '아니오', 증빙필요: '아니오' }],
     Company: [
         { 회사명: '(주)청연ENG', 구분: '시공사', 대표자: '김청연', 사업자번호: '123-45-67890', 주소: '서울시 강남구 테헤란로 101', 연락처: '02-1111-2222' },
         { 회사명: '삼성엔지니어링', 구분: '발주사', 대표자: '이엔지', 사업자번호: '234-56-78901', 주소: '서울시 서초구 서초대로 88', 연락처: '02-3333-4444' },
@@ -419,131 +405,10 @@ const ERROR_CODE_ROWS: Array<Record<string, string>> = [
     }
 ];
 
-const buildTemplateSampleRowsFromDb = async (): Promise<Partial<Record<TemplateSheetType, Array<Record<string, string>>>>> => {
-    const [companiesRes, teamsRes, sitesRes, workersRes, reportsRes] = await Promise.allSettled([
-        companyService.getCompanies(),
-        teamService.getTeams(),
-        siteService.getSites(),
-        manpowerService.getWorkers(),
-        dailyReportService.getAllReports()
-    ]);
+const buildSheetColumnWidths = (headers: string[]) => headers.map(header => ({ wch: Math.max(16, Math.min(48, header.length * 2 + 8)) }));
 
-    const companies = companiesRes.status === 'fulfilled' ? companiesRes.value : [];
-    const teams = teamsRes.status === 'fulfilled' ? teamsRes.value : [];
-    const sites = sitesRes.status === 'fulfilled' ? sitesRes.value : [];
-    const workers = workersRes.status === 'fulfilled' ? workersRes.value : [];
-    const reports = reportsRes.status === 'fulfilled' ? reportsRes.value : [];
-
-    const companyRows = companies.slice(0, TEMPLATE_SAMPLE_LIMIT).map((c: Company) => ({
-        회사명: getCellString(c.name),
-        구분: getCellString(c.type),
-        대표자: getCellString(c.ceoName),
-        사업자번호: getCellString(c.businessNumber),
-        주소: getCellString(c.address),
-        연락처: getCellString(c.phone)
-    }));
-
-    const teamRows = teams.slice(0, TEMPLATE_SAMPLE_LIMIT).map((t: Team) => ({
-        팀명: getCellString(t.name),
-        회사명: getCellString(t.companyName),
-        팀장명: getCellString(t.leaderName),
-        직종: getCellString(t.role)
-    }));
-
-    const siteRows = sites.slice(0, TEMPLATE_SAMPLE_LIMIT).map((s: Site) => ({
-        현장명: getCellString(s.name),
-        발주사: getCellString(s.clientCompanyName),
-        시공사: getCellString(s.companyName),
-        협력사: getCellString(s.partnerName),
-        해당팀: getCellString(s.responsibleTeamName),
-        발주사연락처: '',
-        시공사연락처: '',
-        협력사연락처: '',
-        현장코드: getCellString(s.code),
-        주소: getCellString(s.address),
-        착공일: getCellString(s.startDate),
-        준공일: getCellString(s.endDate),
-        현장구분: getCellString(s.siteType),
-        결제구분: getCellString(s.paymentMethod)
-    }));
-
-    const workerRows = workers.slice(0, TEMPLATE_SAMPLE_LIMIT).map((w: Worker) => ({
-        이름: getCellString(w.name),
-        소속팀: getCellString(w.teamName),
-        회사명: getCellString(w.companyName),
-        직종: getCellString(w.role),
-        연락처: getCellString(w.contact),
-        주민번호: getCellString(w.idNumber),
-        주소: getCellString(w.address),
-        단가: getCellString(w.unitPrice),
-        급여방식: getCellString(w.payType || w.salaryModel),
-        은행명: getCellString(w.bankName),
-        계좌번호: getCellString(w.accountNumber),
-        예금주: getCellString(w.accountHolder),
-        팀구분: getCellString(w.teamType)
-    }));
-
-    const dailyRows: Array<Record<string, string>> = [];
-    for (const report of reports) {
-        if (dailyRows.length >= TEMPLATE_SAMPLE_LIMIT) break;
-        const workersInReport = Array.isArray(report.workers) ? report.workers : [];
-        for (const worker of workersInReport) {
-            if (dailyRows.length >= TEMPLATE_SAMPLE_LIMIT) break;
-            dailyRows.push({
-                일보ID: getCellString(report.id),
-                날짜: getCellString(report.date),
-                현장ID: getCellString(report.siteId),
-                현장명: getCellString(report.siteName),
-                현장주소: getCellString((report as any).siteAddress),
-                현장담당팀: getCellString(report.responsibleTeamName || report.teamName),
-                현장담당팀ID: getCellString(report.responsibleTeamId || report.teamId),
-                현장책임자: getCellString((report as any).siteManagerName),
-                현장책임자ID: getCellString((report as any).siteManagerId),
-                발주사: getCellString(report.companyName),
-                시공사: getCellString(report.constructorCompanyName),
-                협력사: getCellString(report.partnerName),
-                작업자ID: getCellString(worker.workerId),
-                이름: getCellString(worker.name),
-                소속팀: getCellString(worker.workerTeamName),
-                소속팀ID: getCellString(worker.teamId),
-                공수: getCellString(worker.manDay),
-                직종: getCellString(worker.role),
-                단가: getCellString(worker.unitPrice),
-                급여방식: getCellString(worker.payType || worker.salaryModel),
-                상태: getCellString(worker.status === 'absent' ? '결근' : worker.status === 'half' ? '반차' : '출근'),
-                금액: getCellString((worker.manDay || 0) * (worker.unitPrice || 0)),
-                현장구분: getCellString(worker.siteType || report.siteType),
-                결제구분: getCellString(worker.paymentType || report.paymentType),
-                날씨: getCellString(report.weather),
-                작업내용: getCellString(worker.workContent),
-                일보작업내용: getCellString(report.workContent)
-            });
-        }
-    }
-
-    return {
-        Company: companyRows,
-        Team: teamRows,
-        Site: siteRows,
-        Worker: workerRows,
-        DailyReport: dailyRows
-    };
-};
-
-const buildSheetColumnWidths = (headers: string[]): { wch: number }[] => {
-    return headers.map((h) => ({ wch: Math.min(40, Math.max(12, (h || '').length * 2 + 4)) }));
-};
-
-const downloadIntegratedTemplateExcel = async (): Promise<void> => {
+const downloadIntegratedTemplateExcel = async (blank = false) => {
     const wb = XLSX.utils.book_new();
-    let dbSampleRows: Partial<Record<TemplateSheetType, Array<Record<string, string>>>> = {};
-
-    try {
-        dbSampleRows = await buildTemplateSampleRowsFromDb();
-    } catch (error) {
-        console.warn('[IntegratedMassUploader] Failed to load DB samples, fallback to static template rows.', error);
-    }
-
     // Guide sheet
     const guideHeader = ['시트', '항목', '필수', '허용값', '별칭(aliases)', '예시', '설명'];
     const guideRows: Array<Record<string, string>> = [];
@@ -614,7 +479,7 @@ const downloadIntegratedTemplateExcel = async (): Promise<void> => {
         const headers = fields.map((f) => f.label);
         const fallbackRows = TEMPLATE_SAMPLE_ROWS[sheetType] ?? buildSampleRowsForFields(fields);
         const selectedRows = [
-            ...(dbSampleRows[sheetType] ?? []),
+
             ...fallbackRows
         ].slice(0, TEMPLATE_SAMPLE_LIMIT);
         const rows = selectedRows.map((sample) => {
@@ -624,13 +489,13 @@ const downloadIntegratedTemplateExcel = async (): Promise<void> => {
             });
             return normalized;
         });
-        const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
+        const ws = XLSX.utils.json_to_sheet(blank ? [] : rows, { header: headers });
         ws['!cols'] = buildSheetColumnWidths(headers);
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
     });
 
     const ymd = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `integrated_mass_upload_template_${ymd}.xlsx`);
+    XLSX.writeFile(wb, `integrated_mass_upload_${blank ? 'blank' : 'sample'}_${ymd}.xlsx`);
 };
 
 type PreviewRowStatus = 'OK' | 'INVALID' | 'DUPLICATE' | 'SKIP';
@@ -650,53 +515,6 @@ const getCellString = (val: unknown): string => {
 
 const normalizeExcelHeaderKey = (key: string): string => {
     return String(key).replace(/\s+/g, '').trim();
-};
-
-const normalizeExcelRowKeys = (row: unknown): any => {
-    if (!row || typeof row !== 'object') return row;
-    const out: Record<string, unknown> = {};
-    Object.entries(row as Record<string, unknown>).forEach(([k, v]) => {
-        const nk = normalizeExcelHeaderKey(k);
-        if (!nk) return;
-        if (/^__EMPTY/i.test(nk)) return;
-        if (!(nk in out)) {
-            out[nk] = v;
-            return;
-        }
-        const prev = out[nk];
-        const prevEmpty = prev === undefined || prev === null || prev === '';
-        const nextEmpty = v === undefined || v === null || v === '';
-        if (prevEmpty && !nextEmpty) out[nk] = v;
-    });
-    return out;
-};
-
-const canonicalizeTemplateRowKeys = (type: TemplateSheetType, row: unknown): any => {
-    const normalizedRow = normalizeExcelRowKeys(row);
-    if (!normalizedRow || typeof normalizedRow !== 'object') return normalizedRow;
-
-    const aliasToCanonical = new Map<string, string>();
-    TEMPLATE_FIELDS[type].fields.forEach((field) => {
-        [field.label, ...field.aliases].forEach((candidate) => {
-            const normalizedCandidate = normalizeExcelHeaderKey(candidate);
-            if (normalizedCandidate && !aliasToCanonical.has(normalizedCandidate)) {
-                aliasToCanonical.set(normalizedCandidate, field.label);
-            }
-        });
-    });
-
-    const canonicalRow: Record<string, unknown> = {};
-    Object.entries(normalizedRow as Record<string, unknown>).forEach(([key, value]) => {
-        const targetKey = aliasToCanonical.get(normalizeExcelHeaderKey(key)) ?? key;
-        const previous = canonicalRow[targetKey];
-        const previousEmpty = previous === undefined || previous === null || previous === '';
-        const nextEmpty = value === undefined || value === null || value === '';
-        if (!(targetKey in canonicalRow) || (previousEmpty && !nextEmpty)) {
-            canonicalRow[targetKey] = value;
-        }
-    });
-
-    return canonicalRow;
 };
 
 const getDailyReportSiteName = (row: any): string => getCellString(row?.['현장명'] ?? row?.['현장']);
@@ -806,55 +624,6 @@ const getCellByHeaderIncludes = (row: any, includes: string[]): unknown => {
         }
     }
     return undefined;
-};
-
-const getWorkerBankNameFromRow = (row: any): string => {
-    const direct = getCellString(
-        row?.['은행명']
-        ?? row?.['은행']
-        ?? row?.['bankName']
-        ?? row?.['bank']
-    );
-    if (direct) return direct;
-
-    return getCellString(getCellByHeaderIncludes(row, ['은행명', '은행', 'bankName', 'bank']));
-};
-
-const getWorkerAccountNumberFromRow = (row: any): string => {
-    const direct = getCellString(
-        row?.['계좌번호']
-        ?? row?.['계좌']
-        ?? row?.['계좌번호(숫자)']
-        ?? row?.['accountNumber']
-        ?? row?.['account']
-        ?? row?.['accountNo']
-        ?? row?.['account_number']
-    );
-    if (direct) return direct.replace(/\s+/g, '');
-
-    const guessed = getCellByHeaderIncludes(row, [
-        '계좌번호',
-        '계좌',
-        '계좌번호(숫자)',
-        'accountNumber',
-        'account',
-        'accountNo',
-        'account_number'
-    ]);
-    return getCellString(guessed).replace(/\s+/g, '');
-};
-
-const getWorkerAccountHolderFromRow = (row: any): string => {
-    const direct = getCellString(
-        row?.['예금주']
-        ?? row?.['예금주명']
-        ?? row?.['계좌주']
-        ?? row?.['accountHolder']
-        ?? row?.['holder']
-    );
-    if (direct) return direct;
-
-    return getCellString(getCellByHeaderIncludes(row, ['예금주', '예금주명', '계좌주', 'accountHolder', 'holder']));
 };
 
 const getSiteTypeRawFromSiteRow = (row: any): unknown => (
@@ -1039,7 +808,7 @@ const analyzeSheetRows = (type: SheetType, rows: any[], ctx: PreviewAnalyzeConte
             return { row, status: reasons.length ? 'INVALID' : 'OK', reasons, key: siteName };
         }
 
-        if (type === 'Worker') {
+        if (type === 'Worker' || type === 'OfficeStaff' || type === 'SettlementTarget') {
             const workerName = getCellString(row?.['이름'] ?? row?.['성명']);
             if (!workerName) reasons.push('이름/성명 누락');
             return { row, status: reasons.length ? 'INVALID' : 'OK', reasons, key: workerName };
@@ -1117,6 +886,8 @@ const analyzeAllSheets = (data: { [key in SheetType]: any[] }, ctx: PreviewAnaly
         Team: analyzeSheetRows('Team', data.Team ?? [], ctx),
         Site: analyzeSheetRows('Site', data.Site ?? [], ctx),
         Worker: analyzeSheetRows('Worker', data.Worker ?? [], ctx),
+        OfficeStaff: analyzeSheetRows('OfficeStaff', data.OfficeStaff ?? [], ctx),
+        SettlementTarget: analyzeSheetRows('SettlementTarget', data.SettlementTarget ?? [], ctx),
         DailyReport: analyzeSheetRows('DailyReport', data.DailyReport ?? [], ctx)
     };
 };
@@ -1124,468 +895,6 @@ const analyzeAllSheets = (data: { [key in SheetType]: any[] }, ctx: PreviewAnaly
 // ===========================
 // Mapping Analysis Functions
 // ===========================
-
-const analyzeCompanyMapping = async (fileRows: any[]): Promise<MappedRow[]> => {
-    const normalizeNameKey = (val: unknown): string => getCellString(val).replace(/\s+/g, ' ');
-    const existingCompanies = await companyService.getCompanies();
-    const existingMap = new Map(existingCompanies.map(c => [normalizeNameKey(c.name), c]));
-
-    const nameCounts = new Map<string, number>();
-    fileRows.forEach((row) => {
-        const n = normalizeNameKey(row?.['회사명'] || row?.['상호']);
-        if (!n) return;
-        nameCounts.set(n, (nameCounts.get(n) ?? 0) + 1);
-    });
-
-    const seen = new Set<string>();
-
-    return fileRows.map(row => {
-        const name = normalizeNameKey(row?.['회사명'] || row?.['상호']);
-        if (!name) {
-            return {
-                row,
-                status: 'CONFLICT' as MappingStatus,
-                changes: ['회사명 누락'],
-                action: 'SKIP' as ActionType,
-                key: ''
-            };
-        }
-
-        if ((nameCounts.get(name) ?? 0) > 1) {
-            if (seen.has(name)) {
-                return {
-                    row,
-                    status: 'CONFLICT' as MappingStatus,
-                    changes: ['파일 내 중복'],
-                    action: 'SKIP' as ActionType,
-                    key: name
-                };
-            }
-            seen.add(name);
-        }
-
-        const existing = existingMap.get(name);
-        if (!existing) {
-            return {
-                row,
-                status: 'NEW' as MappingStatus,
-                changes: [],
-                action: 'CREATE' as ActionType,
-                key: name
-            };
-        }
-
-        const changes: string[] = [];
-        if (row['구분'] && row['구분'] !== existing.type) {
-            changes.push(`구분: ${existing.type || '-'} → ${row['구분']}`);
-        }
-        if (row['대표자'] && row['대표자'] !== existing.ceoName) {
-            changes.push(`대표자: ${existing.ceoName || '-'} → ${row['대표자']}`);
-        }
-        if (row['사업자번호'] && row['사업자번호'] !== existing.businessNumber) {
-            changes.push('사업자번호 변경');
-        }
-        if (row['주소'] && row['주소'] !== existing.address) {
-            changes.push(`주소 변경`);
-        }
-        const rowPhone = getCellString(row['연락처'] ?? row['전화번호'] ?? row['대표전화']);
-        if (rowPhone && rowPhone !== (existing.phone ?? '')) {
-            changes.push(`연락처 변경`);
-        }
-
-        return {
-            row,
-            status: changes.length > 0 ? 'UPDATE' as MappingStatus : 'UNCHANGED' as MappingStatus,
-            existingData: existing,
-            changes,
-            action: changes.length > 0 ? 'UPDATE' as ActionType : 'SKIP' as ActionType,
-            key: name
-        };
-    });
-};
-
-const analyzeTeamMapping = async (fileRows: any[]): Promise<MappedRow[]> => {
-    const normalizeNameKey = (val: unknown): string => getCellString(val).replace(/\s+/g, ' ');
-    const existingTeams = await teamService.getTeams();
-    const existingMap = new Map(existingTeams.map(t => [normalizeNameKey(t.name), t]));
-
-    const nameCounts = new Map<string, number>();
-    fileRows.forEach((row) => {
-        const n = normalizeNameKey(row?.['팀명']);
-        if (!n) return;
-        nameCounts.set(n, (nameCounts.get(n) ?? 0) + 1);
-    });
-
-    const seen = new Set<string>();
-
-    return fileRows.map(row => {
-        const name = normalizeNameKey(row?.['팀명']);
-        if (!name) {
-            return {
-                row,
-                status: 'CONFLICT' as MappingStatus,
-                changes: ['팀명 누락'],
-                action: 'SKIP' as ActionType,
-                key: ''
-            };
-        }
-
-        if ((nameCounts.get(name) ?? 0) > 1) {
-            if (seen.has(name)) {
-                return {
-                    row,
-                    status: 'CONFLICT' as MappingStatus,
-                    changes: ['파일 내 중복'],
-                    action: 'SKIP' as ActionType,
-                    key: name
-                };
-            }
-            seen.add(name);
-        }
-
-        const existing = existingMap.get(name);
-        if (!existing) {
-            return {
-                row,
-                status: 'NEW' as MappingStatus,
-                changes: [],
-                action: 'CREATE' as ActionType,
-                key: name
-            };
-        }
-
-        const changes: string[] = [];
-        const rowCompanyName = normalizeNameKey(row?.['회사명'] || row?.['소속회사']);
-        if (rowCompanyName && rowCompanyName !== normalizeNameKey(existing.companyName ?? '')) {
-            changes.push(`회사명: ${existing.companyName || '-'} → ${rowCompanyName}`);
-        }
-        const rowLeaderName = normalizeNameKey(row?.['팀장명'] ?? row?.['팀장']);
-        if (rowLeaderName && rowLeaderName !== normalizeNameKey(existing.leaderName ?? '')) {
-            changes.push(`팀장: ${existing.leaderName || '-'} → ${rowLeaderName}`);
-        }
-        const rowRole = getCellString(row?.['직종']);
-        if (rowRole && rowRole !== (existing.role ?? '')) {
-            changes.push(`직종: ${existing.role || '-'} → ${rowRole}`);
-        }
-
-        return {
-            row,
-            status: changes.length > 0 ? 'UPDATE' as MappingStatus : 'UNCHANGED' as MappingStatus,
-            existingData: existing,
-            changes,
-            action: changes.length > 0 ? 'UPDATE' as ActionType : 'SKIP' as ActionType,
-            key: name
-        };
-    });
-};
-
-const analyzeSiteMapping = async (fileRows: any[]): Promise<MappedRow[]> => {
-    const normalizeNameKey = (val: unknown): string => getCellString(val).replace(/\s+/g, ' ');
-    const [existingSites, existingCompanies] = await Promise.all([
-        siteService.getSites(),
-        companyService.getCompanies()
-    ]);
-    const existingMap = new Map(existingSites.map(s => [normalizeNameKey(s.name), s]));
-    const companiesByName = new Map(existingCompanies.map(c => [normalizeNameKey(c.name), c]));
-
-    const nameCounts = new Map<string, number>();
-    fileRows.forEach((row) => {
-        const n = normalizeNameKey(row?.['현장'] || row?.['현장명']);
-        if (!n) return;
-        nameCounts.set(n, (nameCounts.get(n) ?? 0) + 1);
-    });
-
-    const seen = new Set<string>();
-
-    return fileRows.map(row => {
-        const name = normalizeNameKey(row?.['현장'] || row?.['현장명']);
-        if (!name) {
-            return {
-                row,
-                status: 'CONFLICT' as MappingStatus,
-                changes: ['현장명 누락'],
-                action: 'SKIP' as ActionType,
-                key: ''
-            };
-        }
-
-        if ((nameCounts.get(name) ?? 0) > 1) {
-            if (seen.has(name)) {
-                return {
-                    row,
-                    status: 'CONFLICT' as MappingStatus,
-                    changes: ['파일 내 중복'],
-                    action: 'SKIP' as ActionType,
-                    key: name
-                };
-            }
-            seen.add(name);
-        }
-
-        const siteTypeRaw = getCellString(getSiteTypeRawFromSiteRow(row));
-        const paymentMethodRaw = getCellString(getPaymentMethodRawFromSiteRow(row));
-        const siteTypeNormalized = normalizeSiteTypeValue(siteTypeRaw);
-        const paymentMethodNormalized = normalizePaymentMethodValue(paymentMethodRaw);
-
-        if (siteTypeRaw && !siteTypeNormalized) {
-            return {
-                row,
-                status: 'CONFLICT' as MappingStatus,
-                changes: [`현장구분 값 오류: ${siteTypeRaw} (허용: 도급/직영/지원)`],
-                action: 'SKIP' as ActionType,
-                key: name
-            };
-        }
-        if (paymentMethodRaw && !paymentMethodNormalized) {
-            return {
-                row,
-                status: 'CONFLICT' as MappingStatus,
-                changes: [`결제구분 값 오류: ${paymentMethodRaw} (허용: 계산서/노무)`],
-                action: 'SKIP' as ActionType,
-                key: name
-            };
-        }
-
-        const existing = existingMap.get(name);
-        if (!existing) {
-            return {
-                row,
-                status: 'NEW' as MappingStatus,
-                changes: [],
-                action: 'CREATE' as ActionType,
-                key: name
-            };
-        }
-
-        const changes: string[] = [];
-
-        // --- 스마트 회사 매핑 (Smart Company Mapping) ---
-        const rawClient = normalizeNameKey(row?.['발주사'] || row?.['발주처']);
-        const rawConstructor = normalizeNameKey(row?.['시공사'] || row?.['건설사'] || row?.['회사명']);
-        const rawPartner = normalizeNameKey(row?.['협력사'] || row?.['협력업체'] || row?.['파트너']);
-
-        let clientComp = rawClient ? companiesByName.get(rawClient) : null;
-        let constructorComp = rawConstructor ? companiesByName.get(rawConstructor) : null;
-        let partnerComp = rawPartner ? companiesByName.get(rawPartner) : null;
-
-        let shouldClearCompany = false;
-
-        // Smart Distribution: "시공사" 컬럼에 잘못 들어간 협력사/발주사 자동 이동
-        if (constructorComp) {
-            if (constructorComp.type === '협력사' && !partnerComp && !rawPartner) {
-                partnerComp = constructorComp;
-                constructorComp = null;
-                shouldClearCompany = true;
-            } else if (constructorComp.type === '건설사' && !clientComp && !rawClient) {
-                clientComp = constructorComp;
-                constructorComp = null;
-                shouldClearCompany = true;
-            }
-        }
-
-        const clientCompanyName = clientComp ? clientComp.name : (rawClient || '');
-        let companyNameVal = constructorComp ? constructorComp.name : (shouldClearCompany ? '' : (rawConstructor || ''));
-        const partnerName = partnerComp ? partnerComp.name : (rawPartner || '');
-
-        // Default Constructor: 발주사가 있는데 시공사가 없으면 '청연'으로 지정
-        if (clientCompanyName && !companyNameVal) {
-            const defaultComp = companiesByName.get('청연');
-            if (defaultComp && defaultComp.type === '시공사') {
-                companyNameVal = defaultComp.name;
-            } else {
-                companyNameVal = '청연';
-            }
-        }
-
-        if (clientCompanyName && clientCompanyName !== existing.clientCompanyName) {
-            changes.push(`발주사: ${existing.clientCompanyName || '-'} → ${clientCompanyName}`);
-        }
-        if (companyNameVal && companyNameVal !== existing.companyName) {
-            changes.push(`시공사: ${existing.companyName || '-'} → ${companyNameVal}`);
-        }
-        if (partnerName && partnerName !== existing.partnerName) {
-            changes.push(`협력사: ${existing.partnerName || '-'} → ${partnerName}`);
-        }
-        const rowTeamName = normalizeNameKey(row?.['해당팀'] || row?.['현장담당'] || row?.['담당팀']);
-        if (rowTeamName && rowTeamName !== normalizeNameKey(existing.responsibleTeamName ?? '')) {
-            changes.push(`담당팀: ${existing.responsibleTeamName || '-'} → ${rowTeamName}`);
-        }
-        const rowCode = getCellString(row['현장코드']);
-        if (rowCode && rowCode !== (existing.code ?? '')) {
-            changes.push('현장코드 변경');
-        }
-        if (row['주소'] && row['주소'] !== existing.address) {
-            changes.push(`주소 변경`);
-        }
-        const rowStartDate = getCellString(formatExcelDate(row['착공일']));
-        if (rowStartDate && rowStartDate !== (existing.startDate ?? '')) {
-            changes.push('착공일 변경');
-        }
-        const rowEndDate = getCellString(formatExcelDate(row['준공일']));
-        if (rowEndDate && rowEndDate !== (existing.endDate ?? '')) {
-            changes.push('준공일 변경');
-        }
-        if (siteTypeNormalized && siteTypeNormalized !== existing.siteType) {
-            changes.push(`현장구분: ${existing.siteType || '-'} → ${siteTypeNormalized}`);
-        }
-        if (paymentMethodNormalized && paymentMethodNormalized !== existing.paymentMethod) {
-            changes.push(`결제구분: ${existing.paymentMethod || '-'} → ${paymentMethodNormalized}`);
-        }
-
-        return {
-            row,
-            status: changes.length > 0 ? 'UPDATE' as MappingStatus : 'UNCHANGED' as MappingStatus,
-            existingData: existing,
-            changes,
-            action: changes.length > 0 ? 'UPDATE' as ActionType : 'SKIP' as ActionType,
-            key: name
-        };
-    });
-};
-
-const analyzeWorkerMapping = async (fileRows: any[]): Promise<MappedRow[]> => {
-    const [existingWorkers, existingTeams] = await Promise.all([
-        manpowerService.getWorkers(),
-        teamService.getTeams()
-    ]);
-    const existingMap = new Map(existingWorkers.map(w => [w.name, w]));
-
-    const normalizeNameKey = (val: unknown): string => getCellString(val).replace(/\s+/g, ' ');
-    const teamsByName = new Map<string, Team>();
-    existingTeams.forEach((t) => {
-        const n = getCellString((t as any)?.name);
-        if (!n) return;
-        teamsByName.set(n, t);
-    });
-    const teamsByNormalizedName = new Map<string, Team>();
-    teamsByName.forEach((t, k) => {
-        teamsByNormalizedName.set(normalizeNameKey(k), t);
-    });
-
-    const nameCounts = new Map<string, number>();
-    fileRows.forEach((row) => {
-        const n = getCellString(row?.['이름'] || row?.['성명']);
-        if (!n) return;
-        nameCounts.set(n, (nameCounts.get(n) ?? 0) + 1);
-    });
-
-    const seen = new Set<string>();
-
-    return fileRows.map(row => {
-        const name = getCellString(row['이름'] || row['성명']);
-        if (!name) {
-            return {
-                row,
-                status: 'CONFLICT' as MappingStatus,
-                changes: ['이름 누락'],
-                action: 'SKIP' as ActionType,
-                key: ''
-            };
-        }
-
-        if ((nameCounts.get(name) ?? 0) > 1) {
-            if (seen.has(name)) {
-                return {
-                    row,
-                    status: 'CONFLICT' as MappingStatus,
-                    changes: ['파일 내 중복'],
-                    action: 'SKIP' as ActionType,
-                    key: name
-                };
-            }
-            seen.add(name);
-        }
-
-        const existing = existingMap.get(name);
-        if (!existing) {
-            return {
-                row,
-                status: 'NEW' as MappingStatus,
-                changes: [],
-                action: 'CREATE' as ActionType,
-                key: name
-            };
-        }
-
-        const changes: string[] = [];
-        const rowTeamNameRaw = getCellString(row['소속팀'] ?? row['팀명'] ?? row['팀']);
-        if (rowTeamNameRaw && rowTeamNameRaw !== (existing.teamName ?? '')) {
-            changes.push(`팀: ${existing.teamName || '-'} → ${rowTeamNameRaw}`);
-        }
-
-        const resolvedRowTeam = rowTeamNameRaw
-            ? (teamsByName.get(rowTeamNameRaw) ?? teamsByNormalizedName.get(normalizeNameKey(rowTeamNameRaw)))
-            : undefined;
-        if (resolvedRowTeam?.id && !getCellString((existing as any)?.teamId)) {
-            changes.push('팀 ID 보강');
-        }
-        const rowRole = row['직종'] || row['역할'];
-        if (rowRole && rowRole !== existing.role) {
-            changes.push(`직종: ${existing.role || '-'} → ${rowRole}`);
-        }
-        const unitPrice = getUnitPriceFromRow(row);
-        if (unitPrice !== undefined && unitPrice !== (existing.unitPrice ?? 0)) {
-            changes.push(`단가: ${(existing.unitPrice ?? 0).toLocaleString()} → ${unitPrice.toLocaleString()}`);
-        }
-
-        const rowPayType = getPayTypeFromRow(row);
-        if (rowPayType && rowPayType !== (existing.payType ?? '')) {
-            changes.push(`급여방식: ${existing.payType || '-'} → ${rowPayType}`);
-        }
-
-        const rowCompanyNameRaw = getCellString(row['회사명'] ?? row['소속회사']);
-        const effectiveTeamName = rowTeamNameRaw || getCellString(existing.teamName);
-        const team = effectiveTeamName
-            ? (teamsByName.get(effectiveTeamName) ?? teamsByNormalizedName.get(normalizeNameKey(effectiveTeamName)))
-            : undefined;
-        const derivedCompanyName = rowCompanyNameRaw || getCellString(team?.companyName);
-        if (derivedCompanyName && derivedCompanyName !== (existing.companyName ?? '')) {
-            changes.push(`회사명: ${existing.companyName || '-'} → ${derivedCompanyName}`);
-        }
-
-        const rowTeamType = getCellString(row['팀구분']);
-        if (rowTeamType && rowTeamType !== (existing.teamType ?? '')) {
-            changes.push(`팀구분: ${existing.teamType || '-'} → ${rowTeamType}`);
-        }
-
-        const rowContact = getCellString(row['연락처'] ?? row['휴대폰']);
-        if (rowContact && rowContact !== (existing.contact ?? '')) {
-            changes.push(`연락처: ${existing.contact || '-'} → ${rowContact}`);
-        }
-
-        const rowIdNumber = getCellString(row['주민번호']);
-        if (rowIdNumber && rowIdNumber !== (existing.idNumber ?? '')) {
-            changes.push('주민번호 변경');
-        }
-
-        const rowAddress = getCellString(row['주소']);
-        if (rowAddress && rowAddress !== (existing.address ?? '')) {
-            changes.push('주소 변경');
-        }
-
-        const rowBankName = getWorkerBankNameFromRow(row);
-        if (rowBankName && rowBankName !== (existing.bankName ?? '')) {
-            changes.push(`은행명: ${existing.bankName || '-'} → ${rowBankName}`);
-        }
-        const rowAccountNumber = getWorkerAccountNumberFromRow(row);
-        if (rowAccountNumber && rowAccountNumber !== (existing.accountNumber ?? '')) {
-            changes.push('계좌번호 변경');
-        }
-        const rowAccountHolder = getWorkerAccountHolderFromRow(row);
-        if (rowAccountHolder && rowAccountHolder !== (existing.accountHolder ?? '')) {
-            changes.push(`예금주: ${existing.accountHolder || '-'} → ${rowAccountHolder}`);
-        }
-
-        return {
-            row,
-            status: changes.length > 0 ? 'UPDATE' as MappingStatus : 'UNCHANGED' as MappingStatus,
-            existingData: existing,
-            changes,
-            action: changes.length > 0 ? 'UPDATE' as ActionType : 'SKIP' as ActionType,
-            key: name
-        };
-    });
-};
 
 const getDailyReportDateRange = (fileRows: any[]): { startDate: string; endDate: string } => {
     const today = new Date().toISOString().slice(0, 10);
@@ -1905,6 +1214,12 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
 
 const IntegratedMassUploader: React.FC = () => {
     const { currentUser } = useAuth();
+    const [workbookIssues, setWorkbookIssues] = useState<string[]>([]);
+    const [sheetSummaries, setSheetSummaries] = useState<WorkbookSheetSummary[]>([]);
+    const [isReadingFile, setIsReadingFile] = useState(false);
+    const processingRef = useRef(false);
+    const [resultMessage, setResultMessage] = useState('');
+    const [rowSources, setRowSources] = useState<Partial<Record<SheetType, string[]>>>({});
 
     // Stages: 'upload' -> 'preview' -> 'processing'
     const [stage, setStage] = useState<'upload' | 'preview' | 'processing'>('upload');
@@ -1914,6 +1229,8 @@ const IntegratedMassUploader: React.FC = () => {
         Team: [],
         Site: [],
         Worker: [],
+        OfficeStaff: [],
+        SettlementTarget: [],
         DailyReport: []
     });
     const [activeTab, setActiveTab] = useState<SheetType>('Company');
@@ -1922,6 +1239,8 @@ const IntegratedMassUploader: React.FC = () => {
         Team: [],
         Site: [],
         Worker: [],
+        OfficeStaff: [],
+        SettlementTarget: [],
         DailyReport: []
     });
     const [showOnlyIssues, setShowOnlyIssues] = useState(false);
@@ -1932,6 +1251,8 @@ const IntegratedMassUploader: React.FC = () => {
         Team: [],
         Site: [],
         Worker: [],
+        OfficeStaff: [],
+        SettlementTarget: [],
         DailyReport: []
     });
     const [isResettingData, setIsResettingData] = useState(false);
@@ -1943,6 +1264,8 @@ const IntegratedMassUploader: React.FC = () => {
         { step: 'Team', status: 'pending', message: '팀 데이터 대기 중...' },
         { step: 'Site', status: 'pending', message: '현장 데이터 대기 중...' },
         { step: 'Worker', status: 'pending', message: '작업자 데이터 대기 중...' },
+        { step: 'OfficeStaff', status: 'pending', message: '사무실 직원 대기 중...' },
+        { step: 'SettlementTarget', status: 'pending', message: '정산 대상자 대기 중...' },
         { step: 'DailyReport', status: 'pending', message: '출력일보 대기 중...' },
     ]);
 
@@ -1952,108 +1275,59 @@ const IntegratedMassUploader: React.FC = () => {
         ));
     };
 
-    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-            (async () => {
-                const bstr = evt.target?.result;
-                if (typeof bstr !== 'string') return;
-
-                const wb = XLSX.read(bstr, { type: 'binary' });
-
-                const newData = {
-                    Company: [] as any[],
-                    Team: [] as any[],
-                    Site: [] as any[],
-                    Worker: [] as any[],
-                    DailyReport: [] as any[]
-                };
-                const headerIssues: string[] = [];
-
-                // Parse each sheet
-                (Object.keys(SHEET_CONFIG) as SheetType[]).forEach(type => {
-                    const config = SHEET_CONFIG[type];
-                    const sheetName = wb.SheetNames.find((n) => {
-                        const normalizedName = normalizeExcelHeaderKey(n);
-                        return config.keywords.some((k) => normalizedName.includes(normalizeExcelHeaderKey(k)));
-                    });
-                    if (sheetName) {
-                        const ws = wb.Sheets[sheetName];
-                        // raw:false로 읽어 긴 숫자/선행 0이 포함된 계좌번호를 표시 문자열 기준으로 보존한다.
-                        const rawData = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
-                        const normalizedData = rawData.map((row: any) => canonicalizeTemplateRowKeys(type, row));
-                        const headerMatrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as any[][];
-                        const headers = (headerMatrix?.[0] ?? [])
-                            .map((h) => normalizeExcelHeaderKey(getCellString(h)))
-                            .filter((h) => !!h);
-                        const headerSet = new Set(headers);
-                        const fieldDef = TEMPLATE_FIELDS[type as TemplateSheetType];
-                        const missingRequired = (fieldDef?.fields ?? [])
-                            .filter((f) => f.required)
-                            .filter((f) => {
-                                const candidates = [f.label, ...(f.aliases ?? [])]
-                                    .map((k) => normalizeExcelHeaderKey(k));
-                                return !candidates.some((c) => headerSet.has(c));
-                            })
-                            .map((f) => f.label);
-                        if (headerSet.size > 0 && missingRequired.length > 0) {
-                            headerIssues.push(`${fieldDef.sheetName}: 필수 컬럼 누락 (${missingRequired.join(', ')})`);
-                        }
-
-                        // Normalize Dates immediately for Preview
-                        newData[type] = normalizedData.map((row: any) => {
-                            if (row['날짜']) row['날짜'] = formatExcelDate(row['날짜']);
-                            if (row['작업일']) row['작업일'] = formatExcelDate(row['작업일']);
-                            if (row['착공일']) row['착공일'] = formatExcelDate(row['착공일']);
-                            if (row['준공일']) row['준공일'] = formatExcelDate(row['준공일']);
-                            if (row['생년월일']) row['생년월일'] = formatExcelDate(row['생년월일']);
-                            return row;
-                        });
-                    }
-                });
-
-                const ctx = await buildPreviewAnalyzeContext(newData);
-
-                setPreviewData(newData);
-                setPreviewAnalysis(analyzeAllSheets(newData, ctx));
-                setDailyReportExistingMode('overwrite');
-
-                // Perform mapping analysis
-                const mappingResults = {
-                    Company: await analyzeCompanyMapping(newData.Company),
-                    Team: await analyzeTeamMapping(newData.Team),
-                    Site: await analyzeSiteMapping(newData.Site),
-                    Worker: await analyzeWorkerMapping(newData.Worker),
-                    DailyReport: await analyzeDailyReportMapping(newData.DailyReport, newData.Worker)
-                };
-                setMappingAnalysis(mappingResults);
-
-                setStage('preview');
-                setPreviewPage(1);
-
-                // Find first non-empty tab
-                const firstDataTab = (Object.keys(newData) as SheetType[]).find(k => newData[k].length > 0);
-                if (firstDataTab) setActiveTab(firstDataTab);
-
-                if (headerIssues.length > 0) {
-                    await Swal.fire({
-                        title: '헤더 확인 필요',
-                        html: `<div style="text-align:left; font-size: 13px; line-height: 1.6;">${headerIssues.map((m) => `- ${m}`).join('<br/>')}</div>`,
-                        icon: 'warning'
-                    });
-                }
-            })().catch((error) => {
-                console.error(error);
-                Swal.fire('오류', '파일을 읽는 중 오류가 발생했습니다.', 'error');
-            });
-        };
-        reader.readAsBinaryString(file);
+    const handleUploadFile = async (file?: File) => {
+        if (!file || isReadingFile) return;
+        setIsReadingFile(true);
+        try {
+            const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+            const sections = Object.fromEntries((Object.keys(SHEET_CONFIG) as SheetType[]).map(type => [type, {
+                ...SHEET_CONFIG[type], fields: TEMPLATE_FIELDS[type].fields,
+            }])) as unknown as Parameters<typeof readIntegratedWorkbook<SheetType>>[1];
+            const parsed = readIntegratedWorkbook(workbook, sections);
+            const newData = parsed.data;
+            const snapshot = await loadMasterSnapshot(newData);
+            const masterPlan = planMasterImport(newData, snapshot);
+            const mappingResults = {
+                ...masterPlan,
+                DailyReport: newData.DailyReport.length ? await analyzeDailyReportMapping(newData.DailyReport, newData.Worker) : [],
+            };
+            const ctx = await buildPreviewAnalyzeContext(newData);
+            const annotations = analyzeAllSheets(newData, ctx);
+            for (const type of MASTER_TYPES) {
+                annotations[type] = masterPlan[type].map((row, index) => ({
+                    row: newData[type][index], status: row.status === 'CONFLICT' ? 'INVALID' : 'OK',
+                    reasons: [...row.changes, ...(parsed.rowIssues.get(newData[type][index]) || [])], key: row.key,
+                }));
+            }
+            setWorkbookIssues(parsed.issues);
+            setSheetSummaries(parsed.summaries);
+            setRowSources(Object.fromEntries((Object.keys(newData) as SheetType[]).map(type => [type, newData[type].map(row => parsed.sources.get(row) || '')])));
+            setPreviewData(newData);
+            setPreviewAnalysis(annotations);
+            setMappingAnalysis(mappingResults);
+            setStage('preview');
+            setPreviewPage(1);
+            setShowOnlyIssues(false);
+            setResultMessage('');
+            const firstDataTab = (Object.keys(newData) as SheetType[]).find(type => newData[type].length);
+            if (firstDataTab) setActiveTab(firstDataTab);
+        } catch {
+            await Swal.fire('파일 분석 실패', '파일 형식 또는 DB 조회 권한을 확인한 후 다시 업로드하세요.', 'error');
+        } finally {
+            setIsReadingFile(false);
+        }
     };
+    const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        void handleUploadFile(file);
+    };
+    const blockingCount = workbookIssues.length + Object.values(mappingAnalysis).flat().filter(row => row.status === 'CONFLICT').length
+        + previewAnalysis.DailyReport.filter(row => row.status !== 'OK').length;
 
     const handleProcess = async () => {
+        if (processingRef.current || blockingCount) return;
+        processingRef.current = true;
         const planLines = (Object.keys(SHEET_CONFIG) as SheetType[]).map((type) => {
             const mapping = mappingAnalysis[type] || [];
             const createCount = mapping.filter((m) => m.action === 'CREATE').length;
@@ -2076,7 +1350,7 @@ const IntegratedMassUploader: React.FC = () => {
             confirmButtonText: '계속',
             cancelButtonText: '취소'
         });
-        if (!confirm.isConfirmed) return;
+        if (!confirm.isConfirmed) { processingRef.current = false; return; }
 
         setStage('processing');
 
@@ -2086,6 +1360,8 @@ const IntegratedMassUploader: React.FC = () => {
             { step: 'Team', status: 'pending', message: '팀 데이터 대기 중...' },
             { step: 'Site', status: 'pending', message: '현장 데이터 대기 중...' },
             { step: 'Worker', status: 'pending', message: '작업자 데이터 대기 중...' },
+        { step: 'OfficeStaff', status: 'pending', message: '사무실 직원 대기 중...' },
+        { step: 'SettlementTarget', status: 'pending', message: '정산 대상자 대기 중...' },
             { step: 'DailyReport', status: 'pending', message: '출력일보 대기 중...' },
         ]);
 
@@ -2095,12 +1371,17 @@ const IntegratedMassUploader: React.FC = () => {
                 await new Promise<void>((resolve) => setTimeout(resolve, 0));
             };
 
-            const [allCompanies, allTeams, allSites, allWorkers] = await Promise.all([
-                companyService.getCompanies(),
-                teamService.getTeams(),
-                siteService.getSites(),
-                manpowerService.getWorkers()
-            ]);
+            const snapshot = await loadMasterSnapshot(previewData);
+            const plan = planMasterImport(previewData, snapshot);
+            if (MASTER_TYPES.some(type => plan[type].some((row, index) => {
+                const approved = mappingAnalysis[type][index] as typeof row;
+                return row.status === 'CONFLICT' || row.previewId !== approved?.previewId || JSON.stringify(row.payload) !== JSON.stringify(approved?.payload)
+                    || JSON.stringify(row.existingData) !== JSON.stringify(approved?.existingData);
+            }))) throw new Error('미리보기 이후 DB 정보가 바뀌었습니다. 파일을 다시 분석해 주세요.');
+            const allCompanies = snapshot.Company as Company[];
+            const allTeams = snapshot.Team as Team[];
+            const allSites = snapshot.Site as Site[];
+            const allWorkers = snapshot.Worker as Worker[];
 
             const companiesByName = new Map<string, Company>();
             allCompanies.forEach((c) => {
@@ -2259,504 +1540,17 @@ const IntegratedMassUploader: React.FC = () => {
                 return teamsByName.get(workerTeamName) ?? teamsByNormalizedName.get(workerTeamName) ?? fallbackTeam;
             };
 
-            const pendingTeamLeaderNames = new Map<string, string>();
-
-            const processMapped = async (type: SheetType, items: MappedRow[], handler: (item: MappedRow) => Promise<void>) => {
-                if (!items || items.length === 0) {
-                    updateLog(type, 'success', '데이터 없음 (건너뜀)');
-                    return;
-                }
-
-                updateLog(type, 'processing', '처리 중...');
-                let ok = 0;
-                let skipped = 0;
-                let failed = 0;
-
-                for (let i = 0; i < items.length; i++) {
-                    const item = items[i];
-                    if (item.status === 'CONFLICT') {
-                        failed++;
-                        errors.push({
-                            type,
-                            key: getCellString(item.key),
-                            message: (item.changes ?? []).join(', ') || 'CONFLICT'
-                        });
-                        continue;
-                    }
-                    if (item.action === 'SKIP' || item.status === 'UNCHANGED') {
-                        skipped++;
-                        continue;
-                    }
-                    try {
-                        await handler(item);
-                        ok++;
-                    } catch (e) {
-                        failed++;
-                        errors.push({
-                            type,
-                            key: getCellString(item.key),
-                            message: e instanceof Error ? e.message : String(e)
-                        });
-                    }
-
-                    if ((i + 1) % 25 === 0) {
-                        await yieldToBrowser();
-                    }
-                }
-                updateLog(type, failed > 0 ? 'error' : 'success', `완료 (성공 ${ok}, 스킵 ${skipped}, 실패 ${failed})`, ok);
-            };
-
-            await processMapped('Company', mappingAnalysis.Company || [], async (item) => {
-                const row = item.row;
-                const companyName = normalizeNameKey(row?.['회사명'] || row?.['상호']);
-                if (!companyName) throw new Error('회사명 누락');
-
-                const phone = getCellString(row?.['연락처'] || row?.['전화번호'] || row?.['대표전화']);
-
-                const existing = companiesByName.get(companyName) ?? companiesByNormalizedName.get(normalizeNameKey(companyName));
-                if (item.action === 'CREATE') {
-                    const createdId = await companyService.addCompany({
-                        name: companyName,
-                        type: (row?.['구분'] as any) || '기타',
-                        ceoName: getCellString(row?.['대표자']),
-                        businessNumber: getCellString(row?.['사업자번호']),
-                        address: getCellString(row?.['주소']),
-                        code: '',
-                        phone
-                    });
-                    const createdCompany: Company = {
-                        id: createdId,
-                        name: companyName,
-                        type: (row?.['구분'] as any) || '기타',
-                        ceoName: getCellString(row?.['대표자']),
-                        businessNumber: getCellString(row?.['사업자번호']),
-                        address: getCellString(row?.['주소']),
-                        code: '',
-                        phone
-                    } as Company;
-                    companiesByName.set(companyName, createdCompany);
-                    companiesByNormalizedName.set(normalizeNameKey(companyName), createdCompany);
-                    companiesById.set(String(createdId), createdCompany);
-                    return;
-                }
-
-                if (!existing?.id) throw new Error('DB 기존 회사 조회 실패');
-                await companyService.updateCompany(existing.id, {
-                    name: companyName,
-                    type: (row?.['구분'] as any) || existing.type,
-                    ceoName: getCellString(row?.['대표자']) || existing.ceoName,
-                    businessNumber: getCellString(row?.['사업자번호']) || existing.businessNumber,
-                    address: getCellString(row?.['주소']) || existing.address,
-                    phone: phone || existing.phone
-                });
-
-                const nextCompany: Company = {
-                    ...existing,
-                    name: companyName,
-                    type: ((row?.['구분'] as any) || existing.type) as any,
-                    ceoName: getCellString(row?.['대표자']) || existing.ceoName,
-                    businessNumber: getCellString(row?.['사업자번호']) || existing.businessNumber,
-                    address: getCellString(row?.['주소']) || existing.address,
-                    phone: phone || existing.phone
-                } as Company;
-                companiesByName.set(companyName, nextCompany);
-                companiesByNormalizedName.set(normalizeNameKey(companyName), nextCompany);
-                companiesById.set(String(existing.id), nextCompany);
+            const saved = await executeMasterImport(plan, snapshot, masterWriter, (type, done, total) => {
+                updateLog(type, done === total ? 'success' : 'processing', total ? `등록 확인 ${done} / ${total}건` : '데이터 없음 (건너뜀)', done);
             });
-
-            await processMapped('Team', mappingAnalysis.Team || [], async (item) => {
-                const row = item.row;
-                const teamName = normalizeNameKey(row?.['팀명']);
-                if (!teamName) throw new Error('팀명 누락');
-
-                const leaderName = normalizeNameKey(row?.['팀장명'] ?? row?.['팀장']);
-                if (leaderName) pendingTeamLeaderNames.set(teamName, leaderName);
-
-                const rawCompanyName = normalizeNameKey(row?.['회사명'] || row?.['소속회사']);
-                const resolvedCompany = rawCompanyName
-                    ? (companiesByName.get(rawCompanyName) ?? companiesByNormalizedName.get(normalizeNameKey(rawCompanyName)))
-                    : undefined;
-                const companyId = resolvedCompany?.id ? String(resolvedCompany.id) : '';
-                const companyName = resolvedCompany?.name ? String(resolvedCompany.name) : (rawCompanyName || '');
-
-                const existing = teamsByName.get(teamName);
-                if (item.action === 'CREATE') {
-                    const createdId = await teamService.addTeam({
-                        name: teamName,
-                        companyId: companyId || undefined,
-                        leaderName: leaderName,
-                        role: getCellString(row?.['직종']) || '기타',
-                        leaderId: '',
-                        type: '일반'
-                    } as Team);
-                    const createdTeam: Team = {
-                        id: createdId,
-                        name: teamName,
-                        companyId: companyId || undefined,
-                        companyName: companyName || undefined,
-                        leaderName: leaderName,
-                        role: getCellString(row?.['직종']) || '기타',
-                        leaderId: '',
-                        type: '일반'
-                    } as Team;
-                    teamsByName.set(teamName, createdTeam);
-                    teamsByNormalizedName.set(normalizeNameKey(teamName), createdTeam);
-                    registerTeamLookup(createdTeam);
-                    return;
-                }
-
-                if (!existing?.id) throw new Error('DB 기존 팀 조회 실패');
-                await teamService.updateTeam(existing.id, {
-                    name: teamName,
-                    companyId: companyId || existing.companyId,
-                    leaderName: leaderName || existing.leaderName,
-                    role: getCellString(row?.['직종']) || existing.role
-                });
-
-                const nextTeam: Team = {
-                    ...existing,
-                    name: teamName,
-                    companyId: companyId || existing.companyId,
-                    companyName: companyName || existing.companyName,
-                    leaderName: leaderName || existing.leaderName,
-                    role: getCellString(row?.['직종']) || existing.role
-                } as Team;
-                teamsByName.set(teamName, nextTeam);
-                teamsByNormalizedName.set(normalizeNameKey(teamName), nextTeam);
+            saved.Company.forEach(company => {
+                companiesByName.set(company.name, company as Company);
+                companiesByNormalizedName.set(normalizeNameKey(company.name), company as Company);
+                companiesById.set(company.id, company as Company);
             });
-
-            const updatedCompanyPhoneIds = new Set<string>();
-            const maybeUpdateCompanyPhone = async (company: Company | null, nextPhoneRaw: string): Promise<void> => {
-                const id = company?.id ? String(company.id) : '';
-                const nextPhone = getCellString(nextPhoneRaw);
-                if (!id || !nextPhone) return;
-                if (updatedCompanyPhoneIds.has(id)) return;
-                if (getCellString((company as any)?.phone)) return;
-
-                updatedCompanyPhoneIds.add(id);
-                await companyService.updateCompany(id, { phone: nextPhone });
-                const nextCompany: Company = { ...(company as any), phone: nextPhone } as Company;
-                companiesByName.set(nextCompany.name, nextCompany);
-                companiesByNormalizedName.set(normalizeNameKey(nextCompany.name), nextCompany);
-                companiesById.set(id, nextCompany);
-            };
-
-            await processMapped('Site', mappingAnalysis.Site || [], async (item) => {
-                const row = item.row;
-                const siteName = normalizeNameKey(row?.['현장'] || row?.['현장명']);
-                if (!siteName) throw new Error('현장명 누락');
-
-                // --- 스마트 회사 매핑 (Smart Company Mapping) ---
-                const rawClient = normalizeNameKey(row?.['발주사'] || row?.['발주처']);
-                const rawConstructor = normalizeNameKey(row?.['시공사'] || row?.['건설사'] || row?.['회사명']);
-                const rawPartner = normalizeNameKey(row?.['협력사'] || row?.['협력업체'] || row?.['파트너']);
-
-                let clientComp = rawClient
-                    ? (companiesByName.get(rawClient) ?? companiesByNormalizedName.get(normalizeNameKey(rawClient)) ?? null)
-                    : null;
-                let constructorComp = rawConstructor
-                    ? (companiesByName.get(rawConstructor) ?? companiesByNormalizedName.get(normalizeNameKey(rawConstructor)) ?? null)
-                    : null;
-                let partnerComp = rawPartner
-                    ? (companiesByName.get(rawPartner) ?? companiesByNormalizedName.get(normalizeNameKey(rawPartner)) ?? null)
-                    : null;
-
-                let shouldClearCompany = false;
-
-                // Smart Distribution
-                if (constructorComp) {
-                    if (constructorComp.type === '협력사' && !partnerComp && !rawPartner) {
-                        partnerComp = constructorComp;
-                        constructorComp = null;
-                        shouldClearCompany = true;
-                    } else if (constructorComp.type === '건설사' && !clientComp && !rawClient) {
-                        clientComp = constructorComp;
-                        constructorComp = null;
-                        shouldClearCompany = true;
-                    }
-                }
-
-                const clientCompanyId = clientComp ? clientComp.id! : '';
-                const clientCompanyName = clientComp ? clientComp.name : (rawClient || '');
-
-                let companyId = constructorComp ? constructorComp.id! : '';
-                // 이동했으면(shouldClearCompany) 빈값, 아니면 raw값 유지
-                let companyNameVal = constructorComp ? constructorComp.name : (shouldClearCompany ? '' : (rawConstructor || ''));
-
-                // Default Constructor: 발주사가 있는데 시공사가 없으면 '청연'으로 지정
-                if (clientCompanyName && !companyNameVal) {
-                    const defaultComp = companiesByName.get('청연');
-                    if (defaultComp && defaultComp.type === '시공사') {
-                        companyId = defaultComp.id!;
-                        companyNameVal = defaultComp.name;
-                    } else {
-                        companyNameVal = '청연';
-                    }
-                }
-
-                const partnerId = partnerComp ? partnerComp.id! : '';
-                const partnerName = partnerComp ? partnerComp.name : (rawPartner || '');
-
-                const clientPhone = getCellString(
-                    row?.['발주사연락처'] ?? row?.['발주처연락처'] ?? row?.['발주사전화번호'] ?? row?.['발주처전화번호'] ?? row?.['발주사대표전화'] ?? row?.['발주처대표전화']
-                );
-                const constructorPhone = getCellString(
-                    row?.['시공사연락처'] ?? row?.['건설사연락처'] ?? row?.['회사연락처'] ?? row?.['시공사전화번호'] ?? row?.['건설사전화번호'] ?? row?.['회사전화번호'] ?? row?.['시공사대표전화'] ?? row?.['건설사대표전화'] ?? row?.['회사대표전화']
-                );
-                const partnerPhone = getCellString(
-                    row?.['협력사연락처'] ?? row?.['협력업체연락처'] ?? row?.['파트너연락처'] ?? row?.['협력사전화번호'] ?? row?.['협력업체전화번호'] ?? row?.['파트너전화번호'] ?? row?.['협력사대표전화'] ?? row?.['협력업체대표전화'] ?? row?.['파트너대표전화']
-                );
-
-                await maybeUpdateCompanyPhone(clientComp, clientPhone);
-                await maybeUpdateCompanyPhone(constructorComp, constructorPhone);
-                await maybeUpdateCompanyPhone(partnerComp, partnerPhone);
-
-                const teamName = normalizeNameKey(row?.['해당팀'] || row?.['현장담당'] || row?.['담당팀']);
-                const responsibleTeam = teamName
-                    ? (teamsByName.get(teamName) ?? teamsByNormalizedName.get(normalizeNameKey(teamName)))
-                    : undefined;
-                const responsibleTeamId = responsibleTeam?.id ? String(responsibleTeam.id) : '';
-                const responsibleTeamName = responsibleTeam?.name ? String(responsibleTeam.name) : (teamName || '');
-
-                const startDate = getCellString(formatExcelDate(row?.['착공일']));
-                const endDate = getCellString(formatExcelDate(row?.['준공일']));
-
-                const code = getCellString(row?.['현장코드']);
-                const address = getCellString(row?.['주소']);
-                const siteType = normalizeSiteTypeValue(getSiteTypeRawFromSiteRow(row));
-                const paymentMethod = normalizePaymentMethodValue(getPaymentMethodRawFromSiteRow(row));
-
-                const existing = sitesByName.get(siteName);
-                if (item.action === 'CREATE') {
-                    const createdId = await siteService.addSite({
-                        name: siteName,
-                        companyId: companyId || undefined,
-                        companyName: companyNameVal || undefined,
-                        clientCompanyId: clientCompanyId || undefined,
-                        clientCompanyName: clientCompanyName || undefined,
-                        partnerId: partnerId || undefined,
-                        partnerName: partnerName || undefined,
-                        responsibleTeamId: responsibleTeamId || undefined,
-                        responsibleTeamName: responsibleTeamName || undefined,
-                        code: code || '',
-                        status: 'active',
-                        address: address || '',
-                        startDate: startDate || undefined,
-                        endDate: endDate || undefined,
-                        siteType,
-                        paymentMethod
-                    });
-                    const createdSite: Site = {
-                        id: createdId,
-                        name: siteName,
-                        companyId: companyId || undefined,
-                        companyName: companyNameVal || undefined,
-                        clientCompanyId: clientCompanyId || undefined,
-                        clientCompanyName: clientCompanyName || undefined,
-                        partnerId: partnerId || undefined,
-                        partnerName: partnerName || undefined,
-                        responsibleTeamId: responsibleTeamId || undefined,
-                        responsibleTeamName: responsibleTeamName || undefined,
-                        code: code || '',
-                        status: 'active',
-                        address: address || '',
-                        startDate: startDate || undefined,
-                        endDate: endDate || undefined,
-                        siteType,
-                        paymentMethod
-                    } as Site;
-                    sitesByName.set(siteName, createdSite);
-                    sitesByNormalizedName.set(normalizeNameKey(siteName), createdSite);
-                    registerSiteLookup(createdSite);
-                    return;
-                }
-
-                if (!existing?.id) throw new Error('DB 기존 현장 조회 실패');
-                await siteService.updateSite(existing.id, {
-                    siteType: siteType || existing.siteType,
-                    paymentMethod: paymentMethod || existing.paymentMethod,
-                    name: siteName,
-                    companyId: shouldClearCompany ? undefined : (companyId || existing.companyId),
-                    companyName: shouldClearCompany ? undefined : (companyNameVal || existing.companyName),
-                    clientCompanyId: clientCompanyId || existing.clientCompanyId,
-                    clientCompanyName: clientCompanyName || existing.clientCompanyName,
-                    partnerId: partnerId || existing.partnerId,
-                    partnerName: partnerName || existing.partnerName,
-                    responsibleTeamId: responsibleTeamId || existing.responsibleTeamId,
-                    responsibleTeamName: responsibleTeamName || existing.responsibleTeamName,
-                    code: code || existing.code,
-                    address: address || existing.address,
-                    startDate: startDate || existing.startDate,
-                    endDate: endDate || existing.endDate,
-                    status: existing.status
-                });
-
-                const nextSite: Site = {
-                    ...existing,
-                    name: siteName,
-                    companyId: shouldClearCompany ? existing.companyId : (companyId || existing.companyId),
-                    companyName: shouldClearCompany ? existing.companyName : (companyNameVal || existing.companyName),
-                    clientCompanyId: clientCompanyId || existing.clientCompanyId,
-                    clientCompanyName: clientCompanyName || existing.clientCompanyName,
-                    partnerId: partnerId || existing.partnerId,
-                    partnerName: partnerName || existing.partnerName,
-                    responsibleTeamId: responsibleTeamId || existing.responsibleTeamId,
-                    responsibleTeamName: responsibleTeamName || existing.responsibleTeamName,
-                    code: code || existing.code,
-                    address: address || existing.address,
-                    startDate: startDate || existing.startDate,
-                    endDate: endDate || existing.endDate,
-                    siteType: siteType || existing.siteType,
-                    paymentMethod: paymentMethod || existing.paymentMethod
-                } as Site;
-                sitesByName.set(siteName, nextSite);
-                sitesByNormalizedName.set(normalizeNameKey(siteName), nextSite);
-            });
-
-            await processMapped('Worker', mappingAnalysis.Worker || [], async (item) => {
-                const row = item.row;
-                const name = normalizeNameKey(row?.['이름'] || row?.['성명']);
-                if (!name) throw new Error('이름 누락');
-
-                const rowTeamName = normalizeNameKey(row?.['소속팀'] || row?.['팀명'] || row?.['팀']);
-                const team = rowTeamName
-                    ? (teamsByName.get(rowTeamName) ?? teamsByNormalizedName.get(normalizeNameKey(rowTeamName)))
-                    : undefined;
-                const teamId = team?.id || '';
-                const teamName = team?.name || rowTeamName || '';
-
-                const rowCompanyName = normalizeNameKey(row?.['회사명'] || row?.['소속회사']);
-                const resolvedWorkerCompany = rowCompanyName
-                    ? (companiesByName.get(rowCompanyName) ?? companiesByNormalizedName.get(normalizeNameKey(rowCompanyName)))
-                    : undefined;
-
-                const companyNameFromRow = resolvedWorkerCompany?.name ? String(resolvedWorkerCompany.name) : (rowCompanyName || '');
-                const companyNameFromTeam = team?.companyName ? String(team.companyName) : '';
-                const companyNameFromTeamCompanyId = team?.companyId
-                    ? (companiesById.get(String(team.companyId))?.name ? String(companiesById.get(String(team.companyId))!.name) : '')
-                    : '';
-
-                const companyName = companyNameFromRow || companyNameFromTeam || companyNameFromTeamCompanyId;
-
-                const unitPrice = getUnitPriceFromRow(row);
-
-                const bankName = getWorkerBankNameFromRow(row);
-                const accountNumber = getWorkerAccountNumberFromRow(row);
-                const accountHolder = getWorkerAccountHolderFromRow(row);
-
-                const existing = workersByName.get(name);
-                if (item.action === 'CREATE') {
-                    const createdId = await manpowerService.addWorker({
-                        name,
-                        teamId,
-                        teamName,
-                        companyId: '',
-                        companyName,
-                        role: getCellString(row?.['직종'] || row?.['역할']) || '작업자',
-                        contact: getCellString(row?.['연락처'] || row?.['휴대폰']),
-                        idNumber: getCellString(row?.['주민번호']),
-                        address: getCellString(row?.['주소']),
-                        unitPrice: unitPrice ?? 0,
-                        payType: getPayTypeFromRow(row) || '일급제',
-                        bankName,
-                        accountNumber,
-                        accountHolder,
-                        teamType: getCellString(row?.['팀구분']) || '일용직',
-                        status: 'active'
-                    });
-                    workersByName.set(name, {
-                        id: createdId,
-                        name,
-                        idNumber: getCellString(row?.['주민번호']),
-                        address: getCellString(row?.['주소']),
-                        contact: getCellString(row?.['연락처'] || row?.['휴대폰']),
-                        role: getCellString(row?.['직종'] || row?.['역할']) || '작업자',
-                        teamId,
-                        teamName,
-                        teamType: getCellString(row?.['팀구분']) || '일용직',
-                        status: 'active',
-                        unitPrice: unitPrice ?? 0,
-                        payType: getPayTypeFromRow(row) || '일급제',
-                        companyName,
-                        bankName,
-                        accountNumber,
-                        accountHolder
-                    } as Worker);
-                    workersByNormalizedName.set(normalizeNameKey(name), workersByName.get(name)!);
-                    registerWorkerLookup(workersByName.get(name)!);
-                    return;
-                }
-
-                if (!existing?.id) throw new Error('DB 기존 작업자 조회 실패');
-                await manpowerService.updateWorker(existing.id, {
-                    name,
-                    teamId: teamId || existing.teamId,
-                    teamName: teamName || existing.teamName,
-                    companyName: companyName || existing.companyName,
-                    role: getCellString(row?.['직종'] || row?.['역할']) || existing.role,
-                    contact: getCellString(row?.['연락처'] || row?.['휴대폰']) || existing.contact,
-                    idNumber: getCellString(row?.['주민번호']) || existing.idNumber,
-                    address: getCellString(row?.['주소']) || existing.address,
-                    unitPrice: unitPrice !== undefined ? unitPrice : existing.unitPrice,
-                    payType: getPayTypeFromRow(row) || existing.payType,
-                    bankName: bankName || existing.bankName,
-                    accountNumber: accountNumber || existing.accountNumber,
-                    accountHolder: accountHolder || existing.accountHolder
-                });
-
-                const nextWorker: Worker = {
-                    ...existing,
-                    name,
-                    teamId: teamId || existing.teamId,
-                    teamName: teamName || existing.teamName,
-                    companyName: companyName || existing.companyName,
-                    role: getCellString(row?.['직종'] || row?.['역할']) || existing.role,
-                    contact: getCellString(row?.['연락처'] || row?.['휴대폰']) || existing.contact,
-                    idNumber: getCellString(row?.['주민번호']) || existing.idNumber,
-                    address: getCellString(row?.['주소']) || existing.address,
-                    unitPrice: unitPrice !== undefined ? unitPrice : existing.unitPrice,
-                    payType: getPayTypeFromRow(row) || existing.payType,
-                    bankName: bankName || existing.bankName,
-                    accountNumber: accountNumber || existing.accountNumber,
-                    accountHolder: accountHolder || existing.accountHolder
-                } as Worker;
-                workersByName.set(name, nextWorker);
-                workersByNormalizedName.set(normalizeNameKey(name), nextWorker);
-                registerWorkerLookup(nextWorker);
-            });
-
-            if (pendingTeamLeaderNames.size > 0) {
-                let i = 0;
-                for (const [teamName, leaderName] of pendingTeamLeaderNames.entries()) {
-                    i++;
-                    const team = teamsByName.get(teamName) ?? teamsByNormalizedName.get(normalizeNameKey(teamName));
-                    if (!team?.id) continue;
-
-                    const currentLeaderName = normalizeNameKey((team as any)?.leaderName);
-                    if (team.leaderId && currentLeaderName && currentLeaderName === normalizeNameKey(leaderName)) {
-                        continue;
-                    }
-
-                    const worker = workersByName.get(leaderName) ?? workersByNormalizedName.get(normalizeNameKey(leaderName));
-                    if (!worker?.id) {
-                        errors.push({ type: 'Team', key: teamName, message: `팀장 작업자 미등록: ${leaderName}` });
-                        continue;
-                    }
-
-                    try {
-                        await teamService.updateTeam(team.id, { leaderId: String(worker.id) });
-                        const nextTeam: Team = { ...team, leaderId: String(worker.id), leaderName } as Team;
-                        teamsByName.set(team.name, nextTeam);
-                        teamsByNormalizedName.set(normalizeNameKey(team.name), nextTeam);
-                    } catch (e) {
-                        errors.push({ type: 'Team', key: teamName, message: e instanceof Error ? e.message : String(e) });
-                    }
-
-                    if (i % 25 === 0) {
-                        await yieldToBrowser();
-                    }
-                }
-            }
+            saved.Team.forEach(team => registerTeamLookup(team as Team));
+            saved.Site.forEach(site => registerSiteLookup(site as Site));
+            saved.Worker.forEach(worker => registerWorkerLookup(worker as Worker));
 
             // --- 5. Daily Report (출력일보) ---
             const reportData = previewData['DailyReport'];
@@ -3278,22 +2072,30 @@ const IntegratedMassUploader: React.FC = () => {
                     icon: 'warning'
                 });
             } else {
+                setResultMessage('등록이 완료되었습니다. 통합 DB에서 항목과 연결 정보를 확인하세요.');
                 await Swal.fire('완료', '모든 데이터가 통합 처리되었습니다.', 'success');
             }
 
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', '데이터 처리 중 오류가 발생했습니다.', 'error');
+            const message = error instanceof Error ? error.message : '데이터 처리 중 오류가 발생했습니다.';
+            setResultMessage('등록이 중단되었습니다. 이미 저장된 항목이 있을 수 있으므로 통합 DB에서 확인한 뒤 파일을 다시 분석하세요.');
+            setLogs(previous => previous.map(log => log.status === 'pending' || log.status === 'processing' ? { ...log, status: 'error', message: '등록 중단 — DB 확인 후 재분석 필요' } : log));
+            await Swal.fire('등록 중단', message, 'error');
         } finally {
-            // Optional: setStage('upload') to reset?
+            processingRef.current = false;
         }
     };
 
     const handleCancel = () => {
+        if (processingRef.current) return;
         setStage('upload');
-        setPreviewData({ Company: [], Team: [], Site: [], Worker: [], DailyReport: [] });
-        setPreviewAnalysis({ Company: [], Team: [], Site: [], Worker: [], DailyReport: [] });
-        setMappingAnalysis({ Company: [], Team: [], Site: [], Worker: [], DailyReport: [] });
+        setWorkbookIssues([]);
+        setSheetSummaries([]);
+        setResultMessage('');
+        setPreviewData({ Company: [], Team: [], Site: [], Worker: [], OfficeStaff: [], SettlementTarget: [], DailyReport: [] });
+        setPreviewAnalysis({ Company: [], Team: [], Site: [], Worker: [], OfficeStaff: [], SettlementTarget: [], DailyReport: [] });
+        setMappingAnalysis({ Company: [], Team: [], Site: [], Worker: [], OfficeStaff: [], SettlementTarget: [], DailyReport: [] });
         setShowOnlyIssues(false);
         setPreviewPage(1);
     };
@@ -3564,7 +2366,7 @@ const IntegratedMassUploader: React.FC = () => {
                             {issueHighlights.map((item) => (
                                 <div key={`${item.key || 'row'}-${item.index}`} className="rounded-lg border border-rose-100 bg-white px-4 py-3 shadow-sm">
                                     <div className="flex items-center justify-between gap-2">
-                                        <div className="text-xs font-bold text-rose-700">행 {item.index + 2}</div>
+                                        <div className="text-xs font-bold text-rose-700">{rowSources[activeTab]?.[item.index] || `행 ${item.index + 2}`}</div>
                                         {item.key && <div className="text-[11px] text-slate-400 truncate max-w-[220px]">{item.key}</div>}
                                     </div>
                                     <div className="mt-2 space-y-1">
@@ -3602,7 +2404,7 @@ const IntegratedMassUploader: React.FC = () => {
                                     const plannedActionLabel = getPlannedActionLabel(item);
                                     return (
                                         <tr key={`${item.key || 'row'}-${item.index}`} className={`${item.hasProblem ? 'bg-rose-50/40' : 'bg-white'} border-b hover:bg-slate-50`}>
-                                            <td className="px-4 py-4 whitespace-nowrap font-bold text-slate-700">{item.index + 2}</td>
+                                            <td className="px-4 py-4 whitespace-nowrap font-bold text-slate-700">{rowSources[activeTab]?.[item.index] || item.index + 2}</td>
                                             <td className="px-4 py-4 whitespace-nowrap">
                                                 <span className={`px-2 py-1 rounded-full text-xs font-bold ${previewStatusMeta.className}`}>
                                                     {previewStatusMeta.label}
@@ -3686,26 +2488,31 @@ const IntegratedMassUploader: React.FC = () => {
 
     return (
         <div className="p-6 max-w-6xl mx-auto">
-            <h1 className="text-2xl font-bold mb-6 text-slate-800">통합 데이터 일괄 등록 (One-Shot Upload)</h1>
+            <h1 className="text-2xl font-bold mb-6 text-slate-800">통합 데이터 일괄 등록</h1>
+            <p className="mb-5 text-sm text-slate-600">회사·팀·현장·작업자·사무실 직원·정산 대상자의 정보를 한 번에 등록합니다. 여러 시트를 모두 확인하고, 오류를 고친 후 저장할 수 있습니다.</p>
+            <a href="/database/manpower-db" className="inline-block mb-5 text-sm font-bold text-blue-700">통합 DB에서 등록 결과 확인 →</a>
+            {resultMessage && <p role="status" className="mb-4 rounded-lg bg-slate-100 p-4 text-slate-800">{resultMessage}</p>}
 
             {/* Stage 1: Upload */}
             {stage === 'upload' && (
                 <div className="bg-white p-12 rounded-xl shadow-sm border border-slate-200 text-center animate-fade-in">
                     <div className="flex items-center justify-center w-full max-w-2xl mx-auto">
-                        <label className="flex flex-col items-center justify-center w-full h-64 border-2 border-slate-300 border-dashed rounded-lg cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors">
+                        <label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void handleUploadFile(event.dataTransfer.files?.[0]); }} className="flex flex-col items-center justify-center w-full h-64 border-2 border-slate-300 border-dashed rounded-lg cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors">
                             <div className="flex flex-col items-center justify-center pt-5 pb-6">
                                 <FontAwesomeIcon icon={faCloudUploadAlt} className="text-5xl text-slate-400 mb-4" />
                                 <p className="mb-2 text-lg text-slate-600 font-bold">엑셀 파일 업로드</p>
                                 <p className="text-sm text-slate-500">통합 데이터(.xlsx)를 여기에 드래그하거나 클릭하세요</p>
                             </div>
-                            <input type="file" className="hidden" accept=".xlsx, .xls" onChange={handleFileUpload} />
+                            <input type="file" aria-label="통합 엑셀 파일" disabled={isReadingFile} className="hidden" accept=".xlsx, .xls" onChange={handleFileUpload} />
+                            {isReadingFile && <p role="status" className="text-blue-700 font-bold">전체 시트와 DB 항목을 분석하고 있습니다…</p>}
                         </label>
                     </div>
 
-                    <div className="mt-6 flex justify-center gap-4">
+                    <div className="mt-6 flex justify-center flex-wrap gap-4">
+                        <button type="button" onClick={() => { void downloadIntegratedTemplateExcel(true); }} className="px-6 py-3 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700">전체 항목 빈 양식 다운로드</button>
                         <button
                             type="button"
-                            onClick={downloadIntegratedTemplateExcel}
+                            onClick={() => { void downloadIntegratedTemplateExcel(); }}
                             className="px-6 py-3 rounded-lg bg-green-600 text-white font-bold hover:bg-green-700 transition-colors flex items-center gap-2"
                         >
                             <FontAwesomeIcon icon={faDownload} /> 샘플 양식 다운로드
@@ -3748,7 +2555,7 @@ const IntegratedMassUploader: React.FC = () => {
                                     <tr>
                                         <th className="px-3 py-2 text-left font-bold">시트</th>
                                         <th className="px-3 py-2 text-left font-bold">필수 컬럼</th>
-                                        <th className="px-3 py-2 text-left font-bold">선택 컬럼(주요)</th>
+                                        <th className="px-3 py-2 text-left font-bold">선택 컬럼(전체)</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -3768,7 +2575,7 @@ const IntegratedMassUploader: React.FC = () => {
                             </table>
                         </div>
                         <p className="text-[11px] text-slate-500 mt-2">
-                            전체 컬럼, 별칭, 허용값은 샘플 파일의 `가이드` 시트에 상세히 포함됩니다.
+                            전체 컬럼, 별칭, 허용값은 양식의 가이드 시트에서 확인할 수 있습니다. 빈칸은 기존 값을 유지하며 0과 아니오는 그대로 반영합니다. 계좌번호·주민번호는 텍스트 형식으로 입력하세요. 사진·서명·첨부서류와 로그인 계정 연동은 통합 DB에서 별도로 관리합니다. 누적공수 등 집계값은 자동 계산됩니다.
                         </p>
                     </div>
                 </div>
@@ -3777,12 +2584,12 @@ const IntegratedMassUploader: React.FC = () => {
             {/* Stage 2: Preview */}
             {stage === 'preview' && (
                 <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden animate-fade-in">
-                    <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <div className="p-6 border-b border-slate-100 flex flex-wrap gap-3 justify-between items-center bg-slate-50">
                         <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                             <FontAwesomeIcon icon={faTable} className="text-blue-500" />
                             데이터 미리보기
                         </h2>
-                        <div className="flex gap-2 items-center">
+                        <div className="flex flex-wrap gap-2 items-center">
                             {mappingAnalysis.DailyReport?.some((m) => m.action === 'MERGE') && (
                                 <div className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 rounded-lg">
                                     <span className="text-xs font-bold text-slate-700">일보 기존건:</span>
@@ -3821,16 +2628,25 @@ const IntegratedMassUploader: React.FC = () => {
                             <button onClick={handleCancel} className="px-4 py-2 text-slate-600 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-2">
                                 <FontAwesomeIcon icon={faTimes} /> 취소
                             </button>
-                            <button onClick={handleProcess} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-md transition-colors flex items-center gap-2 font-bold">
+                            <button onClick={handleProcess} disabled={blockingCount > 0} title={blockingCount ? '문제 항목을 수정한 뒤 파일을 다시 선택하세요.' : undefined} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed shadow-md transition-colors flex items-center gap-2 font-bold">
                                 <FontAwesomeIcon icon={faPlay} /> 등록 시작
                             </button>
                         </div>
                     </div>
 
+                    <div className="px-6 py-4 border-b border-slate-200 space-y-3">
+                        <p className="font-bold text-sm text-slate-700">전체 시트 확인: {sheetSummaries.length}개 · {sheetSummaries.reduce((total, sheet) => total + sheet.rows, 0)}행</p>
+                        <div className="flex flex-wrap gap-2">{sheetSummaries.map(sheet => <span key={sheet.name} className="rounded-lg bg-slate-100 px-3 py-2 text-xs">{sheet.name} → {sheet.target} · {sheet.rows}행 · {sheet.columns}열</span>)}</div>
+                        {blockingCount > 0 && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                            <p className="font-bold">누락 방지를 위해 등록을 멈췄습니다. 문제 항목 {blockingCount}건을 수정한 뒤 파일을 다시 선택하세요.</p>
+                            <ul className="mt-2 list-disc pl-5 max-h-60 overflow-y-auto">{workbookIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>
+                            <p className="mt-2">행별 오류는 아래 문제행만 보기에서 확인할 수 있습니다.</p>
+                        </div>}
+                    </div>
                     {/* Mapping Statistics */}
                     <div className="px-6 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-slate-200">
                         <h3 className="text-sm font-bold text-slate-700 mb-3">📊 DB 데이터와의 매핑 분석</h3>
-                        <div className="grid grid-cols-5 gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             {(Object.keys(SHEET_CONFIG) as SheetType[]).map(type => {
                                 const mapping = mappingAnalysis[type] || [];
                                 const newCount = mapping.filter(m => m.status === 'NEW').length;
@@ -3880,7 +2696,7 @@ const IntegratedMassUploader: React.FC = () => {
                     </div>
 
                     {/* Tabs */}
-                    <div className="flex border-b border-slate-200">
+                    <div className="flex flex-wrap border-b border-slate-200">
                         {(Object.keys(SHEET_CONFIG) as SheetType[]).map(type => (
                             (() => {
                                 const total = previewData[type].length;

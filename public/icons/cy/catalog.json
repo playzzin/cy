@@ -1,0 +1,446 @@
+{
+  "dashboard": {
+    "label": "대시보드",
+    "category": "현장·인력",
+    "paths": [
+      {
+        "d": "M3 3h7v7H3z M14 14h7v7h-7z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M14 3h7v7h-7z M3 14h7v7H3z"
+      }
+    ]
+  },
+  "site": {
+    "label": "현장 관리",
+    "category": "현장·인력",
+    "paths": [
+      {
+        "d": "M4 21V6l9-3v18 M13 9h7v12",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M2 21h20 M7.5 8v1 M7.5 12v1 M7.5 16v1 M16.5 12v1 M16.5 16v1"
+      }
+    ]
+  },
+  "worker": {
+    "label": "근로자",
+    "category": "현장·인력",
+    "paths": [
+      {
+        "d": "M6 9a6 6 0 0 1 12 0 M5 9h14 M10 3v3 M14 3v3",
+        "accent": true
+      },
+      {
+        "d": "M8 10v1a4 4 0 0 0 8 0v-1 M4 21v-1a7 5 0 0 1 5-5l3 3 3-3a7 5 0 0 1 5 5v1 M9 21v-2 M15 21v-2"
+      }
+    ]
+  },
+  "team": {
+    "label": "팀 관리",
+    "category": "현장·인력",
+    "paths": [
+      {
+        "d": "M8.5 7a3.5 3.5 0 1 0 7 0 3.5 3.5 0 0 0-7 0 M6 21v-2a6 6 0 0 1 12 0v2",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M4.5 5a3 3 0 0 0 0 6 M19.5 5a3 3 0 0 1 0 6 M2 19v-3a3 3 0 0 1 2-2.8 M22 19v-3a3 3 0 0 0-2-2.8"
+      }
+    ]
+  },
+  "assignment": {
+    "label": "팀 배정",
+    "category": "현장·인력",
+    "paths": [
+      {
+        "d": "M3 3h7v7H3z M14 14h7v7h-7z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M14 6h4a2 2 0 0 1 2 2v3 M18 9l2 2 2-2 M10 18H6a2 2 0 0 1-2-2v-3 M2 15l2-2 2 2"
+      }
+    ]
+  },
+  "daily-report": {
+    "label": "작업 일보",
+    "category": "현장·인력",
+    "paths": [
+      {
+        "d": "M8 3h8v4H8z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M8 5H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-3 M8 11h1 M12 11h4 M8 15h1 M12 15h4 M8 18h1 M12 18h4"
+      }
+    ]
+  },
+  "attendance": {
+    "label": "출역·공수",
+    "category": "현장·인력",
+    "paths": [
+      {
+        "d": "M3 6a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v4H3z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M3 10v9a2 2 0 0 0 2 2h6 M7 2v4 M16 2v4 M6 14h1 M6 17h1 M13 17a4 4 0 1 0 8 0 4 4 0 0 0-8 0 M17 15v2l1.5 1"
+      }
+    ]
+  },
+  "calendar": {
+    "label": "일정 관리",
+    "category": "현장·인력",
+    "paths": [
+      {
+        "d": "M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4H3z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M3 10v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-9 M7 2v4 M17 2v4 M7 14h2 M15 14h2 M7 18h2 M15 18h2"
+      }
+    ]
+  },
+  "payroll": {
+    "label": "급여 지급",
+    "category": "급여·정산",
+    "paths": [
+      {
+        "d": "M3 5h18v14H3z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M7 8l2 8 3-6 3 6 2-8 M7 12h10 M3 8h1 M20 16h1"
+      }
+    ]
+  },
+  "settlement": {
+    "label": "팀 정산",
+    "category": "급여·정산",
+    "paths": [
+      {
+        "d": "M7 3h10v5H7z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M5 3H4v18h16V3h-1 M7 12h1 M12 12h1 M7 16h1 M12 16h1 M17 12v5 M7 19h6"
+      }
+    ]
+  },
+  "invoice": {
+    "label": "세금계산서",
+    "category": "급여·정산",
+    "paths": [
+      {
+        "d": "M14 3v6h6",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M20 13V9l-6-6H4v18h8 M8 8h2 M8 12h5 M8 16h3 M14 18a3 3 0 1 0 6 0 3 3 0 0 0-6 0 M17 16.5v3 M15.8 17.2h2.4 M15.8 18.8h2.4"
+      }
+    ]
+  },
+  "receipt": {
+    "label": "영수증",
+    "category": "급여·정산",
+    "paths": [
+      {
+        "d": "M5 3l2 1.5L9 3l3 1.5L15 3l2 1.5L19 3v18l-2-1.5L15 21l-3-1.5L9 21l-2-1.5L5 21z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M8 8h8 M8 12h4 M15 12h1 M8 16h4 M15 16h1"
+      }
+    ]
+  },
+  "card": {
+    "label": "법인카드",
+    "category": "급여·정산",
+    "paths": [
+      {
+        "d": "M3 8h18v4H3z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M6 16h3 M16 16h2"
+      }
+    ]
+  },
+  "expense": {
+    "label": "경비 관리",
+    "category": "급여·정산",
+    "paths": [
+      {
+        "d": "M15 10h6v7h-6a3.5 3.5 0 0 1 0-7z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M20 10V7H5a2 2 0 0 1 0-4h12v4 M3 5v14a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-2 M16 13.5h1"
+      }
+    ]
+  },
+  "company": {
+    "label": "거래처·회사",
+    "category": "급여·정산",
+    "paths": [
+      {
+        "d": "M9 8V4h6v4 M3 10h18v6H3z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M3 10V8h18v12H3v-4 M10 16v2h4v-2"
+      }
+    ]
+  },
+  "chart": {
+    "label": "통계·분석",
+    "category": "급여·정산",
+    "paths": [
+      {
+        "d": "M6 21v-6h3v6 M12 21V9h3v12 M18 21V3h3v18",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M3 3v18h19 M6 10l4-4 3 1 2-3"
+      }
+    ]
+  },
+  "material": {
+    "label": "자재 관리",
+    "category": "자원·업무",
+    "paths": [
+      {
+        "d": "M3 7l9-4 9 4-9 4z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M3 7v10l9 4 9-4V7 M12 11v10 M7.5 5l9 4v4"
+      }
+    ]
+  },
+  "inventory": {
+    "label": "재고·창고",
+    "category": "자원·업무",
+    "paths": [
+      {
+        "d": "M3 9l9-6 9 6v12H3z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M7 21V11h10v10 M7 15h10 M7 18h10 M11 6h2"
+      }
+    ]
+  },
+  "vehicle": {
+    "label": "차량 관리",
+    "category": "자원·업무",
+    "paths": [
+      {
+        "d": "M5 5h12l3 7H2z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M2 12v6h20v-6h-2 M5 18v3 M19 18v3 M5 15h2 M17 15h2 M9 18h6"
+      }
+    ]
+  },
+  "accommodation": {
+    "label": "숙소 관리",
+    "category": "자원·업무",
+    "paths": [
+      {
+        "d": "M3 11l9-8 9 8 M5 10v11h14V10",
+        "accent": true
+      },
+      {
+        "d": "M8 21v-8 M16 21v-6H8 M8 18h8 M10 15v-2h3v2"
+      }
+    ]
+  },
+  "document": {
+    "label": "문서·파일",
+    "category": "자원·업무",
+    "paths": [
+      {
+        "d": "M14 3v6h6",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M14 3H4v18h16V9z M8 12h8 M8 16h6"
+      }
+    ]
+  },
+  "message": {
+    "label": "메시지",
+    "category": "자원·업무",
+    "paths": [
+      {
+        "d": "M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-8l-5 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M7 9h10 M7 13h7"
+      }
+    ]
+  },
+  "memo": {
+    "label": "스마트 메모",
+    "category": "자원·업무",
+    "paths": [
+      {
+        "d": "M14 21v-7h7z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M14 21H3V3h18v11 M7 8h10 M7 12h4 M7 16h3"
+      }
+    ]
+  },
+  "notification": {
+    "label": "공지·알림",
+    "category": "자원·업무",
+    "paths": [
+      {
+        "d": "M5 17l2-3V9a5 5 0 0 1 10 0v5l2 3z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M10 21h4 M12 2v2 M3 7l1-2 M20 5l1 2"
+      }
+    ]
+  },
+  "search": {
+    "label": "검색",
+    "category": "공통 동작",
+    "paths": [
+      {
+        "d": "M3 10a7 7 0 1 0 14 0 7 7 0 0 0-14 0",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M15 15l6 6"
+      }
+    ]
+  },
+  "add": {
+    "label": "추가·등록",
+    "category": "공통 동작",
+    "paths": [
+      {
+        "d": "M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M7 12h10 M12 7v10"
+      }
+    ]
+  },
+  "edit": {
+    "label": "수정·작성",
+    "category": "공통 동작",
+    "paths": [
+      {
+        "d": "M4 15L16 3l5 5L9 20l-6 1z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M13 6l5 5 M4 15l5 5"
+      }
+    ]
+  },
+  "delete": {
+    "label": "삭제",
+    "category": "공통 동작",
+    "paths": [
+      {
+        "d": "M5 7l1 14h12l1-14",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M3 7h18 M8 7V3h8v4 M10 11v6 M14 11v6"
+      }
+    ]
+  },
+  "upload": {
+    "label": "업로드",
+    "category": "공통 동작",
+    "paths": [
+      {
+        "d": "M3 15v6h18v-6",
+        "accent": true
+      },
+      {
+        "d": "M12 16V3 M7 8l5-5 5 5 M7 18h1"
+      }
+    ]
+  },
+  "download": {
+    "label": "다운로드",
+    "category": "공통 동작",
+    "paths": [
+      {
+        "d": "M3 15v6h18v-6",
+        "accent": true
+      },
+      {
+        "d": "M12 3v13 M7 11l5 5 5-5 M7 18h1"
+      }
+    ]
+  },
+  "settings": {
+    "label": "설정",
+    "category": "공통 동작",
+    "paths": [
+      {
+        "d": "M7 6a2 2 0 1 0 4 0 2 2 0 0 0-4 0 M13 12a2 2 0 1 0 4 0 2 2 0 0 0-4 0 M5 18a2 2 0 1 0 4 0 2 2 0 0 0-4 0",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M3 6h4 M11 6h10 M3 12h10 M17 12h4 M3 18h2 M9 18h12"
+      }
+    ]
+  },
+  "approval": {
+    "label": "승인·완료",
+    "category": "공통 동작",
+    "paths": [
+      {
+        "d": "M12 3l9 4v6c0 4-5 7-9 9-4-2-9-5-9-9V7z",
+        "accent": true,
+        "filled": true
+      },
+      {
+        "d": "M7.5 12l3 3 6-6"
+      }
+    ]
+  }
+}

@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useMessageInbox } from '../../hooks/useMessageInbox';
 import { messageService } from '../../services/messageService';
 import type { ErpMessage } from '../../types/erpMessage';
+import { messageDestination } from '../../utils/messageNavigation';
 import './MessageSystem.css';
 
 const formatTime = (message: ErpMessage): string =>
@@ -25,7 +26,7 @@ export const DashboardMessageWidget: React.FC = () => {
     if (currentUser?.uid && !messageService.isReadBy(message, currentUser.uid)) {
       await messageService.markAsRead(message.id, currentUser.uid);
     }
-    navigate(`/messages?messageId=${message.id}`);
+    navigate(messageDestination(message));
   };
 
   const markAllAsRead = async () => {

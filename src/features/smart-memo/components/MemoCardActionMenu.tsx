@@ -1,24 +1,28 @@
 import React, { useState } from 'react';
-import { Copy, MoreHorizontal, Pin, PinOff, Trash2 } from 'lucide-react';
+import { Bell, Copy, MoreHorizontal, Pin, PinOff, Trash2 } from 'lucide-react';
 
 type MemoCardActionMenuProps = {
     memoTitle: string;
     isPinned: boolean;
     disabled?: boolean;
+    readOnly?: boolean;
     compact?: boolean;
     onTogglePinned: () => void;
     onCopy: () => void;
     onDelete: () => void;
+    onReminder?: () => void;
 };
 
 export function MemoCardActionMenu({
     memoTitle,
     isPinned,
     disabled = false,
+    readOnly = false,
     compact = false,
     onTogglePinned,
     onCopy,
-    onDelete
+    onDelete,
+    onReminder
 }: MemoCardActionMenuProps) {
     const [isOpen, setIsOpen] = useState(false);
 
@@ -51,11 +55,13 @@ export function MemoCardActionMenu({
             </button>
             {isOpen && (
                 <div className="absolute right-0 z-50 mt-1 w-48 rounded-xl border border-slate-200 bg-white p-1.5 text-slate-800 shadow-xl" role="menu">
+                    {onReminder && <button type="button" role="menuitem" onClick={() => runAction(onReminder)} className="flex h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-bold hover:bg-blue-50" aria-label={`${memoTitle} 알림 설정`}><Bell className="h-4 w-4" />알림 설정</button>}
                     <button
                         type="button"
                         role="menuitem"
+                        disabled={readOnly}
                         onClick={() => runAction(onTogglePinned)}
-                        className="flex h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-bold transition hover:bg-amber-50 hover:text-amber-800"
+                        className="flex h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-bold transition hover:bg-amber-50 hover:text-amber-800 disabled:cursor-not-allowed disabled:opacity-40"
                         aria-label={`${memoTitle} ${isPinned ? '중요 메모 고정 해제' : '중요 메모로 고정'}`}
                     >
                         {isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
@@ -74,8 +80,9 @@ export function MemoCardActionMenu({
                     <button
                         type="button"
                         role="menuitem"
+                        disabled={readOnly}
                         onClick={() => runAction(onDelete)}
-                        className="flex h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-bold text-red-700 transition hover:bg-red-50"
+                        className="flex h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-bold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
                         aria-label={`${memoTitle} 메모 삭제`}
                     >
                         <Trash2 className="h-4 w-4" />

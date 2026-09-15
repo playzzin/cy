@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "smart_memo_reminders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "remindAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "constructionPlans",
       "queryScope": "COLLECTION",
       "fields": [
