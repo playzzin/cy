@@ -118,3 +118,25 @@ it('paginates a large roster and searches across all members', () => {
     fireEvent.change(within(detail).getByRole('searchbox'), { target: { value: '동료44' } });
     expect(within(detail).getByText(/1명 표시/)).toBeVisible();
 });
+
+it('summarizes numerous sites and searches by code beyond the initially rendered sites', () => {
+    const state = ready();
+    state.data.sites = Array.from({ length: 130 }, (_, index) => ({
+        id: 's' + index, name: '검증현장' + String(index).padStart(3, '0'), code: 'CODE-' + index,
+        responsibleTeamId: 't2', status: 'active' as const,
+    }));
+    mockHook.mockReturnValue(state);
+    render(<CheongyeonOrgChartPage />);
+    const card = screen.getByRole('button', { name: '전기팀 팀 상세 보기' });
+    expect(card).toHaveTextContent('외 128곳');
+    expect(within(card).queryByText('검증현장129')).not.toBeInTheDocument();
+    fireEvent.click(card);
+    const detail = screen.getByRole('complementary');
+    fireEvent.click(within(detail).getByRole('button', { name: /담당 현장/ }));
+    expect(within(detail).getByRole('button', { name: '현장 더 보기 (100곳)' })).toBeVisible();
+    expect(within(detail).queryByRole('heading', { name: '검증현장129' })).not.toBeInTheDocument();
+    fireEvent.change(within(detail).getByRole('searchbox'), { target: { value: 'code-129' } });
+    expect(within(detail).getByRole('heading', { name: '검증현장129' })).toBeVisible();
+    expect(within(detail).getByText(/1곳 검색됨/)).toBeVisible();
+    expect(within(detail).queryByRole('button', { name: /현장 더 보기/ })).not.toBeInTheDocument();
+});

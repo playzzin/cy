@@ -116,6 +116,8 @@ body.cy-organization-theme .app.cheongyeon-mode .header-btn { color: #e2eaf4 !im
 .cy-org-leader svg { width: 12px; flex-shrink: 0; font-size: 10px; color: #8eaac3; }
 .cy-org-team-sites { display: flex; gap: 7px; align-items: baseline; color: #a7bad0; font-size: 11px; line-height: 1.6; margin: 7px 0 15px; overflow-wrap: anywhere; }
 .cy-org-team-sites svg { flex-shrink: 0; width: 12px; font-size: 10px; }
+.cy-org-team-sites > span { min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cy-org-team-sites > small { flex-shrink: 0; color: #a3d7cf; font-size: 10px; }
 .cy-org-team-bottom { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 7px; margin-top: auto; padding-top: 11px; width: 100%; border-top: 1px solid #304358; font-size: 10px; color: #b3c6d8; }
 .cy-org-team-bottom b { color: #f0f6fc; font-size: 12px; margin-left: 3px; }
 .cy-org-team-bottom svg { margin-right: 3px; }

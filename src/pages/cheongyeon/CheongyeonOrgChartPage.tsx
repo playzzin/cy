@@ -28,6 +28,8 @@ const CheongyeonOrgChartPage: React.FC = () => {
     const [detailTab, setDetailTab] = useState<'people' | 'sites'>('people');
     const [memberQuery, setMemberQuery] = useState('');
     const [memberLimit, setMemberLimit] = useState(30);
+    const [siteQuery, setSiteQuery] = useState('');
+    const [siteLimit, setSiteLimit] = useState(30);
     const [workerId, setWorkerId] = useState<string | null>(null);
     const detailRef = useRef<HTMLElement>(null);
     const detailHeading = useRef<HTMLHeadingElement>(null);
@@ -47,6 +49,7 @@ const CheongyeonOrgChartPage: React.FC = () => {
     }, [company, filtered]);
     const members = selected?.members.filter(worker => matchesOrganizationQuery(worker.name + ' ' + workerRole(worker), memberQuery)) || [];
     const focusedWorker = members.find(worker => worker.id === workerId);
+    const visibleSites = selected?.sites.filter(entry => matchesOrganizationQuery([entry.name, entry.site?.code, entry.site?.address].filter(Boolean).join(' '), siteQuery)) || [];
     const memberCount = teams.reduce((sum, team) => sum + team.members.length, 0) + (company?.unassigned.length || 0);
     const siteCount = new Set(teams.flatMap(team => team.sites.filter(site => site.site).map(site => site.key))).size;
     const attentionCount = teams.filter(team => team.issues.length).length;
@@ -72,6 +75,8 @@ const CheongyeonOrgChartPage: React.FC = () => {
         setDetailTab('people');
         setWorkerId(null);
         setMemberLimit(30);
+        setSiteQuery('');
+        setSiteLimit(30);
         setMemberQuery(query.trim() && team.members.some(worker => matchesOrganizationQuery(worker.name + ' ' + workerRole(worker), query)) ? query : '');
     };
     const closeDetails = () => { setSelectedId(null); openerRef.current?.focus(); };
@@ -94,8 +99,9 @@ const CheongyeonOrgChartPage: React.FC = () => {
             </span>
             <strong className="cy-org-team-name">{team.name}</strong>
             <span className="cy-org-leader"><FontAwesomeIcon icon={faUserTie} />{team.leaderLabel}</span>
-            <span className="cy-org-team-sites"><FontAwesomeIcon icon={faLocationDot} />
-                {siteError ? '현장 정보 확인 불가' : team.sites.length ? team.sites.map(site => site.name).join(' · ') : '담당 현장 미등록'}</span>
+            <span className="cy-org-team-sites"><FontAwesomeIcon icon={faLocationDot} /><span>
+                {siteError ? '현장 정보 확인 불가' : team.sites.length ? team.sites.slice(0, 2).map(site => site.name).join(' · ') : '담당 현장 미등록'}</span>
+                {!siteError && team.sites.length > 2 && <small>외 {team.sites.length - 2}곳</small>}</span>
             <span className="cy-org-team-bottom"><span><FontAwesomeIcon icon={faUserGroup} /> 구성원 <b>{number(team.members.length)}</b>명</span>
                 <span className="cy-org-team-open">상세 보기 <FontAwesomeIcon icon={faArrowRight} /></span></span>
         </button>
@@ -211,11 +217,15 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                 <div><dt>등록 현장</dt><dd>{siteError ? '현장 정보 확인 불가' : focusedWorker.siteId ? data?.sites.find(site => site.id === focusedWorker.siteId)?.name || '현장 연결 확인 필요' : text(focusedWorker.siteName) || '현장 미배정'}</dd></div></dl></section>}
                         </div> : <div className="cy-org-detail-body">
                             {siteError ? <p role="status" className="cy-org-detail-empty">현장 정보를 다시 조회한 뒤 확인해 주세요.</p> : selected.sites.length ? <>
-                                <p className="cy-org-count-note">배정 인원은 현장 연결이 확인된 구성원만 집계합니다.</p>
-                                {selected.sites.map(entry => <article className="cy-org-site-card" key={entry.key}><div><FontAwesomeIcon icon={faLocationDot} /><h4>{entry.name}</h4></div>
+                                <label className="cy-org-member-search"><FontAwesomeIcon icon={faMagnifyingGlass} /><input type="search" aria-label="선택한 팀 현장 검색" placeholder="현장명·주소·코드 검색" value={siteQuery}
+                                    onChange={event => { setSiteQuery(event.target.value); setSiteLimit(30); }} /></label>
+                                <p className="cy-org-count-note">{visibleSites.length}곳 검색됨 · 배정 인원은 현장 연결이 확인된 구성원만 집계합니다.</p>
+                                {visibleSites.slice(0, siteLimit).map(entry => <article className="cy-org-site-card" key={entry.key}><div><FontAwesomeIcon icon={faLocationDot} /><h4>{entry.name}</h4></div>
                                     {entry.site ? <><p>{text(entry.site.address) || '주소 미등록'}</p><dl><div><dt>현장 상태</dt><dd>{siteStatus(entry.site.status)}</dd></div><div><dt>이 팀의 확인된 배정 인원</dt><dd>{entry.members.length}명</dd></div></dl>
                                         {entry.site.code && <small>현장 코드 · {entry.site.code}</small>}</> : <p className="cy-org-unresolved">연결 확인 필요 · 등록된 현장을 찾을 수 없거나 같은 이름의 현장이 여러 곳입니다.</p>}
                                 </article>)}
+                                {!visibleSites.length && <p className="cy-org-detail-empty">검색된 현장이 없습니다.</p>}
+                                {visibleSites.length > siteLimit && <button className="cy-org-more" onClick={() => setSiteLimit(limit => limit + 30)}>현장 더 보기 ({visibleSites.length - siteLimit}곳)</button>}
                             </> : <p className="cy-org-detail-empty">등록된 담당 현장이 없습니다.</p>}
                         </div>}
                     </aside>}
