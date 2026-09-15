@@ -1,654 +1,228 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import {
-    faArrowRight,
-    faBolt,
-    faBuilding,
-    faCircle,
-    faCrosshairs,
-    faHelmetSafety,
-    faLocationDot,
-    faMagnifyingGlass,
-    faSitemap,
-    faUserGroup,
-    faUserTie,
-    faUsers,
-} from '@fortawesome/free-solid-svg-icons';
-import { OrgNode, useOrganizationTree } from './hooks/useOrganizationTree';
-import { siteService, type Site } from '../../services/siteService';
+import { faArrowRight, faBuilding, faChevronDown, faChevronRight, faCircleExclamation, faList, faLocationDot, faMagnifyingGlass, faPrint, faRotateRight, faSitemap, faUserGroup, faUserTie, faXmark } from '@fortawesome/free-solid-svg-icons';
+import type { Worker } from '../../services/manpowerService';
+import { useOrganizationTree } from './hooks/useOrganizationTree';
+import { buildOrganization, defaultCompany, matchesOrganizationQuery, OrganizationTeam, siteStatus, teamStatus, text, UNASSIGNED_COMPANY, visibleOrganizationTeams, workerRole } from './organizationModel';
 import './CheongyeonOrgChartPage.css';
 
-type DetailFocus = 'worker' | 'site';
-
-type TeamSummary = {
-    id: string;
-    name: string;
-    leader?: OrgNode;
-    leaderName: string;
-    leaderRole: string;
-    members: OrgNode[];
-    sites: string[];
-    status: string;
+const number = (value: number) => value.toLocaleString('ko-KR');
+const Avatar: React.FC<{ worker: Worker }> = ({ worker }) => {
+    const [failed, setFailed] = useState(false);
+    useEffect(() => setFailed(false), [worker.profileImageUrl]);
+    return worker.profileImageUrl && !failed
+        ? <img className="cy-org-avatar" src={worker.profileImageUrl} alt="" loading="lazy" onError={() => setFailed(true)} />
+        : <span className="cy-org-avatar" aria-hidden="true">{worker.name.slice(0, 1)}</span>;
 };
-
-type ConnectorPath = {
-    id: string;
-    d: string;
-};
-
-const normalize = (value: unknown): string => String(value ?? '').trim();
-
-const formatNumber = (value: number): string => Number(value || 0).toLocaleString('ko-KR');
-
-const isCheongyeonName = (name: unknown): boolean => {
-    const text = normalize(name).toLowerCase();
-    return text.includes('청연') || text.includes('cheongyeon') || text.includes('chungyeon');
-};
-
-const getWorkerRole = (worker?: OrgNode): string => (
-    normalize(worker?.data?.role)
-    || normalize(worker?.data?.position)
-    || normalize(worker?.data?.rank)
-    || '직무 미등록'
-);
-
-const getWorkerImage = (worker?: OrgNode): string => (
-    normalize(worker?.data?.profileImageUrl)
-    || normalize(worker?.data?.photoURL)
-    || normalize(worker?.data?.imageUrl)
-    || normalize(worker?.data?.avatarUrl)
-);
-
-const isForeman = (worker: OrgNode): boolean => /반장|foreman/i.test(getWorkerRole(worker));
-
-const getTeamLeader = (team: OrgNode, members: OrgNode[]): OrgNode | undefined => {
-    const configuredLeaderId = normalize(team.data?.leaderId);
-    const configuredLeaderName = normalize(team.data?.leaderName);
-
-    return members.find((member) => normalize(member.id) === configuredLeaderId)
-        || members.find((member) => normalize(member.name) === configuredLeaderName)
-        || members.find((member) => /팀장|대표|부장|소장|리더|leader|manager/i.test(getWorkerRole(member)))
-        || members[0];
-};
-
-const toTeamSummary = (team: OrgNode, siteRows: Site[]): TeamSummary => {
-    const members = team.children
-        .filter((child) => child.type === 'worker')
-        .sort((left, right) => {
-            const priority = Number(isForeman(right)) - Number(isForeman(left));
-            return priority || left.name.localeCompare(right.name, 'ko');
-        });
-    const leader = getTeamLeader(team, members);
-    const registeredSites = Array.isArray(team.data?.siteNames) ? team.data.siteNames : [];
-    const linkedSites = siteRows
-        .filter((site) => (
-            normalize(site.responsibleTeamId) === normalize(team.id)
-            || normalize(site.responsibleTeamName) === normalize(team.name)
-        ))
-        .map((site) => normalize(site.name));
-    const sites = Array.from(new Set([
-        normalize(team.data?.assignedSiteName),
-        ...registeredSites.map(normalize),
-        ...linkedSites,
-        ...members.map((member) => normalize(member.data?.siteName)),
-    ].filter(Boolean)));
-
-    return {
-        id: team.id,
-        name: normalize(team.name) || '이름 없는 팀',
-        leader,
-        leaderName: normalize(team.data?.leaderName) || leader?.name || '리더 미정',
-        leaderRole: getWorkerRole(leader),
-        members,
-        sites,
-        status: normalize(team.data?.status) || 'active',
-    };
-};
-
-const PersonAvatar: React.FC<{ person?: OrgNode; className?: string }> = ({ person, className = '' }) => {
-    const image = getWorkerImage(person);
-    const name = normalize(person?.name) || '?';
-
-    if (image) {
-        return <img src={image} alt={`${name} 프로필`} className={`object-cover ${className}`} />;
-    }
-
-    return (
-        <span className={`org-avatar-fallback ${className}`} aria-label={`${name} 프로필`}>
-            {name.slice(0, 1)}
-        </span>
-    );
-};
-
-const ORGANIZATION_PROMISES = [
-    {
-        icon: faUserGroup,
-        label: '사람 먼저',
-        title: '일보다 먼저 안부를 묻습니다.',
-        body: '조직도의 선은 명령만 전달하지 않습니다. 오늘 누가 지쳤는지, 어디에 손이 더 필요한지도 함께 연결합니다.',
-    },
-    {
-        icon: faHelmetSafety,
-        label: '안전 우선',
-        title: '빠른 퇴근보다 안전한 귀가를 선택합니다.',
-        body: '공정이 하루 늦어지는 것보다 한 사람이 다치지 않고 집으로 돌아가는 일이 훨씬 중요합니다.',
-    },
-    {
-        icon: faLocationDot,
-        label: '현장 존중',
-        title: '답은 회의실보다 현장 가까이에 있습니다.',
-        body: '계획표가 현실과 다를 때는 현장의 목소리를 먼저 듣고, 실행하는 사람이 납득할 수 있는 방법을 찾습니다.',
-    },
-    {
-        icon: faUsers,
-        label: '함께 성장',
-        title: '한 사람의 노하우를 모두의 자산으로 남깁니다.',
-        body: '베테랑의 감각이 개인의 기억으로 사라지지 않도록 기록하고 나누며 다음 사람의 시행착오를 줄입니다.',
-    },
-];
-
-const FIELD_DAY_STEPS = [
-    { time: '07:30', label: 'MORNING CHECK', title: '이름을 부르며 하루를 엽니다.', body: '출근 숫자보다 사람의 표정과 컨디션을 먼저 확인하고, 오늘의 위험 요소를 함께 짚습니다.' },
-    { time: '09:10', label: 'FIELD SIGNAL', title: '작은 이상 신호도 바로 연결합니다.', body: '“이 정도는 괜찮겠지”를 넘기지 않고 팀과 현장, 지원 부서가 같은 정보를 보고 빠르게 움직입니다.' },
-    { time: '12:20', label: 'TABLE TALK', title: '밥상에서 더 솔직한 답을 듣습니다.', body: '보고서에 쓰기 어려운 불편과 아이디어를 편하게 나누고, 오후의 계획을 현실에 맞게 다시 조정합니다.' },
-    { time: '17:40', label: 'SAFE RETURN', title: '오늘의 마지막 목표는 무사 귀가입니다.', body: '완료한 일과 남은 위험을 다음 팀에 정확히 넘기고, 서로의 귀가를 확인하며 하루를 닫습니다.' },
-];
-
-const ROLE_STORIES = [
-    { number: '01', label: 'TEAM LEADER', title: '앞에서 끌기보다 옆에서 막아주는 사람', body: '결정이 필요할 때 책임지고, 팀원이 일에 집중할 수 있도록 불필요한 혼선을 먼저 걷어냅니다.' },
-    { number: '02', label: 'FOREMAN', title: '도면과 현실 사이를 번역하는 사람', body: '오늘의 공정, 장비, 날씨, 작업자의 호흡을 읽고 가장 안전하고 현실적인 순서를 만듭니다.' },
-    { number: '03', label: 'FIELD CREW', title: '계획을 실제 결과로 바꾸는 사람', body: '작은 오차를 가장 먼저 발견하고, 손끝의 경험으로 현장의 품질과 동료의 안전을 함께 지킵니다.' },
-    { number: '04', label: 'SUPPORT TEAM', title: '보이지 않는 곳에서 길을 비우는 사람', body: '자료, 일정, 자원, 행정의 막힘을 풀어 현장의 좋은 판단이 늦지 않게 도착하도록 돕습니다.' },
-];
 
 const CheongyeonOrgChartPage: React.FC = () => {
-    const { treeData, loading } = useOrganizationTree();
+    const { data, loading, error, siteError, updatedAt, refresh } = useOrganizationTree();
+    const groups = useMemo(() => data ? buildOrganization(data, !siteError) : [], [data, siteError]);
+    const [companyId, setCompanyId] = useState('');
     const [query, setQuery] = useState('');
-    const [siteRows, setSiteRows] = useState<Site[]>([]);
-    const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
-    const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
-    const [selectedSiteName, setSelectedSiteName] = useState('');
-    const [detailFocus, setDetailFocus] = useState<DetailFocus>('worker');
-    const [connectorPaths, setConnectorPaths] = useState<ConnectorPath[]>([]);
-    const networkRef = useRef<HTMLDivElement | null>(null);
-    const commandNodeRef = useRef<HTMLDivElement | null>(null);
-    const teamNodeRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-
-    useEffect(() => {
-        document.body.classList.add('cheongyeon-org-codeit-theme');
-        return () => document.body.classList.remove('cheongyeon-org-codeit-theme');
-    }, []);
-
-    useEffect(() => {
-        let mounted = true;
-
-        siteService.getSites()
-            .then((rows) => {
-                if (mounted) setSiteRows(rows);
-            })
-            .catch((error) => {
-                console.error('[CheongyeonOrgChartPage] Failed to load site data:', error);
-            });
-
-        return () => { mounted = false; };
-    }, []);
-
-    const companies = useMemo(
-        () => treeData.filter((node) => node.type === 'company'),
-        [treeData]
-    );
-
-    const primaryCompany = useMemo(
-        () => companies.find((company) => isCheongyeonName(company.name)) || companies[0] || null,
-        [companies]
-    );
-
-    const teamSummaries = useMemo(() => {
-        const primaryTeams = primaryCompany?.children.filter((node) => node.type === 'team') || [];
-        const sourceTeams = primaryTeams.length > 0
-            ? primaryTeams
-            : companies.flatMap((company) => company.children.filter((node) => node.type === 'team'));
-
-        return sourceTeams
-            .map((team) => toTeamSummary(team, siteRows))
-            .sort((left, right) => left.name.localeCompare(right.name, 'ko'));
-    }, [companies, primaryCompany, siteRows]);
-
-    const visibleTeams = useMemo(() => {
-        const searchTerm = query.trim().toLowerCase();
-        if (!searchTerm) return teamSummaries;
-
-        return teamSummaries.filter((team) => [
-            team.name,
-            team.leaderName,
-            team.leaderRole,
-            ...team.sites,
-            ...team.members.map((member) => `${member.name} ${getWorkerRole(member)}`),
-        ].join(' ').toLowerCase().includes(searchTerm));
-    }, [query, teamSummaries]);
-
-    const selectedTeam = useMemo(
-        () => teamSummaries.find((team) => team.id === selectedTeamId) || null,
-        [selectedTeamId, teamSummaries]
-    );
-
-    const selectedWorker = useMemo(() => {
-        if (!selectedTeam) return null;
-        return selectedTeam.members.find((member) => member.id === selectedWorkerId)
-            || selectedTeam.leader
-            || selectedTeam.members[0]
-            || null;
-    }, [selectedTeam, selectedWorkerId]);
-
-    const selectedSite = useMemo(() => {
-        if (!selectedTeam) return '';
-        return selectedTeam.sites.includes(selectedSiteName)
-            ? selectedSiteName
-            : selectedTeam.sites[0] || '';
-    }, [selectedSiteName, selectedTeam]);
-
-    const selectedSiteWorkers = useMemo(() => {
-        if (!selectedTeam || !selectedSite) return [];
-        return selectedTeam.members.filter((member) => normalize(member.data?.siteName) === selectedSite);
-    }, [selectedSite, selectedTeam]);
-
-    const selectedSiteInfo = useMemo(() => {
-        if (!selectedTeam || !selectedSite) return null;
-        return siteRows.find((site) => (
-            normalize(site.name) === selectedSite
-            && (
-                normalize(site.responsibleTeamId) === selectedTeam.id
-                || normalize(site.responsibleTeamName) === selectedTeam.name
-            )
-        )) || null;
-    }, [selectedSite, selectedTeam, siteRows]);
-
-    const totalMembers = useMemo(
-        () => teamSummaries.reduce((sum, team) => sum + team.members.length, 0),
-        [teamSummaries]
-    );
-
-    const totalSites = useMemo(
-        () => new Set(teamSummaries.flatMap((team) => team.sites)).size,
-        [teamSummaries]
-    );
-
-    const updateConnectors = useCallback(() => {
-        const surface = networkRef.current;
-        const commandNode = commandNodeRef.current;
-        if (!surface || !commandNode) {
-            setConnectorPaths([]);
-            return;
+    const [status, setStatus] = useState('all');
+    const [attention, setAttention] = useState(false);
+    const [view, setView] = useState<'chart' | 'list'>('chart');
+    const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+    const [selectedId, setSelectedId] = useState<string | null>(null);
+    const [detailTab, setDetailTab] = useState<'people' | 'sites'>('people');
+    const [memberQuery, setMemberQuery] = useState('');
+    const [memberLimit, setMemberLimit] = useState(30);
+    const [workerId, setWorkerId] = useState<string | null>(null);
+    const detailRef = useRef<HTMLElement>(null);
+    const detailHeading = useRef<HTMLHeadingElement>(null);
+    const openerRef = useRef<HTMLButtonElement | null>(null);
+    const company = groups.find(group => group.id === companyId) || groups.find(group => group.id === defaultCompany(groups));
+    const teams = company?.teams || [];
+    const filtered = useMemo(() => visibleOrganizationTeams(company?.teams || [], query, status, attention), [company, query, status, attention]);
+    const selected = teams.find(team => team.id === selectedId && filtered.visibleIds.has(team.id));
+    const filtering = Boolean(query.trim() || status !== 'all' || attention);
+    const related = useMemo(() => {
+        const children = new Map<string | null, OrganizationTeam[]>();
+        for (const team of company?.teams || []) {
+            if (!filtered.visibleIds.has(team.id)) continue;
+            children.set(team.parentId, [...(children.get(team.parentId) || []), team]);
         }
+        return children;
+    }, [company, filtered]);
+    const members = selected?.members.filter(worker => matchesOrganizationQuery(worker.name + ' ' + workerRole(worker), memberQuery)) || [];
+    const focusedWorker = members.find(worker => worker.id === workerId);
+    const memberCount = teams.reduce((sum, team) => sum + team.members.length, 0) + (company?.unassigned.length || 0);
+    const siteCount = new Set(teams.flatMap(team => team.sites.filter(site => site.site).map(site => site.key))).size;
+    const attentionCount = teams.filter(team => team.issues.length).length;
 
-        const surfaceBounds = surface.getBoundingClientRect();
-        const commandBounds = commandNode.getBoundingClientRect();
-        const startX = commandBounds.left - surfaceBounds.left + (commandBounds.width / 2);
-        const startY = commandBounds.bottom - surfaceBounds.top - 2;
+    useEffect(() => {
+        document.body.classList.add('cy-organization-theme');
+        return () => document.body.classList.remove('cy-organization-theme');
+    }, []);
+    useEffect(() => {
+        if (selectedId && !selected) setSelectedId(null);
+    }, [selectedId, selected]);
+    useEffect(() => {
+        if (!selectedId) return;
+        detailHeading.current?.focus({ preventScroll: true });
+        detailRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+    }, [selectedId]);
 
-        const nextPaths = visibleTeams.flatMap((team) => {
-            const teamNode = teamNodeRefs.current[team.id];
-            if (!teamNode) return [];
-
-            const teamBounds = teamNode.getBoundingClientRect();
-            const endX = teamBounds.left - surfaceBounds.left + (teamBounds.width / 2);
-            const endY = teamBounds.top - surfaceBounds.top + 4;
-            const controlY = startY + Math.max(42, (endY - startY) * 0.44);
-
-            return [{
-                id: team.id,
-                d: `M ${startX} ${startY} C ${startX} ${controlY}, ${endX} ${controlY}, ${endX} ${endY}`,
-            }];
-        });
-
-        setConnectorPaths(nextPaths);
-    }, [visibleTeams]);
-
-    useLayoutEffect(() => {
-        const frame = window.requestAnimationFrame(updateConnectors);
-        const surface = networkRef.current;
-        const resizeObserver = typeof ResizeObserver === 'undefined' || !surface
-            ? null
-            : new ResizeObserver(updateConnectors);
-
-        if (surface) resizeObserver?.observe(surface);
-        window.addEventListener('resize', updateConnectors);
-
-        return () => {
-            window.cancelAnimationFrame(frame);
-            resizeObserver?.disconnect();
-            window.removeEventListener('resize', updateConnectors);
-        };
-    }, [updateConnectors]);
-
-    const selectTeam = (team: TeamSummary) => {
-        setSelectedTeamId(team.id);
-        setSelectedWorkerId(team.leader?.id || team.members[0]?.id || null);
-        setSelectedSiteName(team.sites[0] || '');
-        setDetailFocus('worker');
+    const resetFilters = () => { setQuery(''); setStatus('all'); setAttention(false); };
+    const changeCompany = (id: string) => { setCompanyId(id); setSelectedId(null); setCollapsed(new Set()); resetFilters(); };
+    const selectTeam = (team: OrganizationTeam, button: HTMLButtonElement) => {
+        openerRef.current = button;
+        setSelectedId(team.id);
+        setDetailTab('people');
+        setWorkerId(null);
+        setMemberLimit(30);
+        setMemberQuery(query.trim() && team.members.some(worker => matchesOrganizationQuery(worker.name + ' ' + workerRole(worker), query)) ? query : '');
+    };
+    const closeDetails = () => { setSelectedId(null); openerRef.current?.focus(); };
+    const toggle = (id: string) => setCollapsed(previous => {
+        const next = new Set(previous);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+    });
+    const print = () => {
+        setCollapsed(new Set());
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => window.print()));
     };
 
-    if (loading) {
-        return (
-            <div className="cheongyeon-org-codeit-page org-loading-page">
-                <div className="org-loading-mark"><FontAwesomeIcon icon={faSitemap} /></div>
-                <p>ORGANIZATION NETWORK LOADING</p>
-            </div>
-        );
-    }
-
-    const companyName = normalize(primaryCompany?.name) || '청연ENG';
-
-    return (
-        <div className="cheongyeon-org-codeit-page">
-            <main className="org-grid-background">
-                <section className="org-network-hero">
-                    <div className="org-shell">
-                        <div className="org-hero-topline">
-                            <span><FontAwesomeIcon icon={faBolt} /> LIVE ORGANIZATION</span>
-                            <span className="org-hero-live-dot"><FontAwesomeIcon icon={faCircle} /> LIVE</span>
-                        </div>
-                        <div className="org-hero-heading-row">
-                            <div>
-                                <p className="org-hero-overline">CHUNG YEON ENG · FIELD COMMAND</p>
-                                <h1>움직이는 조직을<br /><span>한눈에 연결합니다.</span></h1>
-                                <p className="org-hero-description">
-                                    팀을 선택하면 작업자와 담당 현장의 연결 정보를 바로 확인할 수 있습니다.
-                                </p>
-                            </div>
-                            <div className="org-hero-kpis" aria-label="조직 현황">
-                                <div><span>ACTIVE TEAMS</span><strong>{formatNumber(teamSummaries.length)}</strong></div>
-                                <div><span>CONNECTED CREW</span><strong>{formatNumber(totalMembers)}</strong></div>
-                                <div><span>FIELD SITES</span><strong>{formatNumber(totalSites)}</strong></div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <section className="org-network-section" aria-labelledby="organization-network-title">
-                    <div className="org-shell org-network-shell">
-                        <div className="org-network-heading">
-                            <div>
-                                <p>ORGANIZATION MAP</p>
-                                <h2 id="organization-network-title">팀 중심 <span>운영 네트워크</span></h2>
-                            </div>
-                            <label className="org-search-field">
-                                <FontAwesomeIcon icon={faMagnifyingGlass} />
-                                <input
-                                    value={query}
-                                    onChange={(event) => setQuery(event.target.value)}
-                                    placeholder="팀 · 작업자 · 담당 현장 검색"
-                                    aria-label="팀, 작업자 또는 담당 현장 검색"
-                                />
-                            </label>
-                        </div>
-
-                        {visibleTeams.length > 0 ? (
-                            <div className="org-network-surface" ref={networkRef}>
-                                <svg className="org-connector-layer" aria-hidden="true">
-                                    <defs>
-                                        <linearGradient id="org-connector-gradient" x1="0" y1="0" x2="1" y2="1">
-                                            <stop offset="0%" stopColor="#8d7dff" />
-                                            <stop offset="55%" stopColor="#39dcff" />
-                                            <stop offset="100%" stopColor="#68f3be" />
-                                        </linearGradient>
-                                    </defs>
-                                    {connectorPaths.map((path, index) => (
-                                        <g key={path.id}>
-                                            <path className="org-connector-base" d={path.d} />
-                                            <path
-                                                className="org-connector-light"
-                                                d={path.d}
-                                                style={{ animationDelay: `${index * 170}ms` }}
-                                            />
-                                        </g>
-                                    ))}
-                                </svg>
-
-                                <div className="org-command-wrap">
-                                    <div className="org-command-node" ref={commandNodeRef}>
-                                        <span className="org-command-orbit org-command-orbit-one" />
-                                        <span className="org-command-orbit org-command-orbit-two" />
-                                        <span className="org-command-icon"><FontAwesomeIcon icon={faBuilding} /></span>
-                                        <div>
-                                            <span>COMMAND CENTER</span>
-                                            <strong>{companyName}</strong>
-                                        </div>
-                                        <em>{formatNumber(visibleTeams.length)} TEAM LINKED</em>
-                                    </div>
-                                </div>
-
-                                <div className="org-team-grid">
-                                    {visibleTeams.map((team, index) => {
-                                        const foremen = team.members.filter(isForeman).length;
-                                        const isSelected = team.id === selectedTeamId;
-                                        const primarySite = team.sites[0] || '담당 현장 미등록';
-
-                                        return (
-                                            <button
-                                                key={team.id}
-                                                ref={(element) => { teamNodeRefs.current[team.id] = element; }}
-                                                type="button"
-                                                className={`org-team-node ${isSelected ? 'is-selected' : ''}`}
-                                                style={{ animationDelay: `${Math.min(index, 12) * 65}ms` }}
-                                                onClick={() => selectTeam(team)}
-                                                aria-pressed={isSelected}
-                                            >
-                                                <span className="org-team-node-index">{String(index + 1).padStart(2, '0')}</span>
-                                                <span className="org-team-node-pulse" />
-                                                <span className="org-team-node-status">{team.status === 'active' ? '운영 중' : team.status}</span>
-                                                <strong>{team.name}</strong>
-                                                <span className="org-team-node-lead"><FontAwesomeIcon icon={faUserTie} /> {team.leaderName}</span>
-                                                <span className="org-team-node-site"><FontAwesomeIcon icon={faLocationDot} /> {primarySite}</span>
-                                                <span className="org-team-node-metrics">
-                                                    <span><FontAwesomeIcon icon={faUsers} /> {formatNumber(team.members.length)}명</span>
-                                                    <span><FontAwesomeIcon icon={faHelmetSafety} /> 반장 {formatNumber(foremen)}</span>
-                                                </span>
-                                                <span className="org-team-node-action">상세 연결 보기 <FontAwesomeIcon icon={faArrowRight} /></span>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="org-no-results">
-                                <FontAwesomeIcon icon={faSitemap} />
-                                <strong>연결된 팀을 찾지 못했습니다.</strong>
-                                <span>검색어를 지우거나 다른 팀, 작업자, 현장명으로 다시 찾아보세요.</span>
-                            </div>
-                        )}
-
-                        <section className={`org-inspector ${selectedTeam ? 'is-open' : ''}`} aria-live="polite">
-                            {selectedTeam ? (
-                                <>
-                                    <div className="org-inspector-summary">
-                                        <span>TEAM INSPECTOR</span>
-                                        <h3>{selectedTeam.name}</h3>
-                                        <p>{selectedTeam.leaderName} 리더가 이끄는 {formatNumber(selectedTeam.members.length)}명 운영 단위입니다.</p>
-                                        <div className="org-inspector-stat-row">
-                                            <span><FontAwesomeIcon icon={faUserGroup} /> 작업자 {formatNumber(selectedTeam.members.length)}명</span>
-                                            <span><FontAwesomeIcon icon={faCrosshairs} /> 담당 현장 {formatNumber(selectedTeam.sites.length)}곳</span>
-                                        </div>
-                                    </div>
-
-                                    <div className="org-inspector-list-wrap">
-                                        <div className="org-inspector-list-heading">
-                                            <span>작업자</span>
-                                            <small>클릭하여 상세 확인</small>
-                                        </div>
-                                        <div className="org-inspector-chip-list">
-                                            {selectedTeam.members.length > 0 ? selectedTeam.members.map((member) => (
-                                                <button
-                                                    key={member.id}
-                                                    type="button"
-                                                    className={`org-person-chip ${selectedWorker?.id === member.id && detailFocus === 'worker' ? 'is-active' : ''}`}
-                                                    onClick={() => {
-                                                        setSelectedWorkerId(member.id);
-                                                        setDetailFocus('worker');
-                                                    }}
-                                                >
-                                                    <PersonAvatar person={member} className="org-person-chip-avatar" />
-                                                    <span><strong>{member.name}</strong><em>{getWorkerRole(member)}</em></span>
-                                                </button>
-                                            )) : <p className="org-inspector-empty">등록된 작업자가 없습니다.</p>}
-                                        </div>
-                                    </div>
-
-                                    <div className="org-inspector-list-wrap">
-                                        <div className="org-inspector-list-heading">
-                                            <span>담당 현장</span>
-                                            <small>클릭하여 현장 정보 확인</small>
-                                        </div>
-                                        <div className="org-inspector-chip-list org-site-chip-list">
-                                            {selectedTeam.sites.length > 0 ? selectedTeam.sites.map((site) => (
-                                                <button
-                                                    key={site}
-                                                    type="button"
-                                                    className={`org-site-chip ${selectedSite === site && detailFocus === 'site' ? 'is-active' : ''}`}
-                                                    onClick={() => {
-                                                        setSelectedSiteName(site);
-                                                        setDetailFocus('site');
-                                                    }}
-                                                >
-                                                    <FontAwesomeIcon icon={faLocationDot} />
-                                                    <span>{site}</span>
-                                                    <FontAwesomeIcon icon={faArrowRight} />
-                                                </button>
-                                            )) : <p className="org-inspector-empty">담당 현장이 등록되지 않았습니다.</p>}
-                                        </div>
-                                    </div>
-
-                                    <div className="org-focus-card">
-                                        {detailFocus === 'worker' && selectedWorker ? (
-                                            <>
-                                                <div className="org-focus-person">
-                                                    <PersonAvatar person={selectedWorker} className="org-focus-avatar" />
-                                                    <div><span>WORKER DETAIL</span><strong>{selectedWorker.name}</strong><em>{getWorkerRole(selectedWorker)}</em></div>
-                                                </div>
-                                                <div className="org-focus-detail-grid">
-                                                    <span><small>소속 팀</small><strong>{selectedTeam.name}</strong></span>
-                                                    <span><small>현재 담당 현장</small><strong>{normalize(selectedWorker.data?.siteName) || selectedTeam.sites[0] || '현장 미등록'}</strong></span>
-                                                    <span><small>근무 상태</small><strong>{normalize(selectedWorker.data?.status) || '재직'}</strong></span>
-                                                </div>
-                                            </>
-                                        ) : detailFocus === 'site' && selectedSite ? (
-                                            <>
-                                                <div className="org-focus-person org-focus-site-title">
-                                                    <span className="org-focus-site-icon"><FontAwesomeIcon icon={faLocationDot} /></span>
-                                                    <div><span>SITE DETAIL</span><strong>{selectedSite}</strong><em>{selectedTeam.name} 담당 현장</em></div>
-                                                </div>
-                                                <div className="org-focus-detail-grid">
-                                                    <span><small>담당 팀</small><strong>{selectedTeam.name}</strong></span>
-                                                    <span><small>현장 배정 작업자</small><strong>{formatNumber(selectedSiteWorkers.length || selectedTeam.members.length)}명</strong></span>
-                                                    <span><small>현장 주소</small><strong>{normalize(selectedSiteInfo?.address) || '주소 미등록'}</strong></span>
-                                                    <span><small>운영 상태</small><strong>{normalize(selectedSiteInfo?.status) === 'active' || selectedTeam.status === 'active' ? '운영 중' : normalize(selectedSiteInfo?.status) || selectedTeam.status}</strong></span>
-                                                </div>
-                                            </>
-                                        ) : (
-                                            <div className="org-focus-empty">작업자 또는 담당 현장을 선택해 상세 정보를 확인하세요.</div>
-                                        )}
-                                    </div>
-                                </>
-                            ) : (
-                                <div className="org-inspector-placeholder">
-                                    <span><FontAwesomeIcon icon={faCrosshairs} /></span>
-                                    <div><strong>팀을 선택해 연결 정보를 확인하세요.</strong><p>작업자와 담당 현장은 팀을 선택한 뒤 각각 클릭해서 상세하게 볼 수 있습니다.</p></div>
-                                </div>
-                            )}
-                        </section>
-                    </div>
-                </section>
-
-                <section className="org-people-story" aria-labelledby="org-people-story-title">
-                    <div className="org-shell">
-                        <header className="org-story-heading">
-                            <span>01 · PEOPLE BEFORE BOXES</span>
-                            <h2 id="org-people-story-title">조직도 안의 네모보다,<br /><em>그 안에서 일하는 사람을 봅니다.</em></h2>
-                            <p>연결선은 직급의 높낮이를 그리는 장식이 아닙니다. 서로의 상황을 더 빨리 알고, 필요한 도움을 제때 건네기 위한 약속입니다.</p>
-                        </header>
-
-                        <div className="org-promise-grid">
-                            {ORGANIZATION_PROMISES.map((promise, index) => (
-                                <article className="org-promise-card" key={promise.label}>
-                                    <div className="org-promise-card-top">
-                                        <span><FontAwesomeIcon icon={promise.icon} /></span>
-                                        <small>{String(index + 1).padStart(2, '0')} · {promise.label}</small>
-                                    </div>
-                                    <h3>{promise.title}</h3>
-                                    <p>{promise.body}</p>
-                                </article>
-                            ))}
-                        </div>
-                    </div>
-                </section>
-
-                <section className="org-field-day" aria-labelledby="org-field-day-title">
-                    <div className="org-shell org-field-day-layout">
-                        <header className="org-field-day-intro">
-                            <span><FontAwesomeIcon icon={faBolt} /> 02 · A DAY IN THE FIELD</span>
-                            <h2 id="org-field-day-title">한 팀의 하루는<br />연결로 움직입니다.</h2>
-                            <p>화면 속 팀과 현장이 실제 하루에서는 어떻게 이어지는지, 청연의 평범하지만 중요한 네 장면으로 보여드립니다.</p>
-                            <div className="org-field-day-stat">
-                                <strong>{formatNumber(teamSummaries.length)}</strong><span>개 팀이</span>
-                                <strong>{formatNumber(totalSites)}</strong><span>개 현장을 함께 지킵니다.</span>
-                            </div>
-                        </header>
-
-                        <ol className="org-day-timeline">
-                            {FIELD_DAY_STEPS.map((step) => (
-                                <li key={step.time}>
-                                    <time>{step.time}</time>
-                                    <span className="org-day-dot" aria-hidden="true" />
-                                    <div>
-                                        <small>{step.label}</small>
-                                        <h3>{step.title}</h3>
-                                        <p>{step.body}</p>
-                                    </div>
-                                </li>
-                            ))}
-                        </ol>
-                    </div>
-                </section>
-
-                <section className="org-role-section" aria-labelledby="org-role-title">
-                    <div className="org-shell">
-                        <header className="org-story-heading org-story-heading-wide">
-                            <span>03 · EVERY ROLE MATTERS</span>
-                            <h2 id="org-role-title">직함은 다르지만,<br /><em>한 사람도 배경이 되지 않습니다.</em></h2>
-                            <p>현장은 영웅 한 명이 아니라 서로 다른 역할이 정확한 순간에 손을 맞잡을 때 완성됩니다.</p>
-                        </header>
-                        <div className="org-role-grid">
-                            {ROLE_STORIES.map((role) => (
-                                <article className="org-role-card" key={role.number}>
-                                    <span>{role.number}</span>
-                                    <small>{role.label}</small>
-                                    <h3>{role.title}</h3>
-                                    <p>{role.body}</p>
-                                    <i aria-hidden="true" />
-                                </article>
-                            ))}
-                        </div>
-                    </div>
-                </section>
-
-                <section className="org-closing-letter" aria-labelledby="org-closing-title">
-                    <div className="org-shell org-closing-card">
-                        <div className="org-closing-mark"><FontAwesomeIcon icon={faUserGroup} /></div>
-                        <div>
-                            <span>04 · WE GO HOME TOGETHER</span>
-                            <h2 id="org-closing-title">성과는 숫자로 남지만,<br />좋은 조직은 사람의 기억에 남습니다.</h2>
-                            <p>
-                                {formatNumber(totalMembers)}명의 동료가 {formatNumber(totalSites)}개의 현장에서 같은 이름으로 일합니다.
-                                일이 잘된 날뿐 아니라 일이 꼬인 날에도 누구에게 말해야 할지 아는 조직,
-                                실수한 사람을 숨기기보다 다시 안전하게 일할 방법을 찾는 조직이 되겠습니다.
-                            </p>
-                            <blockquote>오늘도 각자의 자리에서 일한 모든 사람에게, “무사히 돌아와줘서 고맙습니다.”</blockquote>
-                        </div>
-                    </div>
-                </section>
-            </main>
-        </div>
+    const teamCard = (team: OrganizationTeam) => (
+        <button type="button" className={'cy-org-team ' + (selected?.id === team.id ? 'is-selected ' : '') + (!filtered.matchedIds.has(team.id) ? 'is-context' : '')}
+            onClick={event => selectTeam(team, event.currentTarget)} aria-pressed={selected?.id === team.id} aria-label={team.name + ' 팀 상세 보기'}>
+            <span className="cy-org-team-top"><span className={'cy-org-status status-' + text(team.source.status)}>{teamStatus(team.source.status)}</span>
+                {!filtered.matchedIds.has(team.id) && <span className="cy-org-context">상위 팀</span>}
+                {team.issues.length > 0 && <span className="cy-org-alert-dot" title={team.issues.join(' · ')}><FontAwesomeIcon icon={faCircleExclamation} /><span className="cy-org-sr">정보 확인 필요</span></span>}
+            </span>
+            <strong className="cy-org-team-name">{team.name}</strong>
+            <span className="cy-org-leader"><FontAwesomeIcon icon={faUserTie} />{team.leaderLabel}</span>
+            <span className="cy-org-team-sites"><FontAwesomeIcon icon={faLocationDot} />
+                {siteError ? '현장 정보 확인 불가' : team.sites.length ? team.sites.map(site => site.name).join(' · ') : '담당 현장 미등록'}</span>
+            <span className="cy-org-team-bottom"><span><FontAwesomeIcon icon={faUserGroup} /> 구성원 <b>{number(team.members.length)}</b>명</span>
+                <span className="cy-org-team-open">상세 보기 <FontAwesomeIcon icon={faArrowRight} /></span></span>
+        </button>
     );
-};
+    const branch = (team: OrganizationTeam): React.ReactNode => {
+        const children = related.get(team.id) || [];
+        const isCollapsed = !filtering && collapsed.has(team.id);
+        return <li className="cy-org-branch" key={team.id}>
+            {teamCard(team)}
+            {children.length > 0 && <>
+                <button type="button" className="cy-org-branch-toggle" onClick={() => toggle(team.id)}
+                    aria-expanded={!isCollapsed} aria-controls={'org-children-' + team.id} disabled={filtering}>
+                    <FontAwesomeIcon icon={isCollapsed ? faChevronRight : faChevronDown} /> 하위 팀 {children.length}개 {isCollapsed ? '펼치기' : '접기'}
+                </button>
+                {!isCollapsed && <ul id={'org-children-' + team.id} className="cy-org-children">{children.map(branch)}</ul>}
+            </>}
+        </li>;
+    };
 
+    if (!data && loading) return <div className="cy-org cy-org-loading" role="status"><FontAwesomeIcon icon={faSitemap} /><h1>조직도를 불러오고 있습니다</h1><p>회사·팀·구성원·현장 정보를 연결하는 중입니다.</p></div>;
+    if (!data && error) return <div className="cy-org cy-org-loading"><FontAwesomeIcon icon={faCircleExclamation} /><h1>조직도를 불러오지 못했습니다</h1><p role="alert">{error}</p><button className="cy-org-button is-primary" onClick={refresh}>다시 불러오기</button></div>;
+
+    return <div className="cy-org">
+        <div className="cy-org-shell">
+            <header className="cy-org-header">
+                <div><p className="cy-org-eyebrow"><span /> CHEONGYEON ENG · ORGANIZATION</p><h1>사람과 현장을 잇는 <em>조직도</em></h1>
+                    <p className="cy-org-description">회사의 팀 구성부터 함께 일하는 동료, 담당 현장까지 살펴보세요.</p></div>
+                <div className="cy-org-header-actions">
+                    <button className="cy-org-button" onClick={refresh} disabled={loading}><FontAwesomeIcon icon={faRotateRight} spin={loading} />{loading ? '갱신 중' : '새로고침'}</button>
+                    <button className="cy-org-button" onClick={print} disabled={!company}><FontAwesomeIcon icon={faPrint} /> 인쇄</button>
+                </div>
+            </header>
+            {error && <div role="alert" className="cy-org-notice is-error">{error}</div>}
+            {siteError && <div role="alert" className="cy-org-notice">{siteError}<button onClick={refresh} disabled={loading}>다시 조회</button></div>}
+            <section className="cy-org-company-bar" aria-label="회사 선택">
+                <div className="cy-org-brand-mark" aria-hidden="true">CY<span>ENG</span></div>
+                <div className="cy-org-company-field"><label htmlFor="org-company">조회할 회사</label>
+                    <select id="org-company" value={company?.id || ''} onChange={event => changeCompany(event.target.value)} disabled={!groups.length}>
+                        {!groups.length && <option value="">등록된 회사 없음</option>}
+                        {groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+                    </select>
+                    <span>{company?.type || '조직 정보'}<i /> 회사 → 상위 팀 → 하위 팀</span>
+                </div>
+                <div className="cy-org-updated"><span className={'cy-org-sync-dot ' + (error ? 'is-stale' : '')} />{updatedAt ? '조회 ' + updatedAt.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '조회 정보 없음'}<small>새로고침으로 최신 정보를 확인하세요.</small></div>
+            </section>
+            <section className="cy-org-stats" aria-label="선택한 회사 전체 조직 현황">
+                <div><span>등록 팀</span><strong>{number(teams.length)}<small>개</small></strong><p>운영 중 {number(teams.filter(team => team.source.status === 'active').length)}개</p></div>
+                <div><span>재직 구성원</span><strong>{number(memberCount)}<small>명</small></strong><p>휴직 포함 · 퇴사·비활성 제외</p></div>
+                <div><span>확인된 담당 현장</span><strong>{siteError ? '—' : number(siteCount)}<small>곳</small></strong><p>중복 없이 집계 · 완료 현장 포함</p></div>
+                <button className={attention ? 'is-active' : ''} onClick={() => setAttention(previous => !previous)} aria-pressed={attention}>
+                    <span>정보 확인이 필요한 팀 <FontAwesomeIcon icon={faArrowRight} /></span><strong>{number(attentionCount)}<small>개</small></strong><p>팀장 지정 · 조직·현장 연결</p>
+                </button>
+            </section>
+            {company?.id === UNASSIGNED_COMPANY && <div className="cy-org-notice">회사가 연결되지 않았거나 기존 연결을 찾을 수 없는 조직입니다. 특정 회사의 인원으로 합산하지 않습니다.</div>}
+            {company && company.unassigned.length > 0 && <details className="cy-org-unassigned"><summary><FontAwesomeIcon icon={faCircleExclamation} /> 팀 미배정 구성원 {company.unassigned.length}명 <span>구성원 확인</span></summary>
+                <p>{company.id === UNASSIGNED_COMPANY ? '회사와 팀의 소속 관계를 확인할 수 없는 구성원입니다.' : '이 회사에 등록되어 있지만 소속 팀을 확인할 수 없는 구성원입니다.'}</p>
+                <div>{company.unassigned.map(worker => <span key={worker.id}>{worker.name}<small>{workerRole(worker)}</small></span>)}</div>
+            </details>}
+            <section className="cy-org-workspace" aria-labelledby="org-chart-title">
+                <div className="cy-org-workspace-heading"><div><p className="cy-org-eyebrow">ORGANIZATION EXPLORER</p><h2 id="org-chart-title">{company?.name || '회사'} 팀 구성</h2></div>
+                    <div className="cy-org-view-switch" role="group" aria-label="조직도 보기 방식">
+                        <button aria-pressed={view === 'chart'} onClick={() => setView('chart')}><FontAwesomeIcon icon={faSitemap} /> 조직도</button>
+                        <button aria-pressed={view === 'list'} onClick={() => setView('list')}><FontAwesomeIcon icon={faList} /> 목록</button>
+                    </div>
+                </div>
+                <div className="cy-org-toolbar">
+                    <label className="cy-org-search"><FontAwesomeIcon icon={faMagnifyingGlass} /><input type="search" value={query} onChange={event => setQuery(event.target.value)}
+                        placeholder="팀·이름·직무·현장 검색 (초성 가능)" aria-label="팀, 구성원, 직무 또는 현장 검색" />{query && <button onClick={() => setQuery('')} aria-label="검색어 지우기"><FontAwesomeIcon icon={faXmark} /></button>}</label>
+                    <label className="cy-org-status-select"><span>팀 상태</span><select aria-label="팀 상태" value={status} onChange={event => setStatus(event.target.value)}>
+                        <option value="all">모든 상태</option><option value="active">운영 중</option><option value="waiting">대기</option><option value="closed">종료</option>
+                    </select></label>
+                </div>
+                <div className="cy-org-results-bar"><p role="status">{filtering ? '검색 결과 ' : '전체 '}<strong>{filtered.matched.length}개 팀</strong>{filtering && ' / 전체 ' + teams.length + '개'}{attention && <span className="cy-org-filter-tag">정보 확인 필요</span>}</p>
+                    <div>{filtering && <button onClick={resetFilters}>필터 초기화</button>}{view === 'chart' && teams.some(team => team.parentId) && <>
+                        <button onClick={() => setCollapsed(new Set())} disabled={filtering}>모두 펼치기</button><button onClick={() => setCollapsed(new Set(teams.map(team => team.id)))} disabled={filtering}>모두 접기</button>
+                    </>}</div>
+                </div>
+                <div className={'cy-org-explorer ' + (selected ? 'has-details' : '')}>
+                    <div className="cy-org-map">
+                        {!filtered.matched.length ? <div className="cy-org-empty"><FontAwesomeIcon icon={faSitemap} /><h3>{teams.length ? '조건에 맞는 팀이 없습니다' : '아직 연결된 팀이 없습니다'}</h3>
+                            <p>{teams.length ? '다른 검색어나 팀 상태로 다시 찾아보세요.' : '회사와 팀의 소속 관계가 등록되면 여기에 표시됩니다.'}</p>{filtering && <button className="cy-org-button" onClick={resetFilters}>필터 초기화</button>}</div>
+                            : view === 'chart' ? <>
+                                <div className="cy-org-root"><FontAwesomeIcon icon={faBuilding} /><div><small>{company?.type}</small><strong>{company?.name}</strong></div><span>{teams.length}개 팀</span></div>
+                                <ul className="cy-org-forest" aria-label="회사별 팀 관계">{(related.get(null) || []).map(branch)}</ul>
+                            </> : <div className="cy-org-table-scroll"><table className="cy-org-table"><caption className="cy-org-sr">검색 조건에 맞는 팀 목록</caption><thead><tr><th scope="col">팀 / 팀장</th><th scope="col">상위 팀</th><th scope="col">상태</th><th scope="col">구성원</th><th scope="col">담당 현장</th><th scope="col"><span className="cy-org-sr">정보 상태</span></th></tr></thead>
+                                <tbody>{filtered.matched.map(team => <tr key={team.id} className={selected?.id === team.id ? 'is-selected' : ''}>
+                                    <th scope="row"><button onClick={event => selectTeam(team, event.currentTarget)} aria-label={team.name + ' 팀 상세 보기'}>{team.name}<small>{team.leaderLabel}</small></button></th>
+                                    <td>{teams.find(parent => parent.id === team.parentId)?.name || '회사 직속'}</td><td><span className={'cy-org-status status-' + text(team.source.status)}>{teamStatus(team.source.status)}</span></td>
+                                    <td>{team.members.length}명</td><td>{siteError ? '확인 불가' : team.sites.length + '곳'}</td><td>{team.issues.length > 0 && <span className="cy-org-table-issue">확인 필요</span>}</td>
+                                </tr>)}</tbody></table></div>}
+                        <p className="cy-org-map-note">연결선은 등록된 상·하위 팀 관계입니다. 팀을 선택하면 구성원과 현장을 확인할 수 있습니다.</p>
+                    </div>
+                    {selected && <aside ref={detailRef} className="cy-org-detail" aria-labelledby="org-detail-title" onKeyDown={event => { if (event.key === 'Escape') closeDetails(); }}>
+                        <header><div><p className="cy-org-eyebrow">TEAM DETAIL</p><h3 ref={detailHeading} tabIndex={-1} id="org-detail-title">{selected.name}</h3></div><button onClick={closeDetails} aria-label="팀 상세 닫기"><FontAwesomeIcon icon={faXmark} /></button></header>
+                        <div className="cy-org-detail-meta"><span className={'cy-org-status status-' + text(selected.source.status)}>{teamStatus(selected.source.status)}</span><span><FontAwesomeIcon icon={faUserTie} /> {selected.leaderLabel}</span></div>
+                        {selected.parentId && <p className="cy-org-parent-label">상위 팀 · {teams.find(team => team.id === selected.parentId)?.name}</p>}
+                        {selected.issues.length > 0 && <ul className="cy-org-detail-issues">{selected.issues.map(issue => <li key={issue}><FontAwesomeIcon icon={faCircleExclamation} /> {issue}</li>)}</ul>}
+                        <div className="cy-org-detail-tabs" role="group" aria-label="팀 상세 정보">
+                            <button aria-pressed={detailTab === 'people'} onClick={() => setDetailTab('people')}>구성원 <b>{selected.members.length}</b></button>
+                            <button aria-pressed={detailTab === 'sites'} onClick={() => setDetailTab('sites')}>담당 현장 <b>{siteError ? '—' : selected.sites.length}</b></button>
+                        </div>
+                        {detailTab === 'people' ? <div className="cy-org-detail-body">
+                            <label className="cy-org-member-search"><FontAwesomeIcon icon={faMagnifyingGlass} /><input type="search" aria-label="선택한 팀 구성원 검색" placeholder="이름·직무 검색" value={memberQuery}
+                                onChange={event => { setMemberQuery(event.target.value); setMemberLimit(30); setWorkerId(null); }} /></label>
+                            <p className="cy-org-count-note">{members.length}명 표시 · 구성원을 선택해 배정 정보를 확인하세요.</p>
+                            <div className="cy-org-member-list">{members.slice(0, memberLimit).map(worker => <button key={worker.id} className={workerId === worker.id ? 'is-selected' : ''}
+                                onClick={() => setWorkerId(worker.id!)} aria-pressed={workerId === worker.id}>
+                                <Avatar worker={worker} /><span><strong>{worker.name}{selected.leader?.id === worker.id && <i>팀장</i>}</strong><small>{workerRole(worker)}</small></span><em>{text(worker.status) || '상태 미등록'}</em>
+                            </button>)}</div>
+                            {!members.length && <p className="cy-org-detail-empty">{memberQuery ? '검색된 구성원이 없습니다.' : '등록된 재직 구성원이 없습니다.'}</p>}
+                            {members.length > memberLimit && <button className="cy-org-more" onClick={() => setMemberLimit(limit => limit + 30)}>구성원 더 보기 ({members.length - memberLimit}명)</button>}
+                            {focusedWorker && <section className="cy-org-person-detail" aria-label="선택한 구성원 정보"><strong>{focusedWorker.name}</strong><dl><div><dt>소속 팀</dt><dd>{selected.name}</dd></div><div><dt>직무</dt><dd>{workerRole(focusedWorker)}</dd></div>
+                                <div><dt>등록 현장</dt><dd>{siteError ? '현장 정보 확인 불가' : focusedWorker.siteId ? data?.sites.find(site => site.id === focusedWorker.siteId)?.name || '현장 연결 확인 필요' : text(focusedWorker.siteName) || '현장 미배정'}</dd></div></dl></section>}
+                        </div> : <div className="cy-org-detail-body">
+                            {siteError ? <p role="status" className="cy-org-detail-empty">현장 정보를 다시 조회한 뒤 확인해 주세요.</p> : selected.sites.length ? <>
+                                <p className="cy-org-count-note">배정 인원은 현장 연결이 확인된 구성원만 집계합니다.</p>
+                                {selected.sites.map(entry => <article className="cy-org-site-card" key={entry.key}><div><FontAwesomeIcon icon={faLocationDot} /><h4>{entry.name}</h4></div>
+                                    {entry.site ? <><p>{text(entry.site.address) || '주소 미등록'}</p><dl><div><dt>현장 상태</dt><dd>{siteStatus(entry.site.status)}</dd></div><div><dt>이 팀의 확인된 배정 인원</dt><dd>{entry.members.length}명</dd></div></dl>
+                                        {entry.site.code && <small>현장 코드 · {entry.site.code}</small>}</> : <p className="cy-org-unresolved">연결 확인 필요 · 등록된 현장을 찾을 수 없거나 같은 이름의 현장이 여러 곳입니다.</p>}
+                                </article>)}
+                            </> : <p className="cy-org-detail-empty">등록된 담당 현장이 없습니다.</p>}
+                        </div>}
+                    </aside>}
+                </div>
+            </section>
+            <footer className="cy-org-footer"><span><FontAwesomeIcon icon={faSitemap} /> 조직을 읽는 방법</span><p>회사별 소속 팀과 재직 구성원을 기준으로 표시합니다. 현장 배정 인원은 출근 인원과 다르며, 누락된 정보는 임의로 채우지 않습니다.</p><small>CHEONGYEON ENG · 함께 일하는 조직을 더 가깝게</small></footer>
+        </div>
+    </div>;
+};
 export default CheongyeonOrgChartPage;
