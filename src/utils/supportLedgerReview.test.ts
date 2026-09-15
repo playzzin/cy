@@ -54,3 +54,30 @@ describe('full support ledger comparison', () => {
         expect(reviewLedgerPosting('vehicle', '2026-09', [{ ...bill, teamId: '__office__' }], [], [])[0].title).toBe('사무실 부담');
     });
 });
+
+
+describe('draft posting progress', () => {
+    const draft = { ...bill, status: 'draft' };
+    it('separates valid drafts awaiting confirmation from unresolved connections', () => {
+        expect(reviewLedgerPosting('vehicle', '2026-09', [draft], [], [])[0]).toMatchObject({ level: 'pending', title: '청구 확정 대기' });
+        expect(reviewLedgerPosting('accommodation', '2026-09', [{ ...draft, recipientType: 'worker' }], [], [])[0].level).toBe('pending');
+        expect(reviewLedgerPosting('accommodation', '2026-09', [{ ...draft, teamId: '' }], [], [])[0].level).toBe('unverified');
+        expect(reviewLedgerPosting('accommodation', '2026-09', [bill], [], [])[0].level).toBe('unverified');
+    });
+    it('still detects mismatched and duplicate saved deductions for drafts', () => {
+        expect(reviewLedgerPosting('accommodation', '2026-09', [{ ...draft, total: 20000 }], [saved], [])[0].level).toBe('difference');
+        expect(reviewLedgerPosting('accommodation', '2026-09', [draft], [saved, saved], [])[0].title).toBe('정산 중복 반영');
+    });
+    it('does not hide broken personal deduction links behind a draft status', () => {
+        const personal = { ...draft, recipientType: 'worker' };
+        expect(reviewLedgerPosting('accommodation', '2026-09', [{ ...personal, postedAdvancePaymentId: 'missing' }], [], [])[0].level).toBe('unverified');
+        const partial = { id: 'advance', yearMonth: '2026-09', accommodationBillingDocId: bill.id, amounts: {} };
+        expect(reviewLedgerPosting('accommodation', '2026-09', [personal], [], [partial])[0].level).toBe('unverified');
+    });
+    it('keeps a draft linked to the wrong team unresolved', () => {
+        expect(reviewLedgerPosting('accommodation', '2026-09', [draft], [{ ...saved, teamId: 'wrong-team' }], [])[0].level).toBe('unverified');
+    });
+    it('does not treat unknown statuses as drafts', () => {
+        expect(reviewLedgerPosting('vehicle', '2026-09', [{ ...bill, status: 'unknown' }], [], [])[0].level).toBe('unverified');
+    });
+});

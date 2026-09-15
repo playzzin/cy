@@ -28,8 +28,16 @@ test('invalidates results after bills change and blocks unsaved inputs', async (
     mocked.mockResolvedValue([]);
     const view = render(<SupportLedgerReview {...props} />);
     fireEvent.click(screen.getByText('월 전체 대조하기'));
-    await waitFor(() => expect(screen.getByText(/원장 0건/)).toBeInTheDocument());
+    expect(await screen.findByText(/원장 0건/)).toBeInTheDocument();
     view.rerender(<SupportLedgerReview {...props} billingRevision="new" blocked />);
     expect(screen.queryByText(/원장 0건/)).not.toBeInTheDocument();
     expect(screen.getByText('월 전체 대조하기')).toBeDisabled();
+});
+
+
+test('shows pending drafts separately from unresolved data', async () => {
+    mocked.mockResolvedValue([{ label: '시험 청구', title: '청구 확정 대기', detail: '금액 확인 후 확정해 주세요.', level: 'pending' }]);
+    render(<SupportLedgerReview {...props} />);
+    fireEvent.click(screen.getByText('월 전체 대조하기'));
+    expect(await screen.findByText(/추가 확인 0건 · 청구 확정 대기 1건/)).toBeInTheDocument();
 });

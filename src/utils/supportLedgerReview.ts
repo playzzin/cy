@@ -32,7 +32,7 @@ export interface LedgerReviewFinding {
     label: string;
     title: string;
     detail: string;
-    level: 'difference' | 'unverified' | 'info';
+    level: 'difference' | 'unverified' | 'pending' | 'info';
     expected?: number;
     actual?: number;
 }
@@ -93,17 +93,21 @@ export function reviewLedgerPosting(kind: 'accommodation' | 'vehicle', month: st
     const bills = activeReviewBills(allBills);
     for (const bill of bills) {
         const base = { label: bill.label };
+        const draft = bill.status.trim().toUpperCase() === 'DRAFT';
+        const pending: LedgerReviewFinding = { ...base, level: 'pending', title: '청구 확정 대기', detail: '작성 중인 청구입니다. 금액과 부담 대상을 검토한 뒤 확정하고 정산 또는 개인 공제 반영 여부를 확인해 주세요.' };
         if (bill.teamId === '__office__' || bill.teamId === '__office_staff__') {
             findings.push({ ...base, level: 'info', title: '사무실 부담', detail: '사무실 부담 비용으로 분류되어 있습니다.' });
             continue;
         }
         if (bill.recipientType === 'worker') {
             if (kind === 'vehicle') {
+                if (draft) { findings.push(pending); continue; }
                 findings.push({ ...base, level: 'unverified', title: '개인 차량비 반영 확인 필요', detail: '개인 공제와 연결된 기록이 없어 자동 대조할 수 없습니다.' });
                 continue;
             }
             const matches = advances.filter(a => a.yearMonth === month && a.id === bill.postedAdvancePaymentId && a.accommodationBillingDocId === bill.id);
             if (matches.length !== 1) {
+                if (draft && !bill.postedAdvancePaymentId && !advances.some(a => a.yearMonth === month && a.accommodationBillingDocId === bill.id)) { findings.push(pending); continue; }
                 findings.push({ ...base, level: 'unverified', title: '개인 공제 연결 확인 필요', detail: '청구서와 연결된 개인 공제 기록을 한 건으로 확인할 수 없습니다. 청구 확정 및 공제 반영 상태를 확인해 주세요.' });
                 continue;
             }
@@ -123,6 +127,7 @@ export function reviewLedgerPosting(kind: 'accommodation' | 'vehicle', month: st
         const id = `${kind}_billing:${month}:${bill.id}`;
         const linked = docs.flatMap(s => s.deductions.filter(d => d.id === id && d.origin === `${kind}_billing`));
         if (linked.length !== 1) {
+            if (draft && linked.length === 0 && !settlements.some(s => s.deductions.some(d => d.id === id))) { findings.push(pending); continue; }
             findings.push({ ...base, level: linked.length > 1 ? 'difference' : 'unverified', title: linked.length > 1 ? '정산 중복 반영' : '정산 반영 확인 필요', detail: '청구서 번호로 연결된 저장 정산을 한 건으로 확인할 수 없습니다. 미확정 청구나 구 방식의 원장 합산 정산은 정산 화면에서 확인해 주세요.' });
         } else if (differs(bill.total, linked[0].amount)) {
             findings.push({ ...base, level: 'difference', title: '청구와 저장 정산 차이', detail: docs.some(d => d.confirmed) ? '확정 당시 금액과 현재 청구 금액이 다릅니다. 확정본을 확인해 주세요.' : '저장된 정산 금액이 현재 청구 금액과 다릅니다.', expected: bill.total, actual: linked[0].amount });

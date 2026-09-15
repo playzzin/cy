@@ -36,7 +36,7 @@ export function SupportLedgerReview({ kind, month, blocked, revision, billingRev
         {blocked && <p role="status" className="mt-2 text-sm">자료를 불러온 후 변경사항을 저장해야 검사할 수 있습니다. 읽기 오류가 있었다면 원장을 다시 열어 주세요.</p>}
         {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
         {result && <div className="mt-3 text-sm" role="status">
-            <p>{result.time} · 원장 {result.count}건 · 금액·중복 차이 {result.findings.filter(f => f.level === 'difference').length}건 · 추가 확인 {result.findings.filter(f => f.level === 'unverified').length}건</p>
+            <p>{result.time} · 원장 {result.count}건 · 금액·중복 차이 {result.findings.filter(f => f.level === 'difference').length}건 · 추가 확인 {result.findings.filter(f => f.level === 'unverified').length}건 · 청구 확정 대기 {result.findings.filter(f => f.level === 'pending').length}건</p>
             {!result.findings.length && <p className="mt-2">{result.count ? '검사 범위에서 차이를 발견하지 못했습니다.' : '이 월에는 대조할 원장과 청구가 없습니다.'}</p>}
             <ul className="mt-2 max-h-80 space-y-2 overflow-auto">{result.findings.map((finding, index) => <li key={index} className="rounded bg-slate-50 p-3">
                 <p className="font-semibold">{finding.label} · {finding.title}</p><p>{finding.detail}</p>
