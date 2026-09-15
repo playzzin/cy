@@ -1233,6 +1233,10 @@ service cloud.firestore {
       return data is map && data.get('senderId', '') == 'system:smart-memo-reminder';
     }
 
+    function isTaskNotificationMessage(data) {
+      return data is map && data.get('senderId', '') == 'system:task-notification';
+    }
+
     function canReadBankSystemMessage(data) {
       return isAdmin()
         || ('recipientIds' in data && data.recipientIds is list && request.auth.uid in data.recipientIds);
@@ -1565,6 +1569,8 @@ service cloud.firestore {
     }
 
     match /erp_messages/{messageId} {
+      // 수신자 쿼리는 다른 메시지 유형의 판정을 거치지 않고 같은 수신 권한을 확인합니다.
+      allow list: if hasActiveUserProfile() && request.auth.uid in resource.data.recipientIds;
       allow read: if hasActiveUserProfile()
         && (
           (isBankSystemMessage(resource.data) && canReadBankSystemMessage(resource.data))
@@ -1573,17 +1579,21 @@ service cloud.firestore {
       allow create: if hasActiveUserProfile()
         && !isBankSystemMessage(request.resource.data)
         && !isMemoReminderMessage(request.resource.data)
+        && !isTaskNotificationMessage(request.resource.data)
         && request.resource.data.senderId == request.auth.uid
         && request.resource.data.type in ['direct', 'broadcast'];
       allow update: if hasActiveUserProfile()
         && (
           (isBankSystemMessage(resource.data) && isValidErpMessageReadReceiptUpdate())
           || (isMemoReminderMessage(resource.data) && isValidErpMessageReadReceiptUpdate())
+          || (isTaskNotificationMessage(resource.data) && isValidErpMessageReadReceiptUpdate())
           || (
             !isBankSystemMessage(resource.data)
             && !isBankSystemMessage(request.resource.data)
             && !isMemoReminderMessage(resource.data)
             && !isMemoReminderMessage(request.resource.data)
+            && !isTaskNotificationMessage(resource.data)
+            && !isTaskNotificationMessage(request.resource.data)
             && request.resource.data.type in ['direct', 'broadcast']
             && (
               isAdmin()
@@ -1595,6 +1605,7 @@ service cloud.firestore {
       allow delete: if hasActiveUserProfile()
         && !isBankSystemMessage(resource.data)
         && !isMemoReminderMessage(resource.data)
+        && !isTaskNotificationMessage(resource.data)
         && (isAdmin() || ('senderId' in resource.data && resource.data.senderId == request.auth.uid));
     }
 

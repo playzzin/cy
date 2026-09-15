@@ -6,6 +6,7 @@ import PrivateRoute from './components/auth/PrivateRoute';
 import Login from './components/auth/Login';
 import AppIntroScreen from './components/common/AppIntroScreen';
 import AnalyticsRouteTracker from './components/analytics/AnalyticsRouteTracker';
+import RouteDocumentTitle from './components/common/RouteDocumentTitle';
 import { lazyNamed } from './utils/lazyNamed';
 
 const ProtectedRouteShell = React.lazy(() => import('./routes/ProtectedRouteShell'));
@@ -265,6 +266,7 @@ const App: React.FC = () => {
     <AuthProvider>
       {isStaging && <div role="note" className="sticky top-0 z-[100] bg-amber-200 px-4 py-2 text-center text-sm font-bold text-amber-950">검증 서버 · 시험 자료만 입력해 주세요 · 운영 서버와 분리되어 있습니다</div>}
       <Router future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
+        <RouteDocumentTitle />
         <AnalyticsRouteTracker />
         <React.Suspense fallback={<AppIntroScreen />}>
           <Routes>

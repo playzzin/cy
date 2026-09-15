@@ -48,6 +48,7 @@ export interface Task {
     description?: string;
     assignee: string;
     createdBy?: string; // 추가된 필드: 업무 요청자
+    createdById?: string; // 알림 수신자는 표시 이름 대신 계정 ID로 연결합니다.
     priority: '긴급' | '보통';
     status: '요청' | '진행' | '완료' | '검토' | '요청중' | '진행중' | '검토중' | '재요청' | '완료함';
     dueDate: string;

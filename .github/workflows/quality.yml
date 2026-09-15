@@ -34,6 +34,9 @@ jobs:
       - name: Verify release comparison
         run: node --test scripts/release-manifest.test.cjs scripts/staging-isolation.test.cjs
 
+      - name: Verify task notification behavior
+        run: node --test functions/lib/taskNotifications.test.js
+
       # Quality-only build; production deployment uses the local production environment.
       - name: Build hosting app
         env:
@@ -69,5 +72,7 @@ jobs:
       - run: npm install --global firebase-tools@15.1.0
       - name: Verify memo access and reminder rules with fake data
         run: node scripts/run-smart-memo-rules-test.mjs
+      - name: Verify task notifications and recipient access with fake data
+        run: node scripts/run-task-notification-rules-test.mjs
       - name: Verify storage access with fake data
         run: node scripts/run-storage-manager-rules-test.mjs

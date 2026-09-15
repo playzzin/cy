@@ -1,5 +1,6 @@
 // 요청 작성과 진행 확인에 집중한 간결한 개발 요청 화면입니다.
 import React, { FormEvent, useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faArrowRight,
@@ -97,6 +98,8 @@ const getCurrentUserName = (displayName?: string | null, email?: string | null) 
 
 const TodoPage: React.FC = () => {
     const { currentUser } = useAuth();
+    const location = useLocation();
+    const linkedTaskId = new URLSearchParams(location.search).get('taskId');
     const currentUserName = getCurrentUserName(currentUser?.displayName, currentUser?.email);
     const initialFilter: ViewFilter = new URLSearchParams(window.location.search).get('filter') === 'mine'
         ? 'mine'
@@ -118,6 +121,23 @@ const TodoPage: React.FC = () => {
     const [revisionReason, setRevisionReason] = useState('');
     const [previewImage, setPreviewImage] = useState<string | null>(null);
     const [reviewTaskId, setReviewTaskId] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!linkedTaskId) return;
+        setFilter('all');
+        setSearchQuery('');
+        setExpandedTaskId(linkedTaskId);
+        setReviewTaskId(null);
+        setRevisionTaskId(null);
+        setRevisionReason('');
+        setCommentText('');
+        setCommentImages([]);
+    }, [linkedTaskId]);
+
+    useEffect(() => {
+        if (loading || !linkedTaskId) return;
+        document.getElementById(`task-${linkedTaskId}`)?.scrollIntoView?.({ block: 'center' });
+    }, [loading, linkedTaskId]);
 
     useEffect(() => {
         let active = true;
@@ -165,16 +185,16 @@ const TodoPage: React.FC = () => {
 
     const counts = useMemo(() => ({
         all: tasks.length,
-        mine: tasks.filter(task => task.createdBy === currentUserName).length,
+        mine: tasks.filter(task => task.createdById ? task.createdById === currentUser?.uid : task.createdBy === currentUserName).length,
         active: tasks.filter(task => ACTIVE_STATUSES.has(task.status)).length,
         review: tasks.filter(task => REVIEW_STATUSES.has(task.status)).length,
         done: tasks.filter(task => DONE_STATUSES.has(task.status)).length,
-    }), [currentUserName, tasks]);
+    }), [currentUser?.uid, currentUserName, tasks]);
 
     const filteredTasks = useMemo(() => {
         const query = searchQuery.trim().toLocaleLowerCase();
         const matchesFilter = (task: Task) => {
-            if (filter === 'mine') return task.createdBy === currentUserName;
+            if (filter === 'mine') return task.createdById ? task.createdById === currentUser?.uid : task.createdBy === currentUserName;
             if (filter === 'active') return ACTIVE_STATUSES.has(task.status);
             if (filter === 'review') return REVIEW_STATUSES.has(task.status);
             if (filter === 'done') return DONE_STATUSES.has(task.status);
@@ -207,7 +227,7 @@ const TodoPage: React.FC = () => {
                 if (statusDifference !== 0) return statusDifference;
                 return (getDateValue(b.createdAt)?.getTime() || 0) - (getDateValue(a.createdAt)?.getTime() || 0);
             });
-    }, [currentUserName, filter, searchQuery, tasks]);
+    }, [currentUser?.uid, currentUserName, filter, searchQuery, tasks]);
 
     const showSuccess = (message: string) => toast.success(message);
     const showWarning = (message: string) => toast.warning(message);
@@ -249,6 +269,7 @@ const TodoPage: React.FC = () => {
                 description: draft.description.trim() || undefined,
                 assignee,
                 createdBy: currentUserName,
+                ...(currentUser?.uid ? { createdById: currentUser.uid } : {}),
                 priority: draft.priority,
                 status: '요청',
                 dueDate: draft.dueDate,
@@ -396,6 +417,10 @@ const TodoPage: React.FC = () => {
                     </button>
                 </header>
 
+                {!loading && !loadError && linkedTaskId && !tasks.some(task => task.id === linkedTaskId) && (
+                    <p role="status" className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">알림에 연결된 요청을 찾을 수 없습니다. 요청이 삭제되었거나 접근할 수 없는 상태입니다.</p>
+                )}
+
                 {isComposerOpen && (
                     <form onSubmit={handleSubmitNewTask} className="mb-6 overflow-hidden rounded-3xl border border-indigo-200 bg-white shadow-xl shadow-indigo-100/60">
                         <div className="border-b border-indigo-100 bg-indigo-50/70 px-5 py-4 sm:px-7">
@@ -520,7 +545,7 @@ const TodoPage: React.FC = () => {
                                 const images = task.images?.length ? task.images : (task.image ? [task.image] : []);
 
                                 return (
-                                    <article key={task.id} className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition ${expanded ? 'border-indigo-300 shadow-lg shadow-indigo-100/60' : 'border-slate-200 hover:border-slate-300'}`}>
+                                    <article id={`task-${task.id}`} key={task.id} className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition ${expanded ? 'border-indigo-300 shadow-lg shadow-indigo-100/60' : 'border-slate-200 hover:border-slate-300'}`}>
                                         <div className="p-4 sm:p-5">
                                             <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
                                                 <div className="min-w-0 flex-1">

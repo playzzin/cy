@@ -20,7 +20,11 @@ const formatTime = (message: ErpMessage): string =>
 export const DashboardMessageWidget: React.FC = () => {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
-  const { messages, summary, loading } = useMessageInbox(currentUser?.uid, 3);
+  const { messages, summary, loading } = useMessageInbox(currentUser?.uid);
+  const visibleMessages = [...messages].sort((left, right) => {
+    if (!currentUser?.uid) return 0;
+    return Number(messageService.isReadBy(left, currentUser.uid)) - Number(messageService.isReadBy(right, currentUser.uid));
+  }).slice(0, 3);
 
   const openMessage = async (message: ErpMessage) => {
     if (currentUser?.uid && !messageService.isReadBy(message, currentUser.uid)) {
@@ -76,7 +80,7 @@ export const DashboardMessageWidget: React.FC = () => {
         <div className="erp-message-dashboard-empty">현재 확인할 메시지가 없습니다.</div>
       ) : (
         <div className="erp-message-dashboard-list">
-          {messages.map((message) => {
+          {visibleMessages.map((message) => {
             const unread = currentUser?.uid ? !messageService.isReadBy(message, currentUser.uid) : false;
 
             return (
