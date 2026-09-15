@@ -559,7 +559,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                 ) : activeTab === 'ledger' ? (
                     <VehicleMonthlyLedger
                         key={refreshKey}
-                        vehicles={filteredVehicles}
+                        vehicles={vehicles}
                         fineImportVehicles={vehicles}
                         teams={teams}
                         teamFilterId={selectedTeamId}

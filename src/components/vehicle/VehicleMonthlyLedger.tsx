@@ -2015,7 +2015,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
 
     return (
         <div className="flex flex-col h-full w-full min-w-0 space-y-5">
-            <SupportLedgerReview kind="vehicle" month={yearMonth} blocked={loading || saving || isDirty || reviewLoadError} revision={rows} billingRevision={billingDocuments} reload={loadData} prepare={() => {
+            <SupportLedgerReview kind="vehicle" month={yearMonth} blocked={loadingVehicles || loading || saving || isDirty || reviewLoadError} revision={rows} billingRevision={billingDocuments} reload={loadData} prepare={() => {
                 const sourceForLine = (doc: VehicleBillingDocument, line: VehicleBillingCostItem) => {
                     if (line.sourceType === 'manual') return undefined;
                     const matched = rows.filter(row => row.vehicle.id === doc.vehicleId && (
