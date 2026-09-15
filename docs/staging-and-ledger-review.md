@@ -38,3 +38,17 @@ npm run staging:deploy
 Google 로그인 초기 설정은 Firebase CLI 15.30.1 이상에서 지원한다. `node scripts/staging-project.cjs auth`는 현재 프로젝트 계정을 지원 이메일로 사용하고 임시 설정을 작업 후 제거한다. 이 작업의 로컬 설치 위치는 `tmp/firebase-staging-tools`이며 Git에 포함하지 않는다.
 
 공식 안내: [Firebase 로그인 제공자 설정](https://firebase.google.com/docs/auth/configure-providers-cli), [Storage 결제 요구사항](https://firebase.google.com/docs/storage/web/start).
+
+### 파일 저장·예약 알림 배포 준비
+
+`node scripts/prepare-staging-backend.cjs`는 커밋된 메모 알림·인증 코드와 파일 접근 규칙만 읽어 `.firebase/staging-backend`에 배포 파일을 만든다. 운영의 다른 외부 연동이나 환경 파일을 포함하지 않는다. 원본과 배포 파일의 해시를 기록하며 `--verify`로 확인한다.
+
+```text
+node scripts/prepare-staging-backend.cjs
+node --test .firebase/staging-backend/functions/lib/smartMemoReminders.test.js
+node scripts/prepare-staging-backend.cjs --verify
+```
+
+결제 연결이 승인되면 `node scripts/enable-staging-services.cjs --link-existing-billing`으로 기존 운영 결제 계정의 연결 권한을 먼저 확인한다. 연결 권한이 없으면 다른 결제 계정으로 자동 전환하지 않고 중단한다. 이후 파일 저장소를 서울에 만들고 필요한 서버 서비스를 활성화한다.
+
+결제·저장소 준비를 마친 뒤 `.firebase/staging-backend` 폴더에서 `firebase deploy --project cy-erp-staging-9c1e4 --only functions:setSmartMemoReminder,functions:dispatchSmartMemoReminders,storage --non-interactive`로 배포한다. 배포 후에는 비로그인 접근 차단, 본인 파일 업로드·조회, 다른 사용자의 비공개 메모 접근 차단, 예약 알림 전달·취소를 검증용 계정으로 점검해야 한다.
