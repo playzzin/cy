@@ -33,7 +33,7 @@ npm run staging:deploy
 
 ### 무료 구성의 범위
 
-현재 Hosting, Authentication, Firestore와 검색 색인을 준비한다. 파일 업로드(Storage), 서버 함수/예약 알림, 자동 삭제(TTL) 정책은 Blaze 결제 연결 후 배포해야 한다. 검증에서는 결제 승인 전 외부 금융·문자·메일 연동과 운영 비밀값을 가져오지 않는다. 별도 확인 없이 운영 프로젝트의 서버 함수 설정을 그대로 복사하지 않는다.
+현재 Hosting, Authentication, Firestore와 검색 색인을 준비한다. 무료 Hosting이 제한하는 APK 등 실행 파일 배포는 검증 서버에서 제외한다. 파일 업로드(Storage), 서버 함수/예약 알림, 자동 삭제(TTL) 정책은 Blaze 결제 연결 후 배포해야 한다. 검증에서는 결제 승인 전 외부 금융·문자·메일 연동과 운영 비밀값을 가져오지 않는다. 별도 확인 없이 운영 프로젝트의 서버 함수 설정을 그대로 복사하지 않는다.
 
 Google 로그인 초기 설정은 Firebase CLI 15.30.1 이상에서 지원한다. `node scripts/staging-project.cjs auth`는 현재 프로젝트 계정을 지원 이메일로 사용하고 임시 설정을 작업 후 제거한다. 이 작업의 로컬 설치 위치는 `tmp/firebase-staging-tools`이며 Git에 포함하지 않는다.
 
