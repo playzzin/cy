@@ -37,6 +37,9 @@ describe('payroll review', () => {
         expect(reviewPayroll([row({ totalDeduction: 1130000, personalDeduction: 1100000, deductionLineTotal: 1100000, netAmount: -130000 })]).issues[0].title).toBe('공제액이 급여보다 큼');
         expect(reviewPayroll([row({ grossAmount: 130000, netAmount: 0, bankCode: '', accountNumber: '' })]).issues).toEqual([]);
     });
+    it('preserves legitimate refunds represented by negative deductions', () => {
+        expect(reviewPayroll([row({ personalDeduction: -10000, deductionLineTotal: -10000, taxDeduction: 0, totalDeduction: -10000, netAmount: 1010000 })]).issues).toEqual([]);
+    });
 });
 
 describe('bank download reconciliation', () => {

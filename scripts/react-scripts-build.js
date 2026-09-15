@@ -15,6 +15,7 @@ try {
 }
 
 const { patchReactScriptsWebpack } = require('./patchReactScriptsWebpack');
+require('./release-manifest.cjs').beginBuild();
 
 patchReactScriptsWebpack();
 require('react-scripts/scripts/build');

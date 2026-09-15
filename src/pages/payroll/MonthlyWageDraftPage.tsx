@@ -5451,9 +5451,15 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         ] as const)));
         return simplePayrollClosingRows.map((row, index) => {
             const payment = filteredPaymentData[index];
-            const breakdown = rowDisplayCache.get(row.id)?.deductionBreakdownForDisplay ?? payment.deductionBreakdown;
+            const display = rowDisplayCache.get(row.id);
+            const breakdown = display?.deductionBreakdownForDisplay ?? payment.deductionBreakdown;
             return {
                 ...row,
+                grossAmount: payment.grossAmount,
+                personalDeduction: breakdown?.total ?? 0,
+                taxDeduction: display?.taxTotalForDisplay ?? row.taxDeduction,
+                totalDeduction: display?.totalDeductionForDisplay ?? payment.totalDeduction,
+                netAmount: display?.totalAmountForDisplay ?? payment.totalAmount,
                 workerId: payment.workerId,
                 teamId: payment.teamId,
                 salaryModel: resolveKBSalaryFilterFromPaymentId(payment.id),
@@ -5495,8 +5501,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             alert('선택 범위에 서로 다른 급여 상태가 있습니다. 월 또는 팀을 나누어 처리해 주세요.');
             return;
         }
-        if (scopedPayrollSettlements.length === 0) {
-            alert('먼저 급여 초안을 저장해 주세요.');
+        if (scopedPayrollSettlements.length === 0 || simplePayrollRunStatus === 'unsaved') {
+            alert('선택한 모든 월·팀의 급여 초안을 먼저 저장해 주세요.');
             return;
         }
         if ((nextStatus === 'reviewed' || nextStatus === 'confirmed') && payrollReview.errorCount > 0) {
