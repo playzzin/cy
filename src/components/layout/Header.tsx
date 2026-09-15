@@ -26,6 +26,7 @@ import { userMenuPositionService } from '../../services/userMenuPositionService'
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 import MessageIndicator from '../messages/MessageIndicator';
 import PositionPanel from './PositionPanel';
+import { DevSessionNotice } from './DevSessionNotice';
 import { PositionItem, SiteDataType, MenuItem } from '../../types/menu';
 
 interface CheongyeonNavChild {
@@ -171,6 +172,7 @@ const Header: React.FC<HeaderProps> = ({
     toggleDarkMode
 }) => {
     const { currentUser, logout } = useAuth();
+    const isSampleAccount = currentUser?.providerId === 'dev-admin';
     const navigate = useNavigate();
     const location = useLocation();
     const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -706,13 +708,14 @@ const Header: React.FC<HeaderProps> = ({
                         {currentUser?.photoURL && (
                             <FontAwesomeIcon icon={faUser} className="fallback-icon" style={{ display: 'none' }} />
                         )}
-                        {userPositionLabel && (
-                            <span className="header-profile-position">{userPositionLabel}</span>
+                        {(userPositionLabel || isSampleAccount) && (
+                            <span className="header-profile-position" title={isSampleAccount ? '개발용 샘플 계정 · 실제 계정과 다른 메뉴를 사용합니다' : undefined}>{isSampleAccount ? `샘플 · ${userPositionLabel || '개발 계정'}` : userPositionLabel}</span>
                         )}
                     </button>
 
                     {isProfileOpen && (
                         <div className="profile-dropdown">
+                            {isSampleAccount && <DevSessionNotice />}
                             <div className="profile-info">
                                 <div className="profile-name">{currentUser?.displayName || '사용자'}</div>
                                 {userPositionLabel && (

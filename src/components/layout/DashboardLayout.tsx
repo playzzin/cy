@@ -27,6 +27,7 @@ import {
     persistDarkModePreference,
 } from '../../utils/themeMode';
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
+import { getMenuModeStorageKey } from '../../utils/menuModeStorage';
 
 // Removed hardcoded siteData in favor of dynamic loading
 
@@ -100,17 +101,17 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const [isPositionPanelOpen, setIsPositionPanelOpen] = useState(false);
     // 사이트 모드를 localStorage에서 복원하여 수동 변경 시 유지되도록 함
     const [currentSite, setCurrentSite] = useState(() => {
-        const saved = localStorage.getItem('cy_current_site');
+        const saved = localStorage.getItem(getMenuModeStorageKey('cy_current_site'));
         return saved || 'admin';
     });
     const [currentPosition, setCurrentPosition] = useState(() => {
-        return localStorage.getItem('cy_current_position') || 'full';
+        return localStorage.getItem(getMenuModeStorageKey('cy_current_position')) || 'full';
     });
     const [userManuallyChangedSite, setUserManuallyChangedSite] = useState(() => {
-        return localStorage.getItem('cy_site_manual') === 'true';
+        return localStorage.getItem(getMenuModeStorageKey('cy_site_manual')) === 'true';
     });
     const [userManuallyChangedPosition, setUserManuallyChangedPosition] = useState(() => {
-        return localStorage.getItem('cy_position_manual') === 'true';
+        return localStorage.getItem(getMenuModeStorageKey('cy_position_manual')) === 'true';
     });
     const [activeMenuItems, setActiveMenuItems] = useState<{ [key: string]: boolean }>({});
     const [activeNestedMenuItems, setActiveNestedMenuItems] = useState<{ [key: string]: boolean }>({});
@@ -447,7 +448,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 if (autoAppliedPositionForUserRef.current === applyKey) return;
                 autoAppliedPositionForUserRef.current = applyKey;
 
-                localStorage.setItem('cy_current_position', resolvedPositionId);
+                localStorage.setItem(getMenuModeStorageKey('cy_current_position'), resolvedPositionId);
                 setCurrentPosition((prev) => (prev === resolvedPositionId ? prev : resolvedPositionId));
             } catch (error) {
                 console.error('[DashboardLayout] Failed to apply user position menu:', error);
@@ -559,13 +560,13 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         setActiveMenuItems({});
         // Site mode and position mode are mutually exclusive. A previously
         // selected position must not override the selected site's sidebar.
-        localStorage.setItem('cy_current_position', 'full');
+        localStorage.setItem(getMenuModeStorageKey('cy_current_position'), 'full');
         setUserManuallyChangedPosition(false);
-        localStorage.removeItem('cy_position_manual');
+        localStorage.removeItem(getMenuModeStorageKey('cy_position_manual'));
         // 사용자가 수동으로 사이트를 변경했음을 기록
         setUserManuallyChangedSite(true);
-        localStorage.setItem('cy_current_site', siteKey);
-        localStorage.setItem('cy_site_manual', 'true');
+        localStorage.setItem(getMenuModeStorageKey('cy_current_site'), siteKey);
+        localStorage.setItem(getMenuModeStorageKey('cy_site_manual'), 'true');
 
         // 청연사이트(test)로 전환 시 /dashboard2로 이동
         const nextDashboardPath = siteModeDashboards[siteKey];
@@ -581,20 +582,20 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const changePosition = (positionId: string) => {
         setCurrentPosition(positionId);
         setActiveMenuItems({});
-        localStorage.setItem('cy_current_position', positionId);
+        localStorage.setItem(getMenuModeStorageKey('cy_current_position'), positionId);
         setUserManuallyChangedPosition(true);
-        localStorage.setItem('cy_position_manual', 'true');
+        localStorage.setItem(getMenuModeStorageKey('cy_position_manual'), 'true');
 
         // A position chosen from the preview panel is an explicit user choice.
         // Keep it ahead of the profile-based automatic position resolver.
         setUserManuallyChangedSite(false);
-        localStorage.removeItem('cy_site_manual');
+        localStorage.removeItem(getMenuModeStorageKey('cy_site_manual'));
 
         // Site mode and position mode are mutually exclusive. Position preview
         // always reads the corresponding pos_* configuration under admin.
         if (currentSite !== 'admin') {
             setCurrentSite('admin');
-            localStorage.setItem('cy_current_site', 'admin');
+            localStorage.setItem(getMenuModeStorageKey('cy_current_site'), 'admin');
 
             if (location.pathname === '/dashboard2' || location.pathname === '/dashboard3') {
                 navigateSync('/dashboard');

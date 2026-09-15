@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { getMenuModeStorageKey } from '../../../utils/menuModeStorage';
 import {
     DndContext,
     DragOverlay,
@@ -250,12 +251,12 @@ const removeDuplicateLeafMenuRoutes = (
 const getInitialMenuSite = (requestedSite: string | null) => {
     if (requestedSite) return requestedSite;
 
-    const storedPosition = localStorage.getItem('cy_current_position');
+    const storedPosition = localStorage.getItem(getMenuModeStorageKey('cy_current_position'));
     if (storedPosition && storedPosition !== 'full') {
         return getPositionSiteKey(storedPosition);
     }
 
-    return localStorage.getItem('cy_current_site') || 'admin';
+    return localStorage.getItem(getMenuModeStorageKey('cy_current_site')) || 'admin';
 };
 
 const resolveExistingMenuSite = (data: SiteDataType, desiredSite: string) => {

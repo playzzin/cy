@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { motion, AnimatePresence, Variants } from 'framer-motion';
+import React, { useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import './DesignManagementPage.css';
 import { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -14,7 +15,7 @@ import {
     faSitemap,
 } from '@fortawesome/free-solid-svg-icons';
 import logoConstruction from '../../assets/logo_construction.jpg';
-import logoFinished from '../../assets/logo_finished.png';
+
 
 type Metric = {
     label: string;
@@ -34,7 +35,7 @@ type GalleryItem = {
 };
 
 type BusinessModule = {
-    id: string;
+    id: 'system-dongbari-scaffolding' | 'material-rental' | 'manpower-supply' | 'erp-site-management' | 'partner-network';
     title: string;
     subtitle: string;
     summary: string;
@@ -68,8 +69,8 @@ const MODULES: BusinessModule[] = [
         duration: '5분 요약',
         level: 'Engineering',
         stats: [
-            { label: '설치 기준', value: '6단계', helper: '하부부터 최종 검측까지' },
-            { label: '안전 체크', value: '2.0+', helper: '권장 안전율 기준' },
+            { label: '설치 기준', value: '5단계', helper: '하부부터 최종 검측까지' },
+            { label: '안전 검토', value: '현장별', helper: '승인 도면과 구조 검토 기준' },
             { label: '운영 포커스', value: '품질', helper: '구조 안정성과 공기 관리' }
         ],
         lessons: ['기준점과 하중 조건 먼저 확인', '하부 레벨링 후 수직재와 수평재 체결', '작업 발판, 난간, 벽이음 기준 동시 검토'],
@@ -281,433 +282,150 @@ const MODULES: BusinessModule[] = [
     }
 ];
 
-const HERO_TOPICS = ['시공', '자재', '인력', 'ERP', '파트너'];
-
-const fadeUp: Variants = {
-    hidden: { opacity: 0, y: 22 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.48, ease: 'easeOut' } }
+const MODULE_LINKS: Record<BusinessModule['id'], { to: string; label: string }> = {
+    'system-dongbari-scaffolding': { to: '/site/management', label: '프로젝트 보기' },
+    'material-rental': { to: '/materials/inventory', label: '자재 재고 보기' },
+    'manpower-supply': { to: '/assignment/daily-dispatch', label: '인력 배치 보기' },
+    'erp-site-management': { to: '/reports/daily', label: '출력일보 보기' },
+    'partner-network': { to: '/company/management', label: '협력사 관리 보기' }
 };
+const TOPICS = ['시공', '자재임대', '인력공급', '현장관리', '협력사'];
 
-const stagger: Variants = {
-    hidden: { opacity: 0 },
-    visible: {
-        opacity: 1,
-        transition: { staggerChildren: 0.07 }
-    }
+const BusinessImage: React.FC<{ src: string; alt: string; eager?: boolean }> = ({ src, alt, eager }) => {
+    const [failed, setFailed] = useState(false);
+    useEffect(() => setFailed(false), [src]);
+    return failed ? (
+        <div className="business-image-fallback" role="img" aria-label={alt}>
+            <FontAwesomeIcon icon={faBuilding} />
+            <span>청연ENG · {alt}</span>
+        </div>
+    ) : <img src={src} alt={alt} loading={eager ? 'eager' : 'lazy'} decoding="async" onError={() => setFailed(true)} />;
 };
 
 const DesignManagementCodeitPage: React.FC = () => {
-    const [activeId, setActiveId] = useState(MODULES[0].id);
+    const [searchParams, setSearchParams] = useSearchParams();
+    const activeModule = MODULES.find((item) => item.id === searchParams.get('module')) || MODULES[0];
+    const [query, setQuery] = useState('');
     const [showGallery, setShowGallery] = useState(false);
-
-    const activeModule = useMemo(
-        () => MODULES.find((module) => module.id === activeId) || MODULES[0],
-        [activeId]
+    const detailRef = useRef<HTMLElement>(null);
+    const pendingFocus = useRef(false);
+    const activeIndex = MODULES.findIndex((item) => item.id === activeModule.id);
+    const normalizedQuery = query.trim().toLocaleLowerCase().replace(/\s/g, '');
+    const visibleModules = MODULES.filter((item) =>
+        [item.title, item.subtitle, item.summary, ...item.lessons].join(' ').toLocaleLowerCase().replace(/\s/g, '').includes(normalizedQuery)
     );
-
-    useEffect(() => {
-        setShowGallery(false);
-    }, [activeId]);
+    const relatedLink = MODULE_LINKS[activeModule.id];
 
     useEffect(() => {
         document.body.classList.add('dashboard2-codeit-theme');
         return () => document.body.classList.remove('dashboard2-codeit-theme');
     }, []);
 
-    const scrollToModules = () => {
-        document.getElementById('codeit-modules')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const scrollTo = (element: HTMLElement | null) => {
+        const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+        element?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
     };
 
-    const focusModule = (moduleId: string) => {
-        setActiveId(moduleId);
-        window.setTimeout(() => {
-            document.getElementById('codeit-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 40);
+    useEffect(() => {
+        setShowGallery(false);
+        if (pendingFocus.current) {
+            detailRef.current?.focus({ preventScroll: true });
+            scrollTo(detailRef.current);
+            pendingFocus.current = false;
+        }
+    }, [activeModule.id]);
+
+    const selectModule = (id: string) => {
+        if (id === activeModule.id) {
+            detailRef.current?.focus({ preventScroll: true });
+            scrollTo(detailRef.current);
+            return;
+        }
+        pendingFocus.current = true;
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.set('module', id);
+        setSearchParams(nextParams, { preventScrollReset: true });
     };
 
     return (
-        <div
-            className="codeit-design-management min-h-screen bg-[#ffffff] text-[#333236]"
-            style={{ fontFamily: 'Pretendard, SpoqaHanSansNeo, Apple SD Gothic Neo, Noto Sans KR, sans-serif' }}
-        >
-            <div className="bg-[#080c16] px-4 py-3 text-center text-sm font-semibold text-[#f7f8fb]">
-                청연ENG 사업영역을 짧은 모듈로 훑고, 필요한 운영 흐름으로 바로 이동하세요
-            </div>
-
-            <section className="mx-auto grid min-h-[640px] max-w-[1240px] grid-cols-1 items-center gap-12 px-5 pb-16 pt-20 md:px-8 lg:grid-cols-[0.95fr_1.05fr]">
-                <motion.div variants={stagger} initial="hidden" animate="visible" className="text-center lg:text-left">
-                    <motion.div
-                        variants={fadeUp}
-                        className="mb-8 inline-flex items-center gap-2 rounded-full border border-[#dedff5] bg-[#f6f5ff] px-4 py-2 text-sm font-black text-[#5b43d6]"
-                    >
-                        <span className="h-2 w-2 rounded-full bg-[#7c3aed]" />
-                        청연ENG에서는
-                    </motion.div>
-
-                    <motion.h1
-                        variants={fadeUp}
-                        className="text-4xl font-black leading-[1.14] text-[#24242a] md:text-6xl lg:text-7xl"
-                        style={{ wordBreak: 'keep-all' }}
-                    >
-                        사업영역이 5분마다 선명해집니다
-                    </motion.h1>
-                    <motion.p
-                        variants={fadeUp}
-                        className="mt-7 text-xl font-extrabold leading-relaxed text-[#4f7cff] md:text-3xl"
-                        style={{ wordBreak: 'keep-all' }}
-                    >
-                        시공, 자재, 인력, ERP, 파트너 흐름까지 한 번에
-                    </motion.p>
-                    <motion.p
-                        variants={fadeUp}
-                        className="mx-auto mt-5 max-w-[680px] text-base leading-8 text-[#656b7a] md:text-lg lg:mx-0"
-                        style={{ wordBreak: 'keep-all' }}
-                    >
-                        복잡한 사업 소개를 Codeit의 학습 카드처럼 짧고 명확한 구조로 재배치했습니다.
-                        각 모듈은 핵심 기준, 운영 순서, 결과물 중심으로 바로 읽히도록 정리됩니다.
-                    </motion.p>
-
-                    <motion.div variants={fadeUp} className="mt-10 flex flex-col items-center gap-3 sm:flex-row lg:justify-start">
-                        <button
-                            type="button"
-                            onClick={scrollToModules}
-                            className="inline-flex h-14 min-w-[220px] items-center justify-center gap-3 rounded-[8px] bg-gradient-to-r from-[#4f7cff] to-[#9d2cff] px-7 text-base font-extrabold text-white shadow-[0_16px_30px_rgba(79,124,255,0.28)] transition hover:-translate-y-0.5"
-                        >
-                            모듈 둘러보기
-                            <FontAwesomeIcon icon={faArrowRight} />
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => focusModule('erp-site-management')}
-                            className="inline-flex h-14 min-w-[220px] items-center justify-center gap-3 rounded-[8px] border border-[#dfe3ef] bg-[#ffffff] px-7 text-base font-extrabold text-[#333236] transition hover:border-[#4f7cff] hover:text-[#4f7cff]"
-                        >
-                            ERP 흐름 보기
-                            <FontAwesomeIcon icon={faDatabase} />
-                        </button>
-                    </motion.div>
-
-                    <motion.div variants={fadeUp} className="mt-12 grid grid-cols-5 gap-2">
-                        {HERO_TOPICS.map((topic, index) => (
-                            <div
-                                key={topic}
-                                className="flex h-[92px] flex-col items-center justify-center rounded-[18px] border border-[#e8eaf1] bg-[#f7f8fb] px-2 text-center shadow-[0_12px_28px_rgba(21,27,45,0.04)]"
-                            >
-                                <span className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#ffffff] text-sm font-black text-[#4f7cff]">
-                                    {index + 1}
-                                </span>
-                                <span className="text-sm font-extrabold text-[#333236]">{topic}</span>
-                            </div>
-                        ))}
-                    </motion.div>
-                </motion.div>
-
-                <motion.div
-                    initial={{ opacity: 0, y: 26, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    transition={{ duration: 0.6, ease: 'easeOut' }}
-                    className="rounded-[28px] border border-[#e2e5ee] bg-[#f7f8fb] p-5 shadow-[0_24px_60px_rgba(21,27,45,0.08)]"
-                >
-                    <div className="overflow-hidden rounded-[22px] bg-[#ffffff]">
-                        <div className="flex items-center justify-between gap-4 border-b border-[#eef0f6] p-5">
-                            <div className="flex items-center gap-3">
-                                <img src={logoConstruction} alt="청연이엔지 로고" className="h-11 w-11 rounded-[12px] object-cover" />
-                                <div>
-                                    <div className="text-sm font-bold text-[#7a8191]">오늘의 사업 모듈</div>
-                                    <div className="text-lg font-black text-[#24242a]">핵심 흐름만 빠르게 보기</div>
-                                </div>
-                            </div>
-                            <img src={logoFinished} alt="청연ENG 심볼" className="hidden h-12 w-12 rounded-[14px] object-cover sm:block" />
+        <div className="business-page">
+            <div className="business-announcement">청연이엔지는 시공, 자재, 인력, 현장 운영을 하나의 기준으로 연결합니다.</div>
+            <div className="business-container">
+                <div className="business-breadcrumb"><Link to="/dashboard2">청연ENG</Link><span>/</span><span>사업영역</span></div>
+                <section className="business-hero" aria-labelledby="business-title">
+                    <div className="business-hero-copy">
+                        <p className="business-eyebrow business-hero-badge"><span /> 청연이엔지 사업영역</p>
+                        <h1 id="business-title">현장의 시작부터,<br /><em>완성까지 함께.</em></h1>
+                        <p className="business-intro">시공의 전문성에 자재, 인력, 데이터의 연결을 더합니다.<br className="business-desktop-break" /> 청연ENG의 다섯 가지 사업영역을 만나보세요.</p>
+                        <div className="business-actions">
+                            <button className="business-button business-primary" onClick={() => scrollTo(document.getElementById('business-modules'))}>사업영역 살펴보기 <FontAwesomeIcon icon={faArrowRight} /></button>
+                            <Link className="business-button business-secondary" to="/site/management">프로젝트 보기 <span aria-hidden="true">↗</span></Link>
                         </div>
-
-                        <div className="relative h-[310px] overflow-hidden">
-                            <img src={activeModule.image} alt={activeModule.title} className="h-full w-full object-cover" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-[#080c16]/85 via-[#080c16]/18 to-transparent" />
-                            <div className="absolute bottom-5 left-5 right-5">
-                                <div className="mb-3 inline-flex rounded-full bg-white/92 px-3 py-1 text-xs font-black text-[#4f7cff]">
-                                    {activeModule.duration}
-                                </div>
-                                <h2 className="text-3xl font-black leading-tight text-white">{activeModule.title}</h2>
-                                <p className="mt-2 max-w-[520px] text-sm font-semibold leading-6 text-[#dfe7f5]">
-                                    {activeModule.summary}
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-3">
-                            {activeModule.stats.map((stat) => (
-                                <div key={stat.label} className="rounded-[16px] border border-[#eef0f6] bg-[#f7f8fb] px-4 py-4">
-                                    <div className="text-xs font-bold text-[#7a8191]">{stat.label}</div>
-                                    <div className="mt-1 text-2xl font-black text-[#24242a]">{stat.value}</div>
-                                    <div className="mt-1 text-xs font-semibold text-[#656b7a]">{stat.helper}</div>
-                                </div>
-                            ))}
-                        </div>
+                        <div className="business-hero-note"><FontAwesomeIcon icon={faHelmetSafety} /><span>시공 · 자재 · 인력 · 현장관리 · 협력사</span></div>
                     </div>
-                </motion.div>
-            </section>
-
-            <section id="codeit-modules" className="bg-[#f7f8fb] px-5 py-20 md:px-8">
-                <div className="mx-auto max-w-[1180px]">
-                    <div className="flex flex-col justify-between gap-5 md:flex-row md:items-end">
-                        <div>
-                            <p className="text-base font-extrabold text-[#4f7cff]">5분 사업 모듈</p>
-                            <h2 className="mt-4 text-3xl font-black leading-tight text-[#24242a] md:text-5xl">
-                                필요한 흐름부터 열어보세요
-                            </h2>
-                        </div>
-                        <p className="max-w-[430px] text-base leading-7 text-[#656b7a]">
-                            각 카드는 하나의 짧은 강의처럼 핵심 기준, 단계, 결과물을 같은 순서로 보여줍니다.
-                        </p>
+                    <div className="business-hero-visual">
+                        <BusinessImage src={MODULES[0].image} alt="건설 현장의 구조 프레임" eager />
+                        <div className="business-photo-shade" />
+                        <span className="business-photo-label">OUR BUSINESS / 01—05</span>
+                        <div className="business-photo-caption"><span>기초를 단단하게, 연결을 긴밀하게</span><strong>현장을 이해하는<br />통합 엔지니어링</strong></div>
+                        <span className="business-photo-credit">사업 이해를 위한 참고 이미지</span>
                     </div>
+                </section>
 
-                    <div className="mt-12 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-5">
-                        {MODULES.map((module, index) => {
-                            const selected = module.id === activeModule.id;
-                            return (
-                                <motion.button
-                                    key={module.id}
-                                    type="button"
-                                    onClick={() => focusModule(module.id)}
-                                    whileHover={{ y: -5 }}
-                                    whileTap={{ scale: 0.985 }}
-                                    aria-pressed={selected}
-                                    className="group flex min-h-[260px] flex-col rounded-[18px] border bg-[#ffffff] p-6 text-left transition"
-                                    style={{
-                                        borderColor: selected ? module.accent : '#e2e5ee',
-                                        boxShadow: selected
-                                            ? `0 22px 48px ${module.accent}24`
-                                            : '0 18px 45px rgba(21,27,45,0.05)'
-                                    }}
-                                >
-                                    <div className="flex items-center justify-between gap-3">
-                                        <span
-                                            className="flex h-12 w-12 items-center justify-center rounded-[14px] text-xl text-white"
-                                            style={{ backgroundColor: module.accent }}
-                                        >
-                                            <FontAwesomeIcon icon={module.icon} />
-                                        </span>
-                                        <span className="rounded-full px-3 py-1 text-xs font-black" style={{ backgroundColor: module.soft, color: module.accentDark }}>
-                                            {String(index + 1).padStart(2, '0')}
-                                        </span>
-                                    </div>
-                                    <div className="mt-7 text-sm font-black" style={{ color: module.accentDark }}>
-                                        {module.level}
-                                    </div>
-                                    <h3 className="mt-2 text-2xl font-black leading-tight text-[#24242a]" style={{ wordBreak: 'keep-all' }}>
-                                        {module.title}
-                                    </h3>
-                                    <p className="mt-4 flex-1 text-sm font-semibold leading-6 text-[#656b7a]" style={{ wordBreak: 'keep-all' }}>
-                                        {module.summary}
-                                    </p>
-                                    <div className="mt-6 flex items-center justify-between border-t border-[#eef0f6] pt-4">
-                                        <span className="text-xs font-black text-[#7a8191]">{module.duration}</span>
-                                        <FontAwesomeIcon icon={faArrowRight} className="text-sm transition group-hover:translate-x-1" style={{ color: module.accent }} />
-                                    </div>
-                                </motion.button>
-                            );
+                <nav className="business-quick-nav" aria-label="사업영역 빠른 탐색">
+                    {MODULES.map((item, index) => (
+                        <button key={item.id} onClick={() => selectModule(item.id)} aria-pressed={activeModule.id === item.id}>
+                            <span className="business-nav-number">0{index + 1}</span><FontAwesomeIcon icon={item.icon} /><span>{TOPICS[index]}</span><span className="business-nav-arrow" aria-hidden="true">↗</span>
+                        </button>
+                    ))}
+                </nav>
+
+                <section id="business-modules" className="business-section" aria-labelledby="business-modules-title">
+                    <div className="business-section-heading">
+                        <div><p className="business-eyebrow">OUR EXPERTISE</p><h2 id="business-modules-title">다섯 가지 전문성, 하나의 현장</h2><p>필요한 사업을 선택해 핵심 업무와 운영 과정을 확인하세요.</p></div>
+                        <div className="business-search"><label htmlFor="business-search">사업영역 검색</label><div><input id="business-search" type="search" placeholder="사업명 또는 업무 검색" value={query} onChange={(event) => setQuery(event.target.value)} />{query && <button onClick={() => setQuery('')} aria-label="검색어 지우기">×</button>}</div></div>
+                    </div>
+                    <p className="business-result-count" role="status">{query ? '검색 결과' : '전체 사업영역'} <strong>{visibleModules.length}</strong></p>
+                    {visibleModules.length > 0 ? <div className="business-cards">
+                        {visibleModules.map((item) => {
+                            const index = MODULES.indexOf(item);
+                            const selected = activeModule.id === item.id;
+                            return <button key={item.id} className={'business-card' + (selected ? ' is-selected' : '')} style={{ '--module-accent': item.accent, '--module-soft': item.soft, '--module-ink': item.accentDark } as React.CSSProperties} aria-pressed={selected} onClick={() => selectModule(item.id)}>
+                                <span className="business-card-top"><span className="business-card-icon"><FontAwesomeIcon icon={item.icon} /></span><span>0{index + 1}</span></span>
+                                <span className="business-card-category">{item.level}</span>
+                                <h3>{item.title}</h3><p>{item.summary}</p>
+                                <span className="business-card-bottom">{selected ? '선택한 사업' : '자세히 보기'}<FontAwesomeIcon icon={selected ? faCheckCircle : faArrowRight} /></span>
+                            </button>;
                         })}
+                    </div> : <div className="business-empty"><FontAwesomeIcon icon={faSitemap} /><h3>일치하는 사업영역이 없습니다</h3><p>시공, 자재, 인력, 현장관리 또는 협력사로 검색해 보세요.</p><button className="business-button business-secondary" onClick={() => setQuery('')}>전체 사업 보기</button></div>}
+                </section>
+
+                <section ref={detailRef} tabIndex={-1} id="business-detail" className="business-detail business-section" aria-labelledby="business-detail-title">
+                    <div className="business-detail-heading">
+                        <div><p className="business-eyebrow">BUSINESS DETAIL <span className="business-detail-number">0{activeIndex + 1} / 05</span></p><h2 id="business-detail-title">{activeModule.title}</h2><p>{activeModule.subtitle}</p></div>
+                        <Link to={relatedLink.to} className="business-button business-primary">{relatedLink.label}<span aria-hidden="true">↗</span></Link>
                     </div>
-                </div>
-            </section>
-
-            <section id="codeit-detail" className="px-5 py-20 md:px-8">
-                <AnimatePresence mode="wait">
-                    <motion.div
-                        key={activeModule.id}
-                        initial={{ opacity: 0, y: 18 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        transition={{ duration: 0.34, ease: 'easeOut' }}
-                        className="mx-auto max-w-[1180px]"
-                    >
-                        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[0.9fr_1.1fr]">
-                            <div className="rounded-[24px] border border-[#e2e5ee] bg-[#ffffff] p-7 shadow-[0_18px_45px_rgba(21,27,45,0.05)]">
-                                <div className="mb-8 inline-flex items-center gap-2 rounded-[8px] px-4 py-2 text-sm font-black" style={{ backgroundColor: activeModule.soft, color: activeModule.accentDark }}>
-                                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: activeModule.accent }} />
-                                    {activeModule.subtitle}
-                                </div>
-                                <h2 className="text-3xl font-black leading-tight text-[#24242a] md:text-5xl" style={{ wordBreak: 'keep-all' }}>
-                                    {activeModule.title}
-                                </h2>
-                                <p className="mt-6 text-lg leading-8 text-[#656b7a]" style={{ wordBreak: 'keep-all' }}>
-                                    {activeModule.description}
-                                </p>
-
-                                <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                                    {activeModule.stats.map((stat) => (
-                                        <div key={stat.label} className="rounded-[14px] border border-[#eef0f6] bg-[#f7f8fb] px-4 py-4">
-                                            <div className="text-xs font-bold text-[#7a8191]">{stat.label}</div>
-                                            <div className="mt-2 text-2xl font-black text-[#24242a]">{stat.value}</div>
-                                            <div className="mt-1 text-xs font-semibold text-[#656b7a]">{stat.helper}</div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="rounded-[24px] border border-[#e2e5ee] bg-[#f7f8fb] p-5 shadow-[0_24px_60px_rgba(21,27,45,0.08)]">
-                                <div className="rounded-[18px] bg-[#ffffff] p-5">
-                                    <div className="flex flex-col gap-5 md:flex-row">
-                                        <img src={activeModule.image} alt={`${activeModule.title} 대표 이미지`} className="h-56 w-full rounded-[14px] object-cover md:w-[42%]" />
-                                        <div className="flex-1">
-                                            <p className="text-sm font-black" style={{ color: activeModule.accentDark }}>학습 노트</p>
-                                            <h3 className="mt-2 text-2xl font-black text-[#24242a]">핵심만 먼저 봅니다</h3>
-                                            <div className="mt-5 space-y-3">
-                                                {activeModule.lessons.map((lesson) => (
-                                                    <div key={lesson} className="flex gap-3 rounded-[14px] border border-[#eef0f6] bg-[#ffffff] p-3">
-                                                        <FontAwesomeIcon icon={faCheckCircle} className="mt-1 flex-shrink-0" style={{ color: activeModule.accent }} />
-                                                        <span className="text-sm font-semibold leading-6 text-[#656b7a]">{lesson}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-                            <div className="rounded-[24px] border border-[#e2e5ee] bg-[#ffffff] p-7 shadow-[0_18px_45px_rgba(21,27,45,0.05)]">
-                                <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
-                                    <div>
-                                        <p className="text-sm font-black" style={{ color: activeModule.accentDark }}>운영 사이클</p>
-                                        <h3 className="mt-2 text-2xl font-black text-[#24242a]">다섯 단계로 이어지는 실행 흐름</h3>
-                                    </div>
-                                    <span className="rounded-[8px] bg-[#f7f8fb] px-3 py-2 text-xs font-black text-[#7a8191]">
-                                        {activeModule.workflow.length} Steps
-                                    </span>
-                                </div>
-
-                                <div className="mt-7 grid grid-cols-1 gap-4 md:grid-cols-5">
-                                    {activeModule.workflow.map((step, index) => (
-                                        <div key={step.title} className="rounded-[16px] border border-[#eef0f6] bg-[#f7f8fb] p-4">
-                                            <div className="mb-4 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#ffffff] text-sm font-black" style={{ color: activeModule.accent }}>
-                                                {index + 1}
-                                            </div>
-                                            <h4 className="text-base font-black text-[#24242a]">{step.title}</h4>
-                                            <p className="mt-3 text-sm font-semibold leading-6 text-[#656b7a]">{step.desc}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="rounded-[24px] border border-[#e2e5ee] bg-[#f7f8fb] p-7 shadow-[0_18px_45px_rgba(21,27,45,0.05)]">
-                                <p className="text-sm font-black" style={{ color: activeModule.accentDark }}>완료 후 얻는 것</p>
-                                <div className="mt-5 space-y-4">
-                                    {activeModule.outcomes.map((outcome) => (
-                                        <div key={outcome} className="flex items-start gap-4 rounded-[14px] bg-[#ffffff] p-4">
-                                            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] text-white" style={{ backgroundColor: activeModule.accent }}>
-                                                <FontAwesomeIcon icon={faChartLine} />
-                                            </div>
-                                            <p className="text-sm font-bold leading-6 text-[#333236]">{outcome}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="mt-8 rounded-[24px] border border-[#e2e5ee] bg-[#ffffff] p-7 shadow-[0_18px_45px_rgba(21,27,45,0.05)]">
-                            <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-                                <div>
-                                    <p className="text-sm font-black" style={{ color: activeModule.accentDark }}>현장 이미지 보드</p>
-                                    <h3 className="mt-2 text-2xl font-black text-[#24242a]">대표 장면을 같이 확인합니다</h3>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => setShowGallery((value) => !value)}
-                                    className="inline-flex h-12 items-center justify-center gap-2 rounded-[8px] px-5 text-sm font-extrabold text-white transition hover:-translate-y-0.5"
-                                    style={{ backgroundColor: activeModule.accentDark }}
-                                >
-                                    {showGallery ? '이미지 접기' : '이미지 보기'}
-                                    <FontAwesomeIcon icon={faArrowRight} className={showGallery ? '-rotate-90 transition' : 'rotate-90 transition'} />
-                                </button>
-                            </div>
-
-                            <AnimatePresence>
-                                {showGallery && (
-                                    <motion.div
-                                        initial={{ opacity: 0, height: 0 }}
-                                        animate={{ opacity: 1, height: 'auto' }}
-                                        exit={{ opacity: 0, height: 0 }}
-                                        transition={{ duration: 0.3, ease: 'easeOut' }}
-                                        className="overflow-hidden"
-                                    >
-                                        <div className="mt-7 grid grid-cols-1 gap-5 md:grid-cols-3">
-                                            {activeModule.gallery.map((item) => (
-                                                <article key={item.title} className="overflow-hidden rounded-[18px] border border-[#e2e5ee] bg-[#f7f8fb]">
-                                                    <div className="relative h-56">
-                                                        <img src={item.src} alt={item.title} loading="lazy" className="h-full w-full object-cover" />
-                                                        <div className="absolute left-4 top-4 rounded-full bg-white/95 px-3 py-1 text-xs font-black" style={{ color: activeModule.accentDark }}>
-                                                            {item.label}
-                                                        </div>
-                                                    </div>
-                                                    <div className="p-5">
-                                                        <h4 className="text-lg font-black text-[#24242a]">{item.title}</h4>
-                                                    </div>
-                                                </article>
-                                            ))}
-                                        </div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-                        </div>
-                    </motion.div>
-                </AnimatePresence>
-            </section>
-
-            <section className="bg-[#111827] px-5 py-20 text-white md:px-8">
-                <div className="mx-auto max-w-[1180px]">
-                    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                        {[
-                            {
-                                title: '짧게 보고',
-                                desc: '각 사업영역은 한 문장 요약, 핵심 기준, 실행 순서로 먼저 읽힙니다.',
-                                icon: faCheckCircle,
-                                color: '#4f7cff'
-                            },
-                            {
-                                title: '바로 비교하고',
-                                desc: '모듈마다 같은 구조를 사용해 시공, 자재, 인력, ERP를 빠르게 비교합니다.',
-                                icon: faProjectDiagram,
-                                color: '#9d2cff'
-                            },
-                            {
-                                title: '현장으로 연결합니다',
-                                desc: '운영 단계와 결과물을 함께 보여 현장 업무 흐름으로 자연스럽게 이어집니다.',
-                                icon: faHelmetSafety,
-                                color: '#00b894'
-                            }
-                        ].map((card) => (
-                            <div key={card.title} className="rounded-[24px] border border-[#273244] bg-[#182133] p-8">
-                                <div className="mb-7 flex h-14 w-14 items-center justify-center rounded-[16px] text-2xl" style={{ backgroundColor: card.color }}>
-                                    <FontAwesomeIcon icon={card.icon} />
-                                </div>
-                                <h3 className="text-2xl font-black">{card.title}</h3>
-                                <p className="mt-4 text-base leading-8 text-[#c7d0df]">{card.desc}</p>
-                            </div>
-                        ))}
+                    <div className="business-overview">
+                        <div className="business-overview-copy"><h3>사업 개요</h3><p>{activeModule.description}</p><dl className="business-metrics">{activeModule.stats.map((stat) => <div key={stat.label}><dt>{stat.label}</dt><dd>{stat.value}</dd><span>{stat.helper}</span></div>)}</dl></div>
+                        <div className="business-checklist"><p className="business-eyebrow">KEY POINTS</p><h3>먼저 확인할 핵심 업무</h3><ul>{activeModule.lessons.map((lesson) => <li key={lesson}><FontAwesomeIcon icon={faCheckCircle} /><span>{lesson}</span></li>)}</ul></div>
                     </div>
-                </div>
-            </section>
-
-            <footer className="border-t border-[#e8eaf1] bg-[#f7f8fb] px-5 py-10 md:px-8">
-                <div className="mx-auto flex max-w-[1180px] flex-col gap-6 md:flex-row md:items-center md:justify-between">
-                    <div className="flex items-center gap-4">
-                        <img src={logoConstruction} alt="청연이엔지 로고" className="h-14 w-14 rounded-[14px] object-cover" />
-                        <div>
-                            <div className="text-2xl font-black text-[#24242a]">청연ENG 사업영역</div>
-                            <div className="mt-1 text-sm font-semibold text-[#656b7a]">시공부터 ERP까지, 같은 기준으로 읽히는 운영 모듈</div>
+                    <div className="business-workflow"><div className="business-subheading"><div><p className="business-eyebrow">WORK PROCESS</p><h3>현장으로 이어지는 운영 과정</h3></div><span>{activeModule.workflow.length}단계</span></div>
+                        <ol>{activeModule.workflow.map((step, index) => <li key={step.title}><span className="business-step-number">0{index + 1}</span><h4>{step.title}</h4><p>{step.desc}</p></li>)}</ol>
+                    </div>
+                    <div className="business-outcomes"><h3>이렇게 연결됩니다</h3><ul>{activeModule.outcomes.map((outcome) => <li key={outcome}><FontAwesomeIcon icon={faCheckCircle} />{outcome}</li>)}</ul></div>
+                    <div className="business-gallery">
+                        <div className="business-subheading"><div><p className="business-eyebrow">BUSINESS SCENES</p><h3>이미지로 살펴보는 사업영역</h3><p>사업 이해를 돕는 참고 이미지이며 실제 수행 현장 사진과는 다를 수 있습니다.</p></div>
+                            <button className="business-button business-secondary" onClick={() => setShowGallery((value) => !value)} aria-expanded={showGallery} aria-controls="business-gallery-items">{showGallery ? '이미지 접기' : '이미지 보기'}<span aria-hidden="true">{showGallery ? '−' : '+'}</span></button>
+                        </div>
+                        <div id="business-gallery-items" hidden={!showGallery}>
+                            {showGallery && <div className="business-gallery-grid">{activeModule.gallery.map((item) => <figure key={item.src}><div><BusinessImage src={item.src} alt={item.title} /><span>{item.label}</span></div><figcaption>{item.title}</figcaption></figure>)}</div>}
                         </div>
                     </div>
-                    <button
-                        type="button"
-                        onClick={scrollToModules}
-                        className="inline-flex h-12 items-center justify-center gap-2 rounded-[8px] bg-[#24242a] px-5 text-sm font-extrabold text-white"
-                    >
-                        다시 모듈 보기
-                        <FontAwesomeIcon icon={faArrowRight} />
-                    </button>
-                </div>
-            </footer>
+                    <div className="business-detail-footer"><button onClick={() => scrollTo(document.getElementById('business-modules'))}>↑ 사업영역 목록으로</button><button onClick={() => selectModule(MODULES[(activeIndex + 1) % MODULES.length].id)}>다음 사업 · {TOPICS[(activeIndex + 1) % MODULES.length]} <FontAwesomeIcon icon={faArrowRight} /></button></div>
+                </section>
+                <section className="business-closing"><div><p className="business-eyebrow">CONNECTED ON SITE</p><h2>각 분야의 전문성이<br />현장에서 하나로 이어집니다.</h2><p>사업의 이해에서 실제 프로젝트 확인까지, 청연ENG와 함께하세요.</p></div><Link to="/site/management" className="business-button business-primary">프로젝트 둘러보기 <FontAwesomeIcon icon={faArrowRight} /></Link></section>
+                <footer className="business-footer"><div><img src={logoConstruction} alt="" /><strong>청연ENG</strong><span>CHUNG YEON ENGINEERING</span></div><span>시공의 기준을 세우고, 현장의 가치를 잇다.</span></footer>
+            </div>
         </div>
     );
 };
