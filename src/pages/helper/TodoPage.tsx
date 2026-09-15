@@ -31,6 +31,10 @@ import { userService, UserData } from '../../services/userService';
 import { Task, TaskComment } from '../../types/task';
 import { UserRole } from '../../types/roles';
 import { toast } from '../../utils/swal';
+import { ACTIVE_TASK_STATUSES as ACTIVE_STATUSES, REVIEW_TASK_STATUSES as REVIEW_STATUSES, DONE_TASK_STATUSES as DONE_STATUSES, getTaskStatusMeta as getStatusMeta } from '../../utils/taskStatus';
+import { TaskReviewForm, TaskReviewGuide } from '../../components/tasks/TaskReviewGuide';
+import { formatTaskReview } from '../../utils/taskReview';
+import type { TaskReview } from '../../types/task';
 
 type ViewFilter = 'all' | 'mine' | 'active' | 'review' | 'done';
 
@@ -52,58 +56,6 @@ const EMPTY_DRAFT: DraftTask = {
     images: [],
 };
 
-const STATUS_META: Record<string, {
-    label: string;
-    description: string;
-    className: string;
-}> = {
-    요청: {
-        label: '접수',
-        description: '담당자가 확인할 차례예요',
-        className: 'border-slate-200 bg-slate-100 text-slate-700',
-    },
-    요청중: {
-        label: '접수',
-        description: '담당자가 확인할 차례예요',
-        className: 'border-slate-200 bg-slate-100 text-slate-700',
-    },
-    재요청: {
-        label: '수정 요청',
-        description: '요청자의 의견을 확인해 주세요',
-        className: 'border-amber-200 bg-amber-50 text-amber-700',
-    },
-    진행: {
-        label: '작업 중',
-        description: '담당자가 요청을 처리하고 있어요',
-        className: 'border-blue-200 bg-blue-50 text-blue-700',
-    },
-    진행중: {
-        label: '작업 중',
-        description: '담당자가 요청을 처리하고 있어요',
-        className: 'border-blue-200 bg-blue-50 text-blue-700',
-    },
-    완료: {
-        label: '확인 필요',
-        description: '요청자가 결과를 확인할 차례예요',
-        className: 'border-violet-200 bg-violet-50 text-violet-700',
-    },
-    검토중: {
-        label: '확인 필요',
-        description: '요청자가 결과를 확인할 차례예요',
-        className: 'border-violet-200 bg-violet-50 text-violet-700',
-    },
-    검토: {
-        label: '완료',
-        description: '요청 처리가 완료되었어요',
-        className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    },
-    완료함: {
-        label: '완료',
-        description: '요청 처리가 완료되었어요',
-        className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    },
-};
-
 const FILTERS: Array<{ key: ViewFilter; label: string }> = [
     { key: 'all', label: '전체' },
     { key: 'mine', label: '내 요청' },
@@ -111,12 +63,6 @@ const FILTERS: Array<{ key: ViewFilter; label: string }> = [
     { key: 'review', label: '확인 필요' },
     { key: 'done', label: '완료' },
 ];
-
-const ACTIVE_STATUSES = new Set(['요청', '요청중', '재요청', '진행', '진행중']);
-const REVIEW_STATUSES = new Set(['완료', '검토중']);
-const DONE_STATUSES = new Set(['검토', '완료함']);
-
-const getStatusMeta = (status: string) => STATUS_META[status] || STATUS_META['요청'];
 
 const getDateValue = (value?: string) => {
     if (!value) return null;
@@ -171,6 +117,7 @@ const TodoPage: React.FC = () => {
     const [revisionTaskId, setRevisionTaskId] = useState<string | null>(null);
     const [revisionReason, setRevisionReason] = useState('');
     const [previewImage, setPreviewImage] = useState<string | null>(null);
+    const [reviewTaskId, setReviewTaskId] = useState<string | null>(null);
 
     useEffect(() => {
         let active = true;
@@ -324,24 +271,26 @@ const TodoPage: React.FC = () => {
         }
     };
 
-    const updateTaskStatus = async (task: Task, status: Task['status'], message: string) => {
+    const updateTaskStatus = async (task: Task, status: Task['status'], message: string, review?: TaskReview) => {
         if (isSubmitting) return;
         setIsSubmitting(true);
         try {
-            const comments: TaskComment[] = [...(task.comments || []), {
+            const comment: TaskComment = {
                 id: Date.now(),
                 user: 'System',
                 text: message,
                 time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
                 isSystem: true,
-            }];
-            const updates: Partial<Task> = { status, comments };
+            };
+            const updates: Pick<Partial<Task>, 'assignee' | 'review'> = {};
             if (status === '완료' && task.createdBy) updates.assignee = task.createdBy;
-            await taskService.updateTask(task.id, updates);
-            showSuccess(message);
+            if (review) updates.review = review;
+            await taskService.transitionTask(task.id, task.status, status, comment, updates);
+            setReviewTaskId(null);
+            showSuccess(review ? '확인 안내와 함께 요청자에게 전달했습니다.' : message);
         } catch (error) {
             console.error('상태 변경 실패:', error);
-            showWarning('상태를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+            showWarning(error instanceof Error ? error.message : '상태를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요.');
         } finally {
             setIsSubmitting(false);
         }
@@ -353,7 +302,8 @@ const TodoPage: React.FC = () => {
             return;
         }
         if (task.status === '진행' || task.status === '진행중') {
-            void updateTaskStatus(task, '완료', '작업이 끝났습니다. 요청자의 확인을 기다립니다.');
+            setExpandedTaskId(task.id);
+            setReviewTaskId(task.id);
             return;
         }
         if (task.status === '완료' || task.status === '검토중') {
@@ -366,14 +316,14 @@ const TodoPage: React.FC = () => {
         if (!reason || isSubmitting) return;
         setIsSubmitting(true);
         try {
-            const comments: TaskComment[] = [...(task.comments || []), {
+            const comment: TaskComment = {
                 id: Date.now(),
                 user: currentUserName,
                 text: `수정 요청: ${reason}`,
                 time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
                 isSystem: false,
-            }];
-            await taskService.updateTask(task.id, { status: '재요청', comments });
+            };
+            await taskService.transitionTask(task.id, task.status, '재요청', comment);
             setRevisionTaskId(null);
             setRevisionReason('');
             showSuccess('수정 요청을 담당자에게 전달했습니다.');
@@ -398,7 +348,7 @@ const TodoPage: React.FC = () => {
                 images: commentImages,
                 isSystem: false,
             };
-            await taskService.updateTask(task.id, { comments: [...(task.comments || []), comment] });
+            await taskService.addComment(task.id, comment);
             setCommentText('');
             setCommentImages([]);
         } catch (error) {
@@ -638,6 +588,11 @@ const TodoPage: React.FC = () => {
                                                     </div>
 
                                                     <div>
+                                                        {reviewTaskId === task.id && <TaskReviewForm key={task.id} initial={task.review} busy={isSubmitting} onCancel={() => setReviewTaskId(null)} onSubmit={review => {
+                                                            const completedReview = { ...review, requestedAt: new Date().toISOString(), requestedBy: currentUserName };
+                                                            void updateTaskStatus(task, '완료', formatTaskReview(completedReview), completedReview);
+                                                        }} />}
+                                                        {task.review && <TaskReviewGuide review={task.review} />}
                                                         <h3 className="mb-2 text-xs font-extrabold uppercase tracking-wider text-slate-400">진행 기록</h3>
                                                         <div className="max-h-72 space-y-3 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4">
                                                             {comments.length === 0 ? <p className="py-5 text-center text-sm text-slate-400">아직 등록된 메시지가 없습니다.</p> : comments.map(comment => (

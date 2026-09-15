@@ -1,6 +1,7 @@
 import { taskService } from './taskService';
 import { Task } from '../types/task';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
+import { runTransaction } from 'firebase/firestore';
 
 jest.mock('../config/firebase', () => ({ db: {} }));
 jest.mock('../utils/devAdminSession', () => ({
@@ -21,6 +22,7 @@ jest.mock('firebase/firestore', () => ({
     deleteDoc: jest.fn(),
     doc: jest.fn(),
     getDoc: jest.fn(),
+    runTransaction: jest.fn(),
     where: jest.fn(),
     orderBy: jest.fn(),
     limit: jest.fn(),
@@ -48,6 +50,24 @@ describe('taskService 개발자 관리자 모드', () => {
         jest.clearAllMocks();
         mockedIsDevAdminSessionEnabled.mockReturnValue(true);
         window.localStorage.clear();
+    });
+
+    it('오래된 상태 변경 요청을 거부한다', async () => {
+        const id = await taskService.addTask(createTask({ status: '진행' }));
+        const comment = { id: 1, user: '검증', text: '확인 요청', time: '12:00', isSystem: true };
+        await taskService.transitionTask(id, '진행', '완료', comment);
+        await expect(taskService.transitionTask(id, '진행', '완료', comment)).rejects.toThrow('다른 사용자가');
+        expect((await taskService.getTask(id))?.comments).toHaveLength(1);
+    });
+
+    it('서버의 최신 댓글을 유지하면서 상태를 함께 저장한다', async () => {
+        mockedIsDevAdminSessionEnabled.mockReturnValue(false);
+        const existing = { id: 1, user: '검증', text: '동시 등록된 댓글', time: '12:00', isSystem: false };
+        const comment = { ...existing, id: 2, text: '확인 안내' };
+        const transaction = { get: jest.fn().mockResolvedValue({ exists: () => true, data: () => createTask({ status: '진행', comments: [existing] }) }), update: jest.fn() };
+        (runTransaction as jest.Mock).mockImplementation(async (_db, callback) => callback(transaction));
+        await taskService.transitionTask('task', '진행', '완료', comment, { assignee: '요청자' });
+        expect(transaction.update).toHaveBeenCalledWith(undefined, expect.objectContaining({ status: '완료', assignee: '요청자', comments: [existing, comment] }));
     });
 
     it('요청을 로컬에 저장하고 실시간 구독자에게 알린다', async () => {

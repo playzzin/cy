@@ -5,6 +5,7 @@ const buildDir = path.resolve(__dirname, '..', 'build');
 const requiredPaths = [
   'index.html',
   'asset-manifest.json',
+  'release.json',
   path.join('static', 'js'),
 ];
 
@@ -19,6 +20,15 @@ if (missing.length > 0) {
 }
 
 const indexHtml = fs.readFileSync(path.join(buildDir, 'index.html'), 'utf8');
+const { hash, sourceState } = require('./release-manifest.cjs');
+const release = JSON.parse(fs.readFileSync(path.join(buildDir, 'release.json'), 'utf8'));
+const state = sourceState();
+if (release.schemaVersion !== 1 || release.commit !== state.commit
+    || Object.keys(state.fingerprints).some(key => release.fingerprints?.[key] !== state.fingerprints[key])
+    || release.assetManifestHash !== hash(fs.readFileSync(path.join(buildDir, 'asset-manifest.json')))) {
+  console.error('배포 파일과 현재 코드가 다릅니다. 다시 빌드해 주세요.');
+  process.exit(1);
+}
 
 if (!indexHtml.includes('/static/js/')) {
   console.error('Hosting build is incomplete. index.html does not reference a static JS bundle.');

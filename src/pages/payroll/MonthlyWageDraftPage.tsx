@@ -10,6 +10,9 @@ import { AdvancePayment } from '../../services/advancePaymentService';
 import { statementOutputService } from '../../services/statementOutputService';
 import type { StatementOutputRecord } from '../../types/statementOutput';
 import { useAuth } from '../../contexts/AuthContext';
+import { PayrollReviewCenter } from './components/PayrollReviewCenter';
+import { reviewPayroll, reviewTransferTotals, type PayrollReviewRow } from './utils/payrollReview';
+import { resolveKBSalaryFilterFromPaymentId } from './utils/kbTransferExport';
 import {
     isFinalizedMonthlyPayrollRun,
     monthlyPayrollSettlementService,
@@ -4919,6 +4922,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const kbPreviewInvalidRows = kbPreviewRows.filter((row) => row.validationErrors.length > 0);
     const kbPreviewValidRows = kbPreviewRows.filter((row) => row.validationErrors.length === 0);
     const kbPreviewValidAmount = kbPreviewValidRows.reduce((sum, row) => sum + row.amount, 0);
+    const kbTransferReview = kbPreviewSnapshot ? reviewTransferTotals(
+        kbPreviewSnapshot.sourceRows.map(row => ({ sourceRowId: row.sourceRowId, amount: resolveKBSourceAmount(row, kbAmountType) })),
+        kbPreviewRows,
+    ) : null;
     const kbAllPreviewRowsSelected = kbPreviewRows.length > 0
         && kbPreviewRows.every((row) => kbSelectedTransferRowIds.has(row.sourceRowId));
     const kbAppliedPrimaryAccountCount = kbPreviewRows.filter((row) => row.usesPrimaryAccount).length;
@@ -5438,6 +5445,28 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         return Array.from(statuses)[0] as MonthlyPayrollRunStatus;
     }, [payrollScopeKeys, scopedPayrollSettlements]);
 
+    const payrollReviewRows = useMemo<PayrollReviewRow[]>(() => {
+        const savedById = new Map(savedPayrollSettlements.flatMap(settlement => settlement.rows.map(row => [
+            String(row.paymentSnapshot?.id ?? row.rowKey), row,
+        ] as const)));
+        return simplePayrollClosingRows.map((row, index) => {
+            const payment = filteredPaymentData[index];
+            const breakdown = rowDisplayCache.get(row.id)?.deductionBreakdownForDisplay ?? payment.deductionBreakdown;
+            return {
+                ...row,
+                workerId: payment.workerId,
+                teamId: payment.teamId,
+                salaryModel: resolveKBSalaryFilterFromPaymentId(payment.id),
+                bankCode: analyzeBankMapping(payment.bankName, payment.bankCode).code,
+                accountNumber: payment.accountNumber || '',
+                accountHolder: payment.accountHolder || '',
+                deductionLineTotal: [...(breakdown?.standardLines ?? []), ...(breakdown?.additionalLines ?? [])].reduce((sum, line) => sum + Number(line.amount), 0),
+                saved: savedById.get(row.id),
+            };
+        });
+    }, [simplePayrollClosingRows, filteredPaymentData, rowDisplayCache, savedPayrollSettlements]);
+    const payrollReview = useMemo(() => reviewPayroll(payrollReviewRows), [payrollReviewRows]);
+
     const reloadPayrollSettlements = useCallback(async () => {
         const years = Array.from(new Set(
             monthRange
@@ -5468,6 +5497,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         }
         if (scopedPayrollSettlements.length === 0) {
             alert('먼저 급여 초안을 저장해 주세요.');
+            return;
+        }
+        if ((nextStatus === 'reviewed' || nextStatus === 'confirmed') && payrollReview.errorCount > 0) {
+            alert(`정산 확인센터에 금액·중복·저장본 확인 항목이 ${payrollReview.errorCount}건 있습니다. 먼저 내용을 확인해 주세요.`);
             return;
         }
         if (nextStatus === 'confirmed') {
@@ -5829,6 +5862,20 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 />
             )}
 
+            {!hideHeader && <PayrollReviewCenter
+                rows={payrollReviewRows}
+                rangeLabel={rangeLabel}
+                busy={loading || payrollSettlementLoading || deductionApplyInProgress}
+                onInspect={issue => {
+                    setPageViewMode(issue.target === 'ledger' ? 'ledger' : 'standard');
+                    if (issue.target === 'account') setShowAccountColumns(true);
+                    setExpandedRows(previous => new Set([...Array.from(previous), issue.rowId]));
+                    if (issue.target !== 'ledger') requestAnimationFrame(() => {
+                        document.getElementById(`payroll-review-${issue.rowId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                    });
+                }}
+            />}
+
             {/* Hidden Batch Rendering Container - 다운로드 시에만 렌더링 (평소 불필요한 재렌더링 방지) */}
             {batchDownloading && (
                 <div className="absolute left-[-9999px] top-0 pointer-events-none opacity-0 w-[1120px]">
@@ -6024,7 +6071,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
                                     return (
                                         <React.Fragment key={rowKey}>
-                                            <tr className={`transition ${rowBgClass} ${!item.isValid ? 'bg-red-50' : ''} ${isExpanded ? 'ring-1 ring-indigo-200' : ''}`}>
+                                            <tr id={`payroll-review-${item.id}`} className={`transition ${rowBgClass} ${!item.isValid ? 'bg-red-50' : ''} ${isExpanded ? 'ring-1 ring-indigo-200' : ''}`}>
                                                 <td className="sticky left-0 z-20 bg-inherit px-2 py-1.5 text-center border-b border-slate-100 shadow-[inset_-1px_0_0_rgba(0,0,0,0.1)]">
                                                     <button
                                                         onClick={() => toggleRow(item.id)}
@@ -6724,6 +6771,11 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                     <div className="rounded border border-slate-700 bg-slate-900/70 px-3 py-2 text-xs text-slate-300">
                                         {kbPreviewSnapshot.criteria.deductionStatusLabel}
                                     </div>
+                                    {kbTransferReview && <div className={`mt-2 rounded-lg p-3 text-sm ${kbTransferReview.matches ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
+                                        <strong>이체 금액 대조 · {kbTransferReview.matches ? '일치' : '확인 필요'}</strong>
+                                        <p className="mt-1">선택한 금액 기준의 양수 합계 {kbTransferReview.expected.toLocaleString()}원 · 다운로드 합계 {kbTransferReview.downloadable.toLocaleString()}원 · 차이 {kbTransferReview.difference.toLocaleString()}원</p>
+                                        <p className="mt-1">{kbTransferReview.matches ? '현재 선택 기준과 내려받을 파일의 대상·금액이 일치합니다.' : '계좌 오류로 제외된 대상과 아래 목록을 확인해 주세요. 같은 총액이어도 지급 대상이 다르면 확인이 필요합니다.'}</p>
+                                    </div>}
                                     {(kbPreviewInvalidRows.length > 0 || kbPreviewExcludedRows.length > 0) && (
                                         <div className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
                                             {kbPreviewInvalidRows.length > 0 && (

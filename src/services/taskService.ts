@@ -1,5 +1,5 @@
 import { db } from '../config/firebase';
-import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc, where, orderBy, limit as queryLimit, Unsubscribe, FirestoreError } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc, runTransaction, where, orderBy, limit as queryLimit, Unsubscribe, FirestoreError } from 'firebase/firestore';
 import { Task, TaskComment } from '../types/task';
 import { createCollectionRepository } from './firestoreRepository';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
@@ -48,6 +48,25 @@ const updateDevTask = (taskId: string, updates: Partial<Task>) => {
 };
 
 export const taskService = {
+    async transitionTask(taskId: string, expectedStatus: Task['status'], status: Task['status'], comment: TaskComment, extra: Pick<Partial<Task>, 'assignee' | 'review'> = {}): Promise<void> {
+        const makeUpdates = (current: Task): Partial<Task> => {
+            if (current.status !== expectedStatus) throw new Error('다른 사용자가 진행 상태를 변경했습니다. 최신 내용을 확인한 뒤 다시 진행해 주세요.');
+            return { ...extra, status, comments: [...(current.comments || []), comment] };
+        };
+        if (isDevAdminSessionEnabled()) {
+            const current = getDevTask(taskId);
+            if (!current) throw new Error('요청을 찾을 수 없습니다.');
+            updateDevTask(taskId, makeUpdates(current));
+            return;
+        }
+        await runTransaction(db, async transaction => {
+            const ref = doc(db, COLLECTION_NAME, taskId);
+            const snapshot = await transaction.get(ref);
+            if (!snapshot.exists()) throw new Error('요청을 찾을 수 없습니다.');
+            transaction.update(ref, makeUpdates(snapshot.data() as Task));
+        });
+        taskRepository.clearCache();
+    },
     // Get single task
     async getTask(taskId: string): Promise<Task | null> {
         if (isDevAdminSessionEnabled()) return getDevTask(taskId);
@@ -125,17 +144,17 @@ export const taskService = {
             return;
         }
         const taskRef = doc(db, COLLECTION_NAME, taskId);
-        const taskSnap = await getDoc(taskRef);
-        if (taskSnap.exists()) {
+        await runTransaction(db, async transaction => {
+            const taskSnap = await transaction.get(taskRef);
+            if (!taskSnap.exists()) throw new Error('요청을 찾을 수 없습니다.');
             const taskData = taskSnap.data() as Task;
-            const comments = taskData.comments || [];
-            comments.push({
+            const comments = [...(taskData.comments || []), {
                 ...comment,
                 id: Date.now()
-            });
-            await updateDoc(taskRef, { comments });
-            taskRepository.clearCache();
-        }
+            }];
+            transaction.update(taskRef, { comments });
+        });
+        taskRepository.clearCache();
     },
 
     // Subscribe to real-time updates

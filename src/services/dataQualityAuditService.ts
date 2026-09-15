@@ -1,3 +1,4 @@
+import { getTaskStage } from '../utils/taskStatus';
 export type DataQualitySeverity = 'critical' | 'warning' | 'info';
 export type DataQualityDomain = 'worker' | 'team' | 'site' | 'company' | 'dailyReport' | 'task';
 
@@ -51,8 +52,7 @@ const isActiveStatus = (value: unknown): boolean => {
 };
 
 const isOpenTaskStatus = (value: unknown): boolean => {
-  const status = normalizeKey(value);
-  return !/완료|검수|complete|done|closed/.test(status);
+  return getTaskStage(value) !== 'done';
 };
 
 const createId = (...parts: unknown[]): string =>

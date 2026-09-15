@@ -1,4 +1,5 @@
 import type { Task } from '../../types/task';
+import { getTaskStage } from '../../utils/taskStatus';
 
 export type TaskSlaBucket = 'overdue' | 'dueToday' | 'dueSoon' | 'missingAssignee' | 'missingDueDate' | 'healthy' | 'closed';
 
@@ -20,8 +21,7 @@ export interface TaskSlaBoard {
 const normalizeText = (value: unknown): string => String(value ?? '').trim().replace(/\s+/g, '').toLowerCase();
 
 export const isTaskClosedForSla = (task: Pick<Task, 'status'>): boolean => {
-  const status = normalizeText(task.status);
-  return /검토|최종|완료됨|closed|done|complete/.test(status);
+  return getTaskStage(task.status) === 'done';
 };
 
 const toStartOfDay = (date: Date): Date => {
