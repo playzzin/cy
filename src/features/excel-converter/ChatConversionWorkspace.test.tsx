@@ -55,6 +55,7 @@ test('파일 두 개와 자연어 요청으로 Gemini를 호출하고 실제 엑
   await upload(); expect(analyze).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '변환 요청' }));
   const download = await screen.findByRole('button', { name: '엑셀 다운로드' });
+  expect(screen.getByText(/^수식 [\d,]+개 계산$/)).toBeInTheDocument();
   expect(analyze.mock.calls[0][0]).toContain(DEFAULT_CONVERSION_MESSAGE);
   fireEvent.click(download);
   expect(saveAs).toHaveBeenCalledTimes(1);

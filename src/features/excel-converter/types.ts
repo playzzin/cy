@@ -46,7 +46,7 @@ export const planSchema = z.object({
 export type ConversionPlan = z.infer<typeof planSchema>;
 export interface Issue { level: 'error' | 'warning' | 'info'; code: string; message: string; location?: string }
 export interface CellTrace { sheet: string; address: string; label: string; value: Scalar; origins: string[]; rule: string; kind: ValueKind }
-export interface ConversionOutput { name: string; bytes: ArrayBuffer; sheets: SheetInfo[]; traces: CellTrace[]; issues: Issue[]; inputCount: number; excludedCount: number; outputCount: number; group: string }
+export interface ConversionOutput { name: string; bytes: ArrayBuffer; sheets: SheetInfo[]; traces: CellTrace[]; issues: Issue[]; inputCount: number; excludedCount: number; outputCount: number; group: string; formulaCalculation?: { calculated: number; unresolved: number } }
 export interface ConversionResult { outputs: ConversionOutput[]; issues: Issue[]; excluded: { origin: string; reason: string }[]; inputCount: number; outputCount: number; elapsedMs: number }
 export interface JoinSpec { fileId: string; sheetName: string; headerRow: number; leftKey: string; rightColumn: number; prefix: string }
 export const emptyRules = (): Rules => ruleSchema.parse({});
