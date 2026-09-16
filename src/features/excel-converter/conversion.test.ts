@@ -54,4 +54,12 @@ test('대상 양식의 입력 제한을 위반하는 값은 오류로 표시한�
 
 
 test('지수 표기의 작은 소수 합산을 보존하고 지원 정밀도 초과는 알린다', () => { expect(decimalSum([1e-7, 2e-7])).toBe(3e-7); expect(() => decimalSum([1e-9])).toThrow('소수 8자리'); });
+test('엑셀 수식의 미세한 저장 오차를 합산하되 실제 추가 소수 자리는 버리지 않는다', () => {
+  expect(decimalSum([14.600000000000001, 0.1 + 0.2, 1.2000000000000002])).toBe(16.1);
+  expect(decimalSum([-14.600000000000001, -0.1 - 0.2])).toBe(-14.9);
+  expect(decimalSum([1.23456789, 2.00000001])).toBe(3.2345679);
+  expect(decimalSum([1e-8, 2e-8])).toBe(3e-8);
+  for (const value of [1e-9, 1.234567891, 1000000.000000001]) expect(() => decimalSum([value])).toThrow('소수 8자리');
+  for (const value of [NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1]) expect(() => decimalSum([value])).toThrow();
+});
 test('단일 입력의 병합 시작 칸·범위·중복을 검증한다', async () => { const p = configure(changed); const mapping = { ...p.mappings[0], mode: 'constant' as const, constant: '테스트', sourceKeys: [] }; p.fixedCells = [{ address: 'C2', mapping }]; const merge = changed.sheets[0].merges.find(m => m.includes(':'))!; p.fixedCells[0].address = merge.split(':')[1]; await expect(convertWorkbook(changed, p, table)).rejects.toThrow('병합 셀'); p.fixedCells[0].address = 'ZZ100'; await expect(convertWorkbook(changed, p, table)).rejects.toThrow('범위'); p.fixedCells = [{ address: 'A3', mapping }, { address: 'A3', mapping }]; expect(validatePlanReferences(p, table.fields).join()).toContain('같은 단일 입력'); });

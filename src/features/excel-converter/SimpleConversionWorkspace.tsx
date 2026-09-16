@@ -33,8 +33,14 @@ export default function SimpleConversionWorkspace({ ownerId, analyze, checkAi, o
   const [example, setExample] = useState<keyof typeof DOCUMENT_EXAMPLES>(); const [review, setReview] = useState(false); const [accepted, setAccepted] = useState(false);
   const [history, setHistory] = useState<SavedWork[]>([]); const [showHistory, setShowHistory] = useState(false);
   const [usage, setUsage] = useState(''); const controller = useRef<AbortController>(); const currentId = useRef<string>(crypto.randomUUID());
-  const sourceState = useMemo(() => { try { return source ? { document: readSourceDocument(source, sourceSheet || source.sheets[0].name), error: '' } : { error: '' }; } catch(e) { return { error: errText(e) }; } }, [source, sourceSheet]);
-  const document = sourceState.document; const totals = document ? documentTotals(document.table) : undefined;
+  const sourceState = useMemo(() => {
+    try {
+      if (!source) return { error: '' };
+      const document = readSourceDocument(source, sourceSheet || source.sheets[0].name);
+      return { document, totals: documentTotals(document.table), error: '' };
+    } catch(e) { return { error: errText(e) }; }
+  }, [source, sourceSheet]);
+  const { document, totals } = sourceState;
   const mergedLayout = useMemo(() => {
     const sheet = target?.sheets.find(s => s.name === plan?.sheetName);
     if (!sheet || !plan?.mappings.length) return null;
