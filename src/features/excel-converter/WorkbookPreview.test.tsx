@@ -8,6 +8,18 @@ import { readWorkbook } from './workbook';
 import type { SheetInfo } from './types';
 Object.defineProperty(globalThis,'crypto',{value:webcrypto});
 const read = async(name:string)=>{const b=fs.readFileSync(path.join(process.cwd(),'public/excel-converter/examples',name));const bytes=new ArrayBuffer(b.length);new Uint8Array(bytes).set(b);return readWorkbook(bytes,name);};
+
+test('정상적인 빈 문자열 결과와 계산값이 없는 수식을 구분해서 표시한다',()=>{
+ const sheet:SheetInfo={name:'계산결과',path:'',rowCount:1,columnCount:3,headerRow:1,hiddenRows:[],hiddenColumns:[],warnings:[],merges:[],cells:[
+  {address:'A1',row:1,col:1,value:'',kind:'text',text:'',formula:'IF(TRUE,"",1)',style:0},
+  {address:'B1',row:1,col:2,value:null,kind:'blank',text:'',formula:'UNKNOWN()',style:0},
+  {address:'C1',row:1,col:3,value:0,kind:'number',text:'0',formula:'1-1',style:0},
+ ]};
+ render(<DocumentSheet sheet={sheet}/>);
+ expect(screen.getAllByText('재계산 필요')).toHaveLength(1);
+ expect(screen.getAllByRole('cell').find(c=>c.getAttribute('data-address')==='A1')).toBeEmptyDOMElement();
+ expect(screen.getAllByRole('cell').find(c=>c.getAttribute('data-address')==='C1')).toHaveTextContent('0');
+});
 test('실제 양식의 병합·너비·색을 읽고 원본과 받을 양식을 전환한다',async()=>{
  const source=await read('10_현재위임장_가상원본.xlsx'),target=await read('11_타회사위임장_개인별양식.xlsx');
  expect(target.sheets[0].presentation?.styles.some(s=>s.background)).toBe(true);

@@ -1,9 +1,11 @@
 import JSZip from 'jszip';
+import { recalculateSheet } from './formulaRecalculation';
 import { CellTrace, ConversionPlan, DataTable, Issue, LIMITS, Mapping, ConversionResult, WorkbookFile, planSchema } from './types';
 import { buildTraces, numberValue, runRules } from './transform';
 import { columnName, columnNumber, elements, normalizeZipPath, readWorkbook, serializeXml, xml } from './workbook';
 import { validatePlanReferences } from './planning';
 import { inputRecordRows } from './mergedLayout';
+export { evaluateFormula } from './formula';
 const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const REL = 'http://schemas.openxmlformats.org/package/2006/relationships';
 const DOCREL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -159,159 +161,12 @@ function applyFormat(styles: Document, cell: Element, mapping: Mapping, cache: M
     cache.set(cacheKey, index);
     cell.setAttribute('s', String(index));
 }
-// Deliberately small formula grammar: no eval, code generation, or external references.
-export function evaluateFormula(formula: string, lookup: (address: string) => number): number {
-    const clean = formula.replace(/\$/g, '').replace(/^=/, '').toUpperCase();
-    const tokens = clean.match(/(?:\d+(?:\.\d*)?|\.\d+)(?:E[+-]?\d+)?|[A-Z]+\d+|[A-Z]+|[+*/():,-]/g) || [];
-    if (tokens.join('') !== clean.replace(/\s/g, ''))
-        throw new Error('recalculate');
-    let index = 0;
-    const expression = (): number => { let n = term(); while (['+', '-'].includes(tokens[index])) {
-        const op = tokens[index++];
-        const b = term();
-        n = op === '+' ? n + b : n - b;
-    } return n; };
-    const term = (): number => { let n = atom(); while (['*', '/'].includes(tokens[index])) {
-        const op = tokens[index++];
-        const b = atom();
-        if (op === '/' && b === 0)
-            throw new Error('division');
-        n = op === '*' ? n * b : n / b;
-    } return n; };
-    const atom = (): number => {
-        const token = tokens[index++];
-        if (token === '-')
-            return -atom();
-        if (token === '+')
-            return atom();
-        if (token === '(') {
-            const n = expression();
-            if (tokens[index++] !== ')')
-                throw new Error('syntax');
-            return n;
-        }
-        if (/^(?:\d|\.)/.test(token || ''))
-            return Number(token);
-        if (/^[A-Z]+\d+$/.test(token || ''))
-            return lookup(token);
-        if (['SUM', 'PRODUCT', 'ROUND', 'MIN', 'MAX'].includes(token)) {
-            if (tokens[index++] !== '(')
-                throw new Error('syntax');
-            const args: number[] = [];
-            do {
-                if (tokens[index] === ',')
-                    index++;
-                if (/^[A-Z]+\d+$/.test(tokens[index] || '') && tokens[index + 1] === ':') {
-                    const from = tokens[index++];
-                    index++;
-                    const to = tokens[index++];
-                    const fc = columnNumber(from.replace(/\d/g, ''));
-                    const tc = columnNumber(to.replace(/\d/g, ''));
-                    const fr = Number(from.match(/\d+$/)![0]);
-                    const tr = Number(to.match(/\d+$/)![0]);
-                    if (tc < fc || tr < fr || (tc - fc + 1) * (tr - fr + 1) > 30000)
-                        throw new Error('range');
-                    for (let r = fr; r <= tr; r++)
-                        for (let c = fc; c <= tc; c++)
-                            args.push(lookup(`${columnName(c)}${r}`));
-                }
-                else
-                    args.push(expression());
-            } while (tokens[index] === ',');
-            if (tokens[index++] !== ')')
-                throw new Error('syntax');
-            if (token === 'SUM')
-                return args.reduce((a, b) => a + b, 0);
-            if (token === 'PRODUCT')
-                return args.reduce((a, b) => a * b, 1);
-            if (token === 'MIN')
-                return Math.min(...args);
-            if (token === 'MAX')
-                return Math.max(...args);
-            if (args.length !== 2 || !Number.isInteger(args[1]) || Math.abs(args[1]) > 8)
-                throw new Error('round');
-            return Math.sign(args[0]) * Math.round(Math.abs(args[0]) * 10 ** args[1] + 1e-9) / 10 ** args[1];
-        }
-        throw new Error('unsupported');
-    };
-    const result = expression();
-    if (index !== tokens.length || !Number.isFinite(result))
-        throw new Error('formula');
-    return Number(result.toPrecision(15));
-}
-function recalculateSheet(doc: Document): number {
-    const cells = new Map(elements(doc, 'c').map(c => [c.getAttribute('r')!, c]));
-    const shared = new Map<string, { address: string; formula: string }>();
-    for (const [address, cell] of cells) {
-        const f = elements(cell, 'f')[0];
-        if (f?.getAttribute('t') === 'shared' && f.textContent && f.hasAttribute('si')) shared.set(f.getAttribute('si')!, { address, formula: f.textContent });
-    }
-    const formulaAt = (address: string, f: Element): string => {
-        if (!f.hasAttribute('t')) return f.textContent || '';
-        if (f.getAttribute('t') !== 'shared') throw new Error('unsupported-formula-type');
-        const master = shared.get(f.getAttribute('si') || '');
-        if (!master) throw new Error('shared-master');
-        const deltaCol = columnNumber(address.replace(/\d/g, '')) - columnNumber(master.address.replace(/\d/g, ''));
-        const deltaRow = Number(address.match(/\d+$/)![0]) - Number(master.address.match(/\d+$/)![0]);
-        // Preserve original shared formula XML. Only resolve relative references
-        // for the restricted numeric evaluator; quoted text is never shifted.
-        return master.formula.split(/("(?:[^"]|"")*")/g).map((part, i) => i % 2 ? part : part.replace(/(\$?)([A-Z]+)(\$?)([1-9]\d*)\b/g, (_, fixedCol: string, col: string, fixedRow: string, row: string) => {
-            const c = columnNumber(col) + (fixedCol ? 0 : deltaCol), r = Number(row) + (fixedRow ? 0 : deltaRow);
-            if (c < 1 || r < 1) throw new Error('shared-reference');
-            return `${fixedCol}${columnName(c)}${fixedRow}${r}`;
-        })).join('');
-    };
-    const memo = new Map<string, number>();
-    const active = new Set<string>();
-    let unresolved = 0;
-    const value = (address: string): number => {
-        if (memo.has(address))
-            return memo.get(address)!;
-        if (active.has(address) || active.size > 100)
-            throw new Error('cycle');
-        active.add(address);
-        const cell = cells.get(address);
-        let result = 0;
-        try {
-            if (cell) {
-                const f = elements(cell, 'f')[0];
-                if (f) {
-                    result = evaluateFormula(formulaAt(address, f), value);
-                }
-                else if (['s', 'inlineStr', 'str', 'e'].includes(cell.getAttribute('t') || '')) {
-                    if (elements(cell, 't').some(t => t.textContent) || elements(cell, 'v').some(v => v.textContent))
-                        throw new Error('text');
-                }
-                else
-                    result = Number(elements(cell, 'v')[0]?.textContent || 0);
-            }
-            memo.set(address, result);
-            return result;
-        }
-        finally {
-            active.delete(address);
-        }
-    };
-    for (const [address, cell] of cells) {
-        if (!elements(cell, 'f').length)
-            continue;
-        for (const v of elements(cell, 'v'))
-            cell.removeChild(v);
-        cell.removeAttribute('t');
-        try {
-            cell.appendChild(newNode(doc, 'v', String(value(address))));
-        }
-        catch {
-            unresolved++;
-        }
-    }
-    return unresolved;
-}
 const safeFilename = (name: string) => Array.from(name).map(c => c.charCodeAt(0) < 32 ? '_' : c).join('').replace(/[<>:"/\\|?*]/g, '_').replace(/[. ]+$/g, '').slice(0, 100) || '변환결과';
 function safeSheetName(name: string, existing: string[]): string { const base = name.replace(/[\\/?*[\]:]/g, '_').replace(/^'|'$/g, '').slice(0, 25) || '결과'; const names = new Set(existing.map(s => s.toLowerCase())); let result = base; let i = 2; while (names.has(result.toLowerCase()))
     result = `${base}_${i++}`.slice(0, 31); return result; }
 export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionPlan, table: DataTable, onProgress?: (message: string) => void, signal?: AbortSignal): Promise<ConversionResult> {
     const started = Date.now();
+    const calculationDate = new Date();
     const plan = planSchema.parse(rawPlan);
     const errors = validatePlanReferences(plan, table.fields);
     if (errors.length)
@@ -469,7 +324,9 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
                 continue;
             }
             // All formula caches are affected by changed values, including untouched sheets.
-            let unresolved = 0;
+            const formulaCalculation = { calculated: 0, unresolved: 0 };
+            const stringsEntry = zip.file('xl/sharedStrings.xml');
+            const sharedStrings = stringsEntry ? elements(xml(await stringsEntry.async('string')), 'si').map(si => elements(si, 't').map(t => t.textContent || '').join('')) : [];
             for (const rel of elements(rels, 'Relationship').filter(r => (r.getAttribute('Type') || '').endsWith('/worksheet'))) {
                 const path = normalizeZipPath('xl/workbook.xml', rel.getAttribute('Target')!);
                 const entry = zip.file(path);
@@ -478,11 +335,13 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
                 const doc = xml(await entry.async('string'));
                 if (!elements(doc, 'f').length)
                     continue;
-                unresolved += recalculateSheet(doc);
+                const counts = recalculateSheet(doc, { sharedStrings, date1904, today: calculationDate });
+                formulaCalculation.calculated += counts.calculated;
+                formulaCalculation.unresolved += counts.unresolved;
                 zip.file(path, serializeXml(doc));
             }
-            if (unresolved)
-                outputIssues.push({ level: 'warning', code: 'formula-recalc', message: `수식 ${unresolved}개는 Excel에서 재계산해야 합니다. 이전 계산값을 제거했으며 해당 결과는 미검증 상태입니다.` });
+            if (formulaCalculation.unresolved)
+                outputIssues.push({ level: 'warning', code: 'formula-recalc', message: `수식 ${formulaCalculation.unresolved}개는 Excel에서 재계산해야 합니다. 이전 계산값을 제거했으며 해당 결과는 미검증 상태입니다.` });
             const calc = elements(workbook, 'calcPr')[0] || newNode(workbook, 'calcPr');
             calc.setAttribute('fullCalcOnLoad', '1');
             calc.setAttribute('forceFullCalc', '1');
@@ -526,7 +385,7 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
                     if (expected === null || actual === null || Math.abs(expected - actual) > 0.0000001) outputIssues.push({ level: 'error', code: 'reconciliation', message: `${mapping.label}: 원본 금액과 양식 계산 결과가 다릅니다.`, location: `${sheetName}!${address}` });
                 });
             });
-            result.outputs.push({ name, bytes, sheets: reread.sheets, traces: allTraces, issues: outputIssues, inputCount: table.rows.length, excludedCount: processed.excluded.length, outputCount: bundle.flat().length, group });
+            result.outputs.push({ name, bytes, sheets: reread.sheets, traces: allTraces, issues: outputIssues, inputCount: table.rows.length, excludedCount: processed.excluded.length, outputCount: bundle.flat().length, group, formulaCalculation });
             result.issues.push(...outputIssues);
         }
     }
