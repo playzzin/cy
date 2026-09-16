@@ -65,8 +65,16 @@ export const normalizeGeminiModelName = (model: string | null | undefined, fallb
     return DEPRECATED_GEMINI_MODEL_REPLACEMENTS[trimmed] || trimmed || fallback;
 };
 
+export const AI_CONVERSION_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
+    { value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash (최신 안정 모델)' },
+    { value: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
+    { value: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite (경제적)' },
+    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (기존 호환)' },
+    { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' }
+];
+
 export const AI_TEXT_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
-    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (권장)' },
+    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (기존 기능 호환)' },
     { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' }
 ];
 

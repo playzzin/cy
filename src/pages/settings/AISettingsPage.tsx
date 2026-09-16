@@ -20,6 +20,7 @@ import {
     AI_IMAGE_MODEL_OPTIONS,
     AI_MANAGED_PAGES,
     AI_TEXT_MODEL_OPTIONS,
+    AI_CONVERSION_MODEL_OPTIONS,
     AiModelSettings,
     AiModelScope
 } from '../../services/aiSettingsService';
@@ -47,6 +48,8 @@ const AISettingsPage: React.FC = () => {
     const [serverModel, setServerModel] = useState('gemini-2.5-flash');
     const [serverDocumentModel, setServerDocumentModel] = useState('gemini-2.5-flash');
     const [serverBatchModel, setServerBatchModel] = useState('gemini-2.5-flash');
+    const [conversionModel, setConversionModel] = useState('gemini-3.8-flash');
+    const [conversionThinking, setConversionThinking] = useState<'low' | 'medium' | 'high'>('medium');
     const [serverStatus, setServerStatus] = useState<ServerAiSettingsStatus | null>(null);
     const [serverStatusError, setServerStatusError] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -70,6 +73,8 @@ const AISettingsPage: React.FC = () => {
             setServerModel(status.model || 'gemini-2.5-flash');
             setServerDocumentModel(status.documentModel || 'gemini-2.5-flash');
             setServerBatchModel(status.batchModel || status.model || 'gemini-2.5-flash');
+            setConversionModel(status.excelConversionModel);
+            setConversionThinking(status.excelConversionThinking);
         } catch (error) {
             console.error('[AISettingsPage] load server settings failed:', error);
             setServerStatusError(error instanceof Error ? error.message : '서버 AI 설정 상태를 불러오지 못했습니다.');
@@ -133,6 +138,7 @@ const AISettingsPage: React.FC = () => {
                 model: serverStatus?.documentModel || serverDocumentModel || 'gemini-2.5-flash',
                 note: '전기·가스·수도 청구서와 과태료 고지서의 고정밀 OCR·매칭'
             },
+            { id: 'binding-excel-conversion', service: '위임장·노임명세서 양식 변환', model: serverStatus?.excelConversionModel || conversionModel, note: '양식 변환 전용 모델 · 개인정보 행은 브라우저에서 처리' },
             {
                 id: 'binding-workbook-tax-invoice',
                 service: '매입매출 세금계산서 대량검수',
@@ -146,7 +152,7 @@ const AISettingsPage: React.FC = () => {
                 note: '명함/업체자료 사진 인식'
             }
         ],
-        [models, serverDocumentModel, serverModel, serverStatus]
+        [models, serverDocumentModel, serverModel, serverStatus, conversionModel]
     );
 
     const setAllPagesEnabled = (enabled: boolean) => {
@@ -170,6 +176,8 @@ const AISettingsPage: React.FC = () => {
                 model: serverModel,
                 documentModel: serverDocumentModel,
                 batchModel: serverBatchModel,
+                excelConversionModel: conversionModel,
+                excelConversionThinking: conversionThinking,
             });
             setServerStatus(status);
             setServerApiKey('');
@@ -384,6 +392,12 @@ const AISettingsPage: React.FC = () => {
                             키 삭제
                         </button>
                     </div>
+                </section>
+
+                <section className="bg-blue-50 rounded-2xl border border-blue-200 p-6" aria-label="양식 변환 AI 설정" id="excel-conversion-ai">
+                    <div className="flex flex-wrap justify-between items-center gap-3"><div><h2 className="text-lg font-extrabold text-slate-900">위임장·노임명세서 변환 AI</h2><p className="text-sm text-slate-600 mt-1">권장 설정: Gemini 3.8 Flash · 균형 분석. 항목 연결과 작성 규칙을 확인합니다.</p></div><button type="button" className="rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-bold text-blue-700" onClick={() => { setConversionModel('gemini-3.8-flash'); setConversionThinking('medium'); }}>권장값 채우기</button></div>
+                    <div className="grid md:grid-cols-2 gap-4 mt-4"><label className="text-sm font-bold text-slate-700">변환 모델<input aria-label="양식 변환 모델" list="conversion-model-options" value={conversionModel} onChange={e => setConversionModel(e.target.value)} className="mt-2 w-full rounded-xl border border-blue-200 px-3 py-3 font-mono"/><datalist id="conversion-model-options">{AI_CONVERSION_MODEL_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</datalist></label><label className="text-sm font-bold text-slate-700">분석 강도<select aria-label="양식 변환 분석 강도" value={conversionThinking} onChange={e => setConversionThinking(e.target.value as 'low' | 'medium' | 'high')} className="mt-2 w-full rounded-xl border border-blue-200 px-3 py-3"><option value="low">빠르게</option><option value="medium">균형 · 권장</option><option value="high">꼼꼼하게 · 복잡한 양식</option></select></label></div>
+                    <p className="text-xs text-slate-500 mt-3">선택 후 상단 저장을 누르면 적용됩니다. 실제 사용 모델은 변환 화면과 결과에 표시됩니다.</p><Link to="/tools/excel-converter" className="inline-block mt-3 font-bold text-sm text-blue-700">양식 변환과 미리보기 열기 →</Link>
                 </section>
 
                 <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">

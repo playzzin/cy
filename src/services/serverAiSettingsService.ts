@@ -7,6 +7,8 @@ export interface ServerAiSettingsStatus {
     model: string;
     documentModel: string;
     batchModel: string;
+    excelConversionModel: string;
+    excelConversionThinking: 'low' | 'medium' | 'high';
     updatedAt: string;
     updatedByUid: string;
 }
@@ -16,6 +18,8 @@ export interface SaveServerAiSettingsInput {
     model: string;
     documentModel: string;
     batchModel: string;
+    excelConversionModel?: string;
+    excelConversionThinking?: 'low' | 'medium' | 'high';
     clearApiKey?: boolean;
 }
 
@@ -25,6 +29,8 @@ const DEFAULT_STATUS: ServerAiSettingsStatus = {
     model: 'gemini-2.5-flash',
     documentModel: 'gemini-2.5-flash',
     batchModel: 'gemini-2.5-flash',
+    excelConversionModel: 'gemini-3.8-flash',
+    excelConversionThinking: 'medium',
     updatedAt: '',
     updatedByUid: '',
 };

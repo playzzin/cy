@@ -1,0 +1,34 @@
+import React from 'react';
+import { Field, Mapping, Rules } from './types';
+export function MappingEditor({ mapping, fields, onChange }: {
+    mapping: Mapping;
+    fields: Field[];
+    onChange: (mapping: Mapping) => void;
+}) {
+    const change = (patch: Partial<Mapping>) => onChange({ ...mapping, ...patch });
+    return <div className={`xc-mapping ${!mapping.confirmed ? 'xc-needs-review' : ''}`}>
+    <div className="xc-mapping-title"><strong>{mapping.label}</strong><span>{mapping.confirmed ? '연결 확인' : '확인 필요'}</span></div>
+    <div className="xc-inline"><label>처리 방식<select aria-label={`${mapping.label} 처리 방식`} value={mapping.mode} onChange={e => change({ mode: e.target.value as Mapping['mode'], confirmed: e.target.value !== 'blank' ? mapping.sourceKeys.length > 0 : !mapping.required })}><option value="copy">그대로 입력</option><option value="concat">여러 항목 합치기</option><option value="product">숫자 곱하기</option><option value="constant">고정값 입력</option><option value="blank">빈칸 · 기존 수식 유지</option></select></label>
+    {['copy', 'concat', 'product'].includes(mapping.mode) && <label>원본 항목<select aria-label={`${mapping.label} 원본 항목`} multiple={mapping.mode !== 'copy'} value={mapping.mode === 'copy' ? mapping.sourceKeys[0] || '' : mapping.sourceKeys} onChange={e => change({ sourceKeys: Array.from(e.target.selectedOptions).map(o => o.value).filter(Boolean), confirmed: Boolean(e.target.value) })}>{mapping.mode === 'copy' && <option value="">원본 항목 선택</option>}{fields.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}</select></label>}
+    {mapping.mode === 'constant' && <label>입력할 값<input aria-label={`${mapping.label} 고정값`} value={String(mapping.constant ?? '')} onChange={e => change({ constant: e.target.value, confirmed: true })}/></label>}</div>
+    <small>{mapping.reason}</small>
+    <details><summary>표시 형식·계산·필수값</summary><div className="xc-inline"><label>표시 형식<select value={mapping.format} onChange={e => change({ format: e.target.value as Mapping['format'] })}><option value="keep">양식 유지</option><option value="text">문자 · 앞자리 0 유지</option><option value="number">숫자</option><option value="date">날짜</option></select></label>{mapping.format === 'date' && <label>날짜 형식<select value={mapping.dateFormat} onChange={e => change({ dateFormat: e.target.value as Mapping['dateFormat'] })}><option>yyyy-mm-dd</option><option>yyyy.mm.dd</option><option>yyyy/mm/dd</option></select></label>}{mapping.mode === 'concat' && <label>구분 문자<input value={mapping.separator} onChange={e => change({ separator: e.target.value })}/></label>}</div><div className="xc-inline"><label>곱할 배율<input type="number" step="any" value={mapping.scale} onChange={e => change({ scale: Number(e.target.value) })}/></label><label>소수 자릿수<input type="number" min="0" max="8" placeholder="자동" value={mapping.decimals ?? ''} onChange={e => change({ decimals: e.target.value === '' ? null : Number(e.target.value) })}/></label><label>소수 처리<select value={mapping.rounding} onChange={e => change({ rounding: e.target.value as Mapping['rounding'] })}><option value="round">반올림</option><option value="floor">내림</option><option value="ceil">올림</option><option value="truncate">버림</option></select></label></div><label className="xc-check"><input type="checkbox" checked={mapping.required} onChange={e => change({ required: e.target.checked })}/>필수 항목</label></details>
+    {mapping.mode === 'blank' && mapping.reason.includes('수식') && <label>계산 결과와 비교할 원본 값<select aria-label={`${mapping.label} 검증 기준`} value={mapping.verifyKey} onChange={e => change({ verifyKey: e.target.value })}><option value="">비교 기준 없음</option>{fields.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}</select></label>}
+    {!mapping.confirmed && <button className="xc-link" onClick={() => change({ confirmed: true })}>이 처리 방식으로 확인</button>}
+  </div>;
+}
+export function RulesEditor({ rules, fields, onChange }: {
+    rules: Rules;
+    fields: Field[];
+    onChange: (rules: Rules) => void;
+}) {
+    const change = (patch: Partial<Rules>) => onChange({ ...rules, ...patch });
+    const multi = (label: string, key: 'groupBy' | 'sums') => <fieldset className="xc-fieldset"><legend>{label}</legend><div className="xc-chips">{fields.map(f => <label key={f.key} className={rules[key].includes(f.key) ? 'selected' : ''}><input type="checkbox" checked={rules[key].includes(f.key)} onChange={e => change({ [key]: e.target.checked ? [...rules[key], f.key] : rules[key].filter(k => k !== f.key) })}/>{f.label}</label>)}</div></fieldset>;
+    return <div className="xc-rules-editor"><div className="xc-section-title"><strong>포함할 행의 조건</strong><button onClick={() => change({ filters: [...rules.filters, { key: fields[0]?.key || '', op: 'neq', value: '' }] })}>+ 조건</button></div>
+    {rules.filters.map((f, i) => <div className="xc-filter" key={i}><select aria-label={`필터 ${i + 1} 항목`} value={f.key} onChange={e => change({ filters: rules.filters.map((r, n) => n === i ? { ...r, key: e.target.value } : r) })}>{fields.map(field => <option key={field.key} value={field.key}>{field.label}</option>)}</select><select aria-label={`필터 ${i + 1} 조건`} value={f.op} onChange={e => change({ filters: rules.filters.map((r, n) => n === i ? { ...r, op: e.target.value as typeof f.op } : r) })}>{Object.entries({ eq: '같음', neq: '다름', contains: '포함', notContains: '미포함', gt: '초과', gte: '이상', lt: '미만', lte: '이하', notEmpty: '값 있음', empty: '빈칸' }).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select><input aria-label={`필터 ${i + 1} 비교값`} value={f.value} disabled={['empty', 'notEmpty'].includes(f.op)} onChange={e => change({ filters: rules.filters.map((r, n) => n === i ? { ...r, value: e.target.value } : r) })}/><button aria-label={`필터 ${i + 1} 삭제`} onClick={() => change({ filters: rules.filters.filter((_, n) => n !== i) })}>×</button></div>)}
+    {multi('같은 값끼리 묶을 기준', 'groupBy')}{multi('그룹 안에서 합산할 항목', 'sums')}
+    <div className="xc-inline"><label>정렬 기준<select value={rules.sort[0]?.key || ''} onChange={e => change({ sort: e.target.value ? [{ key: e.target.value, direction: rules.sort[0]?.direction || 'asc' }] : [] })}><option value="">원본 순서</option>{fields.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}</select></label><label>순서<select value={rules.sort[0]?.direction || 'asc'} disabled={!rules.sort.length} onChange={e => change({ sort: rules.sort.map((s, i) => i === 0 ? { ...s, direction: e.target.value as 'asc' | 'desc' } : s) })}><option value="asc">오름차순</option><option value="desc">내림차순</option></select></label></div>
+    <label>파일 분리 기준<select value={rules.splitBy} onChange={e => change({ splitBy: e.target.value })}><option value="">분리하지 않음</option>{fields.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}</select></label>
+    <label className="xc-check"><input type="checkbox" checked={rules.includeHidden} onChange={e => change({ includeHidden: e.target.checked })}/>숨김 행 포함</label>
+  </div>;
+}

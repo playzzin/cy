@@ -1,4 +1,6 @@
 export const MENU_PATHS: { [key: string]: string } = {
+    '엑셀 양식 변환': '/tools/excel-converter',
+    '양식변경': '/tools/excel-converter',
     "\ub300\uc2dc\ubcf4\ub4dc": "/dashboard",
     "\ud1b5\ud569 \uc5d1\uc140\ub4f1\ub85d": "/mass-upload/integrated",
     "\ud1b5\ud569 \uc77c\uad04 \ub4f1\ub85d": "/mass-upload/integrated", // Keep compat just in case

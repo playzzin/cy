@@ -1,12 +1,15 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { requireCallableAdmin } from './auth';
+import { normalizeExcelModel, normalizeExcelThinking, ExcelThinkingLevel } from './excelConversionModel';
 
 export interface ServerGeminiSettings {
     apiKey?: string;
     model: string;
     documentModel: string;
     batchModel: string;
+    excelConversionModel: string;
+    excelConversionThinking: ExcelThinkingLevel;
     updatedAt?: FirebaseFirestore.Timestamp;
     updatedByUid?: string;
 }
@@ -63,6 +66,8 @@ export const getServerGeminiSettings = async (): Promise<ServerGeminiSettings> =
         model,
         documentModel,
         batchModel,
+        excelConversionModel: normalizeExcelModel(data.excelConversionModel),
+        excelConversionThinking: normalizeExcelThinking(data.excelConversionThinking),
         updatedAt: data.updatedAt,
         updatedByUid: asString(data.updatedByUid),
     };
@@ -81,6 +86,8 @@ export const getServerAiSettingsStatus = functions
             model: settings.model,
             documentModel: settings.documentModel,
             batchModel: settings.batchModel,
+            excelConversionModel: settings.excelConversionModel,
+            excelConversionThinking: settings.excelConversionThinking,
             updatedAt: settings.updatedAt?.toDate?.().toISOString?.() || '',
             updatedByUid: settings.updatedByUid || '',
         };
@@ -100,6 +107,9 @@ export const saveServerAiSettings = functions
         };
 
         const apiKey = asString(data?.apiKey);
+        // Older settings clients must not overwrite conversion-specific choices.
+        if (data?.excelConversionModel !== undefined) patch.excelConversionModel = normalizeExcelModel(data.excelConversionModel);
+        if (data?.excelConversionThinking !== undefined) patch.excelConversionThinking = normalizeExcelThinking(data.excelConversionThinking);
         if (apiKey) {
             patch.apiKey = apiKey;
         }
@@ -116,6 +126,8 @@ export const saveServerAiSettings = functions
             model: settings.model,
             documentModel: settings.documentModel,
             batchModel: settings.batchModel,
+            excelConversionModel: settings.excelConversionModel,
+            excelConversionThinking: settings.excelConversionThinking,
             updatedAt: new Date().toISOString(),
             updatedByUid: auth.uid,
         };

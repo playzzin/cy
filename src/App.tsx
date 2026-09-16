@@ -212,6 +212,7 @@ const TaxInvoiceIssueListPage = React.lazy(() => import('./pages/taxinvoice/TaxI
 const ReceivablesManagerPage = React.lazy(() => import('./pages/taxinvoice/ReceivablesManagerPage'));
 const ReceivablesDashboardPage = React.lazy(() => import('./pages/taxinvoice/ReceivablesDashboardPage'));
 const WorkbookLedgerPage = React.lazy(() => import('./pages/taxinvoice/WorkbookLedgerPage'));
+const ExcelConversionPage = React.lazy(() => import('./pages/tools/ExcelConversionPage'));
 const WorkbookLedgerLogPage = React.lazy(() => import('./pages/taxinvoice/WorkbookLedgerLogPage'));
 const WorkbookLedgerUpgradePage = React.lazy(() => import('./pages/taxinvoice/WorkbookLedgerUpgradePage'));
 const PartnerTransactionLedgerPage = React.lazy(() => import('./pages/taxinvoice/PartnerTransactionLedgerPage'));
@@ -619,6 +620,7 @@ const App: React.FC = () => {
             {/* Settings */}
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/ai" element={<AISettingsPage />} />
+            <Route path="/tools/excel-converter" element={<ExcelConversionPage />} />
             <Route path="/settings/system-messages" element={<SystemMessagePage />} />
             <Route path="/test-settings" element={<TestSettingsPage />} />
 

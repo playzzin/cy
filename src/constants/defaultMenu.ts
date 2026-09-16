@@ -9,6 +9,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "청연ENG ERP",
         icon: "fa-shield-halved",
         menu: [
+            { text: '엑셀 양식 변환', icon: 'fa-file-excel', path: '/tools/excel-converter' },
             {
                 text: "대시보드",
                 icon: "fa-chart-line",

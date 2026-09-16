@@ -1,0 +1,574 @@
+{
+  "위임장": {
+    "plan": {
+      "version": 1,
+      "targetId": "file-1789503273896-bbtzdu",
+      "sheetName": "개인위임장",
+      "headerRow": 1,
+      "startRow": 2,
+      "endRow": 2,
+      "mappings": [],
+      "fixedCells": [
+        {
+          "address": "C3",
+          "mapping": {
+            "label": "현장명",
+            "targetColumn": 3,
+            "sourceKeys": [
+              "site_name"
+            ],
+            "mode": "copy",
+            "constant": null,
+            "separator": " ",
+            "format": "keep",
+            "dateFormat": "yyyy-mm-dd",
+            "scale": 1,
+            "decimals": null,
+            "rounding": "round",
+            "required": false,
+            "confirmed": true,
+            "reason": "현장명 항목으로 연결했습니다."
+          }
+        },
+        {
+          "address": "C4",
+          "mapping": {
+            "label": "대상월",
+            "targetColumn": 3,
+            "sourceKeys": [
+              "month"
+            ],
+            "mode": "copy",
+            "constant": null,
+            "separator": " ",
+            "format": "keep",
+            "dateFormat": "yyyy-mm-dd",
+            "scale": 1,
+            "decimals": null,
+            "rounding": "round",
+            "required": false,
+            "confirmed": true,
+            "reason": "대상월 항목으로 연결했습니다."
+          }
+        },
+        {
+          "address": "C6",
+          "mapping": {
+            "label": "위임인 성명",
+            "targetColumn": 3,
+            "sourceKeys": [
+              "c2"
+            ],
+            "mode": "copy",
+            "constant": null,
+            "separator": " ",
+            "format": "keep",
+            "dateFormat": "yyyy-mm-dd",
+            "scale": 1,
+            "decimals": null,
+            "rounding": "round",
+            "required": false,
+            "confirmed": true,
+            "reason": "위임인 항목으로 연결했습니다."
+          }
+        },
+        {
+          "address": "C7",
+          "mapping": {
+            "label": "주민등록번호",
+            "targetColumn": 3,
+            "sourceKeys": [
+              "c3"
+            ],
+            "mode": "copy",
+            "constant": null,
+            "separator": " ",
+            "format": "text",
+            "dateFormat": "yyyy-mm-dd",
+            "scale": 1,
+            "decimals": null,
+            "rounding": "round",
+            "required": false,
+            "confirmed": true,
+            "reason": "주민등록번호 항목으로 연결했습니다."
+          }
+        },
+        {
+          "address": "C8",
+          "mapping": {
+            "label": "주소",
+            "targetColumn": 3,
+            "sourceKeys": [
+              "c4"
+            ],
+            "mode": "copy",
+            "constant": null,
+            "separator": " ",
+            "format": "keep",
+            "dateFormat": "yyyy-mm-dd",
+            "scale": 1,
+            "decimals": null,
+            "rounding": "round",
+            "required": false,
+            "confirmed": true,
+            "reason": "주 소 항목으로 연결했습니다."
+          }
+        },
+        {
+          "address": "C10",
+          "mapping": {
+            "label": "공수",
+            "targetColumn": 3,
+            "sourceKeys": [
+              "c5"
+            ],
+            "mode": "copy",
+            "constant": null,
+            "separator": " ",
+            "format": "keep",
+            "dateFormat": "yyyy-mm-dd",
+            "scale": 1,
+            "decimals": null,
+            "rounding": "round",
+            "required": false,
+            "confirmed": true,
+            "reason": "공수 항목으로 연결했습니다."
+          }
+        },
+        {
+          "address": "C11",
+          "mapping": {
+            "label": "청구금액",
+            "targetColumn": 3,
+            "sourceKeys": [
+              "c6"
+            ],
+            "mode": "copy",
+            "constant": null,
+            "separator": " ",
+            "format": "keep",
+            "dateFormat": "yyyy-mm-dd",
+            "scale": 1,
+            "decimals": null,
+            "rounding": "round",
+            "required": false,
+            "confirmed": true,
+            "reason": "청구금액 항목으로 연결했습니다."
+          }
+        },
+        {
+          "address": "C13",
+          "mapping": {
+            "label": "수임인 성명",
+            "targetColumn": 3,
+            "sourceKeys": [
+              "trustee_name"
+            ],
+            "mode": "copy",
+            "constant": null,
+            "separator": " ",
+            "format": "keep",
+            "dateFormat": "yyyy-mm-dd",
+            "scale": 1,
+            "decimals": null,
+            "rounding": "round",
+            "required": false,
+            "confirmed": true,
+            "reason": "수임인성명 항목으로 연결했습니다."
+          }
+        },
+        {
+          "address": "C14",
+          "mapping": {
+            "label": "수임인 연락처",
+            "targetColumn": 3,
+            "sourceKeys": [
+              "trustee_contact"
+            ],
+            "mode": "copy",
+            "constant": null,
+            "separator": " ",
+            "format": "text",
+            "dateFormat": "yyyy-mm-dd",
+            "scale": 1,
+            "decimals": null,
+            "rounding": "round",
+            "required": false,
+            "confirmed": true,
+            "reason": "수임인연락처 항목으로 연결했습니다."
+          }
+        },
+        {
+          "address": "C15",
+          "mapping": {
+            "label": "수임인 주소",
+            "targetColumn": 3,
+            "sourceKeys": [
+              "trustee_address"
+            ],
+            "mode": "copy",
+            "constant": null,
+            "separator": " ",
+            "format": "keep",
+            "dateFormat": "yyyy-mm-dd",
+            "scale": 1,
+            "decimals": null,
+            "rounding": "round",
+            "required": false,
+            "confirmed": true,
+            "reason": "수임인주소 항목으로 연결했습니다."
+          }
+        },
+        {
+          "address": "C17",
+          "mapping": {
+            "label": "수임인 은행",
+            "targetColumn": 3,
+            "sourceKeys": [
+              "trustee_bank"
+            ],
+            "mode": "copy",
+            "constant": null,
+            "separator": " ",
+            "format": "keep",
+            "dateFormat": "yyyy-mm-dd",
+            "scale": 1,
+            "decimals": null,
+            "rounding": "round",
+            "required": false,
+            "confirmed": true,
+            "reason": "수임인은행 항목으로 연결했습니다."
+          }
+        },
+        {
+          "address": "C18",
+          "mapping": {
+            "label": "수임인 계좌",
+            "targetColumn": 3,
+            "sourceKeys": [
+              "trustee_account"
+            ],
+            "mode": "copy",
+            "constant": null,
+            "separator": " ",
+            "format": "text",
+            "dateFormat": "yyyy-mm-dd",
+            "scale": 1,
+            "decimals": null,
+            "rounding": "round",
+            "required": false,
+            "confirmed": true,
+            "reason": "수임인계좌 항목으로 연결했습니다."
+          }
+        },
+        {
+          "address": "C19",
+          "mapping": {
+            "label": "수임인 예금주",
+            "targetColumn": 3,
+            "sourceKeys": [
+              "trustee_holder"
+            ],
+            "mode": "copy",
+            "constant": null,
+            "separator": " ",
+            "format": "keep",
+            "dateFormat": "yyyy-mm-dd",
+            "scale": 1,
+            "decimals": null,
+            "rounding": "round",
+            "required": false,
+            "confirmed": true,
+            "reason": "수임인예금주 항목으로 연결했습니다."
+          }
+        }
+      ],
+      "overflow": "files",
+      "rules": {
+        "filters": [],
+        "groupBy": [],
+        "sums": [],
+        "sort": [],
+        "splitBy": "",
+        "includeHidden": true
+      },
+      "questions": [],
+      "summary": [
+        "원본 데이터를 바탕으로 위임인 1인당 개인위임장 문서 1개씩 개별 파일로 생성하도록 구성했습니다."
+      ],
+      "origin": "gemini"
+    },
+    "model": "gemini-3.8-flash",
+    "inputTokens": 2687,
+    "outputTokens": 2149,
+    "elapsedMs": 7464
+  },
+  "노임명세서": {
+    "plan": {
+      "version": 1,
+      "targetId": "file-1789503273941-8ho6hz",
+      "sheetName": "노임명세서",
+      "headerRow": 7,
+      "startRow": 8,
+      "endRow": 10,
+      "mappings": [
+        {
+          "label": "근로자명",
+          "targetColumn": 1,
+          "sourceKeys": [
+            "worker_name"
+          ],
+          "mode": "copy",
+          "constant": null,
+          "separator": " ",
+          "format": "keep",
+          "dateFormat": "yyyy-mm-dd",
+          "scale": 1,
+          "decimals": null,
+          "rounding": "round",
+          "required": false,
+          "confirmed": true,
+          "reason": "성명 항목으로 연결했습니다."
+        },
+        {
+          "label": "식별번호",
+          "targetColumn": 2,
+          "sourceKeys": [
+            "resident_id"
+          ],
+          "mode": "copy",
+          "constant": null,
+          "separator": " ",
+          "format": "text",
+          "dateFormat": "yyyy-mm-dd",
+          "scale": 1,
+          "decimals": null,
+          "rounding": "round",
+          "required": false,
+          "confirmed": true,
+          "reason": "주민번호 항목으로 연결했습니다."
+        },
+        {
+          "label": "연락처",
+          "targetColumn": 3,
+          "sourceKeys": [
+            "contact"
+          ],
+          "mode": "copy",
+          "constant": null,
+          "separator": " ",
+          "format": "text",
+          "dateFormat": "yyyy-mm-dd",
+          "scale": 1,
+          "decimals": null,
+          "rounding": "round",
+          "required": false,
+          "confirmed": true,
+          "reason": "전화번호 항목으로 연결했습니다."
+        },
+        {
+          "label": "주소",
+          "targetColumn": 4,
+          "sourceKeys": [
+            "address"
+          ],
+          "mode": "copy",
+          "constant": null,
+          "separator": " ",
+          "format": "keep",
+          "dateFormat": "yyyy-mm-dd",
+          "scale": 1,
+          "decimals": null,
+          "rounding": "round",
+          "required": false,
+          "confirmed": true,
+          "reason": "주소 항목으로 연결했습니다."
+        },
+        {
+          "label": "출역공수",
+          "targetColumn": 5,
+          "sourceKeys": [
+            "man_days"
+          ],
+          "mode": "copy",
+          "constant": null,
+          "separator": " ",
+          "format": "keep",
+          "dateFormat": "yyyy-mm-dd",
+          "scale": 1,
+          "decimals": null,
+          "rounding": "round",
+          "required": false,
+          "confirmed": true,
+          "reason": "공수 항목으로 연결했습니다."
+        },
+        {
+          "label": "청구단가",
+          "targetColumn": 6,
+          "sourceKeys": [
+            "billing_price"
+          ],
+          "mode": "copy",
+          "constant": null,
+          "separator": " ",
+          "format": "keep",
+          "dateFormat": "yyyy-mm-dd",
+          "scale": 1,
+          "decimals": null,
+          "rounding": "round",
+          "required": false,
+          "confirmed": true,
+          "reason": "청구단가 항목으로 연결했습니다."
+        },
+        {
+          "label": "공급가액",
+          "targetColumn": 7,
+          "sourceKeys": [],
+          "mode": "blank",
+          "constant": null,
+          "separator": " ",
+          "format": "keep",
+          "dateFormat": "yyyy-mm-dd",
+          "scale": 1,
+          "decimals": null,
+          "rounding": "round",
+          "required": false,
+          "confirmed": true,
+          "reason": "기존 수식을 유지하고 원본의 대응 금액과 계산 결과를 검증합니다."
+        },
+        {
+          "label": "은행명",
+          "targetColumn": 8,
+          "sourceKeys": [
+            "bank_name"
+          ],
+          "mode": "copy",
+          "constant": null,
+          "separator": " ",
+          "format": "keep",
+          "dateFormat": "yyyy-mm-dd",
+          "scale": 1,
+          "decimals": null,
+          "rounding": "round",
+          "required": false,
+          "confirmed": true,
+          "reason": "은행 항목으로 연결했습니다."
+        },
+        {
+          "label": "계좌번호",
+          "targetColumn": 9,
+          "sourceKeys": [
+            "account_number"
+          ],
+          "mode": "copy",
+          "constant": null,
+          "separator": " ",
+          "format": "text",
+          "dateFormat": "yyyy-mm-dd",
+          "scale": 1,
+          "decimals": null,
+          "rounding": "round",
+          "required": false,
+          "confirmed": true,
+          "reason": "계좌번호 항목으로 연결했습니다."
+        },
+        {
+          "label": "예금주",
+          "targetColumn": 10,
+          "sourceKeys": [
+            "account_holder"
+          ],
+          "mode": "copy",
+          "constant": null,
+          "separator": " ",
+          "format": "text",
+          "dateFormat": "yyyy-mm-dd",
+          "scale": 1,
+          "decimals": null,
+          "rounding": "round",
+          "required": false,
+          "confirmed": true,
+          "reason": "예금주 항목으로 연결했습니다."
+        },
+        {
+          "label": "지급구분",
+          "targetColumn": 11,
+          "sourceKeys": [
+            "pay_type"
+          ],
+          "mode": "copy",
+          "constant": null,
+          "separator": " ",
+          "format": "keep",
+          "dateFormat": "yyyy-mm-dd",
+          "scale": 1,
+          "decimals": null,
+          "rounding": "round",
+          "required": false,
+          "confirmed": true,
+          "reason": "지급구분 항목으로 연결했습니다."
+        },
+        {
+          "label": "17일",
+          "targetColumn": 12,
+          "sourceKeys": [
+            "day17"
+          ],
+          "mode": "copy",
+          "constant": null,
+          "separator": " ",
+          "format": "keep",
+          "dateFormat": "yyyy-mm-dd",
+          "scale": 1,
+          "decimals": null,
+          "rounding": "round",
+          "required": false,
+          "confirmed": true,
+          "reason": "17일와 의미가 일치합니다."
+        }
+      ],
+      "fixedCells": [
+        {
+          "address": "B4",
+          "mapping": {
+            "label": "현장명",
+            "targetColumn": 2,
+            "sourceKeys": [
+              "site_name"
+            ],
+            "mode": "copy",
+            "constant": null,
+            "separator": " ",
+            "format": "keep",
+            "dateFormat": "yyyy-mm-dd",
+            "scale": 1,
+            "decimals": null,
+            "rounding": "round",
+            "required": false,
+            "confirmed": true,
+            "reason": "현장명 항목으로 연결했습니다."
+          }
+        }
+      ],
+      "overflow": "sheets",
+      "rules": {
+        "filters": [],
+        "groupBy": [],
+        "sums": [],
+        "sort": [],
+        "splitBy": "",
+        "includeHidden": true
+      },
+      "questions": [],
+      "summary": [
+        "세금이나 공제 항목 추가 없이 원본 작업자 데이터를 그대로 매핑하도록 설정했습니다.",
+        "기존 서식의 공급가액 계산 수식을 유지하고 모든 작업자를 차례대로 작성합니다."
+      ],
+      "origin": "gemini"
+    },
+    "model": "gemini-3.8-flash",
+    "inputTokens": 2876,
+    "outputTokens": 1928,
+    "elapsedMs": 8109
+  }
+}
