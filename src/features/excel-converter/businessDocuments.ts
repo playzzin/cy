@@ -11,15 +11,16 @@ const labels: Record<string, string[]> = {
   worker_name: ['성명', '이름', '작업자명', '근로자명', '위임인', '위임인성명'],
   resident_id: ['주민번호', '주민등록번호', '식별번호'],
   contact: ['전화번호', '연락처', '휴대전화'], address: ['주소', '거주지', '현주소'],
-  man_days: ['공수', '총공수', '출역', '출역공수'], unit_price: ['단가', '노임단가', '일당'],
-  gross_amount: ['금액', '노임금액', '노무비', '지급액'],
+  man_days: ['공수', '총공수', '출역', '출역공수', '총출역'], unit_price: ['단가', '노임단가', '일당'],
+  gross_amount: ['금액', '노임금액', '노무비', '지급액', '총액', '보수총액', '지급총액'],
   billing_price: ['청구단가'], billing_amount: ['공급가액', '청구금액'],
   bank_name: ['은행', '은행명'], account_number: ['계좌번호', '입금계좌'], account_holder: ['예금주'], pay_type: ['지급구분'],
   site_name: ['현장명', '공사명'], month: ['대상월', '귀속월', '작업월'],
   trustee_name: ['수임인성명', '수임인'], trustee_contact: ['수임인연락처'], trustee_address: ['수임인주소'],
   trustee_bank: ['수임인은행'], trustee_account: ['수임인계좌', '수임인계좌번호'], trustee_holder: ['수임인예금주'],
 };
-export const semanticKey = (label: string) => Object.keys(labels).find(key => labels[key].some(name => normalize(name) === normalize(label)));
+const semanticLabels = new Map(Object.entries(labels).flatMap(([key, names]) => names.map(name => [normalize(name), key] as const)));
+export const semanticKey = (label: string) => semanticLabels.get(normalize(label));
 const valueAt = (sheet: SheetInfo, row: number, col: number): Scalar => sheet.cells.find(c => c.row === row && c.col === col)?.value ?? null;
 const display = (value: Scalar) => value === null || value === '-' ? '' : String(value);
 const nameFor = (key: string) => labels[key]?.[0] || key;
@@ -41,7 +42,6 @@ function commonValues(sheet: SheetInfo, before: number): Record<string, Scalar> 
 }
 export function readSourceDocument(file: WorkbookFile, selectedSheet = file.sheets[0]?.name): SourceDocument {
   const sheet = file.sheets.find(s => s.name === selectedSheet); if (!sheet) throw new Error('원본 시트를 찾을 수 없습니다.');
-  const twoRow = readTwoRowLabor(file, sheet); if (twoRow) return twoRow;
   // Existing SupportPaymentExcelGenerator: each worker occupies two rows.
   if (valueAt(sheet, 3, 2) === '성명' && valueAt(sheet, 3, 22) === '청구단가' && valueAt(sheet, 4, 22) === '공급가액' && valueAt(sheet, 4, 3) === '전화번호') {
     const keys = ['worker_name', 'resident_id', 'contact', 'address', 'man_days', 'billing_price', 'billing_amount', 'bank_name', 'account_holder', 'account_number', 'pay_type', 'site_name', ...Array.from({ length: 31 }, (_, i) => `day${i + 1}`)];
@@ -61,6 +61,7 @@ export function readSourceDocument(file: WorkbookFile, selectedSheet = file.shee
     }
     return { kind: 'labor', label: '현재 노임명세서 · 한 사람 두 줄', table: { fields, rows, warnings, skipped }, sheetName: sheet.name, headerRow: 3, notes: ['전화번호·일별 공수·청구단가·공급가액·계좌를 두 줄에서 함께 읽었습니다.'] };
   }
+  const twoRow = readTwoRowLabor(file, sheet); if (twoRow) return twoRow;
   const candidateRows = new Map<number, number>();
   for (const c of sheet.cells) if (semanticKey(String(c.value ?? ''))) candidateRows.set(c.row, (candidateRows.get(c.row) || 0) + 1);
   const header = Array.from(candidateRows).filter(([, count]) => count >= 3).sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] || sheet.headerRow;

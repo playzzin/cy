@@ -120,6 +120,10 @@ actualTest('사용자가 제공한 실제 두 파일의 인원·공수·금액·
   expect(validatePlanReferences(plan, source.table.fields)).toEqual([]);
   const result = await convertWorkbook(target, plan, source.table);
   expect(result.issues.filter(i => i.level === 'error').map(i => i.code)).toEqual([]);
+  const { verifyConversion } = await import('./verification');
+  const checked = await verifyConversion(target, plan, source.table, result);
+  expect(checked.issues.filter(i => i.level === 'error').map(i => i.code)).toEqual([]);
+  expect(checked.summary).toMatchObject({records:78,daysChecked:2418,identityChecked:true,preservationChecked:true,missingInputs:1});
   expect(result.outputCount).toBe(source.table.rows.length); expect(result.outputs).toHaveLength(1);
   const values = new Map(result.outputs[0].sheets[0].cells.map(c => [c.address, c.value]));
   source.table.rows.forEach((row, i) => {

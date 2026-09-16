@@ -141,3 +141,4 @@ export {
     transitionConstructionPlanLifecycleServer,
 } from './constructionPlans';
 export { planExcelConversion, getExcelConversionStatus } from './excelConversionPlanning';
+export { analyzeExcelStructure } from './excelStructurePlanning';

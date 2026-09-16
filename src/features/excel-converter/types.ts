@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const ENGINE_VERSION = '1.0.0';
+export const ENGINE_VERSION = '2.0.0';
 export const LIMITS = { fileBytes: 20 * 1024 * 1024, expandedBytes: 100 * 1024 * 1024, rows: 30000, columns: 100, sheets: 30, outputs: 100 };
 export type Scalar = string | number | boolean | null;
 export type ValueKind = 'text' | 'number' | 'date' | 'boolean' | 'blank';
@@ -35,6 +35,7 @@ export type Rules = z.infer<typeof ruleSchema>;
 export const planSchema = z.object({
   version: z.literal(1), targetId: z.string().max(100), sheetName: z.string().max(31),
   headerRow: z.number().int().min(1).max(30000), startRow: z.number().int().min(1).max(30000), endRow: z.number().int().min(1).max(30000),
+  recordHeight: z.number().int().min(1).max(10).optional(),
   mappings: z.array(mappingSchema).max(100),
   fixedCells: z.array(z.object({ address: z.string().regex(/^[A-Z]{1,3}[1-9]\d{0,4}$/), mapping: mappingSchema })).max(50).default([]),
   overflow: z.enum(['sheets', 'files', 'stop']).default('sheets'),

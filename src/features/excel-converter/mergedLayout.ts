@@ -14,10 +14,10 @@ export function mergeBounds(range: string) {
 
 // Physical rows for each record. Never unmerge cells or put data into hidden
 // children of a merge. Different record heights may coexist in a template.
-export function inputRecordRows(sheet: SheetInfo, plan: Pick<ConversionPlan, 'startRow' | 'endRow' | 'mappings'>): number[] {
+export function inputRecordRows(sheet: SheetInfo, plan: Pick<ConversionPlan, 'startRow' | 'endRow' | 'mappings' | 'recordHeight'>): number[] {
   if (!plan.mappings.length) return Array.from({ length: plan.endRow - plan.startRow + 1 }, (_, i) => plan.startRow + i);
   const columns = new Set(plan.mappings.map(m => m.targetColumn));
-  if (plan.mappings.some(m => m.rowOffset)) return offsetRecordRows(sheet, plan);
+  if (plan.recordHeight || plan.mappings.some(m => m.rowOffset)) return offsetRecordRows(sheet, plan);
   const merges = sheet.merges.map(mergeBounds).filter(m => [...columns].some(c => c >= m.start.col && c <= m.end.col) && m.start.row <= plan.endRow && m.end.row >= plan.startRow);
   const byStart = new Map<number, typeof merges>();
   for (const merge of merges) { const group = byStart.get(merge.start.row) || []; group.push(merge); byStart.set(merge.start.row, group); }
@@ -43,7 +43,7 @@ export function inputRecordRows(sheet: SheetInfo, plan: Pick<ConversionPlan, 'st
   return rows;
 }
 
-function offsetRecordRows(sheet: SheetInfo, plan: Pick<ConversionPlan, 'startRow' | 'endRow' | 'mappings'>): number[] {
+function offsetRecordRows(sheet: SheetInfo, plan: Pick<ConversionPlan, 'startRow' | 'endRow' | 'mappings' | 'recordHeight'>): number[] {
   const columns = new Set(plan.mappings.map(m => m.targetColumn));
   const merges = sheet.merges.map(mergeBounds).filter(m => [...columns].some(c => c >= m.start.col && c <= m.end.col));
   const rows: number[] = [];
@@ -51,8 +51,9 @@ function offsetRecordRows(sheet: SheetInfo, plan: Pick<ConversionPlan, 'startRow
     const covering = merges.filter(m => m.start.row <= row && m.end.row >= row);
     if (covering.some(m => m.start.row < row)) throw new Error('입력 범위가 병합 셀 중간에서 끊깁니다.');
     const ends = [...new Set(covering.filter(m => m.end.row > row).map(m => m.end.row))];
-    if (ends.length > 1) throw new Error('항목마다 병합된 인원 구간이 다릅니다.');
-    const end = ends[0] ?? row + Math.max(...plan.mappings.map(m => m.rowOffset || 0));
+    if (!plan.recordHeight && ends.length > 1) throw new Error('항목마다 병합된 인원 구간이 다릅니다.');
+    const end = plan.recordHeight ? row + plan.recordHeight - 1 : ends[0] ?? row + Math.max(...plan.mappings.map(m => m.rowOffset || 0));
+    if (ends.some(n => n > end)) throw new Error('병합 셀이 한 사람의 입력 구간을 벗어납니다.');
     if (end > plan.endRow) throw new Error('입력 범위가 병합 셀 중간에서 끊깁니다.');
     const addresses = new Set<string>();
     for (const mapping of plan.mappings) {

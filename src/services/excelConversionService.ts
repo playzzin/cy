@@ -1,6 +1,7 @@
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../config/firebase';
 import { planSchema } from '../features/excel-converter/types';
+import { StructureRequest, StructureResult } from '../features/excel-converter/structure';
 
 import { PlannerRequest, PlannerResult } from '../features/excel-converter/plannerRequest';
 export { makePlannerRequest } from '../features/excel-converter/plannerRequest';
@@ -28,6 +29,10 @@ export function conversionErrorMessage(error: unknown): string {
 }
 
 export const excelConversionService = {
+  async structure(request:StructureRequest):Promise<StructureResult>{
+    try{const {data}=await httpsCallable<StructureRequest,StructureResult>(functions,'analyzeExcelStructure',{timeout:180000})(request);return data;}
+    catch(error){throw new Error(conversionErrorMessage(error));}
+  },
   async status(): Promise<{ configured: boolean; model: string; thinkingLevel?: string }> {
     try { const response = await httpsCallable<void, { configured: boolean; model: string; thinkingLevel?: string }>(functions, 'getExcelConversionStatus', { timeout: 30000 })(); return response.data; }
     catch (error) { throw new Error(conversionErrorMessage(error)); }
@@ -51,9 +56,9 @@ export const excelConversionService = {
         const named = candidates.filter(previous => previous.label === m.label);
         const sourced = candidates.filter(previous => previous.sourceKeys.length && JSON.stringify(previous.sourceKeys) === JSON.stringify(m.sourceKeys));
         const previous = named.length === 1 ? named[0] : sourced.length === 1 ? sourced[0] : candidates.length === 1 ? candidates[0] : undefined;
-        if (candidates.some(p => p.rowOffset) && !previous) throw new Error('두 줄 양식의 날짜 항목을 구분할 수 없습니다. 자동 연결된 규칙으로 다시 변환해 주세요.');
-        return { ...m, rowOffset: previous?.rowOffset ?? m.rowOffset, verifyKey: previous?.verifyKey || '' };
-      }), fixedCells: data.plan.fixedCells.map(f => ({ ...f, mapping: { ...f.mapping, verifyKey: request.plan.fixedCells.find(previous => previous.address === f.address)?.mapping.verifyKey || '' } })) }) };
+        if (m.rowOffset === undefined && candidates.some(p => p.rowOffset) && !previous) throw new Error('두 줄 양식의 날짜 항목을 구분할 수 없습니다. 자동 연결된 규칙으로 다시 변환해 주세요.');
+        return { ...m, rowOffset: m.rowOffset ?? previous?.rowOffset, verifyKey: m.verifyKey || previous?.verifyKey || '' };
+      }), fixedCells: data.plan.fixedCells.map(f => ({ ...f, mapping: { ...f.mapping, verifyKey: f.mapping.verifyKey || request.plan.fixedCells.find(previous => previous.address === f.address)?.mapping.verifyKey || '' } })) }) };
     } catch (error) {
       throw new Error(conversionErrorMessage(error));
     }
