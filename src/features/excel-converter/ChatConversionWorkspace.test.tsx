@@ -7,7 +7,7 @@ import { webcrypto } from 'crypto';
 import { saveAs } from 'file-saver';
 import ChatConversionWorkspace from './ChatConversionWorkspace';
 import { conversationPrompt, DEFAULT_CONVERSION_MESSAGE } from './conversation';
-import { ConversionPlan } from './types';
+import { ConversionPlan, DataTable } from './types';
 import { PlannerResult } from './plannerRequest';
 import { readWorkbook } from './workbook';
 
@@ -28,6 +28,25 @@ const upload = async () => {
 };
 const readBlob = (blob: Blob) => new Promise<ArrayBuffer>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result as ArrayBuffer); reader.onerror = reject; reader.readAsArrayBuffer(blob); });
 beforeEach(() => jest.clearAllMocks());
+
+test('잘못된 항목 연결은 자동 보정한 뒤 검증된 파일만 제공한다',async()=>{
+ let calls=0;
+ const analyze=jest.fn(async(_prompt:string,plan:ConversionPlan,table:DataTable)=>{
+  const next=response(plan);calls++;
+  const account=table.fields.find(f=>f.label==='계좌번호')!;
+  if(calls===1)next.plan.mappings=next.plan.mappings.map(m=>m.label==='성명'?{...m,sourceKeys:[account.key]}:m);
+  else next.plan.mappings=next.plan.mappings.map(m=>m.label==='성명'?{...m,sourceKeys:[table.fields.find(f=>f.label==='성명')!.key]}:m);
+  return next;
+ });
+ render(<ChatConversionWorkspace ownerId="test" analyze={analyze}/>);await upload();fireEvent.click(screen.getByRole('button',{name:'변환 요청'}));
+ await screen.findByRole('button',{name:'엑셀 다운로드'});expect(analyze).toHaveBeenCalledTimes(2);expect(screen.getByText('자동 보정 1회')).toBeInTheDocument();expect(screen.getByText('인원 3건 개별 대조')).toBeInTheDocument();
+});
+
+test('자동 보정 두 번 이후에도 오류가 있으면 다운로드를 만들지 않는다',async()=>{
+ const analyze=jest.fn(async(_prompt:string,plan:ConversionPlan,table:DataTable)=>{const next=response(plan);next.plan.mappings=next.plan.mappings.map(m=>m.label==='성명'?{...m,sourceKeys:[table.fields.find(f=>f.label==='계좌번호')!.key]}:m);return next;});
+ render(<ChatConversionWorkspace ownerId="test" analyze={analyze}/>);await upload();fireEvent.click(screen.getByRole('button',{name:'변환 요청'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('의미가 다릅니다');expect(analyze).toHaveBeenCalledTimes(3);expect(screen.queryByRole('button',{name:'엑셀 다운로드'})).not.toBeInTheDocument();
+});
 
 test('파일 두 개와 자연어 요청으로 Gemini를 호출하고 실제 엑셀을 다운로드한다', async () => {
   const analyze = jest.fn(async (_prompt: string, plan: ConversionPlan) => response(plan));

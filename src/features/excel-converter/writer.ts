@@ -332,7 +332,7 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
             throw new Error('단일 입력은 병합 셀의 시작 칸에만 지정할 수 있습니다.');
         if (row >= plan.startRow && row <= plan.endRow && plan.mappings.some(m => `${columnName(m.targetColumn)}${row}` === fixed.address))
             throw new Error('단일 입력 칸이 반복 입력 영역과 겹칩니다.');
-        if (sourceSheet.cells.some(c => c.address === fixed.address && c.formula))
+        if (fixed.mapping.mode !== 'blank' && sourceSheet.cells.some(c => c.address === fixed.address && c.formula))
             throw new Error('단일 입력 칸이 기존 수식과 겹칩니다.');
     }
     const usedKeys = Array.from(new Set([...plan.mappings, ...plan.fixedCells.map(f => f.mapping)].flatMap(m => [...m.sourceKeys, ...(m.verifyKey ? [m.verifyKey] : [])]).concat(plan.rules.sort.map(s => s.key), plan.rules.splitBy ? [plan.rules.splitBy] : [])));
