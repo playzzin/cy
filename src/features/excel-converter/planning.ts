@@ -72,7 +72,7 @@ export function validatePlanReferences(plan: ConversionPlan, fields: Field[]): s
   for (const key of Array.from(new Set(used))) if (!keys.has(key)) errors.push(`존재하지 않는 원본 항목: ${key}`);
   if (plan.startRow <= plan.headerRow || plan.endRow < plan.startRow) errors.push('입력 영역은 머리글 다음 행부터 시작해야 합니다.');
   if (plan.endRow - plan.startRow > 10000) errors.push('입력 영역은 한 번에 10,000행 이내로 지정해 주세요.');
-  const columns = plan.mappings.map(m => m.targetColumn); if (new Set(columns).size !== columns.length) errors.push('같은 대상 열에 두 규칙을 적용할 수 없습니다.');
+  const columns = plan.mappings.map(m => `${m.targetColumn}:${m.rowOffset || 0}`); if (new Set(columns).size !== columns.length) errors.push('같은 대상 열의 같은 줄에 두 규칙을 적용할 수 없습니다.');
   const addresses = plan.fixedCells.map(f => f.address); if (new Set(addresses).size !== addresses.length) errors.push('같은 단일 입력 칸에 두 규칙을 적용할 수 없습니다.');
   for (const m of [...plan.mappings, ...plan.fixedCells.map(f => f.mapping)]) {
     if (!m.confirmed) errors.push(`${m.label}: 연결 또는 빈칸 처리를 확인해 주세요.`);

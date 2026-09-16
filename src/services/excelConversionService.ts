@@ -44,7 +44,16 @@ export const excelConversionService = {
         sessionStorage.setItem('excel-converter-ai-request', JSON.stringify({ fingerprint, requestId: payload.requestId, createdAt: Date.now() }));
       } catch { /* Storage restrictions do not prevent an explicit analysis. */ }
       const callable = httpsCallable<PlannerRequest, PlannerResult>(functions, 'planExcelConversion', { timeout: 180000 });
-      const { data } = await callable(payload); return { ...data, plan: planSchema.parse({ ...data.plan, overrides: request.plan.overrides, mappings: data.plan.mappings.map(m => ({ ...m, verifyKey: request.plan.mappings.find(previous => previous.targetColumn === m.targetColumn)?.verifyKey || '' })), fixedCells: data.plan.fixedCells.map(f => ({ ...f, mapping: { ...f.mapping, verifyKey: request.plan.fixedCells.find(previous => previous.address === f.address)?.mapping.verifyKey || '' } })) }) };
+      const { data } = await callable(payload); return { ...data, plan: planSchema.parse({ ...data.plan, overrides: request.plan.overrides, mappings: data.plan.mappings.map(m => {
+        const candidates = request.plan.mappings.filter(previous => previous.targetColumn === m.targetColumn);
+        // Older deployed planners do not return rowOffset. Recover it only from
+        // an unambiguous known field, never from the first matching column.
+        const named = candidates.filter(previous => previous.label === m.label);
+        const sourced = candidates.filter(previous => previous.sourceKeys.length && JSON.stringify(previous.sourceKeys) === JSON.stringify(m.sourceKeys));
+        const previous = named.length === 1 ? named[0] : sourced.length === 1 ? sourced[0] : candidates.length === 1 ? candidates[0] : undefined;
+        if (candidates.some(p => p.rowOffset) && !previous) throw new Error('두 줄 양식의 날짜 항목을 구분할 수 없습니다. 자동 연결된 규칙으로 다시 변환해 주세요.');
+        return { ...m, rowOffset: previous?.rowOffset ?? m.rowOffset, verifyKey: previous?.verifyKey || '' };
+      }), fixedCells: data.plan.fixedCells.map(f => ({ ...f, mapping: { ...f.mapping, verifyKey: request.plan.fixedCells.find(previous => previous.address === f.address)?.mapping.verifyKey || '' } })) }) };
     } catch (error) {
       throw new Error(conversionErrorMessage(error));
     }

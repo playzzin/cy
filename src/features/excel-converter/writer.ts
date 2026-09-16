@@ -63,18 +63,19 @@ function validateInputRestrictions(doc: Document, traces: CellTrace[], file: Wor
     return issues;
 }
 const cellIndexes = new WeakMap<Document, {
+    data: Element;
     rows: Map<number, Element>;
     cells: Map<string, Element>;
 }>();
 function getCell(doc: Document, address: string): Element {
-    const data = elements(doc, 'sheetData')[0];
-    if (!data)
-        throw new Error('시트 데이터 영역이 없습니다.');
     let cache = cellIndexes.get(doc);
     if (!cache) {
-        cache = { rows: new Map(elements(data, 'row').map(r => [Number(r.getAttribute('r')), r])), cells: new Map(elements(data, 'c').map(c => [c.getAttribute('r')!, c])) };
+        const data = elements(doc, 'sheetData')[0];
+        if (!data) throw new Error('시트 데이터 영역이 없습니다.');
+        cache = { data, rows: new Map(elements(data, 'row').map(r => [Number(r.getAttribute('r')), r])), cells: new Map(elements(data, 'c').map(c => [c.getAttribute('r')!, c])) };
         cellIndexes.set(doc, cache);
     }
+    const data = cache.data;
     const existing = cache.cells.get(address);
     if (existing)
         return existing;
@@ -240,6 +241,26 @@ export function evaluateFormula(formula: string, lookup: (address: string) => nu
 }
 function recalculateSheet(doc: Document): number {
     const cells = new Map(elements(doc, 'c').map(c => [c.getAttribute('r')!, c]));
+    const shared = new Map<string, { address: string; formula: string }>();
+    for (const [address, cell] of cells) {
+        const f = elements(cell, 'f')[0];
+        if (f?.getAttribute('t') === 'shared' && f.textContent && f.hasAttribute('si')) shared.set(f.getAttribute('si')!, { address, formula: f.textContent });
+    }
+    const formulaAt = (address: string, f: Element): string => {
+        if (!f.hasAttribute('t')) return f.textContent || '';
+        if (f.getAttribute('t') !== 'shared') throw new Error('unsupported-formula-type');
+        const master = shared.get(f.getAttribute('si') || '');
+        if (!master) throw new Error('shared-master');
+        const deltaCol = columnNumber(address.replace(/\d/g, '')) - columnNumber(master.address.replace(/\d/g, ''));
+        const deltaRow = Number(address.match(/\d+$/)![0]) - Number(master.address.match(/\d+$/)![0]);
+        // Preserve original shared formula XML. Only resolve relative references
+        // for the restricted numeric evaluator; quoted text is never shifted.
+        return master.formula.split(/("(?:[^"]|"")*")/g).map((part, i) => i % 2 ? part : part.replace(/(\$?)([A-Z]+)(\$?)([1-9]\d*)\b/g, (_, fixedCol: string, col: string, fixedRow: string, row: string) => {
+            const c = columnNumber(col) + (fixedCol ? 0 : deltaCol), r = Number(row) + (fixedRow ? 0 : deltaRow);
+            if (c < 1 || r < 1) throw new Error('shared-reference');
+            return `${fixedCol}${columnName(c)}${fixedRow}${r}`;
+        })).join('');
+    };
     const memo = new Map<string, number>();
     const active = new Set<string>();
     let unresolved = 0;
@@ -255,9 +276,7 @@ function recalculateSheet(doc: Document): number {
             if (cell) {
                 const f = elements(cell, 'f')[0];
                 if (f) {
-                    if (!f.textContent || f.hasAttribute('t'))
-                        throw new Error('shared');
-                    result = evaluateFormula(f.textContent, value);
+                    result = evaluateFormula(formulaAt(address, f), value);
                 }
                 else if (['s', 'inlineStr', 'str', 'e'].includes(cell.getAttribute('t') || '')) {
                     if (elements(cell, 't').some(t => t.textContent) || elements(cell, 'v').some(v => v.textContent))
@@ -322,7 +341,7 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
     if (!processed.rows.length)
         result.issues.push({ level: 'error', code: 'no-rows', message: '조건에 맞는 데이터가 없습니다. 제외 조건을 확인해 주세요.' });
     for (const override of plan.overrides || [])
-        if (!processed.rows.some(r => r.origins.join('\n') === override.originsKey) || !plan.mappings.some(m => m.targetColumn === override.targetColumn))
+        if (!processed.rows.some(r => r.origins.join('\n') === override.originsKey) || !plan.mappings.some(m => m.targetColumn === override.targetColumn && (m.rowOffset || 0) === (override.rowOffset || 0)))
             result.issues.push({ level: 'error', code: 'stale-override', message: '직접 수정한 행의 원본 구성이나 대상 열이 바뀌었습니다. 직접 수정 내역을 해제하고 다시 확인해 주세요.' });
     if (result.issues.some(i => i.level === 'error'))
         return result;
@@ -419,7 +438,7 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
                 // Clear only confirmed input columns; existing formulas remain authoritative.
                 for (const r of inputRows)
                     for (const mapping of plan.mappings) {
-                        const cell = getCell(doc, `${columnName(mapping.targetColumn)}${r}`);
+                        const cell = getCell(doc, `${columnName(mapping.targetColumn)}${r + (mapping.rowOffset || 0)}`);
                         if (!elements(cell, 'f').length)
                             assignValue(doc, cell, { value: null, kind: 'blank' }, date1904);
                     }
@@ -433,7 +452,7 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
                         continue;
                     }
                     assignValue(doc, cell, trace, date1904);
-                    const mapping = plan.fixedCells.find(f => f.address === trace.address)?.mapping || plan.mappings.find(m => m.targetColumn === columnNumber(trace.address.replace(/\d/g, '')))!;
+                    const mapping = plan.fixedCells.find(f => f.address === trace.address)?.mapping || plan.mappings.find(m => m.targetColumn === columnNumber(trace.address.replace(/\d/g, '')) && inputRows.includes(Number(trace.address.match(/\d+$/)![0]) - (m.rowOffset || 0)))!;
                     applyFormat(styles, cell, mapping, styleCache);
                     allTraces.push(trace);
                 }
@@ -495,7 +514,7 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
                 const sheetName = index === 0 ? sourceSheet.name : elements(workbook, 'sheet')[target.sheets.length + index - 1]?.getAttribute('name');
                 const sheet = reread.sheets.find(s => s.name === sheetName);
                 pageRows.forEach((row, i) => plan.mappings.filter(m => m.verifyKey).forEach(mapping => {
-                    const address = `${columnName(mapping.targetColumn)}${inputRows[i]}`;
+                    const address = `${columnName(mapping.targetColumn)}${inputRows[i] + (mapping.rowOffset || 0)}`;
                     const expected = numberValue(row.values[mapping.verifyKey]);
                     const actual = numberValue(sheet?.cells.find(c => c.address === address)?.value ?? null);
                     if (expected === null || actual === null || Math.abs(expected - actual) > 0.0000001)

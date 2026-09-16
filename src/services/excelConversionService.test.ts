@@ -48,3 +48,13 @@ test('같은 분석 재시도는 작업 ID를 재사용하고 지시가 바뀌�
   expect(call.mock.calls[2][0].requestId).not.toBe(call.mock.calls[0][0].requestId);
   expect(sessionStorage.getItem('excel-converter-ai-request')).not.toContain('날짜를 바꿔');
 });
+
+test('같은 열의 1일과 16일은 Gemini 응답 순서가 바뀌어도 각 줄을 보존한다', async () => {
+  const calendar = planSchema.parse({ ...plan, overrides: [], mappings: [
+    { ...plan.mappings[0], label: '1일 공수', targetColumn: 9, sourceKeys: ['day1'], rowOffset: 0 },
+    { ...plan.mappings[0], label: '16일 공수', targetColumn: 9, sourceKeys: ['day16'], rowOffset: 1 },
+  ] });
+  call.mockImplementationOnce(async (payload: any) => ({ data: { plan: { ...payload.plan, mappings: [...payload.plan.mappings].reverse().map(({ rowOffset, ...mapping }: any) => mapping) }, model: 'fixture', inputTokens: 0, outputTokens: 0, elapsedMs: 0 } }));
+  const result = await excelConversionService.analyze(makePlannerRequest('날짜 연결 유지', calendar, table, target));
+  expect(result.plan.mappings.map(m => [m.label, m.rowOffset])).toEqual([['16일 공수', 1], ['1일 공수', 0]]);
+});

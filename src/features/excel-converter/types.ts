@@ -13,7 +13,7 @@ export interface DataRow { id: string; values: Record<string, Scalar>; origins: 
 export interface DataTable { fields: Field[]; rows: DataRow[]; warnings: string[]; skipped: { origin: string; reason: string }[] }
 const fieldKey = z.string().max(120);
 export const mappingSchema = z.object({
-  label: z.string().max(120), targetColumn: z.number().int().min(1).max(100),
+  label: z.string().max(120), targetColumn: z.number().int().min(1).max(100), rowOffset: z.number().int().min(0).max(9).optional(),
   sourceKeys: z.array(fieldKey).max(8), mode: z.enum(['copy', 'concat', 'constant', 'blank', 'product']),
   constant: z.union([z.string().max(2000), z.number().finite(), z.boolean(), z.null()]).default(null),
   separator: z.string().max(40).default(' '), format: z.enum(['keep', 'text', 'number', 'date']).default('keep'),
@@ -40,7 +40,7 @@ export const planSchema = z.object({
   overflow: z.enum(['sheets', 'files', 'stop']).default('sheets'),
   rules: ruleSchema, questions: z.array(z.string().max(500)).max(30).default([]),
   summary: z.array(z.string().max(500)).max(30).default([]), origin: z.enum(['local', 'gemini', 'saved']).default('local'),
-  overrides: z.array(z.object({ originsKey: z.string().max(10000), targetColumn: z.number().int().min(1).max(100), value: z.union([z.string().max(2000), z.number().finite(), z.boolean(), z.null()]), kind: z.enum(['text', 'number', 'date', 'boolean', 'blank']) })).max(500).default([]),
+  overrides: z.array(z.object({ originsKey: z.string().max(10000), targetColumn: z.number().int().min(1).max(100), rowOffset: z.number().int().min(0).max(9).optional(), value: z.union([z.string().max(2000), z.number().finite(), z.boolean(), z.null()]), kind: z.enum(['text', 'number', 'date', 'boolean', 'blank']) })).max(500).default([]),
 });
 export type ConversionPlan = z.infer<typeof planSchema>;
 export interface Issue { level: 'error' | 'warning' | 'info'; code: string; message: string; location?: string }

@@ -17,6 +17,7 @@ export function mergeBounds(range: string) {
 export function inputRecordRows(sheet: SheetInfo, plan: Pick<ConversionPlan, 'startRow' | 'endRow' | 'mappings'>): number[] {
   if (!plan.mappings.length) return Array.from({ length: plan.endRow - plan.startRow + 1 }, (_, i) => plan.startRow + i);
   const columns = new Set(plan.mappings.map(m => m.targetColumn));
+  if (plan.mappings.some(m => m.rowOffset)) return offsetRecordRows(sheet, plan);
   const merges = sheet.merges.map(mergeBounds).filter(m => [...columns].some(c => c >= m.start.col && c <= m.end.col) && m.start.row <= plan.endRow && m.end.row >= plan.startRow);
   const byStart = new Map<number, typeof merges>();
   for (const merge of merges) { const group = byStart.get(merge.start.row) || []; group.push(merge); byStart.set(merge.start.row, group); }
@@ -36,6 +37,33 @@ export function inputRecordRows(sheet: SheetInfo, plan: Pick<ConversionPlan, 'st
     for (let r = row + 1; r <= end; r++) {
       if (byStart.has(r)) throw new Error('항목마다 병합된 인원 구간이 다릅니다. 한 사람의 입력칸이 어디까지인지 확인할 수 있도록 실제 양식을 확인해야 합니다.');
       if ((occupied.get(r) || []).some(c => !covering.some(m => c.col >= m.start.col && c.col <= m.end.col && c.row <= m.end.row))) throw new Error('한 사람의 아래쪽 행에도 별도 데이터나 수식이 있습니다. 각 행의 항목을 구분해야 하므로 원본과 받을 양식을 함께 확인해 주세요.');
+    }
+    rows.push(row); row = end + 1;
+  }
+  return rows;
+}
+
+function offsetRecordRows(sheet: SheetInfo, plan: Pick<ConversionPlan, 'startRow' | 'endRow' | 'mappings'>): number[] {
+  const columns = new Set(plan.mappings.map(m => m.targetColumn));
+  const merges = sheet.merges.map(mergeBounds).filter(m => [...columns].some(c => c >= m.start.col && c <= m.end.col));
+  const rows: number[] = [];
+  for (let row = plan.startRow; row <= plan.endRow;) {
+    const covering = merges.filter(m => m.start.row <= row && m.end.row >= row);
+    if (covering.some(m => m.start.row < row)) throw new Error('입력 범위가 병합 셀 중간에서 끊깁니다.');
+    const ends = [...new Set(covering.filter(m => m.end.row > row).map(m => m.end.row))];
+    if (ends.length > 1) throw new Error('항목마다 병합된 인원 구간이 다릅니다.');
+    const end = ends[0] ?? row + Math.max(...plan.mappings.map(m => m.rowOffset || 0));
+    if (end > plan.endRow) throw new Error('입력 범위가 병합 셀 중간에서 끊깁니다.');
+    const addresses = new Set<string>();
+    for (const mapping of plan.mappings) {
+      const r = row + (mapping.rowOffset || 0);
+      if (r > end) throw new Error('아래쪽 행의 항목이 한 사람의 입력 구간을 벗어납니다.');
+      const merge = merges.find(m => r >= m.start.row && r <= m.end.row && mapping.targetColumn >= m.start.col && mapping.targetColumn <= m.end.col);
+      if (merge && (merge.start.row !== r || merge.start.col !== mapping.targetColumn || merge.end.row > end)) throw new Error('병합 셀의 시작 칸에만 값을 입력할 수 있습니다.');
+      addresses.add(`${r}:${mapping.targetColumn}`);
+    }
+    for (const cell of sheet.cells.filter(c => c.row > row && c.row <= end && columns.has(c.col) && (c.formula || (c.value !== null && c.value !== '')))) {
+      if (!addresses.has(`${cell.row}:${cell.col}`)) throw new Error('한 사람의 아래쪽 행에도 별도 데이터나 수식이 있습니다. 해당 줄의 항목을 연결해 주세요.');
     }
     rows.push(row); row = end + 1;
   }

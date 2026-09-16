@@ -155,7 +155,7 @@ export function buildTraces(plan: ConversionPlan, rows: DataRow[], sheetName: st
     const traces: CellTrace[] = [];
     const issues: Issue[] = [];
     const add = (mapping: Mapping, row: DataRow, address: string, fixed = false) => { try {
-        const override = !fixed && plan.overrides?.find(o => o.originsKey === row.origins.join('\n') && o.targetColumn === mapping.targetColumn);
+        const override = !fixed && plan.overrides?.find(o => o.originsKey === row.origins.join('\n') && o.targetColumn === mapping.targetColumn && (o.rowOffset || 0) === (mapping.rowOffset || 0));
         const result = override ? { value: override.value, kind: override.kind } : mapValue(mapping, row);
         if (mapping.required && (result.value === null || result.value === ''))
             throw new Error(`${mapping.label}: 필수값을 빈칸으로 수정할 수 없습니다.`);
@@ -180,7 +180,7 @@ export function buildTraces(plan: ConversionPlan, rows: DataRow[], sheetName: st
             col = String.fromCharCode(65 + n % 26) + col;
             n = Math.floor(n / 26);
         }
-        add(mapping, row, `${col}${inputRows?.[i] ?? plan.startRow + i}`);
+        add(mapping, row, `${col}${(inputRows?.[i] ?? plan.startRow + i) + (mapping.rowOffset || 0)}`);
     }));
     return { traces, issues };
 }

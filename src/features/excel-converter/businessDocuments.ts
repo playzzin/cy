@@ -2,6 +2,7 @@ import { blankMapping, ConversionPlan, DataRow, DataTable, Field, Scalar, SheetI
 import { columnName, columnNumber, extractTable, normalizeLabel } from './workbook';
 import { createPlan, suggestMapping } from './planning';
 import { decimalSum, numberValue } from './transform';
+import { createTwoRowLaborPlan, readTwoRowLabor } from './laborTwoRow';
 
 export type DocumentKind = 'delegation' | 'labor' | 'general';
 export interface SourceDocument { kind: DocumentKind; label: string; table: DataTable; sheetName: string; headerRow: number; notes: string[] }
@@ -40,6 +41,7 @@ function commonValues(sheet: SheetInfo, before: number): Record<string, Scalar> 
 }
 export function readSourceDocument(file: WorkbookFile, selectedSheet = file.sheets[0]?.name): SourceDocument {
   const sheet = file.sheets.find(s => s.name === selectedSheet); if (!sheet) throw new Error('원본 시트를 찾을 수 없습니다.');
+  const twoRow = readTwoRowLabor(file, sheet); if (twoRow) return twoRow;
   // Existing SupportPaymentExcelGenerator: each worker occupies two rows.
   if (valueAt(sheet, 3, 2) === '성명' && valueAt(sheet, 3, 22) === '청구단가' && valueAt(sheet, 4, 22) === '공급가액' && valueAt(sheet, 4, 3) === '전화번호') {
     const keys = ['worker_name', 'resident_id', 'contact', 'address', 'man_days', 'billing_price', 'billing_amount', 'bank_name', 'account_holder', 'account_number', 'pay_type', 'site_name', ...Array.from({ length: 31 }, (_, i) => `day${i + 1}`)];
@@ -84,6 +86,7 @@ export function businessMapping(label: string, col: number, fields: Field[]) {
 }
 export function createDocumentPlan(target: WorkbookFile, source: SourceDocument, sheetName = target.sheets[0].name): ConversionPlan {
   const sheet = target.sheets.find(s => s.name === sheetName)!;
+  const twoRow = createTwoRowLaborPlan(target, source, sheet); if (twoRow) return twoRow;
   const hits = sheet.cells.filter(c => typeof c.value === 'string' && semanticKey(c.value));
   const hasTable = hits.some(c => hits.filter(other => other.row === c.row).length >= 3);
   let plan = createPlan(target, sheetName, source.table.fields);
@@ -118,6 +121,6 @@ export function validateAutomaticPlan(base: ConversionPlan, proposed: Conversion
     if (!before.confirmed || before.mode !== 'copy' || !before.sourceKeys.length) return;
     if (!after || after.mode !== 'copy' || JSON.stringify(after.sourceKeys) !== JSON.stringify(before.sourceKeys) || after.scale !== before.scale || after.decimals !== before.decimals) throw new Error(`${before.label}: 확인된 원본 연결이나 계산이 바뀌었습니다. 상세 설정에서 확인해 주세요.`);
   };
-  base.mappings.forEach(m => check(m, proposed.mappings.find(p => p.targetColumn === m.targetColumn)));
+  base.mappings.forEach(m => check(m, proposed.mappings.find(p => p.targetColumn === m.targetColumn && (p.rowOffset || 0) === (m.rowOffset || 0))));
   base.fixedCells.forEach(f => check(f.mapping, proposed.fixedCells.find(p => p.address === f.address)?.mapping));
 }
