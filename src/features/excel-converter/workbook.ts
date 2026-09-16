@@ -1,10 +1,12 @@
 import JSZip from 'jszip';
 import { readPresentation } from './previewStyles';
+import { headerEndRow, mergeBounds } from './mergedLayout';
 import { DataTable, Field, LIMITS, Scalar, SheetInfo, ValueKind, WorkbookFile } from './types';
 
 export const columnName = (column: number): string => { let n = column; let result = ''; while (n > 0) { n--; result = String.fromCharCode(65 + n % 26) + result; n = Math.floor(n / 26); } return result; };
 export const columnNumber = (name: string): number => Array.from(name.toUpperCase()).reduce((n, char) => n * 26 + char.charCodeAt(0) - 64, 0);
 export const normalizeLabel = (label: string) => label.toLowerCase().replace(/필수/g, '').replace(/[\s_\-()*[\]]/g, '');
+export const workbookMime = (name: string) => /\.xlsm$/i.test(name) ? 'application/vnd.ms-excel.sheet.macroEnabled.12' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 export const xml = (text: string): Document => { if (/<!DOCTYPE|<!ENTITY/i.test(text)) throw new Error('외부 정의가 포함된 XML은 처리할 수 없습니다.'); const doc = new DOMParser().parseFromString(text, 'application/xml'); if (doc.getElementsByTagName('parsererror').length) throw new Error('엑셀 내부 XML이 손상되었습니다.'); return doc; };
 export const elements = (node: Document | Element, tag: string): Element[] => Array.from(node.getElementsByTagNameNS('*', tag));
 export const serializeXml = (doc: Document) => new XMLSerializer().serializeToString(doc);
@@ -20,7 +22,7 @@ export function validateArchive(bytes: ArrayBuffer): void {
     if (size === 0xffffffff || total > LIMITS.expandedBytes || count > 5000) throw new Error('압축을 푼 크기가 너무 크거나 지원하지 않는 엑셀입니다.');
     i += 45 + view.getUint16(i + 28, true) + view.getUint16(i + 30, true) + view.getUint16(i + 32, true);
   }
-  if (!count) throw new Error('정상적인 .xlsx 파일을 선택해 주세요. 암호화 파일은 지원하지 않습니다.');
+  if (!count) throw new Error('정상적인 .xlsx 또는 .xlsm 파일을 선택해 주세요. 암호화 파일은 지원하지 않습니다.');
 }
 export async function fingerprint(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes));
@@ -32,11 +34,19 @@ export function detectHeader(cells: SheetInfo['cells']): number {
   return Array.from(rows).sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] || 1;
 }
 export async function readWorkbook(bytes: ArrayBuffer, name: string, id = `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`): Promise<WorkbookFile> {
-  if (!/\.xlsx$/i.test(name)) throw new Error('.xlsx 파일만 지원합니다. 구형·매크로 파일은 Excel에서 .xlsx로 저장해 주세요.');
+  if (!/\.xls[xm]$/i.test(name)) throw new Error('.xlsx와 매크로 통합문서 .xlsm을 지원합니다. 구형 .xls·바이너리 .xlsb는 Excel에서 .xlsx 또는 .xlsm으로 저장해 주세요.');
   validateArchive(bytes);
   const zip = await JSZip.loadAsync(new Uint8Array(bytes));
   if (!zip.file('xl/workbook.xml')) throw new Error('엑셀 통합문서가 아닙니다.');
-  if (Object.keys(zip.files).some(p => /vbaProject|externalLinks\/externalLink|_xmlsignatures|activeX|embeddings\//i.test(p))) throw new Error('매크로·외부 연결·전자서명·실행 개체가 있는 파일은 지원하지 않습니다.');
+  if (Object.keys(zip.files).some(p => /externalLinks\/externalLink|_xmlsignatures/i.test(p))) throw new Error('외부 연결·문서 전자서명이 있는 파일은 지원하지 않습니다.');
+  const contentTypes = xml(await zip.file('[Content_Types].xml')!.async('string'));
+  const workbookType = elements(contentTypes, 'Override').find(e => (e.getAttribute('PartName') || '').replace(/^\//, '') === 'xl/workbook.xml')?.getAttribute('ContentType')
+    || elements(contentTypes, 'Default').find(e => e.getAttribute('Extension') === 'xml')?.getAttribute('ContentType');
+  const format = workbookType === 'application/vnd.ms-excel.sheet.macroEnabled.main+xml' ? 'xlsm' : 'xlsx';
+  const hasMacros = Object.keys(zip.files).some(p => /vbaProject\.bin$/i.test(p));
+  if (hasMacros && format !== 'xlsm') throw new Error('매크로 정보와 엑셀 파일 형식이 일치하지 않습니다. Excel에서 .xlsm으로 다시 저장해 주세요.');
+  // Binary parts (VBA, controls, embedded files) are opaque ZIP entries. We
+  // never execute or load them; the target package is copied intact on export.
   const manifest = xml(await zip.file('xl/workbook.xml')!.async('string'));
   const rels = xml(await zip.file('xl/_rels/workbook.xml.rels')!.async('string'));
   const paths = new Map(elements(rels, 'Relationship').map(r => [r.getAttribute('Id'), normalizeZipPath('xl/workbook.xml', r.getAttribute('Target') || '')]));
@@ -53,6 +63,11 @@ export async function readWorkbook(bytes: ArrayBuffer, name: string, id = `file-
     if (!path || !zip.file(path)) throw new Error('엑셀 시트 연결 정보가 올바르지 않습니다.');
     const doc = xml(await zip.file(path)!.async('string'));
     const info: SheetInfo = { name: name!, path, cells: [], rowCount: 0, columnCount: 0, headerRow: 1, merges: elements(doc, 'mergeCell').map(m => m.getAttribute('ref') || ''), hiddenRows: [], hiddenColumns: [], warnings: [] };
+    for (const range of info.merges) {
+      const { end } = mergeBounds(range);
+      if (end.row > LIMITS.rows || end.col > LIMITS.columns) throw new Error('병합 영역도 시트당 30,000행·100열 이내로 준비해 주세요.');
+      info.rowCount = Math.max(info.rowCount, end.row); info.columnCount = Math.max(info.columnCount, end.col);
+    }
     for (const row of elements(doc, 'row')) { const r = Number(row.getAttribute('r')); info.rowCount = Math.max(info.rowCount, r); if (['1', 'true'].includes(row.getAttribute('hidden') || '')) info.hiddenRows.push(r); }
     for (const col of elements(doc, 'col')) if (['1', 'true'].includes(col.getAttribute('hidden') || '')) for (let c = Number(col.getAttribute('min')); c <= Math.min(LIMITS.columns, Number(col.getAttribute('max'))); c++) info.hiddenColumns.push(c);
     const cellNodes = elements(doc, 'c'); if (cellNodes.length > 250000) throw new Error('시트에 사용된 셀이 250,000개를 초과합니다. 데이터를 나누어 주세요.');
@@ -84,11 +99,12 @@ export async function readWorkbook(bytes: ArrayBuffer, name: string, id = `file-
     if (info.cells.some(c => c.formula && c.value === null)) info.warnings.push('계산 결과가 저장되지 않은 수식이 있습니다. 원본 데이터라면 Excel에서 재계산 후 저장해 주세요.');
     sheets.push(info);
   }
-  return { id, name, bytes: bytes.slice(0), sheets, fingerprint: await fingerprint(bytes), warnings: [] };
+  return { id, name, bytes: bytes.slice(0), sheets, fingerprint: await fingerprint(bytes), format, hasMacros, warnings: format === 'xlsm' ? ['매크로는 실행하지 않습니다. 받을 양식이 .xlsm이면 매크로와 버튼을 보존해 .xlsm으로 저장합니다.'] : [] };
 }
 export function extractTable(file: WorkbookFile, sheetName: string, headerRow: number, includeHidden = true, prefix = ''): DataTable {
   const sheet = file.sheets.find(s => s.name === sheetName); if (!sheet) throw new Error('선택한 시트를 찾을 수 없습니다.');
   const headers = sheet.cells.filter(c => c.row === headerRow && c.value !== null);
+  const lastHeaderRow = headerEndRow(sheet, headerRow);
   const labels = new Set<string>(); const warnings: string[] = [];
   const fields: Field[] = headers.map(c => {
     const label = String(c.value).trim(); if (labels.has(label)) warnings.push(`중복 머리글: ${label}. 열 위치를 확인해 주세요.`); labels.add(label);
@@ -96,7 +112,7 @@ export function extractTable(file: WorkbookFile, sheetName: string, headerRow: n
     return { key: `${prefix}c${c.col}`, label, col: c.col, kind: sample?.kind || 'text' };
   });
   const byRow = new Map<number, Map<number, SheetInfo['cells'][number]>>();
-  sheet.cells.filter(c => c.row > headerRow).forEach(c => { if (!byRow.has(c.row)) byRow.set(c.row, new Map()); byRow.get(c.row)!.set(c.col, c); });
+  sheet.cells.filter(c => c.row > lastHeaderRow).forEach(c => { if (!byRow.has(c.row)) byRow.set(c.row, new Map()); byRow.get(c.row)!.set(c.col, c); });
   const rows: DataTable['rows'] = []; const skipped: DataTable['skipped'] = [];
   for (const [row, cells] of byRow) {
     const origin = `${file.name} / ${sheetName} / ${row}행`;

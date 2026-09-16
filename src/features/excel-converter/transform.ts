@@ -148,7 +148,7 @@ export function mapValue(mapping: Mapping, row: DataRow): {
     }
     return { value, kind: typeof value === 'number' ? 'number' : typeof value === 'boolean' ? 'boolean' : 'text' };
 }
-export function buildTraces(plan: ConversionPlan, rows: DataRow[], sheetName: string): {
+export function buildTraces(plan: ConversionPlan, rows: DataRow[], sheetName: string, inputRows?: number[]): {
     traces: CellTrace[];
     issues: Issue[];
 } {
@@ -180,7 +180,7 @@ export function buildTraces(plan: ConversionPlan, rows: DataRow[], sheetName: st
             col = String.fromCharCode(65 + n % 26) + col;
             n = Math.floor(n / 26);
         }
-        add(mapping, row, `${col}${plan.startRow + i}`);
+        add(mapping, row, `${col}${inputRows?.[i] ?? plan.startRow + i}`);
     }));
     return { traces, issues };
 }

@@ -1,5 +1,6 @@
 import { blankMapping, ConversionPlan, DataTable, emptyRules, Field, JoinSpec, Mapping, planSchema, Rules, WorkbookFile } from './types';
 import { extractTable, normalizeLabel } from './workbook';
+import { headerEndRow } from './mergedLayout';
 
 const SYNONYMS = [
   ['품명', '품목명', '상품명', '제품명', 'itemname', 'productname'], ['품번', '품목코드', '상품코드', '제품코드', 'sku'],
@@ -22,7 +23,7 @@ export function suggestMapping(label: string, column: number, fields: Field[], d
 }
 export function createPlan(target: WorkbookFile, sheetName: string, fields: Field[], dictionary: Record<string, string> = {}, headerRow?: number): ConversionPlan {
   const sheet = target.sheets.find(s => s.name === sheetName); if (!sheet) throw new Error('대상 시트를 선택해 주세요.');
-  const header = headerRow || sheet.headerRow; const startRow = header + 1;
+  const header = headerRow || sheet.headerRow; const startRow = headerEndRow(sheet, header) + 1;
   const total = sheet.cells.find(c => c.row > header && /^(합계|총계|소계|총합계|total)$/i.test(String(c.value).trim()));
   const endRow = total ? total.row - 1 : Math.max(startRow, sheet.rowCount);
   return planSchema.parse({ version: 1, targetId: target.id, sheetName, headerRow: header, startRow, endRow, mappings: sheet.cells.filter(c => c.row === header && c.value !== null).map(c => {

@@ -7,7 +7,7 @@ export type ValueKind = 'text' | 'number' | 'date' | 'boolean' | 'blank';
 export interface SheetCell { address: string; row: number; col: number; value: Scalar; kind: ValueKind; text: string; formula?: string; style: number; hidden?: boolean }
 export interface SheetPresentation { styles: { color?: string; background?: string; bold: boolean; fontSize: number; align?: 'left' | 'center' | 'right'; bordered: boolean; numberFormat: number }[]; widths: Record<number, number>; heights: Record<number, number> }
 export interface SheetInfo { name: string; path: string; cells: SheetCell[]; rowCount: number; columnCount: number; headerRow: number; merges: string[]; hiddenRows: number[]; hiddenColumns: number[]; warnings: string[]; presentation?: SheetPresentation }
-export interface WorkbookFile { id: string; name: string; bytes: ArrayBuffer; sheets: SheetInfo[]; fingerprint: string; warnings: string[] }
+export interface WorkbookFile { id: string; name: string; bytes: ArrayBuffer; sheets: SheetInfo[]; fingerprint: string; warnings: string[]; format?: 'xlsx' | 'xlsm'; hasMacros?: boolean }
 export interface Field { key: string; label: string; col: number; kind: ValueKind }
 export interface DataRow { id: string; values: Record<string, Scalar>; origins: string[] }
 export interface DataTable { fields: Field[]; rows: DataRow[]; warnings: string[]; skipped: { origin: string; reason: string }[] }

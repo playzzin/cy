@@ -3,6 +3,7 @@ import { CellTrace, ConversionPlan, DataTable, Issue, LIMITS, Mapping, Conversio
 import { buildTraces, numberValue, runRules } from './transform';
 import { columnName, columnNumber, elements, normalizeZipPath, readWorkbook, serializeXml, xml } from './workbook';
 import { validatePlanReferences } from './planning';
+import { inputRecordRows } from './mergedLayout';
 const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const REL = 'http://schemas.openxmlformats.org/package/2006/relationships';
 const DOCREL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -303,17 +304,7 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
     const templateDoc = xml(await templateZip.file(sourceSheet.path)!.async('string'));
     if (elements(templateDoc, 'sheetProtection').length)
         throw new Error('보호된 시트는 변경할 수 없습니다. Excel에서 보호를 해제한 양식을 선택해 주세요.');
-    for (const merge of sourceSheet.merges) {
-        const [a, b = a] = merge.split(':');
-        const ar = Number(a.match(/\d+$/)![0]);
-        const br = Number(b.match(/\d+$/)![0]);
-        if (ar !== br && ar <= plan.endRow && br >= plan.startRow)
-            throw new Error('입력 영역에 여러 행을 합친 병합 셀이 있습니다. 한 행 단위의 입력 영역을 지정해 주세요.');
-        const ac = columnNumber(a.replace(/\d/g, ''));
-        const bc = columnNumber(b.replace(/\d/g, ''));
-        if (ar >= plan.startRow && ar <= plan.endRow && plan.mappings.some(m => m.targetColumn > ac && m.targetColumn <= bc))
-            throw new Error('병합 셀의 시작 칸에만 값을 입력할 수 있습니다. 대상 열을 수정해 주세요.');
-    }
+    const inputRows = inputRecordRows(sourceSheet, plan);
     for (const fixed of plan.fixedCells) {
         const row = Number(fixed.address.match(/\d+$/)![0]);
         if (row > LIMITS.rows || columnNumber(fixed.address.replace(/\d/g, '')) > LIMITS.columns)
@@ -348,20 +339,24 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
     }
     if (result.issues.some(i => i.level === 'error'))
         return result;
-    const capacity = plan.endRow - plan.startRow + 1;
+    const capacity = inputRows.length;
+    // Sheet code names and controls may be referenced by VBA. Split whole
+    // workbooks instead of cloning sheets inside a macro-enabled workbook.
+    const outputFormat = target.format || (/\.xlsm$/i.test(target.name) ? 'xlsm' : 'xlsx');
+    const overflow = outputFormat === 'xlsm' && plan.overflow === 'sheets' ? 'files' : plan.overflow;
     const totalPages = Array.from(groups.values()).reduce((n, rows) => n + Math.ceil(rows.length / capacity), 0);
     if (totalPages > LIMITS.outputs)
         throw new Error('결과 페이지가 100개를 초과합니다. 입력 영역을 늘리거나 데이터를 나누어 주세요.');
     const usedNames = new Set<string>();
     for (const [group, rows] of groups) {
         const pages = Array.from({ length: Math.ceil(rows.length / capacity) }, (_, i) => rows.slice(i * capacity, (i + 1) * capacity));
-        if (plan.overflow === 'sheets' && target.sheets.length + pages.length - 1 > LIMITS.sheets)
+        if (overflow === 'sheets' && target.sheets.length + pages.length - 1 > LIMITS.sheets)
             throw new Error('복제 후 시트가 30개를 초과합니다. 여러 파일로 나누기를 선택해 주세요.');
-        if (pages.length > 1 && plan.overflow === 'stop')
-            throw new Error(`양식은 ${capacity}행이지만 결과는 ${rows.length}행입니다. 초과 처리 방법을 선택해 주세요.`);
-        if (pages.length > 1 && (elements(templateDoc, 'tableParts').length || elements(templateDoc, 'legacyDrawing').length || elements(templateDoc, 'pivotTableParts').length))
+        if (pages.length > 1 && overflow === 'stop')
+            throw new Error(`양식에는 ${capacity}건을 입력할 수 있지만 결과는 ${rows.length}건입니다. 초과 처리 방법을 선택해 주세요.`);
+        if (pages.length > 1 && overflow === 'sheets' && (elements(templateDoc, 'tableParts').length || elements(templateDoc, 'legacyDrawing').length || elements(templateDoc, 'pivotTableParts').length))
             throw new Error('Excel 표·메모·피벗이 있는 양식은 페이지 복제를 지원하지 않습니다. 입력 칸이 충분한 양식을 사용해 주세요.');
-        const bundles = plan.overflow === 'files' ? pages.map(p => [p]) : [pages];
+        const bundles = overflow === 'files' ? pages.map(p => [p]) : [pages];
         for (let bundleIndex = 0; bundleIndex < bundles.length; bundleIndex++) {
             if (signal?.aborted)
                 throw new Error('변환을 중단했습니다.');
@@ -422,13 +417,13 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
                     }
                 }
                 // Clear only confirmed input columns; existing formulas remain authoritative.
-                for (let r = plan.startRow; r <= plan.endRow; r++)
+                for (const r of inputRows)
                     for (const mapping of plan.mappings) {
                         const cell = getCell(doc, `${columnName(mapping.targetColumn)}${r}`);
                         if (!elements(cell, 'f').length)
                             assignValue(doc, cell, { value: null, kind: 'blank' }, date1904);
                     }
-                const prepared = buildTraces(plan, bundle[page], sheetName);
+                const prepared = buildTraces(plan, bundle[page], sheetName, inputRows);
                 outputIssues.push(...prepared.issues, ...validateInputRestrictions(doc, prepared.traces, target));
                 for (const trace of prepared.traces) {
                     const cell = getCell(doc, trace.address);
@@ -483,11 +478,11 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
             zip.file('[Content_Types].xml', serializeXml(contentTypes));
             zip.file('xl/styles.xml', serializeXml(styles));
             const bytes = await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' });
-            const base = safeFilename(`${target.name.replace(/\.xlsx$/i, '')}${group ? `_${group}` : ''}${bundles.length > 1 ? `_${bundleIndex + 1}` : ''}_변환완료`);
-            let name = `${base}.xlsx`;
+            const base = safeFilename(`${target.name.replace(/\.xls[xm]$/i, '')}${group ? `_${group}` : ''}${bundles.length > 1 ? `_${bundleIndex + 1}` : ''}_변환완료`);
+            let name = `${base}.${outputFormat}`;
             let duplicate = 2;
             while (usedNames.has(name))
-                name = `${base}_${duplicate++}.xlsx`;
+                name = `${base}_${duplicate++}.${outputFormat}`;
             usedNames.add(name);
             const reread = await readWorkbook(bytes, name);
             const rereadValues = new Map(reread.sheets.map(s => [s.name, new Map(s.cells.map(c => [c.address, c.value]))]));
@@ -500,7 +495,7 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
                 const sheetName = index === 0 ? sourceSheet.name : elements(workbook, 'sheet')[target.sheets.length + index - 1]?.getAttribute('name');
                 const sheet = reread.sheets.find(s => s.name === sheetName);
                 pageRows.forEach((row, i) => plan.mappings.filter(m => m.verifyKey).forEach(mapping => {
-                    const address = `${columnName(mapping.targetColumn)}${plan.startRow + i}`;
+                    const address = `${columnName(mapping.targetColumn)}${inputRows[i]}`;
                     const expected = numberValue(row.values[mapping.verifyKey]);
                     const actual = numberValue(sheet?.cells.find(c => c.address === address)?.value ?? null);
                     if (expected === null || actual === null || Math.abs(expected - actual) > 0.0000001)
