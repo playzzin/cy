@@ -105,3 +105,14 @@ test('세 파일 첨부는 조용히 버리지 않고 안내하며 대화 요청
   const prompt = conversationPrompt('가'.repeat(2000), Array.from({ length: 20 }, (_, i) => ({ id: String(i), role: 'user' as const, text: '나'.repeat(1000) })));
   expect(prompt.length).toBeLessThan(6000);
 });
+
+test('먼저 작성한 요청은 파일 두 개를 첨부해도 사라지지 않는다', async () => {
+  const analyze = jest.fn(async (_prompt: string, plan: ConversionPlan) => response(plan));
+  render(<ChatConversionWorkspace ownerId="test" analyze={analyze}/>);
+  fireEvent.change(screen.getByLabelText('어떻게 바꿔드릴까요?'), { target: { value: '서명란을 비우고 원본대로 옮겨줘' } });
+  await upload();
+  expect(screen.getByLabelText('어떻게 바꿔드릴까요?')).toHaveValue('서명란을 비우고 원본대로 옮겨줘');
+  fireEvent.click(screen.getByRole('button', { name: '변환 요청' }));
+  await screen.findByRole('button', { name: '엑셀 다운로드' });
+  expect(analyze.mock.calls[0][0]).toContain('현재 사용자 요청: 서명란을 비우고 원본대로 옮겨줘');
+});
