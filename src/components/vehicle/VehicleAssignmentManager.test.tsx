@@ -19,7 +19,7 @@ const workers: Worker[] = [
     { id: 'cy-retired', name: '가상 청연 퇴사자', companyId: 'cy', status: '퇴사' },
     { id: 'partner', name: '가상 외부 인원', companyName: '외부 협력사', status: '재직' },
 ];
-const companies: Company[] = [{ id: 'cy', name: '청연이엔지', type: '시공사' }];
+const companies: Company[] = [{ id: 'cy', code: 'CYENG', name: '청연이엔지', type: '시공사' }];
 const selectableTeams = appendOfficeAssignmentTeam([{ id: 'team', name: '가상 청연팀', companyId: 'cy', type: '시공팀' } as Team]);
 const vehicle = { id: 'test-car', licensePlate: '가상 차량', status: 'AVAILABLE' } as Vehicle;
 const props = { vehicles: [vehicle], workers, companies, selectableTeams, loading: false, onRefresh: jest.fn() };
@@ -30,7 +30,7 @@ beforeEach(() => {
 
 test('실제 운전자 선택에는 청연 재직자만 나오고 처음에는 직접 선택해야 한다', async () => {
     render(<VehicleAssignmentManager {...props} />);
-    fireEvent.click(screen.getByRole('button', { name: '운전자', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '운전자' }));
     const select = screen.getByRole('combobox', { name: '운전자 선택' });
     await waitFor(() => expect(within(select).getAllByRole('option').map(option => option.textContent)).toEqual(['운전자를 선택하세요', '가상 청연 재직자']));
     expect(select).toHaveValue('');
@@ -57,7 +57,7 @@ test('사무실 배정도 퇴사·비활성 직원을 제외한다', async () =>
     ]);
     render(<VehicleAssignmentManager {...props} />);
     fireEvent.change(screen.getByRole('combobox', { name: '배정 팀 선택' }), { target: { value: OFFICE_ASSIGNMENT_TEAM_ID } });
-    fireEvent.click(screen.getByRole('button', { name: '운전자', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '운전자' }));
     const select = screen.getByRole('combobox', { name: '운전자 선택' });
     await waitFor(() => expect(within(select).getAllByRole('option').map(option => option.textContent)).toEqual(['운전자를 선택하세요', '가상 사무직 재직자 (사무실)']));
 });
