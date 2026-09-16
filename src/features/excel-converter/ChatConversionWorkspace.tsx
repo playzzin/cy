@@ -57,8 +57,8 @@ export default function ChatConversionWorkspace({ analyze, checkAi }: ChatWorksp
     window.addEventListener('beforeunload', guard); return () => window.removeEventListener('beforeunload', guard);
   }, [busy]);
 
-  const clearConversation = () => { setPlan(undefined); setMessages([]); setVersions([]); setPreviewId(''); setAccepted([]); setError(''); setDraft(''); };
-  const install = (next: Pair) => { clearConversation(); setFiles(next); setSheets([next[0]?.sheets[0]?.name || '', next[1]?.sheets[0]?.name || '']); setShowFiles(false); };
+  const clearConversation = (keepDraft = true) => { setPlan(undefined); setMessages([]); setVersions([]); setPreviewId(''); setAccepted([]); setError(''); if (!keepDraft) setDraft(''); };
+  const install = (next: Pair, keepDraft = true) => { clearConversation(keepDraft); setFiles(next); setSheets([next[0]?.sheets[0]?.name || '', next[1]?.sheets[0]?.name || '']); setShowFiles(false); };
   const upload = async (selected: FileList | File[] | null, slot?: 0 | 1) => {
     if (!selected?.length || locked.current) return;
     locked.current = true; setBusy('첨부파일을 읽고 있어요'); setError('');
@@ -73,7 +73,7 @@ export default function ChatConversionWorkspace({ analyze, checkAi }: ChatWorksp
       else if (!next[0]) next[0] = read[0];
       else if (!next[1]) next[1] = read[0];
       else throw new Error('파일을 바꾸려면 첨부된 파일의 “바꾸기”를 눌러 주세요.');
-      install(next);
+      install(next, true);
     } catch (e) { if (operation.current === run) setError(errorText(e)); }
     finally { if (operation.current === run) { locked.current = false; setBusy(''); } }
   };
@@ -87,7 +87,7 @@ export default function ChatConversionWorkspace({ analyze, checkAi }: ChatWorksp
         if (!response.ok) throw new Error('예시 파일을 불러오지 못했습니다. 다시 시도해 주세요.');
         return readWorkbook(await response.arrayBuffer(), name);
       }));
-      if (operation.current === run) install([example[0], example[1]]);
+      if (operation.current === run) install([example[0], example[1]], false);
     } catch (e) { if (operation.current === run) setError(errorText(e)); }
     finally { if (operation.current === run) { locked.current = false; setBusy(''); } }
   };
@@ -135,7 +135,7 @@ export default function ChatConversionWorkspace({ analyze, checkAi }: ChatWorksp
   const preview = versions.find(version => version.id === previewId);
   const ready = !!source && !!target;
   return <main className="ecc-page">
-    <header className="ecc-topbar"><div><span className="ecc-app-icon"><FileSpreadsheet size={21}/></span><strong>엑셀 양식 변환</strong><span className="ecc-beta">Gemini</span></div><button disabled={!!busy} onClick={() => install([undefined, undefined])}><Plus size={16}/>새 대화</button></header>
+    <header className="ecc-topbar"><div><span className="ecc-app-icon"><FileSpreadsheet size={21}/></span><strong>엑셀 양식 변환</strong><span className="ecc-beta">Gemini</span></div><button disabled={!!busy} onClick={() => install([undefined, undefined], false)}><Plus size={16}/>새 대화</button></header>
     <div className="ecc-content">
       <section className={`ecc-intro ${messages.length ? 'compact' : ''}`}><span className="ecc-kicker"><Sparkles size={15}/>말로 부탁하는 엑셀 작업</span><h1>파일 두 개 올리고,<br/>원하는 대로 말해 주세요.</h1><p>첫 번째 파일의 데이터를 두 번째 양식으로.<br className="ecc-mobile-break"/> 완성된 엑셀까지 만들어 드려요.</p></section>
       <section className={`ecc-attachments ${dragging ? 'dragging' : ''}`} aria-label="첨부파일" onDragOver={event => { event.preventDefault(); if (!busy) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); void upload(Array.from(event.dataTransfer.files)); }}>
