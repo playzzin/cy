@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Vehicle, VehicleFineChargeTarget } from '../../types/vehicle';
 import { vehicleService } from '../../services/vehicleService';
 import { teamService, Team } from '../../services/teamService';
-import { companyService } from '../../services/companyService';
+import { companyService, Company } from '../../services/companyService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { OfficeStaff, officeStaffService } from '../../services/officeStaffService';
 import { VehicleForm } from '../../components/vehicle/VehicleForm';
@@ -55,6 +55,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
     // Team Search State
     const [teams, setTeams] = useState<Team[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
+    const [companies, setCompanies] = useState<Company[]>([]);
     const [selectableTeams, setSelectableTeams] = useState<Team[]>([]); // Filtered for dropdown
     const [assignableTeams, setAssignableTeams] = useState<Team[]>([]);
     const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
@@ -101,6 +102,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                 .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko-KR'));
             setVehicles(vehicleList);
             setWorkers(workerList);
+            setCompanies(companies);
             setTeams(appendOfficeAssignmentTeam(sortedTeams, sortedTeams));
             setSelectableTeams(allowedTeams);
             setAssignableTeams(appendOfficeAssignmentTeam(allowedTeams, sortedTeams));
@@ -607,6 +609,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                     <VehicleAssignmentManager
                         vehicles={vehicles}
                         workers={workers}
+                        companies={companies}
                         loading={loading}
                         initialVehicleId={setupInitialVehicleId}
                         selectableTeams={assignableTeams}

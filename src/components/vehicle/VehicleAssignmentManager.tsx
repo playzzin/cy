@@ -12,6 +12,8 @@ import { hexToRgba, normalizeHexColor } from '../../utils/color';
 import { normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
 import { buildOfficeStaffAssignmentOptions, isOfficeAssignmentTeam } from '../../utils/supportAssignmentTargets';
 import { getFriendlyErrorMessage, isDeadlineExceededError } from '../../utils/firebaseError';
+import type { Company } from '../../services/companyService';
+import { getEligibleVehicleDrivers, isCurrentVehicleDriver } from '../../utils/vehicleDriverOptions';
 
 type AssigneeMode = VehicleAssigneeType;
 
@@ -36,6 +38,7 @@ interface VehicleAssignmentManagerProps {
     loading: boolean;
     initialVehicleId?: string | null;
     selectableTeams?: Team[];
+    companies?: Company[];
     onRefresh: () => void;
 }
 
@@ -84,6 +87,7 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
     loading,
     initialVehicleId,
     selectableTeams = [],
+    companies = [],
     onRefresh
 }) => {
     const today = useMemo(() => toShortDateInputValue(new Date()), []);
@@ -173,13 +177,13 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
     }, []);
 
     const officeStaffOptions = useMemo(
-        () => buildOfficeStaffAssignmentOptions(officeStaffRows),
+        () => buildOfficeStaffAssignmentOptions(officeStaffRows.filter(isCurrentVehicleDriver)),
         [officeStaffRows]
     );
 
     const filteredWorkers = useMemo<AssignmentPersonOption[]>(() => {
         if (selectedTeamIsOffice) return officeStaffOptions;
-        const workerOptions = workers.map((worker) => ({
+        const workerOptions = getEligibleVehicleDrivers(workers, selectableTeams, companies).map((worker) => ({
             id: getWorkerOptionId(worker),
             name: String(worker.name ?? ''),
             teamId: worker.teamId,
@@ -187,12 +191,12 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
             source: 'worker' as const
         })).filter((worker) => Boolean(worker.id && worker.name));
         return workerOptions;
-    }, [officeStaffOptions, selectedTeamId, selectedTeamIsOffice, workers]);
+    }, [officeStaffOptions, selectedTeamIsOffice, workers, selectableTeams, companies]);
 
     useEffect(() => {
         if (mode !== 'WORKER') return;
         if (selectedWorkerId && filteredWorkers.some((worker) => worker.id === selectedWorkerId)) return;
-        setSelectedWorkerId(filteredWorkers.find((worker) => Boolean(worker.id))?.id ?? '');
+        setSelectedWorkerId('');
     }, [filteredWorkers, mode, selectedWorkerId]);
 
     const selectedPerson = useMemo(
@@ -607,6 +611,7 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
                                         />
                                     )}
                                     <select
+                                        aria-label="배정 팀 선택"
                                         className={`w-full rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-700 ${
                                             selectedTeam ? 'pl-8 pr-3' : 'px-3'
                                         }`}
@@ -638,10 +643,12 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
                                 <div>
                                     <label className="block text-xs font-bold text-slate-600 mb-1">운전자 선택</label>
                                     <select
+                                        aria-label="운전자 선택"
                                         className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
                                         value={selectedWorkerId}
                                         onChange={(event) => setSelectedWorkerId(event.target.value)}
                                     >
+                                        <option value="">{filteredWorkers.length ? '운전자를 선택하세요' : '선택 가능한 운전자가 없습니다'}</option>
                                         {filteredWorkers
                                             .slice()
                                             .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko-KR'))
@@ -651,6 +658,7 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
                                                 </option>
                                             ))}
                                     </select>
+                                    <p className="mt-1 text-xs text-slate-500">{selectedTeamIsOffice ? '사무실 직원 중 퇴사·비활성 인원은 제외합니다.' : '청연 소속 인원만 표시하며, 퇴사·비활성 인원은 제외합니다.'}</p>
                                 </div>
                             )}
 
