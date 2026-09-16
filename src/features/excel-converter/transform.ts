@@ -13,11 +13,20 @@ export function numberValue(value: Scalar): number | null {
 // Fixed decimal operations avoid summing binary fractions (e.g. 0.1 + 0.2).
 export function decimalSum(values: number[]): number {
     const digits = (value: number) => { const [mantissa, exponent = '0'] = String(value).toLowerCase().split('e'); return Math.max(0, (mantissa.split('.')[1] || '').length - Number(exponent)); };
-    if (values.some(value => digits(value) > 8))
+    const normalized = values.map(value => {
+        if (!Number.isFinite(value)) throw new Error('합산할 값이 유효한 숫자가 아닙니다.');
+        if (digits(value) <= 8) return value;
+        const nearest = Number(value.toFixed(8));
+        // Excel formula caches can store 14.6 as 14.600000000000001.
+        // Accept only floating-point noise, capped well below the supported
+        // decimal unit so larger values cannot hide meaningful extra digits.
+        const tolerance = Math.min(1e-12, Number.EPSILON * Math.abs(value) * 4);
+        if (Math.abs(value - nearest) <= tolerance) return nearest;
         throw new Error('합산은 소수 8자리까지 지원합니다. 반올림 기준을 먼저 정해 주세요.');
-    const precision = Math.max(0, ...values.map(digits));
+    });
+    const precision = Math.max(0, ...normalized.map(digits));
     const factor = 10 ** precision;
-    const scaled = values.map(v => Math.round(v * factor));
+    const scaled = normalized.map(v => Math.round(v * factor));
     if (scaled.some(v => !Number.isSafeInteger(v)))
         throw new Error('숫자의 자릿수가 안전한 계산 범위를 초과합니다.');
     const total = scaled.reduce((a, b) => a + b, 0);

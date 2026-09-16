@@ -64,6 +64,18 @@ test('원본 금액 불일치와 여러 달 기간은 자동 진행하지 않는
   source.sheets[0].cells.find(c => c.address === 'A2')!.value = '기간: 2026-08-01 ~ 2026-09-01';
   expect(() => readSourceDocument(source)).toThrow('여러 달');
 });
+test('공수 수식의 저장 오차가 있어도 업로드 요약과 두 줄 양식 변환을 완료한다', async () => {
+  const file = await sourceFixture();
+  file.sheets[0].cells.find(c => c.address === 'U6')!.value = 3.5000000000000004;
+  file.sheets[0].cells.find(c => c.address === 'S7')!.value = 1.2000000000000002;
+  const source = readSourceDocument(file), target = await targetFixture();
+  expect(documentTotals(source.table)).toMatchObject({ people: 2, manDays: 7, amount: 1400000 });
+  const result = await convertWorkbook(target, createDocumentPlan(target, source), source.table);
+  expect(result.issues).toEqual([]);
+  expect(result.outputs[0].sheets[0].cells.find(c => c.address === 'Y8')?.value).toBeCloseTo(3.5);
+  expect(result.outputs[0].sheets[0].cells.find(c => c.address === 'AA8')?.value).toBe(700000);
+  expect(file.sheets[0].cells.find(c => c.address === 'U6')?.value).toBe(3.5000000000000004);
+});
 test('계좌 누락은 안내하고 빈칸을 유지하며 변환을 막지 않는다', async () => {
   const file = await sourceFixture(); file.sheets[0].cells.find(c => c.address === 'Z6')!.value = null;
   const source = readSourceDocument(file), target = await targetFixture();
@@ -103,6 +115,7 @@ const actualTest = process.env.EXCEL_PAIR_SOURCE && process.env.EXCEL_PAIR_TARGE
 actualTest('사용자가 제공한 실제 두 파일의 인원·공수·금액·31일 입력을 대조한다', async () => {
   const read = async (file: string) => readWorkbook(Uint8Array.from(fs.readFileSync(file)).buffer, path.basename(file));
   const source = readSourceDocument(await read(process.env.EXCEL_PAIR_SOURCE!));
+  expect(documentTotals(source.table)).toMatchObject({ people: 78, manDays: 407.3, amount: 84980500 });
   const target = await read(process.env.EXCEL_PAIR_TARGET!); const plan = createDocumentPlan(target, source);
   expect(validatePlanReferences(plan, source.table.fields)).toEqual([]);
   const result = await convertWorkbook(target, plan, source.table);
