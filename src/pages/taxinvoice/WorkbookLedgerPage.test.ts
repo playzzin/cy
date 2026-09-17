@@ -20,6 +20,8 @@ jest.mock('sweetalert2-react-content', () => ({
 }));
 
 const {
+    buildLedgerExcelData,
+    buildSummaryExcelData,
     buildSummaryRows,
     canUseSummaryRangePreview,
     getWorkbookInputRowIssues,
@@ -29,6 +31,33 @@ const {
     partitionWorkbookImportDuplicates,
     shiftWorkbookMonth,
 } = require('./WorkbookLedgerPage') as typeof import('./WorkbookLedgerPage');
+
+describe('조회 결과 엑셀 다운로드', () => {
+    it.each(['매출', '매입'] as const)('exports %s amounts as numbers and uses the final running balance', (type) => {
+        const row = { id: '1', date: '2026-09-01', partnerName: '=거래처', description: '거래', transactionAmount: 110000, paymentAmount: 0, balance: 110000, siteName: '현장', note: '비고', teamName: '팀' };
+        const data = buildLedgerExcelData([row, { ...row, id: '2', transactionAmount: 0, paymentAmount: 30000, balance: 80000 }], type);
+        expect(data[0].slice(3, 5)).toEqual(type === '매출' ? ['매출금액', '입금금액'] : ['매입금액', '지급금액']);
+        expect(data[3].slice(3, 6)).toEqual([110000, 30000, 80000]);
+        const XLSX = require('xlsx');
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(data), '거래장');
+        const result = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' }).Sheets['거래장'];
+        expect(result.D2).toMatchObject({ t: 'n', v: 110000 });
+        expect(result.B2).toMatchObject({ t: 's', v: '=거래처' });
+        expect(result.B2.f).toBeUndefined();
+    });
+
+    it.each(['매출', '매입', '미수금', '미지급금'] as const)('exports all rows and matching settlement labels for %s', (mode) => {
+        const row = { id: '1', transactionType: '매출' as const, partnerName: '거래처', siteName: '현장', issueDate: '2026-09-01', appliedYear: 2026, appliedMonth: 9, supplyAmount: 100000, taxAmount: 10000, totalAmount: 110000, paymentDates: ['2026-09-02', '2026-09-03'], settledAmount: 30000, advanceUsedAmount: 10000, outstandingAmount: 70000, advanceAmount: 0, settlementEntryIds: [], note: '비고', teamName: '팀' };
+        const data = buildSummaryExcelData(Array.from({ length: 125 }, (_, index) => ({ ...row, id: String(index) })), mode);
+        expect(data).toHaveLength(127);
+        expect(data[125][0]).toBe(125);
+        expect(data[1][7]).toBe('2026-09-02\n2026-09-03');
+        expect(data[1][8]).toBe(30000);
+        expect(data[126].slice(4, 11)).toEqual([12500000, 1250000, 13750000, '', 3750000, 8750000, 0]);
+        expect(data[0].slice(8, 11)).toEqual(mode === '매입' || mode === '미지급금' ? ['지급금액', '미지급금', '선급금'] : ['수금금액', '미수금', '선수금']);
+    });
+});
 
 describe('monthly workbook search range', () => {
     it('uses the first and last day of the selected month', () => {

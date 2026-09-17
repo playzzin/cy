@@ -1895,6 +1895,25 @@ const getSummaryDisplayedSettledAmount = (row: SummaryRow) => {
     return row.settledAmount;
 };
 
+export const buildLedgerExcelData = (rows: LedgerRow[], transactionType: WorkbookTransactionType) => {
+    const isPurchase = transactionType === '매입';
+    return [
+        ['날짜', '거래처명', '내용', isPurchase ? '매입금액' : '매출금액', isPurchase ? '지급금액' : '입금금액', '잔액', '현장명', '비고', '팀명'],
+        ...rows.map((row) => [row.date, row.partnerName, row.description, row.transactionAmount, row.paymentAmount, row.balance, row.siteName, row.note, row.teamName]),
+        ['', '', '합계', rows.reduce((sum, row) => sum + row.transactionAmount, 0), rows.reduce((sum, row) => sum + row.paymentAmount, 0), rows[rows.length - 1]?.balance ?? 0, '', '', '']
+    ];
+};
+
+export const buildSummaryExcelData = (rows: SummaryRow[], mode: SummaryMode) => {
+    const isPurchase = mode === '매입' || mode === '미지급금';
+    const sum = (getAmount: (row: SummaryRow) => number) => rows.reduce((total, row) => total + getAmount(row), 0);
+    return [
+        ['No', '거래처명', '현장명', '발행일', '공급가액', '세액', '합계', isPurchase ? '지급일' : '입금일', isPurchase ? '지급금액' : '수금금액', isPurchase ? '미지급금' : '미수금', isPurchase ? '선급금' : '선수금', '비고', '팀명'],
+        ...rows.map((row, index) => [index + 1, row.partnerName, row.siteName, row.issueDate, row.supplyAmount, row.taxAmount, row.totalAmount, row.paymentDates.join('\n'), getSummaryDisplayedSettledAmount(row), row.outstandingAmount, row.advanceAmount, row.note, row.teamName]),
+        ['', '합계', '', '', sum((row) => row.supplyAmount), sum((row) => row.taxAmount), sum((row) => row.totalAmount), '', sum(getSummaryDisplayedSettledAmount), sum((row) => row.outstandingAmount), sum((row) => row.advanceAmount), '', '']
+    ];
+};
+
 const AI_TAX_INVOICE_REMARK_PATTERN = /(?:gemini|ai)\s*세금\s*계산서|세금\s*계산서\s*(?:ai\s*)?(?:대량\s*)?검수|대량\s*검수/i;
 const MAPPING_ADDRESS_REMARK_PATTERN = /(?:매핑\s*주소|주소\s*매핑|mapping\s*address)\s*[:：=-]?\s*/i;
 const REMARK_SEGMENT_SEPARATOR = /\s*(?:·|\||\n)\s*|\s+\/\s+/;
@@ -2442,6 +2461,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const [saving, setSaving] = useState(false);
     const [uploadingDb, setUploadingDb] = useState(false);
     const [downloadingDb, setDownloadingDb] = useState(false);
+    const [downloadingView, setDownloadingView] = useState<'ledger' | 'summary' | null>(null);
     const [downloadingKb, setDownloadingKb] = useState(false);
     const [downloadingVat, setDownloadingVat] = useState(false);
     const [loadingQuarterVatPayment, setLoadingQuarterVatPayment] = useState(false);
@@ -5970,6 +5990,56 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         setTimeout(() => setPrintingVat(false), 800);
     }, [companyLabel, quarterVatFilter, quarterVatPaidAmount, quarterVatPayments, quarterVatReport]);
 
+    const handleDownloadView = useCallback(async (view: 'ledger' | 'summary') => {
+        if (downloadingView || loading || (view === 'summary' && summaryVerificationLoading)) return;
+        const isLedger = view === 'ledger';
+        if ((isLedger ? ledgerRows : summaryRows).length === 0) {
+            Swal.fire('안내', '다운로드할 조회 결과가 없습니다.', 'info');
+            return;
+        }
+
+        setDownloadingView(view);
+        try {
+            const XLSX = await import('xlsx-js-style');
+            const { saveAs } = await import('file-saver');
+            const filter = isLedger ? ledgerFilter : summaryFilter;
+            const mode = isLedger ? ledgerFilter.transactionType : summaryFilter.mode;
+            const title = isLedger ? `${mode} 거래장` : `전체 조회 (${mode})`;
+            const data = isLedger
+                ? buildLedgerExcelData(ledgerRows, ledgerFilter.transactionType)
+                : buildSummaryExcelData(summaryRows, summaryFilter.mode);
+            const worksheet = XLSX.utils.aoa_to_sheet(data);
+            worksheet['!cols'] = (isLedger ? [14, 24, 36, 18, 18, 18, 24, 36, 18] : [8, 24, 24, 14, 18, 18, 18, 24, 18, 18, 18, 36, 18]).map((wch) => ({ wch }));
+            worksheet['!autofilter'] = { ref: XLSX.utils.encode_range({ r: 0, c: 0 }, { r: data.length - 2, c: data[0].length - 1 }) };
+            data.forEach((row, rowIndex) => row.forEach((value, columnIndex) => {
+                const cell = worksheet[XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex })];
+                cell.s = {
+                    font: { name: '맑은 고딕', sz: 11, bold: rowIndex === 0 || rowIndex === data.length - 1 },
+                    alignment: { vertical: 'center', wrapText: true },
+                    ...(rowIndex === 0 || rowIndex === data.length - 1 ? { fill: getExcelFill('E2E8F0') } : {})
+                };
+                if (typeof value === 'number') cell.z = Number.isInteger(value) ? '#,##0' : '#,##0.##########';
+            }));
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, title);
+            XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+                ['조회 조건', '값'], ['회사', companyLabel], ['구분', mode],
+                ['시작일', filter.startDate], ['종료일', filter.endDate],
+                ['팀명', filter.teamName || '전체'], ['거래처', filter.partnerName || '전체'],
+                ['현장명', filter.siteName || '전체'], ['건수', data.length - 2],
+                ...(!isLedger ? [['입금/지급 반영 기준', todayString]] : [])
+            ]), '조회 조건');
+            const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+            const filename = `${companyLabel}_${title}_${filter.startDate}_${filter.endDate}.xlsx`.replace(/[\\/:*?"<>|]/g, '_');
+            saveAs(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), filename);
+        } catch (error) {
+            console.error(error);
+            Swal.fire('오류', '엑셀 다운로드에 실패했습니다. 다시 시도해주세요.', 'error');
+        } finally {
+            setDownloadingView(null);
+        }
+    }, [companyLabel, downloadingView, ledgerFilter, ledgerRows, loading, summaryFilter, summaryRows, summaryVerificationLoading, todayString]);
+
     const handlePrintLedger = useCallback(() => {
         if (ledgerRows.length === 0) {
             Swal.fire('안내', '인쇄할 조회 결과가 없습니다.', 'info');
@@ -7868,8 +7938,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         <tr>
                             {ledgerDateSearchMode === 'range' ? (
                                 <>
-                                    <th className="sheet-label-blue">검색시작일</th>
-                                    <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
+                                    <th className="sheet-label-blue" colSpan={2}>검색시작일</th>
+                                    <td className="sheet-value sheet-filter-date-cell" colSpan={6}>
                                         <input
                                             type="date"
                                             className="sheet-filter-input"
@@ -7877,8 +7947,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                             onChange={(event) => setLedgerDraft((prev) => ({ ...prev, startDate: event.target.value }))}
                                         />
                                     </td>
-                                    <th className="sheet-label-blue">검색종료일</th>
-                                    <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
+                                    <th className="sheet-label-blue" colSpan={2}>검색종료일</th>
+                                    <td className="sheet-value sheet-filter-date-cell" colSpan={6}>
                                         <input
                                             type="date"
                                             className="sheet-filter-input"
@@ -7886,12 +7956,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                             onChange={(event) => setLedgerDraft((prev) => ({ ...prev, endDate: event.target.value }))}
                                         />
                                     </td>
-                                    <td className="sheet-spacer" colSpan={4} />
                                 </>
                             ) : (
                                 <>
-                                    <th className="sheet-label-blue">조회월</th>
-                                    <td className="sheet-value workbook-month-picker-cell" colSpan={5}>
+                                    <th className="sheet-label-blue" colSpan={2}>조회월</th>
+                                    <td className="sheet-value workbook-month-picker-cell" colSpan={14}>
                                         <div className="workbook-month-picker">
                                             <button
                                                 type="button"
@@ -7922,41 +7991,12 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                             </button>
                                         </div>
                                     </td>
-                                    <td className="sheet-spacer" colSpan={4} />
                                 </>
                             )}
-                            <td className="sheet-button-wrap" colSpan={2}>
-                                <button
-                                    type="button"
-                                    className="excel-button excel-button-blue"
-                                    onClick={() => handleCopyCapture('ledger', ledgerCaptureRef.current, '거래장')}
-                                    disabled={capturingView === 'ledger'}
-                                >
-                                    <FontAwesomeIcon icon={capturingView === 'ledger' ? faSpinner : faCopy} spin={capturingView === 'ledger'} />
-                                    화면 복사
-                                </button>
-                            </td>
-                            <td className="sheet-button-wrap" colSpan={2}>
-                                <button
-                                    type="button"
-                                    className="excel-button excel-button-gray"
-                                    onClick={handlePrintLedger}
-                                    disabled={printingLedger}
-                                >
-                                    <FontAwesomeIcon icon={printingLedger ? faSpinner : faPrint} spin={printingLedger} />
-                                    인쇄
-                                </button>
-                            </td>
-                            <td className="sheet-button-wrap sheet-button-stack" colSpan={2}>
-                                <button type="button" className="excel-button excel-button-green" onClick={applyLedgerFilter}>
-                                    <FontAwesomeIcon icon={faMagnifyingGlass} />
-                                    조회
-                                </button>
-                            </td>
                         </tr>
                         <tr>
-                            <th className="sheet-label-green">팀 명</th>
-                            <td className="sheet-value-light">
+                            <th className="sheet-label-green" colSpan={2}>팀 명</th>
+                            <td className="sheet-value-light" colSpan={2}>
                                 <input
                                     className="sheet-filter-input"
                                     list="workbook-team-options"
@@ -7965,8 +8005,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     placeholder="전체"
                                 />
                             </td>
-                            <th className="sheet-label-green">구 분</th>
-                            <td className="sheet-value-light">
+                            <th className="sheet-label-green" colSpan={2}>구 분</th>
+                            <td className="sheet-value-light" colSpan={2}>
                                 <select
                                     className="sheet-filter-input"
                                     value={ledgerDraft.transactionType}
@@ -7979,7 +8019,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     <option value="매입">매입</option>
                                 </select>
                             </td>
-                            <th className="sheet-label-green">거래처</th>
+                            <th className="sheet-label-green" colSpan={2}>거래처</th>
                             <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
                                 <input
                                     className="sheet-filter-input"
@@ -7989,7 +8029,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     placeholder="거래처 전체"
                                 />
                             </td>
-                            <th className="sheet-label-green">현장명</th>
+                            <th className="sheet-label-green" colSpan={2}>현장명</th>
                             <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
                                 <input
                                     className="sheet-filter-input"
@@ -7999,12 +8039,41 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     placeholder="현장 전체"
                                 />
                             </td>
-                            <td className="sheet-spacer sheet-filter-count-cell" colSpan={6}>
-                                <div className="sheet-button-count">{getEntryLoadScopeText(entryLoadScope, ledgerRows.length)}</div>
-                            </td>
                         </tr>
                     </tbody>
                 </table>
+
+                <div className="workbook-query-toolbar">
+                    <div className="sheet-button-count">{getEntryLoadScopeText(entryLoadScope, ledgerRows.length)}</div>
+                    <div className="workbook-query-actions" role="group" aria-label="거래장 작업">
+                        <button type="button" className="excel-button excel-button-green" onClick={applyLedgerFilter}>
+                            <FontAwesomeIcon icon={faMagnifyingGlass} />
+                            조회
+                        </button>
+                        <button type="button" className="excel-button excel-button-green" onClick={() => handleDownloadView('ledger')} disabled={loading || downloadingView !== null || ledgerRows.length === 0}>
+                            <FontAwesomeIcon icon={downloadingView === 'ledger' ? faSpinner : faDownload} spin={downloadingView === 'ledger'} />
+                            엑셀 다운로드
+                        </button>
+                        <button
+                            type="button"
+                            className="excel-button excel-button-blue"
+                            onClick={() => handleCopyCapture('ledger', ledgerCaptureRef.current, '거래장')}
+                            disabled={capturingView === 'ledger'}
+                        >
+                            <FontAwesomeIcon icon={capturingView === 'ledger' ? faSpinner : faCopy} spin={capturingView === 'ledger'} />
+                            화면 복사
+                        </button>
+                        <button
+                            type="button"
+                            className="excel-button excel-button-gray"
+                            onClick={handlePrintLedger}
+                            disabled={printingLedger}
+                        >
+                            <FontAwesomeIcon icon={printingLedger ? faSpinner : faPrint} spin={printingLedger} />
+                            인쇄
+                        </button>
+                    </div>
+                </div>
 
                 <div className="sheet-merged-heading">
                     {ledgerFilter.partnerName || `${ledgerFilter.transactionType} 거래장`}
@@ -8133,7 +8202,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             {summaryDateSearchMode === 'range' ? (
                                 <>
                                     <th className="sheet-label-blue" colSpan={2}>검색시작일</th>
-                                    <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
+                                    <td className="sheet-value sheet-filter-date-cell" colSpan={6}>
                                         <input
                                             type="date"
                                             className="sheet-filter-input"
@@ -8142,7 +8211,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                         />
                                     </td>
                                     <th className="sheet-label-blue" colSpan={2}>검색종료일</th>
-                                    <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
+                                    <td className="sheet-value sheet-filter-date-cell" colSpan={6}>
                                         <input
                                             type="date"
                                             className="sheet-filter-input"
@@ -8154,7 +8223,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             ) : (
                                 <>
                                     <th className="sheet-label-blue" colSpan={2}>조회월</th>
-                                    <td className="sheet-value workbook-month-picker-cell" colSpan={6}>
+                                    <td className="sheet-value workbook-month-picker-cell" colSpan={14}>
                                         <div className="workbook-month-picker">
                                             <button
                                                 type="button"
@@ -8187,53 +8256,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     </td>
                                 </>
                             )}
-                            <td className="sheet-button-wrap" colSpan={2}>
-                                <button
-                                    type="button"
-                                    className="excel-button excel-button-blue"
-                                    onClick={() => handleCopyCapture('summary', summaryCaptureRef.current, '전체 조회')}
-                                    disabled={capturingView === 'summary'}
-                                >
-                                    <FontAwesomeIcon icon={capturingView === 'summary' ? faSpinner : faCopy} spin={capturingView === 'summary'} />
-                                    화면 복사
-                                </button>
-                            </td>
-                            <td className="sheet-button-wrap" colSpan={2}>
-                                <button
-                                    type="button"
-                                    className="excel-button excel-button-gray"
-                                    onClick={handlePrintSummary}
-                                    disabled={printingSummary}
-                                >
-                                    <FontAwesomeIcon icon={printingSummary ? faSpinner : faPrint} spin={printingSummary} />
-                                    인쇄
-                                </button>
-                            </td>
-                            <td className="sheet-button-wrap" colSpan={2}>
-                                <button
-                                    type="button"
-                                    className="excel-button excel-button-green"
-                                    onClick={handleOpenKbPreview}
-                                    disabled={
-                                        downloadingKb ||
-                                        summaryFilter.mode !== '미지급금' ||
-                                        selectedSummaryRows.length === 0
-                                    }
-                                >
-                                    <FontAwesomeIcon icon={downloadingKb ? faSpinner : faDownload} spin={downloadingKb} />
-                                    {`국민은행용 다운로드${selectedSummaryRows.length > 0 ? ` (${selectedSummaryRows.length})` : ''}`}
-                                </button>
-                            </td>
-                            <td className="sheet-button-wrap sheet-button-stack" colSpan={2}>
-                                <button type="button" className="excel-button excel-button-green" onClick={applySummaryFilter}>
-                                    <FontAwesomeIcon icon={faMagnifyingGlass} />
-                                    조회
-                                </button>
-                            </td>
                         </tr>
                         <tr>
-                            <th className="sheet-label-green">팀 명</th>
-                            <td className="sheet-value-light">
+                            <th className="sheet-label-green" colSpan={2}>팀 명</th>
+                            <td className="sheet-value-light" colSpan={2}>
                                 <input
                                     className="sheet-filter-input"
                                     list="workbook-team-options"
@@ -8242,8 +8268,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     placeholder="전체"
                                 />
                             </td>
-                            <th className="sheet-label-green">거래처</th>
-                            <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
+                            <th className="sheet-label-green" colSpan={2}>거래처</th>
+                            <td className="sheet-value-light sheet-filter-wide-cell" colSpan={4}>
                                 <input
                                     className="sheet-filter-input"
                                     list="workbook-partner-options"
@@ -8252,8 +8278,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     placeholder="거래처 전체"
                                 />
                             </td>
-                            <th className="sheet-label-green">현장명</th>
-                            <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
+                            <th className="sheet-label-green" colSpan={2}>현장명</th>
+                            <td className="sheet-value-light sheet-filter-wide-cell" colSpan={4}>
                                 <input
                                     className="sheet-filter-input"
                                     list="workbook-site-options"
@@ -8262,12 +8288,54 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     placeholder="현장 전체"
                                 />
                             </td>
-                            <td className="sheet-spacer sheet-filter-count-cell" colSpan={10}>
-                                <div className="sheet-button-count">{getEntryLoadScopeText(entryLoadScope, summaryRows.length)}</div>
-                            </td>
                         </tr>
                     </tbody>
                 </table>
+
+                <div className="workbook-query-toolbar">
+                    <div className="sheet-button-count">{getEntryLoadScopeText(entryLoadScope, summaryRows.length)}</div>
+                    <div className="workbook-query-actions" role="group" aria-label="전체조회 작업">
+                        <button type="button" className="excel-button excel-button-green" onClick={applySummaryFilter}>
+                            <FontAwesomeIcon icon={faMagnifyingGlass} />
+                            조회
+                        </button>
+                        <button type="button" className="excel-button excel-button-green" onClick={() => handleDownloadView('summary')} disabled={loading || summaryVerificationLoading || downloadingView !== null || summaryRows.length === 0} title={summaryVerificationLoading ? '정산 이력 검증이 완료되면 다운로드할 수 있습니다.' : '현재 조회 조건에 해당하는 모든 페이지의 결과를 다운로드합니다.'}>
+                            <FontAwesomeIcon icon={downloadingView === 'summary' ? faSpinner : faDownload} spin={downloadingView === 'summary'} />
+                            엑셀 다운로드
+                        </button>
+                        <button
+                            type="button"
+                            className="excel-button excel-button-blue"
+                            onClick={() => handleCopyCapture('summary', summaryCaptureRef.current, '전체 조회')}
+                            disabled={capturingView === 'summary'}
+                        >
+                            <FontAwesomeIcon icon={capturingView === 'summary' ? faSpinner : faCopy} spin={capturingView === 'summary'} />
+                            화면 복사
+                        </button>
+                        <button
+                            type="button"
+                            className="excel-button excel-button-gray"
+                            onClick={handlePrintSummary}
+                            disabled={printingSummary}
+                        >
+                            <FontAwesomeIcon icon={printingSummary ? faSpinner : faPrint} spin={printingSummary} />
+                            인쇄
+                        </button>
+                        <button
+                            type="button"
+                            className="excel-button excel-button-green"
+                            onClick={handleOpenKbPreview}
+                            disabled={
+                                downloadingKb ||
+                                summaryFilter.mode !== '미지급금' ||
+                                selectedSummaryRows.length === 0
+                            }
+                        >
+                            <FontAwesomeIcon icon={downloadingKb ? faSpinner : faDownload} spin={downloadingKb} />
+                            {`국민은행용 다운로드${selectedSummaryRows.length > 0 ? ` (${selectedSummaryRows.length})` : ''}`}
+                        </button>
+                    </div>
+                </div>
 
                 {summaryVerificationLoading && (
                     <div className="workbook-settlement-current-notice" role="status">
