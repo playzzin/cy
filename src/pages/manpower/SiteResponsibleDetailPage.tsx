@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useMobileDetailNavigation } from '../../hooks/useMobileScroll';
 import {
     ArrowLeft,
     Banknote,
@@ -282,7 +283,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
     const [statusFilter, setStatusFilter] = useState<SiteStatusFilter>('active');
     const [searchQuery, setSearchQuery] = useState('');
     const [detailView, setDetailView] = useState<DetailView>('siteInfo');
-    const [mobileView, setMobileView] = useState<MobileView>('sites');
+    const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('sites');
     const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
     const [isResponsiblePickerOpen, setIsResponsiblePickerOpen] = useState(false);
     const [loadingMaster, setLoadingMaster] = useState(true);
@@ -922,7 +923,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                 </button>
             </div>
 
-            <main className={`tw-workspace sr-workspace sr-workspace--${mobileView}`}>
+            <main ref={workspaceRef} className={`tw-workspace sr-workspace sr-workspace--${mobileView}`}>
                 <section className="tw-worker-panel">
                     <div className="tw-panel-heading">
                         <div>

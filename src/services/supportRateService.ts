@@ -76,7 +76,7 @@ type LegacyTeamRate = {
 };
 
 const loadSystemConfigData = async (systemConfigId: string): Promise<unknown | null> => {
-    const response = await listSystemConfigs();
+    const response = await listSystemConfigs({ configId: systemConfigId });
     const rows = (response as any)?.data?.systemConfigs ?? [];
     const row = Array.isArray(rows) ? rows.find((r: any) => String(r?.id ?? '') === systemConfigId) : null;
     return row?.data ?? null;
@@ -109,7 +109,7 @@ const loadAllRates = async (forceRefresh: boolean = false): Promise<SupportRate[
         return cachedRates;
     }
 
-    const response = await listSystemConfigs();
+    const response = await listSystemConfigs({ configId: SYSTEM_CONFIG_ID });
     const rows = (response as any)?.data?.systemConfigs ?? [];
     const row = Array.isArray(rows) ? rows.find((r: any) => String(r?.id ?? '') === SYSTEM_CONFIG_ID) : null;
     if (!row?.data) return [];

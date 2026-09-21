@@ -96,6 +96,8 @@ const TeamSettlementAnnualStatisticsPage = React.lazy(() => import('./pages/payr
 const TeamSettlementAnnualStatisticsManagementPage = React.lazy(() => import('./pages/payroll/TeamSettlementAnnualStatisticsManagementPage'));
 const SupportRateManagementPage = React.lazy(() => import('./pages/support/SupportRateManagementPage'));
 const SupportManagerPage = React.lazy(() => import('./pages/support/SupportManagerPage'));
+const TeamExpenseRequestPage = React.lazy(() => import('./pages/support/TeamExpenseRequestPage'));
+const TeamWorkerRequestPage = React.lazy(() => import('./pages/manpower/TeamWorkerRequestPage'));
 const VehicleBillingLogPage = React.lazy(() => import('./pages/support/VehicleBillingLogPage'));
 const EngineOilCyclePage = React.lazy(() => import('./pages/support/EngineOilCyclePage'));
 const TeamEquipmentStatusPage = React.lazy(() => import('./pages/support/TeamEquipmentStatusPage'));
@@ -338,6 +340,7 @@ const App: React.FC = () => {
               <Route path="smart-site-registration" element={<SmartSiteRegistrationPage />} />
               <Route path="summary" element={<WorkerSummaryPage />} />
               <Route path="team-worker-detail" element={<TeamWorkerDetailPage />} />
+              <Route path="team-worker-requests" element={<TeamWorkerRequestPage />} />
               <Route path="site-responsible-detail" element={<SiteResponsibleDetailPage />} />
               <Route path="site-manager-detail" element={<SiteResponsibleDetailPage />} />
               <Route path="freelancer" element={<FreelancerPage />} />
@@ -659,6 +662,7 @@ const App: React.FC = () => {
             <Route path="/support/cards/audit" element={<Navigate to="/support/card-audit" replace />} />
             <Route path="/support/expense-ledger" element={<SupportManagerPage />} />
             <Route path="/support/expense-claims" element={<SupportManagerPage />} />
+            <Route path="/support/team-expense-requests" element={<TeamExpenseRequestPage />} />
             <Route path="/support/expense-claim-input" element={<SupportManagerPage />} />
             <Route path="/support/team-resource-detail" element={<TeamResourceDetailPage />} />
             <Route path="/support/team-resources" element={<TeamResourceDetailPage />} />

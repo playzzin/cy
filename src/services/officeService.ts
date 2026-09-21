@@ -1,3 +1,4 @@
+import { getTeamScopedRows } from './teamScopedReadService';
 import {
     collection,
     deleteDoc,
@@ -88,6 +89,8 @@ export const officeService = {
      * Get transactions by date range
      */
     async getTransactionsByRange(startDate: string, endDate: string): Promise<OfficeTransaction[]> {
+        const scoped = await getTeamScopedRows<OfficeTransaction>('office_transactions', { startDate, endDate });
+        if (scoped !== null) return scoped;
         const q = query(
             collection(db, COLLECTION_NAME),
             where('date', '>=', startDate),
@@ -102,6 +105,8 @@ export const officeService = {
      * Get all transactions
      */
     async getAllTransactions(): Promise<OfficeTransaction[]> {
+        const scoped = await getTeamScopedRows<OfficeTransaction>('office_transactions');
+        if (scoped !== null) return scoped;
         const q = query(
             collection(db, COLLECTION_NAME),
             orderBy('date', 'desc')

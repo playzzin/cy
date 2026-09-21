@@ -174,6 +174,7 @@ export const TeamSettlementDocumentSchema = z.object({
   deductions: z.array(TeamSettlementDeductionItemSchema),
   additions: z.array(TeamSettlementAdditionItemSchema).default([]),
   summary: TeamSettlementSummarySchema,
+  transactionMemo: z.string().optional(),
   sourceSnapshot: TeamSettlementSourceSnapshotSchema.optional(),
   confirmedAt: z.string().datetime().nullable(),
   updatedAt: z.string().datetime()

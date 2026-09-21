@@ -1,3 +1,4 @@
+import { getTeamScopedRows, invalidateTeamScopedCache } from './teamScopedReadService';
 import { teamFirestoreService } from './teamFirestoreService';
 import { databaseLogService } from './databaseLogService';
 import { TeamZod as Team } from '../types/zod/teamSchema';
@@ -12,38 +13,9 @@ const snapshotTeam = (id: string, data: Record<string, unknown>): Record<string,
     ...stripUndefinedFields(data),
 });
 
-const TEAM_LIST_CACHE_TTL_MS = 60 * 1000;
-let teamListCache: { rows: Team[]; expiresAt: number } | null = null;
-let pendingTeamList: Promise<Team[]> | null = null;
+const clearTeamListCache = invalidateTeamScopedCache;
+const getCachedTeams = () => teamFirestoreService.getTeams();
 
-const clearTeamListCache = () => {
-    teamListCache = null;
-    pendingTeamList = null;
-};
-
-const getCachedTeams = async (): Promise<Team[]> => {
-    if (teamListCache && teamListCache.expiresAt > Date.now()) {
-        return teamListCache.rows;
-    }
-
-    if (pendingTeamList) {
-        return pendingTeamList;
-    }
-
-    pendingTeamList = teamFirestoreService.getTeams()
-        .then((rows) => {
-            teamListCache = {
-                rows,
-                expiresAt: Date.now() + TEAM_LIST_CACHE_TTL_MS,
-            };
-            return rows;
-        })
-        .finally(() => {
-            pendingTeamList = null;
-        });
-
-    return pendingTeamList;
-};
 
 const logTeamChange = async (
     action: 'created' | 'updated' | 'deleted',
@@ -137,6 +109,8 @@ export const teamService = {
     },
 
     getTeams: async (): Promise<Team[]> => {
+        const scoped = await getTeamScopedRows<Team>('teams');
+        if (scoped !== null) return scoped;
         return getCachedTeams();
     },
 

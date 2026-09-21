@@ -1,3 +1,4 @@
+import { getTeamScopedRows } from './teamScopedReadService';
 import {
     collection,
     deleteDoc,
@@ -114,6 +115,8 @@ export const fieldScheduleRequestService = {
     makeRequestId,
 
     listAll: async (): Promise<FieldScheduleRequest[]> => {
+        const scoped = await getTeamScopedRows<FieldScheduleRequest>('field_schedule_requests');
+        if (scoped !== null) return scoped;
         const snapshot = await getDocs(collection(db, COLLECTION_NAME));
         return snapshot.docs
             .map((entry) => mapRequest(entry.id, entry.data() as Record<string, unknown>))
@@ -123,6 +126,8 @@ export const fieldScheduleRequestService = {
     },
 
     listByDate: async (date: string): Promise<FieldScheduleRequest[]> => {
+        const scoped = await getTeamScopedRows<FieldScheduleRequest>('field_schedule_requests', { startDate: date, endDate: date });
+        if (scoped !== null) return scoped;
         const snapshot = await getDocs(query(
             collection(db, COLLECTION_NAME),
             where('date', '==', date)
@@ -133,6 +138,8 @@ export const fieldScheduleRequestService = {
     },
 
     listByDateRange: async (startDate: string, endDate: string): Promise<FieldScheduleRequest[]> => {
+        const scoped = await getTeamScopedRows<FieldScheduleRequest>('field_schedule_requests', { startDate, endDate });
+        if (scoped !== null) return scoped;
         const from = startDate <= endDate ? startDate : endDate;
         const to = startDate <= endDate ? endDate : startDate;
         const snapshot = await getDocs(query(

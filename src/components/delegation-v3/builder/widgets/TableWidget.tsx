@@ -1,3 +1,4 @@
+import SecureSignature from '../../../SecureSignature';
 import React from 'react';
 import styled from 'styled-components';
 import { BuilderElement } from '../types';
@@ -362,7 +363,7 @@ export const TableWidget: React.FC<TableWidgetProps> = ({
                                                 )}
                                             </td>
                                             <td className="text-center">
-                                                {delegator.signature && <img src={delegator.signature} alt="서명" style={{ height: '20px', margin: '0 auto' }} />}
+                                                {delegator.signature && <SecureSignature src={delegator.signature} alt="서명" style={{ height: '20px', margin: '0 auto' }} />}
                                             </td>
                                         </tr>
                                     );

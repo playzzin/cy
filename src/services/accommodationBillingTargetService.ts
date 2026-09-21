@@ -11,6 +11,7 @@ import {
     where
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { getTeamScopedRows } from './teamScopedReadService';
 import {
     AccommodationBillingTarget,
     AccommodationBillingTargetType,
@@ -177,6 +178,9 @@ const validateTargetInput = (input: UpsertAccommodationBillingTargetInput): void
 
 export const accommodationBillingTargetService = {
     async listTargets(): Promise<AccommodationBillingTarget[]> {
+        const scoped = await getTeamScopedRows(COLLECTION_NAME);
+        if (scoped !== null) return scoped.map(row => mapDocToTarget(row.id, row)).sort((a, b) =>
+            String(a.accommodationName ?? '').localeCompare(String(b.accommodationName ?? ''), 'ko-KR') || compareTargetLatestFirst(a, b));
         try {
             const snapshot = await getDocs(collection(db, COLLECTION_NAME));
             return snapshot.docs
@@ -195,6 +199,10 @@ export const accommodationBillingTargetService = {
     async listTargetsByAccommodationId(accommodationId: string): Promise<AccommodationBillingTarget[]> {
         const normalizedId = normalizeKey(accommodationId);
         if (!normalizedId) return [];
+
+        const scoped = await getTeamScopedRows(COLLECTION_NAME);
+        if (scoped !== null) return scoped.map(row => mapDocToTarget(row.id, row))
+            .filter(row => row.accommodationId === normalizedId).sort(compareTargetLatestFirst);
 
         try {
             const targets: AccommodationBillingTarget[] = [];

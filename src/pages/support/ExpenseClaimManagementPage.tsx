@@ -1,3 +1,4 @@
+import SecureExpenseReceipt from '../../components/SecureExpenseReceipt';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -1860,7 +1861,7 @@ const ExpenseClaimManagementPage: React.FC<ExpenseClaimManagementPageProps> = ({
                   <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
                     {form.attachments.map((attachment) => (
                       <div key={attachment.id || attachment.fullPath} className="relative overflow-hidden rounded-lg border border-white bg-white shadow-sm">
-                        {attachment.url ? (
+                        {attachment.fullPath?.startsWith('team-expense-receipts/') ? <SecureExpenseReceipt key={attachment.id} fullPath={attachment.fullPath} name={attachment.name} /> : attachment.url ? (
                           <a href={attachment.url} target="_blank" rel="noreferrer" title={attachment.name}>
                             <img src={attachment.url} alt={attachment.name || '첨부 사진'} className="h-20 w-full object-cover" />
                           </a>
@@ -2046,7 +2047,7 @@ const ExpenseClaimManagementPage: React.FC<ExpenseClaimManagementPageProps> = ({
                           {(claim.attachments ?? []).length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-1.5">
                               {(claim.attachments ?? []).map((attachment) => (
-                                attachment.url ? (
+                                attachment.fullPath?.startsWith('team-expense-receipts/') ? <SecureExpenseReceipt key={attachment.id} fullPath={attachment.fullPath} name={attachment.name} /> : attachment.url ? (
                                   <a
                                     key={attachment.id || attachment.fullPath || attachment.url}
                                     href={attachment.url}

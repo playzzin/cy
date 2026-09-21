@@ -1,3 +1,4 @@
+import { getTeamScopedRows } from './teamScopedReadService';
 import { db } from '../config/firebase';
 import {
     collection,
@@ -138,6 +139,8 @@ export const vehicleFirestoreService = {
      * 차량 목록 조회
      */
     listVehicles: async (status?: string) => {
+        const scoped = await getTeamScopedRows<Vehicle>('vehicles');
+        if (scoped !== null) return scoped.filter(row => !status || row.status === status);
         let q = query(collection(db, VEHICLE_COLLECTION).withConverter(createConverter(vehicleSchema)));
         if (status) {
             q = query(q, where('status', '==', status));
@@ -180,6 +183,8 @@ export const vehicleFirestoreService = {
      * 차량 할당 기록 조회
      */
     listVehicleAssignments: async (vehicleId?: string) => {
+        const scoped = await getTeamScopedRows<VehicleAssignmentRecord>('vehicleAssignments');
+        if (scoped !== null) return scoped.filter(row => !vehicleId || row.vehicleId === vehicleId);
         let q = query(collection(db, ASSIGNMENT_COLLECTION).withConverter(createConverter(vehicleAssignmentSchema)));
         if (vehicleId) {
             q = query(q, where('vehicleId', '==', vehicleId));
@@ -209,6 +214,8 @@ export const vehicleFirestoreService = {
      * 차량 청구대상 이력 조회
      */
     listVehicleBillingTargets: async (vehicleId?: string) => {
+        const scoped = await getTeamScopedRows<VehicleBillingTargetRecord>('vehicleBillingTargets');
+        if (scoped !== null) return scoped.filter(row => !vehicleId || row.vehicleId === vehicleId);
         let q = query(collection(db, BILLING_TARGET_COLLECTION).withConverter(createConverter(vehicleBillingTargetSchema)));
         if (vehicleId) {
             q = query(q, where('vehicleId', '==', vehicleId));
@@ -519,6 +526,8 @@ export const vehicleFirestoreService = {
      * 차량 비용 기록 조회
      */
     listVehicleExpenses: async (vehicleId?: string, yearMonth?: string) => {
+        const scoped = await getTeamScopedRows<VehicleExpenseRecord>('vehicleExpenses', yearMonth ? { startDate: `${yearMonth}-01`, endDate: `${yearMonth}-31` } : {});
+        if (scoped !== null) return scoped.filter(row => (!vehicleId || row.vehicleId === vehicleId) && row.status !== 'CANCELLED' && !row.cancelledAt);
         let q = query(collection(db, EXPENSE_COLLECTION).withConverter(createConverter(vehicleExpenseSchema)));
         if (vehicleId) {
             q = query(q, where('vehicleId', '==', vehicleId));

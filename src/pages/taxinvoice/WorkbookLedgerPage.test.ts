@@ -133,10 +133,24 @@ describe('canUseSummaryRangePreview', () => {
 });
 
 describe('getVisibleWorkbookRemark', () => {
-    it('hides a legacy mapped-address segment from an AI tax-invoice bulk-review remark', () => {
+    it('hides generated review metadata and a legacy mapped address', () => {
         expect(getVisibleWorkbookRemark(
             'Gemini 세금계산서 검수 · invoice-20260716.pdf · 매핑주소: 서울특별시 강남구 테헤란로 123'
-        )).toBe('Gemini 세금계산서 검수 · invoice-20260716.pdf');
+        )).toBe('');
+    });
+
+    it('hides the generated filename and approval number while preserving business remarks', () => {
+        expect(getVisibleWorkbookRemark(
+            '-Gemini 세금계산서 검수 · invoice.jpg · 승인번호 20260908-41000047-test · 담당자 확인 후 지급'
+        )).toBe('담당자 확인 후 지급');
+        expect(getVisibleWorkbookRemark(
+            '수기 메모 / Gemini 세금계산서 검수 · invoice.pdf · 승인번호 20260908-test / 입금 예정'
+        )).toBe('수기 메모 · 입금 예정');
+    });
+
+    it('preserves manually written review text, file references and approval numbers', () => {
+        const manualRemark = 'Gemini 세금계산서 검수는 재확인 필요 · 계약서.pdf · 승인번호 수기확인';
+        expect(getVisibleWorkbookRemark(manualRemark)).toBe(manualRemark);
     });
 
     it('keeps the provenance of an inline mapped-address remark while hiding its address', () => {

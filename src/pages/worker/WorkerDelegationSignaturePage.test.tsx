@@ -128,3 +128,5 @@ describe('WorkerDelegationSignaturePage', () => {
         expect(await screen.findByText('관리자가 실시간으로 수정한 위임장 본문')).toBeInTheDocument();
     });
 });
+
+jest.mock('../../components/SecureSignature', () => ({ __esModule: true, default: () => null }));

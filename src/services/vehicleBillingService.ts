@@ -1012,7 +1012,7 @@ export const vehicleBillingService = {
     // Get Billings for a Month
     getBillingsByMonth: async (yearMonth: string, options?: { throwOnError?: boolean }) => {
         try {
-            const res = await listAllVehicleBillingDocuments({ limit: 100_000, offset: 0 });
+            const res = await listAllVehicleBillingDocuments({ limit: 100_000, offset: 0, yearMonth });
             const rows = (res as any)?.data?.vehicleBillingDocuments ?? [];
             const docs = Array.isArray(rows) ? rows : [];
 

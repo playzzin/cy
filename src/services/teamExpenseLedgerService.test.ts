@@ -1,8 +1,12 @@
 import {
   Timestamp,
+  collection,
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
+  query,
+  where,
   setDoc
 } from 'firebase/firestore';
 import type { TeamExpenseClaimInput } from '../types/teamExpenseLedger';
@@ -14,6 +18,7 @@ import {
 } from './teamExpenseLedgerService';
 import { reportSupportWriteError } from '../utils/supportWriteErrorReporting';
 import { recordSupportWriteOperationSafely } from './supportWriteOperationLogService';
+import { getTeamScopedRows } from './teamScopedReadService';
 
 const mockNowTimestamp = {
   toMillis: () => 1000,
@@ -23,6 +28,8 @@ const mockNowTimestamp = {
 jest.mock('../config/firebase', () => ({
   db: {}
 }));
+
+jest.mock('./teamScopedReadService', () => ({ getTeamScopedRows: jest.fn(async () => null) }));
 
 jest.mock('./supportWriteOperationLogService', () => ({
   recordSupportWriteOperationSafely: jest.fn()
@@ -89,6 +96,7 @@ const buildInput = (patch: Partial<TeamExpenseClaimInput> = {}): TeamExpenseClai
 describe('teamExpenseLedgerService save consistency', () => {
   beforeEach(() => {
     jest.resetAllMocks();
+    (getTeamScopedRows as jest.Mock).mockResolvedValue(null);
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     mockedTimestamp.now.mockReturnValue(mockNowTimestamp);
     mockedTimestamp.fromDate.mockImplementation((date: Parameters<typeof Timestamp.fromDate>[0]) => ({
@@ -106,6 +114,21 @@ describe('teamExpenseLedgerService save consistency', () => {
   });
 
   afterEach(() => { jest.restoreAllMocks(); });
+
+  it('reads approved requests from the existing ledger collection with their source link and receipt', async () => {
+    (collection as jest.Mock).mockImplementation((_db, collectionName) => ({ collectionName }));
+    (where as jest.Mock).mockImplementation((field, op, value) => ({ field, op, value }));
+    (query as jest.Mock).mockImplementation((...args) => ({ args }));
+    (getDocs as jest.Mock).mockResolvedValue({ docs: [{ id: 'team-request-request-a', data: () => ({
+      ...buildInput({ claimType: 'teamCharge', chargeToTeamId: 'billing-team', status: 'charged' }),
+      sourceType: 'team_request', sourceRequestId: 'request-a',
+      attachments: [{ id: 'receipt-a', name: 'receipt.png', fullPath: 'team-expense-receipts/receipt-a', url: 'https://example.test/receipt.png' }]
+    }) }] });
+    const claims = await teamExpenseLedgerService.getClaimsByMonth('2026-07');
+    expect(claims).toHaveLength(1);
+    expect(claims[0]).toMatchObject({ sourceType: 'team_request', sourceRequestId: 'request-a', status: 'charged', amount: 1000, attachments: [{ id: 'receipt-a' }] });
+    expect(getDocs).toHaveBeenCalledWith({ args: [{ collectionName: TEAM_EXPENSE_CLAIMS_COLLECTION }, { field: 'yearMonth', op: '==', value: '2026-07' }] });
+  });
 
   it('uses an operationId-backed deterministic id for retried saves', async () => {
     const input = buildInput({ operationId: 'expense-op-1' });

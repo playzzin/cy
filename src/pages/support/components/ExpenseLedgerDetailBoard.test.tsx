@@ -135,3 +135,5 @@ describe('ExpenseLedgerDetailBoard', () => {
     expect(screen.getByText('숙소별 전기요금 청구 금액')).toBeTruthy();
   });
 });
+
+jest.mock('../../../components/SecureExpenseReceipt', () => ({ __esModule: true, default: () => null }));

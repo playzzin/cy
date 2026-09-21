@@ -173,12 +173,6 @@ const normalizeWarnings = (value: unknown): string[] => {
     return Array.from(new Set(value.map(normalizeText).filter(Boolean)));
 };
 
-const buildCandidateNote = (sourceFileName: string, approvalNumber: string): string => {
-    const parts = ['Gemini 세금계산서 검수', sourceFileName];
-    if (approvalNumber) parts.push(`승인번호 ${approvalNumber}`);
-    return parts.join(' · ');
-};
-
 export const normalizeTaxInvoiceCandidate = (
     raw: Record<string, unknown>,
     sourceFileName: string,
@@ -215,7 +209,9 @@ export const normalizeTaxInvoiceCandidate = (
         taxAmount: normalizeAmount(raw.taxAmount),
         totalAmount: normalizeAmount(raw.totalAmount),
         confidence: normalizeConfidence(raw.confidence),
-        note: buildCandidateNote(sourceFileName, approvalNumber),
+        // File and approval metadata already have dedicated review fields.
+        // Leave the business remark empty until the reviewer enters one.
+        note: '',
         warnings: normalizeWarnings(raw.warnings),
     };
 };

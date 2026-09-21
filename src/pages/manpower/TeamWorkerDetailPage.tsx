@@ -1,4 +1,6 @@
+import SecureSignature from '../../components/SecureSignature';
 import React, { useEffect, useMemo, useState } from 'react';
+import { useMobileDetailNavigation } from '../../hooks/useMobileScroll';
 import {
     AlertCircle,
     BadgeCheck,
@@ -390,7 +392,7 @@ const TeamWorkerDetailPage: React.FC = () => {
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const [detailView, setDetailView] = useState<DetailView>('profile');
     const [dailyReportDisplayMode, setDailyReportDisplayMode] = useState<DailyReportDisplayMode>('calendar');
-    const [mobileView, setMobileView] = useState<MobileView>('list');
+    const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('list');
     const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
     const [showSensitive, setShowSensitive] = useState(true);
     const [loadingMaster, setLoadingMaster] = useState(true);
@@ -1205,7 +1207,7 @@ const TeamWorkerDetailPage: React.FC = () => {
                 </button>
             </div>
 
-            <main className={`tw-workspace tw-workspace--${mobileView}`}>
+            <main ref={workspaceRef} className={`tw-workspace tw-workspace--${mobileView}`}>
                 <section className="tw-worker-panel">
                     <div className="tw-panel-heading">
                         <div className="tw-panel-heading__title">
@@ -1495,7 +1497,7 @@ const TeamWorkerDetailPage: React.FC = () => {
                                             </div>
                                             <div className="tw-doc-preview__canvas tw-doc-preview__canvas--signature">
                                                 {selectedWorker.signatureUrl ? (
-                                                    <img src={selectedWorker.signatureUrl} alt={`${selectedWorker.name} 서명`} />
+                                                    <SecureSignature src={selectedWorker.signatureUrl} alt={`${selectedWorker.name} 서명`} />
                                                 ) : (
                                                     <div>
                                                         <PenLine size={28} />

@@ -527,8 +527,8 @@ export const accommodationBillingService = {
         strict?: boolean;
     }): Promise<AccommodationBillingDocument[]> {
         const [docsRes, itemsRes] = await Promise.all([
-            listAllAccommodationBillingDocuments({ limit: Number.MAX_SAFE_INTEGER, offset: 0 }),
-            listAllAccommodationBillingLineItems({ limit: Number.MAX_SAFE_INTEGER, offset: 0 })
+            listAllAccommodationBillingDocuments({ limit: Number.MAX_SAFE_INTEGER, offset: 0, yearMonth: params.yearMonth }),
+            listAllAccommodationBillingLineItems({ limit: Number.MAX_SAFE_INTEGER, offset: 0, yearMonth: params.yearMonth })
         ]);
 
         const docs = (docsRes as any)?.data?.accommodationBillingDocuments ?? [];

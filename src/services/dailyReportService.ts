@@ -1,3 +1,4 @@
+import { getTeamScopedRows } from './teamScopedReadService';
 import { dailyReportFirestoreService } from './dailyReportFirestoreService';
 import {
     DailyReportZod as DailyReport,
@@ -415,6 +416,14 @@ export const dailyReportService = {
             companyIds: Array.from(new Set((params.companyIds || []).map((value) => String(value ?? '').trim()).filter(Boolean))),
         };
 
+        const scoped = await getTeamScopedRows<DailyReport>('daily_reports', {
+            ...(normalized.startDate ? { startDate: normalized.startDate } : {}),
+            ...(normalized.endDate ? { endDate: normalized.endDate } : {}),
+        });
+        if (scoped !== null) return filterReportsByParams(scoped, normalized)
+            .filter(report => !normalized.teamIds.length || normalized.teamIds.includes(String(report.teamId ?? '')))
+            .filter(report => !normalized.companyIds.length || normalized.companyIds.includes(String(report.companyId ?? '')));
+
         if (normalized.companyIds.length > 0) {
             const reportsByCompany = await Promise.all(
                 normalized.companyIds.map((companyId) => dailyReportFirestoreService.getReportsByClientCompany(companyId))
@@ -474,6 +483,8 @@ export const dailyReportService = {
     },
 
     getAllReports: async (): Promise<DailyReport[]> => {
+        const scoped = await getTeamScopedRows<DailyReport>('daily_reports');
+        if (scoped !== null) return scoped;
         const snapshots = await getDocs(collection(db, 'daily_reports'));
         return snapshots.docs.map(snapshot => normalizeReport({ id: snapshot.id, ...(snapshot.data() as any) }));
     },

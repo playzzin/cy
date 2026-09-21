@@ -1,3 +1,4 @@
+import { getTeamScopedRows } from './teamScopedReadService';
 import {
     collection,
     deleteDoc,
@@ -76,6 +77,8 @@ const notifyScheduleBoardSystemMessage = async (
 
 export const scheduleConfirmationBoardService = {
     getBoardByDate: async (date: string): Promise<ScheduleConfirmationBoard | null> => {
+        const scoped = await getTeamScopedRows('schedule_confirmation_boards', { startDate: date, endDate: date });
+        if (scoped !== null) return scoped.length ? mapBoard(scoped[0].id, scoped[0]) : null;
         const ref = doc(db, COLLECTION_NAME, date);
         const snapshot = await getDoc(ref);
         if (!snapshot.exists()) return null;
@@ -83,6 +86,8 @@ export const scheduleConfirmationBoardService = {
     },
 
     getAllBoards: async (): Promise<ScheduleConfirmationBoard[]> => {
+        const scoped = await getTeamScopedRows<any>('schedule_confirmation_boards');
+        if (scoped !== null) return scoped.map(row => mapBoard(row.id, row));
         const snapshot = await getDocs(collection(db, COLLECTION_NAME));
         return snapshot.docs
             .map((entry) => mapBoard(entry.id, entry.data() as Record<string, unknown>))

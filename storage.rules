@@ -49,22 +49,15 @@ service firebase.storage {
       ];
     }
 
+    function activeProfile() {
+      return isSignedIn() && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', 'active') == 'active';
+    }
     function hasTokenRole(roles) {
-      return isSignedIn()
-        && (
-          (request.auth.token.get('role', '') in roles)
-          || (request.auth.token.get('position', '') in roles)
-          || (request.auth.token.get('systemRole', '') in roles)
-          || (request.auth.token.get('accountType', '') in roles)
-          || (
-            request.auth.token.get('roles', []) is list
-            && request.auth.token.get('roles', []).hasAny(roles)
-          )
-          || (
-            request.auth.token.get('additionalPositions', []) is list
-            && request.auth.token.get('additionalPositions', []).hasAny(roles)
-          )
-        );
+      let profile = firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+      return activeProfile() && (profile.get('role', '') in roles || profile.get('position', '') in roles
+        || profile.get('systemRole', '') in roles || profile.get('accountType', '') in roles
+        || profile.get('roles', []).hasAny(roles) || profile.get('additionalPositions', []).hasAny(roles));
     }
 
     function isAdmin() {
@@ -100,7 +93,7 @@ service firebase.storage {
 
     function hasConstructionPlanCentralAccess() {
       let roles = constructionPlanCentralRoles();
-      return isSignedIn()
+      return activeProfile()
         && (
           hasTokenRole(roles)
           || (
@@ -337,6 +330,9 @@ service firebase.storage {
     // out of the authenticated fallback because overlapping matches are ORed.
     function isExplicitlyProtectedTopLevel(topLevel) {
       return topLevel in [
+        'signatures',
+        'team-expense-receipts',
+        'team-worker-documents',
         'public',
         'profiles',
         'users',
@@ -348,6 +344,21 @@ service firebase.storage {
         'construction-plan-record-staging',
         'construction-plan-records'
       ];
+    }
+
+    function canAccessWorkerSignature(workerId) {
+      return activeProfile() && (hasTokenRole(adminRoles().concat(officeRoles()).concat(payrollRoles()))
+        || workerId in firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('linkedWorkerIds', []));
+    }
+    match /signatures/{workerId}/{fileName} {
+      allow read: if canAccessWorkerSignature(workerId);
+      allow delete: if canAccessWorkerSignature(workerId);
+      allow create, update: if false;
+    }
+    // Legacy filenames cannot safely encode a worker binding. Office access only.
+    match /signatures/{fileName} {
+      allow read, delete: if activeProfile() && hasTokenRole(adminRoles().concat(officeRoles()).concat(payrollRoles()));
+      allow create, update: if false;
     }
 
     match /public/{allPaths=**} {
@@ -502,9 +513,9 @@ service firebase.storage {
     }
 
     match /{topLevel}/{allPaths=**} {
-      allow read: if !isExplicitlyProtectedTopLevel(topLevel) && isSignedIn();
+      allow read: if !isExplicitlyProtectedTopLevel(topLevel) && activeProfile();
       allow write: if !isExplicitlyProtectedTopLevel(topLevel)
-        && isSignedIn()
+        && activeProfile()
         && isValidBusinessUpload();
     }
   }

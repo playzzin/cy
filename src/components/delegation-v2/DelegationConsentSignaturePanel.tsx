@@ -1,3 +1,4 @@
+import SecureSignature from '../SecureSignature';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
     BadgeCheck,
@@ -261,7 +262,7 @@ const DelegationConsentSignaturePanel: React.FC<DelegationConsentSignaturePanelP
                                             <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
                                                 <p className="text-xs font-bold text-slate-500">현재 등록된 서명</p>
                                                 <div className="mt-2 flex h-20 items-center justify-center overflow-hidden rounded-xl bg-white">
-                                                    <img src={selectedWorker.signatureUrl} alt={`${selectedWorker.workerName} 현재 서명`} className="h-full w-full object-contain" />
+                                                    <SecureSignature src={selectedWorker.signatureUrl} alt={`${selectedWorker.workerName} 현재 서명`} className="h-full w-full object-contain" />
                                                 </div>
                                                 <p className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-amber-700">
                                                     <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />

@@ -1,3 +1,4 @@
+import SecureSignature from '../../components/SecureSignature';
 import React, { useState, useEffect } from 'react';
 import { dailyReportService } from '../../services/dailyReportService';
 import { manpowerService } from '../../services/manpowerService';
@@ -475,7 +476,7 @@ const SignManagementPage: React.FC = () => {
                                         {signatureImage && (
                                             <div className="mt-4 border border-slate-300 p-4 rounded-lg bg-slate-50 relative">
                                                 <p className="text-xs text-slate-400 absolute top-2 left-2">서명 확인</p>
-                                                <img src={signatureImage} alt="서명" className="mx-auto h-24 object-contain" />
+                                                <SecureSignature src={signatureImage} alt="서명" className="mx-auto h-24 object-contain" />
                                                 <button
                                                     onClick={deleteSavedSignature}
                                                     disabled={signatureSaving}

@@ -45,3 +45,5 @@ it.each([20,21])('%s명의 위임자를 페이지당 최대 20명으로 출력�
         fs.writeFileSync(path.join(process.env.CY_REQUEST_PREVIEW_DIR,`delegation-preview-${count}.html`),`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>위임장 20명 출력 검증</title>${styles}</head><body>${Array.from(pages).map(page=>page.outerHTML).join('')}</body></html>`);
     }
 });
+
+jest.mock('../../components/SecureSignature', () => ({ __esModule: true, default: () => null }));

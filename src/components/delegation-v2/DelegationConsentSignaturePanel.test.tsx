@@ -92,3 +92,5 @@ describe('DelegationConsentSignaturePanel', () => {
         expect(screen.getByText('홍길동')).toBeInTheDocument();
     });
 });
+
+jest.mock('../SecureSignature', () => ({ __esModule: true, default: () => null }));

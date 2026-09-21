@@ -1,3 +1,4 @@
+import { getTeamScopedRows } from './teamScopedReadService';
 import {
     collection,
     doc,
@@ -157,6 +158,8 @@ export interface CardLifecycleTransitionResult {
 export const cardFirestoreService = {
     // --- Cards ---
     async getCards(): Promise<Card[]> {
+        const scoped = await getTeamScopedRows<Card>('cards');
+        if (scoped !== null) return scoped;
         const q = query(collection(db, CARDS_COLLECTION), orderBy('name', 'asc'));
         const snapshot = await getDocs(q);
         return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Card));
@@ -406,6 +409,8 @@ export const cardFirestoreService = {
     },
 
     async listAllCardAssignments(): Promise<CardAssignmentRecord[]> {
+        const scoped = await getTeamScopedRows<CardAssignmentRecord>('cardAssignments');
+        if (scoped !== null) return scoped;
         const q = query(collection(db, ASSIGNMENTS_COLLECTION), orderBy('startDate', 'desc'));
         const snapshot = await getDocs(q);
         return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CardAssignmentRecord));
@@ -594,6 +599,8 @@ export const cardFirestoreService = {
 
     // --- Card Billing Targets ---
     async listCardBillingTargets(cardId?: string): Promise<CardBillingTargetRecord[]> {
+        const scoped = await getTeamScopedRows<CardBillingTargetRecord>('cardBillingTargets');
+        if (scoped !== null) return scoped.filter(row => !cardId || row.cardId === cardId);
         const baseRef = collection(db, BILLING_TARGETS_COLLECTION);
         const q = cardId
             ? query(baseRef, where('cardId', '==', cardId))
@@ -688,6 +695,8 @@ export const cardFirestoreService = {
 
     // --- Transactions ---
     async getTransactionsByMonth(yearMonth: string): Promise<CardTransaction[]> {
+        const scoped = await getTeamScopedRows<CardTransaction>('cardTransactions', { yearMonth });
+        if (scoped !== null) return scoped;
         const q = query(
             collection(db, TRANSACTIONS_COLLECTION),
             where('yearMonth', '==', yearMonth)
@@ -753,6 +762,8 @@ export const cardFirestoreService = {
 
     // --- Billings ---
     async getBillingsByMonth(yearMonth: string): Promise<CardBillingDocument[]> {
+        const scoped = await getTeamScopedRows<CardBillingDocument>('cardBillings', { yearMonth });
+        if (scoped !== null) return scoped;
         const q = query(
             collection(db, BILLINGS_COLLECTION),
             where('yearMonth', '==', yearMonth)

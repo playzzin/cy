@@ -1,3 +1,4 @@
+import { getTeamScopedRows, invalidateTeamScopedCache } from './teamScopedReadService';
 import { siteFirestoreService } from './siteFirestoreService';
 import { databaseLogService } from './databaseLogService';
 import { SiteZod as Site } from '../types/zod/siteSchema';
@@ -7,12 +8,7 @@ import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 
 export type { Site };
 
-const SITE_LIST_CACHE_TTL_MS = 60 * 1000;
-let siteListCache: { rows: Site[]; expiresAt: number } | null = null;
-
-const clearSiteListCache = () => {
-    siteListCache = null;
-};
+const clearSiteListCache = invalidateTeamScopedCache;
 
 const snapshotRecord = (id: string, data: Record<string, unknown>): Record<string, unknown> => ({
     id,
@@ -150,16 +146,9 @@ export const siteService = {
     },
 
     getSites: async (): Promise<Site[]> => {
-        if (siteListCache && siteListCache.expiresAt > Date.now()) {
-            return siteListCache.rows;
-        }
-
-        const rows = await siteFirestoreService.getSites();
-        siteListCache = {
-            rows,
-            expiresAt: Date.now() + SITE_LIST_CACHE_TTL_MS,
-        };
-        return rows;
+        const scoped = await getTeamScopedRows<Site>('sites');
+        if (scoped !== null) return scoped;
+        return siteFirestoreService.getSites();
     },
 
     getSitesByClientCompanyIds: async (companyIds: string[]): Promise<Site[]> => {

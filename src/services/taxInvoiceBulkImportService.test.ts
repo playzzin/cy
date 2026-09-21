@@ -39,7 +39,9 @@ describe('taxInvoiceBulkImportService', () => {
             totalAmount: 326480,
             confidence: 0.97,
         });
-        expect(candidate.note).toContain('승인번호');
+        expect(candidate.note).toBe('');
+        expect(candidate.sourceFileName).toBe('sample.jpg');
+        expect(candidate.approvalNumber).toBe(sampleRaw.approvalNumber);
     });
 
     test('쉼표와 원 표기가 포함된 Gemini 금액도 원 단위 정수로 정규화한다', () => {

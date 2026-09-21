@@ -95,3 +95,18 @@ backups/
 /.deploy_*/
 /.deploy_*.tar
 /.deploy_*.zip
+
+# Local verification captures and isolated release worktrees
+/.codex-smart-memo-cleanup-backup/
+/.codex-smart-memo-test-config/
+/.codex-team-access-diagnosis/
+/.codex-team-expense-request/
+/.codex-team-read-performance/
+/.codex-team-worker-requests/
+/.team-menu-emulator-config/
+/.workbook-excel-qa/
+/team-menu-security-release/
+/workbook-excel-release/
+/workbook-layout-release/
+/.team-settlement-memo-release.patch
+/workbook-layout-release.patch

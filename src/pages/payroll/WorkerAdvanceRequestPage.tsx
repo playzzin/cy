@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     AlertCircle,
     Banknote,
@@ -23,6 +23,7 @@ import {
     AdvanceRequestStatus,
 } from '../../services/advanceRequestService';
 import { ADVANCE_ITEM_LABEL_KEYS } from '../../services/payrollConfigService';
+import './WorkerAdvanceRequestPage.css';
 
 type EarnedSummary = {
     currentMonthEarned: number;
@@ -174,7 +175,7 @@ const getLinkedWorkerCandidates = (
 const matchesWorker = (worker: Worker, row: { workerId?: unknown; workerName?: unknown; name?: unknown }): boolean => {
     const keys = new Set(getWorkerKeys(worker));
     const rowWorkerId = normalizeText(row.workerId);
-    if (rowWorkerId && keys.has(rowWorkerId)) return true;
+    if (rowWorkerId) return keys.has(rowWorkerId);
     return Boolean(row.workerName && sameText(row.workerName, worker.name)) || Boolean(row.name && sameText(row.name, worker.name));
 };
 
@@ -228,6 +229,9 @@ export default function WorkerAdvanceRequestPage() {
     const [amountInput, setAmountInput] = useState('');
     const [memo, setMemo] = useState('');
     const [message, setMessage] = useState('');
+    const [summaryError, setSummaryError] = useState('');
+    const [loadedSummaryKey, setLoadedSummaryKey] = useState('');
+    const summaryRequestId = useRef(0);
 
     const previousYearMonth = useMemo(() => shiftYearMonth(selectedYearMonth, -1), [selectedYearMonth]);
     const periodStart = useMemo(() => getMonthStart(previousYearMonth), [previousYearMonth]);
@@ -280,7 +284,10 @@ export default function WorkerAdvanceRequestPage() {
     }, [requests, selectedWorker]);
 
     const requestedAmount = useMemo(() => parseAmountInput(amountInput), [amountInput]);
-    const canSubmit = Boolean(selectedWorker?.id && requestedAmount > 0 && requestedAmount <= summary.availableAmount && !saving && !summaryLoading);
+    const summaryKey = `${currentUser?.uid || ''}:${selectedWorker?.id || ''}:${selectedYearMonth}`;
+    const summaryReady = Boolean(selectedWorker?.id && loadedSummaryKey === summaryKey && !summaryError && !summaryLoading);
+    const canSubmit = Boolean(summaryReady && requestedAmount > 0 && requestedAmount <= summary.availableAmount && !saving);
+    const displaySummaryAmount = (amount: number) => summaryError ? '확인 필요' : !summaryReady && selectedWorker ? '계산 중' : formatCurrency(amount);
 
     const loadBaseData = useCallback(async () => {
         setLoading(true);
@@ -313,9 +320,13 @@ export default function WorkerAdvanceRequestPage() {
     }, [linkedWorkerCandidates, selectedWorkerId]);
 
     const loadWorkerSummary = useCallback(async () => {
+        const requestId = ++summaryRequestId.current;
+        setLoadedSummaryKey('');
+        setSummaryError('');
+        setSummary(emptySummary);
+        setRequests([]);
         if (!selectedWorker?.id) {
-            setSummary(emptySummary);
-            setRequests([]);
+            setSummaryLoading(false);
             return;
         }
 
@@ -323,18 +334,28 @@ export default function WorkerAdvanceRequestPage() {
         setMessage('');
         try {
             const workerKeys = getWorkerKeys(selectedWorker);
+            const loadPart = async <T,>(label: string, promise: Promise<T>): Promise<T> => {
+                try { return await promise; } catch (error) {
+                    const code = String((error as { code?: string })?.code || '');
+                    const detail = code.includes('permission-denied')
+                        ? '계정의 작업자 연결과 팀 조회 권한을 확인해 주세요.'
+                        : '잠시 후 새로고침해 주세요.';
+                    throw new Error(`${label}을 불러오지 못해 신청 가능액을 계산할 수 없습니다. ${detail}`);
+                }
+            };
             const [workRows, currentAdvancePayments, previousAdvancePayments, requestRows] = await Promise.all([
-                dailyReportService.getWorkerRows({ startDate: periodStart, endDate: periodEnd }),
-                advancePaymentService.getAdvancePaymentsByYearMonth(
+                loadPart('근무 내역', dailyReportService.getWorkerRows({ startDate: periodStart, endDate: periodEnd })),
+                loadPart('이달 가불 내역', advancePaymentService.getAdvancePaymentsByYearMonth(
                     Number(selectedYearMonth.slice(0, 4)),
                     Number(selectedYearMonth.slice(5, 7))
-                ),
-                advancePaymentService.getAdvancePaymentsByYearMonth(
+                )),
+                loadPart('전달 가불 내역', advancePaymentService.getAdvancePaymentsByYearMonth(
                     Number(previousYearMonth.slice(0, 4)),
                     Number(previousYearMonth.slice(5, 7))
-                ),
-                advanceRequestService.listForWorkerIds(workerKeys, currentUser?.uid),
+                )),
+                loadPart('신청 내역', advanceRequestService.listForWorkerIds(workerKeys, currentUser?.uid)),
             ]);
+            if (requestId !== summaryRequestId.current) return;
 
             const matchedWorkRows = workRows.filter((row) => matchesWorker(selectedWorker, row));
             const currentMonthEarned = matchedWorkRows
@@ -370,22 +391,29 @@ export default function WorkerAdvanceRequestPage() {
                 availableAmount,
                 workRows: matchedWorkRows,
             });
+            setLoadedSummaryKey(summaryKey);
             setAmountInput((prev) => {
                 const currentAmount = parseAmountInput(prev);
                 return currentAmount > availableAmount ? formatAmountInput(availableAmount) : prev;
             });
         } catch (error) {
+            if (requestId !== summaryRequestId.current) return;
             console.error('[WorkerAdvanceRequestPage] Failed to load summary', error);
             setSummary(emptySummary);
-            setMessage('근무 금액과 신청 내역을 계산하지 못했습니다.');
+            setRequests([]);
+            setSummaryError(error instanceof Error ? error.message : '근무 금액과 신청 내역을 계산하지 못했습니다.');
         } finally {
-            setSummaryLoading(false);
+            if (requestId === summaryRequestId.current) setSummaryLoading(false);
         }
-    }, [currentUser?.uid, periodEnd, periodStart, previousYearMonth, selectedWorker, selectedYearMonth]);
+    }, [currentUser?.uid, periodEnd, periodStart, previousYearMonth, selectedWorker, selectedYearMonth, summaryKey]);
 
     useEffect(() => {
         loadWorkerSummary();
+        return () => { summaryRequestId.current += 1; };
     }, [loadWorkerSummary]);
+
+    const latestSummaryLoader = useRef(loadWorkerSummary);
+    latestSummaryLoader.current = loadWorkerSummary;
 
     const handleAmountChange = (value: string) => {
         const nextAmount = parseAmountInput(value);
@@ -397,7 +425,14 @@ export default function WorkerAdvanceRequestPage() {
         setAmountInput(formatAmountInput(nextAmount));
     };
 
+    const submission = useRef<{ key: string; id: string } | null>(null);
+    const savingLock = useRef(false);
     const handleSubmit = async () => {
+        if (savingLock.current) return;
+        if (!summaryReady) {
+            setMessage('근무 금액과 신청 내역을 정상적으로 불러온 뒤 신청해 주세요.');
+            return;
+        }
         if (!selectedWorker?.id) {
             setMessage('작업자를 선택해주세요.');
             return;
@@ -411,6 +446,7 @@ export default function WorkerAdvanceRequestPage() {
             return;
         }
 
+        savingLock.current = true;
         setSaving(true);
         setMessage('');
         try {
@@ -420,6 +456,8 @@ export default function WorkerAdvanceRequestPage() {
                 currentUser?.email ||
                 selectedWorker.name;
 
+            const key = JSON.stringify([currentUser?.uid, selectedWorker.id, selectedYearMonth, requestedAmount, memo]);
+            if (submission.current?.key !== key) submission.current = { key, id: crypto.randomUUID() };
             await advanceRequestService.createRequest({
                 workerId: selectedWorker.id,
                 workerName: selectedWorker.name,
@@ -442,43 +480,47 @@ export default function WorkerAdvanceRequestPage() {
                 accountNumber: normalizeText(selectedWorker.accountNumber),
                 accountHolder: normalizeText(selectedWorker.accountHolder || selectedWorker.name),
                 memo,
-            });
+            }, submission.current.id);
+            submission.current = null;
 
             setAmountInput('');
             setMemo('');
             setMessage('가불 신청을 등록했습니다.');
-            await loadWorkerSummary();
+            await latestSummaryLoader.current();
         } catch (error) {
             console.error('[WorkerAdvanceRequestPage] Failed to submit request', error);
             setMessage(error instanceof Error && error.message === 'requested-amount-exceeds-available'
                 ? '신청 가능액을 초과했습니다.'
                 : '가불 신청 저장에 실패했습니다.');
         } finally {
+            savingLock.current = false;
             setSaving(false);
         }
     };
 
     const handleCancel = async (request: AdvanceRequest) => {
-        if (!request.id) return;
+        if (!request.id || savingLock.current) return;
         const ok = window.confirm(`${formatCurrency(request.requestedAmount)} 신청을 취소할까요?`);
         if (!ok) return;
 
+        savingLock.current = true;
         setSaving(true);
         setMessage('');
         try {
             await advanceRequestService.cancelRequest(request.id, currentUser?.uid);
             setMessage('신청을 취소했습니다.');
-            await loadWorkerSummary();
+            await latestSummaryLoader.current();
         } catch (error) {
             console.error('[WorkerAdvanceRequestPage] Failed to cancel request', error);
             setMessage('신청 취소에 실패했습니다.');
         } finally {
+            savingLock.current = false;
             setSaving(false);
         }
     };
 
     return (
-        <div className="min-h-full bg-slate-100 text-slate-900">
+        <div className="advance-request-page min-h-full bg-slate-100 text-slate-900">
             <header className="border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                     <div>
@@ -494,6 +536,7 @@ export default function WorkerAdvanceRequestPage() {
                             <CalendarDays size={16} className="text-slate-500" />
                             <input
                                 type="month"
+                                aria-label="기준월"
                                 value={selectedYearMonth}
                                 onChange={(event) => setSelectedYearMonth(event.target.value || getYearMonth())}
                                 className="bg-transparent text-sm font-bold text-slate-800 outline-none"
@@ -515,7 +558,7 @@ export default function WorkerAdvanceRequestPage() {
                 </div>
             </header>
 
-            <main className="grid min-h-[calc(100vh-73px)] grid-cols-1 gap-4 p-4 xl:grid-cols-[380px_minmax(0,1fr)]">
+            <main className="advance-request-workspace grid min-h-0 grid-cols-1 gap-4 p-4 xl:grid-cols-[380px_minmax(0,1fr)]">
                 <aside className="min-h-0 rounded-lg border border-slate-200 bg-white">
                     <div className="border-b border-slate-200 p-4">
                         <div className="flex items-center justify-between gap-3">
@@ -526,11 +569,11 @@ export default function WorkerAdvanceRequestPage() {
                                 </div>
                             </div>
                             {linkedWorkerCandidates.length > 0 ? (
-                                <span className="rounded-md border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">
+                                <span className="shrink-0 whitespace-nowrap rounded-md border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">
                                     계정 연결
                                 </span>
                             ) : (
-                                <span className="rounded-md border border-amber-100 bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">
+                                <span className="shrink-0 whitespace-nowrap rounded-md border border-amber-100 bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">
                                     직접 선택
                                 </span>
                             )}
@@ -590,6 +633,11 @@ export default function WorkerAdvanceRequestPage() {
                                 {message}
                             </div>
                         ) : null}
+                        {summaryError ? (
+                            <div role="alert" className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-800">
+                                {summaryError}
+                            </div>
+                        ) : null}
                     </div>
                 </aside>
 
@@ -605,25 +653,25 @@ export default function WorkerAdvanceRequestPage() {
                             </div>
                             <div className="flex h-10 items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50 px-3 text-sm font-black text-emerald-700">
                                 <CheckCircle2 size={16} />
-                                {summaryLoading ? '계산 중' : formatCurrency(summary.availableAmount)}
+                                {displaySummaryAmount(summary.availableAmount)}
                             </div>
                         </div>
 
                         <div className="p-4">
-                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                            <div className="advance-summary grid grid-cols-2 gap-3 xl:grid-cols-4">
                                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                                     <div className="flex items-center gap-2 text-xs font-black text-slate-500">
                                         <CalendarDays size={14} />
                                         전달 근무금액
                                     </div>
-                                    <div className="mt-2 text-xl font-black text-slate-950">{formatCurrency(summary.previousMonthEarned)}</div>
+                                    <div className="mt-2 text-xl font-black text-slate-950">{displaySummaryAmount(summary.previousMonthEarned)}</div>
                                 </div>
                                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                                     <div className="flex items-center gap-2 text-xs font-black text-slate-500">
                                         <CalendarDays size={14} />
                                         이달 근무금액
                                     </div>
-                                    <div className="mt-2 text-xl font-black text-slate-950">{formatCurrency(summary.currentMonthEarned)}</div>
+                                    <div className="mt-2 text-xl font-black text-slate-950">{displaySummaryAmount(summary.currentMonthEarned)}</div>
                                 </div>
                                 <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3">
                                     <div className="flex items-center gap-2 text-xs font-black text-amber-700">
@@ -631,7 +679,7 @@ export default function WorkerAdvanceRequestPage() {
                                         기존 가불/신청
                                     </div>
                                     <div className="mt-2 text-xl font-black text-amber-800">
-                                        {formatCurrency(summary.existingAdvanceAmount + summary.activeRequestAmount)}
+                                        {displaySummaryAmount(summary.existingAdvanceAmount + summary.activeRequestAmount)}
                                     </div>
                                 </div>
                                 <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3">
@@ -639,7 +687,7 @@ export default function WorkerAdvanceRequestPage() {
                                         <WalletCards size={14} />
                                         신청 가능액
                                     </div>
-                                    <div className="mt-2 text-xl font-black text-emerald-800">{formatCurrency(summary.availableAmount)}</div>
+                                    <div className="mt-2 text-xl font-black text-emerald-800">{displaySummaryAmount(summary.availableAmount)}</div>
                                 </div>
                             </div>
 
@@ -652,8 +700,8 @@ export default function WorkerAdvanceRequestPage() {
                                         </div>
                                         <span className="text-xs font-bold text-slate-500">{summary.workRows.length}건</span>
                                     </div>
-                                    <div className="max-h-[360px] overflow-auto">
-                                        <table className="w-full min-w-[720px] text-sm">
+                                    <div className="advance-work-scroll max-h-[360px] overflow-auto">
+                                        <table className="advance-work-table w-full min-w-[720px] text-sm">
                                             <thead className="sticky top-0 bg-slate-50 text-xs font-black text-slate-500">
                                                 <tr>
                                                     <th className="px-4 py-2 text-left">일자</th>
@@ -673,17 +721,17 @@ export default function WorkerAdvanceRequestPage() {
                                                 ) : summary.workRows.length === 0 ? (
                                                     <tr>
                                                         <td colSpan={5} className="px-4 py-10 text-center text-sm font-bold text-slate-400">
-                                                            근무 내역 없음
+                                                            {summaryError ? '근무 내역 확인 필요' : '근무 내역 없음'}
                                                         </td>
                                                     </tr>
                                                 ) : (
                                                     summary.workRows.map((row) => (
                                                         <tr key={`${row.reportId}-${row.workerIndex ?? row.workerId}`} className="hover:bg-slate-50">
-                                                            <td className="px-4 py-2 font-bold text-slate-700">{formatDate(row.date)}</td>
-                                                            <td className="px-4 py-2 text-slate-600">{row.siteName || '-'}</td>
-                                                            <td className="px-4 py-2 text-right font-mono text-slate-700">{Number(row.manDay || 0).toFixed(1)}</td>
-                                                            <td className="px-4 py-2 text-right font-mono text-slate-700">{formatCurrency(Number(row.unitPrice || 0))}</td>
-                                                            <td className="px-4 py-2 text-right font-mono font-black text-slate-900">{formatCurrency(Number(row.amount || 0))}</td>
+                                                            <td data-label="일자" className="px-4 py-2 font-bold text-slate-700">{formatDate(row.date)}</td>
+                                                            <td data-label="현장" className="px-4 py-2 text-slate-600">{row.siteName || '-'}</td>
+                                                            <td data-label="공수" className="px-4 py-2 text-right font-mono text-slate-700">{Number(row.manDay || 0).toFixed(1)}</td>
+                                                            <td data-label="단가" className="px-4 py-2 text-right font-mono text-slate-700">{formatCurrency(Number(row.unitPrice || 0))}</td>
+                                                            <td data-label="금액" className="px-4 py-2 text-right font-mono font-black text-slate-900">{formatCurrency(Number(row.amount || 0))}</td>
                                                         </tr>
                                                     ))
                                                 )}
@@ -718,7 +766,7 @@ export default function WorkerAdvanceRequestPage() {
                                                 key={amount}
                                                 type="button"
                                                 onClick={() => setQuickAmount(amount)}
-                                                disabled={summary.availableAmount <= 0}
+                                                disabled={!summaryReady || summary.availableAmount <= 0}
                                                 className="h-9 rounded-md border border-slate-200 bg-white text-xs font-black text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
                                             >
                                                 {currencyFormatter.format(amount / 10000)}만
@@ -727,7 +775,7 @@ export default function WorkerAdvanceRequestPage() {
                                         <button
                                             type="button"
                                             onClick={() => setQuickAmount(summary.availableAmount)}
-                                            disabled={summary.availableAmount <= 0}
+                                            disabled={!summaryReady || summary.availableAmount <= 0}
                                             className="h-9 rounded-md border border-slate-900 bg-slate-950 text-xs font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-300"
                                         >
                                             최대
@@ -754,7 +802,7 @@ export default function WorkerAdvanceRequestPage() {
                                         />
                                     </label>
 
-                                    {requestedAmount > summary.availableAmount ? (
+                                    {summaryReady && requestedAmount > summary.availableAmount ? (
                                         <div className="mt-3 flex items-start gap-2 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
                                             <AlertCircle size={14} className="mt-0.5 shrink-0" />
                                             신청 가능액을 초과했습니다.
@@ -789,14 +837,14 @@ export default function WorkerAdvanceRequestPage() {
                             </span>
                         </div>
 
-                        <div className="max-h-[calc(100vh-170px)] overflow-y-auto p-4">
+                        <div className="advance-request-history max-h-[calc(100dvh-170px)] overflow-y-auto p-4">
                             {summaryLoading ? (
                                 <div className="grid min-h-[240px] place-items-center text-sm font-bold text-slate-400">
                                     불러오는 중
                                 </div>
                             ) : selectedWorkerRequests.length === 0 ? (
                                 <div className="grid min-h-[240px] place-items-center rounded-lg border border-dashed border-slate-200 bg-slate-50 text-sm font-bold text-slate-400">
-                                    신청 내역 없음
+                                    {summaryError ? '신청 내역 확인 필요' : '신청 내역 없음'}
                                 </div>
                             ) : (
                                 <div className="space-y-3">

@@ -1,0 +1,93 @@
+.team-expense-request { max-width: 1440px; margin: auto; padding: 24px; color: #172b3a; }
+.team-expense-request button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; padding: 9px 15px; border: 1px solid #d6dfe5; border-radius: 10px; background: white; font-weight: 700; cursor: pointer; }
+.team-expense-request button:disabled { opacity: .5; cursor: not-allowed; }
+.team-expense-request button.primary { background: #087f72; color: white; border-color: #087f72; }
+.expense-request-header, .expense-request-history-title, .expense-request-card-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.expense-request-eyebrow { font-size: 12px; color: #087f72; font-weight: 800; }
+.expense-request-header h1 { font-size: 28px; font-weight: 800; margin: 5px 0 7px; }
+.expense-request-header p, .expense-request-note, .expense-request-card p { color: #5e707e; font-size: 13px; line-height: 1.6; }
+.expense-request-steps { display: flex; flex-wrap: wrap; gap: 20px; padding: 17px 20px; margin: 22px 0; border: 1px solid #d4e8e2; border-radius: 12px; background: #f1faf7; font-size: 13px; font-weight: 700; }
+.expense-request-steps li { display: flex; align-items: center; gap: 8px; }
+.expense-request-steps span { display: grid; place-items: center; border-radius: 50%; width: 23px; height: 23px; background: #087f72; color: white; }
+.expense-request-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 22px; align-items: start; }
+.expense-request-grid.review-only { grid-template-columns: 1fr; }
+.expense-request-panel { padding: 24px; background: white; border: 1px solid #dde5e9; border-radius: 16px; box-shadow: 0 4px 18px #193c4c05; min-width: 0; }
+.expense-request-panel h2 { display: flex; gap: 8px; align-items: center; font-size: 18px; font-weight: 800; margin-bottom: 6px; }
+.expense-request-panel fieldset { border: 0; padding: 0; margin-top: 22px; min-width: 0; }
+.team-expense-request label { display: block; font-size: 13px; font-weight: 700; margin-bottom: 16px; }
+.team-expense-request input, .team-expense-request select, .team-expense-request textarea { display: block; width: 100%; min-width: 0; margin-top: 7px; padding: 11px 12px; min-height: 44px; border: 1px solid #d4dee5; border-radius: 9px; background: white; font: inherit; font-weight: 400; color: #172b3a; box-sizing: border-box; }
+.team-expense-request :focus-visible { outline: 2px solid #087f72; outline-offset: 3px; }
+.expense-request-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.team-expense-request .optional { color: #8b99a4; font-weight: 400; font-size: 11px; }
+.expense-request-upload { border: 1px dashed #82b5ab; background: #f7fcfa; border-radius: 12px; padding: 17px; }
+.expense-request-upload { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; transition: background .15s, border-color .15s; }
+.expense-request-upload.dragging { background: #dbf5ed; border: 2px dashed #087f72; }
+.expense-request-upload > strong { font-size: 14px; }
+.expense-request-upload > p { font-size: 12px; color: #64748b; margin: 0; }
+.expense-receipt-buttons { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
+.team-expense-request input.expense-file-input { display: none; }
+.expense-request-team-fields { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 20px; }
+.expense-current-team, .expense-billing-team { padding: 14px; border: 1px solid #dce6e7; border-radius: 10px; background: #f8fbfb; }
+.expense-field-label { display: block; font-size: 13px; font-weight: 700; margin-bottom: 10px; }
+.expense-request-team-fields small { display: block; margin-top: 8px; color: #64748b; font-size: 11px; }
+.expense-billing-team label { margin-bottom: 8px; }
+.expense-team-tag { display: inline-flex; align-items: center; gap: 7px; border: 1px solid; border-radius: 7px; padding: 5px 9px; font-size: 13px; color: #172b3a; font-weight: 700; max-width: 100%; overflow-wrap: anywhere; }
+.expense-team-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 7px; flex-shrink: 0; color: white; font-size: 14px; }
+.expense-team-route { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0; }
+.expense-team-route > span { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; color: #64748b; }
+.expense-current-team select { margin-bottom: 10px; }
+.expense-camera-panel video { display: block; width: 100%; max-height: 55vh; object-fit: contain; border-radius: 10px; background: #172b3a; }
+.expense-request-modal > .expense-camera-panel { max-width: 600px; max-height: 95vh; overflow-y: auto; }
+.expense-camera-panel [role="status"] { display: flex; gap: 8px; margin-top: 12px; }
+.expense-request-upload label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0; }
+.expense-request-upload span { width: 100%; color: #6b7e86; font-size: 12px; font-weight: 400; }
+.expense-request-upload input { padding: 6px 0; border: 0; background: transparent; font-size: 12px; }
+.expense-request-files { margin: 14px 0; }
+.expense-request-files > div { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+.expense-request-files img { width: 50px; height: 50px; object-fit: cover; border-radius: 8px; }
+.expense-request-files span { flex: 1; font-size: 12px; overflow-wrap: anywhere; }
+.team-expense-request .expense-request-submit { width: 100%; margin-top: 8px; }
+.expense-request-history-title { flex-wrap: wrap; margin-bottom: 18px; }
+.expense-request-history-title > span { color: #087f72; font-size: 12px; font-weight: 700; }
+.expense-request-filters { display: flex; flex-wrap: wrap; gap: 12px; }
+.expense-request-filters label { flex: 1; min-width: 130px; }
+.expense-request-card { padding: 18px 0; border-top: 1px solid #e7edf0; }
+.expense-request-card h3 { font-weight: 700; font-size: 16px; margin: 10px 0 3px; overflow-wrap: anywhere; }
+.expense-request-card-top strong { font-size: 20px; }
+.expense-request-badge { font-size: 11px; font-weight: 800; padding: 5px 9px; border-radius: 6px; background: #fff3d7; color: #94600c; }
+.expense-request-badge.approved { background: #e5f5ee; color: #147954; }
+.expense-request-badge.rejected { background: #feecee; color: #b0384f; }
+.expense-request-attachments { display: flex; flex-wrap: wrap; gap: 9px; margin: 12px 0; }
+.expense-request-attachments a { display: flex; align-items: center; gap: 5px; color: #216e97; font-size: 12px; border: 1px solid #d6e6ee; padding: 6px 9px; border-radius: 7px; }
+.expense-request-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 15px; }
+.expense-request-error, .expense-request-success { padding: 14px; margin-bottom: 16px; border-radius: 10px; font-size: 14px; display: flex; gap: 8px; align-items: center; }
+.expense-request-error { background: #fff0f1; color: #b32c44; }
+.expense-request-success { background: #e7f6ee; color: #176d4b; }
+.expense-request-loading { display: flex; gap: 8px; padding: 15px; }
+.expense-request-empty { padding: 48px 10px; display: grid; justify-items: center; gap: 10px; color: #7d8f9a; font-size: 14px; }
+.expense-request-modal { position: fixed; inset: 0; background: #122c4277; z-index: 1000; display: grid; place-items: center; padding: 20px; }
+.expense-request-modal > div { background: white; padding: 25px; border-radius: 16px; max-width: 470px; width: 100%; }
+.expense-request-modal h2 { font-size: 21px; font-weight: 800; margin-bottom: 14px; }
+.expense-request-modal p { margin-bottom: 10px; font-size: 14px; }
+.expense-request-modal > .expense-preview-panel { max-width: 1000px; max-height: 92vh; overflow-y: auto; box-sizing: border-box; }
+.team-expense-request.expense-portal-root { display: contents; }
+.expense-preview-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 24px; margin-top: 18px; }
+.expense-preview-grid > * { min-width: 0; }
+.expense-receipt-document { min-width: 0; background: #f3f6f8; border: 1px solid #dce5eb; border-radius: 12px; padding: 12px; align-self: start; }
+.expense-receipt-document img { display: block; width: 100%; max-height: 65vh; object-fit: contain; }
+.expense-receipt-document object { display: block; width: 100%; height: 55vh; border: 0; }
+.expense-receipt-document a { display: block; font-size: 12px; color: #216e97; margin-top: 10px; text-decoration: underline; overflow-wrap: anywhere; }
+.expense-analysis-status { display: flex; align-items: center; gap: 8px; color: #087f72; }
+.expense-analysis-warnings { padding: 12px 15px; background: #fff7e2; border-radius: 10px; margin-bottom: 16px; font-size: 12px; color: #795310; }
+.expense-analysis-warnings ul { list-style: disc; padding-left: 18px; margin-top: 5px; }
+.expense-analysis-warnings li { margin-top: 4px; }
+.expense-preview-panel fieldset { border: 0; padding: 0; }
+.expense-preview-panel .expense-request-actions { flex-wrap: wrap; }
+.team-expense-request .expense-preview-close { width: 100%; margin-top: 10px; font-weight: 400; font-size: 12px; border: 0; }
+.expense-confirm-fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px 20px; margin: 20px 0; font-size: 14px; }
+.expense-confirm-fields dt { color: #64748b; }
+.expense-confirm-fields dd { font-weight: 700; overflow-wrap: anywhere; }
+.expense-confirm-receipts { display: grid; gap: 14px; }
+@media (max-width: 680px) { .expense-preview-grid { grid-template-columns: 1fr; gap: 16px; } .expense-request-modal { padding: 10px; } .expense-request-modal > .expense-preview-panel { padding: 18px; } .expense-receipt-document img { max-height: 40vh; } .expense-receipt-document object { height: 35vh; } .expense-request-files > div { flex-wrap: wrap; } }
+@media (max-width: 850px) { .expense-request-grid { grid-template-columns: 1fr; } .team-expense-request { padding: 16px; } }
+@media (max-width: 480px) { .team-expense-request { padding: 12px; } .expense-request-panel { padding: 17px; } .expense-request-header { align-items: flex-start; } .expense-request-header h1 { font-size: 24px; } .expense-request-header button { font-size: 11px; padding: 8px; white-space: nowrap; } .expense-request-steps { gap: 9px; padding: 12px; font-size: 11px; } .expense-request-fields { gap: 10px; } }

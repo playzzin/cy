@@ -72,6 +72,7 @@ describe('teamSettlementService confirmation freshness', () => {
 
   it('recalculates automatic expenses immediately before confirmation while preserving manual items', async () => {
     const staleDraft = buildDocument(100_000);
+    staleDraft.transactionMemo = '다음 정산 때 확인\n전달사항 유지';
     staleDraft.deductions.push({
       id: 'manual-adjustment',
       source: 'manual',
@@ -98,6 +99,7 @@ describe('teamSettlementService confirmation freshness', () => {
       expect.objectContaining({ id: 'manual-adjustment', amount: 7_000 })
     ]);
     expect(confirmed.confirmedAt).toEqual(expect.any(String));
+    expect(confirmed.transactionMemo).toBe(staleDraft.transactionMemo);
     expect(saveSpy).toHaveBeenCalledWith(confirmed);
   });
 

@@ -1,3 +1,4 @@
+import { getTeamScopedRows, invalidateTeamScopedCache } from './teamScopedReadService';
 import {
     collection,
     doc,
@@ -39,6 +40,8 @@ export const companyFirestoreService = {
 
     // 전체 조회
     async getCompanies(): Promise<CompanyZod[]> {
+        const scoped = await getTeamScopedRows<CompanyZod>('companies');
+        if (scoped !== null) return scoped;
         const q = query(this.getCollection(), orderBy('createdAt', 'desc'));
         const snap = await getDocs(q);
         return snap.docs.map(d => d.data());
@@ -66,6 +69,7 @@ export const companyFirestoreService = {
             updatedAt: serverTimestamp(),
         } as any);
         toast.saved('회사', 1);
+        invalidateTeamScopedCache();
         return docRef.id;
     },
 
@@ -77,11 +81,13 @@ export const companyFirestoreService = {
             updatedAt: serverTimestamp(),
         });
         toast.updated('회사');
+        invalidateTeamScopedCache();
     },
 
     // 회사 삭제
     async deleteCompany(id: string): Promise<void> {
         await deleteDoc(doc(db, COLLECTION_NAME, id));
+        invalidateTeamScopedCache();
         toast.deleted('회사', 1);
     },
 

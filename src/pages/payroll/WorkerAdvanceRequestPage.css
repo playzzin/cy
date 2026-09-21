@@ -1,0 +1,117 @@
+.advance-request-workspace > *,
+.advance-request-workspace section {
+    min-width: 0;
+}
+
+@media (max-width: 360px) {
+    .advance-summary {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .advance-summary > div {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+    }
+
+    .advance-summary .text-xl {
+        flex-shrink: 0;
+        max-width: 65%;
+        margin-top: 0;
+        text-align: right;
+    }
+}
+
+@media (max-width: 768px) {
+    .advance-request-workspace {
+        padding: 12px;
+        gap: 12px;
+    }
+
+    .advance-request-page > header {
+        padding: 12px;
+    }
+
+    .advance-request-page input,
+    .advance-request-page textarea {
+        font-size: 16px;
+    }
+
+    .advance-request-page button {
+        min-height: 44px;
+    }
+
+    .advance-summary {
+        gap: 8px;
+    }
+
+    .advance-summary > div {
+        min-width: 0;
+        padding: 10px;
+        overflow-wrap: anywhere;
+    }
+
+    .advance-summary .text-xl {
+        font-size: clamp(16px, 4.5vw, 20px);
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* One vertical scroll on phones; keep the desktop table unchanged. */
+    .advance-work-scroll,
+    .advance-request-history {
+        max-height: none;
+        overflow: visible;
+    }
+
+    .advance-work-table {
+        min-width: 0;
+        display: block;
+    }
+
+    .advance-work-table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+
+    .advance-work-table tbody {
+        display: block;
+    }
+
+    .advance-work-table tbody tr {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px 12px;
+        padding: 12px;
+    }
+
+    .advance-work-table td {
+        min-width: 0;
+        padding: 0;
+        text-align: left;
+        overflow-wrap: anywhere;
+    }
+
+    .advance-work-table td::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: 2px;
+        color: #64748b;
+        font-size: 12px;
+        font-family: inherit;
+        font-weight: 500;
+    }
+
+    .advance-work-table td:last-child {
+        grid-column: 1 / -1;
+    }
+
+    .advance-work-table td[colspan] {
+        padding: 16px 0;
+        text-align: center;
+    }
+}

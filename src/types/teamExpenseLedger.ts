@@ -42,7 +42,8 @@ export interface TeamExpenseClaim {
   status: TeamExpenseClaimStatus;
   memo?: string;
   attachments?: TeamExpenseClaimAttachment[];
-  sourceType?: 'manual' | 'office_fixed_expense';
+  sourceType?: 'manual' | 'office_fixed_expense' | 'team_request';
+  sourceRequestId?: string;
   sourceFixedExpenseId?: string;
   sourceFixedExpenseName?: string;
   generatedForYearMonth?: string;
@@ -74,7 +75,7 @@ export interface TeamExpenseClaimInput {
   status?: TeamExpenseClaimStatus;
   memo?: string;
   attachments?: TeamExpenseClaimAttachment[];
-  sourceType?: 'manual' | 'office_fixed_expense';
+  sourceType?: 'manual' | 'office_fixed_expense' | 'team_request';
   sourceFixedExpenseId?: string;
   sourceFixedExpenseName?: string;
   generatedForYearMonth?: string;

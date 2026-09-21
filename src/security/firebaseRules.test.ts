@@ -133,7 +133,7 @@ describe('firebase security rules', () => {
     expect(storageRules).toContain("'profiles'");
     expect(storageRules).toContain("'users'");
     expect(storageRules).toContain("'backups'");
-    expect(storageRules).toContain('allow read: if !isExplicitlyProtectedTopLevel(topLevel) && isSignedIn();');
+    expect(storageRules).toContain('allow read: if !isExplicitlyProtectedTopLevel(topLevel) && activeProfile();');
     expect(storageRules).toContain('allow write: if !isExplicitlyProtectedTopLevel(topLevel)');
   });
 

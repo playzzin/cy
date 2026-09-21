@@ -1,3 +1,4 @@
+import SecureExpenseReceipt from '../../../components/SecureExpenseReceipt';
 import React, { useMemo } from 'react';
 import { Image as ImageIcon } from 'lucide-react';
 import type { AccommodationBillingDocument } from '../../../types/accommodationBilling';
@@ -660,7 +661,7 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
                         {(claim.attachments ?? []).length > 0 && (
                           <div className="mt-1.5 flex flex-wrap gap-1.5">
                             {(claim.attachments ?? []).map((attachment) => (
-                              attachment.url ? (
+                              attachment.fullPath?.startsWith('team-expense-receipts/') ? <SecureExpenseReceipt key={attachment.id} fullPath={attachment.fullPath} name={attachment.name} /> : attachment.url ? (
                                 <a
                                   key={attachment.id || attachment.fullPath || attachment.url}
                                   href={attachment.url}
@@ -945,7 +946,7 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
                         {(claim.attachments ?? []).length > 0 && (
                           <div className="mt-1 flex flex-wrap gap-1.5">
                             {(claim.attachments ?? []).map((attachment) => (
-                              attachment.url ? (
+                              attachment.fullPath?.startsWith('team-expense-receipts/') ? <SecureExpenseReceipt key={attachment.id} fullPath={attachment.fullPath} name={attachment.name} /> : attachment.url ? (
                                 <a
                                   key={attachment.id || attachment.fullPath || attachment.url}
                                   href={attachment.url}

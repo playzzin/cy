@@ -1,3 +1,4 @@
+import { getTeamScopedRows } from './teamScopedReadService';
 import {
     collection,
     doc,
@@ -32,6 +33,8 @@ export const siteFirestoreService = {
     },
 
     async getSites(): Promise<SiteZod[]> {
+        const scoped = await getTeamScopedRows<SiteZod>('sites');
+        if (scoped !== null) return scoped;
         const q = query(this.getCollection(), orderBy('createdAt', 'desc'));
         const snap = await getDocs(q);
         return snap.docs.map(d => d.data());

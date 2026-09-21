@@ -1,7 +1,9 @@
+import { getTeamScopedRows } from './teamScopedReadService';
 import { workerFirestoreService } from './workerFirestoreService';
 import { databaseLogService } from './databaseLogService';
 import { WorkerZod as Worker } from '../types/zod/workerSchema';
-import { db, storage } from '../config/firebase';
+import { auth, db, storage } from '../config/firebase';
+import { getWorkerCacheRevision } from '../utils/workerCacheRevision';
 import {
     collection,
     getDocs,
@@ -26,6 +28,8 @@ export type { Worker };
 const WORKER_CACHE_TTL = 300000; // 5 minutes
 let cachedWorkers: Worker[] | null = null;
 let lastWorkerFetchTime = 0;
+let cachedWorkerRevision = -1;
+let cachedWorkerUid: string | undefined;
 
 const hasOwn = (value: object, key: string): boolean =>
     Object.prototype.hasOwnProperty.call(value, key);
@@ -108,17 +112,25 @@ export const manpowerService = {
 
     // Get all workers
     getWorkers: async (forceRefresh: boolean = false): Promise<Worker[]> => {
+        const scoped = await getTeamScopedRows<Worker>('workers');
+        if (scoped !== null) return scoped;
         if (isDevAdminSessionEnabled()) {
             return [...devWorkers];
         }
 
         const now = Date.now();
-        if (!forceRefresh && cachedWorkers && (now - lastWorkerFetchTime < WORKER_CACHE_TTL)) {
+        const revision = getWorkerCacheRevision();
+        const uid = auth?.currentUser?.uid;
+        if (!forceRefresh && cachedWorkers && cachedWorkerRevision === revision && cachedWorkerUid === uid && (now - lastWorkerFetchTime < WORKER_CACHE_TTL)) {
             return cachedWorkers;
         }
 
-        cachedWorkers = (await workerFirestoreService.getWorkers()).map((worker) => normalizeWorkerSalaryFields(worker as Worker));
+        const workers = await workerFirestoreService.getWorkers();
+        if (auth?.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다. 작업자 목록을 다시 조회해 주세요.');
+        cachedWorkers = workers.map((worker) => normalizeWorkerSalaryFields(worker as Worker));
         lastWorkerFetchTime = now;
+        cachedWorkerRevision = revision;
+        cachedWorkerUid = uid;
         return cachedWorkers;
     },
 

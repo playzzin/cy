@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { accommodationBillingService } from '../../../services/accommodationBillingService';
 import { cardBillingService } from '../../../services/cardBillingService';
 import { cardService } from '../../../services/cardService';
@@ -572,7 +572,10 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
   const [dailyReports, setDailyReports] = useState<DailyReport[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const generation = useRef(0);
   const loadData = useCallback(async () => {
+    const sequence = ++generation.current;
+    setAccommodationDocs([]); setVehicleDocs([]); setCardDocs([]); setClaims([]); setDailyReports([]);
     setLoading(true);
     try {
       const monthStart = `${yearMonth}-01`;
@@ -605,6 +608,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
         dailyReportsPromise
       ]);
 
+      if (sequence !== generation.current) return;
       const cheongyeonCompanies = companyList.filter((company) => isCheongyeonCompanyName((company as any).name));
       const cheongyeonIdSet = new Set(cheongyeonCompanies.map((company) => String((company as any).id ?? '')).filter(Boolean));
       const cheongyeonNameSet = new Set(
@@ -634,15 +638,17 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
       setExpenseCategories(categoryList);
       setDailyReports(dailyReportList);
     } catch (error) {
+      if (sequence !== generation.current) return;
       console.error('[useExpenseLedgerData] load failed', error);
       toast.error('경비내역 데이터를 불러오지 못했습니다.');
     } finally {
-      setLoading(false);
+      if (sequence === generation.current) setLoading(false);
     }
   }, [includeDailyReports, yearMonth]);
 
   useEffect(() => {
     void loadData();
+    return () => { generation.current++; };
   }, [loadData]);
 
   const teamOptions = useMemo(

@@ -40,7 +40,7 @@ import { SupportCancellationModal, type SupportCancellationFormValue } from '../
 import { supportCancellationLogService } from '../../services/supportCancellationLogService';
 import { getContrastingTextColor } from '../../utils/color';
 import { getSupportManagementYearMonth, subscribeSupportManagementYearMonth } from '../../utils/supportManagementState';
-import { getAccommodationMonthSummary, getAccommodationMonthSummaryByOwnership, overlapsAccommodationMonth } from '../../utils/accommodationMonthSummary';
+import { getAccommodationContractAmounts, getAccommodationMonthSummary, getAccommodationMonthSummaryByOwnership, overlapsAccommodationMonth } from '../../utils/accommodationMonthSummary';
 import type { SiteDataType } from '../../types/menu';
 
 interface AccommodationManagerProps {
@@ -747,7 +747,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
         });
 
         return summary;
-    }, [filteredAccommodations, activeAssignmentsByAccommodationId]);
+    }, [filteredAccommodations, activeAssignmentsByAccommodationId, currentMonthLedgerByAccommodationId]);
 
     const filteredTotals = useMemo(() => {
         return filteredAccommodations.reduce((acc, curr) => {
@@ -758,7 +758,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
             acc.occupants += assignments.length;
             return acc;
         }, { count: 0, rent: 0, deposit: 0, occupants: 0 });
-    }, [filteredAccommodations, activeAssignmentsByAccommodationId]);
+    }, [filteredAccommodations, activeAssignmentsByAccommodationId, currentMonthLedgerByAccommodationId]);
 
     const ownershipsConfig: { key: Accommodation['ownership']; label: string; bg: string; text: string; border: string; accent: string }[] = [
         { key: 'Cheongyeon', label: '청연', bg: 'bg-indigo-50', text: 'text-indigo-700', border: 'border-indigo-100', accent: 'bg-indigo-600' },
@@ -909,20 +909,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     }
 
     function getAccommodationRent(accommodation: Accommodation): number {
-        const contractObj = (accommodation as any)?.contract;
-        if (contractObj && Object.prototype.hasOwnProperty.call(contractObj, 'monthlyRent')) {
-            return toSafeNumber(contractObj.monthlyRent);
-        }
-        if (Object.prototype.hasOwnProperty.call(accommodation as any, 'monthlyRent')) {
-            return toSafeNumber((accommodation as any)?.monthlyRent);
-        }
-
-        const ledgerRecord = getCurrentMonthLedgerRecord(accommodation);
-        if (Object.prototype.hasOwnProperty.call((ledgerRecord as any)?.costs ?? {}, 'rent')) {
-            return toSafeNumber((ledgerRecord as any)?.costs?.rent);
-        }
-
-        return 0;
+        return getAccommodationContractAmounts(accommodation, getCurrentMonthLedgerRecord(accommodation)).rent;
     }
 
     function getRentDuePaymentBreakdown(accommodation: Accommodation): { rent: number; maintenance: number; total: number } {
@@ -953,23 +940,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     }
 
     function getAccommodationDeposit(accommodation: Accommodation): number {
-        const contractObj = (accommodation as any)?.contract;
-        if (contractObj && Object.prototype.hasOwnProperty.call(contractObj, 'deposit')) {
-            return toSafeNumber(contractObj.deposit);
-        }
-        if (Object.prototype.hasOwnProperty.call(accommodation as any, 'deposit')) {
-            return toSafeNumber((accommodation as any)?.deposit);
-        }
-
-        const ledgerRecord = getCurrentMonthLedgerRecord(accommodation) as any;
-        if (Object.prototype.hasOwnProperty.call(ledgerRecord ?? {}, 'deposit')) {
-            return toSafeNumber(ledgerRecord?.deposit);
-        }
-        if (Object.prototype.hasOwnProperty.call(ledgerRecord?.costs ?? {}, 'deposit')) {
-            return toSafeNumber(ledgerRecord?.costs?.deposit);
-        }
-
-        return 0;
+        return getAccommodationContractAmounts(accommodation, getCurrentMonthLedgerRecord(accommodation)).deposit;
     }
 
     const getAssignedTeamNameForAccommodation = (accommodation: Accommodation): string => {
@@ -1317,11 +1288,14 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
             .filter(target => overlapsAccommodationMonth(target, summaryMonth))
             .some(billingTargetMatchesSelectedTeam);
     });
+    const normalizedMonthLedgerRecords = Array.from(currentMonthLedgerByAccommodationId, ([accommodationId, record]) => ({
+        ...record, accommodationId,
+    }));
     const { rent: totalRent, deposit: totalDeposit } = getAccommodationMonthSummary(
-        monthScopedAccommodations, summaryMonth, currentMonthLedgerRecords,
+        monthScopedAccommodations, summaryMonth, normalizedMonthLedgerRecords,
     );
     const ownershipMonthSummary = getAccommodationMonthSummaryByOwnership(
-        monthScopedAccommodations, summaryMonth, currentMonthLedgerRecords,
+        monthScopedAccommodations, summaryMonth, normalizedMonthLedgerRecords,
     );
     const ownershipSummaryRows = [
         { label: '청연', ...ownershipMonthSummary.Cheongyeon },
@@ -1725,7 +1699,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                             <span className="text-sm font-bold text-slate-400">원</span>
                                         </div>
                                         <div className="mt-4 flex items-center gap-2 text-xs font-medium text-indigo-700 bg-indigo-50 w-fit px-2 py-1 rounded-lg">
-                                            <FontAwesomeIcon icon={faWonSign} /> {summaryMonth} 기준
+                                            <FontAwesomeIcon icon={faWonSign} /> {summaryMonth} 계약 월세 기준
                                         </div>
                                         <dl className="mt-3 space-y-2 border-t border-indigo-100 pt-3 text-sm" aria-label="명의별 월세 지출액">
                                             {ownershipSummaryRows.map(row => (

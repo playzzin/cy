@@ -1,3 +1,4 @@
+import { getTeamScopedRows, invalidateTeamScopedCache } from './teamScopedReadService';
 import { collection, deleteDoc, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
@@ -62,12 +63,23 @@ const strip = (value: unknown): unknown => Array.isArray(value)
 const listVars = (args: any[]) => args.length > 1 && isObj(args[1]) ? { ...DEFAULT_LIST_VARS, ...args[1] } : args.length > 0 && isObj(args[0]) ? { ...DEFAULT_LIST_VARS, ...args[0] } : { ...DEFAULT_LIST_VARS };
 const mutateVars = (args: any[]) => args.length > 1 && isObj(args[1]) ? args[1] : args.length > 0 && isObj(args[0]) ? args[0] : {};
 const page = <T>(rows: T[], args: any[]) => { const vars = listVars(args) as any; const offset = typeof vars.offset === 'number' ? vars.offset : 0; const limit = typeof vars.limit === 'number' ? vars.limit : rows.length; return rows.slice(offset, offset + limit); };
-const readRows = async (col: string) => { const snap = await getDocs(collection(db, col)); return snap.docs.map((d) => ({ id: d.id, ...(strip(d.data()) as Record<string, unknown>) })); };
+const readRows = async (col: string, vars: any = {}) => {
+  const filterKeys = col === 'system_configs' ? ['yearMonth', 'startDate', 'endDate', 'configId'] : ['yearMonth', 'startDate', 'endDate'];
+  const filters = Object.fromEntries(filterKeys.filter(key => vars[key]).map(key => [key, vars[key]]));
+  const scoped = await getTeamScopedRows(col, filters);
+  if (scoped !== null) return scoped;
+  if (col === 'system_configs' && vars.configId) {
+    const snap = await getDoc(doc(db, col, String(vars.configId)));
+    return snap.exists() ? [{ id: snap.id, ...(strip(snap.data()) as Record<string, unknown>) }] : [];
+  }
+  const snap = await getDocs(collection(db, col));
+  return snap.docs.map((d) => ({ id: d.id, ...(strip(d.data()) as Record<string, unknown>) }));
+};
 const mkId = (prefix: string) => { const c: any = typeof crypto !== 'undefined' ? crypto : undefined; return c && typeof c.randomUUID === 'function' ? c.randomUUID() : `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`; };
-const list = async (cfg: Cfg, args: any[]) => ({ data: { [cfg.list]: page(await readRows(cfg.col), args) } } as any);
-const getOne = async (cfg: Cfg, args: any[]) => { const vars = mutateVars(args) as any; const id = typeof vars.id === 'string' ? vars.id.trim() : ''; if (!id) return { data: { [cfg.get]: null } } as any; const snap = await getDoc(doc(db, cfg.col, id)); return { data: { [cfg.get]: snap.exists() ? { id: snap.id, ...(strip(snap.data()) as Record<string, unknown>) } : null } } as any; };
-const upsert = async (cfg: Cfg, mode: 'create' | 'update', args: any[]) => { const vars = mutateVars(args) as any; const inputId = typeof vars.id === 'string' ? vars.id.trim() : ''; const id = inputId || mkId(cfg.prefix); const ref = doc(db, cfg.col, id); const existing = await getDoc(ref); if (mode === 'update' && !existing.exists()) return { data: { [cfg.upd]: null } } as any; const payload = strip({ ...vars, createdAt: existing.exists() ? undefined : (vars.createdAt ?? new Date().toISOString()), updatedAt: vars.updatedAt ?? new Date().toISOString() }) as Record<string, unknown>; delete payload.id; await setDoc(ref, payload, { merge: true }); return { data: { [mode === 'create' ? cfg.ins : cfg.upd]: { id } } } as any; };
-const remove = async (cfg: Cfg, args: any[]) => { const vars = mutateVars(args) as any; const id = typeof vars.id === 'string' ? vars.id.trim() : ''; if (!id) throw new Error(`[firestoreCrudCompat] Missing id for delete ${cfg.col}`); await deleteDoc(doc(db, cfg.col, id)); return { data: { [cfg.del]: { id } } } as any; };
+const list = async (cfg: Cfg, args: any[]) => ({ data: { [cfg.list]: page(await readRows(cfg.col, listVars(args)), args) } } as any);
+const getOne = async (cfg: Cfg, args: any[]) => { const vars = mutateVars(args) as any; const id = typeof vars.id === 'string' ? vars.id.trim() : ''; if (!id) return { data: { [cfg.get]: null } } as any; const scoped = await getTeamScopedRows(cfg.col); if (scoped !== null) return { data: { [cfg.get]: scoped.find(row => row.id === id) || null } } as any; const snap = await getDoc(doc(db, cfg.col, id)); return { data: { [cfg.get]: snap.exists() ? { id: snap.id, ...(strip(snap.data()) as Record<string, unknown>) } : null } } as any; };
+const upsert = async (cfg: Cfg, mode: 'create' | 'update', args: any[]) => { const vars = mutateVars(args) as any; const inputId = typeof vars.id === 'string' ? vars.id.trim() : ''; const id = inputId || mkId(cfg.prefix); const ref = doc(db, cfg.col, id); const existing = await getDoc(ref); if (mode === 'update' && !existing.exists()) return { data: { [cfg.upd]: null } } as any; const payload = strip({ ...vars, createdAt: existing.exists() ? undefined : (vars.createdAt ?? new Date().toISOString()), updatedAt: vars.updatedAt ?? new Date().toISOString() }) as Record<string, unknown>; delete payload.id; await setDoc(ref, payload, { merge: true }); if (cfg.col === 'companies' || cfg.col === 'materials') invalidateTeamScopedCache(); return { data: { [mode === 'create' ? cfg.ins : cfg.upd]: { id } } } as any; };
+const remove = async (cfg: Cfg, args: any[]) => { const vars = mutateVars(args) as any; const id = typeof vars.id === 'string' ? vars.id.trim() : ''; if (!id) throw new Error(`[firestoreCrudCompat] Missing id for delete ${cfg.col}`); await deleteDoc(doc(db, cfg.col, id)); if (cfg.col === 'companies' || cfg.col === 'materials') invalidateTeamScopedCache(); return { data: { [cfg.del]: { id } } } as any; };
 const bindList = (cfg: Cfg) => (...args: any[]) => list(cfg, args);
 const bindGet = (cfg: Cfg) => (...args: any[]) => getOne(cfg, args);
 const bindCreate = (cfg: Cfg) => (...args: any[]) => upsert(cfg, 'create', args);

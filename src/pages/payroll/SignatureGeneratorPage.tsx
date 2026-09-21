@@ -1,3 +1,4 @@
+import SecureSignature from '../../components/SecureSignature';
 import React, { useState, useEffect, useMemo } from 'react';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
@@ -426,7 +427,7 @@ const SignatureGeneratorPage: React.FC<SignatureGeneratorPageProps> = ({
                                     <div className="h-16 bg-slate-50 rounded-lg flex items-center justify-center border border-dashed border-slate-200 overflow-hidden">
                                         {hasRegisteredSignature(worker) && !failedSignatureImages.has(getWorkerKey(worker)) ? (
                                             <div className="relative w-full h-full">
-                                                <img
+                                                <SecureSignature
                                                     src={worker.signatureUrl}
                                                     alt={`${worker.name} 서명`}
                                                     loading="lazy"

@@ -1,3 +1,4 @@
+import SecureSignature from '../../components/SecureSignature';
 import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
 import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -1184,7 +1185,7 @@ const DelegationLetterPage: React.FC = () => {
                                             <th className="border border-black bg-slate-50 px-2 py-2 text-center font-bold">서명 또는 인</th>
                                             <td colSpan={3} className="border border-black px-2 py-2 text-center h-16 w-[20%] relative">
                                                 {mandataryInfo?.signatureUrl && (
-                                                    <img src={mandataryInfo.signatureUrl} alt="서명" className="h-12 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 object-contain" />
+                                                    <SecureSignature src={mandataryInfo.signatureUrl} alt="서명" className="h-12 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 object-contain" />
                                                 )}
                                             </td>
                                         </tr>
@@ -1247,7 +1248,7 @@ const DelegationLetterPage: React.FC = () => {
                                                 <td className="border border-black px-2 py-1.5 text-right">{worker.amount.toLocaleString()}</td>
                                                 <td className="border border-black px-1 py-0 text-center h-10 w-24 relative overflow-hidden">
                                                     {worker.signatureUrl && (
-                                                        <img src={worker.signatureUrl} alt="서명" className="h-8 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 object-contain" />
+                                                        <SecureSignature src={worker.signatureUrl} alt="서명" className="h-8 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 object-contain" />
                                                     )}
                                                 </td>
                                             </tr>
@@ -1312,7 +1313,7 @@ const DelegationLetterPage: React.FC = () => {
                                     <th className="border border-black bg-slate-50 px-2 py-2 text-center font-bold">서명 또는 인</th>
                                     <td colSpan={3} className="border border-black px-2 py-2 text-center h-16 w-[20%] relative">
                                         {mandataryInfo?.signatureUrl && (
-                                            <img
+                                            <SecureSignature
                                                 src={mandataryInfo.signatureUrl}
                                                 alt="서명"
                                                 className="h-12 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 object-contain"
@@ -1381,7 +1382,7 @@ const DelegationLetterPage: React.FC = () => {
                                         <td className="border border-black px-2 py-1.5 text-right">{worker.amount.toLocaleString()}</td>
                                         <td className="border border-black px-1 py-0 text-center h-10 w-24 relative overflow-hidden">
                                             {worker.signatureUrl && (
-                                                <img
+                                                <SecureSignature
                                                     src={worker.signatureUrl}
                                                     alt="서명"
                                                     className="h-8 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 object-contain"

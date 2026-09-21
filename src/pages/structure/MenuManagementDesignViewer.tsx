@@ -1,3 +1,4 @@
+import { useAuth } from '../../contexts/AuthContext';
 import React, { useEffect, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -9,10 +10,11 @@ import { MenuItem, SiteDataType } from '../../types/menu';
 import { getMenuModeStorageKey } from '../../utils/menuModeStorage';
 
 const MenuManagementDesignViewer: React.FC = () => {
+    const { currentUser } = useAuth();
     const [allMenuData, setAllMenuData] = useState<SiteDataType | null>(null);
     const [selectedSite, setSelectedSite] = useState<string>(() => {
         try {
-            return localStorage.getItem(getMenuModeStorageKey('cy_current_site')) || 'admin';
+            return localStorage.getItem(getMenuModeStorageKey('cy_current_site', currentUser?.uid)) || 'admin';
         } catch {
             return 'admin';
         }

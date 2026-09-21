@@ -89,13 +89,13 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
         setLoading(true);
         setLoadError(null);
         try {
-            const [vehicleList, teamList, companies, officeStaffList] = await Promise.all([
+            const [vehicleList, teamList, companies, officeStaffList, workerList] = await Promise.all([
                 vehicleService.getVehicles(),
                 teamService.getTeams(),
                 companyService.getCompanies(),
-                officeStaffService.getOfficeStaff().catch(() => [] as OfficeStaff[])
+                officeStaffService.getOfficeStaff().catch(() => [] as OfficeStaff[]),
+                manpowerService.getWorkers()
             ]);
-            const workerList = await manpowerService.getWorkers();
             const allowedTeams = buildCheongyeonEngTeams(teamList, companies);
             const sortedTeams = teamList
                 .slice()

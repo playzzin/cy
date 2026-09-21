@@ -17,6 +17,7 @@ import type { MaterialLogAction, MaterialLogEntityType } from '../types/material
 import { EXCEL_MATERIAL_CATALOG } from '../constants/materialCatalog';
 import { sortMaterialDisplayRows } from '../utils/materialOrdering';
 import { storageService } from './storageService';
+import { usesTeamScopedReads } from './teamScopedReadService';
 
 // Helper to generate IDs
 const generateId = (prefix: string = 'mat'): string => {
@@ -248,7 +249,7 @@ const createPersistedCatalogMaterial = (material: Material, now: Date): Material
     };
 };
 
-const ensureCatalogMaterialsPersisted = async (rows: Material[]): Promise<Material[]> => {
+const ensureCatalogMaterialsPersisted = async (rows: Material[], persist = true): Promise<Material[]> => {
     const existingMaterialKeys = new Set(rows.map((row) => row.materialKey || buildMaterialBusinessKey(row)));
     const existingIds = new Set(rows.map((row) => row.id).filter(Boolean));
     const now = new Date();
@@ -259,7 +260,7 @@ const ensureCatalogMaterialsPersisted = async (rows: Material[]): Promise<Materi
             return !existingMaterialKeys.has(materialKey) && !existingIds.has(row.id);
         });
 
-    if (missingCatalogRows.length > 0) {
+    if (persist && missingCatalogRows.length > 0) {
         await Promise.all(
             missingCatalogRows.map((row) => materialFirestoreService.saveMaterial(row.id, row as any))
         );
@@ -269,16 +270,19 @@ const ensureCatalogMaterialsPersisted = async (rows: Material[]): Promise<Materi
 };
 
 const getSelectableMaterials = async (): Promise<Material[]> => {
-    if (selectableMaterialsCache && selectableMaterialsCache.expiresAt > Date.now()) {
+    const scoped = await usesTeamScopedReads();
+    // Team readers must not inherit an administrator's price cache or write
+    // shared catalog defaults just by opening a read-only screen.
+    if (!scoped && selectableMaterialsCache && selectableMaterialsCache.expiresAt > Date.now()) {
         return selectableMaterialsCache.rows;
     }
 
     const masterRows = await materialFirestoreService.getAllMaterials({ includeInactive: true }) as any[];
-    const persistedCatalogRows = await ensureCatalogMaterialsPersisted(masterRows);
+    const persistedCatalogRows = await ensureCatalogMaterialsPersisted(masterRows, !scoped);
     const rows = [...masterRows, ...persistedCatalogRows].filter((row) => row.isActive !== false && row.hiddenCatalogDefault !== true);
 
     const selectableRows = mergeMaterialsForSelection(rows);
-    selectableMaterialsCache = {
+    if (!scoped) selectableMaterialsCache = {
         rows: selectableRows,
         expiresAt: Date.now() + MATERIAL_SELECTION_CACHE_TTL_MS,
     };
@@ -331,8 +335,9 @@ const getMaterialFilterKey = (materialId: string | undefined, materialById: Map<
 // --- Material Master ---
 
 export const getAllMaterials = async (): Promise<Material[]> => {
+    const scoped = await usesTeamScopedReads();
     const rows = await materialFirestoreService.getAllMaterials({ includeInactive: true }) as any[];
-    const persistedCatalogRows = await ensureCatalogMaterialsPersisted(rows);
+    const persistedCatalogRows = await ensureCatalogMaterialsPersisted(rows, !scoped);
     return [...rows, ...persistedCatalogRows].filter((row) => row.isActive !== false && row.hiddenCatalogDefault !== true) as any[];
 };
 

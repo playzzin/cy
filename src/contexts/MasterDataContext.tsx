@@ -5,6 +5,7 @@ import { siteService, Site } from '../services/siteService';
 import { positionService, Position } from '../services/positionService';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { devPositions } from '../utils/devAdminFixtures';
+import { invalidateTeamScopedCache } from '../services/teamScopedReadService';
 
 export interface PositionStyle {
     color: string;
@@ -114,6 +115,7 @@ export function MasterDataProvider({ children }: { children: React.ReactNode }) 
 
     // 전체 새로고침
     const refreshAll = useCallback(async () => {
+        invalidateTeamScopedCache();
         setLoading(true);
         try {
             await Promise.all([

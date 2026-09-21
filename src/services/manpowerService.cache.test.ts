@@ -1,0 +1,36 @@
+import { auth } from '../config/firebase';
+import { manpowerService } from './manpowerService';
+import { workerFirestoreService } from './workerFirestoreService';
+import { invalidateWorkerCache } from '../utils/workerCacheRevision';
+import { getTeamScopedRows } from './teamScopedReadService';
+jest.mock('../config/firebase', () => ({ auth: { currentUser: { uid: 'office-a' } }, db: {}, storage: {} }));
+jest.mock('./workerFirestoreService', () => ({ workerFirestoreService: { getWorkers: jest.fn() } }));
+jest.mock('./databaseLogService', () => ({ databaseLogService: {} }));
+jest.mock('./teamScopedReadService', () => ({ getTeamScopedRows: jest.fn(async () => null) }));
+jest.mock('../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: () => false }));
+
+test('승인과 계정 변경 후 이전 작업자 캐시 대신 기존 workers 조회를 다시 실행한다', async () => {
+  (getTeamScopedRows as jest.Mock).mockResolvedValue(null);
+  const read = workerFirestoreService.getWorkers as jest.Mock;
+  read.mockResolvedValueOnce([{ id: 'existing', name: '기존' }]);
+  expect(await manpowerService.getWorkers()).toHaveLength(1);
+  await manpowerService.getWorkers();
+  expect(read).toHaveBeenCalledTimes(1);
+  invalidateWorkerCache();
+  read.mockResolvedValueOnce([{ id: 'existing', name: '기존' }, { id: 'registered', name: '등록' }]);
+  expect(await manpowerService.getWorkers()).toHaveLength(2);
+  expect(read).toHaveBeenCalledTimes(2);
+  (auth.currentUser as any).uid = 'office-b';
+  read.mockResolvedValueOnce([]);
+  expect(await manpowerService.getWorkers()).toHaveLength(0);
+  expect(read).toHaveBeenCalledTimes(3);
+  let complete!: (rows: any[]) => void;
+  let started!: () => void;
+  const reading = new Promise<void>(resolve => { started = resolve; });
+  read.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; started(); }));
+  const pending = manpowerService.getWorkers(true);
+  await reading;
+  (auth.currentUser as any).uid = 'office-c';
+  complete([{ id: 'private-previous-account', name: '이전 계정 자료' }]);
+  await expect(pending).rejects.toThrow('로그인 계정이 변경');
+});

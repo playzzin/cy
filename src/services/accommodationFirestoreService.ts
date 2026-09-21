@@ -1,3 +1,4 @@
+import { getTeamScopedRows } from './teamScopedReadService';
 import { db } from '../config/firebase';
 import {
     collection,
@@ -25,6 +26,8 @@ export const accommodationFirestoreService = {
      * 숙소 목록 조회
      */
     listAccommodations: async (status?: 'active' | 'inactive') => {
+        const scoped = await getTeamScopedRows<Accommodation>('accommodations');
+        if (scoped !== null) return scoped.filter(row => !status || row.status === status);
         let q = query(collection(db, ACCOMMODATION_COLLECTION).withConverter(createConverter(accommodationSchema)));
         if (status) {
             q = query(q, where('status', '==', status));
@@ -66,6 +69,8 @@ export const accommodationFirestoreService = {
      * 공과금 기록 목록 조회 (연월 기준)
      */
     listUtilityRecords: async (yearMonth?: string) => {
+        const scoped = await getTeamScopedRows<UtilityRecord>('accommodationUtilityRecords', yearMonth ? { yearMonth } : {});
+        if (scoped !== null) return scoped;
         let q = query(collection(db, UTILITY_RECORD_COLLECTION).withConverter(createConverter(utilityRecordSchema)));
         if (yearMonth) {
             q = query(q, where('yearMonth', '==', yearMonth));

@@ -1,3 +1,4 @@
+import SecureSignature from '../../components/SecureSignature';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -616,7 +617,7 @@ const CashReceiptConfirmationPage: React.FC = () => {
                                         <span className="min-w-[38mm] border-b border-dotted border-black px-2 text-center font-semibold">{selectedReceiptWorker?.worker.name || ''}</span>
                                         <span className="relative ml-3 inline-flex h-[12mm] w-[23mm] items-center justify-center">
                                             <span>(인)</span>
-                                            {receiverSignatureUrl && <img src={receiverSignatureUrl} alt="수령인 서명" className="absolute left-1/2 top-1/2 z-10 h-[13mm] w-[28mm] -translate-x-1/2 -translate-y-1/2 object-contain opacity-90 mix-blend-multiply" />}
+                                            {receiverSignatureUrl && <SecureSignature src={receiverSignatureUrl} alt="수령인 서명" className="absolute left-1/2 top-1/2 z-10 h-[13mm] w-[28mm] -translate-x-1/2 -translate-y-1/2 object-contain opacity-90 mix-blend-multiply" />}
                                         </span>
                                     </div>
                                 </div>
@@ -629,7 +630,7 @@ const CashReceiptConfirmationPage: React.FC = () => {
                                         <span className="min-w-[52mm] border-b border-dotted border-black px-2 text-center font-semibold">{selectedPayerCompany?.name || ''}</span>
                                         <span className="relative ml-3 inline-flex h-[12mm] w-[23mm] items-center justify-center">
                                             <span>(인)</span>
-                                            {payerSignatureUrl && <img src={payerSignatureUrl} alt="지급인 서명 또는 직인" className={`absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 object-contain opacity-90 mix-blend-multiply ${selectedPayerSigner?.signatureUrl ? 'h-[13mm] w-[28mm]' : 'h-[20mm] w-[20mm]'}`} />}
+                                            {payerSignatureUrl && <SecureSignature src={payerSignatureUrl} alt="지급인 서명 또는 직인" className={`absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 object-contain opacity-90 mix-blend-multiply ${selectedPayerSigner?.signatureUrl ? 'h-[13mm] w-[28mm]' : 'h-[20mm] w-[20mm]'}`} />}
                                         </span>
                                     </div>
                                 </div>

@@ -1,4 +1,5 @@
 import type { TeamSettlementDocument } from '../types/teamSettlement';
+import { TeamSettlementDocumentSchema } from '../types/teamSettlement';
 import {
   createTeamSettlementDraftFingerprint,
   getTeamSettlementConfirmationIssues
@@ -18,6 +19,15 @@ const buildDocument = (): TeamSettlementDocument => ({
 });
 
 describe('teamSettlementDraft', () => {
+  test('메모를 저장 형식에 보존하고 작성·삭제를 미저장 변경으로 인식한다', () => {
+    const original = buildDocument();
+    const edited = TeamSettlementDocumentSchema.parse({ ...original, transactionMemo: '확인할 내용\n전달사항' });
+    expect(edited.transactionMemo).toBe('확인할 내용\n전달사항');
+    expect(TeamSettlementDocumentSchema.safeParse(original).success).toBe(true);
+    expect(createTeamSettlementDraftFingerprint(edited)).not.toBe(createTeamSettlementDraftFingerprint(original));
+    expect(createTeamSettlementDraftFingerprint({ ...edited, transactionMemo: '' })).not.toBe(createTeamSettlementDraftFingerprint(edited));
+  });
+
   test('저장 시각과 확정 시각은 편집 변경으로 계산하지 않는다', () => {
     const first = buildDocument();
     const second = {

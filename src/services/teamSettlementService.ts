@@ -554,6 +554,7 @@ const mergeAutoAndDraft = (params: { autoDoc: TeamSettlementDocument; savedDoc: 
       ...((savedDoc.additions ?? []) as TeamSettlementAdditionItem[]).filter((x) => x.source === 'manual')
     ],
     summary: savedDoc.summary,
+    transactionMemo: savedDoc.transactionMemo,
     confirmedAt: null,
     updatedAt: new Date().toISOString()
   };
@@ -604,7 +605,7 @@ export const teamSettlementService = {
       return normalizeSupportRateOverrides(undefined);
     }
 
-    const res = await listSystemConfigs();
+    const res = await listSystemConfigs({ configId: getSupportRateOverrideConfigId(normalizedYearMonth) });
     const rows = extractSystemConfigRows(res);
     const row = rows.find((item) => String(item.id ?? '') === getSupportRateOverrideConfigId(normalizedYearMonth));
 
@@ -659,7 +660,7 @@ export const teamSettlementService = {
   },
 
   async getTeamDisplayOrder(): Promise<string[]> {
-    const res = await listSystemConfigs();
+    const res = await listSystemConfigs({ configId: TEAM_DISPLAY_ORDER_CONFIG_ID });
     const rows = extractSystemConfigRows(res);
     const row = rows.find((item) => String(item.id ?? '') === TEAM_DISPLAY_ORDER_CONFIG_ID);
     const parsed = typeof row?.data === 'string'
@@ -979,7 +980,7 @@ export const teamSettlementService = {
     const team = await buildTeamIdVariants(params.teamId);
     const systemId = buildSystemConfigId({ yearMonth: params.yearMonth, teamId: team.canonicalTeamId });
 
-    const res = await listSystemConfigs();
+    const res = await listSystemConfigs({ configId: systemId });
     const rows = extractSystemConfigRows(res);
     const row = rows.find((r) => String(r.id ?? '') === systemId);
 
@@ -1011,7 +1012,7 @@ export const teamSettlementService = {
     const team = await buildTeamIdVariants(params.teamId);
     const systemId = buildSystemConfigId({ yearMonth: params.yearMonth, teamId: team.canonicalTeamId });
 
-    const res = await listSystemConfigs();
+    const res = await listSystemConfigs({ configId: systemId });
     const rows = extractSystemConfigRows(res);
     const row = rows.find((r) => String(r.id ?? '') === systemId);
 

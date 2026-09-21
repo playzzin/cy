@@ -44,6 +44,7 @@ import {
 } from '../../services/taxInvoiceBulkImportService';
 import { calculateWorkbookTotalAmount, calculateWorkbookVatAmount } from '../../utils/workbookLedgerAmounts';
 import { parseWorkbookNumber } from '../../utils/workbookLedgerParsing';
+import { applyWorkbookLedgerExcelStyle } from '../../utils/workbookLedgerExcelStyle';
 import TaxInvoiceBulkImportModal from './components/TaxInvoiceBulkImportModal';
 import './WorkbookLedgerPage.css';
 
@@ -1919,16 +1920,26 @@ const MAPPING_ADDRESS_REMARK_PATTERN = /(?:매핑\s*주소|주소\s*매핑|mappi
 const REMARK_SEGMENT_SEPARATOR = /\s*(?:·|\||\n)\s*|\s+\/\s+/;
 
 /**
- * Keeps the stored remark intact while omitting the legacy mapped-address
- * fragment from AI tax-invoice bulk-review rows at display time.
+ * Keeps stored remarks intact while hiding automatically generated import
+ * metadata. User-entered business remarks remain visible.
  */
 export const getVisibleWorkbookRemark = (value: unknown): string => {
     const note = normalizeText(value);
     if (!note || !AI_TAX_INVOICE_REMARK_PATTERN.test(note)) return note;
 
+    let generatedMetadata = false;
     return note
         .split(REMARK_SEGMENT_SEPARATOR)
         .map((segment) => {
+            const text = normalizeText(segment);
+            if (/^-?\s*Gemini\s*세금\s*계산서\s*검수$/i.test(text)) {
+                generatedMetadata = true;
+                return '';
+            }
+            if (generatedMetadata && (/\.(?:pdf|jpe?g|png|webp|heic|heif)$/i.test(text) || /^승인번호\s+\S+$/.test(text))) {
+                return '';
+            }
+            generatedMetadata = false;
             const markerIndex = segment.search(MAPPING_ADDRESS_REMARK_PATTERN);
             if (markerIndex < 0) return normalizeText(segment);
 
@@ -2498,6 +2509,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const [selectedTeam, setSelectedTeam] = useState('');
     const [baseYear, setBaseYear] = useState(currentYear);
     const selectedTeamInputRef = useRef<HTMLInputElement | null>(null);
+    const ledgerSearchInputRef = useRef<HTMLInputElement | null>(null);
+    const summarySearchInputRef = useRef<HTMLInputElement | null>(null);
     const baseYearInputRef = useRef<HTMLInputElement | null>(null);
     const inputRowsRef = useRef<InputRow[]>([]);
     const selectedTeamRef = useRef('');
@@ -2505,6 +2518,9 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     if (inputRowsRef.current.length === 0) {
         inputRowsRef.current = createEmptyInputRows();
     }
+
+    const [ledgerSearchTarget, setLedgerSearchTarget] = useState<'partnerName' | 'siteName' | 'teamName'>('partnerName');
+    const [summarySearchTarget, setSummarySearchTarget] = useState<'partnerName' | 'siteName' | 'teamName'>('partnerName');
 
     const [ledgerDateSearchMode, setLedgerDateSearchMode] = useState<DateSearchMode>('range');
     const [ledgerMonth, setLedgerMonth] = useState(currentMonthValue);
@@ -2820,6 +2836,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         currentYear,
         ledgerFilter.endDate,
         ledgerFilter.startDate,
+        ledgerFilter.transactionType,
         quarterVatFilter.basis,
         quarterVatFilter.year,
         summaryFilter.endDate,
@@ -6009,17 +6026,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 ? buildLedgerExcelData(ledgerRows, ledgerFilter.transactionType)
                 : buildSummaryExcelData(summaryRows, summaryFilter.mode);
             const worksheet = XLSX.utils.aoa_to_sheet(data);
-            worksheet['!cols'] = (isLedger ? [14, 24, 36, 18, 18, 18, 24, 36, 18] : [8, 24, 24, 14, 18, 18, 18, 24, 18, 18, 18, 36, 18]).map((wch) => ({ wch }));
-            worksheet['!autofilter'] = { ref: XLSX.utils.encode_range({ r: 0, c: 0 }, { r: data.length - 2, c: data[0].length - 1 }) };
-            data.forEach((row, rowIndex) => row.forEach((value, columnIndex) => {
-                const cell = worksheet[XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex })];
-                cell.s = {
-                    font: { name: '맑은 고딕', sz: 11, bold: rowIndex === 0 || rowIndex === data.length - 1 },
-                    alignment: { vertical: 'center', wrapText: true },
-                    ...(rowIndex === 0 || rowIndex === data.length - 1 ? { fill: getExcelFill('E2E8F0') } : {})
-                };
-                if (typeof value === 'number') cell.z = Number.isInteger(value) ? '#,##0' : '#,##0.##########';
-            }));
+            applyWorkbookLedgerExcelStyle(worksheet, data, view, XLSX.utils);
             const workbook = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(workbook, worksheet, title);
             XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
@@ -7903,153 +7910,153 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const renderLedgerTab = () => (
         <section className="workbook-sheet">
             <div ref={ledgerCaptureRef}>
-                <table className="sheet-control-table query-sheet-table workbook-summary-filter-table">
-                    <tbody>
-                        <tr>
-                            <th className="sheet-title-dark" colSpan={16}>매출/매입 거래장</th>
-                        </tr>
-                        <tr>
-                            <td className="workbook-date-mode-cell" colSpan={16}>
-                                <div className="workbook-date-mode-controls">
-                                    <span className="workbook-date-mode-label">조회 방식</span>
-                                    <div className="workbook-date-mode-tabs" role="tablist" aria-label="거래장 조회 방식">
+                <div className="workbook-input-panel workbook-query-panel">
+                    <div className="workbook-input-panel-heading">
+                        <h2>매출/매입 거래장</h2>
+                    </div>
+                    <div className="workbook-query-filter-row">
+                        <div className="workbook-query-date-mode">
+                            <span className="workbook-query-field-label">조회 방식</span>
+                            <div className="workbook-date-mode-tabs" role="tablist" aria-label="거래장 조회 방식">
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={ledgerDateSearchMode === 'range'}
+                                    className={`workbook-date-mode-tab ${ledgerDateSearchMode === 'range' ? 'active' : ''}`}
+                                    onClick={() => handleLedgerDateSearchModeChange('range')}
+                                >
+                                    기간별
+                                </button>
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={ledgerDateSearchMode === 'month'}
+                                    className={`workbook-date-mode-tab ${ledgerDateSearchMode === 'month' ? 'active' : ''}`}
+                                    onClick={() => handleLedgerDateSearchModeChange('month')}
+                                >
+                                    월별
+                                </button>
+                            </div>
+                        </div>
+
+                        {ledgerDateSearchMode === 'range' ? (
+                            <>
+                                <label className="workbook-input-field workbook-query-field">
+                                    <span>검색시작일</span>
+                                    <input
+                                        type="date"
+                                        className="sheet-filter-input"
+                                        value={ledgerDraft.startDate}
+                                        onChange={(event) => setLedgerDraft((prev) => ({ ...prev, startDate: event.target.value }))}
+                                    />
+                                </label>
+                                <label className="workbook-input-field workbook-query-field">
+                                    <span>검색종료일</span>
+                                    <input
+                                        type="date"
+                                        className="sheet-filter-input"
+                                        value={ledgerDraft.endDate}
+                                        onChange={(event) => setLedgerDraft((prev) => ({ ...prev, endDate: event.target.value }))}
+                                    />
+                                </label>
+                            </>
+                        ) : (
+                            <>
+                                <div className="workbook-input-field workbook-query-field workbook-query-month-field">
+                                    <span>조회월</span>
+                                    <div className="workbook-month-picker">
                                         <button
                                             type="button"
-                                            role="tab"
-                                            aria-selected={ledgerDateSearchMode === 'range'}
-                                            className={`workbook-date-mode-tab ${ledgerDateSearchMode === 'range' ? 'active' : ''}`}
-                                            onClick={() => handleLedgerDateSearchModeChange('range')}
+                                            className="workbook-month-arrow"
+                                            onClick={() => handleShiftLedgerMonth(-1)}
+                                            aria-label="이전 달 조회"
+                                            title="이전 달"
                                         >
-                                            기간별
+                                            <FontAwesomeIcon icon={faChevronLeft} />
                                         </button>
+                                        <input
+                                            type="month"
+                                            className="sheet-filter-input workbook-month-input"
+                                            value={ledgerMonth}
+                                            min="2000-01"
+                                            max="2100-12"
+                                            onChange={(event) => applyLedgerMonthFilter(event.target.value)}
+                                            aria-label="거래장 조회월"
+                                        />
                                         <button
                                             type="button"
-                                            role="tab"
-                                            aria-selected={ledgerDateSearchMode === 'month'}
-                                            className={`workbook-date-mode-tab ${ledgerDateSearchMode === 'month' ? 'active' : ''}`}
-                                            onClick={() => handleLedgerDateSearchModeChange('month')}
+                                            className="workbook-month-arrow"
+                                            onClick={() => handleShiftLedgerMonth(1)}
+                                            aria-label="다음 달 조회"
+                                            title="다음 달"
                                         >
-                                            월별
+                                            <FontAwesomeIcon icon={faChevronRight} />
                                         </button>
                                     </div>
                                 </div>
-                            </td>
-                        </tr>
-                        <tr>
-                            {ledgerDateSearchMode === 'range' ? (
-                                <>
-                                    <th className="sheet-label-blue" colSpan={2}>검색시작일</th>
-                                    <td className="sheet-value sheet-filter-date-cell" colSpan={6}>
-                                        <input
-                                            type="date"
-                                            className="sheet-filter-input"
-                                            value={ledgerDraft.startDate}
-                                            onChange={(event) => setLedgerDraft((prev) => ({ ...prev, startDate: event.target.value }))}
-                                        />
-                                    </td>
-                                    <th className="sheet-label-blue" colSpan={2}>검색종료일</th>
-                                    <td className="sheet-value sheet-filter-date-cell" colSpan={6}>
-                                        <input
-                                            type="date"
-                                            className="sheet-filter-input"
-                                            value={ledgerDraft.endDate}
-                                            onChange={(event) => setLedgerDraft((prev) => ({ ...prev, endDate: event.target.value }))}
-                                        />
-                                    </td>
-                                </>
-                            ) : (
-                                <>
-                                    <th className="sheet-label-blue" colSpan={2}>조회월</th>
-                                    <td className="sheet-value workbook-month-picker-cell" colSpan={14}>
-                                        <div className="workbook-month-picker">
-                                            <button
-                                                type="button"
-                                                className="workbook-month-arrow"
-                                                onClick={() => handleShiftLedgerMonth(-1)}
-                                                aria-label="이전 달 조회"
-                                                title="이전 달"
-                                            >
-                                                <FontAwesomeIcon icon={faChevronLeft} />
-                                            </button>
-                                            <input
-                                                type="month"
-                                                className="sheet-filter-input workbook-month-input"
-                                                value={ledgerMonth}
-                                                min="2000-01"
-                                                max="2100-12"
-                                                onChange={(event) => applyLedgerMonthFilter(event.target.value)}
-                                                aria-label="거래장 조회월"
-                                            />
-                                            <button
-                                                type="button"
-                                                className="workbook-month-arrow"
-                                                onClick={() => handleShiftLedgerMonth(1)}
-                                                aria-label="다음 달 조회"
-                                                title="다음 달"
-                                            >
-                                                <FontAwesomeIcon icon={faChevronRight} />
-                                            </button>
-                                        </div>
-                                    </td>
-                                </>
-                            )}
-                        </tr>
-                        <tr>
-                            <th className="sheet-label-green" colSpan={2}>팀 명</th>
-                            <td className="sheet-value-light" colSpan={2}>
-                                <input
-                                    className="sheet-filter-input"
-                                    list="workbook-team-options"
-                                    value={ledgerDraft.teamName}
-                                    onChange={(event) => setLedgerDraft((prev) => ({ ...prev, teamName: event.target.value }))}
-                                    placeholder="전체"
-                                />
-                            </td>
-                            <th className="sheet-label-green" colSpan={2}>구 분</th>
-                            <td className="sheet-value-light" colSpan={2}>
-                                <select
-                                    className="sheet-filter-input"
-                                    value={ledgerDraft.transactionType}
-                                    onChange={(event) => setLedgerDraft((prev) => ({
-                                        ...prev,
-                                        transactionType: event.target.value as WorkbookTransactionType
-                                    }))}
-                                >
-                                    <option value="매출">매출</option>
-                                    <option value="매입">매입</option>
-                                </select>
-                            </td>
-                            <th className="sheet-label-green" colSpan={2}>거래처</th>
-                            <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
-                                <input
-                                    className="sheet-filter-input"
-                                    list="workbook-partner-options"
-                                    value={ledgerDraft.partnerName}
-                                    onChange={(event) => setLedgerDraft((prev) => ({ ...prev, partnerName: event.target.value }))}
-                                    placeholder="거래처 전체"
-                                />
-                            </td>
-                            <th className="sheet-label-green" colSpan={2}>현장명</th>
-                            <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
-                                <input
-                                    className="sheet-filter-input"
-                                    list="workbook-site-options"
-                                    value={ledgerDraft.siteName}
-                                    onChange={(event) => setLedgerDraft((prev) => ({ ...prev, siteName: event.target.value }))}
-                                    placeholder="현장 전체"
-                                />
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+                            </>
+                        )}
 
+                        <div className="workbook-input-field workbook-query-field">
+                            <span>조회 구분</span>
+                            <div className="workbook-query-targets workbook-query-types" role="group" aria-label="조회 구분">
+                                {(['매출', '매입'] as const).map((transactionType) => (
+                                    <button
+                                        key={transactionType}
+                                        type="button"
+                                        aria-pressed={ledgerDraft.transactionType === transactionType}
+                                        onClick={() => setLedgerDraft((prev) => ({ ...prev, transactionType }))}
+                                    >
+                                        {transactionType}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="workbook-query-search">
+                            <div className="workbook-query-targets" role="group" aria-label="검색 대상">
+                                {([
+                                    { key: 'partnerName', label: '거래처' },
+                                    { key: 'siteName', label: '현장명' },
+                                    { key: 'teamName', label: '팀명' }
+                                ] as const).map((target) => (
+                                    <button
+                                        key={target.key}
+                                        type="button"
+                                        aria-pressed={ledgerSearchTarget === target.key}
+                                        onClick={() => {
+                                            ledgerSearchInputRef.current?.focus();
+                                            if (ledgerSearchTarget === target.key) return;
+                                            setLedgerSearchTarget(target.key);
+                                            setLedgerDraft((prev) => ({ ...prev, partnerName: '', siteName: '', teamName: '', [target.key]: prev[ledgerSearchTarget] }));
+                                        }}
+                                    >
+                                        {target.label}
+                                    </button>
+                                ))}
+                            </div>
+                            <label className="workbook-input-field">
+                                <input
+                                    ref={ledgerSearchInputRef}
+                                    aria-label={ledgerSearchTarget === 'partnerName' ? '거래처 검색' : ledgerSearchTarget === 'siteName' ? '현장명 검색' : '팀명 검색'}
+                                    autoComplete="off"
+                                    value={ledgerDraft[ledgerSearchTarget]}
+                                    onChange={(event) => setLedgerDraft((prev) => ({ ...prev, [ledgerSearchTarget]: event.target.value }))}
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter' && !event.nativeEvent.isComposing) applyLedgerFilter();
+                                    }}
+                                    placeholder={ledgerSearchTarget === 'partnerName' ? '거래처 전체' : ledgerSearchTarget === 'siteName' ? '현장 전체' : '팀 전체'}
+                                />
+                            </label>
+                            <button type="button" className="excel-button excel-button-green workbook-query-submit" onClick={applyLedgerFilter}>
+                                <FontAwesomeIcon icon={faMagnifyingGlass} />조회</button>
+                        </div>
+                    </div>
+                </div>
                 <div className="workbook-query-toolbar">
                     <div className="sheet-button-count">{getEntryLoadScopeText(entryLoadScope, ledgerRows.length)}</div>
                     <div className="workbook-query-actions" role="group" aria-label="거래장 작업">
-                        <button type="button" className="excel-button excel-button-green" onClick={applyLedgerFilter}>
-                            <FontAwesomeIcon icon={faMagnifyingGlass} />
-                            조회
-                        </button>
+
                         <button type="button" className="excel-button excel-button-green" onClick={() => handleDownloadView('ledger')} disabled={loading || downloadingView !== null || ledgerRows.length === 0}>
                             <FontAwesomeIcon icon={downloadingView === 'ledger' ? faSpinner : faDownload} spin={downloadingView === 'ledger'} />
                             엑셀 다운로드
@@ -8145,160 +8152,157 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const renderSummaryTab = () => (
         <section className="workbook-sheet">
             <div ref={summaryCaptureRef}>
-                <table className="sheet-control-table query-sheet-table">
-                    <tbody>
-                        <tr>
-                            <th className="sheet-title-dark" colSpan={16}>전체 조회</th>
-                        </tr>
-                        <tr>
-                            <td className="workbook-summary-mode-tabs-cell" colSpan={16}>
-                                <div className="workbook-summary-mode-tabs" role="tablist" aria-label="전체조회 구분">
-                                    {SUMMARY_MODE_TABS.map((mode) => (
+                <div className="workbook-input-panel workbook-query-panel">
+                    <div className="workbook-input-panel-heading">
+                        <h2>전체 조회</h2>
+                    </div>
+                    <div className="workbook-query-mode-row">
+                        <div className="workbook-summary-mode-tabs" role="tablist" aria-label="전체조회 구분">
+                            {SUMMARY_MODE_TABS.map((mode) => (
+                                <button
+                                    key={mode}
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={summaryDraft.mode === mode}
+                                    className={`workbook-summary-mode-tab ${summaryDraft.mode === mode ? 'active' : ''}`}
+                                    onClick={() => {
+                                        setSummaryDraft((prev) => ({ ...prev, mode }));
+                                        setSummaryFilter((prev) => ({ ...prev, mode }));
+                                    }}
+                                >
+                                    {mode}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="workbook-query-filter-row">
+                        <div className="workbook-query-date-mode">
+                            <span className="workbook-query-field-label">조회 방식</span>
+                            <div className="workbook-date-mode-tabs" role="tablist" aria-label="전체조회 기간 방식">
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={summaryDateSearchMode === 'range'}
+                                    className={`workbook-date-mode-tab ${summaryDateSearchMode === 'range' ? 'active' : ''}`}
+                                    onClick={() => handleSummaryDateSearchModeChange('range')}
+                                >
+                                    기간별
+                                </button>
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={summaryDateSearchMode === 'month'}
+                                    className={`workbook-date-mode-tab ${summaryDateSearchMode === 'month' ? 'active' : ''}`}
+                                    onClick={() => handleSummaryDateSearchModeChange('month')}
+                                >
+                                    월별
+                                </button>
+                            </div>
+                        </div>
+
+                        {summaryDateSearchMode === 'range' ? (
+                            <>
+                                <label className="workbook-input-field workbook-query-field">
+                                    <span>검색시작일</span>
+                                    <input
+                                        type="date"
+                                        className="sheet-filter-input"
+                                        value={summaryDraft.startDate}
+                                        onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startDate: event.target.value }))}
+                                    />
+                                </label>
+                                <label className="workbook-input-field workbook-query-field">
+                                    <span>검색종료일</span>
+                                    <input
+                                        type="date"
+                                        className="sheet-filter-input"
+                                        value={summaryDraft.endDate}
+                                        onChange={(event) => setSummaryDraft((prev) => ({ ...prev, endDate: event.target.value }))}
+                                    />
+                                </label>
+                            </>
+                        ) : (
+                            <>
+                                <div className="workbook-input-field workbook-query-field workbook-query-month-field">
+                                    <span>조회월</span>
+                                    <div className="workbook-month-picker">
                                         <button
-                                            key={mode}
                                             type="button"
-                                            role="tab"
-                                            aria-selected={summaryDraft.mode === mode}
-                                            className={`workbook-summary-mode-tab ${summaryDraft.mode === mode ? 'active' : ''}`}
-                                            onClick={() => {
-                                                setSummaryDraft((prev) => ({ ...prev, mode }));
-                                                setSummaryFilter((prev) => ({ ...prev, mode }));
-                                            }}
+                                            className="workbook-month-arrow"
+                                            onClick={() => handleShiftSummaryMonth(-1)}
+                                            aria-label="이전 달 조회"
+                                            title="이전 달"
                                         >
-                                            {mode}
+                                            <FontAwesomeIcon icon={faChevronLeft} />
                                         </button>
-                                    ))}
-                                </div>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td className="workbook-date-mode-cell" colSpan={16}>
-                                <div className="workbook-date-mode-controls">
-                                    <span className="workbook-date-mode-label">조회 방식</span>
-                                    <div className="workbook-date-mode-tabs" role="tablist" aria-label="전체조회 기간 방식">
+                                        <input
+                                            type="month"
+                                            className="sheet-filter-input workbook-month-input"
+                                            value={summaryMonth}
+                                            min="2000-01"
+                                            max="2100-12"
+                                            onChange={(event) => applySummaryMonthFilter(event.target.value)}
+                                            aria-label="전체조회 조회월"
+                                        />
                                         <button
                                             type="button"
-                                            role="tab"
-                                            aria-selected={summaryDateSearchMode === 'range'}
-                                            className={`workbook-date-mode-tab ${summaryDateSearchMode === 'range' ? 'active' : ''}`}
-                                            onClick={() => handleSummaryDateSearchModeChange('range')}
+                                            className="workbook-month-arrow"
+                                            onClick={() => handleShiftSummaryMonth(1)}
+                                            aria-label="다음 달 조회"
+                                            title="다음 달"
                                         >
-                                            기간별
-                                        </button>
-                                        <button
-                                            type="button"
-                                            role="tab"
-                                            aria-selected={summaryDateSearchMode === 'month'}
-                                            className={`workbook-date-mode-tab ${summaryDateSearchMode === 'month' ? 'active' : ''}`}
-                                            onClick={() => handleSummaryDateSearchModeChange('month')}
-                                        >
-                                            월별
+                                            <FontAwesomeIcon icon={faChevronRight} />
                                         </button>
                                     </div>
                                 </div>
-                            </td>
-                        </tr>
-                        <tr>
-                            {summaryDateSearchMode === 'range' ? (
-                                <>
-                                    <th className="sheet-label-blue" colSpan={2}>검색시작일</th>
-                                    <td className="sheet-value sheet-filter-date-cell" colSpan={6}>
-                                        <input
-                                            type="date"
-                                            className="sheet-filter-input"
-                                            value={summaryDraft.startDate}
-                                            onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startDate: event.target.value }))}
-                                        />
-                                    </td>
-                                    <th className="sheet-label-blue" colSpan={2}>검색종료일</th>
-                                    <td className="sheet-value sheet-filter-date-cell" colSpan={6}>
-                                        <input
-                                            type="date"
-                                            className="sheet-filter-input"
-                                            value={summaryDraft.endDate}
-                                            onChange={(event) => setSummaryDraft((prev) => ({ ...prev, endDate: event.target.value }))}
-                                        />
-                                    </td>
-                                </>
-                            ) : (
-                                <>
-                                    <th className="sheet-label-blue" colSpan={2}>조회월</th>
-                                    <td className="sheet-value workbook-month-picker-cell" colSpan={14}>
-                                        <div className="workbook-month-picker">
-                                            <button
-                                                type="button"
-                                                className="workbook-month-arrow"
-                                                onClick={() => handleShiftSummaryMonth(-1)}
-                                                aria-label="이전 달 조회"
-                                                title="이전 달"
-                                            >
-                                                <FontAwesomeIcon icon={faChevronLeft} />
-                                            </button>
-                                            <input
-                                                type="month"
-                                                className="sheet-filter-input workbook-month-input"
-                                                value={summaryMonth}
-                                                min="2000-01"
-                                                max="2100-12"
-                                                onChange={(event) => applySummaryMonthFilter(event.target.value)}
-                                                aria-label="전체조회 조회월"
-                                            />
-                                            <button
-                                                type="button"
-                                                className="workbook-month-arrow"
-                                                onClick={() => handleShiftSummaryMonth(1)}
-                                                aria-label="다음 달 조회"
-                                                title="다음 달"
-                                            >
-                                                <FontAwesomeIcon icon={faChevronRight} />
-                                            </button>
-                                        </div>
-                                    </td>
-                                </>
-                            )}
-                        </tr>
-                        <tr>
-                            <th className="sheet-label-green" colSpan={2}>팀 명</th>
-                            <td className="sheet-value-light" colSpan={2}>
-                                <input
-                                    className="sheet-filter-input"
-                                    list="workbook-team-options"
-                                    value={summaryDraft.teamName}
-                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, teamName: event.target.value }))}
-                                    placeholder="전체"
-                                />
-                            </td>
-                            <th className="sheet-label-green" colSpan={2}>거래처</th>
-                            <td className="sheet-value-light sheet-filter-wide-cell" colSpan={4}>
-                                <input
-                                    className="sheet-filter-input"
-                                    list="workbook-partner-options"
-                                    value={summaryDraft.partnerName}
-                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, partnerName: event.target.value }))}
-                                    placeholder="거래처 전체"
-                                />
-                            </td>
-                            <th className="sheet-label-green" colSpan={2}>현장명</th>
-                            <td className="sheet-value-light sheet-filter-wide-cell" colSpan={4}>
-                                <input
-                                    className="sheet-filter-input"
-                                    list="workbook-site-options"
-                                    value={summaryDraft.siteName}
-                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, siteName: event.target.value }))}
-                                    placeholder="현장 전체"
-                                />
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+                            </>
+                        )}
 
+
+                        <div className="workbook-query-search">
+                            <div className="workbook-query-targets" role="group" aria-label="검색 대상">
+                                {([
+                                    { key: 'partnerName', label: '거래처' },
+                                    { key: 'siteName', label: '현장명' },
+                                    { key: 'teamName', label: '팀명' }
+                                ] as const).map((target) => (
+                                    <button
+                                        key={target.key}
+                                        type="button"
+                                        aria-pressed={summarySearchTarget === target.key}
+                                        onClick={() => {
+                                            summarySearchInputRef.current?.focus();
+                                            if (summarySearchTarget === target.key) return;
+                                            setSummarySearchTarget(target.key);
+                                            setSummaryDraft((prev) => ({ ...prev, partnerName: '', siteName: '', teamName: '', [target.key]: prev[summarySearchTarget] }));
+                                        }}
+                                    >
+                                        {target.label}
+                                    </button>
+                                ))}
+                            </div>
+                            <label className="workbook-input-field">
+                                <input
+                                    ref={summarySearchInputRef}
+                                    aria-label={summarySearchTarget === 'partnerName' ? '거래처 검색' : summarySearchTarget === 'siteName' ? '현장명 검색' : '팀명 검색'}
+                                    autoComplete="off"
+                                    value={summaryDraft[summarySearchTarget]}
+                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, [summarySearchTarget]: event.target.value }))}
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter' && !event.nativeEvent.isComposing) applySummaryFilter();
+                                    }}
+                                    placeholder={summarySearchTarget === 'partnerName' ? '거래처 전체' : summarySearchTarget === 'siteName' ? '현장 전체' : '팀 전체'}
+                                />
+                            </label>
+                            <button type="button" className="excel-button excel-button-green workbook-query-submit" onClick={applySummaryFilter}>
+                                <FontAwesomeIcon icon={faMagnifyingGlass} />조회</button>
+                        </div>
+                    </div>
+                </div>
                 <div className="workbook-query-toolbar">
                     <div className="sheet-button-count">{getEntryLoadScopeText(entryLoadScope, summaryRows.length)}</div>
                     <div className="workbook-query-actions" role="group" aria-label="전체조회 작업">
-                        <button type="button" className="excel-button excel-button-green" onClick={applySummaryFilter}>
-                            <FontAwesomeIcon icon={faMagnifyingGlass} />
-                            조회
-                        </button>
+
                         <button type="button" className="excel-button excel-button-green" onClick={() => handleDownloadView('summary')} disabled={loading || summaryVerificationLoading || downloadingView !== null || summaryRows.length === 0} title={summaryVerificationLoading ? '정산 이력 검증이 완료되면 다운로드할 수 있습니다.' : '현재 조회 조건에 해당하는 모든 페이지의 결과를 다운로드합니다.'}>
                             <FontAwesomeIcon icon={downloadingView === 'summary' ? faSpinner : faDownload} spin={downloadingView === 'summary'} />
                             엑셀 다운로드
@@ -8987,7 +8991,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 <div className="workbook-titlebar">
                     <div>
                         <h1>{`${companyLabel} 매입매출`}</h1>
-                        <p>{`${companyLabel} 매입매출 전용 장부 페이지입니다.`}</p>
                     </div>
                     <div className="workbook-title-actions">
                         <button
@@ -9019,6 +9022,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     </div>
                 </div>
 
+                <div className="workbook-navigation">
                 <div className="workbook-tenant-tabs" role="tablist" aria-label="회사 선택">
                     {TENANT_TABS.map((tab) => (
                         <button
@@ -9049,6 +9053,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             {tab.label}
                         </button>
                     ))}
+                </div>
+
                 </div>
 
                 {activeTab === 'input' && renderInputTab()}

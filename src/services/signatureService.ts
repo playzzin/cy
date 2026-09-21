@@ -1,5 +1,7 @@
-import { storage } from '../config/firebase';
-import { ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
+import { httpsCallable } from 'firebase/functions';
+import { invalidateWorkerCache } from '../utils/workerCacheRevision';
+import { auth, functions, storage } from '../config/firebase';
+import { ref, deleteObject } from 'firebase/storage';
 import { manpowerService } from './manpowerService';
 
 export interface SignatureConsentSnapshot {
@@ -40,47 +42,14 @@ export const signatureService = {
                 throw new Error(`존재하지 않는 근로자입니다. (id=${rawWorkerId})`);
             }
 
-            // 1. Create Storage Reference
-            // Use a timestamp to prevent caching issues when updating
-            const timestamp = Date.now();
-            const storagePath = `signatures/${canonicalWorkerId}_${timestamp}.png`;
-            const storageRef = ref(storage, storagePath);
-
-            // 2. Upload Image
-            await uploadString(storageRef, dataUrl, 'data_url');
-            const downloadUrl = await getDownloadURL(storageRef);
-
-            // 3. Update Worker Document
-            // First, get the old signature URL to delete later if needed (optional cleanup)
-            try {
-                const agreedAt = new Date().toISOString();
-                await manpowerService.updateWorker(canonicalWorkerId, {
-                    signatureUrl: downloadUrl,
-                    ...(options?.source ? {
-                        signatureSource: options.source,
-                        signatureUpdatedAt: agreedAt,
-                    } : {}),
-                    ...(options?.consent ? {
-                        signatureConsent: {
-                            ...options.consent,
-                            agreedAt,
-                        },
-                    } : {}),
-                });
-            } catch (e) {
-                try {
-                    await deleteObject(storageRef);
-                } catch {
-                    // ignore cleanup errors
-                }
-                throw e;
-            }
-
-            // 4. (Optional) Cleanup old signature file if it exists and is different
-            // Note: Parsing the token from URL is tricky, so we skip complex deletion for now 
-            // or just rely on the new URL invalidating the old view. 
-
-            return downloadUrl;
+            const uid = auth.currentUser?.uid;
+            if (!uid) throw new Error('로그인이 필요합니다.');
+            const result = await httpsCallable<Record<string, unknown>, { signatureUrl: string }>(functions, 'workerSignatures')({
+                action: 'save', workerId: canonicalWorkerId, dataUrl, ...(options ? { options } : {}),
+            });
+            if (auth.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다.');
+            invalidateWorkerCache();
+            return result.data.signatureUrl;
 
         } catch (error) {
             console.error("Error saving signature:", error);

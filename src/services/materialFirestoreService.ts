@@ -1,3 +1,4 @@
+import { getTeamScopedRows, invalidateTeamScopedCache } from './teamScopedReadService';
 import { db } from '../config/firebase';
 import {
     collection,
@@ -45,6 +46,8 @@ export const materialFirestoreService = {
     },
 
     getAllMaterials: async (options?: { includeInactive?: boolean }) => {
+        const scoped = await getTeamScopedRows<MaterialZod>('materials');
+        if (scoped !== null) return scoped.filter(row => options?.includeInactive || row.isActive !== false);
         const ref = collection(db, MASTER_COLLECTION).withConverter(createConverter(MaterialSchema));
         // Note: Firestore does not support 'field does not exist' query combined with '== true'.
         // Fetch all and filter in memory to ensure data with missing 'isActive' field is included.
@@ -57,6 +60,7 @@ export const materialFirestoreService = {
     saveMaterial: async (id: string, data: MaterialZod) => {
         const ref = doc(db, MASTER_COLLECTION, id).withConverter(createConverter(MaterialSchema));
         await setDoc(ref, data, { merge: true });
+        invalidateTeamScopedCache();
     },
 
     // --- Inbound Transactions ---
@@ -101,6 +105,8 @@ export const materialFirestoreService = {
     },
 
     getInboundsByRange: async (startDate: string, endDate: string, siteId?: string, rentalCompanyId?: string) => {
+        const scoped = await getTeamScopedRows<MaterialInboundZod>('materialInbounds');
+        if (scoped !== null) return scoped.filter(row => row.transactionDate >= startDate && row.transactionDate <= endDate && (!siteId || row.siteId === siteId) && (!rentalCompanyId || row.rentalCompanyId === rentalCompanyId));
         const ref = collection(db, INBOUND_COLLECTION).withConverter(createConverter(MaterialInboundSchema));
         if (rentalCompanyId) {
             const rentalQuery = query(ref, where('rentalCompanyId', '==', rentalCompanyId));
@@ -174,6 +180,8 @@ export const materialFirestoreService = {
     },
 
     getOutboundsByRange: async (startDate: string, endDate: string, siteId?: string, rentalCompanyId?: string) => {
+        const scoped = await getTeamScopedRows<MaterialOutboundZod>('materialOutbounds');
+        if (scoped !== null) return scoped.filter(row => row.transactionDate >= startDate && row.transactionDate <= endDate && (!siteId || row.siteId === siteId) && (!rentalCompanyId || row.rentalCompanyId === rentalCompanyId));
         const ref = collection(db, OUTBOUND_COLLECTION).withConverter(createConverter(MaterialOutboundSchema));
         if (rentalCompanyId) {
             const rentalQuery = query(ref, where('rentalCompanyId', '==', rentalCompanyId));

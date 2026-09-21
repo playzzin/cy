@@ -1,3 +1,4 @@
+import { getTeamScopedRows } from './teamScopedReadService';
 import { toast } from '../utils/swal';
 import {
     listAllAccommodationAssignments,
@@ -530,6 +531,8 @@ export const accommodationAssignmentService = {
     },
 
     getAllAssignments: async (): Promise<AccommodationAssignment[]> => {
+        const scoped = await getTeamScopedRows<any>('accommodationAssignments');
+        if (scoped !== null) return scoped.map(mapAssignmentRow);
         await loadDcAssignments();
         return dcAssignmentsCache
             .map(mapAssignmentRow)

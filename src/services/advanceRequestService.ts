@@ -9,8 +9,10 @@ import {
     updateDoc,
     where,
 } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { auth, db, functions } from '../config/firebase';
+import { httpsCallable } from 'firebase/functions';
 import { stripUndefinedFields } from '../utils/stripUndefinedFields';
+import { getTeamScopedRows } from './teamScopedReadService';
 
 export type AdvanceRequestStatus = 'requested' | 'approved' | 'rejected' | 'paid' | 'cancelled';
 
@@ -186,6 +188,13 @@ export const advanceRequestService = {
 
     listForWorkerIds: async (workerIds: string[], requesterUid?: string): Promise<AdvanceRequest[]> => {
         const uniqueWorkerIds = Array.from(new Set(workerIds.map(normalizeText).filter(Boolean)));
+        const scoped = await getTeamScopedRows<Record<string, unknown> & { id: string }>(COLLECTION_NAME);
+        if (scoped !== null) {
+            return sortNewestFirst(scoped.map(row => mapRequest(row.id, row)).filter(request =>
+                uniqueWorkerIds.includes(request.workerId)
+                || Boolean(requesterUid && request.requesterUid === requesterUid)
+            ));
+        }
         const requestMap = new Map<string, AdvanceRequest>();
 
         const workerResults = await Promise.all(uniqueWorkerIds.map((workerId) => listByField('workerId', workerId)));
@@ -203,54 +212,22 @@ export const advanceRequestService = {
         return sortNewestFirst(Array.from(requestMap.values()));
     },
 
-    createRequest: async (input: AdvanceRequestCreateInput): Promise<string> => {
-        const workerId = normalizeText(input.workerId);
-        const requestedAmount = Math.round(toFiniteNumber(input.requestedAmount));
-        const availableAmount = Math.max(0, Math.round(toFiniteNumber(input.availableAmountSnapshot)));
-
-        if (!workerId) throw new Error('worker-required');
-        if (requestedAmount <= 0) throw new Error('requested-amount-required');
-        if (requestedAmount > availableAmount) throw new Error('requested-amount-exceeds-available');
-
-        const now = Timestamp.now();
-        const id = makeRequestId(workerId);
-        const payload = stripUndefinedFields({
-            ...input,
-            workerId,
-            requestedAmount,
-            currentMonthEarned: Math.round(toFiniteNumber(input.currentMonthEarned)),
-            previousMonthEarned: Math.round(toFiniteNumber(input.previousMonthEarned)),
-            earnedAmountSnapshot: Math.round(toFiniteNumber(input.earnedAmountSnapshot)),
-            existingAdvanceAmountSnapshot: Math.round(toFiniteNumber(input.existingAdvanceAmountSnapshot)),
-            activeRequestAmountSnapshot: Math.round(toFiniteNumber(input.activeRequestAmountSnapshot)),
-            availableAmountSnapshot: availableAmount,
-            status: 'requested',
-            createdAt: now,
-            updatedAt: now,
-        } as Record<string, unknown>);
-
-        await setDoc(doc(db, COLLECTION_NAME, id), payload);
-        return id;
+    createRequest: async (input: AdvanceRequestCreateInput, requestId = makeRequestId(input.workerId)): Promise<string> => {
+        const uid = auth.currentUser?.uid;
+        if (!uid) throw new Error('로그인이 필요합니다.');
+        const result = await httpsCallable<Record<string, unknown>, { id: string }>(functions, 'teamAdvanceRequests')({
+            action: 'create', requestId, workerId: input.workerId, yearMonth: input.yearMonth,
+            requestedAmount: input.requestedAmount, memo: input.memo || '',
+        });
+        if (auth.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다.');
+        return result.data.id;
     },
 
     cancelRequest: async (id: string, requesterUid?: string): Promise<void> => {
-        const requestId = normalizeText(id);
-        if (!requestId) return;
-
-        const ref = doc(db, COLLECTION_NAME, requestId);
-        const snapshot = await getDoc(ref);
-        if (!snapshot.exists()) throw new Error('request-not-found');
-
-        const request = mapRequest(snapshot.id, snapshot.data() as Record<string, unknown>);
-        if (request.status !== 'requested') throw new Error('request-not-cancellable');
-        if (requesterUid && request.requesterUid && request.requesterUid !== requesterUid) {
-            throw new Error('request-owner-mismatch');
-        }
-
-        await updateDoc(ref, {
-            status: 'cancelled',
-            updatedAt: Timestamp.now(),
-        });
+        const uid = auth.currentUser?.uid;
+        if (!uid) throw new Error('로그인이 필요합니다.');
+        await httpsCallable(functions, 'teamAdvanceRequests')({ action: 'cancel', id });
+        if (auth.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다.');
     },
 
     reviewRequest: async (

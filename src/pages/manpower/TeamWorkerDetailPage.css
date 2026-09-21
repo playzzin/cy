@@ -1865,7 +1865,7 @@
 @media (max-width: 768px) {
     .tw-page {
         min-height: auto;
-        overflow-x: hidden;
+        overflow-x: clip;
         padding-bottom: max(16px, env(safe-area-inset-bottom));
     }
 
@@ -2075,6 +2075,9 @@
     .tw-workspace {
         display: block;
         min-width: 0;
+        scroll-margin-top: calc(var(--header-height, 60px) + 12px);
+        /* View changes restore their own position; prevent a second browser adjustment. */
+        overflow-anchor: none;
     }
 
     .tw-workspace--list .tw-detail-panel,
@@ -2095,6 +2098,8 @@
     .tw-worker-list {
         gap: 7px;
         padding: 8px;
+        overflow: visible;
+        overscroll-behavior: auto;
     }
 
     .tw-panel-heading {

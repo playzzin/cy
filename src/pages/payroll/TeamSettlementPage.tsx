@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
 import {
   closestCenter,
@@ -975,6 +975,24 @@ export const TeamSettlementPage: React.FC = () => {
   const [defaultTeamOrderIds, setDefaultTeamOrderIds] = useState<string[]>([]);
   const [yearMonth, setYearMonth] = useState<string>(buildDefaultYearMonth());
   const [doc, setDoc] = useState<TeamSettlementDocument | null>(null);
+  const transactionMemoRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const textarea = transactionMemoRef.current;
+    if (!textarea) return;
+    const resize = () => {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    };
+    resize();
+    let previousWidth = textarea.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (textarea.clientWidth === previousWidth) return;
+      previousWidth = textarea.clientWidth;
+      resize();
+    });
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, [doc?.transactionMemo, doc?.teamId, doc?.yearMonth]);
   const [savedDocumentFingerprint, setSavedDocumentFingerprint] = useState<string>('');
   const [saveState, setSaveState] = useState<TeamSettlementSaveState>('idle');
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' });
@@ -1265,12 +1283,17 @@ export const TeamSettlementPage: React.FC = () => {
     };
   }, [selectedTeamId, yearMonth]);
 
+  const settlementLoadGeneration = useRef(0);
+  const settlementScope = useRef('');
+  settlementScope.current = `${selectedTeamId}:${yearMonth}`;
   const loadSettlement = useCallback(async () => {
+    const sequence = ++settlementLoadGeneration.current;
     if (!selectedTeamId || !yearMonth) return;
 
     setLoadState({ status: 'loading' });
     try {
       const loaded = await teamSettlementService.getTeamSettlement({ yearMonth, teamId: selectedTeamId });
+      if (sequence !== settlementLoadGeneration.current) return;
       const nextDoc = stripSupportOriginalLines(loaded);
       setDoc(nextDoc);
       setSavedDocumentFingerprint(createTeamSettlementDraftFingerprint(nextDoc));
@@ -1278,12 +1301,13 @@ export const TeamSettlementPage: React.FC = () => {
       setLoadState({ status: 'idle' });
     } catch (error) {
       console.error(error);
-      setLoadState({ status: 'error', message: '팀정산 데이터를 불러오지 못했습니다.' });
+      if (sequence === settlementLoadGeneration.current) setLoadState({ status: 'error', message: '팀정산 데이터를 불러오지 못했습니다.' });
     }
   }, [selectedTeamId, yearMonth]);
 
   useEffect(() => {
     void loadSettlement();
+    return () => { settlementLoadGeneration.current++; };
   }, [loadSettlement]);
 
   const selectedTeam = useMemo(
@@ -1789,6 +1813,7 @@ export const TeamSettlementPage: React.FC = () => {
   const persistCurrentDocument = useCallback(async (showSuccessToast = true): Promise<TeamSettlementDocument | null> => {
     if (!doc) return null;
 
+    const scopeAtSave = settlementScope.current;
     const nextDoc: TeamSettlementDocument = {
       ...doc,
       teamName: doc.teamName || selectedTeamName,
@@ -1798,7 +1823,8 @@ export const TeamSettlementPage: React.FC = () => {
     setSaveState('saving');
     try {
       await teamSettlementService.saveTeamSettlement(nextDoc);
-      setDoc(nextDoc);
+      if (settlementScope.current !== scopeAtSave) return nextDoc;
+      setDoc(current => current === doc ? nextDoc : current);
       setSavedDocumentFingerprint(createTeamSettlementDraftFingerprint(nextDoc));
       setSaveState('idle');
       if (showSuccessToast) toast.success('변경사항을 저장했습니다.');
@@ -4157,16 +4183,24 @@ export const TeamSettlementPage: React.FC = () => {
         }
 
         @media (max-width: 639px) {
+          .team-settlement-page__workspace-bar {
+            position: static;
+            backdrop-filter: none;
+            box-shadow: none;
+          }
+
           .team-settlement-page {
             padding-bottom: calc(1rem + env(safe-area-inset-bottom));
           }
 
           .team-settlement-page__action-grid > button {
             min-height: 44px;
+            padding-inline: 8px;
+            word-break: keep-all;
           }
 
           .team-settlement-page__team-list {
-            scroll-snap-type: x mandatory;
+            scroll-snap-type: x proximity;
           }
 
           .team-settlement-page__team-list > button {
@@ -4737,6 +4771,37 @@ export const TeamSettlementPage: React.FC = () => {
               </div>
               <div className="mt-2 text-right text-xs font-medium text-slate-500">
                 전체 변경사항은 상단 작업 표시줄에서 한 번에 저장됩니다.
+              </div>
+              <div className="mt-4 overflow-hidden rounded-xl border border-amber-200 bg-amber-50/50 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200 px-4 py-3">
+                  <label htmlFor="team-settlement-transaction-memo" className="text-sm font-bold text-slate-800">
+                    정산 메모
+                  </label>
+                  <span id="team-settlement-transaction-memo-help" className="text-xs text-slate-500">
+                    {doc?.confirmedAt ? '확정된 정산입니다. 확정 해제 후 수정할 수 있습니다.' : '팀·월별 메모 · 상단 저장 버튼으로 저장'}
+                  </span>
+                </div>
+                <textarea
+                  ref={transactionMemoRef}
+                  id="team-settlement-transaction-memo"
+                  aria-describedby="team-settlement-transaction-memo-help"
+                  value={doc?.transactionMemo ?? ''}
+                  readOnly={!canEdit}
+                  onChange={(event) => {
+                    const transactionMemo = event.target.value;
+                    updateDoc((prev) => ({ ...prev, transactionMemo }));
+                  }}
+                  placeholder="정산하면서 확인할 내용이나 전달사항을 자유롭게 적어 주세요."
+                  rows={6}
+                  className="block w-full resize-none overflow-hidden border-0 bg-transparent px-6 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-amber-400 read-only:cursor-default"
+                  style={{
+                    minHeight: '208px',
+                    lineHeight: '32px',
+                    backgroundImage: 'linear-gradient(to right, transparent 15px, #f3c9c4 15px, #f3c9c4 16px, transparent 16px), repeating-linear-gradient(to bottom, transparent 0px, transparent 31px, #e2e8f0 31px, #e2e8f0 32px)',
+                    backgroundPosition: '0 0, 0 8px',
+                    backgroundAttachment: 'local'
+                  }}
+                />
               </div>
             </div>
           </section>

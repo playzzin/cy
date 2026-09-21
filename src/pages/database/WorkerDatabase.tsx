@@ -1,3 +1,4 @@
+import SecureSignature from '../../components/SecureSignature';
 import React, { useState, useEffect, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { resolveIcon } from '../../constants/iconMap';
@@ -1777,7 +1778,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                 <td key={key} className="px-4 py-3 text-center border border-slate-200">
                                                                     {worker.signatureUrl ? (
                                                                         <div className="flex justify-center group relative">
-                                                                            <img
+                                                                            <SecureSignature
                                                                                 src={worker.signatureUrl}
                                                                                 alt="서명"
                                                                                 className="h-8 w-auto object-contain cursor-pointer hover:scale-150 transition-transform bg-white border border-slate-200 rounded"

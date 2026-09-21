@@ -1,3 +1,4 @@
+import { useAuth } from '../../../contexts/AuthContext';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { getMenuModeStorageKey } from '../../../utils/menuModeStorage';
@@ -248,22 +249,22 @@ const removeDuplicateLeafMenuRoutes = (
     return { items, removed };
 };
 
-const getInitialMenuSite = (requestedSite: string | null) => {
+const getInitialMenuSite = (requestedSite: string | null, uid?: string) => {
     if (requestedSite) return requestedSite;
 
-    const storedPosition = localStorage.getItem(getMenuModeStorageKey('cy_current_position'));
+    const storedPosition = localStorage.getItem(getMenuModeStorageKey('cy_current_position', uid));
     if (storedPosition && storedPosition !== 'full') {
         return getPositionSiteKey(storedPosition);
     }
 
-    return localStorage.getItem(getMenuModeStorageKey('cy_current_site')) || 'admin';
+    return localStorage.getItem(getMenuModeStorageKey('cy_current_site', uid)) || 'admin';
 };
 
-const resolveExistingMenuSite = (data: SiteDataType, desiredSite: string) => {
+const resolveExistingMenuSite = (data: SiteDataType, desiredSite: string, uid?: string) => {
     const keys = Object.keys(data);
     const candidates = [
         desiredSite,
-        getInitialMenuSite(null),
+        getInitialMenuSite(null, uid),
         'admin',
         keys.find(key => !key.startsWith('pos_')),
         keys[0]
@@ -273,8 +274,9 @@ const resolveExistingMenuSite = (data: SiteDataType, desiredSite: string) => {
 };
 
 const AdvancedMenuManagerEditor: React.FC = () => {
+    const { currentUser } = useAuth();
     const [searchParams] = useSearchParams();
-    const initialSite = getInitialMenuSite(searchParams.get('site'));
+    const initialSite = getInitialMenuSite(searchParams.get('site'), currentUser?.uid);
     const { positions: previewPositions, changePosition: changePreviewPosition } = useSiteMode();
 
     // --- State ---
@@ -534,7 +536,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
                 }
                 */
 
-                setSelectedSite(previous => resolveExistingMenuSite(data, previous || initialSite));
+                setSelectedSite(previous => resolveExistingMenuSite(data, previous || initialSite, currentUser?.uid));
             }
         };
         loadData();

@@ -1455,6 +1455,9 @@ a {
 @media (max-width: 768px) {
     #sidebar {
         transform: translateX(-100%);
+        height: 100dvh;
+        max-width: calc(100vw - 44px);
+        overscroll-behavior-y: contain;
     }
 
     .app.mobile-open #sidebar {
@@ -1470,6 +1473,8 @@ a {
         max-width: 100%;
         margin-left: 0;
         padding: 15px;
+        padding-bottom: max(20px, env(safe-area-inset-bottom));
+        scroll-margin-top: calc(var(--header-height) + 12px);
     }
 
     #bottom-panel {
@@ -1499,8 +1504,8 @@ a {
     }
 
     .header-tool-btn {
-        width: 34px;
-        height: 34px;
+        width: 40px;
+        height: 44px;
     }
 
     #mobile-close-btn {

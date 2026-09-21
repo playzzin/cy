@@ -1,3 +1,4 @@
+import SecureSignature from '../../components/SecureSignature';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -459,7 +460,7 @@ const AccountChangeRequestPage: React.FC = () => {
                                 <span>신청인</span><span className="min-w-[42mm] border-b border-black px-4 py-1 font-bold">{selectedWorker?.name || ''}</span>
                                 <span className="relative inline-flex h-[12mm] w-[25mm] items-center justify-center">
                                     <span>(서명 또는 인)</span>
-                                    {selectedWorker?.signatureUrl && <img src={selectedWorker.signatureUrl} alt="신청인 서명" className="absolute left-1/2 top-1/2 h-[13mm] w-[28mm] -translate-x-1/2 -translate-y-1/2 object-contain opacity-90 mix-blend-multiply" />}
+                                    {selectedWorker?.signatureUrl && <SecureSignature src={selectedWorker.signatureUrl} alt="신청인 서명" className="absolute left-1/2 top-1/2 h-[13mm] w-[28mm] -translate-x-1/2 -translate-y-1/2 object-contain opacity-90 mix-blend-multiply" />}
                                 </span>
                             </div>
                             {accountType === 'thirdParty' && <p className="mt-1.5 text-[10.5px]">지정 예금주 동의 확인: {newAccountHolder} __________________ (서명 또는 인)</p>}

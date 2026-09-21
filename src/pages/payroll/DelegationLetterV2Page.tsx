@@ -1,3 +1,4 @@
+import SecureSignature from '../../components/SecureSignature';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -1703,7 +1704,7 @@ const DelegationLetterV2Page: React.FC = () => {
                                                             <td className="delegation-signature-cell align-middle">
                                                                 {worker.signatureUrl ? (
                                                                     <div className="absolute inset-0 flex items-center justify-center p-1">
-                                                                        <img src={worker.signatureUrl} alt={`Sign ${worker.workerName}`} className="max-h-full max-w-full object-contain pointer-events-none opacity-90 mix-blend-multiply" />
+                                                                        <SecureSignature src={worker.signatureUrl} alt={`Sign ${worker.workerName}`} className="max-h-full max-w-full object-contain pointer-events-none opacity-90 mix-blend-multiply" />
                                                                     </div>
                                                                 ) : (
                                                                     <div className="flex items-center justify-center h-full">

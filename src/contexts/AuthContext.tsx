@@ -223,6 +223,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function loginWithGoogle() {
     const { auth, authModule } = await loadFirebaseAuth();
     const provider = new authModule.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
 
     try {
       const result = await authModule.signInWithPopup(auth, provider);

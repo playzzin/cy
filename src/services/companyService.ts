@@ -1,3 +1,4 @@
+import { getTeamScopedRows, invalidateTeamScopedCache } from './teamScopedReadService';
 import { companyFirestoreService } from './companyFirestoreService';
 import { databaseLogService } from './databaseLogService';
 import { CompanyZod as Company } from '../types/zod/companySchema';
@@ -10,38 +11,9 @@ const snapshotCompany = (id: string, data: Record<string, unknown>): Record<stri
     ...stripUndefinedFields(data),
 });
 
-const COMPANY_LIST_CACHE_TTL_MS = 60 * 1000;
-let companyListCache: { rows: Company[]; expiresAt: number } | null = null;
-let pendingCompanyList: Promise<Company[]> | null = null;
+const clearCompanyListCache = invalidateTeamScopedCache;
+const getCachedCompanies = () => companyFirestoreService.getCompanies();
 
-const clearCompanyListCache = () => {
-    companyListCache = null;
-    pendingCompanyList = null;
-};
-
-const getCachedCompanies = async (): Promise<Company[]> => {
-    if (companyListCache && companyListCache.expiresAt > Date.now()) {
-        return companyListCache.rows;
-    }
-
-    if (pendingCompanyList) {
-        return pendingCompanyList;
-    }
-
-    pendingCompanyList = companyFirestoreService.getCompanies()
-        .then((rows) => {
-            companyListCache = {
-                rows,
-                expiresAt: Date.now() + COMPANY_LIST_CACHE_TTL_MS,
-            };
-            return rows;
-        })
-        .finally(() => {
-            pendingCompanyList = null;
-        });
-
-    return pendingCompanyList;
-};
 
 const logCompanyChange = async (
     action: 'created' | 'updated' | 'deleted',
@@ -106,6 +78,8 @@ export const companyService = {
 
     // 전체 회사 목록 조회
     getCompanies: async (): Promise<Company[]> => {
+        const scoped = await getTeamScopedRows<Company>('companies');
+        if (scoped !== null) return scoped;
         return getCachedCompanies();
     },
 

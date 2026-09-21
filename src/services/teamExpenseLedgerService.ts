@@ -1,3 +1,4 @@
+import { getTeamScopedRows } from './teamScopedReadService';
 import {
   collection,
   deleteDoc,
@@ -280,6 +281,7 @@ const mapClaim = (id: string, data: Record<string, unknown>): TeamExpenseClaim =
   memo: data.memo ? String(data.memo) : undefined,
   attachments: normalizeAttachments(data.attachments),
   sourceType: data.sourceType ? String(data.sourceType) as TeamExpenseClaim['sourceType'] : undefined,
+  sourceRequestId: data.sourceRequestId ? String(data.sourceRequestId) : undefined,
   sourceFixedExpenseId: data.sourceFixedExpenseId ? String(data.sourceFixedExpenseId) : undefined,
   sourceFixedExpenseName: data.sourceFixedExpenseName ? String(data.sourceFixedExpenseName) : undefined,
   generatedForYearMonth: data.generatedForYearMonth ? String(data.generatedForYearMonth) : undefined,
@@ -296,6 +298,8 @@ const mapClaim = (id: string, data: Record<string, unknown>): TeamExpenseClaim =
 
 export const teamExpenseLedgerService = {
   async listAllClaims(): Promise<TeamExpenseClaim[]> {
+        const scoped = await getTeamScopedRows<any>('team_expense_claims');
+        if (scoped !== null) return scoped.map(row => mapClaim(row.id, row));
     const snap = await getDocs(collection(db, TEAM_EXPENSE_CLAIMS_COLLECTION));
     return snap.docs
       .map((row) => mapClaim(row.id, row.data() as Record<string, unknown>))
@@ -303,6 +307,8 @@ export const teamExpenseLedgerService = {
   },
 
   async getClaimsByMonth(yearMonth: string): Promise<TeamExpenseClaim[]> {
+        const scoped = await getTeamScopedRows('team_expense_claims', { yearMonth });
+        if (scoped !== null) return scoped.map(row => mapClaim(row.id, row));
     const q = query(
       collection(db, TEAM_EXPENSE_CLAIMS_COLLECTION),
       where('yearMonth', '==', yearMonth)

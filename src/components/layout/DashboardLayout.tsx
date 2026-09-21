@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, useLocation, type NavigateOptions } from 'react-router-dom';
+import { useNavigate, useLocation, useNavigationType, type NavigateOptions } from 'react-router-dom';
+import { useMobileShellScroll } from '../../hooks/useMobileScroll';
 import { useAuth } from '../../contexts/AuthContext';
 import { MessageManager } from '../../constants/messages';
 // ROLE_SITE_MAP removed - now fully dynamic
@@ -16,9 +17,8 @@ import AdminPanel from './AdminPanel';
 import AppIntroScreen from '../common/AppIntroScreen';
 import { menuServiceV11 } from '../../services/menuServiceV11';
 import { SiteData, SiteDataType, MenuItem, PositionItem } from '../../types/menu';
-import { findBusinessPartnerPositionDefinition } from '../../constants/businessPartnerPositions';
+import { resolveUserMenuPositionId } from '../../utils/userMenuPosition';
 import { MENU_PATHS } from '../../constants/menuPaths';
-import { matchesMenuPosition } from '../../utils/menuPosition';
 import RuntimeErrorBoundary from '../../app/bootstrap/RuntimeErrorBoundary';
 import { SiteModeProvider } from '../../contexts/SiteModeContext';
 import {
@@ -37,81 +37,31 @@ interface DashboardLayoutProps {
 
 type QuickTool = 'calculator' | 'camera';
 
-const normalizePositionKey = (value: unknown): string =>
-    String(value || '').trim().toLowerCase().replace(/[\s_-]/g, '');
-
 const getPositionSiteKey = (positionId: string): string =>
     positionId.startsWith('pos_') ? positionId : `pos_${positionId}`;
 
-const findMatchingPosition = (positions: PositionItem[], value: unknown): PositionItem | undefined => {
-    const key = normalizePositionKey(value);
-    if (!key) return undefined;
-
-    const partnerDefinition = findBusinessPartnerPositionDefinition(String(value || ''), String(value || ''));
-    if (partnerDefinition) {
-        const matchedPartnerPosition = positions.find(
-            (position) => normalizePositionKey(position.id) === normalizePositionKey(partnerDefinition.id)
-        );
-        if (matchedPartnerPosition) return matchedPartnerPosition;
-    }
-
-    return positions.find((position) => {
-        return matchesMenuPosition(position.id, position.name, value);
-    });
-};
-
-const findFirstPositionById = (positions: PositionItem[], ids: string[]): PositionItem | undefined => {
-    const wanted = ids.map(normalizePositionKey);
-    return positions.find((position) => wanted.includes(normalizePositionKey(position.id)));
-};
-
-const resolveUserMenuPositionId = (
-    positions: PositionItem[],
-    userProfile: { position?: unknown; role?: unknown; accountType?: unknown; systemRole?: unknown } | null | undefined,
-    linkedEntityRoles?: unknown | unknown[]
-): string | undefined => {
-    const linkedRoles = Array.isArray(linkedEntityRoles) ? linkedEntityRoles : [linkedEntityRoles];
-    const candidates = [...linkedRoles, userProfile?.position, userProfile?.role, userProfile?.systemRole, userProfile?.accountType];
-
-    for (const candidate of candidates) {
-        const matched = findMatchingPosition(positions, candidate);
-        if (matched?.id) return matched.id;
-    }
-
-    const roleKey = normalizePositionKey(userProfile?.role);
-    if (['admin', 'administrator', 'superadmin', 'owner', '\uad00\ub9ac\uc790', '\uc0ac\uc7a5', '\uc2e4\uc7a5'].includes(roleKey)) {
-        return findFirstPositionById(positions, ['full'])?.id || 'full';
-    }
-    if (roleKey.startsWith('manager') || roleKey.startsWith('\ub9e4\ub2c8\uc800') || roleKey.startsWith('\uba54\ub2c8\uc800')) {
-        return findFirstPositionById(positions, ['manager1', 'manager', 'teamLead'])?.id;
-    }
-    if (['user', 'general', '\uc77c\ubc18'].includes(roleKey)) {
-        return findFirstPositionById(positions, ['general'])?.id;
-    }
-
-    return undefined;
-};
-
-const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
+const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) => {
+    const { currentUser } = useAuth();
     const [isMobile, setIsMobile] = useState(false);
     const [isMobileOpen, setIsMobileOpen] = useState(false);
+    const navigationType = useNavigationType();
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [isBottomPanelOpen, setIsBottomPanelOpen] = useState(false);
     const [activeQuickTool, setActiveQuickTool] = useState<QuickTool>('calculator');
     const [isPositionPanelOpen, setIsPositionPanelOpen] = useState(false);
     // 사이트 모드를 localStorage에서 복원하여 수동 변경 시 유지되도록 함
     const [currentSite, setCurrentSite] = useState(() => {
-        const saved = localStorage.getItem(getMenuModeStorageKey('cy_current_site'));
+        const saved = localStorage.getItem(getMenuModeStorageKey('cy_current_site', currentUser?.uid));
         return saved || 'admin';
     });
     const [currentPosition, setCurrentPosition] = useState(() => {
-        return localStorage.getItem(getMenuModeStorageKey('cy_current_position')) || 'full';
+        return localStorage.getItem(getMenuModeStorageKey('cy_current_position', currentUser?.uid)) || 'full';
     });
     const [userManuallyChangedSite, setUserManuallyChangedSite] = useState(() => {
-        return localStorage.getItem(getMenuModeStorageKey('cy_site_manual')) === 'true';
+        return localStorage.getItem(getMenuModeStorageKey('cy_site_manual', currentUser?.uid)) === 'true';
     });
     const [userManuallyChangedPosition, setUserManuallyChangedPosition] = useState(() => {
-        return localStorage.getItem(getMenuModeStorageKey('cy_position_manual')) === 'true';
+        return localStorage.getItem(getMenuModeStorageKey('cy_position_manual', currentUser?.uid)) === 'true';
     });
     const [activeMenuItems, setActiveMenuItems] = useState<{ [key: string]: boolean }>({});
     const [activeNestedMenuItems, setActiveNestedMenuItems] = useState<{ [key: string]: boolean }>({});
@@ -124,9 +74,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
     const autoAppliedPositionForUserRef = useRef('');
 
-    const { currentUser } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
+    useMobileShellScroll(location.pathname, location.hash, navigationType, isMobileOpen, isMobile);
     const siteModeDashboards: Record<string, string> = {
         test: '/dashboard2',
         nation: '/dashboard3',
@@ -430,12 +380,22 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                     import('../../services/officeStaffService')
                 ]);
 
-                const [profile, linkedWorker, linkedOfficeStaff] = await Promise.all([
-                    userService.getUser(currentUser.uid),
+                const [profile, workerByUid, linkedOfficeStaff] = await Promise.all([
+                    userService.getUser(currentUser.uid, true),
                     manpowerService.getWorkerByUid(currentUser.uid).catch(() => null),
                     officeStaffService.getOfficeStaffByUid(currentUser.uid).catch(() => null)
                 ]);
 
+                let linkedWorker = null;
+                const rawIds: unknown = profile?.linkedWorkerIds;
+                const workerIds = Array.isArray(rawIds) ? rawIds : typeof rawIds === 'string' ? rawIds.split(',') : [];
+                for (const rawId of workerIds) {
+                    const workerId = String(rawId ?? '').trim();
+                    if (!workerId) continue;
+                    linkedWorker = await manpowerService.getWorker(workerId);
+                    if (linkedWorker) break;
+                }
+                linkedWorker = linkedWorker || workerByUid;
                 if (cancelled) return;
 
                 const resolvedPositionId = resolveUserMenuPositionId(positions, profile, [
@@ -448,7 +408,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 if (autoAppliedPositionForUserRef.current === applyKey) return;
                 autoAppliedPositionForUserRef.current = applyKey;
 
-                localStorage.setItem(getMenuModeStorageKey('cy_current_position'), resolvedPositionId);
+                localStorage.setItem(getMenuModeStorageKey('cy_current_position', currentUser?.uid), resolvedPositionId);
                 setCurrentPosition((prev) => (prev === resolvedPositionId ? prev : resolvedPositionId));
             } catch (error) {
                 console.error('[DashboardLayout] Failed to apply user position menu:', error);
@@ -560,13 +520,13 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         setActiveMenuItems({});
         // Site mode and position mode are mutually exclusive. A previously
         // selected position must not override the selected site's sidebar.
-        localStorage.setItem(getMenuModeStorageKey('cy_current_position'), 'full');
+        localStorage.setItem(getMenuModeStorageKey('cy_current_position', currentUser?.uid), 'full');
         setUserManuallyChangedPosition(false);
-        localStorage.removeItem(getMenuModeStorageKey('cy_position_manual'));
+        localStorage.removeItem(getMenuModeStorageKey('cy_position_manual', currentUser?.uid));
         // 사용자가 수동으로 사이트를 변경했음을 기록
         setUserManuallyChangedSite(true);
-        localStorage.setItem(getMenuModeStorageKey('cy_current_site'), siteKey);
-        localStorage.setItem(getMenuModeStorageKey('cy_site_manual'), 'true');
+        localStorage.setItem(getMenuModeStorageKey('cy_current_site', currentUser?.uid), siteKey);
+        localStorage.setItem(getMenuModeStorageKey('cy_site_manual', currentUser?.uid), 'true');
 
         // 청연사이트(test)로 전환 시 /dashboard2로 이동
         const nextDashboardPath = siteModeDashboards[siteKey];
@@ -582,20 +542,20 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const changePosition = (positionId: string) => {
         setCurrentPosition(positionId);
         setActiveMenuItems({});
-        localStorage.setItem(getMenuModeStorageKey('cy_current_position'), positionId);
+        localStorage.setItem(getMenuModeStorageKey('cy_current_position', currentUser?.uid), positionId);
         setUserManuallyChangedPosition(true);
-        localStorage.setItem(getMenuModeStorageKey('cy_position_manual'), 'true');
+        localStorage.setItem(getMenuModeStorageKey('cy_position_manual', currentUser?.uid), 'true');
 
         // A position chosen from the preview panel is an explicit user choice.
         // Keep it ahead of the profile-based automatic position resolver.
         setUserManuallyChangedSite(false);
-        localStorage.removeItem(getMenuModeStorageKey('cy_site_manual'));
+        localStorage.removeItem(getMenuModeStorageKey('cy_site_manual', currentUser?.uid));
 
         // Site mode and position mode are mutually exclusive. Position preview
         // always reads the corresponding pos_* configuration under admin.
         if (currentSite !== 'admin') {
             setCurrentSite('admin');
-            localStorage.setItem(getMenuModeStorageKey('cy_current_site'), 'admin');
+            localStorage.setItem(getMenuModeStorageKey('cy_current_site', currentUser?.uid), 'admin');
 
             if (location.pathname === '/dashboard2' || location.pathname === '/dashboard3') {
                 navigateSync('/dashboard');
@@ -847,6 +807,12 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
             </div>
         </SiteModeProvider>
     );
+};
+
+// Recreate navigation state when the signed-in account changes.
+const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
+    const { currentUser } = useAuth();
+    return <DashboardLayoutContent key={currentUser?.uid || 'anonymous'}>{children}</DashboardLayoutContent>;
 };
 
 export default DashboardLayout;

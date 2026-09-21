@@ -1,3 +1,4 @@
+import SecureSignature from '../SecureSignature';
 import React from 'react';
 import { Rnd, DraggableData, ResizableDelta, Position } from 'react-rnd';
 import styled from 'styled-components';
@@ -102,7 +103,7 @@ export const DraggableTable: React.FC<DraggableTableProps> = ({
                                 <td>{delegator.address}</td>
                                 <td className="text-right">{delegator.claimAmount.toLocaleString()}</td>
                                 <td className="text-center">
-                                    {delegator.signature && <img src={delegator.signature} alt="서명" style={{ height: '20px', margin: '0 auto' }} />}
+                                    {delegator.signature && <SecureSignature src={delegator.signature} alt="서명" style={{ height: '20px', margin: '0 auto' }} />}
                                 </td>
                             </tr>
                         ))}

@@ -19,6 +19,7 @@ import {
 
 import { accommodationService } from '../../services/accommodationService';
 import MonthNavigator from '../../components/common/MonthNavigator';
+import { useMobileDetailNavigation } from '../../hooks/useMobileScroll';
 import { cardService } from '../../services/cardService';
 import { vehicleService } from '../../services/vehicleService';
 import type { Accommodation } from '../../types/accommodation';
@@ -299,7 +300,7 @@ const DetailField: React.FC<{ label: string; value?: React.ReactNode; wide?: boo
 const TeamResourceDetailPage: React.FC = () => {
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const [selectedTeamId, setSelectedTeamId] = useState('');
-    const [mobileView, setMobileView] = useState<MobileView>('list');
+    const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('list');
     const [isTeamPickerOpen, setIsTeamPickerOpen] = useState(false);
     const [isMobileTeamPickerOpen, setIsMobileTeamPickerOpen] = useState(false);
     const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
@@ -893,6 +894,7 @@ const TeamResourceDetailPage: React.FC = () => {
     };
 
     const handleCsvDownload = () => {
+        if (loading || loadingResources) return;
         const teamName = selectedTeam?.name || '팀';
         const assignmentRows = [
             ...selectedAccommodationResources.map(resource => {
@@ -1065,7 +1067,7 @@ const TeamResourceDetailPage: React.FC = () => {
                 </div>
 
                 <div className="tw-header-actions">
-                    <button type="button" className="tw-icon-button" onClick={handleCsvDownload} title="CSV 내보내기">
+                    <button type="button" className="tw-icon-button" onClick={handleCsvDownload} disabled={isBusy} title="CSV 내보내기">
                         <Download size={18} />
                         <span>CSV</span>
                     </button>
@@ -1208,7 +1210,7 @@ const TeamResourceDetailPage: React.FC = () => {
                 </button>
             </div>
 
-            <main className={`tw-workspace tw-workspace--${mobileView}`}>
+            <main ref={workspaceRef} className={`tw-workspace tw-workspace--${mobileView}`}>
                 <section className="tw-worker-panel">
                     <div className="tw-panel-heading">
                         <div>
