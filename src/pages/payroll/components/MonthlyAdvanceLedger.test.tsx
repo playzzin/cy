@@ -145,3 +145,28 @@ describe('MonthlyAdvanceLedger 공제 분류', () => {
         });
     });
 });
+
+it('refreshes net pay when calculated tax arrives for the same row and unchanged options', () => {
+    const row: MonthlyAdvanceLedgerRow = {
+        rowKey: '2026-08__worker__team__일급제', month: '2026-08',
+        teamId: 'team', teamName: '테스트팀', workerId: 'worker', workerName: '테스트 작업자',
+        salaryModel: '일급제', invoiceManDay: 0, laborManDay: 6.5,
+        unitPrice: 170000, invoiceGrossAmount: 0, laborGrossAmount: 1105000,
+        statementTaxAmounts: {
+            pension: 0, health: 0, care: 0, employment: 0, incomeTax: 0, residentTax: 0,
+            businessIncomeTax: 0, businessResidentTax: 0, isWithholdingTarget: false,
+        },
+    };
+    const onComputedAmountsChange = jest.fn();
+    const props = { payrollConfig: null, withholdingThreshold: 7, applyBusinessIncome: true, onComputedAmountsChange };
+    const { rerender } = render(<MonthlyAdvanceLedger {...props} rows={[row]} />);
+    fireEvent.click(screen.getByRole('button', { name: '전체 노무' }));
+    expect(onComputedAmountsChange.mock.calls.slice(-1)[0][0][0].personalNet).toBe(1105000);
+
+    rerender(<MonthlyAdvanceLedger {...props} rows={[{
+        ...row,
+        statementTaxAmounts: { ...row.statementTaxAmounts!, businessIncomeTax: 33150, businessResidentTax: 3315 },
+    }]} />);
+    expect(onComputedAmountsChange.mock.calls.slice(-1)[0][0][0].personalNet).toBe(1068535);
+    expect(screen.getAllByText('1,068,535').length).toBeGreaterThan(0);
+});

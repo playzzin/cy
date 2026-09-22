@@ -30,10 +30,10 @@ export const resolvePayslipCalculationPolicy = (
 } => {
     const salaryModel = resolvePayslipSalaryModel(row);
     return {
-        // 현재 월급제는 사업소득세, 일급제는 일당 수수료가 기본이다.
-        // 4대보험은 일급제에서 사용자가 메인 옵션을 켠 경우에만 반영한다.
-        applyInsurance: salaryModel === 'daily' && options.applyInsurance,
-        applyBusinessIncome: salaryModel === 'monthly' && options.applyBusinessIncome,
+        // 급여 형태는 공제 대상 여부가 아니다. 선택한 공제를 전달하고,
+        // 실제 대상 금액과 중복 과세 제외는 근무 내역 계산에서 결정한다.
+        applyInsurance: options.applyInsurance,
+        applyBusinessIncome: options.applyBusinessIncome,
         applyDailyFee: salaryModel === 'daily' && options.applyDailyFee,
     };
 };

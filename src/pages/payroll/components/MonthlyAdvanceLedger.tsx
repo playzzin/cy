@@ -2407,17 +2407,5 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     );
 });
 
-export default React.memo(MonthlyAdvanceLedger, (prevProps: Props, nextProps: Props) => {
-    if (prevProps.rows.length !== nextProps.rows.length) return false;
-    for (let i = 0; i < prevProps.rows.length; i++) {
-        const prevRow = prevProps.rows[i];
-        const nextRow = nextProps.rows[i];
-        if (prevRow.rowKey !== nextRow.rowKey) return false;
-        if ((prevRow.statementTaxAmounts?.dailyFee ?? 0) !== (nextRow.statementTaxAmounts?.dailyFee ?? 0)) return false;
-    }
-    for (const key in prevProps) {
-        if (key === 'rows') continue;
-        if (prevProps[key as keyof Props] !== nextProps[key as keyof Props]) return false;
-    }
-    return true;
-});
+// 세금·공수·단가가 갱신된 rows도 반드시 반영한다.
+export default React.memo(MonthlyAdvanceLedger);

@@ -18,7 +18,7 @@ describe('payslip salary-model behavior', () => {
         expect(resolvePayslipSalaryModel(rows[1])).toBe('daily');
     });
 
-    it('keeps monthly business-income tax separate from daily fee and insurance', () => {
+    it('applies selected deductions to both salary models while keeping the fee daily-only', () => {
         const options = {
             applyInsurance: true,
             applyBusinessIncome: true,
@@ -26,13 +26,13 @@ describe('payslip salary-model behavior', () => {
         };
 
         expect(resolvePayslipCalculationPolicy(rows[0], options)).toEqual({
-            applyInsurance: false,
+            applyInsurance: true,
             applyBusinessIncome: true,
             applyDailyFee: false,
         });
         expect(resolvePayslipCalculationPolicy(rows[1], options)).toEqual({
             applyInsurance: true,
-            applyBusinessIncome: false,
+            applyBusinessIncome: true,
             applyDailyFee: true,
         });
     });
