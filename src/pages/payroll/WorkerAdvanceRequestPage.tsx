@@ -1,3 +1,4 @@
+import { getRequestWorkers } from '../../services/requestWorkerService';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     AlertCircle,
@@ -217,6 +218,7 @@ const emptySummary: EarnedSummary = {
 export default function WorkerAdvanceRequestPage() {
     const { currentUser } = useAuth();
     const [workers, setWorkers] = useState<Worker[]>([]);
+    const [canRequestForTeam, setCanRequestForTeam] = useState(false);
     const [profile, setProfile] = useState<UserData | null>(null);
     const [selectedWorkerId, setSelectedWorkerId] = useState('');
     const [selectedYearMonth, setSelectedYearMonth] = useState(() => getYearMonth());
@@ -259,7 +261,7 @@ export default function WorkerAdvanceRequestPage() {
         [activeWorkers, currentUser?.displayName, currentUser?.email, currentUser?.uid, profile]
     );
 
-    const workerPool = linkedWorkerCandidates.length > 0 ? linkedWorkerCandidates : activeWorkers;
+    const workerPool = canRequestForTeam ? activeWorkers : linkedWorkerCandidates.length > 0 ? linkedWorkerCandidates : activeWorkers;
 
     const filteredWorkers = useMemo(() => {
         const term = normalizeKey(workerSearch);
@@ -294,10 +296,11 @@ export default function WorkerAdvanceRequestPage() {
         setMessage('');
         try {
             const [workerRows, profileRow] = await Promise.all([
-                manpowerService.getWorkers(true),
+                getRequestWorkers(),
                 currentUser?.uid ? userService.getUser(currentUser.uid) : Promise.resolve(null),
             ]);
-            setWorkers(workerRows);
+            setWorkers(workerRows.workers);
+            setCanRequestForTeam(workerRows.canRequestForTeam);
             setProfile(profileRow);
         } catch (error) {
             console.error('[WorkerAdvanceRequestPage] Failed to load base data', error);
@@ -570,7 +573,7 @@ export default function WorkerAdvanceRequestPage() {
                             </div>
                             {linkedWorkerCandidates.length > 0 ? (
                                 <span className="shrink-0 whitespace-nowrap rounded-md border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">
-                                    계정 연결
+                                    {canRequestForTeam ? '소속 팀원 대리 신청' : '계정 연결'}
                                 </span>
                             ) : (
                                 <span className="shrink-0 whitespace-nowrap rounded-md border border-amber-100 bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">

@@ -5,6 +5,8 @@ import { manpowerService } from '../../services/manpowerService';
 import { dailyReportService } from '../../services/dailyReportService';
 import { advancePaymentService } from '../../services/advancePaymentService';
 import { advanceRequestService } from '../../services/advanceRequestService';
+import { getTeamScopedRows } from '../../services/teamScopedReadService';
+jest.mock('../../services/teamScopedReadService', () => ({ getTeamScopedRows: jest.fn() }));
 
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'leader' } }) }));
 jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: jest.fn() } }));
@@ -21,6 +23,8 @@ const month = () => {
 };
 beforeEach(() => {
     jest.clearAllMocks();
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { randomUUID: () => 'delegation-request-id' } });
+    (getTeamScopedRows as jest.Mock).mockResolvedValue(null);
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue([worker]);
     (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue([
         { workerId: 'legacy-a', workerName: worker.name, date: `${month()}-01`, amount: 300000 },
@@ -31,6 +35,20 @@ beforeEach(() => {
     (advanceRequestService.listForWorkerIds as jest.Mock).mockResolvedValue([
         { id: 'request-a', workerId: 'worker-a', yearMonth: month(), requestedAmount: 20000, status: 'requested' },
     ]);
+});
+
+it('팀장이 서버에서 허용한 소속 팀원을 선택해 가불을 대신 신청한다', async () => {
+    const member = { ...worker, id: 'member-a', legacyId: '', uid: '', name: '팀원 테스트' };
+    (getTeamScopedRows as jest.Mock).mockResolvedValue([worker, member]);
+    (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue([{ workerId: 'member-a', date: `${month()}-01`, amount: 300000 }]);
+    (advanceRequestService.createRequest as jest.Mock).mockResolvedValue('saved');
+    render(<WorkerAdvanceRequestPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /팀원 테스트/ }));
+    await screen.findAllByText('300,000원');
+    fireEvent.change(screen.getByRole('textbox', { name: '신청 금액 원' }), { target: { value: '10000' } });
+    fireEvent.click(screen.getByRole('button', { name: '가불 신청' }));
+    await waitFor(() => expect(advanceRequestService.createRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ workerId: 'member-a', requesterUid: 'leader', requestedAmount: 10000 }), expect.any(String)));
 });
 
 it('본인 근무금액에서 기존 가불과 유효 신청을 빼고 동명이인은 합산하지 않는다', async () => {

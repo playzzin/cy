@@ -1,4 +1,5 @@
-import { getTeamScopedRows } from './teamScopedReadService';
+import { getTeamScopedRows, usesTeamScopedReads } from './teamScopedReadService';
+import { httpsCallable } from 'firebase/functions';
 import {
     collection,
     deleteDoc,
@@ -12,7 +13,7 @@ import {
     Timestamp,
     where,
 } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { auth, db, functions } from '../config/firebase';
 import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 
 export type FieldScheduleRequestStatus = 'requested' | 'assigning' | 'assigned' | 'confirmed' | 'cancelled';
@@ -197,6 +198,15 @@ export const fieldScheduleRequestService = {
             throw new Error('date-and-workers-required');
         }
 
+        if (await usesTeamScopedReads()) {
+            const uid = auth.currentUser?.uid;
+            const result = await httpsCallable<Record<string, unknown>, { id: string }>(functions, 'teamOffDutyRequests')({
+                action: 'add', date, workerIds: workers.map(worker => worker.id), memo: input.memo || '',
+            });
+            if (!uid || auth.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다.');
+            return result.data.id;
+        }
+
         const id = makeRequestId(date, FIELD_REQUEST_OFF_DUTY_SITE_ID);
         const ref = doc(db, COLLECTION_NAME, id);
         const now = Timestamp.now();
@@ -256,6 +266,13 @@ export const fieldScheduleRequestService = {
         const date = normalizeText(input.date);
         const workerId = normalizeText(input.workerId);
         if (!date || !workerId) return;
+
+        if (await usesTeamScopedReads()) {
+            const uid = auth.currentUser?.uid;
+            await httpsCallable(functions, 'teamOffDutyRequests')({ action: 'remove', date, workerIds: [workerId] });
+            if (!uid || auth.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다.');
+            return;
+        }
 
         const id = makeRequestId(date, FIELD_REQUEST_OFF_DUTY_SITE_ID);
         const ref = doc(db, COLLECTION_NAME, id);

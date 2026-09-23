@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { protectedRegion, requireCallableAuth } from './auth';
 import { resolvedRoleNames } from './teamExpenseRequests';
 import { list, text } from './teamReadPolicy';
+import { requireWorkerRequestAccess } from './workerRequestAccess';
 
 const fail = (code: functions.https.FunctionsErrorCode, message: string): never => { throw new functions.https.HttpsError(code, message); };
 const id = (value: unknown) => {
@@ -40,7 +41,7 @@ export async function handleTeamAdvanceRequest(input: any, context: functions.ht
         const worker = (await transaction.get(db.collection('workers').doc(workerId))).data();
         if (!worker || worker.isActive === false || ['퇴사', 'inactive', 'retired', 'archived'].includes(text(worker.status))) fail('permission-denied', '활성 작업자 연결을 확인해 주세요.');
         const workerIds = [...new Set([workerId, text(worker!.legacyId)].filter(Boolean))];
-        if (!privileged && !list(profile!.linkedWorkerIds).some(link => workerIds.includes(text(link)))) fail('permission-denied', '본인에게 연결된 작업자만 신청할 수 있습니다.');
+        await requireWorkerRequestAccess(transaction, profile, menu.data(), workerId, worker, privileged);
         const yearMonth = text(input.yearMonth);
         if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) fail('invalid-argument', '신청 월을 확인해 주세요.');
         const requestedAmount = Number(input.requestedAmount);

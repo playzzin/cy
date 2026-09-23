@@ -1,3 +1,4 @@
+import { getRequestWorkers } from '../../services/requestWorkerService';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -160,6 +161,7 @@ export default function WorkerOffDutyRequestPage() {
     const maxDate = useMemo(() => shiftDate(baseDate, REQUEST_RANGE_DAYS), [baseDate]);
 
     const [workers, setWorkers] = useState<Worker[]>([]);
+    const [canRequestForTeam, setCanRequestForTeam] = useState(false);
     const [requests, setRequests] = useState<FieldScheduleRequest[]>([]);
     const [profile, setProfile] = useState<UserData | null>(null);
     const [selectedWorkerId, setSelectedWorkerId] = useState('');
@@ -182,11 +184,12 @@ export default function WorkerOffDutyRequestPage() {
         setMessage('');
         try {
             const [workerRows, profileRow, requestRows] = await Promise.all([
-                manpowerService.getWorkers(true),
+                getRequestWorkers(),
                 currentUser?.uid ? userService.getUser(currentUser.uid) : Promise.resolve(null),
                 fieldScheduleRequestService.listByDateRange(minDate, maxDate),
             ]);
-            setWorkers(workerRows);
+            setWorkers(workerRows.workers);
+            setCanRequestForTeam(workerRows.canRequestForTeam);
             setProfile(profileRow);
             setRequests(requestRows);
         } catch (error) {
@@ -236,7 +239,7 @@ export default function WorkerOffDutyRequestPage() {
         [activeWorkers, selectedWorkerId]
     );
 
-    const workerPool = linkedWorkerCandidates.length > 0 ? linkedWorkerCandidates : activeWorkers;
+    const workerPool = canRequestForTeam ? activeWorkers : linkedWorkerCandidates.length > 0 ? linkedWorkerCandidates : activeWorkers;
     const filteredWorkers = useMemo(() => {
         const term = normalizeKey(workerSearch);
         return workerPool
@@ -444,7 +447,7 @@ export default function WorkerOffDutyRequestPage() {
                                     <div className="text-xs font-black text-slate-500">신청 작업자</div>
                                     {linkedWorkerCandidates.length > 0 ? (
                                         <span className="rounded-md bg-emerald-50 px-2 py-1 text-[11px] font-black text-emerald-700">
-                                            계정 연결됨
+                                            {canRequestForTeam ? '소속 팀원 대리 신청' : '계정 연결됨'}
                                         </span>
                                     ) : null}
                                 </div>

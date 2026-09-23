@@ -68,6 +68,8 @@ export const filterTeamRows = (collection: string, rows: TeamRow[], scope: TeamR
             const ownIds = list(row.offDutyWorkerIds).filter(id => scope.workerIds.includes(text(id)));
             if (!belongsToTeam(row, scope) && !ownIds.length) return [];
             return [{ ...row, offDutyWorkerIds: ownIds, offDutyWorkerNames: [],
+                offDutyRequestActors: Object.fromEntries(ownIds.filter(id => row.offDutyRequestActors?.[id])
+                    .map(id => [id, row.offDutyRequestActors[id]])),
                 memo: row.siteId === '__date_off_duty__' ? '' : row.memo }];
         });
     }

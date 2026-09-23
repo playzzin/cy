@@ -148,5 +148,6 @@ export { teamExpenseRequests } from './teamExpenseRequests';
 export { teamWorkerRequests } from './teamWorkerRequests';
 
 export { teamAdvanceRequests } from './teamAdvanceRequests';
+export { teamOffDutyRequests } from './teamOffDutyRequests';
 
 export { workerSignatures } from './workerSignatures';
