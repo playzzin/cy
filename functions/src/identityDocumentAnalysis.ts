@@ -1,3 +1,5 @@
+import { geminiTextGenerationOptions } from './geminiModelPolicy';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
 import { createHash } from 'crypto';
 import { requireCallableAuth } from './auth';
@@ -305,7 +307,7 @@ export const analyzeIdentityDocuments = functions
             if (!apiKey) {
                 throw new functions.https.HttpsError('failed-precondition', '/settings/ai에서 서버 Gemini API Key를 먼저 설정해 주세요.');
             }
-            const model = asString(settings.documentModel) || asString(settings.model) || 'gemini-2.5-flash';
+            const model = asString(settings.documentModel) || asString(settings.model) || DEFAULT_GEMINI_TEXT_MODEL;
             const parts: Array<Record<string, unknown>> = [{
                 text: mode === 'REGISTRATION' ? buildRegistrationPrompt() : buildGroupingPrompt(files),
             }];
@@ -320,7 +322,7 @@ export const analyzeIdentityDocuments = functions
                 body: JSON.stringify({
                     contents: [{ role: 'user', parts }],
                     generationConfig: {
-                        temperature: 0.05,
+                        ...geminiTextGenerationOptions(model, 0.05),
                         responseMimeType: 'application/json',
                         responseJsonSchema: mode === 'REGISTRATION'
                             ? REGISTRATION_RESPONSE_SCHEMA

@@ -1,3 +1,5 @@
+import { geminiTextGenerationOptions } from './geminiModelPolicy';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { requireCallableAuth } from './auth';
@@ -221,7 +223,7 @@ interface CardMatchResult {
 const MAX_INLINE_FILE_SIZE_BYTES = 18 * 1024 * 1024;
 const MAX_STORAGE_IMPORT_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 const MAX_IMPORT_FILES_PER_JOB = 30;
-const DEFAULT_MODEL = 'gemini-2.5-flash';
+const DEFAULT_MODEL = DEFAULT_GEMINI_TEXT_MODEL;
 const ALLOWED_ROLE_GROUPS = new Set(['admin', 'support', 'finance', 'payroll', 'office']);
 const ALLOWED_ROLE_KEYS = new Set([
     'admin',
@@ -1813,7 +1815,8 @@ Rules:
 
 const buildGeminiRequest = (
     input: AnalyzeCardBillingStatementRequest,
-    file: { base64: string; mimeType: string }
+    file: { base64: string; mimeType: string },
+    model: string
 ): Record<string, unknown> => ({
     contents: [{
         role: 'user',
@@ -1823,7 +1826,7 @@ const buildGeminiRequest = (
         ],
     }],
     generationConfig: {
-        temperature: 0.05,
+        ...geminiTextGenerationOptions(model, 0.05),
         responseMimeType: 'application/json',
         responseJsonSchema: CARD_BILLING_STATEMENT_SCHEMA,
     },
@@ -1839,7 +1842,7 @@ const callGeminiCardStatementAnalysis = async (
     const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildGeminiRequest(input, file)),
+        body: JSON.stringify(buildGeminiRequest(input, file, model)),
     });
 
     const rawResponseText = await response.text();

@@ -1,3 +1,5 @@
+import { geminiTextGenerationOptions } from './geminiModelPolicy';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import { aiSettingsService, normalizeGeminiModelName } from './aiSettingsService';
 
 export type TaxInvoiceTransactionType = '매입' | '매출' | '';
@@ -413,7 +415,7 @@ const analyzeSingleFile = async (
                         ],
                     }],
                     generationConfig: {
-                        temperature: 0.05,
+                        ...geminiTextGenerationOptions(model, 0.05),
                         responseMimeType: 'application/json',
                         responseJsonSchema: TAX_INVOICE_RESPONSE_SCHEMA,
                     },
@@ -469,7 +471,7 @@ export const analyzeTaxInvoiceFiles = async (
         throw new Error('Gemini API 키가 없습니다. /settings/ai에서 Gemini API Key를 먼저 저장하세요.');
     }
 
-    const model = normalizeGeminiModelName(aiSettingsService.getModels().textModel, 'gemini-2.5-flash');
+    const model = normalizeGeminiModelName(aiSettingsService.getModels().textModel, DEFAULT_GEMINI_TEXT_MODEL);
     const batch: TaxInvoiceAnalysisBatch = { candidates: [], errors: [] };
     let nextFileIndex = 0;
     let completedFiles = 0;

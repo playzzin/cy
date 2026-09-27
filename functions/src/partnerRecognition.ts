@@ -1,3 +1,5 @@
+import { geminiTextGenerationOptions } from './geminiModelPolicy';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { requireCallableAuth } from './auth';
@@ -174,7 +176,7 @@ const getGeminiApiKey = async (): Promise<string> => {
 
 const getGeminiModel = async (): Promise<string> => {
     const settings = await getServerGeminiSettings();
-    return settings.model || 'gemini-2.5-flash';
+    return settings.model || DEFAULT_GEMINI_TEXT_MODEL;
 };
 
 const getErrorMessage = (error: unknown): string =>
@@ -241,7 +243,7 @@ const downloadStorageFileAsBase64 = async (
     };
 };
 
-const buildGeminiGenerateContentRequest = (image: { base64: string; mimeType: string }): Record<string, unknown> => ({
+const buildGeminiGenerateContentRequest = (image: { base64: string; mimeType: string }, model: string): Record<string, unknown> => ({
     contents: [{
         role: 'user',
         parts: [
@@ -250,7 +252,7 @@ const buildGeminiGenerateContentRequest = (image: { base64: string; mimeType: st
         ],
     }],
     generationConfig: {
-        temperature: 0.1,
+        ...geminiTextGenerationOptions(model, 0.1),
         responseMimeType: 'application/json',
         responseJsonSchema: PARTNER_RECOGNITION_SCHEMA,
     },
@@ -266,7 +268,7 @@ const callGeminiPartnerRecognition = async (
     const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildGeminiGenerateContentRequest(image)),
+        body: JSON.stringify(buildGeminiGenerateContentRequest(image, model)),
     });
 
     const rawText = await response.text();
@@ -621,7 +623,7 @@ const markRecognitionImagesFailed = async (
 
 const getGeminiBatchModel = async (): Promise<string> => {
     const settings = await getServerGeminiSettings();
-    return settings.batchModel || settings.model || 'gemini-2.5-flash';
+    return settings.batchModel || settings.model || DEFAULT_GEMINI_TEXT_MODEL;
 };
 
 const parseGeminiJsonPayload = (responsePayload: any): GeminiPartnerRecognitionOutput => {
@@ -742,6 +744,7 @@ export const createPartnerRecognitionBatchJob = functions
             throw toHttpsError(error, 'failed-precondition');
         }
 
+        const batchModel = await getGeminiBatchModel();
         const requests: Array<Record<string, unknown>> = [];
         for (const imageDoc of images) {
             const image = imageDoc.data();
@@ -750,7 +753,7 @@ export const createPartnerRecognitionBatchJob = functions
                 String(image.mimeType || 'image/jpeg')
             );
             requests.push({
-                request: buildGeminiGenerateContentRequest(base64Image),
+                request: buildGeminiGenerateContentRequest(base64Image, batchModel),
                 metadata: {
                     key: imageDoc.id,
                     imageId: imageDoc.id,
@@ -769,7 +772,6 @@ export const createPartnerRecognitionBatchJob = functions
             throw toHttpsError(error);
         }
         const resource = getBatchResource(payload);
-        const batchModel = await getGeminiBatchModel();
         const batchName = asString(resource.name || payload.name);
         if (!batchName) {
             throw new Error('Gemini Batch 작업 이름을 확인할 수 없습니다.');

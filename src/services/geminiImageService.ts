@@ -1,3 +1,4 @@
+import { DEFAULT_GEMINI_IMAGE_MODEL } from './geminiModelPolicy';
 import { storage, db } from '../config/firebase';
 import { ref, uploadBytes, getDownloadURL, listAll, deleteObject, getMetadata, updateMetadata } from 'firebase/storage';
 import { 
@@ -124,7 +125,7 @@ export async function generateImage(prompt: string, categoryOrSpec: ImageCategor
     aiSettingsService.assertCurrentPageEnabled('AI 이미지 생성');
 
     const geminiApiKey = aiSettingsService.getApiKey() || process.env.REACT_APP_GOOGLE_API_KEY || '';
-    const geminiImageModel = aiSettingsService.getModels().imageModel || 'gemini-2.5-flash-image';
+    const geminiImageModel = aiSettingsService.getModels().imageModel || DEFAULT_GEMINI_IMAGE_MODEL;
 
     if (!geminiApiKey) {
         return { success: false, error: 'Google API 키가 설정되지 않았습니다. (/settings/ai 또는 .env.local REACT_APP_GOOGLE_API_KEY)' };
@@ -175,9 +176,9 @@ User's request: ${prompt}`;
             return { success: false, error: '응답 형식이 올바르지 않습니다.' };
         }
 
-        const imagePart = parts.find((p: any) => p.inlineData?.data);
+        const imagePart = parts.find((p: any) => !p.thought && p.inlineData?.data);
         if (!imagePart) {
-            const textPart = parts.find((p: any) => p.text);
+            const textPart = parts.find((p: any) => !p.thought && p.text);
             const reason = textPart?.text || '이미지가 생성되지 않았습니다.';
             return { success: false, error: `이미지 생성 실패: ${reason.substring(0, 300)}` };
         }

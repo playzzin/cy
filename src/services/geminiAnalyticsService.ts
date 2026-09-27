@@ -1,3 +1,4 @@
+import { DEFAULT_GEMINI_TEXT_MODEL, DEFAULT_GEMINI_LITE_MODEL, geminiTextGenerationOptions } from './geminiModelPolicy';
 /**
  * Gemini Analytics Service v3 — Production-Grade
  * 
@@ -204,10 +205,10 @@ export interface ChatMessage {
 
 const GEMINI_API_URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const GEMINI_ANALYTICS_REQUEST_TIMEOUT_MS = 30_000;
-const GEMINI_ANALYTICS_FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+const GEMINI_ANALYTICS_FALLBACK_MODELS = [DEFAULT_GEMINI_TEXT_MODEL, DEFAULT_GEMINI_LITE_MODEL];
 
 const getAnalyticsModelCandidates = (): string[] => {
-    const selectedModel = normalizeGeminiModelName(aiSettingsService.getModels().analyticsModel, 'gemini-2.5-flash');
+    const selectedModel = normalizeGeminiModelName(aiSettingsService.getModels().analyticsModel, DEFAULT_GEMINI_TEXT_MODEL);
     return Array.from(new Set([selectedModel, ...GEMINI_ANALYTICS_FALLBACK_MODELS].filter(Boolean)));
 };
 
@@ -220,7 +221,7 @@ const formatGeminiAnalyticsError = (error: unknown, attemptedModels: string[]): 
     const message = error instanceof Error ? error.message : String(error);
 
     if (/abort|timeout|timed out|시간.*초과/i.test(message)) {
-        return `Gemini 통계 분석 응답이 ${GEMINI_ANALYTICS_REQUEST_TIMEOUT_MS / 1000}초 안에 오지 않았습니다. 네트워크 상태를 확인하거나 /settings/ai에서 통계 모델을 gemini-2.5-flash-lite로 바꾼 뒤 다시 시도해 주세요.`;
+        return `Gemini 통계 분석 응답이 ${GEMINI_ANALYTICS_REQUEST_TIMEOUT_MS / 1000}초 안에 오지 않았습니다. 네트워크 상태를 확인하거나 /settings/ai에서 통계 모델을 ${DEFAULT_GEMINI_LITE_MODEL}로 바꾼 뒤 다시 시도해 주세요.`;
     }
 
     if (/project has been denied access|denied access|permission/i.test(message)) {
@@ -389,9 +390,7 @@ async function callGeminiText(prompt: string, systemInstruction?: string): Promi
     const body: Record<string, unknown> = {
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
-            temperature: 0.05,
             maxOutputTokens: 4096,
-            topP: 0.8,
         }
     };
     if (systemInstruction) {
@@ -410,7 +409,10 @@ async function callGeminiText(prompt: string, systemInstruction?: string): Promi
             const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
+                body: JSON.stringify({
+                    ...body,
+                    generationConfig: { ...(body.generationConfig as object), ...geminiTextGenerationOptions(geminiModel, 0.05) }
+                }),
                 signal: controller.signal,
             });
 
@@ -425,7 +427,9 @@ async function callGeminiText(prompt: string, systemInstruction?: string): Promi
             }
 
             const data = await response.json();
-            return (data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+            return (data?.candidates?.[0]?.content?.parts || [])
+                .filter((part: any) => !part.thought && typeof part.text === 'string')
+                .map((part: any) => part.text).join('').trim();
         } catch (error) {
             const isAbort = error instanceof Error && error.name === 'AbortError';
             const normalizedError = isAbort

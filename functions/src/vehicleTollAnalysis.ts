@@ -1,3 +1,5 @@
+import { geminiTextGenerationOptions } from './geminiModelPolicy';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { createHash } from 'crypto';
@@ -377,7 +379,7 @@ export const analyzeVehicleTollUsages = functions
             if (!apiKey) {
                 throw new functions.https.HttpsError('failed-precondition', '/settings/ai에서 서버 Gemini API Key를 먼저 설정해 주세요.');
             }
-            const model = asString(settings.documentModel) || asString(settings.model) || 'gemini-2.5-flash';
+            const model = asString(settings.documentModel) || asString(settings.model) || DEFAULT_GEMINI_TEXT_MODEL;
             const parts: Array<Record<string, unknown>> = [{ text: buildPrompt(files) }];
             files.forEach((file) => {
                 parts.push({ text: `FILE_INDEX=${file.fileIndex}\nFILE_NAME=${file.originalFileName}` });
@@ -390,7 +392,7 @@ export const analyzeVehicleTollUsages = functions
                 body: JSON.stringify({
                     contents: [{ role: 'user', parts }],
                     generationConfig: {
-                        temperature: 0.05,
+                        ...geminiTextGenerationOptions(model, 0.05),
                         responseMimeType: 'application/json',
                         responseJsonSchema: TOLL_USAGE_SCHEMA,
                     },

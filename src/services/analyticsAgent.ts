@@ -1,3 +1,4 @@
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 /**
  * AI 분석 에이전트
  * 
@@ -115,7 +116,7 @@ async function callGemini(prompt: string): Promise<string> {
         throw new Error('Gemini API Key가 설정되지 않았습니다');
     }
 
-    const model = aiSettingsService.getModels().textModel || 'gemini-2.5-flash';
+    const model = aiSettingsService.getModels().textModel || DEFAULT_GEMINI_TEXT_MODEL;
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const response = await fetch(

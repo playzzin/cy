@@ -1,3 +1,4 @@
+import { DEFAULT_GEMINI_TEXT_MODEL, geminiTextGenerationOptions } from './geminiModelPolicy';
 import { aiSettingsService, normalizeGeminiModelName } from './aiSettingsService';
 
 export type DrawingWorkType = 'scaffold' | 'shoring' | 'common';
@@ -720,7 +721,7 @@ const normalizeAnalysis = (raw: any): DrawingAnalysisResult => {
 };
 
 const getGeminiGenerateContentUrl = (apiKey: string): string => {
-    const model = normalizeGeminiModelName(aiSettingsService.getModels().textModel, 'gemini-2.5-flash');
+    const model = normalizeGeminiModelName(aiSettingsService.getModels().textModel, DEFAULT_GEMINI_TEXT_MODEL);
     return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 };
 
@@ -833,7 +834,7 @@ export const drawingEstimateService = {
                     ]
                 }],
                 generationConfig: {
-                    temperature: 0.05,
+                    ...geminiTextGenerationOptions(aiSettingsService.getModels().textModel, 0.05),
                     responseMimeType: 'application/json',
                     responseJsonSchema: DRAWING_ANALYSIS_SCHEMA
                 }

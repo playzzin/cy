@@ -1,3 +1,5 @@
+import { geminiTextGenerationOptions } from './geminiModelPolicy';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import { createHash } from 'crypto';
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
@@ -482,7 +484,7 @@ const callGeminiExpenseAudit = async (
 ): Promise<{ model: string; executiveSummary: string; priorityActions: string[]; reviews: GeminiAuditReview[] }> => {
     const settings = await getServerGeminiSettings();
     const apiKey = asString(settings.apiKey);
-    const model = asString(settings.batchModel || settings.model) || 'gemini-2.5-flash';
+    const model = asString(settings.batchModel || settings.model) || DEFAULT_GEMINI_TEXT_MODEL;
     if (!apiKey) throw new Error('서버용 Gemini API Key가 설정되지 않았습니다.');
 
     const candidates = findings.map((finding) => ({
@@ -519,7 +521,7 @@ ${JSON.stringify(candidates)}`;
         body: JSON.stringify({
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             generationConfig: {
-                temperature: 0.05,
+                ...geminiTextGenerationOptions(model, 0.05),
                 responseMimeType: 'application/json',
                 responseJsonSchema: GEMINI_RESPONSE_SCHEMA,
             },

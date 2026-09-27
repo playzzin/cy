@@ -1,9 +1,11 @@
+import { normalizeGeminiModelName } from './geminiModelPolicy';
+
 export const DEFAULT_EXCEL_MODEL = 'gemini-3.8-flash';
 export const DEFAULT_EXCEL_THINKING = 'medium';
 export type ExcelThinkingLevel = 'low' | 'medium' | 'high';
 
 export function normalizeExcelModel(value: unknown): string {
-    const model = String(value || DEFAULT_EXCEL_MODEL).trim().replace(/^models\//, '');
+    const model = normalizeGeminiModelName(value, DEFAULT_EXCEL_MODEL);
     if (!/^gemini-[a-zA-Z0-9._-]{1,90}$/.test(model)) throw new Error('Gemini 모델명을 확인해 주세요.');
     return model;
 }
