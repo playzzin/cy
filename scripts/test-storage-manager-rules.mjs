@@ -38,6 +38,8 @@ const signIn = async (role) => {
 
 await Promise.all([
   bucket.file('documents/example.pdf').save('%PDF-example', { metadata: { contentType: 'application/pdf' } }),
+  bucket.file('card-billing-statements/2026-08/imports/fixture/statement.pdf').save('%PDF-card', { metadata: { contentType: 'application/pdf' } }),
+  bucket.file('card-billing-statements/2026-08/fixture/statement.pdf').save('%PDF-card', { metadata: { contentType: 'application/pdf' } }),
   bucket.file('construction-plan-staging/owner/session/source').save('private'),
   bucket.file('construction-plan-records/site/plan/record/private.png').save('private'),
   bucket.file('construction-plans/site/plan/snapshots/private.json').save('{}'),
@@ -73,6 +75,28 @@ for (const role of ['admin', 'DEV']) {
   await db.doc(`users/${user.uid}`).delete();
   await denied(`${role} cannot list with only a stale token`, () => listAll(ref(storage)));
 }
+// The header and Firestore accept both the DEV name and its persisted position
+// identifiers. Storage must recognize the same identities, without trusting
+// stale token claims or granting access to arbitrary custom positions.
+const devPositions = ['DEV', 'jhl2VTnk9V3C4EiZ4QQI', 'jhl2vtnk9v3c4eiz4qqi', 'pos_jhl2VTnk9V3C4EiZ4QQI', 'pos_jhl2vtnk9v3c4eiz4qqi'];
+const cardPaths = ['card-billing-statements/2026-08/imports/fixture/statement.pdf', 'card-billing-statements/2026-08/fixture/statement.pdf'];
+for (const [index, position] of devPositions.entries()) {
+  const user = await signIn(`dev-position-${index}`);
+  await db.doc(`users/${user.uid}`).set({ role: 'user', position, status: 'active' });
+  for (const cardPath of cardPaths) {
+    assert.equal((await getBytes(ref(storage, cardPath))).byteLength, 9, `DEV position variant ${index} can read card original`);
+    assertions += 1;
+  }
+  await denied('DEV identifier does not bypass protected staging reads', () => getBytes(ref(storage, 'construction-plan-staging/owner/session/source')));
+  await db.doc(`users/${user.uid}`).update({ status: 'suspended' });
+  await denied('Suspended DEV cannot read card originals', () => getBytes(ref(storage, cardPaths[0])));
+  await db.doc(`users/${user.uid}`).set({ role: 'user', position: 'unrelated-custom-position', status: 'active' });
+  await denied('Unrelated custom position cannot read card originals', () => getBytes(ref(storage, cardPaths[0])));
+  await db.doc(`users/${user.uid}`).delete();
+  await denied('Missing DEV profile cannot read card originals', () => getBytes(ref(storage, cardPaths[0])));
+}
+await signOut(auth);
+await denied('Unauthenticated card original access', () => getBytes(ref(storage, cardPaths[0])));
 console.log(`Storage manager security checks passed: ${assertions}`);
 await signOut(auth);
 process.exit(0);
