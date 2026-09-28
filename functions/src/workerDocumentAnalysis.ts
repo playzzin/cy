@@ -1,3 +1,4 @@
+import { geminiTextGenerationOptions, normalizeGeminiModelName } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
 
 export type WorkerDocumentKind = 'identity' | 'bank';
@@ -23,7 +24,7 @@ export function normalizeWorkerDocument(raw: any, kind: WorkerDocumentKind) {
 
 export async function analyzeWorkerDocument(file: { base64: string; contentType: string }, kind: WorkerDocumentKind, settings: { apiKey?: string; documentModel: string }, fetcher: typeof fetch = fetch) {
     if (!settings.apiKey) throw new functions.https.HttpsError('failed-precondition', '사무실에서 서버 Gemini API 설정을 확인해 주세요. 직접 입력으로도 신청할 수 있습니다.');
-    const model = settings.documentModel.replace(/^models\//, '');
+    const model = normalizeGeminiModelName(settings.documentModel);
     if (!/^gemini-[a-zA-Z0-9._-]{1,90}$/.test(model)) throw new functions.https.HttpsError('failed-precondition', '서버 문서 분석 모델 설정을 확인해 주세요.');
     const keys = kind === 'identity' ? ['name', 'address', 'contact'] : ['bankName', 'accountNumber', 'accountHolder'];
     const schema = { type: 'object', additionalProperties: false, properties: { validDocument: { type: 'boolean' }, ...Object.fromEntries(keys.map(key => [key, { type: ['string', 'null'] }])), warnings: { type: 'array', items: { type: 'string' }, maxItems: 5 } }, required: ['validDocument', ...keys, 'warnings'] };
@@ -33,7 +34,7 @@ ${kind === 'identity' ? '이름(name), 주소(address), 문서에 실제로 기�
     try {
         const response = await fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': settings.apiKey }, signal: AbortSignal.timeout(75_000),
-            body: JSON.stringify({ systemInstruction: { parts: [{ text: prompt }] }, contents: [{ role: 'user', parts: [{ inlineData: { mimeType: file.contentType, data: file.base64 } }] }], generationConfig: { temperature: 0.1, responseMimeType: 'application/json', responseJsonSchema: schema } }),
+            body: JSON.stringify({ systemInstruction: { parts: [{ text: prompt }] }, contents: [{ role: 'user', parts: [{ inlineData: { mimeType: file.contentType, data: file.base64 } }] }], generationConfig: { ...geminiTextGenerationOptions(model, 0.1), responseMimeType: 'application/json', responseJsonSchema: schema } }),
         });
         if (response.status === 429) throw new functions.https.HttpsError('resource-exhausted', '서류 분석 사용량이 많습니다. 잠시 후 다시 시도하거나 직접 입력해 주세요.');
         if (!response.ok) throw new Error('provider-error');

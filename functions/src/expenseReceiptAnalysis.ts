@@ -1,3 +1,4 @@
+import { geminiTextGenerationOptions, normalizeGeminiModelName } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
 
 type Category = { id: string; label: string };
@@ -26,7 +27,7 @@ export async function analyzeExpenseReceipt(
     file: { contentType: string; base64: string }, categories: Category[], settings: Settings, fetcher: typeof fetch = fetch,
 ) {
     if (!settings.apiKey) throw new functions.https.HttpsError('failed-precondition', '사무실에서 AI 설정의 서버 Gemini API 키를 등록해 주세요. 직접 입력으로도 신청할 수 있습니다.');
-    const model = settings.documentModel.replace(/^models\//, '');
+    const model = normalizeGeminiModelName(settings.documentModel);
     if (!/^gemini-[a-zA-Z0-9._-]{1,90}$/.test(model)) throw new functions.https.HttpsError('failed-precondition', '서버 Gemini 문서 분석 모델 설정을 확인해 주세요.');
     const nullableString = { type: ['string', 'null'] };
     const schema = {
@@ -54,7 +55,7 @@ export async function analyzeExpenseReceipt(
             body: JSON.stringify({
                 systemInstruction: { parts: [{ text: prompt }] },
                 contents: [{ role: 'user', parts: [{ inlineData: { mimeType: file.contentType, data: file.base64 } }] }],
-                generationConfig: { temperature: 0.1, responseMimeType: 'application/json', responseJsonSchema: schema },
+                generationConfig: { ...geminiTextGenerationOptions(model, 0.1), responseMimeType: 'application/json', responseJsonSchema: schema },
             }),
         });
         if (response.status === 429) throw new functions.https.HttpsError('resource-exhausted', '영수증 분석 사용량이 많습니다. 잠시 뒤 다시 분석하거나 직접 입력해 주세요.');

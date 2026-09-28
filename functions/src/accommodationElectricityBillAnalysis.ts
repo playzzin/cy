@@ -1,3 +1,5 @@
+import { geminiTextGenerationOptions } from './geminiModelPolicy';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { createHash } from 'crypto';
@@ -575,7 +577,7 @@ export const analyzeAccommodationElectricityBills = functions
                     '/settings/ai에서 서버용 Gemini API Key를 먼저 설정해 주세요.',
                 );
             }
-            const model = asString(settings.documentModel) || asString(settings.model) || 'gemini-2.5-flash';
+            const model = asString(settings.documentModel) || asString(settings.model) || DEFAULT_GEMINI_TEXT_MODEL;
             const parts: Array<Record<string, unknown>> = [{ text: buildPrompt(yearMonth, files) }];
             files.forEach((file) => {
                 parts.push({ text: `FILE_INDEX=${file.fileIndex}\nFILE_NAME=${file.originalFileName}` });
@@ -589,7 +591,7 @@ export const analyzeAccommodationElectricityBills = functions
                 body: JSON.stringify({
                     contents: [{ role: 'user', parts }],
                     generationConfig: {
-                        temperature: 0.05,
+                        ...geminiTextGenerationOptions(model, 0.05),
                         responseMimeType: 'application/json',
                         responseJsonSchema: ELECTRICITY_BILL_SCHEMA,
                     },
@@ -688,7 +690,7 @@ export const analyzeAccommodationGasBills = functions
                     '/settings/ai에서 서버 Gemini API Key를 먼저 설정해 주세요.',
                 );
             }
-            const model = asString(settings.documentModel) || asString(settings.model) || 'gemini-2.5-flash';
+            const model = asString(settings.documentModel) || asString(settings.model) || DEFAULT_GEMINI_TEXT_MODEL;
             const parts: Array<Record<string, unknown>> = [{ text: buildGasPrompt(yearMonth, files) }];
             files.forEach((file) => {
                 parts.push({ text: `FILE_INDEX=${file.fileIndex}\nFILE_NAME=${file.originalFileName}` });
@@ -702,7 +704,7 @@ export const analyzeAccommodationGasBills = functions
                 body: JSON.stringify({
                     contents: [{ role: 'user', parts }],
                     generationConfig: {
-                        temperature: 0.05,
+                        ...geminiTextGenerationOptions(model, 0.05),
                         responseMimeType: 'application/json',
                         responseJsonSchema: GAS_BILL_SCHEMA,
                     },
@@ -801,7 +803,7 @@ export const analyzeAccommodationWaterBills = functions
                     '/settings/ai에서 서버 Gemini API Key를 먼저 설정해 주세요.',
                 );
             }
-            const model = asString(settings.documentModel) || asString(settings.model) || 'gemini-2.5-flash';
+            const model = asString(settings.documentModel) || asString(settings.model) || DEFAULT_GEMINI_TEXT_MODEL;
             const parts: Array<Record<string, unknown>> = [{ text: buildWaterPrompt(yearMonth, files) }];
             files.forEach((file) => {
                 parts.push({ text: `FILE_INDEX=${file.fileIndex}\nFILE_NAME=${file.originalFileName}` });
@@ -815,7 +817,7 @@ export const analyzeAccommodationWaterBills = functions
                 body: JSON.stringify({
                     contents: [{ role: 'user', parts }],
                     generationConfig: {
-                        temperature: 0.05,
+                        ...geminiTextGenerationOptions(model, 0.05),
                         responseMimeType: 'application/json',
                         responseJsonSchema: WATER_BILL_SCHEMA,
                     },

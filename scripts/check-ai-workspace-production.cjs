@@ -7,6 +7,14 @@ const root = path.resolve(__dirname, '..');
 const names = ['aiWorkspace', 'aiWorkspaceReports', 'generateScheduledWorkspaceReports'];
 const groups = ['ai_report_runs', 'ai_report_schedules', 'cardBillings', 'accommodation_billing_documents', 'vehicle_billing_documents'];
 const keyOf = fields => JSON.stringify(fields.filter(field => field.fieldPath !== '__name__').map(field => [field.fieldPath, field.order || field.arrayConfig]));
+// Firebase CLI schedules first-generation functions in the project's App Engine location.
+const schedulerLocation = config => {
+  const location = config?.locationId;
+  if (!location) return 'us-central1';
+  if (typeof location !== 'string' || !/^[a-z]+-[a-z]+\d*$/.test(location)) throw new Error('invalid Scheduler location');
+  return /[^\d]$/.test(location) ? `${location}1` : location;
+};
+const isWorkspaceSchedulerJob = (job, project) => job.pubsubTarget?.topicName === `projects/${project}/topics/firebase-schedule-${names[2]}-asia-northeast3`;
 async function main() {
   if (!process.argv.includes('--read-only')) throw new Error('read-only flag required');
   const project = JSON.parse(fs.readFileSync(path.join(root, '.firebaserc'), 'utf8')).projects.default;
@@ -61,13 +69,15 @@ async function main() {
     schedulerEnabled: effective.schedulerEnabled, pilotAccountCount: effective.pilotUids.length };
   const ai = await get(`https://firestore.googleapis.com/v1/projects/${project}/databases/(default)/documents/server_settings/ai`);
   report.serverAi = { httpStatus: ai.status, keyConfigured: Boolean(ai.data?.fields?.apiKey?.stringValue), model: ai.data?.fields?.model?.stringValue || null };
-  const jobs = await listed(`https://cloudscheduler.googleapis.com/v1/projects/${project}/locations/asia-northeast3/jobs`, 'jobs');
-  const matches = jobs.values.filter(job => job.pubsubTarget?.topicName?.endsWith(`/firebase-scheduled-${names[2]}-asia-northeast3`));
-  report.scheduler = { httpStatus: jobs.status, inventoryComplete: jobs.complete, jobs: matches.map(job => ({ state: job.state, schedule: job.schedule, timeZone: job.timeZone })) };
+  const config = await get(`https://firebase.googleapis.com/v1beta1/projects/${project}/adminSdkConfig`);
+  const location = config.status === 200 ? schedulerLocation(config.data) : null;
+  const jobs = location ? await listed(`https://cloudscheduler.googleapis.com/v1/projects/${project}/locations/${location}/jobs`, 'jobs') : { status: config.status, complete: false, values: [] };
+  const matches = jobs.values.filter(job => isWorkspaceSchedulerJob(job, project));
+  report.scheduler = { httpStatus: jobs.status, location, inventoryComplete: jobs.complete, jobs: matches.map(job => ({ state: job.state, schedule: job.schedule, timeZone: job.timeZone })) };
   try {
     const response = await fetch(`https://${project}.web.app/release.json`, { signal: AbortSignal.timeout(20000) });
     const release = await response.json();
-    report.hosting = { httpStatus: response.status, builtAt: release.builtAt || null, dirty: release.dirty ?? null,
+    report.hosting = { httpStatus: response.status, commit: release.commit || null, builtAt: release.builtAt || null, dirty: release.dirty ?? null,
       sameAssetsAsLocal: fs.existsSync(path.join(root, 'build/release.json')) ? release.assetManifestHash === JSON.parse(fs.readFileSync(path.join(root, 'build/release.json'), 'utf8')).assetManifestHash : null };
   } catch { report.hosting = { httpStatus: 0, sameAssetsAsLocal: null }; }
   report.infrastructureReady = report.functions.every(item => item.state === 'ACTIVE') && report.functions.slice(0, 2).every(item => item.anonymousRejected === true)
@@ -80,4 +90,4 @@ async function main() {
   if (!report.infrastructureReady) process.exitCode = 2;
 }
 if (require.main === module) main().catch(() => { console.error('읽기 전용 운영 점검을 완료하지 못했습니다. 기존 인증·네트워크 설정을 확인해 주세요.'); process.exitCode = 1; });
-module.exports = { keyOf };
+module.exports = { keyOf, schedulerLocation, isWorkspaceSchedulerJob };

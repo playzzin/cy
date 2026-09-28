@@ -1,6 +1,7 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { requireCallableAdmin } from './auth';
+import { normalizeGeminiModelName } from './geminiModelPolicy';
 import { normalizeExcelModel, normalizeExcelThinking, ExcelThinkingLevel } from './excelConversionModel';
 
 export interface ServerGeminiSettings {
@@ -16,8 +17,6 @@ export interface ServerGeminiSettings {
 
 const SETTINGS_COLLECTION = 'server_settings';
 const AI_SETTINGS_DOC = 'ai';
-const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
-const DEFAULT_DOCUMENT_MODEL = 'gemini-2.5-flash';
 
 const db = admin.firestore();
 
@@ -30,19 +29,8 @@ const maskApiKey = (apiKey: string): string => {
     return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`;
 };
 
-const normalizeModel = (value: unknown, fallback = DEFAULT_GEMINI_MODEL): string => {
-    const model = asString(value).replace(/^models\//, '');
-    return model || fallback;
-};
-
-// Gemini 2.5 Pro is no longer available for new Gemini API users. Keep saved
-// server settings from breaking document imports after the provider retirement.
-const normalizeDocumentModel = (value: unknown): string => {
-    const model = normalizeModel(value, DEFAULT_DOCUMENT_MODEL);
-    return /^gemini-2\.5-pro(?:$|[-._:])/i.test(model)
-        ? DEFAULT_DOCUMENT_MODEL
-        : model;
-};
+const normalizeModel = normalizeGeminiModelName;
+const normalizeDocumentModel = normalizeGeminiModelName;
 
 const settingsRef = () => db.collection(SETTINGS_COLLECTION).doc(AI_SETTINGS_DOC);
 

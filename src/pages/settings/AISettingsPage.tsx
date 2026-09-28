@@ -1,3 +1,4 @@
+import { DEFAULT_GEMINI_TEXT_MODEL } from '../../services/geminiModelPolicy';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -45,9 +46,9 @@ const AISettingsPage: React.FC = () => {
     });
     const [pageEnabledById, setPageEnabledById] = useState<Record<string, boolean>>({});
     const [serverApiKey, setServerApiKey] = useState('');
-    const [serverModel, setServerModel] = useState('gemini-2.5-flash');
-    const [serverDocumentModel, setServerDocumentModel] = useState('gemini-2.5-flash');
-    const [serverBatchModel, setServerBatchModel] = useState('gemini-2.5-flash');
+    const [serverModel, setServerModel] = useState(DEFAULT_GEMINI_TEXT_MODEL);
+    const [serverDocumentModel, setServerDocumentModel] = useState(DEFAULT_GEMINI_TEXT_MODEL);
+    const [serverBatchModel, setServerBatchModel] = useState(DEFAULT_GEMINI_TEXT_MODEL);
     const [conversionModel, setConversionModel] = useState('gemini-3.8-flash');
     const [conversionThinking, setConversionThinking] = useState<'low' | 'medium' | 'high'>('medium');
     const [serverStatus, setServerStatus] = useState<ServerAiSettingsStatus | null>(null);
@@ -70,9 +71,9 @@ const AISettingsPage: React.FC = () => {
         try {
             const status = await serverAiSettingsService.getStatus();
             setServerStatus(status);
-            setServerModel(status.model || 'gemini-2.5-flash');
-            setServerDocumentModel(status.documentModel || 'gemini-2.5-flash');
-            setServerBatchModel(status.batchModel || status.model || 'gemini-2.5-flash');
+            setServerModel(status.model || DEFAULT_GEMINI_TEXT_MODEL);
+            setServerDocumentModel(status.documentModel || DEFAULT_GEMINI_TEXT_MODEL);
+            setServerBatchModel(status.batchModel || status.model || DEFAULT_GEMINI_TEXT_MODEL);
             setConversionModel(status.excelConversionModel);
             setConversionThinking(status.excelConversionThinking);
         } catch (error) {
@@ -135,7 +136,7 @@ const AISettingsPage: React.FC = () => {
             {
                 id: 'binding-document-recognition',
                 service: '공공요금·차량 과태료 문서 인식',
-                model: serverStatus?.documentModel || serverDocumentModel || 'gemini-2.5-flash',
+                model: serverStatus?.documentModel || serverDocumentModel || DEFAULT_GEMINI_TEXT_MODEL,
                 note: '전기·가스·수도 청구서와 과태료 고지서의 고정밀 OCR·매칭'
             },
             { id: 'binding-excel-conversion', service: '위임장·노임명세서 양식 변환', model: serverStatus?.excelConversionModel || conversionModel, note: '양식 변환 전용 모델 · 개인정보 행은 브라우저에서 처리' },
@@ -353,7 +354,7 @@ const AISettingsPage: React.FC = () => {
                                 value={serverModel}
                                 onChange={(e) => setServerModel(e.target.value)}
                                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono"
-                                placeholder="gemini-2.5-flash"
+                                placeholder={DEFAULT_GEMINI_TEXT_MODEL}
                             />
                         </div>
                         <div className="space-y-2">
@@ -364,7 +365,7 @@ const AISettingsPage: React.FC = () => {
                                 value={serverDocumentModel}
                                 onChange={(e) => setServerDocumentModel(e.target.value)}
                                 className="w-full border border-indigo-200 bg-indigo-50 rounded-xl px-3 py-2.5 text-xs font-mono font-bold text-indigo-800"
-                                placeholder="gemini-2.5-flash"
+                                placeholder={DEFAULT_GEMINI_TEXT_MODEL}
                             />
                             <datalist id="server-document-model-options">
                                 {AI_TEXT_MODEL_OPTIONS.map((option) => (
@@ -379,7 +380,7 @@ const AISettingsPage: React.FC = () => {
                                 value={serverBatchModel}
                                 onChange={(e) => setServerBatchModel(e.target.value)}
                                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono"
-                                placeholder="gemini-2.5-flash"
+                                placeholder={DEFAULT_GEMINI_TEXT_MODEL}
                             />
                         </div>
                         <button

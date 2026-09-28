@@ -1,3 +1,4 @@
+import { DEFAULT_GEMINI_TEXT_MODEL, DEFAULT_GEMINI_LITE_MODEL, geminiTextGenerationOptions } from './geminiModelPolicy';
 import { aiSettingsService, normalizeGeminiModelName } from './aiSettingsService';
 
 export interface AnalyzedIdCard {
@@ -105,16 +106,16 @@ const getApiKeyOrThrow = (): string => {
 };
 
 const buildGeminiGenerateContentUrl = (apiKey: string, model?: string): string => {
-    const selectedModel = normalizeGeminiModelName(model || aiSettingsService.getModels().textModel, 'gemini-2.5-flash');
+    const selectedModel = normalizeGeminiModelName(model || aiSettingsService.getModels().textModel, DEFAULT_GEMINI_TEXT_MODEL);
     return `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
 };
 
 const getTextModelCandidates = (): string[] => {
-    const selectedModel = normalizeGeminiModelName(aiSettingsService.getModels().textModel, 'gemini-2.5-flash');
+    const selectedModel = normalizeGeminiModelName(aiSettingsService.getModels().textModel, DEFAULT_GEMINI_TEXT_MODEL);
     return Array.from(new Set([
         selectedModel,
-        'gemini-2.5-flash',
-        'gemini-2.5-flash-lite'
+        DEFAULT_GEMINI_TEXT_MODEL,
+        DEFAULT_GEMINI_LITE_MODEL
     ].filter(Boolean)));
 };
 
@@ -426,7 +427,7 @@ ${sourceType === 'text' ? `\nKakaoTalk text:\n${text || ''}` : '\nKakaoTalk scre
 const extractGeminiText = (data: any): string => {
     const parts = data?.candidates?.[0]?.content?.parts;
     if (!Array.isArray(parts)) return '';
-    return parts.map((part: any) => typeof part?.text === 'string' ? part.text : '').join('').trim();
+    return parts.filter((part: any) => !part.thought).map((part: any) => typeof part?.text === 'string' ? part.text : '').join('').trim();
 };
 
 const formatGeminiApiError = (message: string, status?: number): string => {
@@ -453,24 +454,26 @@ const fetchGeminiStructuredJson = async <T,>(
     responseJsonSchema: Record<string, any>,
     errorLabel: string
 ): Promise<T> => {
-    const body = JSON.stringify({
+    const body = {
         contents: [{
             role: 'user',
             parts
         }],
         generationConfig: {
-            temperature: 0.1,
             responseMimeType: 'application/json',
             responseJsonSchema
         }
-    });
+    };
     const attempts: Array<{ model: string; status: number; message: string }> = [];
 
     for (const model of getTextModelCandidates()) {
         const response = await fetch(buildGeminiGenerateContentUrl(apiKey, model), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body
+            body: JSON.stringify({
+                ...body,
+                generationConfig: { ...body.generationConfig, ...geminiTextGenerationOptions(model) }
+            })
         });
 
         const rawText = await response.text();

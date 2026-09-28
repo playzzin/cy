@@ -1,3 +1,4 @@
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 /**
  * 개선된 에이전트 오케스트레이터
  * 스마트 작업 분배, 진행 추적, 병렬 처리 지원
@@ -38,7 +39,7 @@ async function callGeminiSimple(prompt: string): Promise<string> {
 
     try {
         aiSettingsService.assertCurrentPageEnabled('AI 에이전트 대화');
-        const model = aiSettingsService.getModels().textModel || 'gemini-2.5-flash';
+        const model = aiSettingsService.getModels().textModel || DEFAULT_GEMINI_TEXT_MODEL;
         const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
         const response = await fetch(

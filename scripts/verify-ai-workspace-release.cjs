@@ -9,7 +9,7 @@ const before = sourceState();
 const steps = [
   ['project', ['scripts/verify-project-health.js']],
   ['lint', ['node_modules/eslint/bin/eslint.js', 'src/features/ai-workspace', 'functions/src/aiWorkspace', 'src/services/aiSettingsService.ts', 'src/services/aiSettingsService.test.ts']],
-  ['server', () => ['--test', ...fs.readdirSync(path.join(root, 'functions/lib/aiWorkspace')).filter(name => name.endsWith('.test.js')).map(name => `functions/lib/aiWorkspace/${name}`), 'functions/lib/teamReadPolicy.test.js', 'functions/lib/teamScopedQuery.test.js', 'scripts/test-ai-workspace-reference.cjs', 'scripts/release-manifest.test.cjs', 'scripts/apply-ai-workspace-indexes.test.cjs']],
+  ['server', () => ['--test', ...fs.readdirSync(path.join(root, 'functions/lib/aiWorkspace')).filter(name => name.endsWith('.test.js')).map(name => `functions/lib/aiWorkspace/${name}`), 'functions/lib/teamReadPolicy.test.js', 'functions/lib/teamScopedQuery.test.js', 'functions/lib/geminiModelPolicy.test.js', 'scripts/test-ai-workspace-reference.cjs', 'scripts/release-manifest.test.cjs', 'scripts/apply-ai-workspace-indexes.test.cjs', 'scripts/check-ai-workspace-production.test.cjs']],
   ['emulator-query', ['scripts/run-ai-workspace-tests.mjs']],
   ['emulator-reports', ['scripts/run-ai-workspace-tests.mjs', '--reports']],
   ['build', ['--max-old-space-size=8192', 'scripts/react-scripts-build.js']],

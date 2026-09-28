@@ -1,3 +1,4 @@
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../config/firebase';
 
@@ -26,9 +27,9 @@ export interface SaveServerAiSettingsInput {
 const DEFAULT_STATUS: ServerAiSettingsStatus = {
     configured: false,
     maskedApiKey: '',
-    model: 'gemini-2.5-flash',
-    documentModel: 'gemini-2.5-flash',
-    batchModel: 'gemini-2.5-flash',
+    model: DEFAULT_GEMINI_TEXT_MODEL,
+    documentModel: DEFAULT_GEMINI_TEXT_MODEL,
+    batchModel: DEFAULT_GEMINI_TEXT_MODEL,
     excelConversionModel: 'gemini-3.8-flash',
     excelConversionThinking: 'medium',
     updatedAt: '',
