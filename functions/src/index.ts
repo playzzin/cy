@@ -153,4 +153,5 @@ export { teamOffDutyRequests } from './teamOffDutyRequests';
 export { workerSignatures } from './workerSignatures';
 
 export { aiWorkspace } from './aiWorkspace';
+export { dailyReportAnalyticsAi } from './dailyReportAnalyticsAi';
 export { aiWorkspaceReports, generateScheduledWorkspaceReports } from './aiWorkspace/scheduledReports';

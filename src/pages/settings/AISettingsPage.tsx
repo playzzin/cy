@@ -117,9 +117,9 @@ const AISettingsPage: React.FC = () => {
             },
             {
                 id: 'binding-gemini-analytics',
-                service: 'geminiAnalyticsService',
-                model: models.analyticsModel,
-                note: '일보 통계 질문/인사이트 생성'
+                service: '일보 통계 AI (서버)',
+                model: serverStatus?.model || serverModel || 'server-managed',
+                note: '서버용 Gemini 설정으로 질문 해석·인사이트 생성'
             },
             {
                 id: 'binding-gemini-image',
@@ -284,7 +284,7 @@ const AISettingsPage: React.FC = () => {
                                 서버용 Gemini 설정
                             </h2>
                             <p className="text-sm text-slate-500 mt-1">
-                                사진 거래처 등록, 법인카드 청구관리처럼 Cloud Function에서 실행되는 Gemini 기능에 사용됩니다.
+                                일보 통계 AI 분석, AI 업무 도우미, 사진 거래처 등록, 법인카드 청구관리에서 사용합니다. 통계 분석은 브라우저에 저장된 키를 사용하지 않습니다.
                             </p>
                         </div>
                         <button

@@ -17,7 +17,8 @@ if (process.platform === 'win32') {
 }
 const globalCli = path.join(env.APPDATA || '', 'npm', 'node_modules', 'firebase-tools', 'lib', 'bin', 'firebase.js');
 const command = existsSync(globalCli) ? process.execPath : process.platform === 'win32' ? 'firebase.cmd' : 'firebase';
-const testScript = process.argv.includes('--reports') ? 'node scripts/test-ai-workspace-reports.mjs' : 'node scripts/test-ai-workspace.mjs';
+const testScript = process.argv.includes('--statistics') ? 'node scripts/test-daily-report-analytics.mjs'
+  : process.argv.includes('--reports') ? 'node scripts/test-ai-workspace-reports.mjs' : 'node scripts/test-ai-workspace.mjs';
 const args = [...(existsSync(globalCli) ? [globalCli] : []), 'emulators:exec', '--only', 'firestore,auth', '--project', 'demo-cy-ai-workspace', testScript];
 const result = spawnSync(command, args, { env, stdio: 'inherit', shell: false });
 if (result.error) console.error(result.error.message);

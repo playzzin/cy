@@ -155,7 +155,7 @@ const unique = (values: unknown[]): string[] => {
     return result.slice(0, 30);
 };
 
-const getRoleGroups = (roles: string[]): RoleGroup[] => {
+export const getRoleGroups = (roles: string[]): RoleGroup[] => {
     const actual = new Set(roles.map(normalizeKey));
     const groups = (Object.keys(ROLE_GROUPS) as RoleGroup[]).filter((group) => {
         return ROLE_GROUPS[group].some((role) => actual.has(normalizeKey(role)));

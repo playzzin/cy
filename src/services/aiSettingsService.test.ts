@@ -38,4 +38,5 @@ test('workspace switch is independent of statistics and server policy', () => {
   aiSettingsService.setPageEnabled('reports-ai-workspace', false);
   expect(() => aiSettingsService.assertPathEnabled('/reports/ai-workspace')).toThrow('비활성화');
   expect(aiSettingsService.isPathEnabled('/reports/statistics')).toBe(true);
+  expect(aiSettingsService.getPageByPath('/reports/statistics')?.modelScope).toBe('server');
 });

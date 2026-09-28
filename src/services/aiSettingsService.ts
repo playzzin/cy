@@ -108,7 +108,7 @@ export const AI_MANAGED_PAGES: AiManagedPage[] = [
         name: '일보 통계 AI 분석',
         description: '자연어 기반 통계 질의/인사이트 생성',
         paths: ['/reports/statistics'],
-        modelScope: 'analyticsModel'
+        modelScope: 'server'
     },
     {
         id: 'reports-ai-workspace',
@@ -397,10 +397,10 @@ export const aiSettingsService = {
             },
             {
                 id: 'binding-gemini-analytics',
-                service: 'geminiAnalyticsService',
-                model: models.analyticsModel,
-                source: 'analyticsModel',
-                note: '일보 통계 질의 파싱/인사이트 생성'
+                service: '일보 통계 AI (서버)',
+                model: 'server-managed',
+                source: 'server',
+                note: '서버용 Gemini 설정으로 질문 해석·인사이트 생성'
             },
             {
                 id: 'binding-gemini-image',
