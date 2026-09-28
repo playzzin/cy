@@ -793,6 +793,7 @@ service cloud.firestore {
       // large ERP collection classifiers to stay under the rules expression
       // budget.
       return collectionId in [
+        'gemini_usage_logs',
         'team_expense_requests',
         'team_worker_requests',
           'constructionPlans',

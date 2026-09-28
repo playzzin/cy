@@ -1,3 +1,4 @@
+import { trackedGeminiFetch } from './geminiUsageLogging';
 import { geminiTextGenerationOptions, normalizeGeminiModelName } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
 
@@ -32,7 +33,7 @@ export async function analyzeWorkerDocument(file: { base64: string; contentType:
 ${kind === 'identity' ? '이름(name), 주소(address), 문서에 실제로 기재된 본인 전화번호(contact)만 추출한다. 일반 신분증에는 연락처가 없으므로 없으면 반드시 null이다. 발급기관 전화번호, 주민번호, 문서번호를 연락처로 쓰지 않는다. 주민등록번호/외국인등록번호/운전면허번호/생년월일은 절대 출력하지 않는다.' : '은행명(bankName), 계좌번호(accountNumber), 예금주(accountHolder)만 추출한다. 계좌번호의 앞자리 0을 보존한다. 카드번호, 거래금액, 잔액, 주민번호, 비밀번호는 출력하지 않는다. 가려진 숫자는 복원하거나 추측하지 않는다.'}
 다른 사람의 서류가 여러 개 섞였거나 해당 서류가 아니면 validDocument=false로 하고 모든 항목을 null로 한다. 읽을 수 없는 항목은 null로 한다. warnings에는 짧은 한국어 확인 안내만 쓰고 개인정보 원문을 반복하지 않는다.`;
     try {
-        const response = await fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        const response = await trackedGeminiFetch('worker-documents', fetcher)(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': settings.apiKey }, signal: AbortSignal.timeout(75_000),
             body: JSON.stringify({ systemInstruction: { parts: [{ text: prompt }] }, contents: [{ role: 'user', parts: [{ inlineData: { mimeType: file.contentType, data: file.base64 } }] }], generationConfig: { ...geminiTextGenerationOptions(model, 0.1), responseMimeType: 'application/json', responseJsonSchema: schema } }),
         });

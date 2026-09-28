@@ -1,3 +1,4 @@
+import { trackedGeminiFetch, withGeminiUsageContext } from './geminiUsageLogging';
 import { geminiTextGenerationOptions } from './geminiModelPolicy';
 import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
@@ -547,7 +548,7 @@ const toWaterHttpsError = (error: unknown): functions.https.HttpsError => toUtil
 export const analyzeAccommodationElectricityBills = functions
     .runWith({ timeoutSeconds: 300, memory: '1GB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data: AnalyzeElectricityBillsRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: AnalyzeElectricityBillsRequest, context) => {
         try {
             await requireAccommodationBillingAccess(context);
             const yearMonth = normalizeYearMonth(data?.yearMonth);
@@ -585,7 +586,7 @@ export const analyzeAccommodationElectricityBills = functions
             });
 
             const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const response = await fetch(endpoint, {
+            const response = await trackedGeminiFetch('accommodation-bills')(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -655,12 +656,12 @@ export const analyzeAccommodationElectricityBills = functions
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));
 
 export const analyzeAccommodationGasBills = functions
     .runWith({ timeoutSeconds: 300, memory: '1GB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data: AnalyzeElectricityBillsRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: AnalyzeElectricityBillsRequest, context) => {
         try {
             await requireAccommodationBillingAccess(context);
             const yearMonth = normalizeYearMonth(data?.yearMonth);
@@ -698,7 +699,7 @@ export const analyzeAccommodationGasBills = functions
             });
 
             const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const response = await fetch(endpoint, {
+            const response = await trackedGeminiFetch('accommodation-bills')(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -768,12 +769,12 @@ export const analyzeAccommodationGasBills = functions
         } catch (error) {
             throw toGasHttpsError(error);
         }
-    });
+    }));
 
 export const analyzeAccommodationWaterBills = functions
     .runWith({ timeoutSeconds: 300, memory: '1GB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data: AnalyzeElectricityBillsRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: AnalyzeElectricityBillsRequest, context) => {
         try {
             await requireAccommodationBillingAccess(context);
             const yearMonth = normalizeYearMonth(data?.yearMonth);
@@ -811,7 +812,7 @@ export const analyzeAccommodationWaterBills = functions
             });
 
             const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const response = await fetch(endpoint, {
+            const response = await trackedGeminiFetch('accommodation-bills')(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -881,4 +882,4 @@ export const analyzeAccommodationWaterBills = functions
         } catch (error) {
             throw toWaterHttpsError(error);
         }
-    });
+    }));

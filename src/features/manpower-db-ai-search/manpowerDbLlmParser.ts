@@ -1,3 +1,4 @@
+import { trackedGeminiFetch } from '../../services/geminiUsageFetch';
 import { aiSettingsService } from '../../services/aiSettingsService';
 import { parseManpowerDbQuestion } from './manpowerDbQueryParser';
 import { ManpowerDbSearchQuery } from './manpowerDbSearchTypes';
@@ -44,7 +45,7 @@ export const parseManpowerDbQuestionHybrid = async (
             accountNumber: '123456789',
             idNumber: '900101-1234567',
         });
-        const response = await options.fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${aiSettingsService.getModels().textModel}:generateContent?key=${options.apiKey}`, {
+        const response = await trackedGeminiFetch('manpower-search', options.fetchImpl)(`https://generativelanguage.googleapis.com/v1beta/models/${aiSettingsService.getModels().textModel}:generateContent?key=${options.apiKey}`, {
             method: 'POST',
             signal: controller?.signal,
             headers: { 'Content-Type': 'application/json' },

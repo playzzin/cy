@@ -1,3 +1,4 @@
+import { trackedGeminiFetch } from './geminiUsageFetch';
 import { DEFAULT_GEMINI_IMAGE_MODEL } from './geminiModelPolicy';
 import { storage, db } from '../config/firebase';
 import { ref, uploadBytes, getDownloadURL, listAll, deleteObject, getMetadata, updateMetadata } from 'firebase/storage';
@@ -148,7 +149,7 @@ User's request: ${prompt}`;
 
     try {
         const endpoint = `${GEMINI_API_URL_BASE}/${geminiImageModel}:generateContent?key=${geminiApiKey}`;
-        const response = await fetch(endpoint, {
+        const response = await trackedGeminiFetch('image-generation')(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -569,7 +570,7 @@ export async function applyAsFavicon(imageUrl: string, target: BrandingTarget = 
         const targetPaths = BRANDING_PATHS[target];
 
         // Download the image and re-upload to target favicon path
-        const response = await fetch(imageUrl);
+        const response = await trackedGeminiFetch('image-generation')(imageUrl);
         const blob = await response.blob();
         const storageRefObj = ref(storage, targetPaths.faviconPath);
         await uploadBytes(storageRefObj, blob, { contentType: blob.type });
@@ -614,7 +615,7 @@ export async function applyAsLogo(imageUrl: string, target: BrandingTarget = 'si
         const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
         const targetPaths = BRANDING_PATHS[target];
 
-        const response = await fetch(imageUrl);
+        const response = await trackedGeminiFetch('image-generation')(imageUrl);
         const blob = await response.blob();
         const storageRefObj = ref(storage, targetPaths.logoPath);
         await uploadBytes(storageRefObj, blob, { contentType: blob.type });
@@ -662,7 +663,7 @@ export async function applyAsDashboardBanner(imageUrl: string, stepIndex: number
         const { db } = await import('../config/firebase');
         const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
 
-        const response = await fetch(imageUrl);
+        const response = await trackedGeminiFetch('image-generation')(imageUrl);
         const blob = await response.blob();
         const ext = blob.type.includes('png') ? 'png' : 'jpg';
         const storagePath = `settings/dashboard_banners/step_${stepIndex}_${Date.now()}.${ext}`;

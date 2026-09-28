@@ -95,6 +95,28 @@ describe('menuServiceV11 canonical Firestore document', () => {
     expect(mockedGetDoc).toHaveBeenCalledTimes(1);
   });
 
+  it('registers Gemini usage in an existing CEO log folder without replacing custom items or duplicating it', async () => {
+    const legacy = JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG));
+    legacy.pos_ceo.menu = [{ text: '설정', sub: [{ text: '로그관리', sub: [{ text: '기존 기록', path: '/custom-log' }] }] }];
+    mockedGetDoc.mockResolvedValue(existingDoc(legacy) as any);
+    const config = await menuServiceV11.getMenuConfig();
+    const folder = (config!.pos_ceo.menu[0] as any).sub[0];
+    expect(folder.sub).toEqual(expect.arrayContaining([expect.objectContaining({ path: '/custom-log' }), expect.objectContaining({ path: '/admin/gemini-usage-logs' })]));
+    expect(folder.sub.filter((item: any) => item.path === '/admin/gemini-usage-logs')).toHaveLength(1);
+    menuServiceV11.clearCache();
+    mockedGetDoc.mockResolvedValue(existingDoc(config) as any);
+    const again = await menuServiceV11.getMenuConfig();
+    expect((again!.pos_ceo.menu[0] as any).sub[0].sub.filter((item: any) => item.path === '/admin/gemini-usage-logs')).toHaveLength(1);
+  });
+
+  it('creates the requested CEO log folder for saved configurations that do not yet have it', async () => {
+    const legacy = JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG));
+    legacy.pos_ceo.menu = [{ text: '기존 메뉴', path: '/custom-ceo' }];
+    mockedGetDoc.mockResolvedValue(existingDoc(legacy) as any);
+    const config = await menuServiceV11.getMenuConfig();
+    expect(config!.pos_ceo.menu).toEqual(expect.arrayContaining([expect.objectContaining({ path: '/custom-ceo' }), expect.objectContaining({ text: '로그관리', sub: expect.arrayContaining([expect.objectContaining({ path: '/admin/gemini-usage-logs' })]) })]));
+  });
+
   it('adds identity history to existing nested log folders without duplicating or replacing other logs', async () => {
     const legacy = JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG));
     legacy.admin.menu = [{ text: '설정', sub: [{ text: '로그관리', sub: ['로그인 로그', { text: '기존 로그', path: '/custom-log' }] }] }];
@@ -124,12 +146,12 @@ describe('menuServiceV11 canonical Firestore document', () => {
 
     const config = await menuServiceV11.getMenuConfig();
 
-    expect(config?.pos_ceo.menu).toEqual([
+    expect(config?.pos_ceo.menu).toEqual(expect.arrayContaining([
       expect.objectContaining({
         text: '바이백',
         path: '/payroll/field-buyback'
       })
-    ]);
+    ]));
   });
 
   it('writes only settings/menus_v12 and does not fall back on permission errors', async () => {

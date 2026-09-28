@@ -166,6 +166,7 @@ const SalaryModelUpdater = React.lazy(() => import('./pages/admin/SalaryModelUpd
 const AdminDataIntegrityPage = React.lazy(() => import('./pages/admin/AdminDataIntegrityPage'));
 const UserManagementPage = React.lazy(() => import('./pages/admin/UserManagementPage'));
 const LoginLogPage = React.lazy(() => import('./pages/admin/LoginLogPage'));
+const GeminiUsageLogPage = React.lazy(() => import('./pages/admin/GeminiUsageLogPage'));
 const PermissionChangeLogPage = React.lazy(() => import('./pages/admin/PermissionChangeLogPage'));
 const ExcelTransferLogPage = lazyNamed(() => import('./pages/admin/FileTransferLogPage'), 'ExcelTransferLogPage');
 const PdfTransferLogPage = lazyNamed(() => import('./pages/admin/FileTransferLogPage'), 'PdfTransferLogPage');
@@ -722,6 +723,7 @@ const App: React.FC = () => {
             <Route path="/admin">
               <Route path="user-management/*" element={<UserManagementPage />} />
               <Route path="login-logs" element={<LoginLogPage />} />
+              <Route path="gemini-usage-logs" element={<GeminiUsageLogPage />} />
               <Route path="permission-change-logs" element={<PermissionChangeLogPage />} />
               <Route path="excel-transfer-logs" element={<ExcelTransferLogPage />} />
               <Route path="pdf-transfer-logs" element={<PdfTransferLogPage />} />

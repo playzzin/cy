@@ -1,3 +1,4 @@
+import { trackedGeminiFetch, withGeminiUsageContext } from './geminiUsageLogging';
 import { geminiTextGenerationOptions } from './geminiModelPolicy';
 import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import { createHash } from 'crypto';
@@ -515,7 +516,7 @@ const callGeminiExpenseAudit = async (
 거래 JSON:
 ${JSON.stringify(candidates)}`;
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-    const response = await fetch(endpoint, {
+    const response = await trackedGeminiFetch('card-audit')(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -607,7 +608,7 @@ const writeInChunks = async (
 export const runCardExpenseAudit = functions
     .runWith({ timeoutSeconds: 540, memory: '1GB', maxInstances: 2 })
     .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+    .https.onCall(withGeminiUsageContext(async (data, context) => {
         const actor = await requireCardExpenseAuditAccess(context);
         const yearMonth = parseYearMonth(data?.yearMonth);
         const db = admin.firestore();
@@ -766,12 +767,12 @@ export const runCardExpenseAudit = functions
             if (error instanceof functions.https.HttpsError) throw error;
             throw new functions.https.HttpsError('internal', message || '카드감사 실행에 실패했습니다.');
         }
-    });
+    }));
 
 export const getCardExpenseAuditDashboard = functions
     .runWith({ timeoutSeconds: 60, memory: '512MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+    .https.onCall(withGeminiUsageContext(async (data, context) => {
         await requireCardExpenseAuditAccess(context);
         const yearMonth = parseYearMonth(data?.yearMonth);
         const db = admin.firestore();
@@ -793,12 +794,12 @@ export const getCardExpenseAuditDashboard = functions
             latestRun: runs[0] || null,
             findings,
         };
-    });
+    }));
 
 export const reviewCardExpenseAuditFinding = functions
     .runWith({ timeoutSeconds: 30, memory: '256MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+    .https.onCall(withGeminiUsageContext(async (data, context) => {
         const actor = await requireCardExpenseAuditAccess(context);
         const findingId = asString(data?.findingId);
         const reviewStatus = asString(data?.reviewStatus) as CardExpenseAuditReviewStatus;
@@ -838,12 +839,12 @@ export const reviewCardExpenseAuditFinding = functions
             });
         });
         return { ok: true, findingId, reviewStatus };
-    });
+    }));
 
 export const saveCardExpenseAuditPolicy = functions
     .runWith({ timeoutSeconds: 30, memory: '256MB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+    .https.onCall(withGeminiUsageContext(async (data, context) => {
         const actor = await requireCardExpenseAuditAccess(context);
         const policy = normalizeCardExpenseAuditPolicy(data?.policy);
         const now = admin.firestore.Timestamp.now();
@@ -853,4 +854,4 @@ export const saveCardExpenseAuditPolicy = functions
             updatedBy: actor,
         }, { merge: true });
         return { ok: true, policy };
-    });
+    }));

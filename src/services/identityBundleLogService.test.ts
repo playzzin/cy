@@ -1,4 +1,4 @@
-import { doc, getDocs, setDoc, where, orderBy } from 'firebase/firestore';
+import { doc, getDocs, onSnapshot, setDoc, where, orderBy } from 'firebase/firestore';
 import { auth } from '../config/firebase';
 import { isDevAdminSessionEnabled, createDevAdminUser } from '../utils/devAdminSession';
 import { buildIdentityLogDetails, identityBundleLogService, IDENTITY_LOG_CATEGORY } from './identityBundleLogService';
@@ -7,7 +7,7 @@ jest.mock('../config/firebase', () => ({ db: {}, auth: { currentUser: { uid: 'ac
 jest.mock('../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: jest.fn(() => false), createDevAdminUser: jest.fn(() => ({ uid: 'dev-admin', displayName: '개발자 관리자' })) }));
 jest.mock('firebase/firestore', () => ({
   collection: jest.fn((_db, path) => path), doc: jest.fn(() => ({ id: 'identity-log-1' })), setDoc: jest.fn(),
-  getDocs: jest.fn(), where: jest.fn(), orderBy: jest.fn(), limit: jest.fn(), query: jest.fn(),
+  getDocs: jest.fn(), onSnapshot: jest.fn(), where: jest.fn(), orderBy: jest.fn(), limit: jest.fn(), query: jest.fn(),
 }));
 beforeEach(() => {
   jest.clearAllMocks();
@@ -63,4 +63,39 @@ it('round-trips DEV history locally without writing production data', async () =
   expect(setDoc).not.toHaveBeenCalled();
   expect(await identityBundleLogService.getLogs()).toEqual([expect.objectContaining({ action: 'files_added', fileNames: ['sample.png'], actorId: 'dev-admin', fileCount: 1 })]);
   expect(getDocs).not.toHaveBeenCalled();
+});
+
+it('subscribes to server records and exposes permission failures', () => {
+  const stop = jest.fn();
+  (onSnapshot as jest.Mock).mockReturnValue(stop);
+  const receive = jest.fn();
+  const failed = jest.fn();
+  const unsubscribe = identityBundleLogService.subscribe(receive, failed);
+  const [, next, error] = (onSnapshot as jest.Mock).mock.calls[0];
+  next({ docs: [{ id: 'new', data: () => ({ category: IDENTITY_LOG_CATEGORY, timestamp: '2026-09-29T03:00:00Z',
+    details: JSON.stringify({ action: 'document_registered', status: 'success', source: 'worker_database' }) }) }] });
+  expect(receive).toHaveBeenCalledWith([expect.objectContaining({ id: 'new', action: 'document_registered', source: 'worker_database' })]);
+  error(new Error('permission-denied'));
+  expect(failed).toHaveBeenCalledWith(expect.any(Error));
+  unsubscribe();
+  expect(stop).toHaveBeenCalledTimes(1);
+});
+
+it('refreshes DEV listeners for writes in this tab and storage changes in another tab', async () => {
+  (isDevAdminSessionEnabled as jest.Mock).mockReturnValue(true);
+  const receive = jest.fn();
+  const failed = jest.fn();
+  const stop = identityBundleLogService.subscribe(receive, failed);
+  expect(receive).toHaveBeenLastCalledWith([]);
+  await identityBundleLogService.log({ action: 'document_analysis', status: 'success' });
+  expect(receive).toHaveBeenLastCalledWith([expect.objectContaining({ action: 'document_analysis' })]);
+  window.localStorage.setItem('cy_dev_identity_logs_v1', '[]');
+  window.dispatchEvent(new StorageEvent('storage', { key: 'cy_dev_identity_logs_v1', storageArea: window.localStorage }));
+  expect(receive).toHaveBeenLastCalledWith([]);
+  const calls = receive.mock.calls.length;
+  stop();
+  await identityBundleLogService.log({ action: 'files_added', status: 'success' });
+  expect(receive).toHaveBeenCalledTimes(calls);
+  expect(onSnapshot).not.toHaveBeenCalled();
+  expect(failed).not.toHaveBeenCalled();
 });

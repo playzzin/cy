@@ -1,3 +1,4 @@
+import { trackedGeminiFetch } from './geminiUsageFetch';
 import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 /**
  * 개선된 에이전트 오케스트레이터
@@ -42,7 +43,7 @@ async function callGeminiSimple(prompt: string): Promise<string> {
         const model = aiSettingsService.getModels().textModel || DEFAULT_GEMINI_TEXT_MODEL;
         const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-        const response = await fetch(
+        const response = await trackedGeminiFetch('agent-orchestrator')(
             endpoint,
             {
                 method: 'POST',

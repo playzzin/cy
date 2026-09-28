@@ -1,3 +1,4 @@
+import { trackedGeminiFetch, withGeminiUsageContext } from './geminiUsageLogging';
 import { geminiTextGenerationOptions } from './geminiModelPolicy';
 import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
@@ -359,7 +360,7 @@ const toHttpsError = (error: unknown, fallback: string): functions.https.HttpsEr
 export const analyzeVehicleTollUsages = functions
     .runWith({ timeoutSeconds: 300, memory: '1GB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data: { files?: unknown[] }, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: { files?: unknown[] }, context) => {
         try {
             await requireVehicleFineAccess(context);
             const rawFiles = Array.isArray(data?.files) ? data.files : [];
@@ -386,7 +387,7 @@ export const analyzeVehicleTollUsages = functions
                 parts.push({ inlineData: { mimeType: file.mimeType, data: file.base64 } });
             });
             const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const response = await fetch(endpoint, {
+            const response = await trackedGeminiFetch('vehicle-tolls')(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -491,7 +492,7 @@ export const analyzeVehicleTollUsages = functions
         } catch (error) {
             throw toHttpsError(error, '차량 통행료 이용내역 분석에 실패했습니다.');
         }
-    });
+    }));
 
 const sanitizeCommitItem = (value: unknown): CommitTollItem => {
     const source = (value || {}) as Record<string, unknown>;
@@ -536,7 +537,7 @@ const buildTollNote = (item: CommitTollItem): string => [
 export const commitVehicleTollImports = functions
     .runWith({ timeoutSeconds: 120, memory: '512MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data: { operationId?: unknown; items?: unknown[] }, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: { operationId?: unknown; items?: unknown[] }, context) => {
         const auth = await requireVehicleFineAccess(context);
         const operationId = asString(data?.operationId).slice(0, 220);
         const rawItems = Array.isArray(data?.items) ? data.items : [];
@@ -762,4 +763,4 @@ export const commitVehicleTollImports = functions
             }
             throw toHttpsError(error, '차량 통행료 등록에 실패했습니다.');
         }
-    });
+    }));

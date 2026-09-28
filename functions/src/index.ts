@@ -4,6 +4,8 @@ import * as admin from 'firebase-admin';
 admin.initializeApp();
 admin.firestore().settings({ ignoreUndefinedProperties: true });
 
+export { recordGeminiClientUsage, listGeminiUsageLogs } from './geminiUsageLogs';
+
 export { setSmartMemoReminder, dispatchSmartMemoReminders } from './smartMemoReminders';
 export { notifyTaskChanges } from './taskNotifications';
 

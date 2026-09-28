@@ -1,3 +1,4 @@
+import { trackedGeminiFetch } from './geminiUsageFetch';
 import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 /**
  * AI 분석 에이전트
@@ -119,7 +120,7 @@ async function callGemini(prompt: string): Promise<string> {
     const model = aiSettingsService.getModels().textModel || DEFAULT_GEMINI_TEXT_MODEL;
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-    const response = await fetch(
+    const response = await trackedGeminiFetch('analytics-agent')(
         endpoint,
         {
             method: 'POST',

@@ -769,6 +769,7 @@ const getMenuItemPath = (item: MenuItem | string): string | undefined => {
 
 const LOG_MANAGEMENT_FOLDER_TEXT = '로그관리';
 const REQUIRED_LOG_MANAGEMENT_ITEMS: MenuItem[] = [
+    { text: 'Gemini 사용량·비용 로그', icon: 'fa-chart-simple', path: '/admin/gemini-usage-logs', roles: ['admin'] },
     { text: '신분증 로그', icon: 'fa-id-card', path: '/database/identity-logs' },
     { text: '권한 변경 로그', icon: 'fa-shield-halved', path: '/admin/permission-change-logs' },
     { text: '엑셀 업로드·다운로드 로그', icon: 'fa-file-excel', path: '/admin/excel-transfer-logs' },
@@ -791,6 +792,16 @@ const findLogManagementFolders = (items: Array<MenuItem | string>, result: MenuI
 
 const ensureRequiredLogManagementItems = (config: SiteDataType): boolean => {
     let changed = false;
+
+    Object.entries(config).forEach(([key, site]) => {
+        if (!site || !Array.isArray(site.menu)) return;
+        const position = normalizePositionIdForCleanup(key).toLowerCase();
+        if (position !== 'ceo' && !['ceo', '대표', '사장'].includes(String(site.name || '').trim().toLowerCase())) return;
+        if (findLogManagementFolders(site.menu).length === 0) {
+            site.menu.push({ text: LOG_MANAGEMENT_FOLDER_TEXT, icon: 'fa-clock-rotate-left', sub: ['로그인 로그'] });
+            changed = true;
+        }
+    });
 
     Object.values(config).forEach((site) => {
         if (!site || !Array.isArray(site.menu)) return;

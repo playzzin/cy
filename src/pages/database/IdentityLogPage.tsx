@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertCircle, CheckCircle2, Download, Filter, IdCard, RefreshCw, Search } from 'lucide-react';
 import {
-  IDENTITY_LOG_ACTIONS, identityBundleLogService,
+  IDENTITY_LOG_ACTIONS, IDENTITY_LOG_SOURCES, identityBundleLogService,
   type IdentityBundleLog, type IdentityLogAction, type IdentityLogStatus,
 } from '../../services/identityBundleLogService';
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
@@ -31,15 +31,23 @@ const IdentityLogPage: React.FC = () => {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [expandedId, setExpandedId] = useState('');
+  const [refreshVersion, setRefreshVersion] = useState(0);
 
-  const loadLogs = useCallback(async () => {
+  useEffect(() => {
     setLoading(true);
     setError('');
-    try { setLogs(await identityBundleLogService.getLogs()); }
-    catch { setError('신분증 로그를 불러오지 못했습니다. 로그 조회 권한과 연결 상태를 확인해 주세요.'); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { void loadLogs(); }, [loadLogs]);
+    const onError = () => {
+      setError('신분증 로그를 불러오지 못했습니다. 로그 조회 권한과 연결 상태를 확인해 주세요.');
+      setLoading(false);
+    };
+    try {
+      return identityBundleLogService.subscribe((rows) => {
+        setLogs(rows);
+        setError('');
+        setLoading(false);
+      }, onError);
+    } catch { onError(); }
+  }, [refreshVersion]);
 
   const filtered = useMemo(() => logs.filter((log) => {
     if (action !== 'all' && log.action !== action) return false;
@@ -48,7 +56,7 @@ const IdentityLogPage: React.FC = () => {
     if (fromDate && createdDay < fromDate) return false;
     if (toDate && createdDay > toDate) return false;
     const text = [log.actorName, log.actorEmail, log.workerId, ...log.personNames, ...log.fileNames,
-      IDENTITY_LOG_ACTIONS[log.action]].join(' ').toLowerCase();
+      IDENTITY_LOG_ACTIONS[log.action], IDENTITY_LOG_SOURCES[log.source || 'identity_bundle']].join(' ').toLowerCase();
     return text.includes(keyword.trim().toLowerCase());
   }), [logs, action, status, keyword, fromDate, toDate]);
 
@@ -66,12 +74,16 @@ const IdentityLogPage: React.FC = () => {
         <div>
           <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700"><IdCard size={15} /> 로그 관리</div>
           <h1 className="mt-3 text-3xl font-black text-slate-900">신분증 로그</h1>
-          <p className="mt-2 text-sm text-slate-500">신분증 묶음사진의 파일 추가, 분석, 편집, 다운로드와 DB 등록 이력을 확인합니다.</p>
-          {isDevAdminSessionEnabled() && <p className="mt-2 text-xs text-amber-700">개발 모드 · 이 브라우저에 저장된 테스트 기록입니다.</p>}
+          <p className="mt-2 text-sm text-slate-500">묶음사진 변환, 통합DB의 신분증 등록·교체·AI 인식, 개별·일괄 다운로드 이력을 확인합니다.</p>
+          <p className={`mt-2 text-xs ${isDevAdminSessionEnabled() ? 'text-amber-700' : 'text-slate-500'}`}>
+            {isDevAdminSessionEnabled()
+              ? '개발 모드 · 이 브라우저의 테스트 기록만 자동 반영됩니다. 실제 계정의 서버 기록은 표시되지 않습니다.'
+              : '실제 계정으로 처리한 서버 기록이 자동 반영됩니다.'}
+          </p>
         </div>
         <div className="flex gap-2">
           <Link to="/database/identity-bundle" className={`${inputClass} inline-flex items-center`}>신분증 묶음사진</Link>
-          <button type="button" onClick={() => { void loadLogs(); }} disabled={loading} className={`${inputClass} inline-flex items-center gap-2 disabled:opacity-50`}><RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> 새로고침</button>
+          <button type="button" onClick={() => setRefreshVersion((value) => value + 1)} disabled={loading} className={`${inputClass} inline-flex items-center gap-2 disabled:opacity-50`}><RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> 새로고침</button>
         </div>
       </div>
       <div className="mb-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -99,7 +111,7 @@ const IdentityLogPage: React.FC = () => {
             {filtered.map((log) => <React.Fragment key={log.id}>
               <tr className="text-slate-700 hover:bg-slate-50">
                 <td className="whitespace-nowrap px-5 py-4 text-xs">{dateTime(log.createdAt)}</td>
-                <td className="px-5 py-4 font-semibold">{IDENTITY_LOG_ACTIONS[log.action]}</td>
+                <td className="px-5 py-4"><div className="font-semibold">{IDENTITY_LOG_ACTIONS[log.action]}</div><div className="mt-1 text-xs text-slate-500">{IDENTITY_LOG_SOURCES[log.source || 'identity_bundle']}</div></td>
                 <td className="px-5 py-4"><div className="max-w-[260px] truncate font-semibold">{log.personNames.join(', ') || log.fileNames[0] || '-'}</div><div className="mt-1 text-xs text-slate-500">파일 {log.fileCount}개 · 대상 {log.personCount}명</div></td>
                 <td className="px-5 py-4"><div className="font-semibold">{log.actorName || '-'}</div><div className="mt-1 text-xs text-slate-500">{log.actorEmail || log.actorId}</div></td>
                 <td className="px-5 py-4"><span className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold ${log.status === 'success' ? 'bg-emerald-50 text-emerald-700' : log.status === 'partial' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>{STATUS_LABELS[log.status]}</span></td>

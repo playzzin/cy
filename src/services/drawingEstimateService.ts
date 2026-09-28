@@ -1,3 +1,4 @@
+import { trackedGeminiFetch } from './geminiUsageFetch';
 import { DEFAULT_GEMINI_TEXT_MODEL, geminiTextGenerationOptions } from './geminiModelPolicy';
 import { aiSettingsService, normalizeGeminiModelName } from './aiSettingsService';
 
@@ -822,7 +823,7 @@ export const drawingEstimateService = {
             }
         })));
 
-        const response = await fetch(getGeminiGenerateContentUrl(apiKey), {
+        const response = await trackedGeminiFetch('drawing-estimate')(getGeminiGenerateContentUrl(apiKey), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

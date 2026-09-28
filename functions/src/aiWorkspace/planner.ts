@@ -1,3 +1,4 @@
+import { trackedGeminiFetch } from '../geminiUsageLogging';
 import { AiPlan } from './contract';
 import { validatePlan, WorkspaceError } from './domain';
 import { geminiTextGenerationOptions } from '../geminiModelPolicy';
@@ -47,7 +48,7 @@ export async function planQuestion(question: string, previousPlan: AiPlan | null
   const modelContext = previousPlan ? { ...previousPlan, filters: previousPlan.filters.map(filter => filter.id
     ? { entity: filter.entity, id: `previous:${filter.entity}`, name: `이전 선택 ${filter.entity}` } : filter) } : null;
   try {
-    const response = await request(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.model)}:generateContent`, {
+    const response = await trackedGeminiFetch('ai-workspace', request)(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.model)}:generateContent`, {
       method: 'POST', signal: abort.signal, headers: { 'Content-Type': 'application/json', 'x-goog-api-key': settings.apiKey },
       body: JSON.stringify({ systemInstruction: { parts: [{ text: PLANNER_SYSTEM }] },
         contents: [{ role: 'user', parts: [{ text: JSON.stringify({ today, question, previousPlan: modelContext }) }] }],

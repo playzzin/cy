@@ -1,3 +1,4 @@
+import { trackedGeminiFetch } from './geminiUsageFetch';
 import { geminiTextGenerationOptions } from './geminiModelPolicy';
 import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import { aiSettingsService, normalizeGeminiModelName } from './aiSettingsService';
@@ -397,7 +398,7 @@ const analyzeSingleFile = async (
     parentSignal?.addEventListener('abort', abortFromParent, { once: true });
 
     try {
-        const response = await fetch(
+        const response = await trackedGeminiFetch('tax-invoice-import')(
             `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
             {
                 method: 'POST',

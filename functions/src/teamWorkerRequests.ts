@@ -1,3 +1,4 @@
+import { withGeminiUsageContext } from './geminiUsageLogging';
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import * as functions from 'firebase-functions/v1';
@@ -172,4 +173,4 @@ export async function handleTeamWorkerRequest(input: any, context: functions.htt
     });
 }
 
-export const teamWorkerRequests = functions.runWith({ timeoutSeconds: 120, memory: '512MB', maxInstances: 5 }).region('asia-northeast3').https.onCall(handleTeamWorkerRequest);
+export const teamWorkerRequests = functions.runWith({ timeoutSeconds: 120, memory: '512MB', maxInstances: 5 }).region('asia-northeast3').https.onCall(withGeminiUsageContext(handleTeamWorkerRequest));

@@ -111,6 +111,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                         icon: "fa-clock-rotate-left",
                         sub: [
                             "로그인 로그",
+                            "Gemini 사용량·비용 로그",
                             "권한 변경 로그",
                             "엑셀 업로드·다운로드 로그",
                             "PDF 업로드·다운로드 로그",
@@ -210,6 +211,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "대표",
         icon: "fa-crown",
         menu: [
+            { text: "로그관리", icon: "fa-clock-rotate-left", sub: ["로그인 로그", "신분증 로그", "Gemini 사용량·비용 로그"] },
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "시공계획서", icon: "fa-file-circle-check", path: "/construction-plans" },

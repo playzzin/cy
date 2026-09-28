@@ -1,10 +1,11 @@
-import { collection, doc, getDocs, limit, orderBy, query, setDoc, where } from 'firebase/firestore';
+import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { isDevAdminSessionEnabled, createDevAdminUser } from '../utils/devAdminSession';
 
 export const IDENTITY_LOG_CATEGORY = 'IDENTITY_BUNDLE';
 export const IDENTITY_LOG_PATH = '/database/identity-logs';
 const DEV_STORAGE_KEY = 'cy_dev_identity_logs_v1';
+const DEV_LOG_CHANGED_EVENT = 'cy:identity-log-changed';
 const MAX_LOGS = 500;
 
 export const IDENTITY_LOG_ACTIONS = {
@@ -23,6 +24,17 @@ export const IDENTITY_LOG_ACTIONS = {
   download_zip: 'ZIP 다운로드 요청',
   worker_created: 'DB 신규 등록',
   worker_updated: 'DB 업데이트',
+  document_registered: '신분증 자료 등록',
+  document_replaced: '신분증 자료 교체',
+  document_removed: '신분증 자료 연결 해제',
+  document_analysis: '신분증 AI 인식',
+  copy_image: '신분증 이미지 복사',
+} as const;
+
+export const IDENTITY_LOG_SOURCES = {
+  identity_bundle: '신분증 묶음사진',
+  worker_database: '작업자·통합DB',
+  worker_summary: '작업자 요약',
 } as const;
 
 export type IdentityLogAction = keyof typeof IDENTITY_LOG_ACTIONS;
@@ -30,6 +42,7 @@ export type IdentityLogStatus = 'success' | 'partial' | 'failure';
 export interface IdentityLogInput {
   action: IdentityLogAction;
   status: IdentityLogStatus;
+  source?: keyof typeof IDENTITY_LOG_SOURCES;
   fileNames?: string[];
   personNames?: string[];
   fileCount?: number;
@@ -67,6 +80,7 @@ export const buildIdentityLogDetails = (input: IdentityLogInput): IdentityLogInp
   return {
     action: input.action,
     status: input.status,
+    ...(input.source && Object.prototype.hasOwnProperty.call(IDENTITY_LOG_SOURCES, input.source) ? { source: input.source } : {}),
     fileNames,
     personNames,
     fileCount: count(input.fileCount, fileNames.length),
@@ -104,13 +118,24 @@ const readDevRows = (): Record<string, any>[] => {
   return Array.isArray(rows) ? rows : [];
 };
 
+const normalizeRows = (rows: Record<string, any>[]): IdentityBundleLog[] => rows
+  .map((row) => normalizeLog(String(row.id), row))
+  .filter((row): row is IdentityBundleLog => row !== null)
+  .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, MAX_LOGS);
+
+const logsQuery = () => query(collection(db, 'audit_logs'),
+  where('category', '==', IDENTITY_LOG_CATEGORY), orderBy('timestamp', 'desc'), limit(MAX_LOGS));
+
 export const identityBundleLogService = {
   async log(input: IdentityLogInput): Promise<boolean> {
     try {
       const isDev = isDevAdminSessionEnabled();
       const actor = isDev ? createDevAdminUser() : auth.currentUser;
       if (!actor) return false;
-      const details = buildIdentityLogDetails(input);
+      const details = buildIdentityLogDetails({
+        ...input,
+        source: input.source || (window.location.pathname === '/database/identity-bundle' ? 'identity_bundle' : 'worker_database'),
+      });
       const ref = doc(collection(db, 'audit_logs'));
       const payload = {
         category: IDENTITY_LOG_CATEGORY,
@@ -127,6 +152,7 @@ export const identityBundleLogService = {
         window.localStorage.setItem(DEV_STORAGE_KEY, JSON.stringify([
           { id: ref.id, ...payload }, ...readDevRows(),
         ].slice(0, MAX_LOGS)));
+        window.dispatchEvent(new Event(DEV_LOG_CHANGED_EVENT));
       } else {
         // Append directly: creating a log must not require permission to read the audit collection.
         await setDoc(ref, payload);
@@ -141,11 +167,30 @@ export const identityBundleLogService = {
   async getLogs(): Promise<IdentityBundleLog[]> {
     const rows = isDevAdminSessionEnabled()
       ? readDevRows()
-      : (await getDocs(query(collection(db, 'audit_logs'),
-        where('category', '==', IDENTITY_LOG_CATEGORY), orderBy('timestamp', 'desc'), limit(MAX_LOGS))))
+      : (await getDocs(logsQuery()))
         .docs.map((row) => ({ ...row.data(), id: row.id }));
-    return rows.map((row) => normalizeLog(String(row.id), row))
-      .filter((row): row is IdentityBundleLog => row !== null)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, MAX_LOGS);
+    return normalizeRows(rows);
+  },
+
+  subscribe(onLogs: (logs: IdentityBundleLog[]) => void, onError: (error: unknown) => void): () => void {
+    if (isDevAdminSessionEnabled()) {
+      const refresh = () => {
+        try { onLogs(normalizeRows(readDevRows())); }
+        catch (error) { onError(error); }
+      };
+      const onStorage = (event: StorageEvent) => {
+        if (event.storageArea === window.localStorage && (event.key === DEV_STORAGE_KEY || event.key === null)) refresh();
+      };
+      window.addEventListener(DEV_LOG_CHANGED_EVENT, refresh);
+      window.addEventListener('storage', onStorage);
+      refresh();
+      return () => {
+        window.removeEventListener(DEV_LOG_CHANGED_EVENT, refresh);
+        window.removeEventListener('storage', onStorage);
+      };
+    }
+    return onSnapshot(logsQuery(), (snapshot) => {
+      onLogs(normalizeRows(snapshot.docs.map((row) => ({ ...row.data(), id: row.id }))));
+    }, onError);
   },
 };

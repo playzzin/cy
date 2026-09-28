@@ -1,3 +1,4 @@
+import { trackedGeminiFetch, withGeminiUsageContext } from './geminiUsageLogging';
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { requireCallableAuth } from './auth';
@@ -35,17 +36,17 @@ export function validateStructureRequest(data:any){
 }
 export async function generateExcelStructure(data:any,settings:{apiKey:string;model:string;thinkingLevel?:string},request:typeof fetch=fetch){
  validateStructureRequest(data);const started=Date.now();const {images=[],...context}=data;
- const response=await request(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.model)}:generateContent`,{method:'POST',signal:AbortSignal.timeout(150000),headers:{'Content-Type':'application/json','x-goog-api-key':settings.apiKey},body:JSON.stringify({systemInstruction:{parts:[{text:STRUCTURE_INSTRUCTION}]},contents:[{role:'user',parts:[{text:JSON.stringify(context)},...images.map((im:any)=>({inlineData:{mimeType:im.mimeType,data:im.data}}))]}],generationConfig:{...excelGenerationOptions(settings.model,settings.thinkingLevel),responseMimeType:'application/json',responseJsonSchema:schemaForGemini(STRUCTURE_SCHEMA),maxOutputTokens:16000}})});
+ const response=await trackedGeminiFetch('excel-structure', request)(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.model)}:generateContent`,{method:'POST',signal:AbortSignal.timeout(150000),headers:{'Content-Type':'application/json','x-goog-api-key':settings.apiKey},body:JSON.stringify({systemInstruction:{parts:[{text:STRUCTURE_INSTRUCTION}]},contents:[{role:'user',parts:[{text:JSON.stringify(context)},...images.map((im:any)=>({inlineData:{mimeType:im.mimeType,data:im.data}}))]}],generationConfig:{...excelGenerationOptions(settings.model,settings.thinkingLevel),responseMimeType:'application/json',responseJsonSchema:schemaForGemini(STRUCTURE_SCHEMA),maxOutputTokens:16000}})});
  if(!response.ok)throw new functions.https.HttpsError(response.status===429?'resource-exhausted':'unavailable','Gemini 양식 분석을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.');
  const payload:any=await response.json(),candidate=payload.candidates?.[0];if(candidate?.finishReason!=='STOP')throw new Error('Incomplete structure response');
  const decision=JSON.parse((candidate.content?.parts||[]).filter((p:any)=>!p.thought).map((p:any)=>p.text||'').join(''));validateSchema(decision,STRUCTURE_SCHEMA);
  if(decision.useSuggestedSource&&!data.suggestedSource||decision.useSuggestedTarget&&!data.suggestedTarget||!decision.useSuggestedSource&&!decision.source&&!decision.questions.length||!decision.useSuggestedTarget&&!decision.target&&!decision.questions.length)throw new Error('Missing structure');
  return{...decision,model:settings.model,inputTokens:payload.usageMetadata?.promptTokenCount||0,outputTokens:payload.usageMetadata?.candidatesTokenCount||0,elapsedMs:Date.now()-started};
 }
-export const analyzeExcelStructure=functions.region('asia-northeast3').runWith({timeoutSeconds:180,memory:'512MB',maxInstances:3}).https.onCall((data,context)=>withConversionErrors('structure',async()=>{
+export const analyzeExcelStructure=functions.region('asia-northeast3').runWith({timeoutSeconds:180,memory:'512MB',maxInstances:3}).https.onCall(withGeminiUsageContext((data,context)=>withConversionErrors('structure',async()=>{
  const auth=requireCallableAuth(context);const db=admin.firestore();const profile=await db.collection('users').doc(auth.uid).get();if(!profile.exists||['pending','rejected','suspended'].includes(String(profile.data()?.status||'').toLowerCase()))throw new functions.https.HttpsError('permission-denied','승인된 계정으로 로그인해야 합니다.');
  validateStructureRequest(data);const ref=db.collection('excel_conversion_users').doc(auth.uid).collection('limits').doc('structure');const now=Date.now();
  await db.runTransaction(async tx=>{const previous=(await tx.get(ref)).data()||{};const count=now-(previous.windowAt||0)<60000?Number(previous.count||0):0;if(count>=6)throw new functions.https.HttpsError('resource-exhausted','양식 분석 요청이 많습니다. 잠시 후 다시 시도해 주세요.');tx.set(ref,{windowAt:count?previous.windowAt:now,count:count+1});});
  const settings=await getServerGeminiSettings();if(!settings.apiKey)throw new functions.https.HttpsError('failed-precondition','AI 설정에서 Gemini 연결을 확인해 주세요.');
  return generateExcelStructure(data,{apiKey:settings.apiKey,model:settings.excelConversionModel,thinkingLevel:settings.excelConversionThinking});
-}));
+})));

@@ -1,3 +1,4 @@
+import { withGeminiUsageContext } from '../geminiUsageLogging';
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import { randomUUID } from 'crypto';
@@ -165,7 +166,7 @@ export async function handleAiWorkspace(input: any, context: functions.https.Cal
     });
   }
 }
-export const aiWorkspace = functions.runWith({ timeoutSeconds: 120, memory: '1GB', maxInstances: 3 }).region('asia-northeast3').https.onCall(async (input, context) => {
+export const aiWorkspace = functions.runWith({ timeoutSeconds: 120, memory: '1GB', maxInstances: 3 }).region('asia-northeast3').https.onCall(withGeminiUsageContext(async (input, context) => {
   try { return await handleAiWorkspace(input, context); }
   catch (error) {
     if (error instanceof WorkspaceError) throw new functions.https.HttpsError(error.code, error.message);
@@ -173,4 +174,4 @@ export const aiWorkspace = functions.runWith({ timeoutSeconds: 120, memory: '1GB
     functions.logger.error('ai-workspace-failed');
     throw new functions.https.HttpsError('internal', '요청을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.');
   }
-});
+}));

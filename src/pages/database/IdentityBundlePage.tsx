@@ -51,6 +51,7 @@ import {
 import { renderIdentityBundleBlob } from '../../utils/identityBundleComposer';
 import { compressIdentityImageForStorage } from '../../utils/identityImageCompression';
 import './IdentityBundlePage.css';
+import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 
 const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   RESIDENT_CARD: '주민등록증',
@@ -684,6 +685,7 @@ const IdentityBundlePage: React.FC = () => {
           <div className="identity-bundle-eyebrow"><Sparkles size={14} /> AI DOCUMENT STUDIO</div>
           <h1>신분증 묶음사진</h1>
           <Link to={IDENTITY_LOG_PATH} className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-teal-200 underline underline-offset-4">신분증 로그 보기 <ArrowRight size={14} /></Link>
+          {isDevAdminSessionEnabled() && <p className="mt-2 text-sm text-amber-200">개발 모드 · 작업 로그는 이 브라우저에만 저장됩니다.</p>}
           <p>1차 AI로 사진을 빠르게 묶고 완성 이미지를 먼저 확인하세요.<br className="identity-desktop-break" /> DB 등록할 묶음만 2차 AI가 인적정보를 상세 분석합니다.</p>
           <div className="identity-bundle-hero__chips">
             <span><Check size={14} /> 최대 60장</span>

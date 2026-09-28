@@ -471,6 +471,7 @@ export const MENU_PATHS: { [key: string]: string } = {
     "로그인 로그": "/admin/login-logs",
     "로그인 접근 로그": "/admin/login-logs",
     "접속 로그": "/admin/login-logs",
+    "Gemini 사용량·비용 로그": "/admin/gemini-usage-logs",
     "권한 변경 로그": "/admin/permission-change-logs",
     "권한변경로그": "/admin/permission-change-logs",
     "메뉴 권한 변경 로그": "/admin/permission-change-logs",

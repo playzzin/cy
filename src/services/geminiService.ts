@@ -1,3 +1,4 @@
+import { trackedGeminiFetch } from './geminiUsageFetch';
 import { DEFAULT_GEMINI_TEXT_MODEL, DEFAULT_GEMINI_LITE_MODEL, geminiTextGenerationOptions } from './geminiModelPolicy';
 import { aiSettingsService, normalizeGeminiModelName } from './aiSettingsService';
 
@@ -467,7 +468,7 @@ const fetchGeminiStructuredJson = async <T,>(
     const attempts: Array<{ model: string; status: number; message: string }> = [];
 
     for (const model of getTextModelCandidates()) {
-        const response = await fetch(buildGeminiGenerateContentUrl(apiKey, model), {
+        const response = await trackedGeminiFetch('document-analysis')(buildGeminiGenerateContentUrl(apiKey, model), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -633,7 +634,7 @@ Return empty strings for fields that are not visible.`;
             Do not include markdown or explanations.
         `;
 
-        const response = await fetch(buildGeminiGenerateContentUrl(apiKey), {
+        const response = await trackedGeminiFetch('document-analysis')(buildGeminiGenerateContentUrl(apiKey), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -674,7 +675,7 @@ Return empty strings for fields that are not visible.`;
             Do not include markdown or explanations.
         `;
 
-        const response = await fetch(buildGeminiGenerateContentUrl(apiKey), {
+        const response = await trackedGeminiFetch('document-analysis')(buildGeminiGenerateContentUrl(apiKey), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -777,7 +778,7 @@ Return empty strings for fields that are not visible.`;
             Do not include markdown or explanations.
         `;
 
-        const response = await fetch(buildGeminiGenerateContentUrl(apiKey), {
+        const response = await trackedGeminiFetch('document-analysis')(buildGeminiGenerateContentUrl(apiKey), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -827,7 +828,7 @@ Return empty strings for fields that are not visible.`;
             Do not include markdown or explanations.
         `;
 
-        const response = await fetch(buildGeminiGenerateContentUrl(apiKey), {
+        const response = await trackedGeminiFetch('document-analysis')(buildGeminiGenerateContentUrl(apiKey), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -883,7 +884,7 @@ Return empty strings for fields that are not visible.`;
             Return ONLY JSON.
         `;
 
-        const response = await fetch(buildGeminiGenerateContentUrl(apiKey), {
+        const response = await trackedGeminiFetch('document-analysis')(buildGeminiGenerateContentUrl(apiKey), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

@@ -12,6 +12,7 @@ import { ref, getDownloadURL } from 'firebase/storage';
 import html2canvas from 'html2canvas';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
+import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 
 
 const PageContainer = styled.div`
@@ -694,6 +695,7 @@ const WorkerSummaryPage: React.FC = () => {
         try {
             toast.info('신분증 이미지 다운로드 중...');
             const zip = new JSZip();
+            let downloaded = 0;
 
             const promises = workerswithImages.map(async (w) => {
                 const url = idCardUrls[w.id!];
@@ -709,6 +711,7 @@ const WorkerSummaryPage: React.FC = () => {
                     const fileName = `${cleanName}_${idNum}.png`; // Assuming PNG or standard image
 
                     zip.file(fileName, blob);
+                    downloaded++;
                 } catch (err) {
                     console.error(`Failed to download image for ${w.name}`, err);
                 }
@@ -716,13 +719,20 @@ const WorkerSummaryPage: React.FC = () => {
 
             await Promise.all(promises);
 
+            if (downloaded === 0) throw new Error('다운로드 가능한 신분증 이미지가 없습니다.');
+
             const content = await zip.generateAsync({ type: "blob" });
             const dateStr = new Date().toISOString().split('T')[0];
             saveAs(content, `작업자_신분증_모음_${dateStr}.zip`);
+            void recordIdentityDocumentLog({ action: 'download_zip', source: 'worker_summary', status: downloaded === workerswithImages.length ? 'success' : 'partial',
+                personNames: workerswithImages.map((worker) => worker.name), personCount: workerswithImages.length, fileCount: downloaded,
+                ...(downloaded < workerswithImages.length ? { reason: 'processing_failed' as const } : {}) });
             toast.success('신분증 압축 파일이 다운로드되었습니다.');
 
         } catch (error) {
             console.error('ZIP Process Error:', error);
+            void recordIdentityDocumentLog({ action: 'download_zip', source: 'worker_summary', status: 'failure',
+                personNames: workerswithImages.map((worker) => worker.name), personCount: workerswithImages.length, fileCount: 0, reason: 'processing_failed' });
             toast.error('압축 파일 생성에 실패했습니다.');
         }
     };
@@ -743,23 +753,22 @@ const WorkerSummaryPage: React.FC = () => {
             canvas.width = img.width;
             canvas.height = img.height;
             const ctx = canvas.getContext('2d');
-            if (!ctx) return;
+            if (!ctx) throw new Error('이미지 변환 실패');
 
             ctx.drawImage(img, 0, 0);
 
-            canvas.toBlob(async (blob) => {
-                if (!blob) {
-                    toast.error('이미지 변환 실패');
-                    return;
-                }
-                const item = new ClipboardItem({ 'image/png': blob });
-                await navigator.clipboard.write([item]);
-                const cleanName = workerName.replace(/[0-9]/g, '');
-                toast.success(`${cleanName}님의 신분증이 복사되었습니다.`);
+            const blob = await new Promise<Blob>((resolve, reject) => {
+                canvas.toBlob((result) => result ? resolve(result) : reject(new Error('이미지 변환 실패')), 'image/png');
             });
+            const item = new ClipboardItem({ 'image/png': blob });
+            await navigator.clipboard.write([item]);
+            void recordIdentityDocumentLog({ action: 'copy_image', source: 'worker_summary', status: 'success', personNames: [workerName], fileCount: 1 });
+            const cleanName = workerName.replace(/[0-9]/g, '');
+            toast.success(`${cleanName}님의 신분증이 복사되었습니다.`);
 
         } catch (error) {
             console.error('Single ID Copy Error:', error);
+            void recordIdentityDocumentLog({ action: 'copy_image', source: 'worker_summary', status: 'failure', personNames: [workerName], fileCount: 1, reason: 'processing_failed' });
             toast.error('이미지 복사 실패 (CORS 문제일 수 있습니다)');
         }
     };

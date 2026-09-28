@@ -1,3 +1,4 @@
+import { trackedGeminiFetch } from './geminiUsageLogging';
 import { geminiTextGenerationOptions, normalizeGeminiModelName } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
 
@@ -49,7 +50,7 @@ export async function analyzeExpenseReceipt(
 경비 구분은 아래에 등록된 항목에서 상호·품목에 맞는 id 하나만 선택하고 근거가 없으면 null이다. 경고는 짧은 한국어로 쓰고 개인정보·카드번호는 출력하지 않는다.
 등록된 경비 구분: ${JSON.stringify(categories)}`;
     try {
-        const response = await fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        const response = await trackedGeminiFetch('expense-receipt', fetcher)(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': settings.apiKey },
             signal: AbortSignal.timeout(75_000),
             body: JSON.stringify({

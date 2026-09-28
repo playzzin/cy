@@ -1,3 +1,4 @@
+import { trackedGeminiFetch, withGeminiActor, withGeminiUsageContext } from './geminiUsageLogging';
 import { geminiTextGenerationOptions } from './geminiModelPolicy';
 import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
@@ -1839,7 +1840,7 @@ const callGeminiCardStatementAnalysis = async (
     const { apiKey, model } = await getGeminiSettingsOrThrow();
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-    const response = await fetch(endpoint, {
+    const response = await trackedGeminiFetch('card-statements')(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildGeminiRequest(input, file, model)),
@@ -1896,7 +1897,7 @@ const analyzeCardStatementImportFile = async (
 export const analyzeCardBillingStatement = functions
     .runWith({ timeoutSeconds: 120, memory: '512MB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data: AnalyzeCardBillingStatementRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: AnalyzeCardBillingStatementRequest, context) => {
         try {
             await requireCardStatementAccess(context);
 
@@ -1935,7 +1936,7 @@ export const analyzeCardBillingStatement = functions
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));
 
 const getJobStatusPayload = async (jobId: string): Promise<Record<string, unknown>> => {
     const db = admin.firestore();
@@ -2091,7 +2092,7 @@ const buildSyntheticCardWhenNeeded = (parsed: CompatibleBillingStatementOutput):
 export const createCardStatementImportUploadSession = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data: CreateCardStatementImportUploadSessionRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: CreateCardStatementImportUploadSessionRequest, context) => {
         try {
             const auth = await requireCardStatementAccess(context);
             const yearMonth = asString(data?.yearMonth);
@@ -2182,12 +2183,12 @@ export const createCardStatementImportUploadSession = functions
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));
 
 export const completeCardStatementImportUpload = functions
     .runWith({ timeoutSeconds: 300, memory: '512MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data: CompleteCardStatementImportUploadRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: CompleteCardStatementImportUploadRequest, context) => {
         try {
             await requireCardStatementAccess(context);
             const jobId = asString(data?.jobId);
@@ -2293,12 +2294,12 @@ export const completeCardStatementImportUpload = functions
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));
 
 export const cancelCardStatementImportUploadSession = functions
     .runWith({ timeoutSeconds: 120, memory: '256MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data: CancelCardStatementImportUploadSessionRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: CancelCardStatementImportUploadSessionRequest, context) => {
         try {
             const auth = await requireCardStatementAccess(context) as NonNullable<functions.https.CallableContext['auth']>;
             const actor = resolveCallableActor(auth);
@@ -2389,12 +2390,12 @@ export const cancelCardStatementImportUploadSession = functions
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));
 
 export const createCardStatementImportJob = functions
     .runWith({ timeoutSeconds: 300, memory: '512MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data: CreateCardStatementImportJobRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: CreateCardStatementImportJobRequest, context) => {
         try {
             const auth = await requireCardStatementAccess(context);
             const yearMonth = asString(data?.yearMonth);
@@ -2510,12 +2511,12 @@ export const createCardStatementImportJob = functions
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));
 
 const legacyAnalyzeCardStatementImportJob = functions
     .runWith({ timeoutSeconds: 540, memory: '1GB', maxInstances: 3 })
     .region('asia-northeast3')
-    .https.onCall(async (data: AnalyzeCardStatementImportJobRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: AnalyzeCardStatementImportJobRequest, context) => {
         try {
             await requireCardStatementAccess(context);
             const jobId = asString(data?.jobId);
@@ -2721,7 +2722,7 @@ const legacyAnalyzeCardStatementImportJob = functions
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));
 
 type CardStatementImportAnalysisSummary = {
     status: 'matched' | 'needs_review';
@@ -3223,11 +3224,11 @@ const runCardStatementImportJobAnalysis = async (jobId: string, expectedRunId?: 
                     fileData,
                     file,
                 );
-                const analysis = await analyzeCardStatementImportFile({
+                const analysis = await withGeminiActor({ uid: asString(job.createdByUid), name: asString(job.createdByName) }, () => analyzeCardStatementImportFile({
                     statementPath: storagePath,
                     yearMonth,
                     cardLabel: asString(fileData.originalFileName) || undefined,
-                }, file);
+                }, file));
                 const parsed = analysis.parsed;
                 const statementCards = buildSyntheticCardWhenNeeded(parsed);
                 const fileWarnings = Array.from(new Set(parsed.warnings.map(asString).filter(Boolean)));
@@ -3409,7 +3410,7 @@ const recoverCardStatementImportJobAnalysisNow = async (jobId: string): Promise<
 export const analyzeCardStatementImportJob = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data: AnalyzeCardStatementImportJobRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: AnalyzeCardStatementImportJobRequest, context) => {
         try {
             await requireCardStatementAccess(context);
             const jobId = asString(data?.jobId);
@@ -3420,12 +3421,12 @@ export const analyzeCardStatementImportJob = functions
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));
 
 export const recoverCardStatementImportJobAnalysis = functions
     .runWith({ timeoutSeconds: 540, memory: '1GB', maxInstances: 2 })
     .region('asia-northeast3')
-    .https.onCall(async (data: RecoverCardStatementImportJobAnalysisRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: RecoverCardStatementImportJobAnalysisRequest, context) => {
         try {
             await requireCardStatementAccess(context);
             const jobId = asString(data?.jobId);
@@ -3436,7 +3437,7 @@ export const recoverCardStatementImportJobAnalysis = functions
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));
 
 export const processCardStatementImportJobAnalysis = functions
     .runWith({ timeoutSeconds: 540, memory: '1GB', maxInstances: 3 })
@@ -3458,7 +3459,7 @@ export const processCardStatementImportJobAnalysis = functions
 export const getCardStatementImportJobStatus = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data: GetCardStatementImportJobStatusRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: GetCardStatementImportJobStatusRequest, context) => {
         try {
             await requireCardStatementAccess(context);
             const jobId = asString(data?.jobId);
@@ -3469,24 +3470,24 @@ export const getCardStatementImportJobStatus = functions
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));
 
 export const cancelCardStatementImportFile = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data: { fileId?: string }, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: { fileId?: string }, context) => {
         try {
             const auth = await requireCardStatementAccess(context) as NonNullable<functions.https.CallableContext['auth']>;
             return await cancelStoredCardStatementFile(admin.firestore(), asString(data?.fileId), auth.uid);
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));
 
 export const updateCardStatementImportResultReview = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data: UpdateCardStatementImportResultReviewRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: UpdateCardStatementImportResultReviewRequest, context) => {
         try {
             const auth = await requireCardStatementAccess(context) as NonNullable<functions.https.CallableContext['auth']>;
             const actor = resolveCallableActor(auth);
@@ -3651,12 +3652,12 @@ export const updateCardStatementImportResultReview = functions
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));
 
 export const commitCardStatementImportJob = functions
     .runWith({ timeoutSeconds: 540, memory: '1GB', maxInstances: 3 })
     .region('asia-northeast3')
-    .https.onCall(async (data: CommitCardStatementImportJobRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: CommitCardStatementImportJobRequest, context) => {
         let actorForOperationLog: { uid: string; name: string; email: string | null } = context.auth
             ? resolveCallableActor(context.auth as NonNullable<functions.https.CallableContext['auth']>)
             : { uid: 'system', name: 'ERP 시스템', email: null };
@@ -3988,4 +3989,4 @@ export const commitCardStatementImportJob = functions
             }
             throw toHttpsError(error);
         }
-    });
+    }));

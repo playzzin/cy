@@ -7,6 +7,7 @@ import { ref, uploadBytes } from 'firebase/storage';
 import { Position } from '../../services/positionService';
 import WorkerForm from '../../components/manpower/WorkerForm';
 import { showErrorAlert } from '../../utils/swal';
+import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 
 interface WorkerModalProps {
     isOpen: boolean;
@@ -36,6 +37,8 @@ const WorkerModal: React.FC<WorkerModalProps> = ({ isOpen, onClose, onSave, init
             await onSave(finalData);
             onClose();
         } catch (error: any) {
+            if (file) void recordIdentityDocumentLog({ action: initialData?.id ? 'worker_updated' : 'worker_created', status: 'failure',
+                workerId: initialData?.id, personNames: [data.name || ''], fileNames: [file.name], fileCount: 1, reason: 'processing_failed' });
             console.error("Failed to save worker:", error);
             await showErrorAlert('저장 실패', error.message || "저장 중 오류가 발생했습니다.");
         }

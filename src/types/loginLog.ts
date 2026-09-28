@@ -1,6 +1,6 @@
 import type { Timestamp } from 'firebase/firestore';
 
-export type LoginLogAction = 'login_success' | 'login_failed' | 'logout' | 'signup_success';
+export type LoginLogAction = 'login_success' | 'login_failed' | 'logout' | 'signup_success' | 'session_access';
 export type LoginLogStatus = 'success' | 'failed' | 'info';
 
 export interface LoginLogActor {

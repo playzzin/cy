@@ -24,6 +24,7 @@ import BulkProgressModal from '../../components/manpower/BulkProgressModal';
 import BulkEditWorkerModal from '../../components/manpower/BulkEditWorkerModal';
 import BankBookAnalysisModal from '../../components/manpower/BankBookAnalysisModal';
 import IdCardAnalysisModal from '../../components/manpower/IdCardAnalysisModal';
+import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 import WorkerModal from '../manpower/WorkerModal';
 import SignatureGeneratorModal from '../../components/signatures/SignatureGeneratorModal';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
@@ -787,13 +788,20 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             try {
                 const content = await zip.generateAsync({ type: "blob" });
                 saveAs(content, `신분증_모음_${new Date().toISOString().slice(0, 10)}.zip`);
+                void recordIdentityDocumentLog({ action: 'download_zip', status: failCount > 0 ? 'partial' : 'success',
+                    personNames: workersToDownload.map((worker) => worker.name), personCount: workersToDownload.length, fileCount: successCount,
+                    ...(failCount > 0 ? { reason: 'processing_failed' as const } : {}) });
                 setBulkLogs(prev => [`[완료] 다운로드 시작`, ...prev]);
             } catch (zipError) {
+                void recordIdentityDocumentLog({ action: 'download_zip', status: 'failure', personNames: workersToDownload.map((worker) => worker.name),
+                    personCount: workersToDownload.length, fileCount: 0, reason: 'processing_failed' });
                 console.error("Zip generation failed:", zipError);
                 setBulkLogs(prev => [`[오류] 압축 파일 생성 실패`, ...prev]);
             }
         } else {
             setBulkLogs(prev => [`[알림] 다운로드 가능한 파일이 없습니다.`, ...prev]);
+            void recordIdentityDocumentLog({ action: 'download_zip', status: 'failure', personNames: workersToDownload.map((worker) => worker.name),
+                personCount: workersToDownload.length, fileCount: 0, reason: 'processing_failed' });
         }
     };
 
@@ -827,8 +835,10 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             document.body.appendChild(anchor);
             anchor.click();
             anchor.remove();
+            void recordIdentityDocumentLog({ action: 'download_image', status: 'success', workerId: worker.id, personNames: [worker.name], fileCount: 1 });
         } catch (error: unknown) {
             console.error("Download failed:", error);
+            void recordIdentityDocumentLog({ action: 'download_image', status: 'failure', workerId: worker.id, personNames: [worker.name], fileCount: 1, reason: 'processing_failed' });
             alert("파일을 찾을 수 없거나 접근 권한이 없습니다.");
         }
     };
@@ -856,6 +866,8 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             setIsModalOpen(false);
         } catch (error) {
             console.error("Failed to save worker", error);
+            if (workerData.fileNameSaved) void recordIdentityDocumentLog({ action: currentWorker?.id ? 'worker_updated' : 'worker_created',
+                status: 'failure', workerId: currentWorker?.id, personNames: [workerData.name || ''], fileCount: 1, reason: 'processing_failed' });
             const message = error instanceof Error ? error.message : (typeof error === 'string' ? error : '저장에 실패했습니다.');
             alert(message);
         }
@@ -948,9 +960,12 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                 } else {
                     failCount++;
                     const reason = !worker.matchedWorkerId ? '매칭된 작업자 ID 없음' : '알 수 없는 유형';
+                    void recordIdentityDocumentLog({ action: 'worker_updated', status: 'failure', personNames: [worker.name], fileNames: [worker.file.name], fileCount: 1, reason: 'processing_failed' });
                     setBulkLogs(prev => [`[실패] ${worker.name}: 처리되지 않음 (${worker.matchType}, ${reason})`, ...prev]);
                 }
             } catch (error: any) {
+                void recordIdentityDocumentLog({ action: worker.matchType === 'new' ? 'worker_created' : 'worker_updated', status: 'failure',
+                    workerId: worker.matchedWorkerId, personNames: [worker.name], fileNames: [worker.file.name], fileCount: 1, reason: 'processing_failed' });
                 console.error(error);
                 failCount++;
                 // Try to provide a helpful error message

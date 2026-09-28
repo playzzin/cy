@@ -1,6 +1,7 @@
 import { getTeamScopedRows } from './teamScopedReadService';
 import { workerFirestoreService } from './workerFirestoreService';
 import { databaseLogService } from './databaseLogService';
+import { recordWorkerIdentityChange } from './identityDocumentLogService';
 import { WorkerZod as Worker } from '../types/zod/workerSchema';
 import { auth, db, storage } from '../config/firebase';
 import { getWorkerCacheRevision } from '../utils/workerCacheRevision';
@@ -220,6 +221,7 @@ export const manpowerService = {
         const data = syncWorkerSalaryFields(worker) as Record<string, unknown>;
         const id = await workerFirestoreService.addWorker(data as any);
         cachedWorkers = null;
+        await recordWorkerIdentityChange(null, snapshotWorker(id, data));
         await logWorkerChange('created', null, snapshotWorker(id, data), 'manpowerService.addWorker');
         return id;
     },
@@ -227,7 +229,10 @@ export const manpowerService = {
     // Update a worker
     updateWorker: async (id: string, updates: Partial<Worker>): Promise<void> => {
         if (isDevAdminSessionEnabled()) {
+            const before = devWorkers.find((worker) => worker.id === id);
+            const snapshot = before ? { ...before } : null;
             updateDevWorker(id, updates);
+            if (snapshot) await recordWorkerIdentityChange(snapshot, { ...snapshot, ...updates });
             return;
         }
 
@@ -235,6 +240,7 @@ export const manpowerService = {
         const normalizedUpdates = stripUndefinedFields(syncWorkerSalaryFields(updates) as Record<string, unknown>);
         await workerFirestoreService.updateWorker(id, normalizedUpdates);
         cachedWorkers = null;
+        await recordWorkerIdentityChange(before, snapshotWorker(id, { ...before, ...normalizedUpdates }));
         if (hasOwn(normalizedUpdates, 'role') && before?.uid) {
             const { userService } = await import('./userService');
             await userService.updateUserProfile(String(before.uid), {
@@ -266,6 +272,7 @@ export const manpowerService = {
         }
         await workerFirestoreService.deleteWorker(id);
         cachedWorkers = null;
+        await recordWorkerIdentityChange(before, null);
         await logWorkerChange('deleted', before, null, 'manpowerService.deleteWorker');
     },
 
@@ -281,6 +288,7 @@ export const manpowerService = {
         });
         await batch.commit();
         cachedWorkers = null;
+        await Promise.all(beforeRows.map((before) => recordWorkerIdentityChange(before, null)));
         await Promise.all(beforeRows.map((before) =>
             before ? logWorkerChange('deleted', before, null, 'manpowerService.deleteWorkers') : Promise.resolve()
         ));

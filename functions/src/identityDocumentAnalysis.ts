@@ -1,3 +1,4 @@
+import { trackedGeminiFetch, withGeminiUsageContext } from './geminiUsageLogging';
 import { geminiTextGenerationOptions } from './geminiModelPolicy';
 import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
@@ -282,7 +283,7 @@ const toHttpsError = (error: unknown): functions.https.HttpsError => {
 export const analyzeIdentityDocuments = functions
     .runWith({ timeoutSeconds: 300, memory: '1GB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data: { sessionId?: unknown; files?: unknown[]; mode?: unknown }, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: { sessionId?: unknown; files?: unknown[]; mode?: unknown }, context) => {
         try {
             requireCallableAuth(context);
             const sessionId = sanitizeSessionId(data?.sessionId);
@@ -316,7 +317,7 @@ export const analyzeIdentityDocuments = functions
                 parts.push({ inlineData: { mimeType: file.mimeType, data: file.base64 } });
             });
             const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const response = await fetch(endpoint, {
+            const response = await trackedGeminiFetch('identity-analysis')(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -384,4 +385,4 @@ export const analyzeIdentityDocuments = functions
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));

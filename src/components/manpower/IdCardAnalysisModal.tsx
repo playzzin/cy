@@ -6,6 +6,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { geminiService, AnalyzedIdCard } from '../../services/geminiService';
 import { Worker } from '../../services/manpowerService';
+import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 
 interface IdCardAnalysisModalProps {
     isOpen: boolean;
@@ -67,6 +68,7 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
                 matchType: 'pending' as const
             }));
             setResults(prev => [...prev, ...newFiles]);
+            void recordIdentityDocumentLog({ action: 'files_added', status: 'success', fileNames: newFiles.map(({ file }) => file.name), fileCount: newFiles.length });
         }
     };
 
@@ -91,6 +93,7 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
                 matchType: 'pending' as const
             }));
             setResults(prev => [...prev, ...newFiles]);
+            void recordIdentityDocumentLog({ action: 'files_added', status: 'success', fileNames: newFiles.map(({ file }) => file.name), fileCount: newFiles.length });
         }
     };
 
@@ -185,12 +188,15 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
                 newResults[i].matchType = matchResult.matchType;
                 newResults[i].matchedWorker = matchResult.matchedWorker;
                 newResults[i].changes = matchResult.changes;
+                void recordIdentityDocumentLog({ action: 'document_analysis', status: 'success', fileNames: [newResults[i].file.name],
+                    fileCount: 1, personNames: [data.name || ''], workerId: matchResult.matchedWorker?.id });
 
                 // Rate limit 방지 지연
                 await new Promise(resolve => setTimeout(resolve, 2000));
 
             } catch (error: any) {
                 newResults[i].status = 'error';
+                void recordIdentityDocumentLog({ action: 'document_analysis', status: 'failure', fileNames: [newResults[i].file.name], fileCount: 1, reason: 'processing_failed' });
                 const message = error?.message || '인식 실패';
                 if (/API Key Missing|API key not valid|403|PERMISSION_DENIED|referer|blocked/i.test(message)) {
                     newResults[i].error = `${message} (/settings/ai 또는 .env.local 확인)`;
@@ -254,6 +260,7 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
     };
 
     const handleRemoveResult = (index: number) => {
+        void recordIdentityDocumentLog({ action: 'files_removed', status: 'success', fileNames: [results[index].file.name], fileCount: 1 });
         setResults(prev => prev.filter((_, i) => i !== index));
     };
 
@@ -348,6 +355,7 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
 
                     <input
                         type="file"
+                        aria-label="대량 등록 신분증 사진 선택"
                         ref={fileInputRef}
                         className="hidden"
                         multiple
