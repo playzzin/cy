@@ -110,6 +110,7 @@ const TeamBasedPaymentDraftPageV2 = React.lazy(() => import('./pages/payroll/Tea
 const EmploymentCertificatePage = React.lazy(() => import('./pages/hr/EmploymentCertificatePage'));
 const TerminationCertificatePage = React.lazy(() => import('./pages/hr/TerminationCertificatePage'));
 const DailyReportStatisticsPage = React.lazy(() => import('./pages/report/DailyReportStatisticsPage'));
+const AiWorkspacePage = React.lazy(() => import('./pages/report/AiWorkspacePage'));
 const DailyReportLogPage = React.lazy(() => import('./pages/report/DailyReportLogPage'));
 const OfficeDashboardPage = React.lazy(() => import('./pages/office/OfficeDashboardPage'));
 const OfficeRequestCenterPage = React.lazy(() => import('./pages/office/OfficeRequestCenterPage'));
@@ -319,6 +320,7 @@ const App: React.FC = () => {
             <Route path="/reports/daily-logs" element={<DailyReportLogPage />} />
             <Route path="/reports/team-personnel-status" element={<TeamPersonnelStatusReportPage />} />
             <Route path="/reports/statistics" element={<DailyReportStatisticsPage />} />
+            <Route path="/reports/ai-workspace" element={<AiWorkspacePage />} />
             <Route path="/reports/list" element={<div>보고서 목록</div>} />
 
             <Route path="/report/excel" element={<DailyReportExcelPage />} />

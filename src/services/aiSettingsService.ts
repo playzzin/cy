@@ -133,6 +133,13 @@ export const AI_MANAGED_PAGES: AiManagedPage[] = [
         modelScope: 'analyticsModel'
     },
     {
+        id: 'reports-ai-workspace',
+        name: 'AI 업무 도우미',
+        description: '자연어 분석·저장 분석·정기 보고 (서버 운영 설정은 별도 적용)',
+        paths: ['/reports/ai-workspace'],
+        modelScope: 'server'
+    },
+    {
         id: 'gallery-ai-images',
         name: 'AI 이미지 스튜디오',
         description: 'Gemini 이미지 생성',

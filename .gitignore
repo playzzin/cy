@@ -110,3 +110,6 @@ backups/
 /workbook-layout-release/
 /.team-settlement-memo-release.patch
 /workbook-layout-release.patch
+
+# Isolated AI release verification output
+/.tmp/

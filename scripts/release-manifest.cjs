@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
-const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+const git = (args, cwd = root) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 const groups = {
   hosting: ['src/', 'public/', 'scripts/', 'package.json', 'package-lock.json', 'tsconfig.json', 'tailwind.config.js', 'postcss.config.js'],
   functions: ['functions/src/', 'functions/package.json', 'functions/package-lock.json', 'functions/tsconfig.json'],
@@ -13,14 +13,16 @@ const groups = {
   deployment: ['firebase.json', 'firebase.staging.json', '.firebaserc'],
 };
 const buildStartPath = path.join(root, '.firebase', 'release-source-start.json');
-function sourceState() {
-  const files = git(['ls-files', '-z']).split('\0').filter(Boolean).sort();
+function sourceState(workspaceRoot = root) {
+  const prefixes = [...new Set(Object.values(groups).flat())];
+  // New feature files affect the bundle before they are tracked by Git as well.
+  const files = [...new Set(git(['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', ...prefixes], workspaceRoot).split('\0').filter(Boolean))].sort();
   const fingerprints = Object.fromEntries(Object.entries(groups).map(([group, prefixes]) => {
     const selected = files.filter(file => prefixes.some(prefix => prefix.endsWith('/') ? file.startsWith(prefix) : file === prefix));
-    return [group, hash(selected.map(file => `${file}\0${fs.existsSync(path.join(root, file)) ? hash(fs.readFileSync(path.join(root, file))) : 'deleted'}`).join('\n'))];
+    return [group, hash(selected.map(file => `${file}\0${fs.existsSync(path.join(workspaceRoot, file)) ? hash(fs.readFileSync(path.join(workspaceRoot, file))) : 'deleted'}`).join('\n'))];
   }));
-  const untrackedSource = git(['ls-files', '--others', '--exclude-standard', '--', 'src', 'public', 'functions/src']);
-  return { commit: git(['rev-parse', 'HEAD']), dirty: Boolean(git(['status', '--porcelain', '--untracked-files=no'])) || Boolean(untrackedSource), fingerprints };
+  const untrackedSource = git(['ls-files', '--others', '--exclude-standard', '--', ...prefixes], workspaceRoot);
+  return { commit: git(['rev-parse', 'HEAD'], workspaceRoot), dirty: Boolean(git(['status', '--porcelain', '--untracked-files=no'], workspaceRoot)) || Boolean(untrackedSource), fingerprints };
 }
 function compareRelease(local, remote) {
   if (!remote || remote.schemaVersion !== 1 || !remote.fingerprints || !remote.assetManifestHash) {

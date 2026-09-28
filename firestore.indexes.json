@@ -1,5 +1,16 @@
 {
   "indexes": [
+    { "collectionGroup": "ai_report_schedules", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "uid", "order": "ASCENDING" }, { "fieldPath": "nextRunAt", "order": "ASCENDING" }] },
+    { "collectionGroup": "ai_report_runs", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "uid", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" }] },
+    { "collectionGroup": "cardBillings", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "team.id", "order": "ASCENDING" }] },
+    { "collectionGroup": "cardBillings", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "teamId", "order": "ASCENDING" }] },
+    { "collectionGroup": "cardBillings", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "assignedTeamId", "order": "ASCENDING" }] },
+    { "collectionGroup": "accommodation_billing_documents", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "team.id", "order": "ASCENDING" }] },
+    { "collectionGroup": "accommodation_billing_documents", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "teamId", "order": "ASCENDING" }] },
+    { "collectionGroup": "accommodation_billing_documents", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "assignedTeamId", "order": "ASCENDING" }] },
+    { "collectionGroup": "vehicle_billing_documents", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "team.id", "order": "ASCENDING" }] },
+    { "collectionGroup": "vehicle_billing_documents", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "teamId", "order": "ASCENDING" }] },
+    { "collectionGroup": "vehicle_billing_documents", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "assignedTeamId", "order": "ASCENDING" }] },
     {
       "collectionGroup": "smart_memo_reminders",
       "queryScope": "COLLECTION",

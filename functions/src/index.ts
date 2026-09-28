@@ -151,3 +151,6 @@ export { teamAdvanceRequests } from './teamAdvanceRequests';
 export { teamOffDutyRequests } from './teamOffDutyRequests';
 
 export { workerSignatures } from './workerSignatures';
+
+export { aiWorkspace } from './aiWorkspace';
+export { aiWorkspaceReports, generateScheduledWorkspaceReports } from './aiWorkspace/scheduledReports';

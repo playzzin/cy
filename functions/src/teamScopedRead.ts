@@ -29,7 +29,7 @@ const serialize = (value: any): any => {
 // This endpoint decodes and filters several collections per call. In gen 1,
 // memory also controls CPU; the shared 256MB budget throttled these batches.
 // Keep scale-to-zero and the existing instance cap; change only this endpoint.
-export const getTeamScopedData = protectedRegion.runWith({ memory: '1GB' }).https.onCall(async (input, context) => {
+export const readTeamScopedData = async (input: any, context: functions.https.CallableContext) => {
     const startedAt = Date.now();
     const auth = requireCallableAuth(context);
     const batch = Array.isArray(input?.requests);
@@ -236,4 +236,6 @@ export const getTeamScopedData = protectedRegion.runWith({ memory: '1GB' }).http
     }));
     logPerformance();
     return { results };
-});
+};
+
+export const getTeamScopedData = protectedRegion.runWith({ memory: '1GB' }).https.onCall(readTeamScopedData);
