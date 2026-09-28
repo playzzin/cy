@@ -126,4 +126,3 @@ export const DAILY_REPORT_INSIGHT_PROMPT = `당신은 건설업 인력 데이터
 - "~입니다"로 단정, 모호한 표현 금지
 - 데이터에 없는 내용은 절대 추측 금지
 - 이모지 사용 금지`;
-

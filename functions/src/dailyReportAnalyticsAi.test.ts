@@ -1,9 +1,9 @@
 import { strict as assert } from 'assert';
 import { test } from 'node:test';
 import * as admin from 'firebase-admin';
+import { buildDailyReportAnalyticsPrompt } from './dailyReportAnalyticsPrompts';
 if (!admin.apps.length) admin.initializeApp({ projectId: 'demo-cy-statistics' });
 const { validateAnalyticsInput, canUseDailyReportAnalytics, nextAnalyticsQuota, generateDailyReportAnalytics, handleDailyReportAnalytics } = require('./dailyReportAnalyticsAi') as typeof import('./dailyReportAnalyticsAi');
-import { buildDailyReportAnalyticsPrompt } from './dailyReportAnalyticsPrompts';
 const settings = { apiKey: 'synthetic-server-key', model: 'gemini-3.8-flash' };
 const input = { task: 'parse' as const, text: '이번 달 팀별 공수' };
 const response = (status: number, body: unknown) => (async () => ({ ok: status === 200, status, json: async () => body })) as any;

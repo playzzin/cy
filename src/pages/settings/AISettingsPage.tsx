@@ -410,7 +410,7 @@ const AISettingsPage: React.FC = () => {
                         서비스별 기본 모델을 분리해 설정할 수 있습니다. 커스텀 모델명이 있으면 직접 입력하세요.
                     </p>
 
-                    <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">공통 분석 모델</label>
                             <select
@@ -433,27 +433,6 @@ const AISettingsPage: React.FC = () => {
                             />
                         </div>
 
-                        <div className="space-y-2">
-                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">통계 분석 모델</label>
-                            <select
-                                value={models.analyticsModel}
-                                onChange={(e) => setModels((prev) => ({ ...prev, analyticsModel: e.target.value }))}
-                                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold"
-                            >
-                                {AI_TEXT_MODEL_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                            <input
-                                type="text"
-                                value={models.analyticsModel}
-                                onChange={(e) => setModels((prev) => ({ ...prev, analyticsModel: e.target.value }))}
-                                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono"
-                                placeholder="커스텀 모델명"
-                            />
-                        </div>
 
                         <div className="space-y-2">
                             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">이미지 생성 모델</label>
