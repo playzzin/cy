@@ -123,6 +123,13 @@ const DashboardPage: React.FC = () => {
             />
 
             <main className="relative z-10 mx-auto -mt-12 min-w-0 w-full max-w-none overflow-hidden px-3 pb-28 sm:-mt-16 sm:px-5 md:pb-12 lg:px-8 2xl:px-10">
+                {!isPartnerDashboard && !isDedicatedFieldDashboard && (
+                    <div className="mb-6">
+                        <Suspense fallback={<DashboardSectionFallback minHeight="min-h-[240px]" label="빠른 실행 메뉴를 준비하는 중입니다." />}>
+                            <QuickActionsWidget modeConfig={modeConfig} />
+                        </Suspense>
+                    </div>
+                )}
                 <Suspense fallback={<DashboardSectionFallback minHeight="min-h-[128px]" label="메시지 위젯을 준비하는 중입니다." />}>
                     <DashboardMessageWidget />
                 </Suspense>
@@ -151,11 +158,6 @@ const DashboardPage: React.FC = () => {
                 <div className="mb-6">
                     <Suspense fallback={<DashboardSectionFallback minHeight="min-h-[220px]" label="일정 위젯을 준비하는 중입니다." />}>
                         <TomorrowScheduleWidget />
-                    </Suspense>
-                </div>
-                <div className="mb-8">
-                    <Suspense fallback={<DashboardSectionFallback label="빠른 실행 메뉴를 준비하는 중입니다." />}>
-                        <QuickActionsWidget modeConfig={modeConfig} />
                     </Suspense>
                 </div>
                 <Suspense fallback={<DashboardSectionFallback minHeight="min-h-[320px]" label="개인 위젯 보드를 준비하는 중입니다." />}>
