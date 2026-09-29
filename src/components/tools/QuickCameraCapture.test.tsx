@@ -134,6 +134,7 @@ describe('capture geometry', () => {
         )).toContain('현재 앱 탭을 활성화');
         expect(getScreenCaptureFailureMessage(new Error('video-frame-timeout'))).toContain('영상 프레임');
         expect(getScreenCaptureFailureMessage(new Error('track-ended'))).toContain('화면 공유가 종료');
+        expect(getScreenCaptureFailureMessage(new Error('capture-viewport-unsettled'))).toContain('창 크기·배율 변경을 마친 뒤');
         expect(getScrollCaptureFailureMessage(
             new DOMException('user activation required', 'InvalidStateError')
         )).toContain('현재 앱 탭을 활성화');
@@ -324,8 +325,8 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
         jest.restoreAllMocks();
     });
 
-    const chooseRectangle = async () => {
-        const overlay = await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' });
+    const chooseRectangle = async (timeout = 1000) => {
+        const overlay = await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' }, { timeout });
         fireEvent(overlay, new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 120 }));
         fireEvent(window, new MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 400, clientY: 320 }));
     };
@@ -399,6 +400,136 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
         expect(screen.queryByRole('dialog', { name: '화면 캡처 영역 선택' })).not.toBeInTheDocument();
         expect(stopTrack).toHaveBeenCalledTimes(1);
     });
+
+    it('waits for delayed video resizing after the permission UI changes the viewport', async () => {
+        let sourceHeight = 1200;
+        Object.defineProperty(HTMLVideoElement.prototype, 'videoHeight', {
+            configurable: true, get: () => sourceHeight
+        });
+        const originalRequest = getDisplayMedia.getMockImplementation()!;
+        getDisplayMedia.mockImplementation(() => {
+            setWindowNumber('innerHeight', 550);
+            fireEvent(window, new Event('resize'));
+            return originalRequest();
+        });
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        const resizeTimer = window.setTimeout(() => { sourceHeight = 1100; }, 650);
+        try {
+            await chooseRectangle(2500);
+            expect(drawImage).toHaveBeenCalledWith(expect.any(HTMLVideoElement), 0, 0, 1600, 1100);
+            expect(screen.queryByText(/선택한 탭의 화면 비율이 현재 앱과 달라/)).not.toBeInTheDocument();
+            fireEvent.click(screen.getByRole('button', { name: '캡처 후 클립보드 복사' }));
+            expect(await screen.findByAltText('최근 캡처 미리보기')).toBeInTheDocument();
+            expect(screen.getByText('600 × 400 px')).toBeInTheDocument();
+            expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+            expect(stopTrack).not.toHaveBeenCalled();
+        } finally {
+            window.clearTimeout(resizeTimer);
+        }
+    });
+
+    it('waits for the resized video when reusing an approved current-tab stream', async () => {
+        let sourceWidth = 1600;
+        Object.defineProperty(HTMLVideoElement.prototype, 'videoWidth', {
+            configurable: true, get: () => sourceWidth
+        });
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        await chooseRectangle();
+        fireEvent.click(screen.getByRole('button', { name: '캡처 후 클립보드 복사' }));
+        await screen.findByRole('button', { name: '새 실제 영역 선택' });
+
+        setWindowNumber('innerWidth', 1000);
+        fireEvent(window, new Event('resize'));
+        drawImage.mockClear();
+        fireEvent.click(screen.getByRole('button', { name: '새 실제 영역 선택' }));
+        const resizeTimer = window.setTimeout(() => { sourceWidth = 2000; }, 650);
+        try {
+            await chooseRectangle(2500);
+            expect(drawImage).toHaveBeenCalledWith(expect.any(HTMLVideoElement), 0, 0, 2000, 1200);
+            fireEvent.click(screen.getByRole('button', { name: '캡처 후 클립보드 복사' }));
+            await waitFor(() => expect(clipboardWrite).toHaveBeenCalledTimes(2));
+            expect(drawImage).toHaveBeenLastCalledWith(
+                expect.any(HTMLCanvasElement), 200, 240, 600, 400, 0, 0, 600, 400
+            );
+            expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+            expect(stopTrack).not.toHaveBeenCalled();
+        } finally {
+            window.clearTimeout(resizeTimer);
+        }
+    });
+
+    it('settles again when the viewport resizes during the final compositor frame', async () => {
+        let sourceWidth = 1600;
+        Object.defineProperty(HTMLVideoElement.prototype, 'videoWidth', {
+            configurable: true, get: () => sourceWidth
+        });
+        const requestFrame = jest.fn((callback: VideoFrameRequestCallback) => {
+            if (sourceWidth === 1600) {
+                sourceWidth = 1800;
+                setWindowNumber('innerWidth', 900);
+                fireEvent(window, new Event('resize'));
+            }
+            callback(0, {} as VideoFrameCallbackMetadata);
+            return 1;
+        });
+        Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', {
+            configurable: true, value: requestFrame
+        });
+        render(<QuickCameraCapture />);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        await chooseRectangle(2500);
+        expect(requestFrame).toHaveBeenCalledTimes(2);
+        expect(drawImage.mock.calls.filter(([source]) => source instanceof HTMLVideoElement)).toHaveLength(1);
+        expect(drawImage).toHaveBeenCalledWith(expect.any(HTMLVideoElement), 0, 0, 1800, 1200);
+        fireEvent.click(screen.getByRole('button', { name: '캡처 후 클립보드 복사' }));
+        expect(await screen.findByAltText('최근 캡처 미리보기')).toBeInTheDocument();
+        expect(screen.getByText('600 × 400 px')).toBeInTheDocument();
+        expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+        expect(stopTrack).not.toHaveBeenCalled();
+    });
+
+    it('keeps cancellation available while the shared video size is still catching up', async () => {
+        let sourceHeight = 900;
+        Object.defineProperty(HTMLVideoElement.prototype, 'videoHeight', {
+            configurable: true, get: () => sourceHeight
+        });
+        render(<aside data-capture-exclude="true"><QuickCameraCapture /></aside>);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1));
+        expect(screen.getByRole('button', { name: '화면 캡처 준비 취소' })).toBeVisible();
+        expect(screen.queryByRole('dialog', { name: '화면 캡처 영역 선택' })).not.toBeInTheDocument();
+        expect(drawImage).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: '화면 캡처 준비 취소' }));
+        expect(stopTrack).toHaveBeenCalledTimes(1);
+        expect(document.querySelector<HTMLElement>('[data-capture-exclude="true"]')?.style.visibility).toBe('');
+        expect(screen.getByRole('button', { name: '실제 영역 선택 시작' })).toBeEnabled();
+
+        sourceHeight = 1200;
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        expect(await screen.findByRole('dialog', { name: '화면 캡처 영역 선택' })).toBeInTheDocument();
+        expect(getDisplayMedia).toHaveBeenCalledTimes(2);
+        expect(stopTrack).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops an incompatible stream with a recoverable size message instead of drawing mismatched pixels', async () => {
+        Object.defineProperty(HTMLVideoElement.prototype, 'videoHeight', {
+            configurable: true, get: () => 900
+        });
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        render(<aside data-capture-exclude="true"><QuickCameraCapture /></aside>);
+        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        expect(await screen.findByText(/공유 영상과 앱 화면의 크기가 아직 맞지 않습니다/, {}, { timeout: 9500 })).toBeInTheDocument();
+        expect(screen.getByText(/capture-viewport-unsettled/)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '실제 영역 선택 시작' })).toBeEnabled();
+        expect(screen.queryByRole('dialog', { name: '화면 캡처 영역 선택' })).not.toBeInTheDocument();
+        expect(document.querySelector<HTMLElement>('[data-capture-exclude="true"]')?.style.visibility).toBe('');
+        expect(drawImage).not.toHaveBeenCalled();
+        expect(clipboardWrite).not.toHaveBeenCalled();
+        expect(stopTrack).toHaveBeenCalledTimes(1);
+    }, 11000);
 
     it('requires visible source confirmation on browsers without capture identity', async () => {
         Object.defineProperty(navigator.mediaDevices, 'setCaptureHandleConfig', { value: undefined });

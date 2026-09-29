@@ -11,6 +11,7 @@ import {
     fitCaptureSize, getCaptureConstraints, retainCaptureHistory, CAPTURE_HISTORY_LIMIT
 } from './capturePolicy';
 import {
+    hasUsableCapturedFrame,
     prepareCaptureVideo,
     waitForCaptureOperation,
     waitForCapturePaint,
@@ -1292,7 +1293,8 @@ export const getScreenCaptureFailureMessage = (error: unknown): string => {
             case 'screen-browser-only':
                 return '현재 앱 화면을 고정하려면 공유창에서 “현재 탭”을 선택해 주세요. 창 또는 전체 화면은 저장하지 않았습니다.';
             case 'screen-aspect-mismatch':
-                return '선택한 탭의 화면 비율이 현재 앱과 달라 정확한 픽셀 좌표를 보장할 수 없습니다. 공유창에서 현재 탭을 선택해 주세요.';
+            case 'capture-viewport-unsettled':
+                return '공유 영상과 앱 화면의 크기가 아직 맞지 않습니다. 현재 앱 탭을 앞으로 가져오고 창 크기·배율 변경을 마친 뒤 다시 시도해 주세요.';
             case 'screen-tab-mismatch':
                 return '다른 탭이 선택되었습니다. 공유창에서 지금 카메라를 사용하는 앱 탭을 선택해 주세요.';
             case 'capture-viewport-changed':
@@ -1935,41 +1937,52 @@ const QuickCameraCapture: React.FC<{ active?: boolean }> = ({ active = true }) =
             );
             diagnostic?.mark('frame');
 
-            // Keep the progress message visible while permission/video setup is
-            // pending. Hide capture chrome only for the short compositor refresh
-            // immediately before freezing the bitmap.
-            await waitForCapturePaint(signal);
-            assertCurrentCaptureSession(stream);
-            const restoreCursorForCapture = hideDocumentCursorForCapture();
-            const restoreExcludedRoots = hideExcludedRoots();
-            restoreCaptureUi = () => {
-                restoreCursorForCapture();
-                restoreExcludedRoots();
-            };
-            screenCaptureUiRestoreRef.current = restoreCaptureUi;
-            await waitForCursorlessCaptureFrame(video, true, signal);
-            assertCurrentCaptureSession(stream);
-            if (isCaptureTrackEnded(track)) {
-                throw new Error('track-ended');
+            // The sharing toolbar can resize this tab before its video catches
+            // up, including when reusing an existing stream. Keep the progress
+            // and cancel UI visible while both coordinate systems settle.
+            let frozenViewport: CaptureViewport | null = null;
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                setProcessingStatusText('공유 영상과 화면 크기를 맞추고 있습니다. 잠시 기다려 주세요.');
+                const viewport = await waitForStableCaptureViewport(video, signal);
+                assertCurrentCaptureSession(stream);
+                captureIdentityRef.current?.verify(track);
+                await waitForCapturePaint(signal);
+                assertCurrentCaptureSession(stream);
+                const restoreCursorForCapture = hideDocumentCursorForCapture();
+                const restoreExcludedRoots = hideExcludedRoots();
+                restoreCaptureUi = () => {
+                    restoreCursorForCapture();
+                    restoreExcludedRoots();
+                };
+                screenCaptureUiRestoreRef.current = restoreCaptureUi;
+                await waitForCursorlessCaptureFrame(video, true, signal);
+                assertCurrentCaptureSession(stream);
+                if (isCaptureTrackEnded(track)) throw new Error('track-ended');
+
+                // A resize can also arrive during the final compositor wait.
+                // Retry preparation instead of saving with stale coordinates.
+                if (document.visibilityState === 'visible'
+                    && hasUsableCapturedFrame(video)
+                    && isSameCaptureViewport(viewport, readCaptureViewport())
+                    && isFrameAspectCompatible(video.videoWidth, video.videoHeight, viewport)) {
+                    frozenViewport = viewport;
+                    break;
+                }
+                restoreScreenCaptureUi();
+                restoreCaptureUi = null;
             }
+            if (!frozenViewport) throw new Error('capture-viewport-unsettled');
 
             captureIdentityRef.current?.verify(track);
             const frozenCanvas = freezeVideoFrameToCanvas(video, effectiveQuality);
             if (frozenCanvas.width < video.videoWidth) setQualityNotice('메모리 사용을 줄이기 위해 화면을 비율에 맞춰 축소했습니다. 표시된 해상도로 저장됩니다.');
-            if (!isFrameAspectCompatible(
-                frozenCanvas.width,
-                frozenCanvas.height,
-                getViewportMetrics()
-            )) {
-                throw new Error('screen-aspect-mismatch');
-            }
 
             clearFrozenScreenFrame();
             const frozenFrame: FrozenScreenFrame = {
                 canvas: frozenCanvas,
                 width: frozenCanvas.width,
                 height: frozenCanvas.height,
-                viewport: readCaptureViewport(),
+                viewport: frozenViewport,
                 tabVerified
             };
             frozenScreenFrameRef.current = frozenFrame;
