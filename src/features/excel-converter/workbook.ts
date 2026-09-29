@@ -1,4 +1,5 @@
 import JSZip from 'jszip';
+import { SSF } from 'xlsx';
 import { readPresentation } from './previewStyles';
 import { headerEndRow, mergeBounds } from './mergedLayout';
 import { DataTable, Field, LIMITS, Scalar, SheetInfo, ValueKind, WorkbookFile } from './types';
@@ -7,7 +8,13 @@ export const columnName = (column: number): string => { let n = column; let resu
 export const columnNumber = (name: string): number => Array.from(name.toUpperCase()).reduce((n, char) => n * 26 + char.charCodeAt(0) - 64, 0);
 export const normalizeLabel = (label: string) => label.toLowerCase().replace(/필수/g, '').replace(/[\s_\-()*[\]]/g, '');
 export const workbookMime = (name: string) => /\.xlsm$/i.test(name) ? 'application/vnd.ms-excel.sheet.macroEnabled.12' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-export const xml = (text: string): Document => { if (/<!DOCTYPE|<!ENTITY/i.test(text)) throw new Error('외부 정의가 포함된 XML은 처리할 수 없습니다.'); const doc = new DOMParser().parseFromString(text, 'application/xml'); if (doc.getElementsByTagName('parsererror').length) throw new Error('엑셀 내부 XML이 손상되었습니다.'); return doc; };
+export const xml = (text: string): Document => {
+  if (/<!DOCTYPE|<!ENTITY/i.test(text)) throw new Error('외부 정의가 포함된 XML은 처리할 수 없습니다.');
+  // ZIP decoding retains the UTF-8 BOM; Chromium's string XML parser rejects it.
+  const doc = new DOMParser().parseFromString(text.replace(/^\uFEFF/, ''), 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('엑셀 내부 XML이 손상되었습니다.');
+  return doc;
+};
 export const elements = (node: Document | Element, tag: string): Element[] => Array.from(node.getElementsByTagNameNS('*', tag));
 export const serializeXml = (doc: Document) => new XMLSerializer().serializeToString(doc);
 export const normalizeZipPath = (base: string, target: string): string => { const path: string[] = target.startsWith('/') ? [] : base.split('/').slice(0, -1); target.split('/').forEach(part => { if (part === '..') path.pop(); else if (part && part !== '.') path.push(part); }); return path.join('/'); };
@@ -54,7 +61,7 @@ export async function readWorkbook(bytes: ArrayBuffer, name: string, id = `file-
   if (sheetPaths.size > LIMITS.sheets) throw new Error('한 파일에서 최대 30개 시트까지 지원합니다.');
   const sharedStrings = zip.file('xl/sharedStrings.xml') ? elements(xml(await zip.file('xl/sharedStrings.xml')!.async('string')), 'si').map(si => elements(si, 't').map(t => t.textContent || '').join('')) : [];
   const styleDoc = zip.file('xl/styles.xml') ? xml(await zip.file('xl/styles.xml')!.async('string')) : null;
-  const formatCodes = new Map<number, string>([[14, 'mm-dd-yy'], [15, 'd-mmm-yy'], [16, 'd-mmm'], [17, 'mmm-yy'], [22, 'm/d/yy h:mm'], [49, '@']]);
+  const formatCodes = new Map<number, string>(Object.entries(SSF.get_table() as Record<string, string>).map(([id, format]) => [Number(id), format]));
   if (styleDoc) elements(styleDoc, 'numFmt').forEach(f => formatCodes.set(Number(f.getAttribute('numFmtId')), f.getAttribute('formatCode') || ''));
   const cellFormats = styleDoc ? Array.from(elements(styleDoc, 'cellXfs')[0]?.children || []).map(f => formatCodes.get(Number(f.getAttribute('numFmtId'))) || '') : [];
   const date1904 = ['1', 'true'].includes(elements(manifest, 'workbookPr')[0]?.getAttribute('date1904') || '');
@@ -89,7 +96,12 @@ export async function readWorkbook(bytes: ArrayBuffer, name: string, id = `file-
         else if (/[yd]/i.test(format.replace(/"[^"]*"|\[[^\]]*\]/g, ''))) { value = new Date(Math.round((number - (date1904 ? 24107 : 25569)) * 86400000)).toISOString().slice(0, 10); kind = 'date'; }
         else { value = number; kind = 'number'; }
       }
-      info.cells.push({ address, row, col, value, kind, formula, text: value === null ? '' : String(value), style, hidden: info.hiddenRows.includes(row) || info.hiddenColumns.includes(col) });
+      let displayText = value === null ? '' : String(value);
+      // SSF treats a bare dot between date tokens as a fractional second. Excel
+      // accepts it as a separator; quote only those dots, leaving time decimals intact.
+      const displayFormat = format.split(/("[^"]*")/).map((part, i) => i % 2 ? part : part.replace(/([ymd])\.(?=[ymd])/gi, '$1"."')).join('');
+      try { if (value !== null) displayText = SSF.format(displayFormat || 'General', type === 's' || type === 'inlineStr' || type === 'str' || type === 'e' || type === 'd' ? value : type === 'b' ? value : Number(raw), { date1904 }); } catch { /* Keep the value readable when an uncommon format is unsupported. */ }
+      info.cells.push({ address, row, col, value, kind, formula, text: value === null ? '' : String(value), displayText, style, hidden: info.hiddenRows.includes(row) || info.hiddenColumns.includes(col) });
     }
     info.presentation = readPresentation(styleDoc, doc);
     info.headerRow = detectHeader(info.cells);
@@ -99,7 +111,7 @@ export async function readWorkbook(bytes: ArrayBuffer, name: string, id = `file-
     if (info.cells.some(c => c.formula && c.value === null)) info.warnings.push('계산 결과가 저장되지 않은 수식이 있습니다. 원본 데이터라면 Excel에서 재계산 후 저장해 주세요.');
     sheets.push(info);
   }
-  return { id, name, bytes: bytes.slice(0), sheets, fingerprint: await fingerprint(bytes), format, hasMacros, warnings: format === 'xlsm' ? ['매크로는 실행하지 않습니다. 받을 양식이 .xlsm이면 매크로와 버튼을 보존해 .xlsm으로 저장합니다.'] : [] };
+  return { id, name, bytes: bytes.slice(0), sheets, fingerprint: await fingerprint(bytes), format, hasMacros, warnings: format === 'xlsm' ? ['매크로와 버튼은 .xlsm 결과에 유지됩니다. 대화로 VBA를 수정할 수 있으며, 매크로 실행은 Excel에서 확인합니다.'] : [] };
 }
 export function extractTable(file: WorkbookFile, sheetName: string, headerRow: number, includeHidden = true, prefix = ''): DataTable {
   const sheet = file.sheets.find(s => s.name === sheetName); if (!sheet) throw new Error('선택한 시트를 찾을 수 없습니다.');

@@ -1,11 +1,12 @@
 import { z } from 'zod';
+import { sheetEditSchema, formulaEditSchema, macroEditSchema } from './editingTypes';
 
 export const ENGINE_VERSION = '2.0.0';
 export const LIMITS = { fileBytes: 20 * 1024 * 1024, expandedBytes: 100 * 1024 * 1024, rows: 30000, columns: 100, sheets: 30, outputs: 100 };
 export type Scalar = string | number | boolean | null;
 export type ValueKind = 'text' | 'number' | 'date' | 'boolean' | 'blank';
-export interface SheetCell { address: string; row: number; col: number; value: Scalar; kind: ValueKind; text: string; formula?: string; style: number; hidden?: boolean }
-export interface SheetPresentation { styles: { color?: string; background?: string; bold: boolean; fontSize: number; align?: 'left' | 'center' | 'right'; bordered: boolean; numberFormat: number }[]; widths: Record<number, number>; heights: Record<number, number> }
+export interface SheetCell { address: string; row: number; col: number; value: Scalar; kind: ValueKind; text: string; displayText?: string; formula?: string; style: number; hidden?: boolean }
+export interface SheetPresentation { styles: { color?: string; background?: string; bold: boolean; fontSize: number; fontName?:string; italic?:boolean; underline?:boolean; wrap?:boolean; vertical?:'top'|'middle'|'bottom'; align?: 'left' | 'center' | 'right'; bordered: boolean; borderStyle?:string; borderColor?:string; numberFormat: number }[]; widths: Record<number, number>; heights: Record<number, number> }
 export interface SheetInfo { name: string; path: string; cells: SheetCell[]; rowCount: number; columnCount: number; headerRow: number; merges: string[]; hiddenRows: number[]; hiddenColumns: number[]; warnings: string[]; presentation?: SheetPresentation }
 export interface WorkbookFile { id: string; name: string; bytes: ArrayBuffer; sheets: SheetInfo[]; fingerprint: string; warnings: string[]; format?: 'xlsx' | 'xlsm'; hasMacros?: boolean }
 export interface Field { key: string; label: string; col: number; kind: ValueKind }
@@ -41,11 +42,14 @@ export const planSchema = z.object({
   overflow: z.enum(['sheets', 'files', 'stop']).default('sheets'),
   rules: ruleSchema, questions: z.array(z.string().max(500)).max(30).default([]),
   summary: z.array(z.string().max(500)).max(30).default([]), origin: z.enum(['local', 'gemini', 'saved']).default('local'),
-  overrides: z.array(z.object({ originsKey: z.string().max(10000), targetColumn: z.number().int().min(1).max(100), rowOffset: z.number().int().min(0).max(9).optional(), value: z.union([z.string().max(2000), z.number().finite(), z.boolean(), z.null()]), kind: z.enum(['text', 'number', 'date', 'boolean', 'blank']) })).max(500).default([]),
+  edits: z.array(sheetEditSchema).max(200).default([]),
+  formulaEdits: z.array(formulaEditSchema).max(200).default([]),
+  macroEdits: z.array(macroEditSchema).max(50).default([]),
+  overrides: z.array(z.object({ originsKey: z.string().max(10000), targetColumn: z.number().int().min(1).max(100), rowOffset: z.number().int().min(0).max(9).optional(), fixedAddress: z.string().regex(/^[A-Z]{1,3}[1-9]\d{0,4}$/).optional(), value: z.union([z.string().max(2000), z.number().finite(), z.boolean(), z.null()]), kind: z.enum(['text', 'number', 'date', 'boolean', 'blank']) })).max(500).default([]),
 });
 export type ConversionPlan = z.infer<typeof planSchema>;
 export interface Issue { level: 'error' | 'warning' | 'info'; code: string; message: string; location?: string }
-export interface CellTrace { sheet: string; address: string; label: string; value: Scalar; origins: string[]; rule: string; kind: ValueKind }
+export interface CellTrace { sheet: string; address: string; label: string; value: Scalar; origins: string[]; rule: string; kind: ValueKind; recordKey?: string; mappingKey?: string }
 export interface ConversionOutput { name: string; bytes: ArrayBuffer; sheets: SheetInfo[]; traces: CellTrace[]; issues: Issue[]; inputCount: number; excludedCount: number; outputCount: number; group: string; formulaCalculation?: { calculated: number; unresolved: number } }
 export interface ConversionResult { outputs: ConversionOutput[]; issues: Issue[]; excluded: { origin: string; reason: string }[]; inputCount: number; outputCount: number; elapsedMs: number }
 export interface JoinSpec { fileId: string; sheetName: string; headerRow: number; leftKey: string; rightColumn: number; prefix: string }

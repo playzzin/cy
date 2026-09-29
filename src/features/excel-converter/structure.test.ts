@@ -73,7 +73,7 @@ test('구조 분석 응답이 중단 후 도착하면 적용하지 않는다',as
 test('날짜 연결 뒤바뀜·임의 고정값·인원 제외·숫자 변경은 검증 단계에서 차단한다',()=>{
  const {file,layout}=sample();const table=extractWithLayout(file,'새로운원본',layout).table;
  const make=(key:string,label:string)=>({label,targetColumn:1,sourceKeys:[key],mode:'copy' as const,constant:null,separator:' ',format:'keep' as const,dateFormat:'yyyy-mm-dd' as const,scale:1,decimals:null,rounding:'round' as const,required:false,confirmed:true,reason:'',verifyKey:''});
- const base={version:1 as const,targetId:'t',sheetName:'s',headerRow:1,startRow:2,endRow:10,mappings:[make('day1','1일')],fixedCells:[],rules:{filters:[],sort:[],groupBy:[],sums:[],splitBy:'',includeHidden:true},overflow:'files' as const,questions:[],summary:[],origin:'local' as const,overrides:[]};
+ const base={version:1 as const,targetId:'t',sheetName:'s',headerRow:1,startRow:2,endRow:10,mappings:[make('day1','1일')],fixedCells:[],rules:{filters:[],sort:[],groupBy:[],sums:[],splitBy:'',includeHidden:true},overflow:'files' as const,questions:[],summary:[],origin:'local' as const,overrides:[],edits:[],formulaEdits:[],macroEdits:[]};
  expect(planProblems({...base,mappings:[make('day2','1일')]},table,base,'그대로')).toEqual(expect.arrayContaining([expect.objectContaining({code:'meaning'})]));
  expect(planProblems({...base,mappings:[{...base.mappings[0],mode:'constant',constant:99}]},table,base,'그대로')).toEqual(expect.arrayContaining([expect.objectContaining({code:'invented-constant'})]));
  expect(planProblems({...base,mappings:[{...base.mappings[0],scale:10}]},table,base,'그대로')).toEqual(expect.arrayContaining([expect.objectContaining({code:'unrequested-calculation'})]));

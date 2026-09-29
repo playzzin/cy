@@ -37,7 +37,7 @@ export function structuralText(value: unknown): string {
 }
 export function structureOnlyPlan(plan:ConversionPlan):ConversionPlan {
   const clean=(m:ConversionPlan['mappings'][number],index:number)=>({...m,label:structuralText(m.label)||`항목 ${index+1}`,reason:''});
-  return{...plan,mappings:plan.mappings.map(clean),fixedCells:plan.fixedCells.map((f,i)=>({...f,mapping:clean(f.mapping,i)})),summary:[],questions:[],overrides:[]};
+  return{...plan,mappings:plan.mappings.map(clean),fixedCells:plan.fixedCells.map((f,i)=>({...f,mapping:clean(f.mapping,i)})),summary:[],questions:[],overrides:[],edits:[],formulaEdits:[],macroEdits:[]};
 }
 const ranges = (values:number[]) => {const result:string[]=[];let start=values[0],end=start;for(const n of values.slice(1)){if(n===end+1)end=n;else{result.push(start===end?`${start}`:`${start}-${end}`);start=end=n;}}if(start!==undefined)result.push(start===end?`${start}`:`${start}-${end}`);return result.join(',');};
 export function workbookAtlas(file:WorkbookFile,selectedSheet:string):WorkbookAtlas {

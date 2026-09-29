@@ -9,7 +9,7 @@ export function rememberStructure(owner:string,prepared:PreparedConversion,plan:
   // Keep coordinates and field links only. No file bytes, row values, prompts,
   // filter values, user constants, explanations, or manual overrides are saved.
   const clean=(m:ConversionPlan['mappings'][number])=>({...m,constant:null,reason:'',...(m.mode==='constant'?{mode:'blank' as const,confirmed:false}: {})});
-  const safePlan=planSchema.parse({...plan,targetId:'remembered',sheetName:'template',mappings:plan.mappings.map(clean),fixedCells:plan.fixedCells.map(f=>({...f,mapping:clean(f.mapping)})),rules:{},summary:[],questions:[],overrides:[]});
+  const safePlan=planSchema.parse({...plan,targetId:'remembered',sheetName:'template',mappings:plan.mappings.map(clean),fixedCells:plan.fixedCells.map(f=>({...f,mapping:clean(f.mapping)})),rules:{},summary:[],questions:[],overrides:[],edits:[],formulaEdits:[],macroEdits:[]});
   const decision:StructureDecision={useSuggestedSource:!prepared.sourceLayout,useSuggestedTarget:!prepared.targetLayout,source:prepared.sourceLayout,target:prepared.targetLayout,questions:[],summary:[]};
   const entry:RememberedStructure={version:ENGINE_VERSION,signature:prepared.structureSignature,at:Date.now(),decision,plan:safePlan};
   try{localStorage.setItem(key(owner),JSON.stringify([entry,...readMemory(owner).filter(m=>m.signature!==entry.signature)].slice(0,12)));}catch{/* Conversion does not depend on storage availability. */}

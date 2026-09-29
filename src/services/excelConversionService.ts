@@ -40,7 +40,7 @@ export const excelConversionService = {
   async analyze(request: PlannerRequest): Promise<PlannerResult> {
     try {
       // Row-level manual edits and lineage stay in the browser.
-      const payload = { ...request, plan: { ...request.plan, overrides: [] } };
+      const payload = { ...request, plan: { ...request.plan, overrides: [], edits: [], formulaEdits: [], macroEdits: [] } };
       const encoded = new TextEncoder().encode(JSON.stringify({ ...payload, requestId: '' }));
       const fingerprint = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', encoded))).map(b => b.toString(16).padStart(2, '0')).join('');
       try {
@@ -49,7 +49,7 @@ export const excelConversionService = {
         sessionStorage.setItem('excel-converter-ai-request', JSON.stringify({ fingerprint, requestId: payload.requestId, createdAt: Date.now() }));
       } catch { /* Storage restrictions do not prevent an explicit analysis. */ }
       const callable = httpsCallable<PlannerRequest, PlannerResult>(functions, 'planExcelConversion', { timeout: 180000 });
-      const { data } = await callable(payload); return { ...data, plan: planSchema.parse({ ...data.plan, overrides: request.plan.overrides, mappings: data.plan.mappings.map(m => {
+      const { data } = await callable(payload); return { ...data, plan: planSchema.parse({ ...data.plan, overrides: request.plan.overrides, edits: request.plan.edits, formulaEdits: request.plan.formulaEdits, macroEdits: request.plan.macroEdits, mappings: data.plan.mappings.map(m => {
         const candidates = request.plan.mappings.filter(previous => previous.targetColumn === m.targetColumn);
         // Older deployed planners do not return rowOffset. Recover it only from
         // an unambiguous known field, never from the first matching column.
