@@ -14,6 +14,7 @@ import {
 import { db } from '../config/firebase';
 import { normalizeWorkbookNumber } from '../utils/workbookLedgerParsing';
 import { workbookLedgerLogService } from './workbookLedgerLogService';
+import { getWorkbookNumericIssues } from '../utils/workbookLedgerValidation';
 
 export type WorkbookTransactionType = '매출' | '매입';
 export type WorkbookLedgerTenant = 'cheongyeon' | 'dawon';
@@ -42,6 +43,7 @@ export interface WorkbookLedgerEntry {
     sourceType?: WorkbookLedgerSourceType | string;
     sourceId?: string;
     sourceMonth?: string;
+    importedFromId?: string;
     note?: string;
     teamName?: string;
     createdAt?: string;
@@ -54,6 +56,18 @@ export interface WorkbookLedgerEntry {
 
 type WorkbookLedgerEntryInput = Omit<WorkbookLedgerEntry, 'createdAt' | 'updatedAt'>;
 type WorkbookLedgerEntryUpdate = Partial<Omit<WorkbookLedgerEntry, 'id' | 'createdAt' | 'createdBy' | 'deletedAt' | 'deletedBy'>>;
+export class WorkbookLedgerBatchError extends Error {
+    constructor(public committedEntries: WorkbookLedgerEntry[], public pendingEntries: WorkbookLedgerEntryInput[]) {
+        super(`${committedEntries.length}건 저장 완료, ${pendingEntries.length}건 저장을 완료하지 못했습니다. 남은 항목만 재시도해 주세요.`);
+        this.name = 'WorkbookLedgerBatchError';
+        Object.setPrototypeOf(this, WorkbookLedgerBatchError.prototype);
+    }
+}
+
+const validateNumericValues = (entry: WorkbookLedgerEntryUpdate) => {
+    const issues = getWorkbookNumericIssues(entry);
+    if (issues.length) throw new Error(issues.map((issue) => issue.message).join(' '));
+};
 type GetEntriesOptions = {
     force?: boolean;
     startDate?: string;
@@ -164,6 +178,7 @@ const sanitizeEntry = (entry: WorkbookLedgerEntryInput, timestamp: string) => ({
     sourceType: normalizeText(entry.sourceType) || null,
     sourceId: normalizeText(entry.sourceId) || null,
     sourceMonth: normalizeText(entry.sourceMonth) || null,
+    importedFromId: normalizeText(entry.importedFromId) || null,
     note: normalizeText(entry.note),
     teamName: normalizeText(entry.teamName),
     createdBy: normalizeText(entry.createdBy) || null,
@@ -218,6 +233,7 @@ const normalizeStoredEntry = (id: string, data: Record<string, unknown>): Workbo
     sourceType: normalizeText(data.sourceType),
     sourceId: normalizeText(data.sourceId),
     sourceMonth: normalizeText(data.sourceMonth),
+    importedFromId: normalizeText(data.importedFromId),
     note: normalizeFirstText(data.note, data.memo, data.remark, data.remarks, data.notes),
     teamName: normalizeText(data.teamName),
     createdAt: normalizeText(data.createdAt),
@@ -229,6 +245,7 @@ const normalizeStoredEntry = (id: string, data: Record<string, unknown>): Workbo
 });
 
 export interface WorkbookLedgerService {
+    createEntryId(): string;
     getEntries(options?: GetEntriesOptions): Promise<WorkbookLedgerEntry[]>;
     getLinkedEntries(matchedEntryId: string): Promise<WorkbookLedgerEntry[]>;
     addEntries(entries: WorkbookLedgerEntryInput[]): Promise<WorkbookLedgerEntry[]>;
@@ -309,7 +326,24 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
         return normalizeStoredEntry(entrySnapshot.id, entrySnapshot.data() as Record<string, unknown>);
     };
 
+    const assertNoDependents = async (ids: string[]) => {
+        const selected = new Set(ids);
+        const candidates = ids.length > 1
+            ? await service.getEntries({ force: true })
+            : (await Promise.all(['matchedEntryId', 'sourceId'].map(async (field) => {
+                const snapshot = await getDocs(query(collection(db, collectionName), where(field, '==', ids[0])));
+                return snapshot.docs.map((entryDoc) => normalizeStoredEntry(entryDoc.id, entryDoc.data()));
+            }))).flat();
+        if (candidates.some((entry) => !entry.deletedAt && !selected.has(entry.id ?? '') && (
+            selected.has(entry.matchedEntryId ?? '')
+            || (entry.sourceType === 'advanceUsage' && selected.has(entry.sourceId ?? ''))
+        ))) {
+            throw new Error('조회 범위 밖을 포함해 연결된 입금·취소·선수금 사용 이력이 남아 있습니다. 연결 이력을 먼저 확인해 주세요.');
+        }
+    };
+
     const service: WorkbookLedgerService = {
+        createEntryId: () => doc(collection(db, collectionName)).id,
         async getEntries(options: GetEntriesOptions = {}): Promise<WorkbookLedgerEntry[]> {
             const cacheKey = buildCacheKey(options);
             if (options.force) {
@@ -400,13 +434,17 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
 
         async addEntries(entries: WorkbookLedgerEntryInput[]): Promise<WorkbookLedgerEntry[]> {
             if (entries.length === 0) return [];
-
+            entries.forEach(validateNumericValues);
+            const prepared = entries.map((entry) => ({ ...entry, id: entry.id || service.createEntryId() }));
+            // Commit invoices before linked settlements even when an uploaded file lists payments first.
+            prepared.sort((left, right) => Number(right.totalAmount > 0) - Number(left.totalAmount > 0));
             const now = new Date().toISOString();
             const createdEntries: WorkbookLedgerEntry[] = [];
 
-            for (let index = 0; index < entries.length; index += BATCH_SIZE) {
+            for (let index = 0; index < prepared.length; index += BATCH_SIZE) {
                 const batch = writeBatch(db);
-                const chunk = entries.slice(index, index + BATCH_SIZE);
+                const chunk = prepared.slice(index, index + BATCH_SIZE);
+                const chunkEntries: WorkbookLedgerEntry[] = [];
 
                 chunk.forEach((entry) => {
                     const entryRef = entry.id
@@ -414,36 +452,45 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                         : doc(collection(db, collectionName));
                     const payload = sanitizeEntry(entry, now);
                     batch.set(entryRef, payload);
-                    createdEntries.push({
+                    chunkEntries.push({
                         id: entryRef.id,
                         ...(payload as Omit<WorkbookLedgerEntry, 'id'>)
                     });
                 });
 
-                await batch.commit();
-            }
-
-            clearCachedEntries();
-
-            await Promise.all(
-                createdEntries.map((entry) =>
+                try {
+                    await batch.commit();
+                } catch (error) {
+                    clearCachedEntries();
+                    throw new WorkbookLedgerBatchError(cloneEntries(createdEntries), prepared.slice(index));
+                }
+                createdEntries.push(...chunkEntries);
+                clearCachedEntries();
+                await Promise.all(chunkEntries.map((entry) =>
                     workbookLedgerLogService.safeCreateLog({
                         action: 'created',
                         tenantKey,
                         after: entry,
                         source: 'workbookLedgerService.addEntries'
                     })
-                )
-            );
+                ));
+            }
 
             return cloneEntries(createdEntries);
         },
 
         async updateEntry(id: string, updates: WorkbookLedgerEntryUpdate): Promise<void> {
+            validateNumericValues(updates);
             const now = new Date().toISOString();
             const payload = sanitizeUpdate(updates, now);
             const entryRef = doc(collection(db, collectionName), id);
             const before = await getEntrySnapshot(id);
+            if (before && before.totalAmount > 0 && (
+                (updates.transactionType !== undefined && updates.transactionType !== before.transactionType)
+                || (updates.totalAmount !== undefined && updates.totalAmount <= 0)
+            )) {
+                await assertNoDependents([id]);
+            }
             await updateDoc(entryRef, payload);
             const after = await getEntrySnapshot(id);
 
@@ -459,6 +506,7 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
         },
 
         async softDeleteEntry(id: string, deletedBy?: string): Promise<void> {
+            await assertNoDependents([id]);
             const now = new Date().toISOString();
             const entryRef = doc(collection(db, collectionName), id);
             const before = await getEntrySnapshot(id);
@@ -486,19 +534,31 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
         },
 
         async softDeleteEntries(ids: string[], deletedBy?: string): Promise<number> {
-            const normalizedIds = Array.from(new Set(
+            let normalizedIds = Array.from(new Set(
                 ids
                     .map((id) => normalizeText(id))
                     .filter((id) => id.length > 0)
             ));
 
             if (normalizedIds.length === 0) return 0;
+            await assertNoDependents(normalizedIds);
 
             const beforeEntries = new Map(
                 await Promise.all(
                     normalizedIds.map(async (id) => [id, await getEntrySnapshot(id)] as const)
                 )
             );
+            // Remove dependents first, so a later failed chunk cannot leave a live payment without its invoice.
+            normalizedIds = normalizedIds.filter((id) => {
+                const entry = beforeEntries.get(id);
+                return entry && !entry.deletedAt;
+            }).sort((left, right) => {
+                const priority = (id: string) => {
+                    const entry = beforeEntries.get(id)!;
+                    return entry.sourceType === 'advanceUsage' ? 0 : entry.totalAmount > 0 ? 2 : 1;
+                };
+                return priority(left) - priority(right);
+            });
             const now = new Date().toISOString();
             const deletePayload = {
                 deletedAt: now,
@@ -513,13 +573,14 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                     batch.update(doc(collection(db, collectionName), id), deletePayload);
                 });
 
-                await batch.commit();
-            }
-
-            clearCachedEntries();
-
-            await Promise.all(
-                normalizedIds.map((id) => {
+                try {
+                    await batch.commit();
+                } catch (error) {
+                    clearCachedEntries();
+                    throw new Error(`${index}건 삭제 완료, ${normalizedIds.length - index}건 미완료입니다. 새로고침 후 남은 항목을 확인해 주세요.`);
+                }
+                clearCachedEntries();
+                await Promise.all(chunk.map((id) => {
                     const before = beforeEntries.get(id);
                     return workbookLedgerLogService.safeCreateLog({
                         action: 'deleted',
@@ -533,8 +594,8 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                         } : null,
                         source: 'workbookLedgerService.softDeleteEntries'
                     });
-                })
-            );
+                }));
+            }
 
             return normalizedIds.length;
         },

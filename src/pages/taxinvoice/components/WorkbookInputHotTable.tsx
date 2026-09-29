@@ -12,6 +12,7 @@ interface WorkbookInputHotTableProps {
     columns: any[];
     colHeaders: string[];
     cells: any;
+    readOnly?: boolean;
     beforePaste: any;
     beforeChange: any;
     afterChange: any;
@@ -26,6 +27,7 @@ const WorkbookInputHotTable: React.FC<WorkbookInputHotTableProps> = ({
     columns,
     colHeaders,
     cells,
+    readOnly = false,
     beforePaste,
     beforeChange,
     afterChange,
@@ -57,6 +59,7 @@ const WorkbookInputHotTable: React.FC<WorkbookInputHotTableProps> = ({
         outsideClickDeselects={true}
         className="excel-handsontable"
         cells={cells}
+        readOnly={readOnly}
     />
 );
 
