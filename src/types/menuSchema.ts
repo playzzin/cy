@@ -13,6 +13,8 @@ export const MenuItemSchema: z.ZodType<any> = z.lazy(() =>
         iconColor: z.string().optional(),
         activeColor: z.string().optional(),
         hide: z.boolean().optional(),
+        dividerStyle: z.enum(['solid', 'dashed']).optional(),
+        dividerSpacing: z.enum(['compact', 'normal', 'relaxed']).optional(),
         sub: z.array(z.string().or(MenuItemSchema)).optional()
     })
 );

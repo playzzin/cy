@@ -15,7 +15,8 @@ import {
     faPen,
     faCheck,
     faXmark,
-    faPlus
+    faPlus,
+    faMinus
 } from '@fortawesome/free-solid-svg-icons';
 import { MENU_PATHS } from '../../../../constants/menuPaths';
 
@@ -27,6 +28,7 @@ interface ToolboxPanelProps {
     targetMenuName: string;
     isSystemPageAdded: (path: string) => boolean;
     onAddSystemPage: (page: { name: string; path: string }) => void;
+    onAddDivider?: () => void;
 }
 
 interface SystemPageSource {
@@ -110,7 +112,8 @@ const ToolboxPanel: React.FC<ToolboxPanelProps> = ({
     onRenameSystemPage,
     targetMenuName,
     isSystemPageAdded,
-    onAddSystemPage
+    onAddSystemPage,
+    onAddDivider
 }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [showHidden, setShowHidden] = useState(false);
@@ -224,13 +227,16 @@ const ToolboxPanel: React.FC<ToolboxPanelProps> = ({
                             color="bg-indigo-600"
                             payload={{ template: 'link' }}
                         />
-                        <DraggableItem
-                            id="new-divider"
-                            label="구분선 (-)"
-                            icon={faFileLines}
-                            color="bg-gray-600"
-                            payload={{ template: 'divider' }}
-                        />
+                        {onAddDivider && (
+                            <div className="rounded-lg border border-slate-700/80 bg-slate-900/40 p-3">
+                                <div className="mb-3 flex items-center gap-3 text-slate-400" aria-hidden="true">
+                                    <span className="flex-1 border-t border-slate-500/60" /><FontAwesomeIcon icon={faMinus} /><span className="flex-1 border-t border-slate-500/60" />
+                                </div>
+                                <DraggableItem id="new-divider" label="구분선" icon={faMinus} color="bg-slate-700" payload={{ template: 'divider' }} />
+                                <p className="my-2 text-[11px] leading-relaxed text-slate-400">메뉴 사이에 드래그해 구역을 나눕니다.</p>
+                                <button type="button" onClick={onAddDivider} className="w-full rounded-md border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-blue-400 hover:bg-blue-500/10 focus-visible:ring-2 focus-visible:ring-blue-400">구분선 바로 추가</button>
+                            </div>
+                        )}
                     </div>
 
                     {/* 2. System Pages (Import) */}

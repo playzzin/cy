@@ -10,6 +10,8 @@ export interface MenuItem {
     activeColor?: string; // Background/Text color when active
     hoverColor?: string; // Color for hover/active state
     hide?: boolean;
+    dividerStyle?: 'solid' | 'dashed';
+    dividerSpacing?: 'compact' | 'normal' | 'relaxed';
 }
 
 export interface SiteData {

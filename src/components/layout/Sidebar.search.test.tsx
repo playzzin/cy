@@ -49,6 +49,23 @@ const searchFor = (value: string) => fireEvent.change(screen.getByRole('searchbo
 
 beforeEach(() => jest.clearAllMocks());
 
+it('구분선을 모든 메뉴 깊이에서 링크 없이 표시하고 숨김 설정을 반영한다', async () => {
+    render(app({
+        activeMenuItems: { group: true }, activeNestedMenuItems: { nested: true },
+        currentSiteData: { ...site, menu: [
+            { id: 'divider-root', text: '-', dividerSpacing: 'relaxed', dividerStyle: 'dashed' },
+            { id: 'hidden-divider', text: '-', hide: true },
+            { id: 'group', text: '그룹', sub: ['-', { id: 'nested', text: '하위 그룹', sub: [
+                { text: '-', dividerSpacing: 'compact' }, { text: '실제 메뉴', path: '/real' }
+            ] }] }
+        ] }
+    }));
+    expect(await screen.findAllByRole('separator', { name: '메뉴 구분선' })).toHaveLength(3);
+    expect(screen.queryByRole('link', { name: /^-/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('separator')[0]).toHaveStyle({ padding: '22px 16px' });
+    expect(screen.getByRole('link', { name: /실제 메뉴/ })).toHaveAttribute('href', '/real');
+});
+
 it('설정을 켰을 때만 검색을 표시하고 사이트 변경 시 검색어를 초기화한다', async () => {
     const view = render(app({ currentSiteData: { ...site, sidebarSearchEnabled: undefined } }));
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();

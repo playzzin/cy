@@ -24,7 +24,8 @@ import {
     faCopy,
     faList,
     faGrip,
-    faBroom
+    faBroom,
+    faMinus
 } from '@fortawesome/free-solid-svg-icons';
 import { arrayMove } from '@dnd-kit/sortable';
 
@@ -41,6 +42,7 @@ import PositionMenuCopyModal from './components/PositionMenuCopyModal';
 import { addMenuItemsSafely } from './menuBulkApply';
 import { isDevAdminSessionEnabled } from '../../../utils/devAdminSession';
 import { useSiteMode } from '../../../contexts/SiteModeContext';
+import { createMenuDivider, isMenuDivider } from '../../../utils/menuDivider';
 
 // --- Recursive Helpers ---
 
@@ -384,7 +386,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
         if (!ref || ref.index <= 0) return; // Can't indent if first item
 
         const prevSibling = ref.list[ref.index - 1];
-        if (typeof prevSibling === 'string') return; // Can't nest under a string (separator)
+        if (typeof prevSibling === 'string' || isMenuDivider(prevSibling)) return;
 
         // Remove from current list
         const [movedItem] = ref.list.splice(ref.index, 1);
@@ -691,6 +693,24 @@ const AdvancedMenuManagerEditor: React.FC = () => {
         updateMenuData(newData);
     }, [currentMenuDuplicateCount, menuData, selectedSite, updateMenuData]);
 
+    const handleAddDivider = useCallback(() => {
+        if (!menuData?.[selectedSite] || selectedSurface !== 'menu') return;
+        const newData = JSON.parse(JSON.stringify(menuData)) as SiteDataType;
+        const items = getSurfaceItems(newData, selectedSite, 'menu');
+        const existingIds = collectMenuIds(items);
+        const baseId = `divider-${Date.now()}`;
+        let id = baseId;
+        let suffix = 1;
+        while (existingIds.has(id)) id = `${baseId}-${suffix++}`;
+        const divider = createMenuDivider(id);
+        const target = selectedIds.length === 1 ? findRef(items, selectedIds[0]) : null;
+        if (target) target.list.splice(target.index + 1, 0, divider);
+        else items.push(divider);
+        updateMenuData(newData);
+        setSelectedIds([id]);
+        setLeftPanelOpen(false);
+    }, [menuData, selectedSite, selectedSurface, selectedIds, updateMenuData]);
+
     const handleCopyFromPosition = useCallback((sourceSite: string, itemIds: string[], targetSites: string[]) => {
         if (!menuData) return;
 
@@ -821,10 +841,11 @@ const AdvancedMenuManagerEditor: React.FC = () => {
                 };
             } else {
                 const template = data.template;
+                if (template === 'divider' && selectedSurface !== 'menu') return;
                 newItem = template === 'folder'
                     ? { id: newId, text: '새 그룹', sub: [], icon: 'faFolder' }
                     : template === 'divider'
-                        ? { id: newId, text: '-' }
+                        ? createMenuDivider(newId)
                         : { id: newId, text: '새 링크', path: '/new-link', icon: 'faLink' };
             }
 
@@ -840,6 +861,8 @@ const AdvancedMenuManagerEditor: React.FC = () => {
             const newData = { ...menuData };
             setSurfaceItems(newData, selectedSite, selectedSurface, newMenu as MenuItem[]);
             updateMenuData(newData);
+            setSelectedIds([newId]);
+            if (isMenuDivider(newItem)) setLeftPanelOpen(false);
             return;
         }
 
@@ -1009,6 +1032,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
                         targetMenuName={menuData[selectedSite]?.name || selectedSite}
                         isSystemPageAdded={isSystemPageAdded}
                         onAddSystemPage={handleAddSystemPage}
+                        onAddDivider={selectedSurface === 'menu' ? handleAddDivider : undefined}
                     />
 
                     {/* 2. Canvas (Center) */}
@@ -1056,6 +1080,15 @@ const AdvancedMenuManagerEditor: React.FC = () => {
                                         <>
                                             <button
                                                 type="button"
+                                                onClick={handleAddDivider}
+                                                className="flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 transition-colors hover:border-blue-400 hover:text-white focus-visible:ring-2 focus-visible:ring-blue-400"
+                                                title={selectedIds.length === 1 ? '선택한 항목 바로 아래에 구분선 추가' : '메뉴 맨 아래에 구분선 추가'}
+                                            >
+                                                <FontAwesomeIcon icon={faMinus} />
+                                                구분선 추가
+                                            </button>
+                                            <button
+                                                type="button"
                                                 onClick={handleRemoveDuplicateMenuLinks}
                                                 disabled={currentMenuDuplicateCount === 0}
                                                 className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-200 transition-colors hover:border-amber-400 hover:bg-amber-500/20 hover:text-white disabled:cursor-default disabled:border-slate-700 disabled:bg-slate-800/50 disabled:text-slate-500"
@@ -1092,7 +1125,11 @@ const AdvancedMenuManagerEditor: React.FC = () => {
 
                 {/* Drag Overlay for smooth visuals */}
                 <DragOverlay>
-                    {activeDragId ? (
+                    {activeDragId && (activeDragId === 'new-divider' || isMenuDivider(findMenuItemInTree(getSurfaceItems(menuData, selectedSite, selectedSurface), activeDragId) || { text: '' })) ? (
+                        <div className="flex items-center gap-3 rounded-lg border border-slate-500 bg-slate-900/95 px-5 py-4 text-xs text-slate-300 shadow-xl">
+                            <span className="flex-1 border-t border-slate-500" /><span>구분선</span><span className="flex-1 border-t border-slate-500" />
+                        </div>
+                    ) : activeDragId ? (
                         <div className="bg-blue-600 text-white p-3 rounded-lg shadow-2xl skew-y-2 opacity-90 backdrop-blur-sm border border-blue-400/50 font-bold z-50">
                             <FontAwesomeIcon icon={faCube} className="mr-2" />
                             아이템 이동 중...

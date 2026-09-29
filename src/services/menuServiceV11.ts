@@ -585,7 +585,7 @@ const ensureOfficeMenuPages = (config: SiteDataType): boolean => {
     return changed;
 };
 
-const normalizeMenuItem = (item: any, parentIdPath: string): MenuItem => {
+const normalizeMenuItem = (item: any, parentIdPath: string, siblingIndex = 0): MenuItem => {
     const base: MenuItem =
         typeof item === 'string'
             ? { text: item }
@@ -600,14 +600,14 @@ const normalizeMenuItem = (item: any, parentIdPath: string): MenuItem => {
     const inferredText = rawText || fromPath || rawId;
     const normalizedText = inferredText ? (MENU_TEXT_ALIASES[inferredText] ?? inferredText) : '';
 
-    const idSeed = `${parentIdPath}/${normalizedText || rawId || 'unknown'}`;
+    const idSeed = `${parentIdPath}/${normalizedText || rawId || 'unknown'}${normalizedText === '-' ? `/${siblingIndex}` : ''}`;
     const normalizedId = rawId.length > 0 ? rawId : createDeterministicId([idSeed]);
 
     const rawSub = Array.isArray(base.sub)
         ? base.sub.filter((c: any) => typeof c === 'string' || (c && typeof c === 'object'))
         : [];
     const normalizedSub = rawSub
-        .map((child: any) => normalizeMenuItem(child, `${idSeed}`))
+        .map((child: any, index: number) => normalizeMenuItem(child, idSeed, index))
         .filter((child: MenuItem) => typeof child.text === 'string' && child.text.trim().length > 0);
 
     const inferredPath = normalizedText ? (MENU_PATHS[normalizedText] || undefined) : undefined;
@@ -625,6 +625,14 @@ const normalizeMenuItem = (item: any, parentIdPath: string): MenuItem => {
         path: normalizedPath,
         sub: normalizedSub
     };
+
+    if (normalizedText === '-') {
+        delete next.path;
+        delete next.action;
+        delete next.icon;
+        delete next.sub;
+        return next;
+    }
 
     if (!next.sub || next.sub.length === 0) {
         delete (next as any).sub;
@@ -657,11 +665,11 @@ const normalizeSiteDataType = (config: SiteDataType): SiteDataType => {
             order: typeof site.order === 'number' ? site.order : undefined, // Ensure order is preserved
             headerActions: normalizeHeaderActions(site.headerActions, siteKey),
             menu: rawMenu
-                .map((item: any) => normalizeMenuItem(item, siteKey))
+                .map((item: any, index: number) => normalizeMenuItem(item, siteKey, index))
                 .filter((item: MenuItem) => typeof item.text === 'string' && item.text.trim().length > 0),
             trash: rawTrash
                 ? rawTrash
-                    .map((item: any) => normalizeMenuItem(item, `${siteKey}/trash`))
+                    .map((item: any, index: number) => normalizeMenuItem(item, `${siteKey}/trash`, index))
                     .filter((item: MenuItem) => typeof item.text === 'string' && item.text.trim().length > 0)
                 : undefined,
             deletedItems: Array.isArray(site.deletedItems) ? site.deletedItems.filter((v: any) => typeof v === 'string') : [],
@@ -1553,12 +1561,13 @@ export const menuServiceV11 = {
                 const seenText = new Set<string>();
                 const uniqueItems: (MenuItem | string)[] = [];
 
-                items.forEach(item => {
+                items.forEach((item, index) => {
                     const text = typeof item === 'string' ? item : item.text;
                     const normalizedText = text.trim();
+                    const isDivider = normalizedText === '-';
 
                     // 1. Text Deduplication (per level)
-                    if (seenText.has(normalizedText)) {
+                    if (!isDivider && seenText.has(normalizedText)) {
                         modified = true;
                         return; // Skip duplicate text at same level
                     }
@@ -1566,7 +1575,7 @@ export const menuServiceV11 = {
 
                     // 2. ID Deduplication (Global) & ID Generation
                     if (typeof item !== 'string') {
-                        const expectedId = generateDeterministicId(normalizedText, parentPath);
+                        const expectedId = generateDeterministicId(isDivider ? `divider-${index}` : normalizedText, parentPath);
 
                         if (!item.id || item.id.startsWith('m_rand_') || seenIds.has(item.id)) {
                             // Fix deterministic ID if missing or potentially random

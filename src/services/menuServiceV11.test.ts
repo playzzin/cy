@@ -95,6 +95,31 @@ describe('menuServiceV11 canonical Firestore document', () => {
     expect(mockedGetDoc).toHaveBeenCalledTimes(1);
   });
 
+  it('preserves multiple separators and their appearance through save and reload', async () => {
+    const config = { admin: { name: '테스트', icon: 'faFolder', menu: [
+      { text: '-', path: '/invalid-link', icon: 'faLink', dividerStyle: 'dashed', dividerSpacing: 'relaxed' },
+      { text: '그룹', sub: ['-', { text: '항목', path: '/test' }, '-'] },
+      { text: '-' }
+    ] } } as any;
+    const saved = await menuServiceV11.saveMenuConfig(config);
+    const dividers = saved.admin.menu.filter(item => item.text === '-');
+    expect(dividers).toHaveLength(2);
+    expect(new Set(dividers.map(item => item.id)).size).toBe(2);
+    expect(dividers[0]).toMatchObject({ dividerStyle: 'dashed', dividerSpacing: 'relaxed' });
+    expect(dividers[0]).not.toHaveProperty('path');
+    expect(dividers[0]).not.toHaveProperty('icon');
+    const nested = saved.admin.menu.find(item => item.text === '그룹')!.sub as any[];
+    expect(nested[0].id).not.toBe(nested[2].id);
+    mockedGetDoc.mockResolvedValue(existingDoc(saved) as any);
+    menuServiceV11.clearCache();
+    const loaded = await menuServiceV11.getMenuConfig();
+    expect(loaded!.admin.menu.filter(item => item.text === '-')).toEqual(dividers);
+    await menuServiceV11.pruneDuplicates();
+    const pruned = await menuServiceV11.getMenuConfig();
+    expect(pruned!.admin.menu.filter(item => item.text === '-')).toHaveLength(2);
+    expect((pruned!.admin.menu.find(item => item.text === '그룹')!.sub as any[]).filter(item => item.text === '-')).toHaveLength(2);
+  });
+
   it('registers Gemini usage in an existing CEO log folder without replacing custom items or duplicating it', async () => {
     const legacy = JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG));
     legacy.pos_ceo.menu = [{ text: '설정', sub: [{ text: '로그관리', sub: [{ text: '기존 기록', path: '/custom-log' }] }] }];

@@ -54,6 +54,8 @@ import { isOperationManagementMenuPath, isOperationManagementMenuText } from '..
 
 import { resolveIcon } from '../../constants/iconMap';
 import SidebarMenuSearch from './SidebarMenuSearch';
+import MenuDivider from './MenuDivider';
+import { isMenuDivider } from '../../utils/menuDivider';
 
 interface SidebarProps {
     currentSite: string;
@@ -399,6 +401,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     // Filter menu items based on permissions
     const filterMenuEntry = (entry: string | MenuItem): string | MenuItem | null => {
+        if (isMenuDivider(entry)) return typeof entry === 'object' && entry.hide ? null : entry;
         if (typeof entry === 'string') {
             return hasPermission(entry, undefined, menuPaths[entry]) ? entry : null;
         }
@@ -547,6 +550,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="menu-list-wrapper">
                     <ul className="menu-list" style={{ paddingBottom: '20px' }}>
                         {finalMenu.map((item: MenuItem, index: number) => {
+                            if (isMenuDivider(item)) return <li key={`divider-${item.id || index}`}><MenuDivider item={item} /></li>;
                             const hasSub = item.sub && item.sub.length > 0;
                             const uniqueKey = item.id || `menu-${index}`;
                             const itemId = uniqueKey;
@@ -644,6 +648,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     {hasSub && (
                                         <ul className="submenu-list">
                                             {item.sub?.map((subItem: string | MenuItem, subIndex: number) => {
+                                                if (isMenuDivider(subItem)) return <li key={`divider-${subIndex}`}><MenuDivider item={subItem} /></li>;
                                                 let isLeaf = false;
                                                 let linkText = '';
                                                 let linkPath = '';
@@ -743,6 +748,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                             {isNestedActive && (
                                                                 <ul className="nested-submenu-list" style={{ paddingLeft: '15px' }}>
                                                                     {menuItem.sub?.map((nestedItem: string | MenuItem, nestedIndex: number) => {
+                                                                        if (isMenuDivider(nestedItem)) return <li key={`divider-${nestedIndex}`}><MenuDivider item={nestedItem} /></li>;
                                                                         let nestedUniqueKey = `nested-${subUniqueKey}-${nestedIndex}`;
                                                                         let nestedDeepActiveColor = '#1abc9c';
 
@@ -879,6 +885,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                     <div className="submenu-panel-content">
                         {hoveredMenuItem.sub?.map((subItem: string | MenuItem, idx: number) => {
+                            if (isMenuDivider(subItem)) return <MenuDivider key={`divider-${idx}`} item={subItem} />;
                             let isLeaf = false;
                             let itemText = '';
                             let itemPath = '';
@@ -961,6 +968,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                             </span>
                                         </div>
                                         {menuItem.sub?.map((nested: string | MenuItem, nIdx: number) => {
+                                            if (isMenuDivider(nested)) return <MenuDivider key={`divider-${nIdx}`} item={nested} />;
                                             let deepText = '';
                                             let deepPath = '';
                                             let deepPermission = '';

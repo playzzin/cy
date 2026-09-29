@@ -8,6 +8,8 @@ import {
 import { resolveIcon } from '../../../../constants/iconMap';
 import { MenuItem } from '../../../../services/menuServiceV11';
 import IconPicker from './IconPicker';
+import DividerSettings from './DividerSettings';
+import { isMenuDivider } from '../../../../utils/menuDivider';
 import * as Fas from '@fortawesome/free-solid-svg-icons';
 import { IconName } from '@fortawesome/fontawesome-svg-core';
 
@@ -88,13 +90,13 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                         <div className="flex items-center gap-3 mb-1">
                             <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 ring-1 ring-blue-500/20">
                                 <FontAwesomeIcon
-                                    icon={resolveIcon(localState.icon, faChartPie)}
+                                    icon={isMenuDivider(localState) ? Fas.faMinus : resolveIcon(localState.icon, faChartPie)}
                                     size="lg"
                                 />
                             </div>
                             <div>
-                                <h2 className="font-bold text-gray-100 text-base line-clamp-1">{localState.text}</h2>
-                                <p className="text-xs text-gray-500 font-mono line-clamp-1">{localState.id}</p>
+                                <h2 className="font-bold text-gray-100 text-base line-clamp-1">{isMenuDivider(localState) ? '구분선 설정' : localState.text}</h2>
+                                <p className="text-xs text-gray-500 line-clamp-1">{isMenuDivider(localState) ? '메뉴 사이의 시각적 구분' : localState.id}</p>
                             </div>
                         </div>
                     ) : (
@@ -201,6 +203,8 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                                 </div>
                             </div>
                         </div>
+                    ) : localState && isMenuDivider(localState) ? (
+                        <DividerSettings item={localState} onChange={updated => { setLocalState(updated); onUpdate(updated); }} />
                     ) : localState ? (
                         <>
                             {/* Section: General */}
