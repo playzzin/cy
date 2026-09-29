@@ -3,6 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faGlobe,
     faUsers,
+    faMagnifyingGlass,
     faCog
 } from '@fortawesome/free-solid-svg-icons';
 import {
@@ -181,7 +182,7 @@ const MenuManagerHeader: React.FC<MenuManagerHeaderProps> = ({
     };
 
     return (
-        <div className="flex flex-col bg-slate-900 border-b border-slate-700">
+        <div className="flex flex-col shrink-0 bg-slate-900 border-b border-slate-700">
             {/* Top Row: Sites */}
             <div className="flex items-center px-4 pt-2 border-b border-slate-800 bg-slate-900/50">
                 <div className="flex items-center gap-2 mr-4 text-indigo-400 font-bold text-sm">
@@ -252,6 +253,38 @@ const MenuManagerHeader: React.FC<MenuManagerHeaderProps> = ({
                     <FontAwesomeIcon icon={faCog} />
                 </button>
             </div>
+            {menuData[selectedSite] && (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-700 bg-slate-800 px-4 py-3">
+                    <div>
+                        <div className="flex items-center gap-2 text-sm font-bold text-slate-100">
+                            <FontAwesomeIcon icon={faMagnifyingGlass} className="text-blue-400" />
+                            좌측 메뉴 검색
+                        </div>
+                        <p id="sidebar-search-setting-description" className="mt-1 text-xs text-slate-400">
+                            {menuData[selectedSite].name} 메뉴 상단에 검색창을 표시합니다. 하위 메뉴까지 검색할 수 있으며 변경 즉시 저장됩니다.
+                        </p>
+                    </div>
+                    <button
+                        type="button"
+                        role="switch"
+                        aria-label="좌측 메뉴 검색 사용"
+                        aria-describedby="sidebar-search-setting-description"
+                        aria-checked={menuData[selectedSite].sidebarSearchEnabled === true}
+                        onClick={() => onUpdateMenuData({
+                            ...menuData,
+                            [selectedSite]: {
+                                ...menuData[selectedSite],
+                                sidebarSearchEnabled: menuData[selectedSite].sidebarSearchEnabled !== true
+                            }
+                        })}
+                        className={`shrink-0 rounded-lg border px-4 py-2 text-sm font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 ${menuData[selectedSite].sidebarSearchEnabled === true
+                            ? 'border-blue-400 bg-blue-600 text-white'
+                            : 'border-slate-600 bg-slate-900 text-slate-300 hover:bg-slate-700'}`}
+                    >
+                        {menuData[selectedSite].sidebarSearchEnabled === true ? '사용 중' : '사용 안 함'}
+                    </button>
+                </div>
+            )}
         </div>
     );
 };

@@ -53,6 +53,7 @@ import { buildMenuAccessRoles } from '../../utils/menuAccess';
 import { isOperationManagementMenuPath, isOperationManagementMenuText } from '../../utils/operationMenuAccess';
 
 import { resolveIcon } from '../../constants/iconMap';
+import SidebarMenuSearch from './SidebarMenuSearch';
 
 interface SidebarProps {
     currentSite: string;
@@ -532,6 +533,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                         <FontAwesomeIcon icon={faXmark} />
                     </button>
                 </div>
+                <SidebarMenuSearch
+                    key={`${currentSite}-${safeCurrentSiteData.sidebarSearchEnabled === true}`}
+                    enabled={safeCurrentSiteData.sidebarSearchEnabled === true}
+                    collapsed={isSidebarCollapsed && !isMobile}
+                    items={filteredMenu}
+                    menuPaths={menuPaths}
+                    displayText={getMenuDisplayText}
+                    isActive={isActiveCheck}
+                    onNavigate={openMenuPath}
+                    onExpand={toggleSidebar}
+                >
                 <div className="menu-list-wrapper">
                     <ul className="menu-list" style={{ paddingBottom: '20px' }}>
                         {finalMenu.map((item: MenuItem, index: number) => {
@@ -835,6 +847,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         })}
                     </ul>
                 </div>
+                </SidebarMenuSearch>
             </nav>
 
             {/* Hover Submenu Panel for Collapsed Mode (Portal to body) */}

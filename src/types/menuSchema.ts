@@ -24,6 +24,7 @@ export const SiteDataSchema = z.object({
     delegationTemplatePath: z.string().optional(),
     menu: z.array(MenuItemSchema),
     headerActions: z.array(MenuItemSchema).optional(),
+    sidebarSearchEnabled: z.boolean().optional(),
     trash: z.array(MenuItemSchema).optional(),
     deletedItems: z.array(z.string()).optional(),
     systemPageLabels: z.record(z.string(), z.string().min(1)).optional(),
