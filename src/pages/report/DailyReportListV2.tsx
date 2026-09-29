@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import Swal from 'sweetalert2';
+import { formatYmd, getMonthDateRange, getMonthDateRangeFromValue, validateDailyReportDateRange } from './dailyReportListDates';
+import { useDailyReportDraftGuard } from './useDailyReportDraftGuard';
 import { motion, type Variants } from 'framer-motion';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -50,13 +53,6 @@ interface DailyReportListV2Props {
     initialSiteId?: string;
     targetReportId?: string;
 }
-
-const formatYmd = (d: Date): string => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-};
 
 const formatNumber = (value: number): string => {
     return new Intl.NumberFormat('ko-KR').format(value);
@@ -195,32 +191,6 @@ const clearDailyReportBoardDrafts = (dates: Iterable<string>) => {
 
 type DatePresetKey = DailyReportDatePresetKey;
 
-const getMonthDateRange = (monthOffset: number): { start: string; end: string } => {
-    const startDate = new Date();
-    startDate.setMonth(startDate.getMonth() + monthOffset);
-    startDate.setDate(1);
-
-    const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
-    return {
-        start: formatYmd(startDate),
-        end: formatYmd(endDate)
-    };
-};
-
-const getMonthDateRangeFromValue = (monthValue: string): { start: string; end: string } | null => {
-    const match = /^(\d{4})-(\d{2})$/.exec(monthValue);
-    if (!match) return null;
-
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    if (!Number.isInteger(year) || month < 1 || month > 12) return null;
-
-    return {
-        start: `${match[1]}-${match[2]}-01`,
-        end: formatYmd(new Date(year, month, 0)),
-    };
-};
-
 const getRelativeDateString = (dayOffset: number): string => {
     const date = new Date();
     date.setDate(date.getDate() + dayOffset);
@@ -282,7 +252,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
         : (searchParams.has('workerSearch') ? (searchParams.get('workerSearch') ?? '') : (hasUrlListState ? '' : null));
     const urlSortMode = parseSortModeParam(searchParams.get('sort'));
     const urlSortOrder = parseSortOrderParam(searchParams.get('order'));
-    const urlDateQueryMode = parseDateQueryModeParam(searchParams.get('dateMode'));
+    const urlDateQueryMode = parseDateQueryModeParam(searchParams.get('dateMode')) ?? (hasUrlListState ? 'range' : null);
     const defaultDate = urlStartDate || initialDate || todayStr;
     const persistedViewState = useMemo(() => {
         const fallback: DailyReportListViewState = {
@@ -330,6 +300,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
             if (urlSortMode === 'site') nextState.siteSortOrder = urlSortOrder;
         }
 
+        if (hasUrlListState) nextState.columnFilters = {};
+        if (nextState.dateQueryMode === 'month') {
+            const range = getMonthDateRangeFromValue(nextState.startDate.slice(0, 7));
+            if (range) Object.assign(nextState, { startDate: range.start, endDate: range.end, startDateInput: range.start, endDateInput: range.end });
+        }
         return nextState;
     }, [
         defaultDate,
@@ -405,6 +380,24 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
     const [showSiteDetailColumns, setShowSiteDetailColumns] = useState(false);
     const [mobileViewMode, setMobileViewMode] = useState<'cards' | 'table'>('cards');
     const isFixed = true;
+    const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
+    const [tablePage, setTablePage] = useState(1);
+    const tableWrapperRef = useRef<HTMLDivElement>(null);
+    const pendingEditsRef = useRef(false);
+    const savingRef = useRef(false);
+    const canChangeQuery = useCallback(() => {
+        if (pendingEditsRef.current || savingRef.current) {
+            toast.warning('조회 기간을 바꾸거나 새로 조회하기 전에 변경 내용을 저장하거나 수정을 종료해 주세요.');
+            return false;
+        }
+        return true;
+    }, []);
+    useEffect(() => {
+        const media = window.matchMedia('(max-width: 767px)');
+        const update = () => setIsMobile(media.matches);
+        media.addEventListener('change', update);
+        return () => media.removeEventListener('change', update);
+    }, []);
 
     const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
     const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
@@ -620,9 +613,13 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
     }, [openColumnFilter]);
 
     const commitDateInput = useCallback((field: 'start' | 'end') => {
-        const currentValue = field === 'start' ? startDate : endDate;
         const draftValue = field === 'start' ? startDateInput : endDateInput;
-        const normalizedValue = normalizeTypedDateInput(draftValue) ?? currentValue;
+        const normalizedValue = normalizeTypedDateInput(draftValue);
+        if (!normalizedValue) {
+            setDateRangeError('실제 존재하는 날짜를 입력해 주세요. (예: 2026-09-29)');
+            return null;
+        }
+        setDateRangeError(null);
 
         if (field === 'start') {
             setStartDateInput(normalizedValue);
@@ -647,7 +644,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
         lastSyncedSearchRef.current = currentSearch;
 
         if (urlStartDate && urlEndDate) {
-            applyDateRange(urlStartDate, urlEndDate);
+            const range = urlDateQueryMode === 'month' ? getMonthDateRangeFromValue(urlStartDate.slice(0, 7)) : null;
+            applyDateRange(range?.start ?? urlStartDate, range?.end ?? urlEndDate);
         }
 
         if (hasUrlListState || initialSiteId) {
@@ -777,17 +775,19 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
     }, [datePresets, normalizedStartForPreset, normalizedEndForPreset]);
 
     const handleDatePresetClick = useCallback((key: DatePresetKey) => {
+        if (!canChangeQuery()) return;
         const preset = datePresets[key];
         setDateQueryMode(key === 'prevMonth' || key === 'thisMonth' ? 'month' : 'range');
         setDateRangeError(null);
         if (preset.start === startDate && preset.end === endDate) {
-            void fetchRows();
+            void fetchRows(true);
             return;
         }
         applyDateRange(preset.start, preset.end);
     }, [applyDateRange, datePresets, endDate, fetchRows, startDate]);
 
     const handleDateQueryModeChange = useCallback((mode: DailyReportDateQueryMode) => {
+        if (!canChangeQuery()) return;
         setDateQueryMode(mode);
         setDateRangeError(null);
         if (mode !== 'month') return;
@@ -795,19 +795,19 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
         const normalizedStart = normalizeTypedDateInput(startDateInput) ?? startDate;
         const monthRange = getMonthDateRangeFromValue(normalizedStart.slice(0, 7));
         if (!monthRange) return;
-        setStartDateInput(monthRange.start);
-        setEndDateInput(monthRange.end);
-    }, [startDate, startDateInput]);
+        applyDateRange(monthRange.start, monthRange.end);
+    }, [applyDateRange, canChangeQuery, startDate, startDateInput]);
 
     const handleMonthChange = useCallback((monthValue: string) => {
+        if (!canChangeQuery()) return;
         const monthRange = getMonthDateRangeFromValue(monthValue);
-        if (!monthRange) return;
-        setStartDateInput(monthRange.start);
-        setEndDateInput(monthRange.end);
+        if (!monthRange) { setDateRangeError('올바른 조회 월을 입력해 주세요.'); return; }
+        applyDateRange(monthRange.start, monthRange.end);
         setDateRangeError(null);
-    }, []);
+    }, [applyDateRange, canChangeQuery]);
 
     const handleMonthNavigate = useCallback((offset: -1 | 1) => {
+        if (!canChangeQuery()) return;
         const normalizedStart = normalizeTypedDateInput(startDateInput) ?? startDate;
         const [yearText, monthText] = normalizedStart.slice(0, 7).split('-');
         const year = Number(yearText);
@@ -825,32 +825,22 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
     }, [applyDateRange, startDate, startDateInput]);
 
     const handleSearch = useCallback(() => {
-        const normalizedStart = normalizeTypedDateInput(startDateInput) ?? startDate;
-        const normalizedEnd = normalizeTypedDateInput(endDateInput) ?? endDate;
-
-        setStartDateInput(normalizedStart);
-        setEndDateInput(normalizedEnd);
-
-        if (normalizedStart > normalizedEnd) {
-            setDateRangeError('조회 시작일은 종료일보다 늦을 수 없습니다.');
-            return;
-        }
-
+        const range = validateDailyReportDateRange(startDateInput, endDateInput, dateQueryMode);
+        if (range.error || !range.start || !range.end) { setDateRangeError(range.error); return; }
+        if (!canChangeQuery()) return;
         setDateRangeError(null);
-        if (normalizedStart === startDate && normalizedEnd === endDate) {
-            void fetchRows();
-            return;
-        }
-
-        applyDateRange(normalizedStart, normalizedEnd);
-    }, [applyDateRange, endDate, endDateInput, fetchRows, startDate, startDateInput]);
+        setStartDateInput(range.start);
+        setEndDateInput(range.end);
+        if (range.start === startDate && range.end === endDate) { void fetchRows(true); return; }
+        applyDateRange(range.start, range.end);
+    }, [applyDateRange, canChangeQuery, dateQueryMode, endDate, endDateInput, fetchRows, startDate, startDateInput]);
 
     const handleToggleSort = useCallback((mode: DailyReportSortMode) => {
         setSortMode(mode);
-        if (mode === 'date') setDateSortOrder((previous) => previous === 'desc' ? 'asc' : 'desc');
-        if (mode === 'name') setNameSortOrder((previous) => previous === 'asc' ? 'desc' : 'asc');
-        if (mode === 'site') setSiteSortOrder((previous) => previous === 'asc' ? 'desc' : 'asc');
-    }, []);
+        if (mode === 'date') setDateSortOrder(previous => sortMode === mode ? (previous === 'desc' ? 'asc' : 'desc') : 'desc');
+        if (mode === 'name') setNameSortOrder(previous => sortMode === mode ? (previous === 'asc' ? 'desc' : 'asc') : 'asc');
+        if (mode === 'site') setSiteSortOrder(previous => sortMode === mode ? (previous === 'asc' ? 'desc' : 'asc') : 'asc');
+    }, [sortMode]);
 
     const getRowKey = useCallback((r: DailyReportWorkerRow) => {
         const workerIndex = typeof r.workerIndex === 'number' ? String(r.workerIndex) : 'none';
@@ -1485,6 +1475,19 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
     }, [getRowKey, resolveResponsibleTeamDisplayName, resolveWorkerTeamDisplayName, sortedRows, targetReportId]);
 
     const effectiveMobileViewMode = isEditMode ? 'table' : mobileViewMode;
+    const showMobileCards = isMobile && effectiveMobileViewMode === 'cards';
+    const tablePageSize = 100;
+    const tablePageCount = Math.max(1, Math.ceil(sortedRows.length / tablePageSize));
+    const currentTablePage = Math.min(tablePage, tablePageCount);
+    const tableStartIndex = (currentTablePage - 1) * tablePageSize;
+    const tableRows = sortedRows.slice(tableStartIndex, tableStartIndex + tablePageSize);
+    useEffect(() => { setTablePage(1); }, [startDate, endDate, selectedSiteId, selectedTeamId, selectedWorkerTeamId, workerSearch, columnFilters, sortMode, dateSortOrder, nameSortOrder, siteSortOrder]);
+    useEffect(() => {
+        if (!targetReportId) return;
+        const index = sortedRows.findIndex(row => row.reportId === targetReportId);
+        if (index >= 0) setTablePage(Math.floor(index / tablePageSize) + 1);
+    }, [targetReportId, sortedRows]);
+    useEffect(() => { if (tableWrapperRef.current) tableWrapperRef.current.scrollTop = 0; }, [currentTablePage]);
 
     const isLightEditMode = isEditMode && sortedRows.length > INLINE_EDIT_ALL_ROW_LIMIT;
 
@@ -1862,22 +1865,26 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
         });
     }, []);
 
-    const handleToggleEditMode = () => {
+    const handleToggleEditMode = async () => {
+        if (savingRef.current) return;
         if (isScopedReadOnly) {
             toast.info('팀장·반장·작업자 계정은 범위 내 일보를 조회할 수 있습니다. 수정 권한은 별도로 부여하세요.');
             return;
         }
-        setIsEditMode((prev) => {
-            const next = !prev;
-            if (!next) {
-                setSelectedRowKeys(new Set());
-                setIsBulkEditOpen(false);
-                setRowDrafts({});
-                setRowSavingKeys(new Set());
-                setActiveEditRowKey(null);
-            }
-            return next;
-        });
+        if (isEditMode && pendingEditsRef.current) {
+            const result = await Swal.fire({
+                title: '저장하지 않은 변경이 있습니다', icon: 'warning',
+                text: '변경 내용을 저장한 뒤 수정을 종료할까요?',
+                showDenyButton: true, showCancelButton: true,
+                confirmButtonText: '저장 후 종료', denyButtonText: '변경 버리기', cancelButtonText: '계속 수정',
+            });
+            if (result.isConfirmed) { if (!await handleSaveAllDirtyRows(false)) return; }
+            else if (!result.isDenied) return;
+        }
+        if (isEditMode) {
+            setSelectedRowKeys(new Set()); setIsBulkEditOpen(false); setRowDrafts({}); setActiveEditRowKey(null);
+        }
+        setIsEditMode(previous => !previous);
     };
 
     useEffect(() => {
@@ -2258,6 +2265,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
         draft: RowDraft,
         options?: { confirmSave?: boolean; successMessage?: string }
     ) => {
+        if (savingRef.current) return false;
         const key = getRowKey(r);
         let validatedWorker: { manDay: number; unitPrice: number } | null = null;
 
@@ -2286,6 +2294,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
             return next;
         });
 
+        queryCacheRef.current = null;
         try {
             if (r.isEmptyReport) {
                 await saveEmptyReportDraft(r, draft);
@@ -2353,6 +2362,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
             if (successMessage) {
                 toast.success(successMessage);
             }
+            queryCacheRef.current = null;
             clearRowDraft(key);
 
             const rowLevelWorkerUpdates: Partial<DailyReportWorkerRow> = { ...updates };
@@ -2726,11 +2736,17 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
         return count;
     }, [rowDrafts, rowByKey, isRowDirty]);
 
-    const handleSaveAllDirtyRows = async () => {
-        if (dirtyRowCount === 0) return;
+    pendingEditsRef.current = dirtyRowCount > 0;
+    savingRef.current = isMutationLoading || rowSavingKeys.size > 0;
+    useDailyReportDraftGuard(dirtyRowCount > 0, savingRef.current);
 
-        const result = await confirm.save(`변경된 ${dirtyRowCount}건의 항목을 일괄 저장하시겠습니까?`);
-        if (!result.isConfirmed) return;
+    const handleSaveAllDirtyRows = async (askConfirmation = true): Promise<boolean> => {
+        if (savingRef.current) return false;
+        if (dirtyRowCount === 0) return true;
+        if (askConfirmation) {
+            const result = await confirm.save(`변경된 ${dirtyRowCount}건의 항목을 일괄 저장하시겠습니까?`);
+            if (!result.isConfirmed) return false;
+        }
 
         setIsMutationLoading(true);
         try {
@@ -2838,10 +2854,13 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                 });
                 return next;
             });
+            queryCacheRef.current = null;
             await fetchRows(true);
+            return failCount === 0;
         } catch (error) {
             console.error('[DailyReportListV2] Save All Failed (Critical)', error);
             toast.error('일괄 저장 중 시스템 오류가 발생했습니다.');
+            return false;
         } finally {
             setIsMutationLoading(false);
         }
@@ -2909,7 +2928,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
         : '조회된 작업자 내역이 없습니다';
     const emptyDescription = rows.length > 0
         ? '현장, 소속팀, 작업자 검색 또는 표 필터를 줄여서 다시 확인하세요.'
-        : '선택한 기간에 등록된 출력일보가 없거나 아직 조회되지 않았습니다.';
+        : '선택한 기간에 조회 가능한 출력일보가 없습니다. 기간과 조회 범위를 확인해 주세요.';
 
     return (
         <div className="daily-report-v2-page flex flex-col flex-1 min-h-0 gap-3 p-0 pb-1">
@@ -2920,7 +2939,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                 </div>
             )}
             {dateRangeError && (
-                <div className="daily-report-v2-inline-alert daily-report-v2-inline-alert--error" role="alert">
+                <div className="daily-report-v2-inline-alert daily-report-v2-inline-alert--error" role="alert" id="daily-report-date-error">
                     <span>{dateRangeError}</span>
                 </div>
             )}
@@ -2941,6 +2960,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                 </div>
             )}
             <DailyReportListToolbar
+                dateRangeError={dateRangeError}
+                isSaving={isMutationLoading || rowSavingKeys.size > 0}
                 dateQueryMode={dateQueryMode}
                 startDateInput={startDateInput}
                 endDateInput={endDateInput}
@@ -2982,7 +3003,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                 showSiteDetailColumns={showSiteDetailColumns}
                 selectedRowCount={selectedRowKeys.size}
                 dirtyRowCount={dirtyRowCount}
-                isSearchDisabled={isQueryLoading || isMutationLoading}
+                isSearchDisabled={isQueryLoading || isMutationLoading || rowSavingKeys.size > 0}
                 isTransferBusy={isTransferBusy}
                 isDownloadingExcel={isDownloadingExcel}
                 onDateQueryModeChange={handleDateQueryModeChange}
@@ -2998,7 +3019,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                 onWorkerSearchChange={setWorkerSearch}
                 onClearFilters={handleClearListFilters}
                 onToggleSort={handleToggleSort}
-                onToggleEditMode={handleToggleEditMode}
+                onToggleEditMode={() => { void handleToggleEditMode(); }}
                 onToggleSiteDetails={handleToggleSiteDetailColumns}
                 onOpenBulkEdit={() => setIsBulkEditOpen(true)}
                 onBulkDelete={() => { void handleBulkDelete(); }}
@@ -3012,7 +3033,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                 initial="hidden"
                 animate="visible"
                 variants={queryResultContainerVariants}
-                className="flex min-h-0 flex-1 flex-col gap-3"
+                className="daily-report-v2-results flex min-h-0 flex-1 flex-col gap-3"
             >
             {!isQueryLoading && !queryError && (
                 <motion.div variants={queryResultItemVariants}>
@@ -3275,14 +3296,16 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                         </button>
                         {isEditMode && <span>수정 중에는 표로 표시됩니다.</span>}
                     </div>
-                    {effectiveMobileViewMode === 'cards' && (
+                    {showMobileCards && (
                         <DailyReportMobileList rows={mobileRows} sortMode={sortMode} formatNumber={formatNumber} />
                     )}
+                    {!showMobileCards && <>
                     <div
+                        ref={tableWrapperRef}
                         role="region"
                         aria-label="일보 상세 표, 상하좌우로 스크롤 가능"
                         tabIndex={0}
-                        className={`sheet-table-wrapper workbook-frozen-table-wrapper daily-report-v2-wrapper ${effectiveMobileViewMode === 'cards' ? 'hidden md:block' : 'block'}`}
+                        className="sheet-table-wrapper workbook-frozen-table-wrapper daily-report-v2-wrapper"
                         style={{ flex: 1 }}
                     >
                     <table className={`sheet-table daily-report-workbook-table ${showSiteDetailColumns ? 'min-w-[1730px]' : 'min-w-[1310px]'} text-left text-slate-700`}>
@@ -3315,6 +3338,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                 {isEditMode && (
                                     <th className={`px-2.5 py-2 whitespace-nowrap w-[48px] ${isFixed ? 'sticky left-0 z-40 bg-[#2e75b6] border-r border-[#255e94]' : ''}`}>
                                         <input
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                             type="checkbox"
                                             className="w-4 h-4 text-brand-600 bg-gray-100 border-gray-300 rounded focus:ring-brand-500"
                                             checked={isAllSelected}
@@ -3412,9 +3436,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                             </tr>
                         </thead>
                         <tbody className="bg-white">
-                            {sortedRows.map((row, rowIndex) => {
+                            {tableRows.map((row, rowIndex) => {
                                 const key = getRowKey(row);
-                                const previousRow = rowIndex > 0 ? sortedRows[rowIndex - 1] : undefined;
+                                const previousRow = sortedRows[tableStartIndex + rowIndex - 1];
                                 const groupingEnabled = sortMode !== 'name';
                                 const isDateGroupStart = groupingEnabled && (!previousRow || previousRow.date !== row.date);
                                 const isSiteGroupStart = groupingEnabled && (!previousRow || getTableGroupKey(previousRow) !== getTableGroupKey(row));
@@ -3457,6 +3481,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                         {isEditMode && (
                                             <td className={`px-2.5 py-1.5 text-center ${isFixed ? 'sticky left-0 z-30 bg-inherit border-r border-slate-200' : ''}`}>
                                                 <input
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                     type="checkbox"
                                                     checked={isSelected}
                                                     onChange={() => toggleSelectRow(key)}
@@ -3471,6 +3496,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                             {isInlineEditing ? (
                                                 <div className="space-y-1">
                                                     <select
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                         value={displayRow.siteId}
                                                         onChange={(e) => {
                                                             const nextSiteId = e.target.value;
@@ -3504,6 +3530,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                                 <td className="px-2.5 py-1.5">
                                                     {isInlineEditing ? (
                                                         <input
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                             type="text"
                                                             list="company-list-v2"
                                                             value={displaySiteDetail.companyName}
@@ -3520,6 +3547,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                                 <td className="px-2.5 py-1.5">
                                                     {isInlineEditing ? (
                                                         <input
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                             type="text"
                                                             list="company-list-v2"
                                                             value={displaySiteDetail.constructorCompanyName}
@@ -3536,6 +3564,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                                 <td className="px-2.5 py-1.5">
                                                     {isInlineEditing ? (
                                                         <input
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                             type="text"
                                                             list="company-list-v2"
                                                             value={displaySiteDetail.partnerName}
@@ -3554,6 +3583,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                         <td className="px-2.5 py-1.5">
                                             {isInlineEditing ? (
                                                 <select
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                     value={displayRow.siteType}
                                                     onChange={(e) => setRowDraft(row, { siteType: e.target.value })}
                                                     className={`w-full px-1 py-0.5 border rounded text-sm ${isDirty && draft?.siteType !== (row.siteType ?? '') ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
@@ -3570,6 +3600,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                         <td className="px-2.5 py-1.5">
                                             {isInlineEditing ? (
                                                 <select
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                     value={displayRow.paymentType}
                                                     onChange={(e) => setRowDraft(row, { paymentType: e.target.value })}
                                                     className={`w-full px-1 py-0.5 border rounded text-sm ${isDirty && draft?.paymentType !== (row.paymentType ?? '') ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
@@ -3585,6 +3616,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                         <td className="px-2.5 py-1.5">
                                             {isInlineEditing ? (
                                                 <select
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                     value={resolveResponsibleTeamOptionId({
                                                         responsibleTeamId: displayRow.responsibleTeamId,
                                                         responsibleTeamName: displayRow.responsibleTeamName ?? displayRow.teamName
@@ -3612,6 +3644,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                             <td className="px-2.5 py-1.5">
                                                 {isInlineEditing ? (
                                                     <select
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                         value={displayRow.siteManagerId ?? ''}
                                                         onChange={(e) => {
                                                             const managerId = e.target.value;
@@ -3640,7 +3673,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                         <td className="px-2.5 py-1.5">
                                             {isInlineEditing && !isEmptyReport ? (
                                                 <input
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                     type="text"
+                                                    aria-label="작업자 이름"
                                                     list="worker-list-v2"
                                                     value={displayRow.workerName}
                                                     onChange={(e) => handleWorkerNameChange(row, e.target.value)}
@@ -3657,7 +3692,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                         <td className="px-2.5 py-1.5">
                                             {isInlineEditing && !isEmptyReport ? (
                                                 <input
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                     type="text"
+                                                    aria-label="작업자 소속팀"
                                                     list="worker-team-list-v2"
                                                     value={displayWorkerTeamName}
                                                     onChange={(e) => {
@@ -3678,7 +3715,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                         <td className="px-2.5 py-1.5">
                                             {isInlineEditing && !isEmptyReport ? (
                                                 <input
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                     type="text"
+                                                    aria-label="급여방식"
                                                     list="daily-report-v2-salary-model-options"
                                                     value={displayRow.salaryModel}
                                                     onChange={(e) => setRowDraft(row, { salaryModel: e.target.value })}
@@ -3693,8 +3732,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                         <td className="px-2.5 py-1.5 text-right font-sans tabular-nums">
                                             {isInlineEditing && !isEmptyReport ? (
                                                 <input
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                     type="number"
                                                     step="0.1"
+                                                    aria-label="공수"
                                                     value={displayRow.manDay}
                                                     onChange={(e) => setRowDraft(row, { manDay: e.target.value })}
                                                     className={`w-full px-1 py-0.5 border rounded text-sm text-right font-bold ${isDirty && Number(draft?.manDay) !== row.manDay ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
@@ -3708,7 +3749,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                         <td className="px-2.5 py-1.5 text-right font-sans tabular-nums">
                                             {isInlineEditing && !isEmptyReport ? (
                                                 <input
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                     type="number"
+                                                    aria-label="단가"
                                                     value={displayRow.unitPrice}
                                                     onChange={(e) => setRowDraft(row, { unitPrice: e.target.value })}
                                                     className={`w-full px-1 py-0.5 border rounded text-sm text-right ${isDirty && Number(draft?.unitPrice) !== row.unitPrice ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
@@ -3728,7 +3771,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                         <td className="px-2.5 py-1.5">
                                             {isInlineEditing ? (
                                                 <input
+                                                    disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                     type="text"
+                                                    aria-label="작업내용"
                                                     value={displayRow.workContent}
                                                     onChange={(e) => setRowDraft(row, { workContent: e.target.value })}
                                                     className={`w-full px-2 py-0.5 border rounded text-sm ${isDirty && draft?.workContent !== (row.workContent ?? '') ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
@@ -3744,7 +3789,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                                         <>
                                                             <button
                                                                 onClick={() => handleSaveRow(row)}
-                                                                disabled={isSaving}
+                                                                disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                                 className="w-7 h-7 flex items-center justify-center bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:bg-slate-300"
                                                                 title="저장"
                                                             >
@@ -3755,7 +3800,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                                                                     clearRowDraft(key);
                                                                     if (isLightEditMode) setActiveEditRowKey(null);
                                                                 }}
-                                                                disabled={isSaving}
+                                                                disabled={isMutationLoading || rowSavingKeys.size > 0}
                                                                 className="w-7 h-7 flex items-center justify-center bg-slate-200 text-slate-600 rounded hover:bg-slate-300"
                                                                 title="취소"
                                                             >
@@ -3792,6 +3837,13 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                         </tbody>
                     </table>
                     </div>
+                    {tablePageCount > 1 && <nav className="daily-report-v2-pagination" aria-label="일보 표 페이지">
+                        <span>{formatNumber(tableStartIndex + 1)}–{formatNumber(Math.min(tableStartIndex + tablePageSize, sortedRows.length))} / {formatNumber(sortedRows.length)}건</span>
+                        <button type="button" disabled={currentTablePage === 1} onClick={() => setTablePage(currentTablePage - 1)}>이전 페이지</button>
+                        <span>{currentTablePage} / {tablePageCount}</span>
+                        <button type="button" disabled={currentTablePage === tablePageCount} onClick={() => setTablePage(currentTablePage + 1)}>다음 페이지</button>
+                    </nav>}
+                    </>}
                     </>
                 )}
             </motion.div>

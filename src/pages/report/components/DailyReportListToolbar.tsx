@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import {
@@ -39,6 +39,8 @@ export interface DailyReportToolbarPreset {
 }
 
 interface DailyReportListToolbarProps {
+    dateRangeError: string | null;
+    isSaving: boolean;
     dateQueryMode: DailyReportDateQueryMode;
     startDateInput: string;
     endDateInput: string;
@@ -85,6 +87,8 @@ interface DailyReportListToolbarProps {
 }
 
 const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
+    dateRangeError,
+    isSaving,
     dateQueryMode,
     startDateInput,
     endDateInput,
@@ -129,6 +133,7 @@ const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
     onDownloadExcel,
     onSaveAll,
 }) => {
+    const [expanded, setExpanded] = useState(false);
     const handleDateKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
         if (event.key !== 'Enter') return;
         event.preventDefault();
@@ -136,8 +141,11 @@ const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
     };
 
     return (
-        <div className="daily-report-v2-toolbar flex-shrink-0 bg-white px-3 py-2.5 rounded-xl shadow-sm border border-slate-200">
-            <div className="daily-report-v2-toolbar-main">
+        <div className={`daily-report-v2-toolbar ${expanded ? 'is-expanded' : 'is-collapsed'} flex-shrink-0 bg-white px-3 py-2.5 rounded-xl shadow-sm border border-slate-200`}>
+            <button type="button" className="daily-report-v2-toolbar-toggle" aria-expanded={expanded} onClick={() => setExpanded(previous => !previous)}>
+                {expanded ? '상세 조건 접기' : '상세 조건 펼치기'}{activeFilterLabels.length > 0 ? ` (${activeFilterLabels.length})` : ''}
+            </button>
+            <fieldset disabled={isSaving} className="daily-report-v2-toolbar-main">
                 <section className="daily-report-v2-toolbar-section daily-report-v2-date-section" aria-label="조회 기간">
                     <span className="daily-report-v2-section-label">조회 기준</span>
                     <div className="daily-report-v2-date-mode-group" role="group" aria-label="조회 기준 선택">
@@ -177,6 +185,8 @@ const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
                                     onChange={(event) => onMonthChange(event.target.value)}
                                     onKeyDown={handleDateKeyDown}
                                     aria-label="조회 월"
+                                    aria-invalid={!!dateRangeError}
+                                    aria-describedby={dateRangeError ? 'daily-report-date-error' : undefined}
                                     className="daily-report-v2-month-input"
                                 />
                             </label>
@@ -202,6 +212,8 @@ const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
                                     onBlur={() => onDateBlur('start')}
                                     onKeyDown={handleDateKeyDown}
                                     aria-label="조회 시작일"
+                                    aria-invalid={!!dateRangeError}
+                                    aria-describedby={dateRangeError ? 'daily-report-date-error' : undefined}
                                     placeholder="YYYY-MM-DD"
                                     className="pl-10 pr-3 py-2 border-slate-300 rounded-lg text-sm w-[130px]"
                                 />
@@ -215,6 +227,8 @@ const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
                                 onBlur={() => onDateBlur('end')}
                                 onKeyDown={handleDateKeyDown}
                                 aria-label="조회 종료일"
+                                aria-invalid={!!dateRangeError}
+                                aria-describedby={dateRangeError ? 'daily-report-date-error' : undefined}
                                 placeholder="YYYY-MM-DD"
                                 className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[130px]"
                             />
@@ -358,7 +372,7 @@ const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
                         </button>
                     )}
                 </section>
-            </div>
+            </fieldset>
 
             {activeFilterLabels.length > 0 && (
                 <div className="daily-report-v2-active-filter-row" aria-label="적용 중인 필터">

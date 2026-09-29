@@ -13,6 +13,7 @@ import {
     serverTimestamp,
     writeBatch,
     getCountFromServer,
+    runTransaction,
 } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { db } from '../config/firebase';
@@ -65,6 +66,23 @@ const normalizeReport = (
 }) as DailyReportZod;
 
 export const dailyReportFirestoreService = {
+    async transactReport<T>(
+        id: string,
+        mutate: (report: DailyReportZod) => Promise<{ data: Partial<DailyReportInputZod> | null; result: T }>,
+    ): Promise<T> {
+        const ref = doc(db, COLLECTION_NAME, id).withConverter(reportConverter);
+        const result = await runTransaction(db, async transaction => {
+            const snapshot = await transaction.get(ref);
+            if (!snapshot.exists()) throw new Error('Report not found');
+            const mutation = await mutate(normalizeReport(snapshot.data() as DailyReportInputZod));
+            if (mutation.data === null) transaction.delete(ref);
+            else transaction.set(ref, mutation.data as DailyReportInputZod, { merge: true });
+            return mutation.result;
+        });
+        toast.updated('report');
+        return result;
+    },
+
     getCollection() {
         return collection(db, COLLECTION_NAME).withConverter(reportConverter);
     },
