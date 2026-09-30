@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { documentStampService } from '../services/documentStampService';
 import { saveAs } from 'file-saver';
 import { EstimateDraft, formatCurrency, numberToKorean, LOGO_FALLBACK } from './estimateUtils';
 
@@ -10,7 +11,6 @@ type DownloadEstimateExcelOptions = {
 
 const EMU_PER_PIXEL = 9525;
 const REFERENCE_ESTIMATE_LOGO_URL = '/assets/estimate/cheongyeon-logo.png';
-const REFERENCE_ESTIMATE_STAMP_URL = '/assets/estimate/cheongyeon-stamp-round.png';
 
 /**
  * 브라우저 환경에서 ExcelJS가 안정적으로 처리할 수 있도록 이미지를 data URL로 변환합니다.
@@ -370,10 +370,10 @@ const downloadReferenceEstimateExcel = async (
     try {
         const [logo, stamp] = await Promise.all([
             getImageDataUrl(REFERENCE_ESTIMATE_LOGO_URL),
-            getImageDataUrl(REFERENCE_ESTIMATE_STAMP_URL)
+            documentStampService.getUrl('estimate', draft.supplierCompany, 'excel').then(url => url ? getImageDataUrl(url) : null)
         ]);
         const logoId = workbook.addImage({ base64: logo.base64, extension: logo.extension });
-        const stampId = workbook.addImage({ base64: stamp.base64, extension: stamp.extension });
+        const stampId = stamp ? workbook.addImage({ base64: stamp.base64, extension: stamp.extension }) : null;
         worksheet.addImage(logoId, {
             tl: {
                 nativeCol: 6,
@@ -383,7 +383,7 @@ const downloadReferenceEstimateExcel = async (
             },
             ext: { width: 157, height: 28 }
         } as any);
-        worksheet.addImage(stampId, {
+        if (stampId !== null) worksheet.addImage(stampId, {
             // ExcelJS normalizes fractional columns against a default width,
             // moving the stamp to the left of the representative's name.
             // Match the supplied template's stamp anchor at the right edge of K6.
@@ -890,10 +890,10 @@ const downloadReferenceTransactionExcel = async (
     try {
         const [logo, stamp] = await Promise.all([
             getImageDataUrl(REFERENCE_ESTIMATE_LOGO_URL),
-            getImageDataUrl(REFERENCE_ESTIMATE_STAMP_URL)
+            documentStampService.getUrl('transaction', draft.supplierCompany, 'excel').then(url => url ? getImageDataUrl(url) : null)
         ]);
         const logoId = workbook.addImage({ base64: logo.base64, extension: logo.extension });
-        const stampId = workbook.addImage({ base64: stamp.base64, extension: stamp.extension });
+        const stampId = stamp ? workbook.addImage({ base64: stamp.base64, extension: stamp.extension }) : null;
         worksheet.addImage(logoId, {
             tl: {
                 nativeCol: 6,
@@ -903,7 +903,7 @@ const downloadReferenceTransactionExcel = async (
             },
             ext: { width: 157, height: 28 }
         } as any);
-        worksheet.addImage(stampId, {
+        if (stampId !== null) worksheet.addImage(stampId, {
             tl: {
                 nativeCol: 10,
                 nativeRow: 5,

@@ -139,6 +139,7 @@ const TestDataGeneratorPage = React.lazy(() => import('./pages/jeonkuk/TestDataG
 const TestDailyReportGeneratorPage = React.lazy(() => import('./pages/jeonkuk/TestDailyReportGeneratorPage'));
 const DailyReportExcelPage = React.lazy(() => import('./pages/report/DailyReportExcelPage'));
 const DataSyncStatusPage = React.lazy(() => import('./pages/system/DataSyncStatusPage'));
+const DocumentStampPage = React.lazy(() => import('./pages/settings/DocumentStampPage'));
 const SettingsPage = React.lazy(() => import('./pages/SettingsPage'));
 const SystemMessagePage = React.lazy(() => import('./pages/settings/SystemMessagePage'));
 const AISettingsPage = React.lazy(() => import('./pages/settings/AISettingsPage'));
@@ -625,6 +626,7 @@ const App: React.FC = () => {
 
             {/* Settings */}
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings/stamps" element={<DocumentStampPage />} />
             <Route path="/settings/ai" element={<AISettingsPage />} />
             <Route path="/tools/excel-converter" element={<ExcelConversionPage />} />
             <Route path="/settings/system-messages" element={<SystemMessagePage />} />

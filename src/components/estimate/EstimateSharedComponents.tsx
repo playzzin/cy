@@ -1,4 +1,5 @@
 import React from 'react';
+import { useDocumentStamp } from '../../hooks/useDocumentStamp';
 import { 
     EXCEL_FONT, BORDER_THIN, BORDER_THICK, BG_LABEL, 
     cellStyle, labelCellStyle, tableWrapperStyle,
@@ -26,6 +27,7 @@ export const TitleComponent = React.memo(({ text, logoUrl }: { text: string; log
 ));
 
 export const InfoTableComponent = React.memo(({ draft, isEdit, updateDraft }: any) => {
+    const stampUrl = useDocumentStamp(draft.documentType === 'transaction' ? 'transaction' : 'estimate', draft.supplierCompany);
     const inputStyle: React.CSSProperties = { width: '100%', border: 'none', outline: 'none', background: 'transparent', fontFamily: EXCEL_FONT, fontSize: 'calc(10pt + var(--estimate-font-size-offset, 0pt))', padding: '0 2px' };
     const wrapInput = (field: keyof EstimateDraft, placeholder = '') =>
         isEdit ? <input value={(draft[field] as string) || ''} onChange={e => updateDraft(field, e.target.value)} style={inputStyle} placeholder={placeholder} />
@@ -91,7 +93,7 @@ export const InfoTableComponent = React.memo(({ draft, isEdit, updateDraft }: an
                             <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>상&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;호</td>
                             <td colSpan={3} style={{ ...cellStyle(), borderBottom: BORDER_THIN, fontWeight: 700, position: 'relative' }}>
                                 {wrapInput('supplierCompany')}
-                                <img src="https://firebasestorage.googleapis.com/v0/b/cyee-9c1e4.firebasestorage.app/o/%EC%B2%AD%EC%97%B0%EB%8F%84%EC%9E%A5.jpg?alt=media&token=04a70f81-44dc-406d-ab92-b438d264e537" alt="도장" style={{ position: 'absolute', top: '15px', right: '10px', width: '48px', height: '48px', mixBlendMode: 'multiply', opacity: 0.9, pointerEvents: 'none', zIndex: 10 }} />
+                                {stampUrl && <img src={stampUrl} alt="도장" style={{ position: 'absolute', top: '15px', right: '10px', width: '48px', height: '48px', mixBlendMode: 'multiply', opacity: 0.9, pointerEvents: 'none', zIndex: 10 }} />}
                             </td>
                         </tr>
                         <tr>

@@ -1,9 +1,9 @@
-import React, { forwardRef, useEffect, useMemo, useState } from 'react';
+import React, { forwardRef, useMemo } from 'react';
 import styled, { createGlobalStyle } from 'styled-components';
 import { format } from 'date-fns';
 import { Company } from '../../services/companyService';
 import { Worker } from '../../services/manpowerService';
-import { storageService } from '../../services/storageService';
+import { useDocumentStamp } from '../../hooks/useDocumentStamp';
 import { CERTIFICATE_FONT_FAMILY } from './certificateTypography';
 
 interface TerminationCertificateTemplateProps {
@@ -338,12 +338,6 @@ const formatDate = (date?: Date | string | null, formatStr = 'yyyy년 MM월 dd�
   }
 };
 
-const getOfficialSealCandidates = (companyName?: string | null) => {
-  const name = String(companyName || '');
-  if (name.includes('청연')) return ['청연도장.jpg'];
-  if (name.includes('다원')) return ['다원도장.png'];
-  return [];
-};
 
 const getSealText = (companyName?: string | null) => {
   if (!companyName) return '회사\n인';
@@ -358,31 +352,8 @@ const getCompanyDisplayName = (company?: Company | null) => company?.name || '�
 
 export const TerminationCertificateTemplate = forwardRef<HTMLDivElement, TerminationCertificateTemplateProps>(
   ({ company, worker, issueDate, serviceStartDate, serviceEndDate, serviceDescription, purpose }, ref) => {
-    const [sealUrl, setSealUrl] = useState<string | null>(null);
+    const sealUrl = useDocumentStamp('termination', company?.name);
 
-    useEffect(() => {
-      const fetchSeal = async () => {
-        const candidates = getOfficialSealCandidates(company?.name);
-        if (candidates.length === 0) {
-          setSealUrl(null);
-          return;
-        }
-
-        for (const fileName of candidates) {
-          try {
-            const url = await storageService.getDownloadUrl(fileName);
-            setSealUrl(url);
-            return;
-          } catch {
-            continue;
-          }
-        }
-
-        setSealUrl(null);
-      };
-
-      void fetchSeal();
-    }, [company?.name]);
 
     const workerDisplayName = formatWorkerName(worker);
     const formattedIssueDate = formatDate(issueDate);

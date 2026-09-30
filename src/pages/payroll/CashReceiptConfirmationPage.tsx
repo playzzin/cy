@@ -20,7 +20,7 @@ import { companyService, Company } from '../../services/companyService';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
-import { storageService } from '../../services/storageService';
+import { useDocumentStamp } from '../../hooks/useDocumentStamp';
 
 interface ReceiptWorkerSummary {
     worker: Worker;
@@ -74,7 +74,6 @@ const CashReceiptConfirmationPage: React.FC = () => {
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [companies, setCompanies] = useState<Company[]>([]);
     const [reports, setReports] = useState<DailyReport[]>([]);
-    const [companySealUrl, setCompanySealUrl] = useState('');
     const [loadingStatic, setLoadingStatic] = useState(true);
     const [loadingReports, setLoadingReports] = useState(false);
     const [copying, setCopying] = useState(false);
@@ -262,35 +261,7 @@ const CashReceiptConfirmationPage: React.FC = () => {
         setSelectedPayerSignerId(nextSigner?.id ? String(nextSigner.id) : '');
     }, [selectedPayerCompany, workers]);
 
-    useEffect(() => {
-        let alive = true;
-        const loadSeal = async () => {
-            const companyName = String(selectedPayerCompany?.name ?? '');
-            const fileName = companyName.includes('청연')
-                ? '청연도장.jpg'
-                : companyName.includes('다원')
-                    ? '다원도장.png'
-                    : '';
-
-            if (!fileName) {
-                setCompanySealUrl('');
-                return;
-            }
-
-            try {
-                const url = await storageService.getDownloadUrl(fileName);
-                if (alive) setCompanySealUrl(url);
-            } catch {
-                if (!alive) return;
-                setCompanySealUrl(companyName.includes('청연') ? '/assets/estimate/cheongyeon-stamp-round.png' : '');
-            }
-        };
-
-        void loadSeal();
-        return () => {
-            alive = false;
-        };
-    }, [selectedPayerCompany?.name]);
+    const companySealUrl = useDocumentStamp('receipt', selectedPayerCompany?.name);
 
     const payerSignatureUrl = String(selectedPayerSigner?.signatureUrl ?? '').trim() || companySealUrl;
     const receiverSignatureUrl = String(selectedReceiptWorker?.worker.signatureUrl ?? '').trim();

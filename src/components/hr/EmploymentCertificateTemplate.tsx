@@ -1,9 +1,9 @@
 
-import React, { forwardRef, useEffect, useState } from 'react';
+import React, { forwardRef } from 'react';
 import styled, { createGlobalStyle } from 'styled-components';
 import { Company } from '../../services/companyService';
 import { Worker } from '../../services/manpowerService';
-import { storageService } from '../../services/storageService';
+import { useDocumentStamp } from '../../hooks/useDocumentStamp';
 import { format } from 'date-fns';
 import { CERTIFICATE_FONT_FAMILY } from './certificateTypography';
 
@@ -336,37 +336,9 @@ const WarningText = styled.p`
 
 export const EmploymentCertificateTemplate = forwardRef<HTMLDivElement, EmploymentCertificateTemplateProps>(
     ({ company, worker, purpose, issueDate, position, duties, joinDate, endDate, isServing }, ref) => {
-        const [sealUrl, setSealUrl] = useState<string | null>(null);
+        const sealUrl = useDocumentStamp('employment', company?.name);
         const workerDisplayName = String(worker?.name || '').replace(/\d+/g, '').trim();
 
-        useEffect(() => {
-            const fetchSeal = async () => {
-                if (!company?.name) {
-                    setSealUrl(null);
-                    return;
-                }
-
-                let filename = '';
-                if (company.name.includes('청연')) {
-                    filename = '청연도장.jpg';
-                } else if (company.name.includes('다원')) {
-                    filename = '다원도장.png';
-                }
-
-                if (filename) {
-                    try {
-                        const url = await storageService.getDownloadUrl(filename);
-                        setSealUrl(url);
-                    } catch (e) {
-                        console.error("Seal image not found:", filename);
-                        setSealUrl(null);
-                    }
-                } else {
-                    setSealUrl(null);
-                }
-            };
-            fetchSeal();
-        }, [company?.name]);
 
         // Formatting helpers
         const formatDate = (date?: Date | string | null, formatStr: string = 'yyyy년 MM월 dd일') => {

@@ -2,8 +2,10 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { createItem, getEmptyDraft } from './estimateUtils';
 import { downloadEstimateExcel } from './estimateExcelUtils';
+import { documentStampService } from '../services/documentStampService';
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
+jest.mock('../services/documentStampService', () => ({ documentStampService: { getUrl: jest.fn() } }));
 
 const mockedSaveAs = saveAs as jest.MockedFunction<typeof saveAs>;
 const originalFetch = global.fetch;
@@ -18,6 +20,7 @@ const blobToArrayBuffer = (blob: Blob): Promise<ArrayBuffer> => new Promise((res
 describe('downloadEstimateExcel', () => {
     beforeEach(() => {
         mockedSaveAs.mockReset();
+        (documentStampService.getUrl as jest.Mock).mockReset().mockResolvedValue('/assets/estimate/cheongyeon-stamp-round.png');
         global.fetch = jest.fn().mockResolvedValue({
             ok: true,
             headers: { get: () => 'image/png' },
@@ -27,6 +30,30 @@ describe('downloadEstimateExcel', () => {
 
     afterEach(() => {
         global.fetch = originalFetch;
+    });
+
+    it.each(['estimate', 'transaction'] as const)('uses the managed %s stamp while retaining the original image anchor and size', async type => {
+        (documentStampService.getUrl as jest.Mock).mockResolvedValue('/managed-seal.png');
+        const draft = { ...getEmptyDraft(type), supplierCompany: '테스트 회사' };
+        await downloadEstimateExcel(draft, [], 0, 0, 0, type);
+        expect(documentStampService.getUrl).toHaveBeenCalledWith(type, '테스트 회사', 'excel');
+        expect(global.fetch).toHaveBeenCalledWith('/managed-seal.png');
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(await blobToArrayBuffer(mockedSaveAs.mock.calls[0][0] as Blob));
+        const stamp = workbook.worksheets[0].getImages()[1];
+        expect(stamp.range.tl.nativeCol).toBe(10);
+        expect(stamp.range.tl.nativeRow).toBe(5);
+        expect(stamp.range.tl.nativeColOff).toBe(266700);
+        expect(stamp.range).toMatchObject({ ext: { width: 70, height: 63 } });
+    });
+
+    it('exports the document and logo when the stamp was deleted without a replacement', async () => {
+        (documentStampService.getUrl as jest.Mock).mockResolvedValue(null);
+        await downloadEstimateExcel(getEmptyDraft('estimate'), [], 0, 0, 0, 'estimate');
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(await blobToArrayBuffer(mockedSaveAs.mock.calls[0][0] as Blob));
+        expect(workbook.worksheets[0].getImages()).toHaveLength(1);
+        expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
     it('keeps the reference estimate borders thin and anchors the stamp to the supplier cell right edge', async () => {
