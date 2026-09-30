@@ -176,6 +176,9 @@ const LaborCheckPage: React.FC = () => {
     const [companies, setCompanies] = useState<Company[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
     const [reportRows, setReportRows] = useState<DailyReportWorkerRow[]>([]);
+    const [historicalFirstOutputDates, setHistoricalFirstOutputDates] = useState<Map<string, string>>(new Map());
+    const firstOutputDatesRequestRef = useRef<Promise<Map<string, string>> | null>(null);
+    const loadRequestIdRef = useRef(0);
     const [reportedSites, setReportedSites] = useState<DailyWorkerReportSite[]>([]);
     const [reportSiteDrafts, setReportSiteDrafts] = useState<Record<string, string>>({});
     const [replacementPicker, setReplacementPicker] = useState<ReplacementPicker | null>(null);
@@ -184,6 +187,7 @@ const LaborCheckPage: React.FC = () => {
     const [saveFeedbackByKey, setSaveFeedbackByKey] = useState<Record<string, SaveFeedback>>({});
     const savingKeyRef = useRef<Set<string>>(new Set());
     const [isLoading, setIsLoading] = useState(true);
+    const [dataLoadFailed, setDataLoadFailed] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
 
     const dates = useMemo(() => getMonthDates(selectedMonth), [selectedMonth]);
@@ -237,39 +241,64 @@ const LaborCheckPage: React.FC = () => {
         text(selectedTeam?.legacyId),
     ].filter(Boolean)), [selectedTeam?.id, selectedTeam?.legacyId, selectedTeamId]);
 
-    const loadData = useCallback(async () => {
+    const loadData = useCallback(async (refreshHistory = false) => {
+        const requestId = ++loadRequestIdRef.current;
         setIsLoading(true);
+        setDataLoadFailed(false);
         setErrorMessage('');
         try {
+            // Keep only the first dates, and reuse them when changing months. A
+            // worker's first output must not reset at a month or team boundary.
+            if (refreshHistory || !firstOutputDatesRequestRef.current) {
+                const historyRequest = dailyReportService.getWorkerRows().then((rows) => getFirstOutputDateByWorker(
+                    rows.filter((row) => !row.isEmptyReport && Number(row.manDay) > 0)
+                        .map((row) => ({
+                            workerKey: getWorkerKey(row.workerId, row.workerName, row.workerTeamName),
+                            date: row.date,
+                        }))
+                ));
+                firstOutputDatesRequestRef.current = historyRequest;
+                void historyRequest.catch(() => {
+                    if (firstOutputDatesRequestRef.current === historyRequest) {
+                        firstOutputDatesRequestRef.current = null;
+                    }
+                });
+            }
             const reportedSiteRequest = dailyWorkerReportSiteService.getByDateRange(startDate, endDate)
                 .catch((error) => {
                     console.warn('[LaborCheckPage] Failed to load reported sites; continuing with output data', error);
                     return [] as DailyWorkerReportSite[];
                 });
-            const [workersData, teamsData, companiesData, sitesData, reportData, reportedSiteData] = await Promise.all([
+            const [workersData, teamsData, companiesData, sitesData, reportData, reportedSiteData, firstOutputDates] = await Promise.all([
                 manpowerService.getWorkers(),
                 teamService.getTeams(),
                 companyService.getCompanies(),
                 siteService.getSites(),
                 dailyReportService.getReportWorkerRowsByRange({ startDate, endDate }),
                 reportedSiteRequest,
+                firstOutputDatesRequestRef.current,
             ]);
+            if (requestId !== loadRequestIdRef.current) return;
             setWorkers(workersData);
             setTeams(teamsData);
             setCompanies(companiesData);
             setSites(sitesData);
             setReportRows(reportData.filter((row) => !row.isEmptyReport && Number(row.manDay) > 0));
+            setHistoricalFirstOutputDates(firstOutputDates);
             setReportedSites(reportedSiteData);
         } catch (error) {
+            if (requestId !== loadRequestIdRef.current) return;
             console.error('[LaborCheckPage] Failed to load data', error);
+            setDataLoadFailed(true);
             setErrorMessage('인원체크 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
         } finally {
-            setIsLoading(false);
+            if (requestId === loadRequestIdRef.current) setIsLoading(false);
         }
     }, [endDate, startDate]);
 
     useEffect(() => {
         void loadData();
+        return () => { loadRequestIdRef.current += 1; };
     }, [loadData]);
 
     useEffect(() => {
@@ -362,14 +391,20 @@ const LaborCheckPage: React.FC = () => {
         [checkWorkers, payStatusFilter, showOnlyWorkersWithOutput, showRetired, workerKeysWithOutput]
     );
 
-    const firstOutputDateByWorker = useMemo(() => getFirstOutputDateByWorker(
-        reportRows
-            .filter((row) => teamMatches(row.workerTeamId, row.workerTeamName))
-            .map((row) => ({
+    const firstOutputDateByWorker = useMemo(() => {
+        const firstDates = new Map(historicalFirstOutputDates);
+        const currentFirstDates = getFirstOutputDateByWorker(
+            reportRows.map((row) => ({
                 workerKey: getWorkerKey(row.workerId, row.workerName, row.workerTeamName),
                 date: row.date,
             }))
-    ), [reportRows, teamMatches]);
+        );
+        currentFirstDates.forEach((date, workerKey) => {
+            const historicalDate = firstDates.get(workerKey);
+            if (!historicalDate || date < historicalDate) firstDates.set(workerKey, date);
+        });
+        return firstDates;
+    }, [historicalFirstOutputDates, reportRows]);
 
     const rowsByWorkerDate = useMemo(() => {
         const grouped = new Map<string, DailyReportWorkerRow[]>();
@@ -544,12 +579,12 @@ const LaborCheckPage: React.FC = () => {
                 title={outsideOutputPeriod
                     ? canOverrideInactiveCell
                         ? '선택한 작업자 · 비활성 칸 입력 가능'
-                        : firstOutputDate ? '첫 출역일 이전 · 신고 대상 아님' : '이번 달 출역 기록 없음'
+                        : firstOutputDate ? '첫 출역일 이전 · 신고 대상 아님' : '출역 이력 없음 · 신고 대상 아님'
                     : undefined}
             >
                 <div className="flex h-full min-h-[57px] flex-col justify-center px-1">
                     {outsideOutputPeriod && !canOverrideInactiveCell && (
-                        <span className="sr-only">{firstOutputDate ? '첫 출역일 이전' : '이번 달 출역 기록 없음'}</span>
+                        <span className="sr-only">{firstOutputDate ? '첫 출역일 이전' : '출역 이력 없음'}</span>
                     )}
                     {cellSiteNames.length > 0 && !hasInvoice && (
                         <span className={`line-clamp-2 break-keep text-center text-[10px] font-bold leading-3 ${
@@ -620,7 +655,7 @@ const LaborCheckPage: React.FC = () => {
                         </button>
                         <button
                             type="button"
-                            onClick={() => void loadData()}
+                            onClick={() => void loadData(true)}
                             disabled={isLoading}
                             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-wait"
                         >
@@ -745,6 +780,10 @@ const LaborCheckPage: React.FC = () => {
                         <div className="flex h-64 flex-col items-center justify-center gap-3 text-slate-500">
                             <FontAwesomeIcon icon={faSpinner} spin className="text-2xl text-emerald-600" />
                             <span className="text-sm font-bold">인원체크 현황을 불러오는 중입니다.</span>
+                        </div>
+                    ) : dataLoadFailed ? (
+                        <div className="flex h-64 items-center justify-center px-4 text-center text-sm font-bold text-slate-500">
+                            출역 이력을 확인할 수 없습니다. 새로고침해 주세요.
                         </div>
                     ) : visibleWorkers.length === 0 ? (
                         <div className="flex h-64 items-center justify-center px-4 text-center text-sm font-bold text-slate-500">
