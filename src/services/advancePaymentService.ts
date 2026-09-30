@@ -278,12 +278,29 @@ const listEveryAdvancePaymentRow = async (): Promise<any[]> => {
     return rows;
 };
 
-const toDate = (value?: string | null): Date | undefined => {
-    const raw = value ? String(value) : '';
-    if (!raw) return undefined;
-    const d = new Date(raw);
-    if (Number.isNaN(d.getTime())) return undefined;
-    return d;
+const toDate = (value: unknown): Date | undefined => {
+    if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : undefined;
+    if (typeof value === 'string' || typeof value === 'number') {
+        if (value === '') return undefined;
+        const parsed = new Date(value);
+        return Number.isFinite(parsed.getTime()) ? parsed : undefined;
+    }
+    if (!value || typeof value !== 'object') return undefined;
+
+    const timestamp = value as {
+        toDate?: () => Date;
+        toMillis?: () => number;
+        seconds?: number;
+        _seconds?: number;
+        nanoseconds?: number;
+        _nanoseconds?: number;
+    };
+    if (typeof timestamp.toDate === 'function') return toDate(timestamp.toDate());
+    if (typeof timestamp.toMillis === 'function') return toDate(timestamp.toMillis());
+    const seconds = timestamp.seconds ?? timestamp._seconds;
+    const nanos = timestamp.nanoseconds ?? timestamp._nanoseconds ?? 0;
+    if (typeof seconds !== 'number' || !Number.isFinite(seconds) || !Number.isFinite(nanos)) return undefined;
+    return toDate(seconds * 1000 + Math.floor(nanos / 1_000_000));
 };
 
 const isAlreadyExistsError = (error: unknown): boolean => {

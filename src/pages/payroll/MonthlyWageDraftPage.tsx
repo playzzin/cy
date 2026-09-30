@@ -86,7 +86,7 @@ import { normalizePayrollBankKey, resolvePayrollBankCode } from './utils/payroll
 
 import { usePayrollData } from './hooks/usePayrollData';
 import { PaymentData, MonthlyAdvanceLedgerRow, MonthlyAdvanceLedgerWorkEntry, LedgerManualInput, DeductionBreakdown, WorkerWorkEntry, DeductionLine, TaxRateSnapshot, LedgerUtilityInputLike, InsuranceAppliedSummary, InsuranceAppliedSiteSummary, InsuranceAppliedReason, WithholdingAppliedSummary, WithholdingAppliedSiteSummary, BusinessIncomeAppliedSummary, BusinessIncomeAppliedSiteSummary } from './types/payroll';
-import { resolveInitialLedgerManualInput } from './utils/advanceLedgerInput';
+import { isLedgerManualInputUnchanged, resolveInitialLedgerManualInput } from './utils/advanceLedgerInput';
 import { BANK_CODES, STANDARD_DEDUCTION_FIELDS, WITHHOLDING_MAX_MAN_DAY } from './constants/payroll.constants';
 
 // --- Premium UI Styled Components ---
@@ -2295,7 +2295,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         [ledgerSideFieldNames]
     );
 
+    const previousInitialLedgerInputsRef = useRef(initialLedgerInputs);
     useEffect(() => {
+        const previousInitialInputs = previousInitialLedgerInputsRef.current;
+        previousInitialLedgerInputsRef.current = initialLedgerInputs;
         setLedgerInputs((prev) => {
             const next: Record<string, LedgerManualInput> = {};
 
@@ -2303,7 +2306,9 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 const prevInput = prev[key];
                 const loadedInput = initialLedgerInputs[key];
 
-                if (loadedInput && (!prevInput || isLedgerManualInputEffectivelyEmpty(prevInput, loadedInput))) {
+                const unchangedSinceLoad = isLedgerManualInputUnchanged(prevInput, previousInitialInputs[key]);
+                const emptyBeforeLoad = !previousInitialInputs[key] && isLedgerManualInputEffectivelyEmpty(prevInput, loadedInput);
+                if (loadedInput && (!prevInput || unchangedSinceLoad || emptyBeforeLoad)) {
                     next[key] = loadedInput;
                     return;
                 }

@@ -90,13 +90,15 @@ export const pickAdvanceRecordForPayrollRow = (
   return salaryScopedCandidates.reduce<AdvancePayment | undefined>((best, current) => {
     if (!best) return current;
 
+    // A correction can reduce or clear an advance. Amount is only a legacy
+    // tie-breaker when the records have no distinguishable save time.
+    const bestTs = toEpochMillis(best.updatedAt);
+    const currentTs = toEpochMillis(current.updatedAt);
+    if (currentTs !== bestTs) return currentTs > bestTs ? current : best;
+
     const bestScore = getRecordValueScore(best);
     const currentScore = getRecordValueScore(current);
-    if (currentScore !== bestScore) return currentScore > bestScore ? current : best;
-
-    const bestTs = best.updatedAt instanceof Date ? best.updatedAt.getTime() : 0;
-    const currentTs = current.updatedAt instanceof Date ? current.updatedAt.getTime() : 0;
-    return currentTs > bestTs ? current : best;
+    return currentScore > bestScore ? current : best;
   }, undefined);
 };
 
@@ -114,6 +116,27 @@ const createEmptySideInput = (): LedgerManualInput['invoice'] => ({
   fine: 0,
   other: 0,
 });
+
+// Compare values, including normalized defaults added by the ledger component,
+// so a refetch replaces loaded values but preserves unsaved user edits.
+export const isLedgerManualInputUnchanged = (
+  current: LedgerManualInput | undefined,
+  loaded: LedgerManualInput | undefined
+): boolean => {
+  if (!current || !loaded) return current === loaded;
+  const fields = Object.keys(createEmptySideInput()) as Array<keyof LedgerManualInput['invoice']>;
+  const sameAmounts = (['invoice', 'labor'] as const).every((side) => (
+    fields.every((field) => toNumber(current[side]?.[field]) === toNumber(loaded[side]?.[field]))
+  ));
+  const assignmentKeys = new Set([
+    ...Object.keys(current.itemAssignments ?? {}), ...Object.keys(loaded.itemAssignments ?? {}),
+  ]);
+  return sameAmounts
+    && (current.personalMemo ?? '') === (loaded.personalMemo ?? '')
+    && (current.assignmentType ?? 'corporate') === (loaded.assignmentType ?? 'corporate')
+    && (current.allocationMode ?? 'split') === (loaded.allocationMode ?? 'split')
+    && Array.from(assignmentKeys).every((key) => current.itemAssignments?.[key] === loaded.itemAssignments?.[key]);
+};
 
 const getMappedItemAmount = (
   record: AdvancePayment,
