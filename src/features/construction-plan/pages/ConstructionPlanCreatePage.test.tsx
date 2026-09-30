@@ -459,7 +459,8 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
     const deleteButton = await screen.findByRole('button', { name: '현장 특별 안전계획 목차 삭제' });
     await waitFor(() => expect(deleteButton).toBeEnabled());
     fireEvent.click(deleteButton);
-    await waitFor(() => expect(screen.queryByRole('button', { name: '현장 특별 안전계획 목차 수정' })).not.toBeInTheDocument());
+    await waitFor(() => expect(deleteButton).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: '현장 특별 안전계획 목차 수정' })).not.toBeInTheDocument();
     expect(confirm).toHaveBeenCalled();
     confirm.mockRestore();
   }, 15_000);
