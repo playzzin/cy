@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useContext } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faFileInvoiceDollar,
@@ -21,7 +21,10 @@ import {
 import { taxInvoiceListService } from '../../services/taxInvoiceListService';
 import { TaxInvoiceIssue, IssueStatus, SiteWorkSummary, STATUS_CONFIG } from '../../types/taxInvoiceList';
 import { exportIssuesToExcel } from '../../utils/taxInvoiceExcelUtils';
+import { reserveImageClipboardWrite } from '../../utils/taxInvoiceClipboard';
 import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
+import { applySavedIssueUpdates, getIssuePendingChanges, getNextIssueNo, IssueBatchWriteError, IssueDeleteConflictError, IssueSaveConflict, IssueSaveConflictError, parseIssueNumber } from '../../utils/taxInvoiceIssueDraft';
+import { useIssueNavigationGuard } from './useIssueNavigationGuard';
 import PayrollIssueTopTabs from '../../components/payroll/PayrollIssueTopTabs';
 import { showConfirmAlert, toast } from '../../utils/swal';
 import html2canvas from 'html2canvas';
@@ -104,6 +107,11 @@ const COLUMN_FILTER_LABELS: Record<string, string> = {
     issueStatus: '발행',
     scanCompleted: '노임서류',
     remark: '특이사항',
+    yearMonth: '조회 월',
+    siteId: '현장 연결',
+    siteName: '현장명',
+    carriedFromIssueId: '이월 원본 연결',
+    carriedFromYearMonth: '이월 원본 월',
 };
 
 const getIssueNoSortValue = (value: unknown): number => {
@@ -138,54 +146,6 @@ const compareIssuesByTeam = (a: TaxInvoiceIssue, b: TaxInvoiceIssue): number => 
 const getIssueTypeLabel = (value: TaxInvoiceIssue['isNew'] | boolean | null | undefined) => {
     if (typeof value === 'boolean') return value ? '입력' : '';
     return String(value ?? '');
-};
-
-interface ImageClipboardWriteReservation {
-    complete: (blob: Blob) => void;
-    cancel: (error: unknown) => void;
-    result: Promise<void>;
-}
-
-const reserveImageClipboardWrite = (): ImageClipboardWriteReservation | null => {
-    if (typeof window === 'undefined' || typeof navigator === 'undefined' || window.isSecureContext === false) {
-        return null;
-    }
-
-    const ClipboardItemCtor = (window as unknown as {
-        ClipboardItem?: new (items: Record<string, Blob | Promise<Blob>>) => ClipboardItem;
-    }).ClipboardItem;
-    const clipboard = navigator.clipboard as Clipboard & {
-        write?: (data: ClipboardItem[]) => Promise<void>;
-    };
-
-    if (!ClipboardItemCtor || !clipboard?.write) return null;
-
-    let resolveBlob: (blob: Blob) => void = () => {};
-    let rejectBlob: (error: unknown) => void = () => {};
-    let settled = false;
-    const blobPromise = new Promise<Blob>((resolve, reject) => {
-        resolveBlob = resolve;
-        rejectBlob = reject;
-    });
-
-    try {
-        const item = new ClipboardItemCtor({ 'image/png': blobPromise });
-        return {
-            complete: (blob) => {
-                if (settled) return;
-                settled = true;
-                resolveBlob(blob);
-            },
-            cancel: (error) => {
-                if (settled) return;
-                settled = true;
-                rejectBlob(error);
-            },
-            result: clipboard.write([item]),
-        };
-    } catch {
-        return null;
-    }
 };
 
 const canvasToPngBlob = (canvas: HTMLCanvasElement) => new Promise<Blob>((resolve, reject) => {
@@ -345,28 +305,29 @@ const getCarryoverIssueDate = (source: TaxInvoiceIssue, fallbackDate: string): s
 // Site Data Import Modal
 // ─────────────────────────────────────────────
 
+const getSiteImportKey = (site: SiteWorkSummary) => site.sourceKey || JSON.stringify([
+    site.siteId || site.siteName, site.siteName, site.companyName, site.teamName, site.siteType, site.paymentType,
+]);
+
 interface SiteImportModalProps {
     sites: SiteWorkSummary[];
     onClose: () => void;
-    onImport: (selected: SiteWorkSummary[]) => Promise<boolean>;
+    onImport: (selected: SiteWorkSummary[]) => Promise<string[]>;
+    blocked: boolean;
+    refreshing: boolean;
+    onRefresh: () => void;
 }
 
-const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImport }) => {
+const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImport, blocked, refreshing, onRefresh }) => {
     const [checked, setChecked] = useState<Set<string>>(new Set());
+    const [completedKeys, setCompletedKeys] = useState<Set<string>>(new Set());
+    const [retryMessage, setRetryMessage] = useState('');
     const [filterSiteType, setFilterSiteType] = useState<string>('전체');
     const [filterPaymentType, setFilterPaymentType] = useState<string>('전체');
     const [searchTerm, setSearchTerm] = useState('');
     const [importing, setImporting] = useState(false);
 
-    // Include team/company because the same site can be imported as separate invoice rows.
-    const rowKey = (s: SiteWorkSummary) => [
-        s.siteId || s.siteName,
-        s.siteName,
-        s.companyName,
-        s.teamName,
-        s.siteType,
-        s.paymentType,
-    ].join('|');
+    const rowKey = getSiteImportKey;
 
     const normalizedSearchTerm = searchTerm.trim().toLowerCase();
 
@@ -386,6 +347,7 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
     });
 
     const toggle = (key: string) => {
+        if (importing || blocked || completedKeys.has(key)) return;
         setChecked(prev => {
             const next = new Set(prev);
             if (next.has(key)) next.delete(key);
@@ -395,7 +357,8 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
     };
 
     const toggleAll = () => {
-        const filteredKeys = filtered.map(rowKey);
+        if (importing || blocked) return;
+        const filteredKeys = filtered.map(rowKey).filter(key => !completedKeys.has(key));
         const allChecked = filteredKeys.every(k => checked.has(k));
         if (allChecked && filteredKeys.length > 0) {
             setChecked(prev => {
@@ -412,10 +375,11 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
         }
     };
 
-    const filteredCheckedCount = filtered.filter(s => checked.has(rowKey(s))).length;
-    const allFilteredChecked = filtered.length > 0 && filteredCheckedCount === filtered.length;
+    const selectable = filtered.filter(s => !completedKeys.has(rowKey(s)));
+    const filteredCheckedCount = selectable.filter(s => checked.has(rowKey(s))).length;
+    const allFilteredChecked = selectable.length > 0 && filteredCheckedCount === selectable.length;
 
-    const selectedSites = sites.filter(s => checked.has(rowKey(s)));
+    const selectedSites = sites.filter(s => checked.has(rowKey(s)) && !completedKeys.has(rowKey(s)));
 
     return (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="site-import-title">
@@ -438,6 +402,11 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
                     </button>
                 </div>
 
+                {retryMessage && <p role="alert" className="px-5 pt-3 text-sm text-amber-800">{retryMessage}</p>}
+                {blocked && <div className="flex items-center justify-between gap-2 px-5 pt-3 text-sm text-red-700">
+                    <span>목록을 다시 확인한 뒤 남은 항목을 추가해주세요.</span>
+                    <button type="button" onClick={onRefresh} disabled={refreshing || importing} className="rounded border px-2 py-1 disabled:opacity-40">목록 다시 확인</button>
+                </div>}
                 {/* Filters */}
                 <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-4 flex-wrap">
                     <div className="relative min-w-[240px] flex-1">
@@ -508,6 +477,7 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
                                             aria-label="표시된 현장 전체 선택"
                                             checked={allFilteredChecked}
                                             onChange={toggleAll}
+                                            disabled={importing || blocked || selectable.length === 0}
                                             className="w-4 h-4 rounded accent-indigo-600"
                                         />
                                     </th>
@@ -536,6 +506,7 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
                                                     aria-label={`${s.siteName} 선택`}
                                                     checked={checked.has(key)}
                                                     onChange={() => toggle(key)}
+                                                    disabled={importing || blocked || completedKeys.has(key)}
                                                     onClick={e => e.stopPropagation()}
                                                     className="w-4 h-4 rounded accent-indigo-600"
                                                 />
@@ -554,7 +525,7 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
                                                     <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold text-[10px]">{s.paymentType}</span>
                                                 ) : <span className="text-slate-300">-</span>}
                                             </td>
-                                            <td className="px-3 py-2 text-slate-500 truncate">{s.teamName || '-'}</td>
+                                            <td className="px-3 py-2 text-slate-500 truncate">{s.teamName || '-'}{completedKeys.has(key) && <span className="ml-1 text-green-700">추가됨</span>}</td>
                                             <td className="px-3 py-2 text-right font-semibold text-indigo-600">{s.manDays}</td>
                                         </tr>
                                     );
@@ -577,13 +548,19 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
                             onClick={async () => {
                                 setImporting(true);
                                 try {
-                                    const imported = await onImport(selectedSites);
-                                    if (imported) onClose();
+                                    const completed = await onImport(selectedSites);
+                                    setCompletedKeys(prev => new Set([...prev, ...completed]));
+                                    setChecked(prev => new Set([...prev].filter(key => !completed.includes(key))));
+                                    const remaining = selectedSites.filter(site => !completed.includes(rowKey(site))).length;
+                                    if (remaining === 0) onClose();
+                                    else setRetryMessage(`${completed.length}건 추가 완료, ${remaining}건은 추가하지 못했습니다. 실패한 항목만 선택되어 있습니다.`);
+                                } catch {
+                                    setRetryMessage('추가 결과를 확인하지 못했습니다. 선택한 항목은 유지됩니다.');
                                 } finally {
                                     setImporting(false);
                                 }
                             }}
-                            disabled={selectedSites.length === 0 || importing}
+                            disabled={selectedSites.length === 0 || importing || blocked}
                             className="px-5 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                             {importing ? '추가하는 중...' : `발행리스트에 추가 (${selectedSites.length}건)`}
@@ -600,6 +577,52 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
 // ─────────────────────────────────────────────
 
 type EditableField = keyof TaxInvoiceIssue;
+
+interface CellDraftState {
+    rowId?: string;
+    field: EditableField;
+    inputType: 'text' | 'number' | 'date';
+    value: string;
+    dirty: boolean;
+    invalid: boolean;
+    composing: boolean;
+    error?: string;
+}
+
+const getCellPatch = (saved: TaxInvoiceIssue, field: EditableField, value: string | number | boolean): Partial<TaxInvoiceIssue> =>
+    field === 'recipient' ? {
+        recipient: String(value),
+        recipientManuallyEdited: String(value) === String(saved.recipient ?? '') ? saved.recipientManuallyEdited : true,
+    } : { [field]: value };
+
+const formatIssueValue = (field: string, value: unknown): string => {
+    if (field === 'issueStatus') return STATUS_CONFIG[value as IssueStatus]?.label ?? String(value ?? '');
+    if (field === 'scanCompleted') return value ? '완료' : '미완료';
+    if (field === 'recipientManuallyEdited') return value ? '직접 수정' : '자동 입력';
+    if (typeof value === 'number') return value.toLocaleString('ko-KR');
+    return String(value ?? '') || '(빈 셀)';
+};
+
+// Saving and exporting must use the same normalized values, including retained hidden inputs.
+const applyCellDrafts = (issues: TaxInvoiceIssue[], savedIssues: TaxInvoiceIssue[], drafts: CellDraftState[]): TaxInvoiceIssue[] | null => {
+    const byId = new Map(issues.map(issue => [issue.id, issue]));
+    const savedById = new Map(savedIssues.map(issue => [issue.id, issue]));
+    for (const draft of drafts) {
+        if (draft.invalid || draft.composing) return null;
+        const issue = byId.get(draft.rowId);
+        const saved = savedById.get(draft.rowId);
+        const value = draft.inputType === 'date' ? normalizeTypedDateInput(draft.value)
+            : draft.inputType === 'number' ? parseIssueNumber(draft.value) : draft.value;
+        if (!issue || !saved || value === null) return null;
+        byId.set(draft.rowId, { ...issue, ...getCellPatch(saved, draft.field, value) });
+    }
+    return issues.map(issue => byId.get(issue.id)!);
+};
+const IssueEditingContext = React.createContext({
+    disabled: false,
+    drafts: {} as Record<string, CellDraftState>,
+    onDraftChange: (_key: string, _state: CellDraftState | null) => {},
+});
 
 interface EditableCellProps {
     value: string | number | boolean;
@@ -619,83 +642,115 @@ const EditableCell: React.FC<EditableCellProps> = ({
     value, field, rowId, type = 'text', onCommit, className = '',
     rowIndex, colIndex, isFocused, onNavigate
 }) => {
-    const [editing, setEditing] = useState(false);
-    const [draft, setDraft] = useState(String(value));
+    const { disabled, drafts, onDraftChange } = useContext(IssueEditingContext);
+    const draftKey = `${rowId}:${field}`;
+    const retainedDraft = drafts[draftKey];
+    const [editing, setEditing] = useState(Boolean(retainedDraft));
+    const [draft, setDraft] = useState(retainedDraft?.value ?? String(value));
+    const [error, setError] = useState(retainedDraft?.error ?? '');
     const inputRef = useRef<HTMLInputElement>(null);
+    const focusRequestedRef = useRef(false);
+    const composingRef = useRef(false);
+    const recordDraft = (nextValue: string, message?: string) => onDraftChange(draftKey, {
+        rowId, field, inputType: type, value: nextValue, dirty: nextValue !== String(value),
+        invalid: (type === 'date' && normalizeTypedDateInput(nextValue) === null)
+            || (type === 'number' && parseIssueNumber(nextValue) === null),
+        composing: composingRef.current, error: message,
+    });
 
     // 부모로부터 포커스 명령을 받았을 때 에디팅 모드 진입
     useEffect(() => {
-        if (isFocused) {
-            setDraft(String(value));
+        if (isFocused && !disabled) {
+            setDraft(retainedDraft?.value ?? String(value));
+            focusRequestedRef.current = true;
             setEditing(true);
         }
-    }, [isFocused, value]);
+    }, [isFocused, disabled]);
 
     useEffect(() => {
-        if (editing && inputRef.current) {
+        if (editing && inputRef.current && focusRequestedRef.current) {
+            focusRequestedRef.current = false;
             inputRef.current.focus();
             if (type !== 'date') {
                 inputRef.current.select();
             }
         }
-    }, [editing, type]);
+    }, [editing, type, isFocused]);
 
     const commit = () => {
+        if (disabled || composingRef.current) return false;
         let finalValue: string | number | boolean = draft;
         if (type === 'number') {
-            finalValue = Number(draft.replace(/,/g, '')) || 0;
+            const parsed = parseIssueNumber(draft);
+            if (parsed === null) {
+                const message = '올바른 숫자를 입력해주세요. 예: -100, 1,000, 1.5 (최대 절댓값 9,007,199,254,740,991)';
+                setError(message);
+                recordDraft(draft, message);
+                return false;
+            }
+            finalValue = parsed;
         } else if (type === 'date') {
-            finalValue = normalizeTypedDateInput(draft) ?? draft;
+            const normalized = normalizeTypedDateInput(draft);
+            if (!normalized) {
+                setError('실제 존재하는 날짜를 YYYY-MM-DD 형식으로 입력해주세요.');
+                recordDraft(draft, '실제 존재하는 날짜를 YYYY-MM-DD 형식으로 입력해주세요.');
+                return false;
+            }
+            finalValue = normalized;
         }
         onCommit(rowId, field, finalValue);
+        onDraftChange(draftKey, null);
+        setError('');
         setEditing(false);
+        return true;
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (composingRef.current || e.nativeEvent.isComposing || e.keyCode === 229) return;
         const target = e.target as HTMLInputElement;
         const isFirstChar = target.selectionStart === 0 && target.selectionEnd === 0;
         const isLastChar = target.selectionStart === target.value.length && target.selectionEnd === target.value.length;
 
         if (e.key === 'Enter') {
-            commit();
-            if (onNavigate) onNavigate('down');
+            e.preventDefault();
+            if (commit() && onNavigate) onNavigate('down');
         }
         if (e.key === 'Escape') {
             setDraft(String(value));
+            setError('');
+            onDraftChange(draftKey, null);
             setEditing(false);
         }
         
         if (onNavigate) {
             if (e.key === 'ArrowUp') {
                 e.preventDefault();
-                commit();
-                onNavigate('up');
+                if (commit()) onNavigate('up');
             } else if (e.key === 'ArrowDown') {
                 e.preventDefault();
-                commit();
-                onNavigate('down');
+                if (commit()) onNavigate('down');
             } else if (e.key === 'ArrowLeft' && isFirstChar) {
                 // 커서가 맨 앞에 있을 때 왼쪽 키 누르면 이동
                 e.preventDefault();
-                commit();
-                onNavigate('left');
+                if (commit()) onNavigate('left');
             } else if (e.key === 'ArrowRight' && isLastChar) {
                 // 커서가 맨 뒤에 있을 때 오른쪽 키 누르면 이동
                 e.preventDefault();
-                commit();
-                onNavigate('right');
+                if (commit()) onNavigate('right');
             } else if (e.key === 'Tab') {
                 e.preventDefault();
-                commit();
-                onNavigate(e.shiftKey ? 'untab' : 'tab');
+                if (commit()) onNavigate(e.shiftKey ? 'untab' : 'tab');
             }
         }
     };
 
     if (editing) {
         return (
+            <>
             <input
                 ref={inputRef}
+                disabled={disabled}
+                aria-invalid={Boolean(error)}
                 // number 타입은 selectionStart를 지원하지 않아 text로 변경하여 엑셀 스타일 이동 지원
                 type="text"
                 aria-label={`${COLUMN_FILTER_LABELS[String(field)] ?? String(field)} 값 편집`}
@@ -705,36 +760,40 @@ const EditableCell: React.FC<EditableCellProps> = ({
                 value={draft}
                 onChange={e => {
                     const val = e.target.value;
-                    if (type === 'number') {
-                        // 숫자, 소수점, 마이너스 기호만 허용
-                        if (val === '' || /^-?\d*\.?\d*$/.test(val.replace(/,/g, ''))) {
-                            setDraft(val);
-                        }
-                    } else if (type === 'date') {
-                        setDraft(formatTypedDateInput(val));
-                    } else {
-                        setDraft(val);
+                    let nextDraft = val;
+                    // Keep invalid pasted text visible so it cannot silently reuse an old amount.
+                    if (type === 'date') {
+                        nextDraft = formatTypedDateInput(val);
                     }
+                    setDraft(nextDraft);
+                    setError('');
+                    recordDraft(nextDraft);
                 }}
+                onCompositionStart={() => { composingRef.current = true; recordDraft(draft); }}
+                onCompositionEnd={event => { composingRef.current = false; setDraft(event.currentTarget.value); recordDraft(event.currentTarget.value); }}
                 onBlur={commit}
                 onKeyDown={handleKeyDown}
                 className={`w-full px-2 py-1 text-sm border border-indigo-400 rounded-lg outline-none bg-indigo-50 focus:ring-2 focus:ring-indigo-200 ${className}`}
             />
+            {error && <span role="alert" className="block text-xs text-red-600">{error}</span>}
+            </>
         );
     }
 
     return (
         <span
-            onClick={() => { setDraft(String(value)); setEditing(true); }}
+            onClick={() => { if (!disabled) { focusRequestedRef.current = true; setDraft(String(value)); setEditing(true); } }}
             onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === 'F2') {
+                if (!disabled && (event.key === 'Enter' || event.key === 'F2')) {
                     event.preventDefault();
+                    focusRequestedRef.current = true;
                     setDraft(String(value));
                     setEditing(true);
                 }
             }}
             role="button"
-            tabIndex={0}
+            aria-disabled={disabled}
+            tabIndex={disabled ? -1 : 0}
             aria-label={`${COLUMN_FILTER_LABELS[String(field)] ?? String(field)} 값 편집${String(value) ? `, 현재 ${String(value)}` : ''}`}
             className={`block cursor-pointer px-1 py-0.5 rounded hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 transition-colors min-h-[1.25rem] min-w-[2rem] truncate ${className}`}
             title={String(value)}
@@ -918,6 +977,7 @@ interface SelectCellProps {
     rowId: string | undefined;
     onCommit: (id: string | undefined, field: EditableField, value: string | number | boolean) => void;
     badgeClass?: string;
+    allowEmpty?: boolean;
     // Keyboard Navigation
     rowIndex?: number;
     colIndex?: number;
@@ -927,8 +987,9 @@ interface SelectCellProps {
 
 const SelectCell: React.FC<SelectCellProps> = ({ 
     value, options, field, rowId, onCommit, badgeClass = '',
-    rowIndex, colIndex, isFocused, onNavigate
+    rowIndex, colIndex, isFocused, onNavigate, allowEmpty = true
 }) => {
+    const { disabled } = useContext(IssueEditingContext);
     const selectRef = useRef<HTMLSelectElement>(null);
 
     useEffect(() => {
@@ -964,6 +1025,7 @@ const SelectCell: React.FC<SelectCellProps> = ({
     return (
         <select
             ref={selectRef}
+            disabled={disabled}
             aria-label={`${COLUMN_FILTER_LABELS[String(field)] ?? String(field)} 값 선택`}
             value={value || ''}
             onChange={e => onCommit(rowId, field, e.target.value)}
@@ -976,7 +1038,7 @@ const SelectCell: React.FC<SelectCellProps> = ({
             }}
             className={`text-sm border-0 bg-transparent cursor-pointer outline-none font-bold w-full focus:ring-2 focus:ring-indigo-400 rounded ${badgeClass}`}
         >
-            <option value="">-</option>
+            {allowEmpty && <option value="">-</option>}
             {options.map(opt => (
                 <option key={opt} value={opt}>{opt}</option>
             ))}
@@ -992,11 +1054,56 @@ const TaxInvoiceIssueListPage: React.FC = () => {
     const [yearMonth, setYearMonth] = useState<string>(toYearMonth(new Date()));
     const [issues, setIssues] = useState<TaxInvoiceIssue[]>([]);
     const [savedIssues, setSavedIssues] = useState<TaxInvoiceIssue[]>([]);
-    const [pendingChanges, setPendingChanges] = useState<Record<string, Partial<TaxInvoiceIssue>>>({});
+    const [saveConflicts, setSaveConflicts] = useState<IssueSaveConflict[]>([]);
+    const hasSaveConflicts = saveConflicts.length > 0;
+    const pendingChanges = useMemo(() => getIssuePendingChanges(issues, savedIssues), [issues, savedIssues]);
+    const [cellDrafts, setCellDrafts] = useState<Record<string, CellDraftState>>({});
+    const [editorReset, setEditorReset] = useState(0);
+    const cellDraftsRef = useRef(cellDrafts);
+    const onDraftChange = useCallback((key: string, state: CellDraftState | null) => {
+        const next = { ...cellDraftsRef.current };
+        if (state?.dirty || state?.invalid || state?.composing) next[key] = state;
+        else delete next[key];
+        cellDraftsRef.current = next;
+        setCellDrafts(next);
+    }, []);
+    const hasCellDrafts = Object.keys(cellDrafts).length > 0;
+    const hasInvalidDrafts = Object.values(cellDrafts).some(draft => draft.invalid);
+    const hasComposingDrafts = Object.values(cellDrafts).some(draft => draft.composing);
+    const pendingSaveRowCount = new Set([
+        ...Object.keys(pendingChanges),
+        ...Object.values(cellDrafts).filter(draft => draft.dirty).map(draft => draft.rowId).filter(Boolean),
+    ]).size;
     const [showPendingChanges, setShowPendingChanges] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [loadedMonth, setLoadedMonth] = useState<string | null>(null);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const writeBlocked = loading || loadedMonth !== yearMonth;
     const [isCopyingSelection, setIsCopyingSelection] = useState(false);
+    const copyingSelectionRef = useRef(false);
+    const [isExporting, setIsExporting] = useState(false);
+    const exportingRef = useRef(false);
     const [saving, setSaving] = useState<Set<string>>(new Set());
+    const [mutation, setMutation] = useState<'save' | 'structure' | null>(null);
+    const mutationRef = useRef<'save' | 'structure' | null>(null);
+    const mountedRef = useRef(false);
+    const yearMonthRef = useRef(yearMonth);
+    yearMonthRef.current = yearMonth;
+    const loadRequestRef = useRef(0);
+    const deferredRequestRef = useRef(0);
+    const siteRequestRef = useRef(0);
+    const issuesRef = useRef(issues);
+    issuesRef.current = issues;
+    const beginMutation = (kind: 'save' | 'structure') => {
+        if (mutationRef.current || writeBlocked || hasSaveConflicts) return false;
+        mutationRef.current = kind;
+        setMutation(kind);
+        return true;
+    };
+    const endMutation = () => {
+        mutationRef.current = null;
+        if (mountedRef.current) setMutation(null);
+    };
     const [saveFeedback, setSaveFeedback] = useState<SaveFeedback>({
         status: 'idle',
         message: '변경 후 저장 버튼을 눌러주세요',
@@ -1004,6 +1111,14 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
     const pendingRowCount = Object.keys(pendingChanges).length;
     const hasPendingChanges = pendingRowCount > 0;
+    const canLeave = () => {
+        if (mutationRef.current) {
+            toast.warning('저장 처리가 끝난 뒤 이동해주세요.');
+            return false;
+        }
+        return window.confirm('저장하지 않은 입력이 있습니다. 변경사항을 버리고 이동할까요?');
+    };
+    useIssueNavigationGuard(hasPendingChanges || hasCellDrafts || hasSaveConflicts || mutation !== null, canLeave);
 
     // Site import
     const [siteData, setSiteData] = useState<SiteWorkSummary[]>([]);
@@ -1131,63 +1246,96 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
     // ── Load issues ──
     const loadIssues = async () => {
+        const request = ++loadRequestRef.current;
+        const current = () => mountedRef.current && request === loadRequestRef.current && yearMonthRef.current === yearMonth;
         setLoading(true);
+        setLoadedMonth(null);
+        setLoadError(null);
+        setSaveConflicts([]);
+        setSelectedIds(new Set());
+        setActiveCell(null);
+        cellDraftsRef.current = {};
+        setCellDrafts({});
         try {
             const data = await taxInvoiceListService.getIssuesByMonth(yearMonth);
+            if (!current()) return;
             const sorted = [...data].sort((a, b) => a.no - b.no);
             setIssues(sorted);
             setSavedIssues(sorted);
-            setPendingChanges({});
+            setLoadedMonth(yearMonth);
             setShowPendingChanges(false);
             setSaveFeedback({ status: 'idle', message: '변경 후 저장 버튼을 눌러주세요' });
         } catch (e) {
+            if (!current()) return;
             console.error('발행리스트 로드 실패:', e);
             setIssues([]);
             setSavedIssues([]);
+            setLoadError(`${formatYearMonth(yearMonth)} 목록을 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.`);
             markSaveError(`${formatYearMonth(yearMonth)} 목록을 불러오지 못했습니다.`);
             toast.error(`${formatYearMonth(yearMonth)} 데이터 로드에 실패했습니다.`);
         } finally {
-            setLoading(false);
+            if (current()) setLoading(false);
         }
     };
 
     const loadPreviousDeferredSites = async () => {
+        const request = ++deferredRequestRef.current;
+        const current = () => mountedRef.current && request === deferredRequestRef.current && yearMonthRef.current === yearMonth;
         setLoadingDeferredSites(true);
         try {
             const previousYearMonth = getPreviousYearMonth(yearMonth);
             const data = await taxInvoiceListService.getDeferredIssuesByMonth(previousYearMonth);
+            if (!current()) return;
             setPreviousDeferredIssues(data);
         } catch (e) {
+            if (!current()) return;
             console.error('전월 이월 현장 로드 실패:', e);
             setPreviousDeferredIssues([]);
             toast.warning('전월 이월 현장을 불러오지 못했습니다.');
         } finally {
-            setLoadingDeferredSites(false);
+            if (current()) setLoadingDeferredSites(false);
         }
     };
 
     useEffect(() => { 
+        mountedRef.current = true;
         setIssues([]); // 월 변경 시 즉시 목록을 비워 순번 꼬임 방지
         setSavedIssues([]);
-        setPendingChanges({});
+        setSelectedIds(new Set());
+        setActiveCell(null);
+        cellDraftsRef.current = {};
+        setCellDrafts({});
+        setShowImportModal(false);
+        setLoadingSites(false);
         setSiteData([]); 
         setPreviousDeferredIssues([]);
         loadIssues(); 
         loadPreviousDeferredSites();
+        return () => {
+            mountedRef.current = false;
+            loadRequestRef.current += 1;
+            deferredRequestRef.current += 1;
+            siteRequestRef.current += 1;
+        };
     }, [yearMonth]);
 
     // ── Month navigation ──
     const stepMonth = (delta: number) => {
-        if (hasPendingChanges && !window.confirm('저장하지 않은 변경사항이 있습니다. 변경사항을 버리고 다른 달로 이동할까요?')) {
+        if (mutationRef.current) return;
+        if ((hasPendingChanges || hasSaveConflicts || Object.keys(cellDraftsRef.current).length > 0) && !window.confirm('저장하지 않은 변경사항이 있습니다. 변경사항을 버리고 다른 달로 이동할까요?')) {
             return;
         }
         const [y, m] = yearMonth.split('-').map(Number);
         const d = new Date(y, m - 1 + delta, 1);
+        setSelectedIds(new Set());
+        setActiveCell(null);
+        yearMonthRef.current = toYearMonth(d);
         setYearMonth(toYearMonth(d));
     };
 
     const handleRefresh = () => {
-        if (hasPendingChanges && !window.confirm('저장하지 않은 변경사항이 있습니다. 변경사항을 버리고 목록을 새로고침할까요?')) {
+        if (mutationRef.current || loading) return;
+        if ((hasPendingChanges || hasSaveConflicts || Object.keys(cellDraftsRef.current).length > 0) && !window.confirm('저장하지 않은 변경사항이 있습니다. 변경사항을 버리고 목록을 새로고침할까요?')) {
             return;
         }
         loadIssues();
@@ -1196,11 +1344,12 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
     // ── Add row ──
     const handleAddRow = async () => {
-        if (hasPendingChanges) {
+        if (hasPendingChanges || Object.keys(cellDraftsRef.current).length > 0) {
             toast.warning('먼저 변경사항을 저장하거나 되돌려주세요.');
             return;
         }
-        const nextNo = issues.length + 1;
+        if (!beginMutation('structure')) return;
+        const nextNo = getNextIssueNo(issues);
         const newIssue = EMPTY_ISSUE(yearMonth, nextNo);
         markSaving('새 행을 추가하는 중입니다.');
         try {
@@ -1214,69 +1363,119 @@ const TaxInvoiceIssueListPage: React.FC = () => {
             console.error(e);
             markSaveError('새 행을 저장하지 못했습니다.');
             toast.error('새 행 추가에 실패했습니다. 다시 시도해주세요.');
+        } finally {
+            endMutation();
         }
     };
 
     // ── Delete row ──
-    const handleDelete = async (id: string | undefined) => {
-        if (!id) return;
-        if (hasPendingChanges) {
-            toast.warning('먼저 변경사항을 저장하거나 되돌려주세요.');
-            return;
-        }
-        const confirmation = await showConfirmAlert('항목 삭제', '선택한 항목을 삭제하시겠습니까?', '삭제');
-        if (!confirmation.isConfirmed) return;
-        markSaving('항목을 삭제하는 중입니다.');
+    const removeConfirmedIssues = (ids: string[]) => {
+        const removed = new Set(ids);
+        setIssues(prev => prev.filter(issue => !removed.has(issue.id ?? '')));
+        setSavedIssues(prev => prev.filter(issue => !removed.has(issue.id ?? '')));
+        setSelectedIds(prev => new Set([...prev].filter(id => !removed.has(id))));
+        setActiveCell(null);
+    };
+
+    // A failed follow-up must never undo or misreport an acknowledged write.
+    const refreshIssueNumbers = async (): Promise<boolean> => {
         try {
-            await taxInvoiceListService.deleteIssue(id);
             const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
             setIssues(renumbered);
             setSavedIssues(renumbered);
-            setSelectedIds(prev => {
-                const next = new Set(prev);
-                next.delete(id);
-                return next;
-            });
-            markSaved('항목을 삭제했습니다.');
-            toast.success('항목을 삭제했습니다.');
+            setActiveCell(null);
+            return true;
+        } catch (error) {
+            console.error('변경 후 목록 갱신 실패:', error);
+            setLoadedMonth(null);
+            setLoadError('완료된 변경은 반영됐지만 목록 갱신에 실패했습니다. 새로고침 후 계속해주세요.');
+            return false;
+        }
+    };
+
+    const finishImport = async (added: TaxInvoiceIssue[], failedCount: number, label: string, existingCount = 0) => {
+        if (added.length > 0) {
+            const merge = (prev: TaxInvoiceIssue[]) => [...new Map([...prev, ...added].map(issue => [issue.id, issue])).values()].sort(compareIssuesByNo);
+            setIssues(merge);
+            setSavedIssues(merge);
+        }
+        const refreshed = added.length === 0 || await refreshIssueNumbers();
+        const message = `${added.length - existingCount}개 ${label}을 추가했습니다.${existingCount ? ` ${existingCount}건은 이미 등록되어 기존 내용을 유지했습니다.` : ''}${failedCount ? ` ${failedCount}건은 추가하지 못했습니다.` : ''}${refreshed ? '' : ' 목록 갱신은 새로고침으로 다시 시도해주세요.'}`;
+        if (failedCount || !refreshed) {
+            markSaveError(message);
+            toast.warning(message);
+        } else {
+            markSaved(message);
+            toast.success(message);
+        }
+    };
+
+    const handleDeleteFailure = (error: unknown, ids: string[]) => {
+        console.error('항목 삭제 실패:', error);
+        const completed = error instanceof IssueBatchWriteError ? error.completedIds : [];
+        removeConfirmedIssues(completed);
+        const original = error instanceof IssueBatchWriteError ? error.originalError : error;
+        const conflicts = original instanceof IssueDeleteConflictError ? original.conflicts : [];
+        setSaveConflicts(conflicts);
+        const message = conflicts.length
+            ? `${completed.length}개 항목 삭제 완료. 다른 창에서 변경된 ${conflicts.length}개 항목의 삭제를 중단했습니다. 최신 내용을 확인해주세요.`
+            : `${completed.length}개 항목 삭제 완료, ${ids.length - completed.length}개 항목은 삭제하지 못했습니다. 남은 항목만 다시 시도해주세요.`;
+        markSaveError(message);
+        if (conflicts.length) toast.warning(message);
+        else toast.error(message);
+    };
+
+    const handleDelete = async (id: string | undefined) => {
+        if (!id || !issues.some(issue => issue.id === id && issue.yearMonth === yearMonth)) return;
+        if (hasPendingChanges || Object.keys(cellDraftsRef.current).length > 0) {
+            toast.warning('먼저 변경사항을 저장하거나 되돌려주세요.');
+            return;
+        }
+        if (!beginMutation('structure')) return;
+        try {
+            const confirmation = await showConfirmAlert('항목 삭제', '선택한 항목을 삭제하시겠습니까?', '삭제');
+            if (!confirmation.isConfirmed || yearMonthRef.current !== yearMonth) return;
+            markSaving('항목을 삭제하는 중입니다.');
+            await taxInvoiceListService.deleteIssuesWithConflictCheck([id], savedIssues);
+            removeConfirmedIssues([id]);
+            const refreshed = await refreshIssueNumbers();
+            const message = `항목을 삭제했습니다.${refreshed ? '' : ' 목록 갱신은 새로고침으로 다시 시도해주세요.'}`;
+            markSaved(message);
+            toast.success(message);
         } catch (e) {
-            console.error(e);
-            markSaveError('항목 삭제에 실패했습니다.');
-            toast.error('항목 삭제에 실패했습니다. 다시 시도해주세요.');
+            handleDeleteFailure(e, [id]);
+        } finally {
+            endMutation();
         }
     };
 
     const handleBulkDelete = async () => {
-        if (selectedIds.size === 0) return;
-        if (hasPendingChanges) {
+        const ids = issues.filter(issue => issue.id && issue.yearMonth === yearMonth && selectedIds.has(issue.id)).map(issue => issue.id as string);
+        if (ids.length === 0) return;
+        if (hasPendingChanges || Object.keys(cellDraftsRef.current).length > 0) {
             toast.warning('먼저 변경사항을 저장하거나 되돌려주세요.');
             return;
         }
-        const confirmation = await showConfirmAlert(
-            '선택 항목 삭제',
-            `선택한 ${selectedIds.size}개의 항목을 모두 삭제하시겠습니까?`,
-            '모두 삭제'
-        );
-        if (!confirmation.isConfirmed) return;
-        
-        setLoading(true);
-        markSaving(`${selectedIds.size}개 항목을 삭제하는 중입니다.`);
+        if (!beginMutation('structure')) return;
         try {
-            const deleteCount = selectedIds.size;
-            const ids = Array.from(selectedIds);
-            await taxInvoiceListService.deleteIssuesBatch(ids);
-            const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
-            setIssues(renumbered);
-            setSavedIssues(renumbered);
-            setSelectedIds(new Set());
-            markSaved(`${deleteCount}개 항목을 삭제했습니다.`);
-            toast.success(`${deleteCount}개 항목을 삭제했습니다.`);
+            const confirmation = await showConfirmAlert(
+                '선택 항목 삭제',
+                `선택한 ${ids.length}개의 항목을 모두 삭제하시겠습니까?`,
+                '모두 삭제'
+            );
+            if (!confirmation.isConfirmed || yearMonthRef.current !== yearMonth) return;
+            markSaving(`${ids.length}개 항목을 삭제하는 중입니다.`);
+            const deleteCount = ids.length;
+            await taxInvoiceListService.deleteIssuesWithConflictCheck(ids, savedIssues);
+            removeConfirmedIssues(ids);
+            const refreshed = await refreshIssueNumbers();
+            const message = `${deleteCount}개 항목을 삭제했습니다.${refreshed ? '' : ' 목록 갱신은 새로고침으로 다시 시도해주세요.'}`;
+            markSaved(message);
+            toast.success(message);
         } catch (e) {
-            console.error('일괄 삭제 실패:', e);
-            markSaveError('선택 항목 삭제에 실패했습니다.');
-            toast.error('일괄 삭제 중 오류가 발생했습니다.');
+            handleDeleteFailure(e, ids);
         } finally {
-            setLoading(false);
+            endMutation();
         }
     };
 
@@ -1300,22 +1499,55 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         });
     };
 
+    const getOutputIssues = (rows: TaxInvoiceIssue[]): TaxInvoiceIssue[] | null => {
+        if (writeBlocked || mutationRef.current || hasSaveConflicts) return null;
+        const staged = applyCellDrafts(issuesRef.current, savedIssues, Object.values(cellDraftsRef.current));
+        if (!staged) {
+            toast.warning('입력 오류나 조합 중인 글자를 먼저 확인해주세요.');
+            return null;
+        }
+        const byId = new Map(staged.map(issue => [issue.id, issue]));
+        return rows.map(issue => byId.get(issue.id) ?? issue);
+    };
+
+    const handleExportExcel = async () => {
+        if (exportingRef.current || filteredIssues.length === 0) return;
+        const rows = getOutputIssues(filteredIssues);
+        if (!rows) return;
+        exportingRef.current = true;
+        setIsExporting(true);
+        try {
+            await exportIssuesToExcel(rows, yearMonth);
+        } catch (error) {
+            console.error('발행리스트 엑셀 생성 실패:', error);
+            toast.error('엑셀 파일을 만들지 못했습니다. 다시 시도해주세요.');
+        } finally {
+            exportingRef.current = false;
+            if (mountedRef.current) setIsExporting(false);
+        }
+    };
+
     const handleCopySelected = async () => {
+        if (copyingSelectionRef.current) return;
         if (selectedIssues.length === 0) {
             toast.warning('복사할 항목을 선택해주세요.');
             return;
         }
 
+        const rows = getOutputIssues(selectedIssues);
+        if (!rows) return;
         const clipboardReservation = reserveImageClipboardWrite();
         if (!clipboardReservation) {
             toast.error('이 브라우저에서는 이미지 클립보드 복사를 지원하지 않습니다.');
             return;
         }
 
-        const captureRoot = createIssueCaptureTable(selectedIssues);
-        document.body.appendChild(captureRoot);
+        copyingSelectionRef.current = true;
         setIsCopyingSelection(true);
+        let captureRoot: HTMLDivElement | null = null;
         try {
+            captureRoot = createIssueCaptureTable(rows);
+            document.body.appendChild(captureRoot);
             await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
             if (document.fonts?.ready) await document.fonts.ready;
 
@@ -1341,89 +1573,135 @@ const TaxInvoiceIssueListPage: React.FC = () => {
             } as any);
 
             clipboardReservation.complete(await canvasToPngBlob(canvas));
-            await clipboardReservation.result;
-            toast.success(`선택한 ${selectedIssues.length}개 행을 이미지로 클립보드에 복사했습니다.`);
+            const outcome = await clipboardReservation.result;
+            if (!outcome.ok) throw outcome.error;
+            toast.success(`선택한 ${rows.length}개 행을 이미지로 클립보드에 복사했습니다.`);
         } catch (error) {
             clipboardReservation.cancel(error);
-            await clipboardReservation.result.catch(() => undefined);
+            await clipboardReservation.result;
             console.error('선택 항목 클립보드 복사 실패:', error);
             toast.error('이미지를 클립보드에 복사하지 못했습니다. 브라우저 권한을 확인해주세요.');
         } finally {
-            captureRoot.remove();
-            setIsCopyingSelection(false);
+            captureRoot?.remove();
+            copyingSelectionRef.current = false;
+            if (mountedRef.current) setIsCopyingSelection(false);
         }
     };
 
     // ── Inline edit staging ──
-    const handleCellCommit = async (
+    const handleCellCommit = (
         id: string | undefined,
         field: EditableField,
         value: string | number | boolean
     ) => {
-        if (!id) return;
+        if (!id || writeBlocked || mutationRef.current === 'structure') return;
         const savedIssue = savedIssues.find(issue => issue.id === id);
         if (!savedIssue) return;
 
-        const update: Partial<TaxInvoiceIssue> = field === 'recipient'
-            ? {
-                recipient: String(value),
-                recipientManuallyEdited: String(value) === String(savedIssue.recipient ?? '')
-                    ? savedIssue.recipientManuallyEdited === true
-                    : true,
-            }
-            : { [field]: value };
-
-        setIssues(prev => prev.map(issue => issue.id === id ? { ...issue, ...update } : issue));
-        setPendingChanges(prev => {
-            const nextForRow: Partial<TaxInvoiceIssue> = { ...(prev[id] || {}), ...update };
-
-            Object.keys(nextForRow).forEach(key => {
-                const issueKey = key as keyof TaxInvoiceIssue;
-                if (nextForRow[issueKey] === savedIssue[issueKey]) {
-                    delete nextForRow[issueKey];
-                }
-            });
-
-            const next = { ...prev };
-            if (Object.keys(nextForRow).length === 0) delete next[id];
-            else next[id] = nextForRow;
-
-            const nextCount = Object.keys(next).length;
-            setSaveFeedback({
-                status: 'idle',
-                message: nextCount > 0 ? `저장 전 변경 ${nextCount}건` : '변경 후 저장 버튼을 눌러주세요',
-            });
-            return next;
-        });
+        const update = getCellPatch(savedIssue, field, value);
+        const next = issuesRef.current.map(issue => issue.id === id ? { ...issue, ...update } : issue);
+        issuesRef.current = next;
+        setIssues(next);
+        if (!mutationRef.current) setSaveFeedback({ status: 'idle', message: '변경 후 저장 버튼을 눌러주세요' });
     };
 
     const handleSavePendingChanges = async () => {
-        const updates = Object.entries(pendingChanges).map(([id, data]) => ({ id, data }));
+        const drafts = Object.values(cellDraftsRef.current);
+        if (drafts.some(draft => draft.invalid || draft.composing)) {
+            toast.warning('입력 오류나 조합 중인 글자를 먼저 확인해주세요.');
+            return;
+        }
+        if (mutationRef.current || writeBlocked || hasSaveConflicts) return;
+        const staged = applyCellDrafts(issuesRef.current, savedIssues, drafts);
+        if (!staged) return;
+        const updates = Object.entries(getIssuePendingChanges(staged, savedIssues)).map(([id, data]) => ({ id, data }));
+        if (updates.length > 0 && !beginMutation('save')) return;
+        issuesRef.current = staged;
+        setIssues(staged);
+        cellDraftsRef.current = {};
+        setCellDrafts({});
+        setActiveCell(null);
+        setEditorReset(prev => prev + 1);
         if (updates.length === 0) return;
 
         const changedIds = new Set(updates.map(({ id }) => id));
         setSaving(changedIds);
         markSaving(`${updates.length}개 항목의 변경사항을 저장하는 중입니다.`);
         try {
-            await taxInvoiceListService.updateIssuesBatch(updates);
-            setSavedIssues(issues);
-            setPendingChanges({});
-            setShowPendingChanges(false);
-            markSaved(`${updates.length}개 항목의 변경사항을 저장했습니다.`);
+            await taxInvoiceListService.saveIssuesWithConflictCheck(updates, savedIssues);
+            if (!mountedRef.current) return;
+            const acknowledged = applySavedIssueUpdates(savedIssues, updates);
+            setSavedIssues(acknowledged);
+            const remaining = Object.keys(getIssuePendingChanges(issuesRef.current, acknowledged)).length;
+            if (!remaining) setShowPendingChanges(false);
+            markSaved(`${updates.length}개 항목을 저장했습니다.${remaining ? ` 추가 변경 ${remaining}건은 저장 전입니다.` : ''}`);
             toast.success(`${updates.length}개 항목의 변경사항을 저장했습니다.`);
         } catch (e) {
+            if (!mountedRef.current) return;
             console.error(e);
-            markSaveError('변경사항을 저장하지 못했습니다. 검토 목록은 유지됩니다.');
-            toast.error('변경사항 저장에 실패했습니다. 다시 시도해주세요.');
+            const completed = new Set(e instanceof IssueBatchWriteError ? e.completedIds : []);
+            const acknowledged = updates.filter(({ id }) => completed.has(id));
+            setSavedIssues(prev => applySavedIssueUpdates(prev, acknowledged));
+            const conflictError = e instanceof IssueBatchWriteError ? e.originalError : e;
+            const conflicts = conflictError instanceof IssueSaveConflictError ? conflictError.conflicts : [];
+            setSaveConflicts(conflicts);
+            const message = conflicts.length
+                ? `${acknowledged.length}개 항목 저장 완료. 다른 창에서 변경되거나 삭제된 ${conflicts.length}개 항목을 확인해주세요. 내 입력은 유지됩니다.`
+                : acknowledged.length
+                ? `${acknowledged.length}개 항목 저장 완료, ${updates.length - acknowledged.length}개 항목 저장 실패. 저장 전 변경만 검토 목록에 남겼습니다.`
+                : '변경사항을 저장하지 못했습니다. 검토 목록은 유지됩니다.';
+            markSaveError(message);
+            toast.error(message);
         } finally {
-            setSaving(new Set());
+            if (mountedRef.current) setSaving(new Set());
+            endMutation();
         }
     };
 
+    const resolveSaveConflict = (conflict: IssueSaveConflict, useLatest: boolean) => {
+        if (mutationRef.current) return;
+        const latest = conflict.current?.yearMonth === yearMonth ? conflict.current : null;
+        const current = issuesRef.current.find(issue => issue.id === conflict.id);
+        const saved = savedIssues.find(issue => issue.id === conflict.id);
+        const changes = current && saved ? getIssuePendingChanges([current], [saved])[conflict.id] ?? {} : {};
+        const discardedFields = new Set<keyof TaxInvoiceIssue>(useLatest ? conflict.fields : []);
+        if (discardedFields.has('recipient')) discardedFields.add('recipientManuallyEdited');
+        discardedFields.forEach(field => { delete changes[field]; });
+        const next = issuesRef.current.flatMap(issue => issue.id === conflict.id ? latest ? [{ ...latest, ...changes }] : [] : [issue]);
+        issuesRef.current = next;
+        setIssues(next);
+        setSavedIssues(prev => prev.flatMap(issue => issue.id === conflict.id ? latest ? [latest] : [] : [issue]));
+        const drafts = Object.fromEntries(Object.entries(cellDraftsRef.current).filter(([, draft]) =>
+            draft.rowId !== conflict.id || (latest && !discardedFields.has(draft.field))));
+        cellDraftsRef.current = drafts;
+        setCellDrafts(drafts);
+        if (!latest || conflict.operation === 'delete') setSelectedIds(prev => new Set([...prev].filter(id => id !== conflict.id)));
+        setSaveConflicts(prev => prev.filter(item => item.id !== conflict.id));
+        setActiveCell(null);
+        setEditorReset(prev => prev + 1);
+        setSaveFeedback({ status: 'idle', message: conflict.operation === 'delete'
+            ? '최신 내용을 반영했습니다. 삭제가 필요하면 다시 요청해주세요.'
+            : '최신 값과 비교했습니다. 남은 변경사항을 확인한 뒤 저장해주세요.' });
+    };
+
     const handleDiscardPendingChanges = () => {
-        if (!hasPendingChanges) return;
-        setIssues(savedIssues);
-        setPendingChanges({});
+        if ((!hasPendingChanges && !hasCellDrafts && !hasSaveConflicts) || mutationRef.current) return;
+        const conflictsById = new Map(saveConflicts.map(conflict => [conflict.id, conflict.current]));
+        const restored = savedIssues.flatMap(issue => {
+            if (!issue.id || !conflictsById.has(issue.id)) return [issue];
+            const latest = conflictsById.get(issue.id);
+            return latest?.yearMonth === yearMonth ? [latest] : [];
+        });
+        issuesRef.current = restored;
+        setIssues(restored);
+        setSavedIssues(restored);
+        setSaveConflicts([]);
+        const restoredIds = new Set(restored.map(issue => issue.id));
+        setSelectedIds(prev => new Set([...prev].filter(id => restoredIds.has(id))));
+        setActiveCell(null);
+        cellDraftsRef.current = {};
+        setCellDrafts({});
+        setEditorReset(prev => prev + 1);
         setShowPendingChanges(false);
         setSaveFeedback({ status: 'idle', message: '변경사항을 되돌렸습니다.' });
         toast.info('저장 전 변경사항을 되돌렸습니다.');
@@ -1443,29 +1721,35 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
     // ── Load site data ──
     const handleLoadSites = async () => {
+        if (mutationRef.current || writeBlocked || loadingSites || hasSaveConflicts) return;
+        const request = ++siteRequestRef.current;
+        const current = () => mountedRef.current && request === siteRequestRef.current && yearMonthRef.current === yearMonth;
         setLoadingSites(true);
         try {
             const data = await taxInvoiceListService.fetchMonthlySiteData(yearMonth);
+            if (!current()) return;
             setSiteData(data);
             setShowImportModal(true);
         } catch (e) {
+            if (!current()) return;
             console.error(e);
             toast.error('현장 데이터를 불러오지 못했습니다.');
         } finally {
-            setLoadingSites(false);
+            if (current()) setLoadingSites(false);
         }
     };
 
     // ── Import sites as issues ──
-    const handleImportSites = async (selected: SiteWorkSummary[]): Promise<boolean> => {
-        if (selected.length === 0) return false;
-        if (hasPendingChanges) {
+    const handleImportSites = async (selected: SiteWorkSummary[]): Promise<string[]> => {
+        if (selected.length === 0) return [];
+        if (hasPendingChanges || Object.keys(cellDraftsRef.current).length > 0) {
             toast.warning('먼저 변경사항을 저장하거나 되돌려주세요.');
-            return false;
+            return [];
         }
 
+        if (!beginMutation('structure')) return [];
         markSaving(`${selected.length}개 현장을 발행리스트에 추가하는 중입니다.`);
-        const startNo = issues.length;
+        const startNo = getNextIssueNo(issues) - 1;
         const monthEndDate = getMonthEndDate(yearMonth);
         const newIssues: Omit<TaxInvoiceIssue, 'id' | 'createdAt' | 'updatedAt'>[] = selected.map((s, idx) => ({
             yearMonth,
@@ -1488,11 +1772,13 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         }));
 
         const added: TaxInvoiceIssue[] = [];
+        const completedKeys: string[] = [];
         let failedCount = 0;
-        for (const issue of newIssues) {
+        for (const [index, issue] of newIssues.entries()) {
             try {
                 const id = await taxInvoiceListService.addIssue(issue);
                 added.push({ ...issue, id });
+                completedKeys.push(getSiteImportKey(selected[index]));
             } catch (e) {
                 console.error(e);
                 failedCount += 1;
@@ -1500,47 +1786,28 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         }
 
         try {
-            if (added.length > 0) {
-                const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
-                setIssues(renumbered);
-                setSavedIssues(renumbered);
-            }
-        } catch (e) {
-            console.error('현장 데이터 순번 정리 실패:', e);
-            failedCount += added.length;
+            await finishImport(added, failedCount, '현장');
+            return completedKeys;
+        } finally {
+            endMutation();
         }
-
-        if (added.length === 0 || failedCount >= selected.length) {
-            markSaveError('현장 데이터를 추가하지 못했습니다.');
-            toast.error('선택한 현장 데이터를 추가하지 못했습니다.');
-            return false;
-        }
-
-        if (failedCount > 0) {
-            markSaveError(`${added.length}건 추가, ${failedCount}건 실패했습니다.`);
-            toast.warning(`${added.length}건을 추가했고 ${failedCount}건은 실패했습니다.`);
-        } else {
-            markSaved(`${added.length}개 현장을 발행리스트에 추가했습니다.`);
-            toast.success(`${added.length}개 현장을 추가했습니다.`);
-        }
-
-        return true;
     };
 
     const handleImportDeferredIssues = async (selected: TaxInvoiceIssue[]) => {
         const importTargets = selected.filter(issue => !importedCarryoverKeys.has(getCarryoverSourceKey(issue)));
         if (importTargets.length === 0) return;
-        if (hasPendingChanges) {
+        if (hasPendingChanges || Object.keys(cellDraftsRef.current).length > 0) {
             toast.warning('먼저 변경사항을 저장하거나 되돌려주세요.');
             return;
         }
 
-        setLoading(true);
+        if (!beginMutation('structure')) return;
         markSaving(`${importTargets.length}개 이월 현장을 추가하는 중입니다.`);
-        const startNo = issues.length;
+        const startNo = getNextIssueNo(issues) - 1;
         const monthEndDate = getMonthEndDate(yearMonth);
         const added: TaxInvoiceIssue[] = [];
         let failedCount = 0;
+        let existingCount = 0;
 
         for (const [idx, source] of importTargets.entries()) {
             const sourceId = getCarryoverSourceId(source);
@@ -1569,8 +1836,9 @@ const TaxInvoiceIssueListPage: React.FC = () => {
             };
 
             try {
-                const id = await taxInvoiceListService.addIssue(newIssue);
-                added.push({ ...newIssue, id });
+                const result = await taxInvoiceListService.importDeferredIssue(newIssue);
+                added.push(result.issue);
+                if (!result.created) existingCount += 1;
             } catch (e) {
                 console.error('이월 현장 가져오기 실패:', e);
                 failedCount += 1;
@@ -1578,24 +1846,9 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         }
 
         try {
-            if (added.length > 0) {
-                const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
-                setIssues(renumbered);
-                setSavedIssues(renumbered);
-            }
-            if (failedCount > 0) {
-                markSaveError(`${added.length}건 추가, ${failedCount}건 실패했습니다.`);
-                toast.warning(`${added.length}건을 추가했고 ${failedCount}건은 실패했습니다.`);
-            } else {
-                markSaved(`${added.length}개 이월 현장을 추가했습니다.`);
-                toast.success(`${added.length}개 이월 현장을 추가했습니다.`);
-            }
-        } catch (e) {
-            console.error('이월 현장 순번 정리 실패:', e);
-            markSaveError('이월 현장 추가를 마무리하지 못했습니다.');
-            toast.error('이월 현장 추가 중 오류가 발생했습니다.');
+            await finishImport(added, failedCount, '이월 현장', existingCount);
         } finally {
-            setLoading(false);
+            endMutation();
         }
     };
 
@@ -1685,15 +1938,6 @@ const TaxInvoiceIssueListPage: React.FC = () => {
             .sort(sortMode === 'team' ? compareIssuesByTeam : compareIssuesByNo)
     ), [issues, selectedIds, sortMode]);
     const pendingChangeItems = useMemo(() => {
-        const formatValue = (field: string, value: unknown) => {
-            if (field === 'issueStatus') {
-                return STATUS_CONFIG[value as IssueStatus]?.label ?? String(value ?? '');
-            }
-            if (field === 'scanCompleted') return value ? '완료' : '미완료';
-            if (typeof value === 'number') return value.toLocaleString('ko-KR');
-            return String(value ?? '') || '(빈 셀)';
-        };
-
         return Object.entries(pendingChanges).flatMap(([id, changes]) => {
             const current = issues.find(issue => issue.id === id);
             const saved = savedIssues.find(issue => issue.id === id);
@@ -1707,22 +1951,16 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                         key: `${id}-${field}`,
                         no: current.no,
                         label: COLUMN_FILTER_LABELS[field] ?? field,
-                        before: formatValue(field, saved[issueField]),
-                        after: formatValue(field, current[issueField]),
+                        before: formatIssueValue(field, saved[issueField]),
+                        after: formatIssueValue(field, current[issueField]),
                     };
                 });
         });
     }, [issues, pendingChanges, savedIssues]);
 
-    useEffect(() => {
-        if (!hasPendingChanges) return;
-        const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-            event.preventDefault();
-            event.returnValue = '';
-        };
-        window.addEventListener('beforeunload', warnBeforeUnload);
-        return () => window.removeEventListener('beforeunload', warnBeforeUnload);
-    }, [hasPendingChanges]);
+    const feedbackMessage = saveFeedback.status === 'idle' && hasPendingChanges
+        ? `저장 전 변경 ${pendingRowCount}건`
+        : saveFeedback.message;
     const saveFeedbackClass = {
         idle: 'border-slate-200 bg-white text-slate-500',
         saving: 'border-indigo-200 bg-indigo-50 text-indigo-700',
@@ -1753,6 +1991,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
     // ─────────────────────────────────────────────
     return (
+        <IssueEditingContext.Provider value={{ disabled: writeBlocked || mutation === 'structure', drafts: cellDrafts, onDraftChange }}>
         <div className="flex flex-col p-6 gap-5 bg-slate-50 min-h-full">
             {/* 숫자 입력창 스핀 버튼 제거 스타일 */}
             <style>
@@ -1787,10 +2026,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                             role={saveFeedback.status === 'error' ? 'alert' : 'status'}
                             aria-live="polite"
                             className={`inline-flex min-h-10 items-center gap-2 rounded-xl border px-3 text-xs font-bold ${saveFeedbackClass}`}
-                            title={saveFeedback.message}
+                            title={feedbackMessage}
                         >
                             <span className={`h-2 w-2 rounded-full ${saveFeedbackDotClass}`} aria-hidden="true" />
-                            <span>{saveFeedback.message}</span>
+                            <span>{feedbackMessage}</span>
                             {savedTimeLabel && saveFeedback.status !== 'saving' && <span className="font-medium opacity-70">{savedTimeLabel}</span>}
                         </div>
 
@@ -1807,7 +2046,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                         <button
                             type="button"
                             onClick={handleDiscardPendingChanges}
-                            disabled={!hasPendingChanges || saveFeedback.status === 'saving'}
+                            disabled={(!hasPendingChanges && !hasCellDrafts && !hasSaveConflicts) || mutation !== null}
                             className="flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 transition-all hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                             <FontAwesomeIcon icon={faArrowRotateLeft} />
@@ -1817,17 +2056,17 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                         <button
                             type="button"
                             onClick={handleSavePendingChanges}
-                            disabled={!hasPendingChanges || saveFeedback.status === 'saving'}
+                            disabled={pendingSaveRowCount === 0 || mutation !== null || hasInvalidDrafts || hasComposingDrafts || writeBlocked || hasSaveConflicts}
                             className="flex min-h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white shadow-sm transition-all hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300"
                         >
                             <FontAwesomeIcon icon={faFloppyDisk} />
-                            변경사항 저장 ({pendingRowCount})
+                            변경사항 저장 ({pendingSaveRowCount})
                         </button>
 
                         <button
                             type="button"
                             onClick={handleLoadSites}
-                            disabled={loadingSites}
+                            disabled={loadingSites || writeBlocked || mutation !== null || hasSaveConflicts}
                             className="flex min-h-10 items-center gap-2 rounded-xl bg-slate-700 px-4 py-2 text-sm font-bold text-white shadow-sm transition-all hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                             <FontAwesomeIcon icon={faDownload} className={loadingSites ? 'animate-spin' : ''} />
@@ -1837,6 +2076,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                         <button
                             type="button"
                             onClick={handleAddRow}
+                            disabled={writeBlocked || mutation !== null || hasSaveConflicts}
                             className="flex min-h-10 items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-indigo-100 transition-all hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 active:scale-95"
                         >
                             <FontAwesomeIcon icon={faPlus} />
@@ -1845,19 +2085,19 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
                         <button
                             type="button"
-                            onClick={() => exportIssuesToExcel(filteredIssues, yearMonth)}
-                            disabled={filteredIssues.length === 0}
+                            onClick={handleExportExcel}
+                            disabled={filteredIssues.length === 0 || isExporting || writeBlocked || mutation !== null || hasInvalidDrafts || hasComposingDrafts || hasSaveConflicts}
                             className="flex min-h-10 items-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2 text-sm font-bold text-emerald-700 transition-all hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                             <FontAwesomeIcon icon={faFileExcel} />
-                            엑셀
+                            {isExporting ? '엑셀 생성 중...' : '엑셀'}
                         </button>
 
                         {selectedIds.size > 0 && (
                             <button
                                 type="button"
                                 onClick={handleCopySelected}
-                                disabled={isCopyingSelection}
+                                disabled={isCopyingSelection || writeBlocked || mutation !== null || hasInvalidDrafts || hasComposingDrafts || hasSaveConflicts}
                                 className="flex min-h-10 items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-bold text-indigo-700 transition-all hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 active:scale-95 disabled:cursor-wait disabled:opacity-60"
                             >
                                 <FontAwesomeIcon icon={isCopyingSelection ? faRotateRight : faCopy} className={isCopyingSelection ? 'animate-spin' : ''} />
@@ -1869,6 +2109,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={handleBulkDelete}
+                                disabled={writeBlocked || mutation !== null || hasSaveConflicts}
                                 className="flex min-h-10 items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-600 transition-all hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 active:scale-95"
                             >
                                 <FontAwesomeIcon icon={faTrash} />
@@ -1879,7 +2120,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                         <button
                             type="button"
                             onClick={handleRefresh}
-                            disabled={loading || loadingDeferredSites}
+                            disabled={loading || loadingDeferredSites || mutation !== null}
                             className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-all hover:border-indigo-200 hover:text-indigo-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
                             title="목록 새로고침"
                             aria-label="목록 새로고침"
@@ -1888,6 +2129,52 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                         </button>
                     </div>
                 </div>
+
+                {loadError && (
+                    <div role="alert" className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                        <span>{loadError}</span>
+                        <button type="button" onClick={handleRefresh} disabled={loading || mutation !== null} className="shrink-0 rounded-lg border border-red-200 bg-white px-3 py-2 font-bold disabled:opacity-40">목록 다시 불러오기</button>
+                    </div>
+                )}
+                {hasSaveConflicts && (
+                    <section aria-label="동시 수정 충돌" className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+                        <h2 className="font-bold">다른 창의 변경사항을 확인해주세요</h2>
+                        <p>{saveConflicts.some(conflict => conflict.operation === 'delete')
+                            ? '변경된 항목의 삭제를 중단했습니다. 최신 내용을 반영한 뒤 삭제가 필요한 항목만 다시 선택해주세요. 확인 버튼으로 삭제되지는 않습니다.'
+                            : '내 입력은 보관되어 있습니다. 항목별로 사용할 값을 선택한 뒤 다시 저장해주세요. 선택만으로 저장되지는 않습니다.'}</p>
+                        {saveConflicts.map(conflict => {
+                            const local = issues.find(issue => issue.id === conflict.id);
+                            const available = conflict.current?.yearMonth === yearMonth;
+                            return <div key={conflict.id} className="space-y-2 rounded-lg border border-amber-200 bg-white p-3">
+                                <p className="font-bold">{local?.no}번 · {local?.recipient || '(공급받는자 없음)'}</p>
+                                {!available && <p>다른 창에서 삭제되었거나 다른 달로 이동된 항목입니다. 아래 내용을 확인한 뒤 현재 목록에서 정리해주세요.</p>}
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left">
+                                        <thead><tr><th className="p-1">항목</th><th className="p-1">{conflict.operation === 'delete' ? '확인했던 값' : '내 입력'}</th><th className="p-1">최신 값</th></tr></thead>
+                                        <tbody>{conflict.fields.map(field => {
+                                            const draft = cellDrafts[`${conflict.id}:${field}`];
+                                            return <tr key={field}>
+                                                <td className="p-1">{COLUMN_FILTER_LABELS[field] ?? (field === 'recipientManuallyEdited' ? '공급받는자 입력 방식' : field)}</td>
+                                                <td className="whitespace-pre-wrap break-all p-1">{draft ? draft.value || '(빈 셀)' : formatIssueValue(field, local?.[field])}</td>
+                                                <td className="whitespace-pre-wrap break-all p-1">{available ? formatIssueValue(field, conflict.current?.[field]) : '(현재 목록에 없음)'}</td>
+                                            </tr>;
+                                        })}</tbody>
+                                    </table>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    {available && conflict.operation !== 'delete' && <button type="button" onClick={() => resolveSaveConflict(conflict, false)} className="rounded border border-amber-300 px-3 py-2 font-bold">내 입력 유지</button>}
+                                    <button type="button" onClick={() => resolveSaveConflict(conflict, true)} className="rounded border border-slate-300 px-3 py-2 font-bold">{available ? conflict.operation === 'delete' ? '최신 내용 확인' : '충돌 항목은 최신 값 사용' : '현재 목록에서 정리'}</button>
+                                </div>
+                            </div>;
+                        })}
+                    </section>
+                )}
+                {hasCellDrafts && (
+                    <div role="status" className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        <span>{hasInvalidDrafts ? '입력 오류가 있는 셀이 있습니다.' : '입력 중인 정상 값은 저장할 때 함께 반영됩니다.'} 검색으로 숨겨진 입력도 유지됩니다. 내용을 확인하거나 되돌려주세요.</span>
+                        <button type="button" onClick={clearAllFilters} className="shrink-0 rounded-lg border border-amber-200 bg-white px-3 py-2 font-bold">입력 중인 셀 보기</button>
+                    </div>
+                )}
 
                 {showPendingChanges && hasPendingChanges && (
                     <div className="overflow-hidden rounded-2xl border border-amber-200 bg-amber-50 shadow-sm">
@@ -1931,6 +2218,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => stepMonth(-1)}
+                                disabled={mutation !== null}
                                 className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-50 hover:text-indigo-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                                 aria-label="이전 달 보기"
                                 title="이전 달"
@@ -1943,6 +2231,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => stepMonth(1)}
+                                disabled={mutation !== null}
                                 className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-50 hover:text-indigo-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                                 aria-label="다음 달 보기"
                                 title="다음 달"
@@ -2066,7 +2355,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                 <button
                                     type="button"
                                     onClick={() => handleImportDeferredIssues(previousDeferredIssues)}
-                                    disabled={loading || importableDeferredCount === 0}
+                                    disabled={writeBlocked || mutation !== null || hasSaveConflicts || importableDeferredCount === 0}
                                     className="text-[11px] font-bold text-blue-700 hover:text-blue-900 disabled:text-slate-300 disabled:cursor-not-allowed"
                                 >
                                     전체 가져오기
@@ -2093,7 +2382,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                 <button
                                                     type="button"
                                                     onClick={() => handleImportDeferredIssues([s.source])}
-                                                    disabled={loading}
+                                                    disabled={writeBlocked || mutation !== null || hasSaveConflicts}
                                                     className="w-6 h-6 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
                                                     title="현재 월 발행리스트에 추가"
                                                     aria-label={`${s.siteName} 현재 월 발행리스트에 추가`}
@@ -2299,7 +2588,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                     <th className="px-3 py-3 text-center font-black text-slate-500 whitespace-nowrap w-14">삭제</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-100">
+                            <tbody key={`${yearMonth}:${editorReset}`} className="divide-y divide-slate-100">
                                 {loading ? (
                                     <tr>
                                         <td colSpan={16} className="py-16 text-center text-slate-400">
@@ -2310,9 +2599,9 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                 ) : filteredIssues.length === 0 ? (
                                     <tr>
                                         <td colSpan={16} className="py-16 text-center text-slate-400">
-                                            <p className="font-bold">{issues.length > 0 ? '조건에 맞는 결과가 없습니다' : '데이터가 없습니다'}</p>
+                                            <p className="font-bold">{loadError ? '목록을 확인할 수 없습니다' : issues.length > 0 ? '조건에 맞는 결과가 없습니다' : '데이터가 없습니다'}</p>
                                             <p className="text-sm mt-1">
-                                                {issues.length > 0 ? '검색어나 적용된 필터를 확인해주세요.' : '행 추가 또는 현장 데이터 가져오기로 시작하세요.'}
+                                                {loadError ? '목록 다시 불러오기를 눌러주세요.' : issues.length > 0 ? '검색어나 적용된 필터를 확인해주세요.' : '행 추가 또는 현장 데이터 가져오기로 시작하세요.'}
                                             </p>
                                             {issues.length > 0 && activeFilterCount > 0 && (
                                                 <button
@@ -2351,7 +2640,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                             <tr
                                                 key={issue.id}
                                                 aria-busy={isSaving}
-                                                className={`group transition-colors hover:brightness-[0.98] ${rowToneClass} ${isSaving ? 'pointer-events-none opacity-60' : ''}`}
+                                                className={`group transition-colors hover:brightness-[0.98] ${rowToneClass} ${isSaving ? 'opacity-60' : ''}`}
                                             >
                                                 {/* Checkbox */}
                                                 <td className={`sticky left-0 z-10 bg-inherit px-3 py-2 text-center ${statusAccentClass}`}>
@@ -2527,10 +2816,11 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                         value={STATUS_CONFIG[issue.issueStatus]?.label || issue.issueStatus}
                                                         options={['ready', 'pending', 'issued', 'deferred'].map(k => STATUS_CONFIG[k as IssueStatus].label)}
                                                         field="issueStatus"
+                                                        allowEmpty={false}
                                                         rowId={issue.id}
                                                         onCommit={(id, _f, v) => {
-                                                            const key = (Object.entries(STATUS_CONFIG) as [IssueStatus, any][]).find(([_, cfg]) => cfg.label === v)?.[0] || 'ready';
-                                                            handleStatusChange(id, key as IssueStatus);
+                                                            const key = (Object.entries(STATUS_CONFIG) as [IssueStatus, any][]).find(([_, cfg]) => cfg.label === v)?.[0];
+                                                            if (key) handleStatusChange(id, key);
                                                         }}
                                                         rowIndex={idx}
                                                         colIndex={10}
@@ -2544,6 +2834,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                     <button
                                                         type="button"
                                                         onClick={() => handleScanToggle(issue.id, issue.scanCompleted)}
+                                                        disabled={writeBlocked || mutation === 'structure'}
                                                         title={issue.scanCompleted ? '노임서류 완료 해제' : '노임서류 완료 처리'}
                                                         aria-label={`${issue.no}번 노임서류 ${issue.scanCompleted ? '완료 해제' : '완료 처리'}`}
                                                         aria-pressed={issue.scanCompleted}
@@ -2581,6 +2872,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                     <button
                                                         type="button"
                                                         onClick={() => handleDelete(issue.id)}
+                                                        disabled={writeBlocked || mutation !== null || hasSaveConflicts}
                                                         className="text-slate-300 hover:text-red-500 transition-colors p-1 rounded-lg hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
                                                         aria-label={`${issue.no}번 ${issue.recipient || '이름 없는'} 항목 삭제`}
                                                         title="항목 삭제"
@@ -2598,7 +2890,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                             {issues.length > 0 && (
                                 <tfoot>
                                     <tr className="bg-slate-50 border-t-2 border-slate-200 font-black text-slate-700">
-                                        <td colSpan={5} className="px-3 py-3 text-base">
+                                        <td colSpan={6} className="px-3 py-3 text-base">
                                             조회 합계 ({filteredIssues.length}건)
                                         </td>
                                         <td className="px-3 py-3 text-right text-base">
@@ -2621,9 +2913,13 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                     sites={siteData}
                     onClose={() => setShowImportModal(false)}
                     onImport={handleImportSites}
+                    blocked={writeBlocked}
+                    refreshing={loading}
+                    onRefresh={handleRefresh}
                 />
             )}
         </div>
+        </IssueEditingContext.Provider>
     );
 };
 
