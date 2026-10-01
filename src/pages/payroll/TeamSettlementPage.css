@@ -1,0 +1,157 @@
+/* Keep the same fields and actions when tables reflow into mobile cards. */
+.team-settlement-page__readonly-value {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .team-settlement-page,
+  .team-settlement-page .grid > *,
+  .team-settlement-page .flex > * {
+    min-width: 0;
+  }
+
+  .team-settlement-page {
+    overflow-wrap: anywhere;
+  }
+
+  .team-settlement-page .overflow-auto > table,
+  .team-settlement-page .overflow-auto > table > tbody {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Retain column headers for assistive technology. */
+  .team-settlement-page .overflow-auto > table > thead {
+    position: absolute !important;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .team-settlement-page .overflow-auto > table > tbody > tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: 0.75rem;
+    padding: 0.5rem;
+    border: 1px solid var(--team-settlement-accent-border, #cbd5e1);
+    border-radius: 0.75rem;
+  }
+
+  .team-settlement-page .overflow-auto > table > tbody > tr > td {
+    display: block;
+    min-width: 0;
+    padding: 0.375rem;
+    border: 0;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .team-settlement-page td[data-label]::before {
+    display: block;
+    margin-bottom: 0.25rem;
+    color: #64748b;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    content: attr(data-label);
+  }
+
+  .team-settlement-page .overflow-auto > table > tbody > tr > td:is(
+    [colspan], [data-label="현장"], [data-label="상대팀"], [data-label="항목"],
+    [data-label="대상"], [data-label="비고"], [data-label="사유"],
+    [data-label="금액"], [data-label="노임총액"], [data-label="상세"], [data-label="더상세"]
+  ) {
+    grid-column: 1 / -1;
+  }
+
+  .team-settlement-page td:is([data-label="금액"], [data-label="노임총액"]) {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .team-settlement-page td[data-label] > *,
+  .team-settlement-page td[data-label] input {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .team-settlement-page td[data-label] input {
+    width: 100%;
+    margin-inline: 0;
+    text-align: left;
+  }
+
+  .team-settlement-page td[data-label] > .text-center {
+    text-align: left;
+  }
+
+  .team-settlement-page td:is([data-label="상세"], [data-label="더상세"])::before {
+    display: none;
+  }
+
+  .team-settlement-page td:is([data-label="상세"], [data-label="더상세"]) > .flex {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .team-settlement-page .overflow-auto > table > tbody > tr:has(> td[colspan]) {
+    display: block;
+    padding: 0;
+    background: transparent;
+  }
+
+  .team-settlement-page .overflow-auto > table > tbody > tr > td[colspan] {
+    padding: 0.5rem;
+  }
+
+  .team-settlement-page td[colspan] > .rounded-lg {
+    padding: 0.5rem;
+    border: 0;
+  }
+
+  .team-settlement-page input,
+  .team-settlement-page select,
+  .team-settlement-page textarea {
+    font-size: 16px;
+  }
+
+  .team-settlement-page button,
+  .team-settlement-page input,
+  .team-settlement-page select {
+    min-height: 44px;
+  }
+
+  .team-settlement-page input:disabled {
+    min-height: 32px;
+    color: #334155;
+    -webkit-text-fill-color: #334155;
+    opacity: 1;
+  }
+
+  .team-settlement-page__readonly-input:disabled {
+    display: none;
+  }
+
+  .team-settlement-page__readonly-value {
+    display: block;
+    width: 100%;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .team-settlement-page__summary-card .truncate,
+  .team-settlement-page__final-card .truncate {
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .team-settlement-page__summary-card .truncate {
+    font-size: clamp(0.875rem, 4vw, 1.125rem);
+  }
+}

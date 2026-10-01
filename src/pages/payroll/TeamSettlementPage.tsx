@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
+import './TeamSettlementPage.css';
 import {
   closestCenter,
   DndContext,
@@ -3734,7 +3735,7 @@ export const TeamSettlementPage: React.FC = () => {
         <React.Fragment key={line.id}>
           <tr className={summaryRowClassName}>
             {showKindColumn && (
-              <td className="px-2 py-2 border text-center align-middle whitespace-nowrap">
+              <td data-label="구분" className="px-2 py-2 border text-center align-middle whitespace-nowrap">
                 <span
                   className={`inline-flex items-center px-2 py-1 rounded-full border text-xs font-semibold ${getKindBadgeClassName(
                     line.kind
@@ -3744,10 +3745,10 @@ export const TeamSettlementPage: React.FC = () => {
                 </span>
               </td>
             )}
-            <td className="px-2 py-2 border text-center align-middle whitespace-nowrap">
+            <td data-label={showSiteInsteadOfCounterTeam ? '현장' : '상대팀'} className="px-2 py-2 border text-center align-middle whitespace-nowrap">
               {showSiteInsteadOfCounterTeam ? (
                 editableManual ? (
-                  <input
+                  <input aria-label={showSiteInsteadOfCounterTeam ? '현장' : '상대팀'}
                     className="mx-auto block w-full border rounded px-2 py-1 text-center"
                     value={line.siteName}
                     onChange={(e) => {
@@ -3769,7 +3770,7 @@ export const TeamSettlementPage: React.FC = () => {
                   <div className="text-center text-slate-800 font-medium">{String(line.siteName ?? '').trim() || '-'}</div>
                 )
               ) : editableManual ? (
-                <input
+                <input aria-label={showSiteInsteadOfCounterTeam ? '현장' : '상대팀'}
                   className="mx-auto block w-full border rounded px-2 py-1 text-center"
                   value={line.counterTeamName ?? ''}
                   onChange={(e) => {
@@ -3791,8 +3792,8 @@ export const TeamSettlementPage: React.FC = () => {
                 <div className="text-center font-bold text-slate-900">{line.counterTeamName ?? '-'}</div>
               )}
             </td>
-            <td className="px-1 py-2 border text-center align-middle whitespace-nowrap">
-              <input
+            <td data-label="공수" className="px-1 py-2 border text-center align-middle whitespace-nowrap">
+              <input aria-label="공수"
                 className="mx-auto block w-20 border rounded px-2 py-1 text-center"
                 value={formatManDay1(line.manDay)}
                 disabled={!editableManual}
@@ -3813,8 +3814,8 @@ export const TeamSettlementPage: React.FC = () => {
               />
             </td>
             {showSupportRateColumn && (
-              <td className="px-1 py-2 border text-center align-middle whitespace-nowrap">
-                <input
+              <td data-label="지원단가" className="px-1 py-2 border text-center align-middle whitespace-nowrap">
+                <input aria-label="지원단가"
                   key={`support-rate:${line.id}:${Math.round(supportUnitPrice ?? 0)}`}
                   type="text"
                   inputMode="numeric"
@@ -3838,8 +3839,8 @@ export const TeamSettlementPage: React.FC = () => {
                 />
               </td>
             )}
-            <td className="px-1 py-2 border text-center align-middle whitespace-nowrap">
-              <CurrencyInput
+            <td data-label={line.kind === '지원' ? '노임총액' : '금액'} className="px-1 py-2 border text-center align-middle whitespace-nowrap">
+              <CurrencyInput aria-label={line.kind === '지원' ? '노임총액' : '금액'}
                 className="mx-auto block w-28 border rounded px-2 py-1 text-center"
                 value={line.amount}
                 disabled={!editableAmount}
@@ -3863,10 +3864,10 @@ export const TeamSettlementPage: React.FC = () => {
                 }}
               />
             </td>
-            <td className="px-2 py-2 border text-center align-middle">
-              <div className="flex min-w-[220px] items-center gap-2">
-                <input
-                  className="min-w-0 flex-1 border rounded px-2 py-1 text-center"
+            <td data-label="비고" className="px-2 py-2 border text-center align-middle">
+              <div className="flex min-w-0 items-center gap-2 md:min-w-[220px]">
+                <input aria-label="비고"
+                  className="team-settlement-page__readonly-input min-w-0 flex-1 border rounded px-2 py-1 text-center"
                   value={line.memo ?? ''}
                   disabled={!canEdit || isMergedSupportLine}
                   onChange={(e) => {
@@ -3884,9 +3885,10 @@ export const TeamSettlementPage: React.FC = () => {
                     }
                   }}
                 />
+                {(!canEdit || isMergedSupportLine) && <span className="team-settlement-page__readonly-value">{(line.memo ?? '') || '—'}</span>}
               </div>
             </td>
-            <td className="px-2 py-2 border text-center">
+            <td data-label="상세" className="px-2 py-2 border text-center">
               <div className="flex items-center justify-center gap-1">
                 <button
                   type="button"
@@ -3969,12 +3971,12 @@ export const TeamSettlementPage: React.FC = () => {
                         <table className="w-full text-sm border-collapse">
                           <thead>
                             <tr className="bg-slate-50 text-slate-600">
-                              <th className="text-left px-2 py-2 border">현장</th>
-                              <th className="text-right px-2 py-2 border">작업자수</th>
-                              <th className="text-right px-2 py-2 border">공수 합계</th>
-                              {showSiteRateColumn && <th className="text-right px-2 py-2 border">지원단가</th>}
-                              <th className="text-right px-2 py-2 border">{lineIsSupportOrigin ? '노임총액 합계' : '금액 합계'}</th>
-                              <th className="text-center px-2 py-2 border">상세</th>
+                              <th scope="col" className="text-left px-2 py-2 border">현장</th>
+                              <th scope="col" className="text-right px-2 py-2 border">작업자수</th>
+                              <th scope="col" className="text-right px-2 py-2 border">공수 합계</th>
+                              {showSiteRateColumn && <th scope="col" className="text-right px-2 py-2 border">지원단가</th>}
+                              <th scope="col" className="text-right px-2 py-2 border">{lineIsSupportOrigin ? '노임총액 합계' : '금액 합계'}</th>
+                              <th scope="col" className="text-center px-2 py-2 border">상세</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -4010,12 +4012,12 @@ export const TeamSettlementPage: React.FC = () => {
                               return (
                                 <React.Fragment key={siteKey}>
                                   <tr className="bg-white">
-                                    <td className="px-2 py-2 border">{site.siteName}</td>
-                                    <td className="px-2 py-2 border text-right">{workerCount}</td>
-                                    <td className="px-2 py-2 border text-right">{formatManDay1(site.manDay)}</td>
+                                    <td data-label="현장" className="px-2 py-2 border">{site.siteName}</td>
+                                    <td data-label="작업자수" className="px-2 py-2 border text-right">{workerCount}</td>
+                                    <td data-label="공수 합계" className="px-2 py-2 border text-right">{formatManDay1(site.manDay)}</td>
                                     {showSiteRateColumn && (
-                                      <td className="px-2 py-2 border text-right">
-                                        <input
+                                      <td data-label="지원단가" className="px-2 py-2 border text-right">
+                                        <input aria-label="지원단가"
                                           key={`support-site-rate:${line.id}:${site.key}:${Math.round(siteSupportUnitPrice ?? 0)}`}
                                           type="text"
                                           inputMode="numeric"
@@ -4039,8 +4041,8 @@ export const TeamSettlementPage: React.FC = () => {
                                         />
                                       </td>
                                     )}
-                                    <td className="px-2 py-2 border text-right">{formatCurrency(site.amount)}</td>
-                                    <td className="px-2 py-2 border text-center">
+                                    <td data-label={lineIsSupportOrigin ? '노임총액 합계' : '금액 합계'} className="px-2 py-2 border text-right">{formatCurrency(site.amount)}</td>
+                                    <td data-label="상세" className="px-2 py-2 border text-center">
                                       <button
                                         type="button"
                                         className={ghostButtonClassName}
@@ -4060,11 +4062,11 @@ export const TeamSettlementPage: React.FC = () => {
                                             <table className="w-full text-sm border-collapse">
                                               <thead>
                                                 <tr className="bg-white text-slate-600">
-                                                  <th className="text-left px-2 py-2 border">작업자</th>
-                                                  <th className="text-left px-2 py-2 border">소속팀</th>
-                                                  <th className="text-right px-2 py-2 border">공수</th>
-                                                  <th className="text-right px-2 py-2 border">평균단가</th>
-                                                  <th className="text-right px-2 py-2 border">{lineIsSupportOrigin ? '노임총액' : '금액'}</th>
+                                                  <th scope="col" className="text-left px-2 py-2 border">작업자</th>
+                                                  <th scope="col" className="text-left px-2 py-2 border">소속팀</th>
+                                                  <th scope="col" className="text-right px-2 py-2 border">공수</th>
+                                                  <th scope="col" className="text-right px-2 py-2 border">평균단가</th>
+                                                  <th scope="col" className="text-right px-2 py-2 border">{lineIsSupportOrigin ? '노임총액' : '금액'}</th>
                                                 </tr>
                                               </thead>
                                               <tbody>
@@ -4072,11 +4074,11 @@ export const TeamSettlementPage: React.FC = () => {
                                                   const avgUnit = safeAverage(w.amount, w.manDay);
                                                   return (
                                                     <tr key={`${siteKey}__${w.workerName}__${w.workerTeamName}`} className="bg-white">
-                                                      <td className="px-2 py-2 border">{w.workerName}</td>
-                                                      <td className="px-2 py-2 border">{w.workerTeamName}</td>
-                                                      <td className="px-2 py-2 border text-right">{formatManDay1(w.manDay)}</td>
-                                                      <td className="px-2 py-2 border text-right">{formatAverageCurrency(avgUnit)}</td>
-                                                      <td className="px-2 py-2 border text-right">{formatCurrency(w.amount)}</td>
+                                                      <td data-label="작업자" className="px-2 py-2 border">{w.workerName}</td>
+                                                      <td data-label="소속팀" className="px-2 py-2 border">{w.workerTeamName}</td>
+                                                      <td data-label="공수" className="px-2 py-2 border text-right">{formatManDay1(w.manDay)}</td>
+                                                      <td data-label="평균단가" className="px-2 py-2 border text-right">{formatAverageCurrency(avgUnit)}</td>
+                                                      <td data-label={lineIsSupportOrigin ? '노임총액' : '금액'} className="px-2 py-2 border text-right">{formatCurrency(w.amount)}</td>
                                                     </tr>
                                                   );
                                                 })}
@@ -4105,7 +4107,7 @@ export const TeamSettlementPage: React.FC = () => {
   };
 
   return (
-    <div className="team-settlement-page w-full p-3 sm:p-4 lg:p-6" style={teamSettlementAccentStyle}>
+    <div className="team-settlement-page min-w-0 w-full p-3 sm:p-4 lg:p-6" style={teamSettlementAccentStyle}>
       <style>{`
         .team-settlement-page {
           color: #0f172a;
@@ -4182,7 +4184,7 @@ export const TeamSettlementPage: React.FC = () => {
           overscroll-behavior-inline: contain;
         }
 
-        @media (max-width: 639px) {
+        @media (max-width: 767px) {
           .team-settlement-page__workspace-bar {
             position: static;
             backdrop-filter: none;
@@ -4205,10 +4207,6 @@ export const TeamSettlementPage: React.FC = () => {
 
           .team-settlement-page__team-list > button {
             min-height: 44px;
-          }
-
-          .team-settlement-page .overflow-auto > table {
-            min-width: 640px;
           }
         }
       `}</style>
@@ -4278,21 +4276,21 @@ export const TeamSettlementPage: React.FC = () => {
         </div>
 
         <div className="team-settlement-page__selector-card rounded-xl border bg-white p-3 sm:p-4">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
                 <div className="text-base font-black text-slate-900">팀</div>
-                <span className="hidden rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-600 sm:inline-flex">
+                <span className="hidden rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-600 md:inline-flex">
                   회사 공통 순서
                 </span>
               </div>
               {isTeamOrderEditing && (
-                <div className="mt-0.5 hidden text-xs font-semibold text-blue-600 sm:block">
+                <div className="mt-0.5 hidden text-xs font-semibold text-blue-600 md:block">
                   팀 버튼을 드래그해 순서를 바꾸세요.
                 </div>
               )}
             </div>
-            <div className="hidden items-center gap-1.5 sm:flex">
+            <div className="hidden items-center gap-1.5 md:flex">
               {isTeamOrderEditing && (
                 <button
                   type="button"
@@ -4320,7 +4318,7 @@ export const TeamSettlementPage: React.FC = () => {
           <label className="sr-only" htmlFor="team-settlement-team-select">정산 팀 선택</label>
           <select
             id="team-settlement-team-select"
-            className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 sm:hidden"
+            className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 md:hidden"
             value={selectedTeamId}
             onChange={(event) => handleTeamSelect(event.target.value)}
           >
@@ -4338,7 +4336,7 @@ export const TeamSettlementPage: React.FC = () => {
               strategy={horizontalListSortingStrategy}
             >
               <div
-                className="team-settlement-page__team-list mt-2 hidden gap-2.5 sm:flex"
+                className="team-settlement-page__team-list mt-2 hidden gap-2.5 md:flex"
                 role="group"
                 aria-label={isTeamOrderEditing ? '팀 순서 변경' : '팀 선택'}
               >
@@ -4448,21 +4446,21 @@ export const TeamSettlementPage: React.FC = () => {
                   <table className="w-full min-w-[680px] border-collapse text-xs">
                     <thead className="sticky top-0 bg-slate-100 text-slate-700">
                       <tr>
-                        <th className="border-b border-slate-200 px-3 py-2 text-left">출력일</th>
-                        <th className="border-b border-slate-200 px-3 py-2 text-left">현장</th>
-                        <th className="border-b border-slate-200 px-3 py-2 text-left">당시 담당팀</th>
-                        <th className="border-b border-slate-200 px-3 py-2 text-left">출력일보 작성팀</th>
-                        <th className="border-b border-slate-200 px-3 py-2 text-left">작업팀</th>
+                        <th scope="col" className="border-b border-slate-200 px-3 py-2 text-left">출력일</th>
+                        <th scope="col" className="border-b border-slate-200 px-3 py-2 text-left">현장</th>
+                        <th scope="col" className="border-b border-slate-200 px-3 py-2 text-left">당시 담당팀</th>
+                        <th scope="col" className="border-b border-slate-200 px-3 py-2 text-left">출력일보 작성팀</th>
+                        <th scope="col" className="border-b border-slate-200 px-3 py-2 text-left">작업팀</th>
                       </tr>
                     </thead>
                     <tbody>
                       {doc.sourceSnapshot.dailyReports.map((report) => (
                         <tr key={report.reportId} className="text-slate-800 odd:bg-white even:bg-slate-50/70">
-                          <td className="border-b border-slate-100 px-3 py-2 whitespace-nowrap">{report.date}</td>
-                          <td className="border-b border-slate-100 px-3 py-2 font-bold">{report.siteName || '현장 미연결'}</td>
-                          <td className="border-b border-slate-100 px-3 py-2 font-bold">{report.responsibleTeamName || '담당팀 없음'}</td>
-                          <td className="border-b border-slate-100 px-3 py-2">{report.reportTeamName || '작성팀 없음'}</td>
-                          <td className="border-b border-slate-100 px-3 py-2">
+                          <td data-label="출력일" className="border-b border-slate-100 px-3 py-2 whitespace-nowrap">{report.date}</td>
+                          <td data-label="현장" className="border-b border-slate-100 px-3 py-2 font-bold">{report.siteName || '현장 미연결'}</td>
+                          <td data-label="당시 담당팀" className="border-b border-slate-100 px-3 py-2 font-bold">{report.responsibleTeamName || '담당팀 없음'}</td>
+                          <td data-label="출력일보 작성팀" className="border-b border-slate-100 px-3 py-2">{report.reportTeamName || '작성팀 없음'}</td>
+                          <td data-label="작업팀" className="border-b border-slate-100 px-3 py-2">
                             {report.workerTeamNames.length > 0 ? report.workerTeamNames.join(', ') : '작업팀 없음'}
                           </td>
                         </tr>
@@ -4490,23 +4488,23 @@ export const TeamSettlementPage: React.FC = () => {
                 <table className="w-full text-xs border-collapse bg-white">
                   <thead>
                     <tr className="bg-amber-100 text-amber-900">
-                      <th className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">구분</th>
-                      <th className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">현장</th>
-                      <th className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">상대팀</th>
-                      <th className="text-right px-2 py-2 border border-amber-200 whitespace-nowrap">공수</th>
-                      <th className="text-right px-2 py-2 border border-amber-200 whitespace-nowrap">현재단가</th>
-                      <th className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">사유</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">구분</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">현장</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">상대팀</th>
+                      <th scope="col" className="text-right px-2 py-2 border border-amber-200 whitespace-nowrap">공수</th>
+                      <th scope="col" className="text-right px-2 py-2 border border-amber-200 whitespace-nowrap">현재단가</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">사유</th>
                     </tr>
                   </thead>
                   <tbody>
                     {supportRateMissingRows.map((row) => (
                       <tr key={row.key} className="text-slate-800">
-                        <td className="px-2 py-2 border border-amber-100 whitespace-nowrap">{row.directionLabel}</td>
-                        <td className="px-2 py-2 border border-amber-100 font-medium">{row.siteName}</td>
-                        <td className="px-2 py-2 border border-amber-100">{row.counterTeamName}</td>
-                        <td className="px-2 py-2 border border-amber-100 text-right">{formatManDay1(row.manDay)}</td>
-                        <td className="px-2 py-2 border border-amber-100 text-right">{formatCurrency(Math.round(row.currentRate))}</td>
-                        <td className="px-2 py-2 border border-amber-100 text-amber-800">{row.reason}</td>
+                        <td data-label="구분" className="px-2 py-2 border border-amber-100 whitespace-nowrap">{row.directionLabel}</td>
+                        <td data-label="현장" className="px-2 py-2 border border-amber-100 font-medium">{row.siteName}</td>
+                        <td data-label="상대팀" className="px-2 py-2 border border-amber-100">{row.counterTeamName}</td>
+                        <td data-label="공수" className="px-2 py-2 border border-amber-100 text-right">{formatManDay1(row.manDay)}</td>
+                        <td data-label="현재단가" className="px-2 py-2 border border-amber-100 text-right">{formatCurrency(Math.round(row.currentRate))}</td>
+                        <td data-label="사유" className="px-2 py-2 border border-amber-100 text-amber-800">{row.reason}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -4531,23 +4529,23 @@ export const TeamSettlementPage: React.FC = () => {
                 <table className="w-full text-xs border-collapse bg-white">
                   <thead>
                     <tr className="bg-rose-100 text-rose-900">
-                      <th className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">구분</th>
-                      <th className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">원천</th>
-                      <th className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">현장</th>
-                      <th className="text-right px-2 py-2 border border-rose-200 whitespace-nowrap">공수</th>
-                      <th className="text-right px-2 py-2 border border-rose-200 whitespace-nowrap">현재금액</th>
-                      <th className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">사유</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">구분</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">원천</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">현장</th>
+                      <th scope="col" className="text-right px-2 py-2 border border-rose-200 whitespace-nowrap">공수</th>
+                      <th scope="col" className="text-right px-2 py-2 border border-rose-200 whitespace-nowrap">현재금액</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">사유</th>
                     </tr>
                   </thead>
                   <tbody>
                     {settlementAmountMissingRows.map((row) => (
                       <tr key={row.key} className="text-slate-800">
-                        <td className="px-2 py-2 border border-rose-100 whitespace-nowrap">{row.kind}</td>
-                        <td className="px-2 py-2 border border-rose-100 whitespace-nowrap">{row.originLabel}</td>
-                        <td className="px-2 py-2 border border-rose-100 font-medium">{row.siteName}</td>
-                        <td className="px-2 py-2 border border-rose-100 text-right">{formatManDay1(row.manDay)}</td>
-                        <td className="px-2 py-2 border border-rose-100 text-right">{formatCurrency(row.amount)}</td>
-                        <td className="px-2 py-2 border border-rose-100 text-rose-800">{row.reason}</td>
+                        <td data-label="구분" className="px-2 py-2 border border-rose-100 whitespace-nowrap">{row.kind}</td>
+                        <td data-label="원천" className="px-2 py-2 border border-rose-100 whitespace-nowrap">{row.originLabel}</td>
+                        <td data-label="현장" className="px-2 py-2 border border-rose-100 font-medium">{row.siteName}</td>
+                        <td data-label="공수" className="px-2 py-2 border border-rose-100 text-right">{formatManDay1(row.manDay)}</td>
+                        <td data-label="현재금액" className="px-2 py-2 border border-rose-100 text-right">{formatCurrency(row.amount)}</td>
+                        <td data-label="사유" className="px-2 py-2 border border-rose-100 text-rose-800">{row.reason}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -4570,7 +4568,7 @@ export const TeamSettlementPage: React.FC = () => {
 
       {doc && (
         <div className="mt-6 grid grid-cols-1 2xl:grid-cols-3 gap-4">
-          <section id="settlement-transactions" className="team-settlement-page__transaction-card scroll-mt-36 rounded-2xl border bg-white p-5 shadow-sm 2xl:col-span-2">
+          <section id="settlement-transactions" className="team-settlement-page__transaction-card scroll-mt-36 min-w-0 rounded-2xl border bg-white p-3 shadow-sm sm:p-5 2xl:col-span-2">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <h2 className="team-settlement-page__transaction-title font-bold text-slate-900">
@@ -4621,12 +4619,12 @@ export const TeamSettlementPage: React.FC = () => {
                     <table className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
-                          <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">상대팀</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">지원단가</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">노임총액</th>
-                          <th className="px-2 py-2 border text-center align-middle">비고</th>
-                          <th className="px-2 py-2 border text-center align-middle"></th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle whitespace-nowrap">상대팀</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">지원단가</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">노임총액</th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle">비고</th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle"></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -4636,7 +4634,7 @@ export const TeamSettlementPage: React.FC = () => {
                       </tbody>
                     </table>
                   </div>
-                  <div className="mt-2 flex items-center justify-end gap-3 rounded-lg bg-purple-50 px-3 py-2 text-sm">
+                  <div className="mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-purple-50 px-3 py-2 text-sm">
                     <span className="font-semibold text-purple-700">총금액</span>
                     <span className="font-extrabold text-purple-900">{formatCurrency(transactionSectionTotals.salesSupport.amount)}원</span>
                     <span className="font-semibold text-purple-700">공수</span>
@@ -4655,12 +4653,12 @@ export const TeamSettlementPage: React.FC = () => {
                     <table className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
-                          <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">구분</th>
-                          <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">현장</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">금액</th>
-                          <th className="px-2 py-2 border text-center align-middle">비고</th>
-                          <th className="px-2 py-2 border text-center align-middle"></th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle whitespace-nowrap">구분</th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle whitespace-nowrap">현장</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">금액</th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle">비고</th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle"></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -4703,12 +4701,12 @@ export const TeamSettlementPage: React.FC = () => {
                     <table className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
-                          <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">상대팀</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">지원단가</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">노임총액</th>
-                          <th className="px-2 py-2 border text-center align-middle">비고</th>
-                          <th className="px-2 py-2 border text-center align-middle"></th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle whitespace-nowrap">상대팀</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">지원단가</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">노임총액</th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle">비고</th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle"></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -4718,7 +4716,7 @@ export const TeamSettlementPage: React.FC = () => {
                       </tbody>
                     </table>
                   </div>
-                  <div className="mt-2 flex items-center justify-end gap-3 rounded-lg bg-orange-50 px-3 py-2 text-sm">
+                  <div className="mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-orange-50 px-3 py-2 text-sm">
                     <span className="font-semibold text-orange-700">총금액</span>
                     <span className="font-extrabold text-orange-900">{formatCurrency(transactionSectionTotals.purchaseSupport.amount)}원</span>
                     <span className="font-semibold text-orange-700">공수</span>
@@ -4806,8 +4804,8 @@ export const TeamSettlementPage: React.FC = () => {
             </div>
           </section>
 
-          <section id="settlement-deductions" className="scroll-mt-36 rounded-2xl border bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
+          <section id="settlement-deductions" className="min-w-0 scroll-mt-36 rounded-2xl border bg-white p-3 shadow-sm sm:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold text-slate-900"><span className="mr-2 text-blue-600">02</span>공제</h2>
                 <div className="text-xs text-slate-500 mt-0.5">사무실비·급여·차량·숙소·카드·경비 구분</div>
@@ -4848,11 +4846,11 @@ export const TeamSettlementPage: React.FC = () => {
                     <table className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
-                          <th className="text-left px-2 py-2 border">구분</th>
-                          <th className="text-left px-2 py-2 border">항목</th>
-                          <th className="text-right px-2 py-2 border">금액</th>
-                          <th className="text-left px-2 py-2 border">비고</th>
-                          <th className="text-center px-2 py-2 border whitespace-nowrap">상세</th>
+                          <th scope="col" className="text-left px-2 py-2 border">구분</th>
+                          <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                          <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                          <th scope="col" className="text-left px-2 py-2 border">비고</th>
+                          <th scope="col" className="text-center px-2 py-2 border whitespace-nowrap">상세</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -4881,12 +4879,12 @@ export const TeamSettlementPage: React.FC = () => {
                     return (
                       <React.Fragment key={item.id}>
                         <tr className={item.source === 'auto' ? 'bg-white' : 'bg-amber-50'}>
-                          <td className="px-2 py-2 border text-slate-700">
+                          <td data-label="구분" className="px-2 py-2 border text-slate-700">
                             {getDeductionDisplayOriginLabel(item)}
                           </td>
-                          <td className="px-2 py-2 border">
-                            <input
-                              className="w-full border rounded px-2 py-1"
+                          <td data-label="항목" className="px-2 py-2 border">
+                            <input aria-label="항목"
+                              className="team-settlement-page__readonly-input w-full border rounded px-2 py-1"
                               value={item.category}
                               disabled={!editableRow}
                               onChange={(e) => {
@@ -4897,9 +4895,10 @@ export const TeamSettlementPage: React.FC = () => {
                                 }));
                               }}
                             />
+                            {(!editableRow) && <span className="team-settlement-page__readonly-value">{(item.category) || '—'}</span>}
                           </td>
-                          <td className="px-2 py-2 border text-right">
-                            <CurrencyInput
+                          <td data-label="금액" className="px-2 py-2 border text-right">
+                            <CurrencyInput aria-label="금액"
                               className="w-full border rounded px-2 py-1 text-right"
                               value={item.amount}
                               disabled={!editableRow}
@@ -4911,10 +4910,10 @@ export const TeamSettlementPage: React.FC = () => {
                               }}
                             />
                           </td>
-                          <td className="px-2 py-2 border">
-                            <div className="flex min-w-[220px] items-center gap-2">
-                              <input
-                                className="min-w-0 flex-1 border rounded px-2 py-1"
+                          <td data-label="비고" className="px-2 py-2 border">
+                            <div className="flex min-w-0 items-center gap-2 md:min-w-[220px]">
+                              <input aria-label="비고"
+                                className="team-settlement-page__readonly-input min-w-0 flex-1 border rounded px-2 py-1"
                                 value={item.memo ?? ''}
                                 disabled={!editableRow}
                                 onChange={(e) => {
@@ -4925,9 +4924,10 @@ export const TeamSettlementPage: React.FC = () => {
                                   }));
                                 }}
                               />
+                              {(!editableRow) && <span className="team-settlement-page__readonly-value">{(item.memo ?? '') || '—'}</span>}
                             </div>
                           </td>
-                          <td className="px-2 py-2 border text-center">
+                          <td data-label="상세" className="px-2 py-2 border text-center">
                             <div className="flex items-center justify-center gap-1">
                               {canExpand && (
                                 <button
@@ -4969,10 +4969,10 @@ export const TeamSettlementPage: React.FC = () => {
                                       <table className="w-full text-xs border-collapse">
                                         <thead>
                                           <tr className="bg-slate-50 text-slate-600">
-                                            <th className="text-left px-2 py-2 border">현장</th>
-                                            <th className="text-right px-2 py-2 border">공수</th>
-                                            <th className="text-right px-2 py-2 border">금액</th>
-                                            <th className="text-right px-2 py-2 border">원/공수</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">현장</th>
+                                            <th scope="col" className="text-right px-2 py-2 border">공수</th>
+                                            <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                                            <th scope="col" className="text-right px-2 py-2 border">원/공수</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -4985,10 +4985,10 @@ export const TeamSettlementPage: React.FC = () => {
                                           ) : (
                                             detail.sites.map((s) => (
                                               <tr key={s.siteName} className="bg-white">
-                                                <td className="px-2 py-2 border text-slate-800 font-medium">{s.siteName}</td>
-                                                <td className="px-2 py-2 border text-right">{formatManDay1(s.manDay)}</td>
-                                                <td className="px-2 py-2 border text-right">{formatCurrency(s.amount)}</td>
-                                                <td className="px-2 py-2 border text-right">
+                                                <td data-label="현장" className="px-2 py-2 border text-slate-800 font-medium">{s.siteName}</td>
+                                                <td data-label="공수" className="px-2 py-2 border text-right">{formatManDay1(s.manDay)}</td>
+                                                <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(s.amount)}</td>
+                                                <td data-label="원/공수" className="px-2 py-2 border text-right">
                                                   {formatAverageCurrency(safeAverage(s.amount, s.manDay))}
                                                 </td>
                                               </tr>
@@ -5021,10 +5021,10 @@ export const TeamSettlementPage: React.FC = () => {
                                       <table className="w-full text-xs border-collapse">
                                         <thead>
                                           <tr className="bg-slate-50 text-slate-600">
-                                            <th className="text-left px-2 py-2 border">작업자</th>
-                                            <th className="text-right px-2 py-2 border">공수</th>
-                                            <th className="text-right px-2 py-2 border">금액</th>
-                                            <th className="text-right px-2 py-2 border">원/공수</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">작업자</th>
+                                            <th scope="col" className="text-right px-2 py-2 border">공수</th>
+                                            <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                                            <th scope="col" className="text-right px-2 py-2 border">원/공수</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -5037,10 +5037,10 @@ export const TeamSettlementPage: React.FC = () => {
                                           ) : (
                                             detail.rows.map((r) => (
                                               <tr key={r.workerId} className="bg-white">
-                                                <td className="px-2 py-2 border text-slate-800 font-medium">{r.workerName}</td>
-                                                <td className="px-2 py-2 border text-right">{formatManDay1(r.manDay)}</td>
-                                                <td className="px-2 py-2 border text-right">{formatCurrency(r.amount)}</td>
-                                                <td className="px-2 py-2 border text-right">
+                                                <td data-label="작업자" className="px-2 py-2 border text-slate-800 font-medium">{r.workerName}</td>
+                                                <td data-label="공수" className="px-2 py-2 border text-right">{formatManDay1(r.manDay)}</td>
+                                                <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(r.amount)}</td>
+                                                <td data-label="원/공수" className="px-2 py-2 border text-right">
                                                   {formatAverageCurrency(safeAverage(r.amount, r.manDay))}
                                                 </td>
                                               </tr>
@@ -5074,11 +5074,11 @@ export const TeamSettlementPage: React.FC = () => {
                                       <table className="w-full text-xs border-collapse">
                                         <thead>
                                           <tr className="bg-slate-50 text-slate-600">
-                                            <th className="text-left px-2 py-2 border">대상</th>
-                                            <th className="text-left px-2 py-2 border">항목</th>
-                                            <th className="text-right px-2 py-2 border">금액</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">대상</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                            <th scope="col" className="text-right px-2 py-2 border">금액</th>
                                             {detail.mode === 'ledger' && (
-                                              <th className="text-right px-2 py-2 border">배분일수(팀/전체)</th>
+                                              <th scope="col" className="text-right px-2 py-2 border">배분일수(팀/전체)</th>
                                             )}
                                           </tr>
                                         </thead>
@@ -5092,11 +5092,11 @@ export const TeamSettlementPage: React.FC = () => {
                                           ) : (
                                             detail.rows.map((row, idx) => (
                                               <tr key={`accommodation-row-${idx}`} className="bg-white">
-                                                <td className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
-                                                <td className="px-2 py-2 border">{row.label}</td>
-                                                <td className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                                <td data-label="대상" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
+                                                <td data-label="항목" className="px-2 py-2 border">{row.label}</td>
+                                                <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
                                                 {detail.mode === 'ledger' && (
-                                                  <td className="px-2 py-2 border text-right">
+                                                  <td data-label="배분일수(팀/전체)" className="px-2 py-2 border text-right">
                                                     {safeNumber(row.teamDays)}/{safeNumber(row.totalDays)}
                                                   </td>
                                                 )}
@@ -5127,11 +5127,11 @@ export const TeamSettlementPage: React.FC = () => {
                                       <table className="w-full text-xs border-collapse">
                                         <thead>
                                           <tr className="bg-slate-50 text-slate-600">
-                                            <th className="text-left px-2 py-2 border">차량</th>
-                                            <th className="text-left px-2 py-2 border">항목</th>
-                                            <th className="text-left px-2 py-2 border">구분</th>
-                                            <th className="text-left px-2 py-2 border">일자</th>
-                                            <th className="text-right px-2 py-2 border">금액</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">차량</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">구분</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">일자</th>
+                                            <th scope="col" className="text-right px-2 py-2 border">금액</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -5144,11 +5144,11 @@ export const TeamSettlementPage: React.FC = () => {
                                           ) : (
                                             detail.rows.map((row, idx) => (
                                               <tr key={`vehicle-row-${idx}`} className="bg-white">
-                                                <td className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
-                                                <td className="px-2 py-2 border">{row.label}</td>
-                                                <td className="px-2 py-2 border">{row.note ?? '-'}</td>
-                                                <td className="px-2 py-2 border">{row.date ?? '-'}</td>
-                                                <td className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                                <td data-label="차량" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
+                                                <td data-label="항목" className="px-2 py-2 border">{row.label}</td>
+                                                <td data-label="구분" className="px-2 py-2 border">{row.note ?? '-'}</td>
+                                                <td data-label="일자" className="px-2 py-2 border">{row.date ?? '-'}</td>
+                                                <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
                                               </tr>
                                             ))
                                           )}
@@ -5176,11 +5176,11 @@ export const TeamSettlementPage: React.FC = () => {
                                       <table className="w-full text-xs border-collapse">
                                         <thead>
                                           <tr className="bg-slate-50 text-slate-600">
-                                            <th className="text-left px-2 py-2 border">카드</th>
-                                            <th className="text-left px-2 py-2 border">사용처</th>
-                                            <th className="text-left px-2 py-2 border">구분</th>
-                                            <th className="text-left px-2 py-2 border">일자</th>
-                                            <th className="text-right px-2 py-2 border">금액</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">카드</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">사용처</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">구분</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">일자</th>
+                                            <th scope="col" className="text-right px-2 py-2 border">금액</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -5193,11 +5193,11 @@ export const TeamSettlementPage: React.FC = () => {
                                           ) : (
                                             detail.rows.map((row, idx) => (
                                               <tr key={`card-row-${idx}`} className="bg-white">
-                                                <td className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
-                                                <td className="px-2 py-2 border">{row.label}</td>
-                                                <td className="px-2 py-2 border">{row.note ?? '-'}</td>
-                                                <td className="px-2 py-2 border">{row.date ?? '-'}</td>
-                                                <td className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                                <td data-label="카드" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
+                                                <td data-label="사용처" className="px-2 py-2 border">{row.label}</td>
+                                                <td data-label="구분" className="px-2 py-2 border">{row.note ?? '-'}</td>
+                                                <td data-label="일자" className="px-2 py-2 border">{row.date ?? '-'}</td>
+                                                <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
                                               </tr>
                                             ))
                                           )}
@@ -5225,12 +5225,12 @@ export const TeamSettlementPage: React.FC = () => {
                                       <table className="w-full text-xs border-collapse">
                                         <thead>
                                           <tr className="bg-slate-50 text-slate-600">
-                                            <th className="text-left px-2 py-2 border">구분</th>
-                                            <th className="text-left px-2 py-2 border">대상</th>
-                                            <th className="text-left px-2 py-2 border">항목</th>
-                                            <th className="text-left px-2 py-2 border">비고</th>
-                                            <th className="text-right px-2 py-2 border">금액</th>
-                                            <th className="text-center px-2 py-2 border whitespace-nowrap">더상세</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">구분</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">대상</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">비고</th>
+                                            <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                                            <th scope="col" className="text-center px-2 py-2 border whitespace-nowrap">더상세</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -5247,12 +5247,12 @@ export const TeamSettlementPage: React.FC = () => {
                                               return (
                                                 <React.Fragment key={`expense-aggregate-row-${row.key}-${idx}`}>
                                                   <tr className="bg-white">
-                                                    <td className="px-2 py-2 border text-slate-800 font-medium">{row.originLabel}</td>
-                                                    <td className="px-2 py-2 border">{row.subject}</td>
-                                                    <td className="px-2 py-2 border">{row.category}</td>
-                                                    <td className="px-2 py-2 border">{row.memo || '-'}</td>
-                                                    <td className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
-                                                    <td className="px-2 py-2 border text-center">
+                                                    <td data-label="구분" className="px-2 py-2 border text-slate-800 font-medium">{row.originLabel}</td>
+                                                    <td data-label="대상" className="px-2 py-2 border">{row.subject}</td>
+                                                    <td data-label="항목" className="px-2 py-2 border">{row.category}</td>
+                                                    <td data-label="비고" className="px-2 py-2 border">{row.memo || '-'}</td>
+                                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                                    <td data-label="더상세" className="px-2 py-2 border text-center">
                                                       {hasMoreDetail ? (
                                                         <button
                                                           type="button"
@@ -5278,21 +5278,21 @@ export const TeamSettlementPage: React.FC = () => {
                                                             <table className="w-full text-xs border-collapse">
                                                               <thead>
                                                                 <tr className="bg-slate-50 text-slate-600">
-                                                                  <th className="text-left px-2 py-2 border">대상</th>
-                                                                  <th className="text-left px-2 py-2 border">항목</th>
-                                                                  <th className="text-left px-2 py-2 border">비고</th>
-                                                                  <th className="text-right px-2 py-2 border">세부</th>
-                                                                  <th className="text-right px-2 py-2 border">금액</th>
+                                                                  <th scope="col" className="text-left px-2 py-2 border">대상</th>
+                                                                  <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                                                  <th scope="col" className="text-left px-2 py-2 border">비고</th>
+                                                                  <th scope="col" className="text-right px-2 py-2 border">세부</th>
+                                                                  <th scope="col" className="text-right px-2 py-2 border">금액</th>
                                                                 </tr>
                                                               </thead>
                                                               <tbody>
                                                                 {row.details.map((child, childIdx) => (
                                                                   <tr key={`expense-aggregate-child-${row.key}-${childIdx}`} className="bg-white">
-                                                                    <td className="px-2 py-2 border">{child.subject || child.label}</td>
-                                                                    <td className="px-2 py-2 border">{child.category || '-'}</td>
-                                                                    <td className="px-2 py-2 border">{child.note || '-'}</td>
-                                                                    <td className="px-2 py-2 border text-right">{child.allocation || '-'}</td>
-                                                                    <td className="px-2 py-2 border text-right">{formatCurrency(child.amount)}</td>
+                                                                    <td data-label="대상" className="px-2 py-2 border">{child.subject || child.label}</td>
+                                                                    <td data-label="항목" className="px-2 py-2 border">{child.category || '-'}</td>
+                                                                    <td data-label="비고" className="px-2 py-2 border">{child.note || '-'}</td>
+                                                                    <td data-label="세부" className="px-2 py-2 border text-right">{child.allocation || '-'}</td>
+                                                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(child.amount)}</td>
                                                                   </tr>
                                                                 ))}
                                                               </tbody>
@@ -5330,11 +5330,11 @@ export const TeamSettlementPage: React.FC = () => {
                                       <table className="w-full text-xs border-collapse">
                                         <thead>
                                           <tr className="bg-slate-50 text-slate-600">
-                                            <th className="text-left px-2 py-2 border">일자</th>
-                                            <th className="text-left px-2 py-2 border">상대/대상</th>
-                                            <th className="text-left px-2 py-2 border">항목</th>
-                                            <th className="text-left px-2 py-2 border">비고</th>
-                                            <th className="text-right px-2 py-2 border">금액</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">일자</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">상대/대상</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                            <th scope="col" className="text-left px-2 py-2 border">비고</th>
+                                            <th scope="col" className="text-right px-2 py-2 border">금액</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -5347,11 +5347,11 @@ export const TeamSettlementPage: React.FC = () => {
                                           ) : (
                                             detail.rows.map((row, idx) => (
                                               <tr key={`team-expense-row-${idx}`} className="bg-white">
-                                                <td className="px-2 py-2 border">{row.date || '-'}</td>
-                                                <td className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
-                                                <td className="px-2 py-2 border">{row.label}</td>
-                                                <td className="px-2 py-2 border">{row.note || '-'}</td>
-                                                <td className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                                <td data-label="일자" className="px-2 py-2 border">{row.date || '-'}</td>
+                                                <td data-label="상대/대상" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
+                                                <td data-label="항목" className="px-2 py-2 border">{row.label}</td>
+                                                <td data-label="비고" className="px-2 py-2 border">{row.note || '-'}</td>
+                                                <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
                                               </tr>
                                             ))
                                           )}
@@ -5382,7 +5382,7 @@ export const TeamSettlementPage: React.FC = () => {
             </div>
 
             <div id="settlement-additions" className="mt-6 scroll-mt-36">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="font-bold text-slate-900"><span className="mr-2 text-blue-600">03</span>추가</h2>
                   <div className="text-xs text-slate-500 mt-0.5">공제와 반대로 (+) 더해지는 항목</div>
@@ -5396,11 +5396,11 @@ export const TeamSettlementPage: React.FC = () => {
                 <table className="w-full text-sm border-collapse">
                   <thead>
                     <tr className="bg-slate-50 text-slate-600">
-                      <th className="text-left px-2 py-2 border">구분</th>
-                      <th className="text-left px-2 py-2 border">항목</th>
-                      <th className="text-right px-2 py-2 border">금액</th>
-                      <th className="text-left px-2 py-2 border">비고</th>
-                      <th className="text-center px-2 py-2 border whitespace-nowrap">상세</th>
+                      <th scope="col" className="text-left px-2 py-2 border">구분</th>
+                      <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                      <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                      <th scope="col" className="text-left px-2 py-2 border">비고</th>
+                      <th scope="col" className="text-center px-2 py-2 border whitespace-nowrap">상세</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -5410,10 +5410,10 @@ export const TeamSettlementPage: React.FC = () => {
                       const editableRow = canEdit && item.source === 'manual';
                       return (
                         <tr key={item.id} className={item.source === 'auto' ? 'bg-white' : 'bg-emerald-50'}>
-                          <td className="px-2 py-2 border text-slate-700">{formatAdditionOrigin(item.origin)}</td>
-                          <td className="px-2 py-2 border">
-                            <input
-                              className="w-full border rounded px-2 py-1"
+                          <td data-label="구분" className="px-2 py-2 border text-slate-700">{formatAdditionOrigin(item.origin)}</td>
+                          <td data-label="항목" className="px-2 py-2 border">
+                            <input aria-label="항목"
+                              className="team-settlement-page__readonly-input w-full border rounded px-2 py-1"
                               value={item.category}
                               disabled={!editableRow}
                               onChange={(e) => {
@@ -5424,9 +5424,10 @@ export const TeamSettlementPage: React.FC = () => {
                                 }));
                               }}
                             />
+                            {(!editableRow) && <span className="team-settlement-page__readonly-value">{(item.category) || '—'}</span>}
                           </td>
-                          <td className="px-2 py-2 border text-right">
-                            <CurrencyInput
+                          <td data-label="금액" className="px-2 py-2 border text-right">
+                            <CurrencyInput aria-label="금액"
                               className="w-full border rounded px-2 py-1 text-right"
                               value={item.amount}
                               disabled={!editableRow}
@@ -5438,10 +5439,10 @@ export const TeamSettlementPage: React.FC = () => {
                               }}
                             />
                           </td>
-                          <td className="px-2 py-2 border">
-                            <div className="flex min-w-[220px] items-center gap-2">
-                              <input
-                                className="min-w-0 flex-1 border rounded px-2 py-1"
+                          <td data-label="비고" className="px-2 py-2 border">
+                            <div className="flex min-w-0 items-center gap-2 md:min-w-[220px]">
+                              <input aria-label="비고"
+                                className="team-settlement-page__readonly-input min-w-0 flex-1 border rounded px-2 py-1"
                                 value={item.memo ?? ''}
                                 disabled={!editableRow}
                                 onChange={(e) => {
@@ -5452,9 +5453,10 @@ export const TeamSettlementPage: React.FC = () => {
                                   }));
                                 }}
                               />
+                              {(!editableRow) && <span className="team-settlement-page__readonly-value">{(item.memo ?? '') || '—'}</span>}
                             </div>
                           </td>
-                          <td className="px-2 py-2 border text-center">
+                          <td data-label="상세" className="px-2 py-2 border text-center">
                             <div className="flex items-center justify-center gap-1">
                               <button
                                 type="button"
@@ -5531,10 +5533,10 @@ export const TeamSettlementPage: React.FC = () => {
                   <table className="w-full text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 text-slate-600">
-                        <th className="text-left px-2 py-2 border">현장</th>
-                        <th className="text-right px-2 py-2 border">공수</th>
-                        <th className="text-right px-2 py-2 border">금액</th>
-                        <th className="text-right px-2 py-2 border">쓰꾸미(원/공수)</th>
+                        <th scope="col" className="text-left px-2 py-2 border">현장</th>
+                        <th scope="col" className="text-right px-2 py-2 border">공수</th>
+                        <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                        <th scope="col" className="text-right px-2 py-2 border">쓰꾸미(원/공수)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -5550,10 +5552,10 @@ export const TeamSettlementPage: React.FC = () => {
 
                           return (
                             <tr key={r.siteName} className="bg-white">
-                              <td className="px-2 py-2 border text-slate-800 font-medium">{r.siteName}</td>
-                              <td className="px-2 py-2 border text-right">{formatManDay1(r.manDay)}</td>
-                              <td className="px-2 py-2 border text-right">{formatCurrency(r.amount)}</td>
-                              <td className="px-2 py-2 border text-right">{formatAverageCurrency(skkumi)}</td>
+                              <td data-label="현장" className="px-2 py-2 border text-slate-800 font-medium">{r.siteName}</td>
+                              <td data-label="공수" className="px-2 py-2 border text-right">{formatManDay1(r.manDay)}</td>
+                              <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(r.amount)}</td>
+                              <td data-label="쓰꾸미(원/공수)" className="px-2 py-2 border text-right">{formatAverageCurrency(skkumi)}</td>
                             </tr>
                           );
                         })
@@ -5599,7 +5601,7 @@ export const TeamSettlementPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="rounded-lg bg-slate-900 text-white px-3 py-3 flex items-center justify-between">
+              <div className="rounded-lg bg-slate-900 text-white px-3 py-3 flex flex-wrap gap-2 items-center justify-between">
                 <div className="font-semibold">정산 잔액</div>
                 <div className="text-xl font-bold">{formatCurrency(totals.net)}원</div>
               </div>
