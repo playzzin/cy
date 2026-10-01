@@ -87,23 +87,27 @@ test('월 변경과 새로고침은 선택을 지우며 현재 월 항목만 삭
     await waitFor(() => expect(service.deleteIssuesWithConflictCheck).toHaveBeenCalledWith(['NEW_MONTH'], [expect.objectContaining({ id: 'NEW_MONTH' })]));
 });
 
-test('저장 중 같은 행과 다른 행에 추가한 변경을 보존하고 재저장한다', async () => {
+test('하단 저장은 상단 버튼과 상태를 공유하고 저장 중 추가한 변경을 보존하여 재저장한다', async () => {
     const saving = deferred<void>();
     (service.updateIssuesBatch as jest.Mock).mockReturnValueOnce(saving.promise);
     mount(); await ready();
+    expect(screen.getByRole('button', { name: '하단 변경사항 저장 (0)' })).toBeDisabled();
     edit('품목', '첫 저장');
-    fireEvent.click(screen.getByRole('button', { name: '변경사항 저장 (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: '하단 변경사항 저장 (1)' }));
     edit('품목', '같은 행 추가'); edit('비고', '다른 행 추가', 1);
     expect(screen.getByRole('button', { name: '변경사항 저장 (2)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '하단 변경사항 저장 (2)' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '다음 달 보기' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '목록 새로고침' })).toBeDisabled();
     await act(async () => saving.resolve());
     expect(screen.getByRole('button', { name: '변경사항 저장 (2)' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '하단 변경사항 저장 (2)' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: '변경사항 저장 (2)' }));
     await waitFor(() => expect(service.updateIssuesBatch).toHaveBeenLastCalledWith([
         { id: 'A', data: { item: '같은 행 추가' } }, { id: 'B', data: { note: '다른 행 추가' } },
     ]));
     await waitFor(() => expect(screen.getByRole('button', { name: '변경사항 저장 (0)' })).toBeDisabled());
+    expect(screen.getByRole('button', { name: '하단 변경사항 저장 (0)' })).toBeDisabled();
 });
 
 test('저장 중 원래 값으로 되돌린 편집도 새 저장 기준과 비교하여 남긴다', async () => {

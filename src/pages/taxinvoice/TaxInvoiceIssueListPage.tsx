@@ -1989,6 +1989,19 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         }));
     const importableDeferredCount = deferredSites.filter(site => !site.imported).length;
 
+    const renderSaveButton = (position: 'top' | 'bottom') => (
+        <button
+            type="button"
+            aria-label={position === 'bottom' ? `하단 변경사항 저장 (${pendingSaveRowCount})` : undefined}
+            onClick={handleSavePendingChanges}
+            disabled={pendingSaveRowCount === 0 || mutation !== null || hasInvalidDrafts || hasComposingDrafts || writeBlocked || hasSaveConflicts}
+            className={`flex ${position === 'bottom' ? 'min-h-11 w-full justify-center' : 'min-h-10'} items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white shadow-sm transition-all hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300`}
+        >
+            <FontAwesomeIcon icon={faFloppyDisk} />
+            변경사항 저장 ({pendingSaveRowCount})
+        </button>
+    );
+
     // ─────────────────────────────────────────────
     return (
         <IssueEditingContext.Provider value={{ disabled: writeBlocked || mutation === 'structure', drafts: cellDrafts, onDraftChange }}>
@@ -2053,15 +2066,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                             되돌리기
                         </button>
 
-                        <button
-                            type="button"
-                            onClick={handleSavePendingChanges}
-                            disabled={pendingSaveRowCount === 0 || mutation !== null || hasInvalidDrafts || hasComposingDrafts || writeBlocked || hasSaveConflicts}
-                            className="flex min-h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white shadow-sm transition-all hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300"
-                        >
-                            <FontAwesomeIcon icon={faFloppyDisk} />
-                            변경사항 저장 ({pendingSaveRowCount})
-                        </button>
+                        {renderSaveButton('top')}
 
                         <button
                             type="button"
@@ -2346,55 +2351,59 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                     </div>
 
                     {/* Deferred Sites */}
-                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
-                        <div className="flex items-center justify-between gap-2 mb-3">
-                            <h3 className="text-xs font-black text-slate-500 uppercase tracking-wider">
-                                전월 이월 현장 ({deferredSites.length})
-                            </h3>
-                            {deferredSites.length > 0 && (
-                                <button
-                                    type="button"
-                                    onClick={() => handleImportDeferredIssues(previousDeferredIssues)}
-                                    disabled={writeBlocked || mutation !== null || hasSaveConflicts || importableDeferredCount === 0}
-                                    className="text-[11px] font-bold text-blue-700 hover:text-blue-900 disabled:text-slate-300 disabled:cursor-not-allowed"
-                                >
-                                    전체 가져오기
-                                </button>
+                    <div className="flex min-w-0 flex-col gap-3">
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+                            <div className="flex items-center justify-between gap-2 mb-3">
+                                <h3 className="text-xs font-black text-slate-500 uppercase tracking-wider">
+                                    전월 이월 현장 ({deferredSites.length})
+                                </h3>
+                                {deferredSites.length > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleImportDeferredIssues(previousDeferredIssues)}
+                                        disabled={writeBlocked || mutation !== null || hasSaveConflicts || importableDeferredCount === 0}
+                                        className="text-[11px] font-bold text-blue-700 hover:text-blue-900 disabled:text-slate-300 disabled:cursor-not-allowed"
+                                    >
+                                        전체 가져오기
+                                    </button>
+                                )}
+                            </div>
+                            {loadingDeferredSites ? (
+                                <p className="text-xs text-slate-400 text-center py-3">이월 현장을 불러오는 중입니다</p>
+                            ) : deferredSites.length === 0 ? (
+                                <p className="text-xs text-slate-400 text-center py-3">이월 현장이 없습니다</p>
+                            ) : (
+                                <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                    {deferredSites.map((s, idx) => (
+                                        <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-blue-50 border border-blue-100">
+                                            <div className="min-w-0">
+                                                <p className="text-xs font-bold text-blue-800 truncate">{s.siteName}</p>
+                                                {s.teamName && <p className="text-[10px] text-blue-500">{s.teamName}</p>}
+                                            </div>
+                                            <div className="flex items-center gap-1.5 ml-2">
+                                                <span className="text-xs font-black text-blue-700">{s.manDays}</span>
+                                                {s.imported ? (
+                                                    <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-bold text-slate-400">추가됨</span>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleImportDeferredIssues([s.source])}
+                                                        disabled={writeBlocked || mutation !== null || hasSaveConflicts}
+                                                        className="w-6 h-6 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
+                                                        title="현재 월 발행리스트에 추가"
+                                                        aria-label={`${s.siteName} 현재 월 발행리스트에 추가`}
+                                                    >
+                                                        <FontAwesomeIcon icon={faPlus} className="text-[10px]" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
                             )}
                         </div>
-                        {loadingDeferredSites ? (
-                            <p className="text-xs text-slate-400 text-center py-3">이월 현장을 불러오는 중입니다</p>
-                        ) : deferredSites.length === 0 ? (
-                            <p className="text-xs text-slate-400 text-center py-3">이월 현장이 없습니다</p>
-                        ) : (
-                            <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                                {deferredSites.map((s, idx) => (
-                                    <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-blue-50 border border-blue-100">
-                                        <div className="min-w-0">
-                                            <p className="text-xs font-bold text-blue-800 truncate">{s.siteName}</p>
-                                            {s.teamName && <p className="text-[10px] text-blue-500">{s.teamName}</p>}
-                                        </div>
-                                        <div className="flex items-center gap-1.5 ml-2">
-                                            <span className="text-xs font-black text-blue-700">{s.manDays}</span>
-                                            {s.imported ? (
-                                                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-bold text-slate-400">추가됨</span>
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleImportDeferredIssues([s.source])}
-                                                    disabled={writeBlocked || mutation !== null || hasSaveConflicts}
-                                                    className="w-6 h-6 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
-                                                    title="현재 월 발행리스트에 추가"
-                                                    aria-label={`${s.siteName} 현재 월 발행리스트에 추가`}
-                                                >
-                                                    <FontAwesomeIcon icon={faPlus} className="text-[10px]" />
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
+
+                        {renderSaveButton('bottom')}
                     </div>
 
                     {/* Site Data (loaded) */}
