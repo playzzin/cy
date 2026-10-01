@@ -22,7 +22,7 @@ jest.mock('../../services/advancePaymentService', () => ({ advancePaymentService
 jest.mock('../../services/statementOutputService', () => ({ statementOutputService: { getOutputsByMonth: async () => [] } }));
 jest.mock('../../services/monthlyPayrollSettlementService', () => ({
     isFinalizedMonthlyPayrollRun: (status: string) => status === 'confirmed' || status === 'paid',
-    monthlyPayrollSettlementService: { getSettlementsByYear: jest.fn() },
+    monthlyPayrollSettlementService: { getSettlementsByYear: jest.fn(), saveSettlements: jest.fn().mockResolvedValue(undefined) },
 }));
 jest.mock('../../services/payrollConfigService', () => ({
     DEFAULT_ADVANCE_ITEM_LABELS: {
@@ -47,6 +47,10 @@ jest.mock('./components/MonthlyAdvanceLedger', () => {
 jest.mock('./components/SimplePayrollToolbar', () => ({ PayrollToolbar: (props: any) => (
     <div>
         <button onClick={props.fetchData}>조회</button>
+        <button onClick={() => props.setPageViewMode('simple')}>간편 마감</button>
+        <button onClick={() => props.setPageViewMode('ledger')}>가불대장</button>
+        <button disabled={props.payrollSettlementDisabled || props.payrollSettlementSaving || props.payrollSettlementLoading} onClick={props.handleSavePayrollSettlement}>초안 저장</button>
+        <button disabled={props.actionsDisabled} onClick={props.openPayslipPreview}>명세서</button>
         <button aria-pressed={props.businessIncomeApplied} onClick={() => props.applyCalculatedDeductions({
             applyInsurance: props.insuranceApplied, applyInsuranceTeamSiteOnly: props.insuranceTeamSiteOnly,
             applyBusinessIncome: !props.businessIncomeApplied, applyUtilities: true, applyDailyFee: props.dailyFeeApplied,
@@ -147,4 +151,78 @@ it('조회 결과가 비어 있으면 이전 급여를 다시 계산해 되살�
     await waitFor(() => expect(screen.queryByTestId('worker-0')).not.toBeInTheDocument());
     await waitFor(() => expect(screen.queryByText('급여 계산을 적용하고 있습니다...')).not.toBeInTheDocument());
     expect(screen.getByText(/현재 조회된 급여 0건/)).toBeInTheDocument();
+});
+
+jest.mock('./components/SimplePayrollClosingTable', () => ({ SimplePayrollClosingTable: ({ rows }: any) => <div>{rows.map((row: any) => <output key={row.id} data-testid={'closing-' + row.id}>{JSON.stringify(row)}</output>)}</div> }));
+it.each([true, false])('확정된 세금은 가불대장에서도 저장 당시 금액을 유지한다 (현재 원본 존재: %s)', async hasCurrentSource => {
+    const id = `${month}__worker-0__team__월급제`;
+    const empty = { standardLines: [], additionalLines: [], total: 0, hasData: false };
+    const paymentSnapshot = {
+        id, workerId: 'worker-0', workerName: '검증0', teamId: 'team', teamName: '검증팀', month,
+        companyId: '', companyName: '', idNumber: '', unitPrice: 110500, totalManDay: 10,
+        grossAmount: 1105000, invoiceGrossAmount: 1105000, laborGrossAmount: 0,
+        invoiceManDay: 10, laborManDay: 0, invoiceNetAmount: 1068535, laborNetAmount: 0,
+        totalDeduction: 36465, totalAmount: 1068535, workEntries: [],
+        deductionBreakdown: empty,
+        taxBreakdown: { ...empty, hasData: true, total: 36465, additionalLines: [
+            { label: '[3.0%] 사업소득세', amount: 33150 }, { label: '[0.3%] 소득세', amount: 3315 },
+        ] },
+        taxRateSnapshot: {}, isValid: true, errors: {}, bankName: '국민은행', bankCode: '004',
+        accountNumber: 'fixture-account', accountHolder: '검증0', displayContent: '월급',
+    };
+    (dailyReportService.getReportsByRange as jest.Mock).mockResolvedValue(hasCurrentSource ? reports(170000) : []);
+    (monthlyPayrollSettlementService.getSettlementsByYear as jest.Mock).mockResolvedValue([{
+        id: 'saved', yearMonth: month, teamId: 'team', runStatus: 'confirmed', calculationOptions: savedOptions,
+        rows: [{ rowKey: id, workerId: 'worker-0', yearMonth: month, teamId: 'team', paymentSnapshot,
+            grossAmount: 1105000, netAmount: 1068535, taxDeduction: 36465, totalDeduction: 36465, personalDeduction: 0 }],
+    }]);
+    render(<MonthlyWageDraftPage />);
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '간편 마감' }));
+    expect(JSON.parse(screen.getByTestId(`closing-${id}`).textContent || '{}').netAmount).toBe(1068535);
+    fireEvent.click(screen.getByRole('button', { name: '가불대장' }));
+    await expectTaxes(33150, 3315, ['worker-0']);
+});
+
+it('저장 설정이 늦게 도착해도 사용자의 최신 세금 선택을 유지해야 한다', async () => {
+    let resolveSaved!: (value: unknown[]) => void;
+    (monthlyPayrollSettlementService.getSettlementsByYear as jest.Mock).mockImplementationOnce(() => new Promise(resolve => { resolveSaved = resolve; }));
+    render(<MonthlyWageDraftPage />);
+    await screen.findByTestId('worker-0');
+    fireEvent.click(screen.getByRole('button', { name: '사업소득' }));
+    await expectTaxes(33150, 3315);
+    await act(async () => resolveSaved([{
+        id: 'saved', yearMonth: month, teamId: 'team', rows: [], runStatus: 'draft',
+        calculationOptions: { ...savedOptions, businessIncomeApplied: false },
+    }]));
+    await waitFor(() => expect(screen.queryByText('급여 계산을 적용하고 있습니다...')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '사업소득' })).toHaveAttribute('aria-pressed', 'true');
+    await expectTaxes(33150, 3315);
+});
+
+it('재조회가 진행 중일 때 이전 금액을 저장하면 안 된다', async () => {
+    render(<MonthlyWageDraftPage />);
+    await ready();
+    let resolveReports!: (value: unknown[]) => void;
+    (dailyReportService.getReportsByRange as jest.Mock).mockImplementationOnce(() => new Promise(resolve => { resolveReports = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: '조회' }));
+    await waitFor(() => expect(dailyReportService.getReportsByRange).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: '초안 저장' }));
+    // The save boundary is mocked: this test never writes payroll data.
+    const calls = (monthlyPayrollSettlementService.saveSettlements as jest.Mock).mock.calls;
+    await act(async () => resolveReports(reports(170000)));
+    expect(calls).toHaveLength(0);
+});
+
+it('정산 조회 실패 중 저장과 출력을 막고 재조회로 복구한다', async () => {
+    const warning = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    (monthlyPayrollSettlementService.getSettlementsByYear as jest.Mock).mockRejectedValueOnce(new Error('fixture failure'));
+    render(<MonthlyWageDraftPage />);
+    await screen.findByRole('alert');
+    expect(screen.getByRole('button', { name: '초안 저장' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '명세서' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '다시 조회' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: '명세서' })).toBeEnabled());
+    warning.mockRestore();
 });

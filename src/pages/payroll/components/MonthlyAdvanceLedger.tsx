@@ -95,6 +95,7 @@ export interface MonthlyAdvanceLedgerRow {
     workEntries?: MonthlyAdvanceLedgerWorkEntry[];
     statementTaxAmounts?: MonthlyAdvanceLedgerTaxAmounts;
     assignmentType?: 'corporate' | 'labor'; // 추가
+    finalizedAmounts?: { corporateNet: number; personalNet: number };
 }
 
 export interface MonthlyAdvanceLedgerComputedAmount {
@@ -336,7 +337,8 @@ const LedgerInputCell: React.FC<{
     onAssignmentChange?: (next: 'corporate' | 'labor') => void;
     className?: string;
     placeholder?: string;
-}> = ({ value, onChange, assignment, onAssignmentChange, className = '', placeholder = '-' }) => {
+    disabled?: boolean;
+}> = ({ value, onChange, assignment, onAssignmentChange, className = '', placeholder = '-', disabled = false }) => {
     const [draftValue, setDraftValue] = useState<string | null>(null);
 
     // 부모 td의 색상에 맞춰 input 배경색을 동적으로 지정
@@ -349,6 +351,7 @@ const LedgerInputCell: React.FC<{
         <div className="min-w-0 flex flex-col gap-0.5 group">
             <div className="min-w-0 flex items-center gap-1">
                 <input
+                    disabled={disabled}
                     type="text"
                     inputMode="numeric"
                     value={draftValue ?? formatInputAmount(value)}
@@ -371,6 +374,7 @@ const LedgerInputCell: React.FC<{
                 {onAssignmentChange && (
                     <button
                         type="button"
+                        disabled={disabled}
                         onClick={() => onAssignmentChange(assignment === 'corporate' ? 'labor' : 'corporate')}
                         className={`shrink-0 w-4 h-4 flex items-center justify-center rounded-[2px] text-[9px] font-bold transition-colors ${
                             assignment === 'corporate'
@@ -450,7 +454,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 const isTouchedRow = touchedRowKeysRef.current.has(row.rowKey);
                 const initialInputChanged = initialInput !== previousInitialInput;
                 const shouldAdoptInitial = Boolean(initialInput)
-                    && !isTouchedRow
+                    && (!isTouchedRow || Boolean(row.finalizedAmounts))
                     && (initialInputChanged || isManualInputEffectivelyEmpty(prevInput, defaultAssignment));
                 const existing = shouldAdoptInitial ? initialInput : (prevInput ?? initialInput);
                 if (shouldAdoptInitial && existing !== prevInput) {
@@ -566,6 +570,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
 
     const updateSideField = useCallback(
         (rowKey: string, side: LedgerSide, field: LedgerSideNumberField, value: number) => {
+            if (rows.some(row => row.rowKey === rowKey && row.finalizedAmounts)) return;
             touchedRowKeysRef.current.add(rowKey);
             setInputsByRowKey((prev) => {
                 const base = prev[rowKey] ?? createEmptyManualInput();
@@ -581,10 +586,11 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 };
             });
         },
-        []
+        [rows]
     );
 
     const updatePersonalMemo = useCallback((rowKey: string, value: string) => {
+        if (rows.some(row => row.rowKey === rowKey && row.finalizedAmounts)) return;
         touchedRowKeysRef.current.add(rowKey);
         setInputsByRowKey((prev) => {
             const base = prev[rowKey] ?? createEmptyManualInput();
@@ -596,9 +602,10 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 },
             };
         });
-    }, []);
+    }, [rows]);
 
     const updateAllocationMode = useCallback((rowKey: string, value: MonthlyAdvanceAllocationMode) => {
+        if (rows.some(row => row.rowKey === rowKey && row.finalizedAmounts)) return;
         touchedRowKeysRef.current.add(rowKey);
         setInputsByRowKey((prev) => {
             const sourceRow = rows.find((row) => row.rowKey === rowKey);
@@ -618,10 +625,11 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     }, [rows]);
 
     const updateAllAllocationModes = useCallback((value: MonthlyAdvanceAllocationMode) => {
-        rows.forEach((row) => touchedRowKeysRef.current.add(row.rowKey));
+        rows.filter(row => !row.finalizedAmounts).forEach((row) => touchedRowKeysRef.current.add(row.rowKey));
         setInputsByRowKey((prev) => {
             const next = { ...prev };
             rows.forEach((row) => {
+                if (row.finalizedAmounts) return;
                 const defaultAssignment = resolveDefaultMonthlyAdvanceAssignment(row);
                 const base = prev[row.rowKey] ?? createEmptyManualInput(defaultAssignment);
                 next[row.rowKey] = {
@@ -635,6 +643,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     }, [rows]);
 
     const updateItemAssignment = useCallback((rowKey: string, itemKey: string, value: 'corporate' | 'labor') => {
+        if (rows.some(row => row.rowKey === rowKey && row.finalizedAmounts)) return;
         touchedRowKeysRef.current.add(rowKey);
         setInputsByRowKey((prev) => {
             const base = prev[rowKey] ?? createEmptyManualInput();
@@ -649,7 +658,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 },
             };
         });
-    }, []);
+    }, [rows]);
 
     const isInsuranceEligibleForRowEntry = useCallback(
         (entry: MonthlyAdvanceLedgerWorkEntry, row: MonthlyAdvanceLedgerRow): boolean => {
@@ -861,9 +870,11 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
 
         return rows
             .map((row) => {
-                const baseManual = inputsByRowKey[row.rowKey]
+                const baseManual = (row.finalizedAmounts
+                    ? normalizeManualInput(initialInputs?.[row.rowKey], resolveDefaultMonthlyAdvanceAssignment(row))
+                    : inputsByRowKey[row.rowKey])
                     ?? createEmptyManualInput(resolveDefaultMonthlyAdvanceAssignment(row));
-                const manual = applyUtilities ? baseManual : maskUtilitiesInManualInput(baseManual);
+                const manual = applyUtilities || row.finalizedAmounts ? baseManual : maskUtilitiesInManualInput(baseManual);
                 const assignmentType = manual.assignmentType ?? resolveDefaultMonthlyAdvanceAssignment(row);
                 const allocationMode = manual.allocationMode ?? 'split';
                 const allocatedTotals = allocateMonthlyAdvanceTotals(row, allocationMode);
@@ -907,7 +918,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 let isWithholdingTarget = false;
                 const isDailyWageWorker = (row.salaryModel ?? '').trim() === '일급제';
 
-                if (row.statementTaxAmounts && !allocationChanged) {
+                if (row.statementTaxAmounts && (!allocationChanged || row.finalizedAmounts)) {
                     pension = floorWon(row.statementTaxAmounts.pension);
                     health = floorWon(row.statementTaxAmounts.health);
                     care = floorWon(row.statementTaxAmounts.care);
@@ -917,10 +928,10 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                     businessIncomeTax = floorWon(row.statementTaxAmounts.businessIncomeTax);
                     businessResidentTax = floorWon(row.statementTaxAmounts.businessResidentTax);
                     isWithholdingTarget = Boolean(row.statementTaxAmounts.isWithholdingTarget);
-                    const stmtDailyFee = applyDailyFee ? floorWon(row.statementTaxAmounts.dailyFee ?? 0) : 0;
+                    const stmtDailyFee = applyDailyFee || row.finalizedAmounts ? floorWon(row.statementTaxAmounts.dailyFee ?? 0) : 0;
                     if (stmtDailyFee > 0) {
                         dailyFee = stmtDailyFee;
-                    } else if (applyDailyFee && isDailyWageWorker && dailyWorkerFeePerManDay > 0) {
+                    } else if (!row.finalizedAmounts && applyDailyFee && isDailyWageWorker && dailyWorkerFeePerManDay > 0) {
                         const totalManDay = invoiceManDay + laborManDay;
                         dailyFee = floorWon(totalManDay * dailyWorkerFeePerManDay);
                     }
@@ -1134,8 +1145,8 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                     }
                 });
 
-                const corporateNet = floorWon(corporateBaseBeforeUtility - utilityAppliedToCorporate);
-                const personalNet = floorWon(personalBaseBeforeUtility - utilityShiftedToPersonal);
+                const corporateNet = row.finalizedAmounts?.corporateNet ?? floorWon(corporateBaseBeforeUtility - utilityAppliedToCorporate);
+                const personalNet = row.finalizedAmounts?.personalNet ?? floorWon(personalBaseBeforeUtility - utilityShiftedToPersonal);
 
                 return {
                     ...row,
@@ -1182,6 +1193,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
         applyDailyFee,
         applyUtilities,
         applyInsurance,
+        initialInputs,
         inputsByRowKey,
         isInsuranceEligibleForRowEntry,
         payrollConfig,
@@ -1877,7 +1889,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                         <div className="flex items-center rounded-lg bg-white p-1 ring-1 ring-slate-200">
                             <button
                                 type="button"
-                                disabled={computedRows.length === 0}
+                                disabled={!computedRows.some(row => !row.finalizedAmounts)}
                                 onClick={() => updateAllAllocationModes('split')}
                                 className={`h-7 rounded-md px-3 text-[12px] font-bold transition-colors ${
                                     allAssignedToSplit
@@ -1889,7 +1901,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                             </button>
                             <button
                                 type="button"
-                                disabled={computedRows.length === 0}
+                                disabled={!computedRows.some(row => !row.finalizedAmounts)}
                                 onClick={() => updateAllAllocationModes('corporate')}
                                 className={`h-7 rounded-md px-3 text-[12px] font-bold transition-colors ${
                                     allAssignedToCorporate
@@ -1901,7 +1913,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                             </button>
                             <button
                                 type="button"
-                                disabled={computedRows.length === 0}
+                                disabled={!computedRows.some(row => !row.finalizedAmounts)}
                                 onClick={() => updateAllAllocationModes('labor')}
                                 className={`h-7 rounded-md px-3 text-[12px] font-bold transition-colors ${
                                     allAssignedToLabor
@@ -2101,6 +2113,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                 <td rowSpan={2} className={`sticky left-[120px] z-30 w-14 min-w-14 max-w-14 whitespace-nowrap border-b border-r border-slate-300 px-1 text-center font-semibold shadow-[1px_0_0_rgba(0,0,0,0.1)] ${getSalaryModelLabelClassName(row.salaryModel)}`}>{row.salaryModel || '월급제'}</td>
                                                 <td rowSpan={2} className="sticky left-[176px] z-30 w-[112px] min-w-[112px] max-w-[112px] border-b border-r border-slate-300 bg-slate-50 px-1.5 py-1 text-center align-middle shadow-[1px_0_0_rgba(0,0,0,0.1)]">
                                                     <select
+                                                        disabled={Boolean(row.finalizedAmounts)}
                                                         aria-label={`${row.workerName} 공제 분류`}
                                                         value={row.allocationMode}
                                                         onChange={(event) => updateAllocationMode(
@@ -2126,7 +2139,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                 {showUtilities && (
                                                     <>
                                                         <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-blue-100">
-                                                            <LedgerInputCell
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)}
                                                                 value={row.manual.invoice.lodging}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'lodging', v)}
                                                                 assignment={row.manual.itemAssignments?.lodging ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
@@ -2135,7 +2148,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                             />
                                                         </td>
                                                         <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-blue-100">
-                                                            <LedgerInputCell
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)}
                                                                 value={row.manual.invoice.electricity}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'electricity', v)}
                                                                 assignment={row.manual.itemAssignments?.electricity ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
@@ -2144,7 +2157,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                             />
                                                         </td>
                                                         <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-blue-100">
-                                                            <LedgerInputCell
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)}
                                                                 value={row.manual.invoice.gas}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'gas', v)}
                                                                 assignment={row.manual.itemAssignments?.gas ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
@@ -2153,7 +2166,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                             />
                                                         </td>
                                                         <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-blue-100">
-                                                            <LedgerInputCell
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)}
                                                                 value={row.manual.invoice.water}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'water', v)}
                                                                 assignment={row.manual.itemAssignments?.water ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
@@ -2167,16 +2180,16 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                 {showAdvances && (
                                                     <>
                                                         <td className="border border-slate-300 px-1 bg-blue-100">
-                                                            <LedgerInputCell value={row.manual.invoice.carry} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'carry', v)} />
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)} value={row.manual.invoice.carry} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'carry', v)} />
                                                         </td>
                                                         <td className="border border-slate-300 px-1 bg-blue-100">
-                                                            <LedgerInputCell value={row.manual.invoice.carrySecond} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'carrySecond', v)} />
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)} value={row.manual.invoice.carrySecond} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'carrySecond', v)} />
                                                         </td>
                                                         <td className="border border-slate-300 px-1 bg-blue-100">
-                                                            <LedgerInputCell value={row.manual.invoice.currentAdvance} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'currentAdvance', v)} />
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)} value={row.manual.invoice.currentAdvance} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'currentAdvance', v)} />
                                                         </td>
                                                         <td className="border border-slate-300 px-1 bg-blue-100">
-                                                            <LedgerInputCell value={row.manual.invoice.currentAdvanceSecond} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'currentAdvanceSecond', v)} />
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)} value={row.manual.invoice.currentAdvanceSecond} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'currentAdvanceSecond', v)} />
                                                         </td>
                                                         <td className="border border-slate-300 px-2 text-right bg-yellow-200 text-yellow-900 font-semibold">{formatAmount(row.invoiceAdvanceTotal)}</td>
                                                     </>
@@ -2192,6 +2205,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                                 <span>{formatAmount(row.dailyFee)}</span>
                                                                 {row.dailyFee > 0 && (
                                                                     <button
+                                                                        disabled={Boolean(row.finalizedAmounts)}
                                                                         onClick={() => updateItemAssignment(row.rowKey, 'dailyFee',
                                                                             (row.manual.itemAssignments?.['dailyFee'] ?? row.assignmentType ?? 'labor') === 'corporate' ? 'labor' : 'corporate'
                                                                         )}
@@ -2215,6 +2229,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                 <td rowSpan={2} className="border border-slate-300 px-2 bg-lime-100 align-top">
                                                     <input
                                                         type="text"
+                                                        disabled={Boolean(row.finalizedAmounts)}
                                                         value={row.manual.personalMemo}
                                                         onChange={(e) => updatePersonalMemo(row.rowKey, e.target.value)}
                                                         placeholder="메모"
@@ -2230,7 +2245,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                 {showUtilities && (
                                                     <>
                                                         <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-emerald-100">
-                                                            <LedgerInputCell
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)}
                                                                 value={row.manual.labor.internet}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'internet', v)}
                                                                 assignment={row.manual.itemAssignments?.internet ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
@@ -2239,7 +2254,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                             />
                                                         </td>
                                                         <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-emerald-100">
-                                                            <LedgerInputCell
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)}
                                                                 value={row.manual.labor.management}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'management', v)}
                                                                 assignment={row.manual.itemAssignments?.management ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
@@ -2248,7 +2263,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                             />
                                                         </td>
                                                         <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-emerald-100">
-                                                            <LedgerInputCell
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)}
                                                                 value={row.manual.labor.fine}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'fine', v)}
                                                                 assignment={row.manual.itemAssignments?.fine ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
@@ -2257,7 +2272,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                             />
                                                         </td>
                                                         <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-emerald-100">
-                                                            <LedgerInputCell
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)}
                                                                 value={row.manual.labor.other}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'other', v)}
                                                                 assignment={row.manual.itemAssignments?.other ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
@@ -2271,16 +2286,16 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                 {showAdvances && (
                                                     <>
                                                         <td className="border border-slate-300 px-1 bg-emerald-100">
-                                                            <LedgerInputCell value={row.manual.labor.carry} onChange={(v) => updateSideField(row.rowKey, 'labor', 'carry', v)} />
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)} value={row.manual.labor.carry} onChange={(v) => updateSideField(row.rowKey, 'labor', 'carry', v)} />
                                                         </td>
                                                         <td className="border border-slate-300 px-1 bg-emerald-100">
-                                                            <LedgerInputCell value={row.manual.labor.carrySecond} onChange={(v) => updateSideField(row.rowKey, 'labor', 'carrySecond', v)} />
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)} value={row.manual.labor.carrySecond} onChange={(v) => updateSideField(row.rowKey, 'labor', 'carrySecond', v)} />
                                                         </td>
                                                         <td className="border border-slate-300 px-1 bg-emerald-100">
-                                                            <LedgerInputCell value={row.manual.labor.currentAdvance} onChange={(v) => updateSideField(row.rowKey, 'labor', 'currentAdvance', v)} />
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)} value={row.manual.labor.currentAdvance} onChange={(v) => updateSideField(row.rowKey, 'labor', 'currentAdvance', v)} />
                                                         </td>
                                                         <td className="border border-slate-300 px-1 bg-emerald-100">
-                                                            <LedgerInputCell value={row.manual.labor.currentAdvanceSecond} onChange={(v) => updateSideField(row.rowKey, 'labor', 'currentAdvanceSecond', v)} />
+                                                            <LedgerInputCell disabled={Boolean(row.finalizedAmounts)} value={row.manual.labor.currentAdvanceSecond} onChange={(v) => updateSideField(row.rowKey, 'labor', 'currentAdvanceSecond', v)} />
                                                         </td>
                                                         <td className="border border-slate-300 px-2 text-right bg-yellow-200 font-semibold">{formatAmount(row.laborAdvanceTotal)}</td>
                                                     </>

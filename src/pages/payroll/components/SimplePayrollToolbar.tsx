@@ -98,6 +98,7 @@ export interface PayrollToolbarProps {
     payrollSettlementLoading: boolean;
     payrollSettlementFeedback: string;
     payrollSettlementDisabled: boolean;
+    actionsDisabled?: boolean;
 }
 
 const ToggleButton: React.FC<{
@@ -191,6 +192,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
     payrollSettlementLoading,
     payrollSettlementFeedback,
     payrollSettlementDisabled,
+    actionsDisabled = false,
 }) => {
     const selectedWorker = workerOptions.find((worker) => worker.id === selectedWorkerId);
     const normalizedWorkerSearch = workerSearchText.trim();
@@ -620,7 +622,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                             <div className="flex flex-wrap gap-1.5">
                                 <button
                                     type="button"
-                                    disabled={isPaymentDataEmpty}
+                                    disabled={isPaymentDataEmpty || actionsDisabled}
                                     onClick={() => setShowKBPreview(true)}
                                     className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                                 >
@@ -629,7 +631,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                                 </button>
                                 <button
                                     type="button"
-                                    disabled={isPaymentDataEmpty}
+                                    disabled={isPaymentDataEmpty || actionsDisabled}
                                     onClick={openPayslipPreview}
                                     className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                                 >
@@ -638,7 +640,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                                 </button>
                                 <button
                                     type="button"
-                                    disabled={isPaymentDataEmpty || batchDownloading}
+                                    disabled={isPaymentDataEmpty || batchDownloading || actionsDisabled}
                                     onClick={handleBatchDownload}
                                     className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                                 >
@@ -647,7 +649,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                                 </button>
                                 <button
                                     type="button"
-                                    disabled={isLedgerRowsDataEmpty}
+                                    disabled={isLedgerRowsDataEmpty || actionsDisabled}
                                     onClick={() => advanceLedgerRef.current?.downloadExcel(rangeLabel || currentYearMonth)}
                                     className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                                 >

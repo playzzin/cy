@@ -1399,12 +1399,13 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     // usePayrollData 훅 통합
     const { 
         loading, 
+        loadError,
         paymentData, 
         basePaymentData,
         setPaymentData,
         ledgerRowsData, 
         errorCount, 
-        refetch: fetchData 
+        refetch: refetchPayrollData
     } = usePayrollData(startMonth, endMonth, { 
         selectedTeamId: selectedTeamId || undefined, 
         selectedWorkerId: selectedWorkerId || undefined 
@@ -1441,6 +1442,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [, setFiltersReady] = useState<boolean>(false);
     const [, setDeductionLabelMap] = useState<Record<string, string>>(buildStandardDeductionLabelMap());
     const [payrollConfig, setPayrollConfig] = useState<PayrollConfig | null>(null);
+    const [payrollConfigLoadError, setPayrollConfigLoadError] = useState<string | null>(null);
+    const [payrollConfigLoading, setPayrollConfigLoading] = useState(true);
     const advanceLabelSet = useMemo(() => buildAdvanceLabelSet(payrollConfig), [payrollConfig]);
     const [showInsuranceSettings, setShowInsuranceSettings] = useState<boolean>(false);
     const [insuranceConfigSaving, setInsuranceConfigSaving] = useState<boolean>(false);
@@ -1472,7 +1475,20 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [savedPayrollSettlements, setSavedPayrollSettlements] = useState<MonthlyPayrollSettlement[]>([]);
     const [payrollSettlementSaving, setPayrollSettlementSaving] = useState<boolean>(false);
     const [payrollSettlementLoading, setPayrollSettlementLoading] = useState<boolean>(false);
+    const [payrollSettlementLoadError, setPayrollSettlementLoadError] = useState<string | null>(null);
+    const [payrollReloadKey, setPayrollReloadKey] = useState(0);
+    const fetchData = useCallback(() => {
+        setPayrollReloadKey(previous => previous + 1);
+        void refetchPayrollData();
+    }, [refetchPayrollData]);
     const [payrollSettlementFeedback, setPayrollSettlementFeedback] = useState<string>('');
+    const payrollDataBlocked = loading || Boolean(loadError) || payrollSettlementLoading
+        || Boolean(payrollSettlementLoadError) || payrollConfigLoading || Boolean(payrollConfigLoadError) || !payrollConfig || deductionApplyInProgress;
+    const ensurePayrollReady = useCallback(() => {
+        if (!payrollDataBlocked) return true;
+        alert(loadError || payrollSettlementLoadError || payrollConfigLoadError || '급여 조회와 계산이 완료된 뒤 다시 시도해 주세요.');
+        return false;
+    }, [loadError, payrollConfigLoadError, payrollDataBlocked, payrollSettlementLoadError]);
     const advanceLedgerRef = useRef<MonthlyAdvanceLedgerHandle>(null);
     const [kbReceiverDisplay, setKbReceiverDisplay] = useState<string>('㈜다원');
     const [kbMemoSuffix, setKbMemoSuffix] = useState<string>('{이름} 가불');
@@ -1486,6 +1502,12 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const applyRunSeqRef = React.useRef(0);
     const applyWatchdogRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const restoredCalculationOptionsRef = React.useRef<string>('');
+    useEffect(() => {
+        if (!loading && !loadError && !payrollSettlementLoading && !payrollSettlementLoadError) return;
+        setShowKBPreview(false);
+        setKbPreviewSnapshot(null);
+        setShowPayslipModal(false);
+    }, [loading, loadError, payrollSettlementLoading, payrollSettlementLoadError]);
 
     const companyNameById = useMemo<Record<string, string>>(() => {
         const map: Record<string, string> = {};
@@ -1653,6 +1675,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
     // --- Copy Logic ---
     const handleCopyToClipboard = async () => {
+        if (!ensurePayrollReady()) return;
         if (!printRef.current) return;
         if (resolvedPayslipTarget && !ensurePayslipIssueReady([resolvedPayslipTarget], '이미지 복사')) return;
         setCopying(true);
@@ -1842,6 +1865,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         }
 
         setPayrollSettlementLoading(true);
+        setPayrollSettlementLoadError(null);
         Promise.all(years.map((year) => monthlyPayrollSettlementService.getSettlementsByYear(year)))
             .then((results) => {
                 if (!alive) return;
@@ -1855,6 +1879,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 console.error('[MonthlyWageDraftPage] saved settlement load failed:', error);
                 if (!alive) return;
                 setSavedPayrollSettlements([]);
+                setPayrollSettlementLoadError('저장된 정산을 불러오지 못했습니다. 다시 조회해 주세요.');
                 setPayrollSettlementFeedback('저장된 정산을 불러오지 못했습니다.');
             })
             .finally(() => {
@@ -1864,7 +1889,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         return () => {
             alive = false;
         };
-    }, [monthRange, monthRangeSet]);
+    }, [monthRange, monthRangeSet, payrollReloadKey]);
 
     const selectedTeamLabel = useMemo(() => {
         if (!selectedTeamId) return '팀전체';
@@ -2055,33 +2080,55 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             return filterValue === ledgerSalaryModelFilter;
         };
 
-        const rows = ledgerRowsData.filter(matchesSalaryModelFilter);
+        const sourceRows = new Map(ledgerRowsData.map(row => [row.rowKey, row]));
+        const visiblePaymentIds = new Set(filteredPaymentData.map(item => item.id));
+        finalizedSnapshotByPaymentId.forEach(({ payment, row: saved }, paymentId) => {
+            if (!visiblePaymentIds.has(paymentId)) return;
+            const rowKey = saved.rowKey || paymentId;
+            const source = sourceRows.get(rowKey);
+            const corporateNet = toNumber(saved.invoiceNetAmount ?? payment.invoiceNetAmount);
+            const netAmount = toNumber(saved.netAmount ?? payment.totalAmount);
+            sourceRows.set(rowKey, {
+                ...source,
+                rowKey, id: paymentId, month: payment.month, date: payment.month, type: '월급',
+                teamId: payment.teamId, teamName: payment.teamName,
+                workerId: payment.workerId, workerName: payment.workerName,
+                salaryModel: paymentId.endsWith('__일급제') ? '일급제' : paymentId.endsWith('__용역팀') ? '용역팀' : '월급제',
+                unitPrice: payment.unitPrice,
+                invoiceManDay: payment.invoiceManDay, laborManDay: payment.laborManDay,
+                invoiceGrossAmount: payment.invoiceGrossAmount, laborGrossAmount: payment.laborGrossAmount,
+                amount: payment.grossAmount, workEntries: payment.workEntries,
+                manual: saved.manualInput as LedgerManualInput | undefined,
+                finalizedAmounts: { corporateNet, personalNet: netAmount - corporateNet },
+            });
+        });
+        const rows = Array.from(sourceRows.values()).filter(matchesSalaryModelFilter);
         if (filterMode === 'team') return rows;
         if (selectedWorkerId) {
             return rows.filter((item) => item.workerId === selectedWorkerId);
         }
         return filterRowsByWorkerName(rows, workerSearchText);
-    }, [filterMode, ledgerRowsData, ledgerSalaryModelFilter, selectedWorkerId, workerSearchText]);
+    }, [filterMode, filteredPaymentData, finalizedSnapshotByPaymentId, ledgerRowsData, ledgerSalaryModelFilter, selectedWorkerId, workerSearchText]);
 
     const paymentDataByLedgerKey = useMemo(() => {
         const map = new Map<string, PaymentData>();
-        paymentData.forEach((item) => {
+        filteredPaymentData.forEach((item) => {
             const salaryModel = item.id.endsWith('__일급제') ? '일급제' : item.id.endsWith('__용역팀') ? '용역팀' : '월급제';
             map.set(`${item.month}__${item.workerId}__${item.teamId}__${salaryModel}`, item);
         });
         return map;
-    }, [paymentData]);
+    }, [filteredPaymentData]);
 
     const paymentDataByWorkerMonthKey = useMemo(() => {
         const map = new Map<string, PaymentData[]>();
-        paymentData.forEach((item) => {
+        filteredPaymentData.forEach((item) => {
             const key = `${item.month}__${item.workerId}`;
             const prev = map.get(key) ?? [];
             prev.push(item);
             map.set(key, prev);
         });
         return map;
-    }, [paymentData]);
+    }, [filteredPaymentData]);
 
     const ledgerRows = useMemo<MonthlyAdvanceLedgerRow[]>(
         () =>
@@ -2561,6 +2608,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     useEffect(() => {
         let mounted = true;
         const loadPayrollConfig = async () => {
+            setPayrollConfigLoading(true);
+            setPayrollConfigLoadError(null);
             try {
                 const config = await payrollConfigService.getConfig();
                 if (!mounted) return;
@@ -2568,6 +2617,9 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 setPayrollConfig(config);
             } catch (error) {
                 console.error('Failed to load payroll deduction config:', error);
+                if (mounted) setPayrollConfigLoadError('급여 계산 설정을 불러오지 못했습니다. 다시 조회해 주세요.');
+            } finally {
+                if (mounted) setPayrollConfigLoading(false);
             }
         };
 
@@ -2575,7 +2627,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         return () => {
             mounted = false;
         };
-    }, []);
+    }, [payrollReloadKey]);
 
     const openInsuranceSettings = useCallback(() => {
         const config = payrollConfig;
@@ -2688,6 +2740,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         applyDailyFee: false,
         applyInsuranceTeamSiteOnly: false,
     });
+    const calculationScope = [startMonth, endMonth, selectedTeamId || 'all'].join('|');
+    const userCalculationOptionsByScopeRef = useRef(new Map<string, typeof requestedCalculationOptionsRef.current>());
 
     const applyCalculatedDeductions = useCallback((params: {
         applyInsurance: boolean;
@@ -2696,6 +2750,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         applyDailyFee: boolean;
         applyInsuranceTeamSiteOnly: boolean;
         immediate?: boolean;
+        automatic?: boolean;
     }) => {
         const effectiveApplyUtilities = true;
         const config = payrollConfigRef.current;
@@ -2704,7 +2759,14 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             return;
         }
 
-        requestedCalculationOptionsRef.current = { ...params, applyUtilities: effectiveApplyUtilities };
+        requestedCalculationOptionsRef.current = {
+            applyInsurance: params.applyInsurance,
+            applyBusinessIncome: params.applyBusinessIncome,
+            applyUtilities: effectiveApplyUtilities,
+            applyDailyFee: params.applyDailyFee,
+            applyInsuranceTeamSiteOnly: params.applyInsuranceTeamSiteOnly,
+        };
+        if (!params.automatic) userCalculationOptionsByScopeRef.current.set(calculationScope, requestedCalculationOptionsRef.current);
         setInsuranceApplied(params.applyInsurance);
         setInsuranceTeamSiteOnly(params.applyInsuranceTeamSiteOnly);
         setBusinessIncomeApplied(params.applyBusinessIncome);
@@ -2899,6 +2961,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             }
         }, delay);
     }, [
+        calculationScope,
         isEntryInWorkerTeamSite,
         markApplyFinished,
         markApplyStarted,
@@ -2918,7 +2981,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     } | null>(null);
 
     useEffect(() => {
-        if (loading || payrollSettlementLoading) {
+        if (loading || loadError || payrollSettlementLoading || payrollSettlementLoadError || payrollConfigLoading || payrollConfigLoadError) {
             applyRunSeqRef.current += 1;
             if (applyDebounceRef.current !== null) {
                 clearTimeout(applyDebounceRef.current);
@@ -2938,7 +3001,9 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             selectedTeamId || 'all',
             makePayrollCalculationOptionsSignature(savedCalculationOptions),
         ].join('|') : '';
-        const shouldRestore = Boolean(savedCalculationOptions && restoredCalculationOptionsRef.current !== restorationKey);
+        const shouldRestore = Boolean(savedCalculationOptions
+            && restoredCalculationOptionsRef.current !== restorationKey
+            && !userCalculationOptionsByScopeRef.current.has(calculationScope));
         restoredCalculationOptionsRef.current = restorationKey;
 
         const previous = appliedCalculationSourceRef.current;
@@ -2948,25 +3013,31 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
         // 조회 결과는 세금 계산 전 원본이다. 저장 설정 복원 여부와 별개로
         // 새 원본에는 현재 적용 중인 설정을 다시 계산해야 한다.
-        const options = shouldRestore && savedCalculationOptions ? {
+        const options = userCalculationOptionsByScopeRef.current.get(calculationScope) ?? (shouldRestore && savedCalculationOptions ? {
             applyInsurance: savedCalculationOptions.insuranceApplied,
             applyInsuranceTeamSiteOnly: savedCalculationOptions.insuranceTeamSiteOnly,
             applyBusinessIncome: savedCalculationOptions.businessIncomeApplied,
             applyUtilities: savedCalculationOptions.utilitiesApplied,
             applyDailyFee: savedCalculationOptions.dailyFeeApplied,
-        } : requestedCalculationOptionsRef.current;
+        } : requestedCalculationOptionsRef.current);
         applyCalculatedDeductions({
             ...options,
             immediate: true,
+            automatic: true,
         });
     }, [
         applyCalculatedDeductions,
         basePaymentData,
+        calculationScope,
         clearApplyWatchdog,
         endMonth,
         loading,
+        loadError,
         payrollConfig,
+        payrollConfigLoading,
+        payrollConfigLoadError,
         payrollSettlementLoading,
+        payrollSettlementLoadError,
         savedCalculationOptions,
         selectedTeamId,
         startMonth,
@@ -2990,6 +3061,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     }, [customPayslipContractorName, payslipContractorOption]);
 
     const openPayslipPreview = useCallback(() => {
+        if (!ensurePayrollReady()) return;
         if (filteredPaymentData.length === 0) return;
 
         // 명세서 모달 오픈 직전 최신 공제/세금 상태를 강제로 반영해 미리보기 표시와 계산값을 동기화한다.
@@ -3001,6 +3073,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 applyDailyFee: dailyFeeApplied,
                 applyInsuranceTeamSiteOnly: insuranceTeamSiteOnly,
                 immediate: true, // 모달 오픈 전 즉시 반영
+                automatic: true,
             });
         }
 
@@ -3014,6 +3087,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         businessIncomeApplied,
         dailyFeeApplied,
         filteredPaymentData,
+        ensurePayrollReady,
         insuranceApplied,
         insuranceTeamSiteOnly,
         payslipPaymentData,
@@ -3101,6 +3175,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const selectedPayslipOutputId = resolvedPayslipTarget ? (payslipOutputIds[resolvedPayslipTarget.id] ?? '') : '';
 
     const ensurePayslipIssueReady = useCallback((rows: PaymentData[], actionLabel: string): boolean => {
+        if (!ensurePayrollReady()) return false;
         const summary = validateMonthlyPayslipRows(rows);
         const topIssues = summary.issues.slice(0, 8).map(getPayslipIssueLabel).join('\n');
 
@@ -3120,7 +3195,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         }
 
         return true;
-    }, []);
+    }, [ensurePayrollReady]);
 
     const buildPayslipOutputRecord = useCallback((
         item: PaymentData,
@@ -4368,6 +4443,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
     // 국민은행용 엑셀 다운로드 (미리보기 스냅샷 기준)
     const handleDownloadKBExcel = () => {
+        if (!ensurePayrollReady()) return;
         if (kbPrimaryAccountAppliedRowIds.size > 0 && !ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
         const snapshot = kbPreviewSnapshot;
         if (!snapshot) {
@@ -4549,6 +4625,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             return;
         }
 
+        if (!ensurePayrollReady()) return;
         if (kbSourcePaymentData.length === 0) {
             alert('현재 조회 조건에 해당하는 국민은행 출력 대상이 없습니다.');
             return;
@@ -4585,6 +4662,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         applyCalculatedDeductions,
         buildKBPreviewSnapshot,
         buildKBPreviewSourceRows,
+        ensurePayrollReady,
         businessIncomeApplied,
         dailyFeeApplied,
         insuranceApplied,
@@ -4607,7 +4685,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const kbAllPreviewRowsSelected = kbPreviewRows.length > 0
         && kbPreviewRows.every((row) => kbSelectedTransferRowIds.has(row.sourceRowId));
     const kbAppliedPrimaryAccountCount = kbPreviewRows.filter((row) => row.usesPrimaryAccount).length;
-    const canDownloadKBExcel = Boolean(kbPreviewSnapshot && kbPreviewValidRows.length > 0);
+    const canDownloadKBExcel = !payrollDataBlocked && Boolean(kbPreviewSnapshot && kbPreviewValidRows.length > 0);
 
     const toggleKBPreviewRowSelection = (sourceRowId: string) => {
         setKbSelectedTransferRowIds((current) => {
@@ -4773,6 +4851,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const batchRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
     const handleDownloadImage = async () => {
+        if (!ensurePayrollReady()) return;
         if (!printRef.current || !resolvedPayslipTarget) return;
         if (!ensurePayslipIssueReady([resolvedPayslipTarget], '파일 저장')) return;
 
@@ -4798,6 +4877,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     };
 
     const handleBatchDownload = async () => {
+        if (!ensurePayrollReady()) return;
         if (payslipPaymentData.length === 0) {
             alert('다운로드할 데이터가 없습니다.');
             return;
@@ -4889,6 +4969,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     };
 
     const handleSavePayrollSettlement = async () => {
+        if (!ensurePayrollReady()) return;
         if (filterMode === 'worker') {
             alert('정산 저장은 팀 모드에서 진행해 주세요. 개인 저장은 팀 전체 저장본을 덮어쓸 수 있어 제한됩니다.');
             return;
@@ -5171,6 +5252,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     }, [monthRange, monthRangeSet]);
 
     const handlePayrollRunTransition = async (nextStatus: Exclude<MonthlyPayrollRunStatus, 'draft'>) => {
+        if (!ensurePayrollReady()) return;
         if (filterMode === 'worker') {
             alert('급여 상태 변경은 팀 모드에서만 할 수 있습니다.');
             return;
@@ -5536,7 +5618,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     payrollSettlementLoading={payrollSettlementLoading}
                     payrollSettlementFeedback={payrollSettlementFeedback}
                     payrollSettlementDisabled={
-                        filterMode === 'worker'
+                        payrollDataBlocked || filterMode === 'worker'
                         || filteredPaymentData.length === 0
                         || deductionApplyInProgress
                         || simplePayrollRunStatus === 'reviewed'
@@ -5544,9 +5626,16 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                         || simplePayrollRunStatus === 'paid'
                         || simplePayrollRunStatus === 'mixed'
                     }
+                    actionsDisabled={payrollDataBlocked}
                 />
             )}
 
+            {(loadError || payrollSettlementLoadError || payrollConfigLoadError) && (
+                <div role="alert" className="my-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                    {loadError || payrollSettlementLoadError || payrollConfigLoadError}
+                    <button type="button" onClick={fetchData} className="ml-3 underline">다시 조회</button>
+                </div>
+            )}
             {!hideHeader && <PayrollReviewCenter
                 rows={payrollReviewRows}
                 rangeLabel={rangeLabel}
@@ -6282,7 +6371,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     onOpenDetailed={() => setPageViewMode('standard')}
                     onOpenLedger={() => setPageViewMode('ledger')}
                     runStatus={simplePayrollRunStatus}
-                    statusActionDisabled={filterMode === 'worker' || deductionApplyInProgress || simplePayrollRunStatus === 'mixed'}
+                    statusActionDisabled={payrollDataBlocked || filterMode === 'worker' || simplePayrollRunStatus === 'mixed'}
                     statusActionLoading={payrollSettlementSaving || payrollSettlementLoading}
                     onSaveDraft={handleSavePayrollSettlement}
                     onMarkReviewed={() => handlePayrollRunTransition('reviewed')}
@@ -6293,6 +6382,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
             {pageViewMode === 'ledger' && (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                    <fieldset disabled={payrollDataBlocked} className="m-0 flex min-h-0 min-w-0 flex-1 flex-col border-0 p-0">
                     <MonthlyAdvanceLedger
                         ref={advanceLedgerRef}
                         rows={ledgerRows}
@@ -6311,6 +6401,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                         initialInputs={initialLedgerInputs}
                         visibleSections={ledgerVisibleSections}
                     />
+                    </fieldset>
                 </div>
             )}
 

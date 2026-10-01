@@ -55,3 +55,47 @@ it('이전 요청이 먼저 완료되어도 최신 요청이 끝날 때까지 �
     expect(result.current.loading).toBe(false);
     expect(result.current.paymentData[0]?.grossAmount).toBe(200000);
 });
+
+it('새 월 조회가 실패하면 이전 월 금액을 현재 결과로 남기면 안 된다', async () => {
+    const warning = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    (dailyReportService.getReportsByRange as jest.Mock)
+        .mockResolvedValueOnce(reports('2026-08', 100000))
+        .mockRejectedValueOnce(new Error('fixture network failure'));
+    const { result, rerender } = renderHook(({ month }) => usePayrollData(month, month), { initialProps: { month: '2026-08' } });
+    await waitFor(() => expect(result.current.paymentData[0]?.grossAmount).toBe(100000));
+    rerender({ month: '2026-09' });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    warning.mockRestore();
+    expect(result.current.paymentData).toEqual([]);
+});
+
+it('조회 실패 시 모든 금액을 비우고 재시도 성공 시 오류를 해제한다', async () => {
+    const warning = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    (dailyReportService.getReportsByRange as jest.Mock).mockResolvedValueOnce(reports('2026-09', 100000))
+        .mockRejectedValueOnce(new Error('fixture failure')).mockResolvedValueOnce(reports('2026-09', 200000));
+    const { result } = renderHook(() => usePayrollData('2026-09', '2026-09'));
+    await waitFor(() => expect(result.current.paymentData).toHaveLength(1));
+    await act(async () => { await result.current.refetch(); });
+    expect(result.current.paymentData).toEqual([]);
+    expect(result.current.basePaymentData).toEqual([]);
+    expect(result.current.ledgerRowsData).toEqual([]);
+    expect(result.current.loadError).toBeTruthy();
+    await act(async () => { await result.current.refetch(); });
+    expect(result.current.loadError).toBeNull();
+    expect(result.current.paymentData[0].grossAmount).toBe(200000);
+    warning.mockRestore();
+});
+
+it('오래된 요청의 실패가 최신 성공 결과를 지우지 않는다', async () => {
+    let rejectOld!: (error: Error) => void;
+    const pending = new Promise((_, reject) => { rejectOld = reject; });
+    (dailyReportService.getReportsByRange as jest.Mock).mockReturnValueOnce(pending)
+        .mockResolvedValueOnce(reports('2026-09', 200000));
+    const { result } = renderHook(() => usePayrollData('2026-09', '2026-09'));
+    await waitFor(() => expect(dailyReportService.getReportsByRange).toHaveBeenCalledTimes(1));
+    await act(async () => { await result.current.refetch(); });
+    await act(async () => rejectOld(new Error('old fixture request')));
+    expect(result.current.paymentData[0].grossAmount).toBe(200000);
+    expect(result.current.loadError).toBeNull();
+    expect(result.current.loading).toBe(false);
+});

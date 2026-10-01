@@ -230,6 +230,7 @@ export interface MonthlyAdvanceLedgerRow {
     assignmentType?: 'corporate' | 'labor';
     manual?: LedgerManualInput;
     sourceManualUpdatedAt?: unknown;
+    finalizedAmounts?: { corporateNet: number; personalNet: number };
 }
 
 export type LedgerUtilityInputLike = LedgerManualInput;
