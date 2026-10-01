@@ -1,3 +1,4 @@
+import { PagePrimaryAccountSettings } from '../../components/accounts/PagePrimaryAccountManager';
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import ProgressClaimPage from './ProgressClaimPage';
@@ -23,7 +24,7 @@ const ProgressClaimsEntry: React.FC = () => {
         return <Navigate to={`/payroll/field-buyback${search ? `?${search}` : ''}`} replace />;
     }
 
-    return <ProgressClaimPage />;
+    return <><div className="px-6 pt-4"><PagePrimaryAccountSettings scope="progress-claims" /></div><ProgressClaimPage /></>;
 };
 
 export default ProgressClaimsEntry;

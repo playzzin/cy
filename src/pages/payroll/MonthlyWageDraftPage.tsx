@@ -6,7 +6,10 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService, Company } from '../../services/companyService';
 import { siteService, Site } from '../../services/siteService';
-import { primaryAccountService, type PrimaryAccountSetting } from '../../services/primaryAccountService';
+import { type PrimaryAccountSetting } from '../../services/primaryAccountService';
+import { usePagePrimaryAccount, ensurePagePrimaryAccountReady } from '../../hooks/usePagePrimaryAccount';
+import PagePrimaryAccountCard from '../../components/accounts/PagePrimaryAccountCard';
+
 import { AdvancePayment } from '../../services/advancePaymentService';
 import { statementOutputService } from '../../services/statementOutputService';
 import type { StatementOutputRecord } from '../../types/statementOutput';
@@ -1422,8 +1425,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [allSites, setAllSites] = useState<Site[]>([]);
     const [showCalculationLabor, setShowCalculationLabor] = useState<boolean>(false);
     const [companies, setCompanies] = useState<Company[]>([]);
-    const [primaryAccount, setPrimaryAccount] = useState<PrimaryAccountSetting | null>(null);
-    const [primaryAccountLoadError, setPrimaryAccountLoadError] = useState(false);
+    const pagePrimaryAccount = usePagePrimaryAccount('monthly-wage');
+    const primaryAccount = pagePrimaryAccount.account;
     const [workerSearchText, setWorkerSearchText] = useState<string>('');
     const [filterMode, setFilterMode] = useState<'team' | 'worker'>('team');
     const [pageViewMode, setPageViewMode] = useState<'simple' | 'standard' | 'ledger'>('ledger');
@@ -2554,14 +2557,6 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         };
     }, []);
 
-    useEffect(() => primaryAccountService.subscribe(account => {
-        setPrimaryAccount(account);
-        setPrimaryAccountLoadError(false);
-    }, error => {
-        console.warn('Failed to load primary account for KB preview:', error);
-        setPrimaryAccount(null);
-        setPrimaryAccountLoadError(true);
-    }), []);
 
     useEffect(() => {
         let mounted = true;
@@ -4331,6 +4326,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
     // 국민은행용 엑셀 다운로드 (미리보기 스냅샷 기준)
     const handleDownloadKBExcel = () => {
+        if (kbPrimaryAccountAppliedRowIds.size > 0 && !ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
         const snapshot = kbPreviewSnapshot;
         if (!snapshot) {
             alert('먼저 국민은행 미리보기를 열어 출력 내용을 확인해주세요.');
@@ -5421,6 +5417,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             )}
 
 
+            <div className="mb-4"><PagePrimaryAccountCard state={pagePrimaryAccount} /></div>
             {!hideHeader && (
                 <PayrollToolbar
                     hideHeader={!!hideHeader}
@@ -6293,9 +6290,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                             <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-amber-400/40 bg-amber-400/10 p-4 lg:flex-row lg:items-center lg:justify-between">
                                 <div>
                                     <div className="text-xs font-black uppercase tracking-[0.12em] text-amber-300">작업자 입금계좌 변경</div>
-                                    <div className="mt-1 text-sm font-bold text-white">
-                                        대표계좌: {primaryAccountLoadError ? '불러오지 못했습니다. 새로고침 후 다시 확인해 주세요.' : primaryAccount ? formatKBPrimaryAccountLabel(primaryAccount) : '미설정'}
-                                    </div>
+                                    <PagePrimaryAccountCard state={pagePrimaryAccount} />
                                     <div className="mt-1 text-xs text-slate-300">
                                         아래 작업자를 선택한 뒤 대표계좌 적용을 누르면 해당 작업자의 국민은행 이체 계좌만 변경됩니다.
                                     </div>

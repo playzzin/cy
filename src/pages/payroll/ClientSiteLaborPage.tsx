@@ -1,3 +1,5 @@
+import { usePagePrimaryAccount, ensurePagePrimaryAccountReady } from '../../hooks/usePagePrimaryAccount';
+import PagePrimaryAccountCard from '../../components/accounts/PagePrimaryAccountCard';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -1469,9 +1471,10 @@ const ClientSiteLaborPage: React.FC = () => {
     const showTeamUnderName = laborStatementDefaults.showTeamUnderName;
     const appliedBulkUnitPrice = laborStatementDefaults.unitPriceOverride;
     const defaultPayType = laborStatementDefaults.defaultPayType;
-    const delegateBankName = laborStatementDefaults.delegateBankName;
-    const delegateAccountHolder = laborStatementDefaults.delegateAccountHolder;
-    const delegateAccountNumber = laborStatementDefaults.delegateAccountNumber;
+    const pagePrimaryAccount = usePagePrimaryAccount('client-site-labor');
+    const delegateBankName = pagePrimaryAccount.account?.bankName ?? laborStatementDefaults.delegateBankName;
+    const delegateAccountHolder = pagePrimaryAccount.account?.accountHolder ?? laborStatementDefaults.delegateAccountHolder;
+    const delegateAccountNumber = pagePrimaryAccount.account?.accountNumber ?? laborStatementDefaults.delegateAccountNumber;
     const [transactionStatements, setTransactionStatements] = useState<Estimate[]>([]);
     const [transactionStatementsLoading, setTransactionStatementsLoading] = useState(false);
     const [transactionStatementError, setTransactionStatementError] = useState('');
@@ -2176,6 +2179,8 @@ const ClientSiteLaborPage: React.FC = () => {
                     </div>
                 </div>
 
+                <div className="mt-4"><PagePrimaryAccountCard state={pagePrimaryAccount} fallbackAccount={{ bankName: delegateBankName, accountHolder: delegateAccountHolder, accountNumber: delegateAccountNumber }} /></div>
+
                 <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[220px_minmax(130px,1fr)_minmax(130px,1fr)_minmax(130px,1fr)_120px_120px_minmax(210px,1.1fr)]">
                     <label className="flex flex-col gap-1 text-xs font-bold text-slate-500">
                         년/월
@@ -2553,7 +2558,7 @@ const ClientSiteLaborPage: React.FC = () => {
                                 </Link>
                                 <button
                                     type="button"
-                                    onClick={() => window.print()}
+                                    onClick={() => { if (ensurePagePrimaryAccountReady(pagePrimaryAccount)) window.print(); }}
                                     disabled={!selectedSite}
                                     className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-xs font-black text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                                 >

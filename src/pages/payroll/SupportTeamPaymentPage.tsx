@@ -1,3 +1,7 @@
+import { PagePrimaryAccountSettings } from '../../components/accounts/PagePrimaryAccountManager';
+import { PrimaryAccountPage } from '../../services/primaryAccountService';
+import { usePagePrimaryAccount, ensurePagePrimaryAccountReady } from '../../hooks/usePagePrimaryAccount';
+import PagePrimaryAccountCard from '../../components/accounts/PagePrimaryAccountCard';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -3149,6 +3153,7 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
             <tr>
                 <td colSpan={12} className="border border-slate-900 bg-emerald-50 p-4">
                     <SupportLaborStatementPanel
+                        primaryAccountScope={scope === 'incoming' ? 'support-team-incoming' : scope === 'internalOut' ? 'support-team-internal' : scope === 'internalIn' ? 'support-team-internal-incoming' : 'support-team'}
                         aggregate={laborStatementTarget}
                         previews={laborStatementTargetPreviews}
                         yearMonth={selectedMonth}
@@ -3166,7 +3171,8 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
         laborStatementTarget,
         laborStatementTargetPreviews,
         selectedMonth,
-        statementLogoUrl
+        statementLogoUrl,
+        scope
     ]);
 
     const expenseStatementContext = useMemo(
@@ -3236,6 +3242,8 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                     </ActionButton>
                 </div>
             </div>
+
+            <PagePrimaryAccountSettings scope={scope === 'incoming' ? 'support-team-incoming' : scope === 'internalOut' ? 'support-team-internal' : scope === 'internalIn' ? 'support-team-internal-incoming' : 'support-team'} />
 
             <div className="flex w-full flex-col gap-6 lg:flex-row">
                 {/* 좌측 사이드바 */}
@@ -4048,13 +4056,14 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
 // --- Sub Components ---
 
 const SupportLaborStatementPanel: React.FC<{
+    primaryAccountScope: PrimaryAccountPage;
     aggregate: SupportCompanyAggregate;
     previews: SitePreviewBlock[];
     yearMonth: string;
     adjustment: SupportManualAdjustment;
     logoUrl?: string | null;
     onClose: () => void;
-}> = ({ aggregate, previews, yearMonth, adjustment, onClose }) => {
+}> = ({ primaryAccountScope, aggregate, previews, yearMonth, adjustment, onClose }) => {
     const [statementOptionPreset, setStatementOptionPreset] = useState<StatementIssueOptionPreset>(() => loadStatementIssueOptionPreset());
     const [showBankColumn, setShowBankColumn] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).showBankColumn);
     const [showBillingColumns, setShowBillingColumns] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).showBillingColumns);
@@ -4075,9 +4084,13 @@ const SupportLaborStatementPanel: React.FC<{
             loadSupportLaborStatementDefaults(statementOptionPreset)
         )
     );
-    const [delegateBankName, setDelegateBankName] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).delegateBankName);
-    const [delegateAccountHolder, setDelegateAccountHolder] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).delegateAccountHolder);
-    const [delegateAccountNumber, setDelegateAccountNumber] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).delegateAccountNumber);
+    const [legacyDelegateBankName, setDelegateBankName] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).delegateBankName);
+    const [legacyDelegateAccountHolder, setDelegateAccountHolder] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).delegateAccountHolder);
+    const [legacyDelegateAccountNumber, setDelegateAccountNumber] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).delegateAccountNumber);
+    const pagePrimaryAccount = usePagePrimaryAccount(primaryAccountScope);
+    const delegateBankName = pagePrimaryAccount.account?.bankName ?? legacyDelegateBankName;
+    const delegateAccountHolder = pagePrimaryAccount.account?.accountHolder ?? legacyDelegateAccountHolder;
+    const delegateAccountNumber = pagePrimaryAccount.account?.accountNumber ?? legacyDelegateAccountNumber;
     const statementOptions = useMemo<SupportLaborStatementOptions>(() => ({
         unitPriceOverride: appliedBulkUnitPrice,
         defaultPayType: 'direct',
@@ -4290,6 +4303,7 @@ const SupportLaborStatementPanel: React.FC<{
     }, []);
 
     const handleSaveStatementOptions = useCallback(async () => {
+        if (!ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
         saveLaborStatementPresetDefaults(statementOptionPreset, {
             showBankColumn,
             showBillingColumns,
@@ -4299,9 +4313,6 @@ const SupportLaborStatementPanel: React.FC<{
             unitPriceOverride: appliedBulkUnitPrice,
             useWorkerMasterPayType,
             workerPayTypes,
-            delegateBankName,
-            delegateAccountHolder,
-            delegateAccountNumber,
         });
         const label = STATEMENT_ISSUE_OPTION_PRESETS.find((option) => option.value === statementOptionPreset)?.label ?? '선택';
         try {
@@ -4312,11 +4323,9 @@ const SupportLaborStatementPanel: React.FC<{
             setStatusMessage(`${label} 노임명세 옵션은 저장했지만 문서대장 반영에 실패했습니다.`);
         }
     }, [
+        pagePrimaryAccount,
         appliedBulkUnitPrice,
         buildLaborStatementOutput,
-        delegateAccountHolder,
-        delegateAccountNumber,
-        delegateBankName,
         isSplitView,
         showBankColumn,
         showBankUnderAddress,
@@ -4335,6 +4344,7 @@ const SupportLaborStatementPanel: React.FC<{
     };
 
     const handleCopy = async () => {
+        if (!ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
         try {
             setBusyAction('copy');
             const blob = await captureStatementImage();
@@ -4349,6 +4359,7 @@ const SupportLaborStatementPanel: React.FC<{
     };
 
     const handleSend = async () => {
+        if (!ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
         const shareNavigator = navigator as Navigator & {
             canShare?: (data: { files?: File[] }) => boolean;
             share?: (data: { title?: string; text?: string; files?: File[] }) => Promise<void>;
@@ -4382,6 +4393,7 @@ const SupportLaborStatementPanel: React.FC<{
     };
 
     const handleExcelDownload = async () => {
+        if (!ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
         if (statementPreviews.length === 0) {
             setStatusMessage('엑셀로 저장할 노임명세 데이터가 없습니다.');
             return;
@@ -4390,7 +4402,8 @@ const SupportLaborStatementPanel: React.FC<{
         try {
             setBusyAction('excel');
             await generateLaborStatementExcel(
-                statementPreviews.map(buildLaborStatementExcelBlock),
+                statementPreviews.map(preview => ({ ...buildLaborStatementExcelBlock(preview),
+                    delegateBankName, delegateAccountHolder, delegateAccountNumber })),
                 yearMonth,
                 {
                     fileName: `노무내역서_${sanitizeFileNamePart(yearMonth)}_${sanitizeFileNamePart(aggregate.companyName)}.xlsx`,
@@ -4588,35 +4601,7 @@ const SupportLaborStatementPanel: React.FC<{
                                 </button>
                             )}
                         </div>
-                        <div className="min-w-0 rounded-lg border border-yellow-200 bg-yellow-50 px-2 py-2">
-                            <div className="mb-1 flex items-center gap-1 text-xs font-black text-yellow-700">
-                                <FontAwesomeIcon icon={faReceipt} />
-                                위임 계좌
-                            </div>
-                            <div className="grid grid-cols-[72px_82px_minmax(120px,1fr)] gap-1.5">
-                                <input
-                                    type="text"
-                                    value={delegateBankName}
-                                    onChange={(event) => setDelegateBankName(event.target.value)}
-                                    placeholder="은행"
-                                    className="h-8 rounded-md border border-yellow-200 bg-white px-2 text-xs font-bold outline-none focus:border-yellow-500"
-                                />
-                                <input
-                                    type="text"
-                                    value={delegateAccountHolder}
-                                    onChange={(event) => setDelegateAccountHolder(event.target.value)}
-                                    placeholder="예금주"
-                                    className="h-8 rounded-md border border-yellow-200 bg-white px-2 text-xs font-bold outline-none focus:border-yellow-500"
-                                />
-                                <input
-                                    type="text"
-                                    value={delegateAccountNumber}
-                                    onChange={(event) => setDelegateAccountNumber(event.target.value)}
-                                    placeholder="계좌번호"
-                                    className="h-8 rounded-md border border-yellow-200 bg-white px-2 text-xs font-bold outline-none focus:border-yellow-500"
-                                />
-                            </div>
-                        </div>
+                        <PagePrimaryAccountCard state={pagePrimaryAccount} fallbackAccount={{ bankName: delegateBankName, accountHolder: delegateAccountHolder, accountNumber: delegateAccountNumber }} />
                     </div>
                 </div>
 

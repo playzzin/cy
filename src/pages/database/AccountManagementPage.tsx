@@ -1,3 +1,4 @@
+import PagePrimaryAccountManager from '../../components/accounts/PagePrimaryAccountManager';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -422,6 +423,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const [companies, setCompanies] = useState<Company[]>([]);
     const [customAccounts, setCustomAccounts] = useState<AccountDirectory[]>([]);
     const [primaryAccount, setPrimaryAccount] = useState<PrimaryAccountSetting | null>(null);
+    useEffect(() => primaryAccountService.subscribe(setPrimaryAccount, () => setPrimaryAccount(null)), []);
 
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const [savingKeys, setSavingKeys] = useState<Record<string, boolean>>({});
@@ -2110,36 +2112,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 </div>
             )}
 
-            <div className={`rounded-2xl border p-5 shadow-sm ${primaryAccount ? 'border-amber-200 bg-amber-50' : 'border-dashed border-slate-300 bg-white'}`}>
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="flex items-start gap-3">
-                        <span className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border ${primaryAccount ? 'border-amber-300 bg-white text-amber-500' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>
-                            <FontAwesomeIcon icon={faStar} />
-                        </span>
-                        <div>
-                            <div className="text-sm font-bold text-slate-900">대표계좌</div>
-                            {primaryAccount ? (
-                                <>
-                                    <div className="mt-1 font-semibold text-slate-800">
-                                        {[primaryAccount.bankName, primaryAccount.accountNumber, primaryAccount.accountHolder ? `(${primaryAccount.accountHolder})` : ''].filter(Boolean).join(' ')}
-                                    </div>
-                                    <div className="mt-1 text-xs text-slate-500">
-                                        {PRIMARY_ACCOUNT_SOURCE_LABEL[primaryAccount.sourceType]} · {primaryAccount.sourceName || '이름 없음'}
-                                    </div>
-                                </>
-                            ) : (
-                                <div className="mt-1 text-sm text-slate-500">아래 계좌의 “대표 설정” 버튼을 누르면 노무비 명세서의 위임 계좌 기본값으로 사용됩니다.</div>
-                            )}
-                        </div>
-                    </div>
-                    {primaryAccount && (
-                        <div className="inline-flex items-center gap-2 self-start rounded-full border border-amber-200 bg-white px-3 py-1.5 text-xs font-bold text-amber-700 lg:self-center">
-                            <FontAwesomeIcon icon={faCheck} />
-                            위임 계좌 기본값 적용
-                        </div>
-                    )}
-                </div>
-            </div>
+            <PagePrimaryAccountManager />
 
             {renderStickyToolbar}
 
@@ -2549,7 +2522,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                                 className={`${rowActionButtonClass} ${isPrimary ? 'border-amber-400 bg-amber-400 text-slate-900' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
                                                                             >
                                                                                 <FontAwesomeIcon icon={faStar} />
-                                                                                {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '대표계좌' : '대표 설정'}
+                                                                                {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '공통 대표계좌' : '공통 대표 설정'}
                                                                             </button>
                                                                             <button
                                                                                 type="button"
@@ -2706,7 +2679,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                             className={`${rowActionButtonClass} ${isPrimary ? 'border-amber-400 bg-amber-400 text-slate-900' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
                                                                         >
                                                                             <FontAwesomeIcon icon={faStar} />
-                                                                            {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '대표계좌' : '대표 설정'}
+                                                                            {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '공통 대표계좌' : '공통 대표 설정'}
                                                                         </button>
                                                                         <button
                                                                             type="button"
@@ -2862,7 +2835,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                             className={`${rowActionButtonClass} ${isPrimary ? 'border-amber-400 bg-amber-400 text-slate-900' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
                                                                         >
                                                                             <FontAwesomeIcon icon={faStar} />
-                                                                            {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '대표계좌' : '대표 설정'}
+                                                                            {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '공통 대표계좌' : '공통 대표 설정'}
                                                                         </button>
                                                                         <button
                                                                             type="button"
@@ -3047,7 +3020,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                                         className={`${rowActionButtonClass} ${isPrimary ? 'border-amber-400 bg-amber-400 text-slate-900' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
                                                                                     >
                                                                                         <FontAwesomeIcon icon={faStar} />
-                                                                                        {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '대표계좌' : '대표 설정'}
+                                                                                        {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '공통 대표계좌' : '공통 대표 설정'}
                                                                                     </button>
                                                                                     <button type="button" disabled={!entry.id || !!savingKeys[rowSavingKey]} onClick={() => entry.id && deleteCustomEntry(entry.id)} className={rowActionDangerClass}>
                                                                                         <FontAwesomeIcon icon={faTrash} />

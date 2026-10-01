@@ -17,7 +17,8 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
 import { siteService, Site } from '../../services/siteService';
 import { companyService, Company } from '../../services/companyService';
-import { primaryAccountService } from '../../services/primaryAccountService';
+import { usePagePrimaryAccount, ensurePagePrimaryAccountReady } from '../../hooks/usePagePrimaryAccount';
+import PagePrimaryAccountCard from '../../components/accounts/PagePrimaryAccountCard';
 import { formatManDayWithDecimal, roundManDay, sumManDays } from '../../utils/manDayMath';
 import {
   getWorkerMasterLaborStatementPayType,
@@ -274,10 +275,17 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   const [globalRate, setGlobalRate] = useState(230000);
 
   // --- Master Bank Info ---
-  const [masterBank, setMasterBank] = useState(() => loadLaborStatementDefaults().delegateBankName);
-  const [masterOwner, setMasterOwner] = useState(() => loadLaborStatementDefaults().delegateAccountHolder);
-  const [masterAccount, setMasterAccount] = useState(() => loadLaborStatementDefaults().delegateAccountNumber);
-  const [isPrimaryAccountDefault, setIsPrimaryAccountDefault] = useState(false);
+  const [legacyMasterBank, setMasterBank] = useState(() => loadLaborStatementDefaults().delegateBankName);
+  const [legacyMasterOwner, setMasterOwner] = useState(() => loadLaborStatementDefaults().delegateAccountHolder);
+  const [legacyMasterAccount, setMasterAccount] = useState(() => loadLaborStatementDefaults().delegateAccountNumber);
+  const pagePrimaryAccount = usePagePrimaryAccount('labor-cost-statement-generator');
+  const masterBank = pagePrimaryAccount.account?.bankName ?? legacyMasterBank;
+  const masterOwner = pagePrimaryAccount.account?.accountHolder ?? legacyMasterOwner;
+  const masterAccount = pagePrimaryAccount.account?.accountNumber ?? legacyMasterAccount;
+  useEffect(() => {
+    setRows(current => current.map(row => row.payType === 'delegate'
+      ? { ...row, bankName: masterBank, bankOwner: masterOwner, bankAccount: masterAccount } : row));
+  }, [masterBank, masterOwner, masterAccount]);
 
   // --- Data ---
   const [sites, setSites] = useState<Site[]>([]);
@@ -326,33 +334,11 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     manpowerService.getWorkers().then(data => setWorkers(data.map(w => ({ ...w, id: w.id ?? '' }))));
   }, []);
 
-  // Fetch the representative account on mount, with Cheongyeon company info as a legacy fallback.
+  // Keep the legacy company fallback; a saved page account always takes precedence.
   useEffect(() => {
     let cancelled = false;
 
     const loadDefaultDelegationAccount = async () => {
-      let primaryAccount: Awaited<ReturnType<typeof primaryAccountService.getPrimaryAccount>> = null;
-      try {
-        primaryAccount = await primaryAccountService.getPrimaryAccount();
-      } catch (err) {
-        console.warn('Failed to load primary account setting:', err);
-      }
-
-      if (cancelled) return;
-
-      if (primaryAccount) {
-        setMasterBank(primaryAccount.bankName);
-        setMasterOwner(primaryAccount.accountHolder);
-        setMasterAccount(primaryAccount.accountNumber);
-        setIsPrimaryAccountDefault(true);
-        saveLaborStatementDefaults({
-          delegateBankName: primaryAccount.bankName,
-          delegateAccountHolder: primaryAccount.accountHolder,
-          delegateAccountNumber: primaryAccount.accountNumber,
-        });
-        return;
-      }
-
       try {
         const company = await companyService.getCompanyByName('청연');
         if (!cancelled && company) {
@@ -912,6 +898,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 };
 
   const handleExcelDownload = useCallback(async () => {
+    if (rows.some(row => row.payType === 'delegate') && !ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Codex';
     workbook.lastModifiedBy = 'Codex';
@@ -1428,7 +1415,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
     const buffer = await workbook.xlsx.writeBuffer();
     saveAs(new Blob([buffer]), `노무내역서_${siteNameInput || '전체'}_${month}.xlsx`);
-  }, [rows, month, statementTitle, siteNameInput, showBankColumn, showBankUnderAddress, showTeamUnderName, isSplitView, masterBank, masterOwner, masterAccount]);
+  }, [rows, month, statementTitle, siteNameInput, showBankColumn, showBankUnderAddress, showTeamUnderName, isSplitView, masterBank, masterOwner, masterAccount, pagePrimaryAccount]);
   const statementSummary = useMemo(() => {
     const visibleLastDay = getMonthLastDay(month);
     let totalDays = 0;
@@ -1840,22 +1827,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
               />
               <button onClick={handleApplyGlobalRate} className="px-3 py-1 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded text-xs font-bold transition-colors">적용</button>
             </div>
-            <div className="flex items-center gap-2 bg-yellow-50/80 px-3 py-1.5 rounded-lg border border-yellow-200 shadow-sm">
-              <span className="text-[11px] font-bold text-yellow-700 flex items-center gap-1 whitespace-nowrap">
-                <Check className="w-3 h-3" /> 위임 계좌
-              </span>
-              <div className="flex gap-1.5">
-                <input type="text" value={masterBank} onChange={e => { setMasterBank(e.target.value); setIsPrimaryAccountDefault(false); }} placeholder="은행"
-                  className="w-[50px] text-xs font-medium p-1 border border-yellow-200 rounded bg-white outline-none focus:border-yellow-500/50 text-center" />
-                <input type="text" value={masterOwner} onChange={e => { setMasterOwner(e.target.value); setIsPrimaryAccountDefault(false); }} placeholder="예금주"
-                  className="w-[60px] text-xs font-medium p-1 border border-yellow-200 rounded bg-white outline-none focus:border-yellow-500/50 text-center" />
-                <input type="text" value={masterAccount} onChange={e => { setMasterAccount(e.target.value); setIsPrimaryAccountDefault(false); }} placeholder="계좌번호"
-                  className="w-[120px] text-xs font-bold p-1 border border-yellow-200 rounded bg-white outline-none focus:border-yellow-500/50 tracking-tight text-slate-700" />
-              </div>
-              {isPrimaryAccountDefault && (
-                <span className="rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-black text-slate-900 whitespace-nowrap">대표계좌</span>
-              )}
-            </div>
+            <PagePrimaryAccountCard state={pagePrimaryAccount} fallbackAccount={{ bankName: masterBank, accountHolder: masterOwner, accountNumber: masterAccount }} />
           </div>
         </div>
         <div className="h-14 px-6 border-t border-slate-200 flex items-center justify-between gap-4 bg-white">
