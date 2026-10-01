@@ -14,34 +14,13 @@ import { buildWorkedTeamIds } from '../../utils/personnelHistoryWorkedTeams';
 import OutputManagementTabs from '../../components/common/OutputManagementTabs';
 import MonthNavigator from '../../components/common/MonthNavigator';
 import { useSearchParams } from 'react-router-dom';
-import { formatTextForDisplay, formatNumberForDisplay } from '../../utils/zeroDisplay';
+import { formatNumberForDisplay } from '../../utils/zeroDisplay';
+import { buildPersonnelHistoryWorkbook, formatManDay, formatPersonnelHistoryPriceDetail, formatResidentNumberForDisplay, PersonnelHistoryRow, SalaryModelFilter } from '../../utils/personnelHistoryExcel';
 
 type CompanyTypeFilter = 'construction' | 'partner';
-type SalaryModelFilter = '전체' | '일급제' | '월급제' | '지원팀' | '용역팀';
 type DateMode = 'period' | 'monthly';
 
 const TABLE_COLUMN_COUNT = 12;
-
-interface PersonnelHistoryRow {
-    workerId: string;
-    name: string;
-    idNumber: string;
-    salaryModel: SalaryModelFilter;
-    teamId: string;
-    teamName: string;
-    totalManDay: number;
-    laborManDay: number;
-    invoiceManDay: number;
-    unitPrice: number;
-    unitPriceBreakdown: Array<{
-        unitPrice: number;
-        manDay: number;
-        amount: number;
-    }>;
-    laborAmount: number;
-    invoiceAmount: number;
-    totalAmount: number;
-}
 
 const resolveWorkerSalaryModel = (worker: Worker): SalaryModelFilter => {
     const payType = resolveWorkerPayType(worker);
@@ -103,35 +82,6 @@ const classifyInvoiceBySiteContext = (params: {
 
     if (params.salaryModel === '지원팀') return true;
     return false;
-};
-
-const formatResidentNumberForDisplay = (rawValue: string): string => {
-    const raw = String(rawValue ?? '').trim();
-    if (!raw) return '';
-
-    const digits = raw.replace(/[^0-9]/g, '');
-    if (digits.length === 13) {
-        return `${digits.slice(0, 6)}-${digits.slice(6)}`;
-    }
-    return raw;
-};
-
-const maskResidentNumberForDisplay = (rawValue: string): string => {
-    const formatted = formatResidentNumberForDisplay(rawValue);
-    if (formatTextForDisplay(formatted) === '-') return '-';
-
-    const digits = formatted.replace(/[^0-9]/g, '');
-    if (digits.length === 13) {
-        return `${digits.slice(0, 6)}-${digits.slice(6, 7)}******`;
-    }
-    if (formatted.length > 8) {
-        return `${formatted.slice(0, 8)}******`;
-    }
-    return formatted;
-};
-
-const formatManDay = (value: number): string => {
-    return formatNumberForDisplay(value, (amount) => amount.toFixed(2));
 };
 
 const escapeRegExp = (value: string): string => {
@@ -235,6 +185,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     const [activeIndex, setActiveIndex] = useState(0);
 
     const [historyData, setHistoryData] = useState<PersonnelHistoryRow[]>([]);
+    const [resultDateRange, setResultDateRange] = useState<{ startDate: string; endDate: string } | null>(null);
     const [companies, setCompanies] = useState<Company[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [allWorkers, setAllWorkers] = useState<Worker[]>([]);
@@ -800,6 +751,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
             });
 
             setHistoryData(result);
+            setResultDateRange({ startDate: effectiveStartDate, endDate: effectiveEndDate });
         } catch (error) {
             console.error('Error fetching history data:', error);
             setHistoryData([]);
@@ -862,7 +814,18 @@ const TotalPersonnelHistoryInner: React.FC = () => {
             });
     }, [historyData, sortOrder]);
 
-    const handleDownloadExcel = () => {
+    const handleDownloadScreenExcel = () => {
+        if (loading || initialLoading || sortedHistoryData.length === 0 || !resultDateRange) return;
+        try {
+            const workbook = buildPersonnelHistoryWorkbook(sortedHistoryData);
+            XLSX.writeFile(workbook, `인원전체내역_조회화면_${resultDateRange.startDate}_${resultDateRange.endDate}.xlsx`);
+        } catch (error) {
+            console.error('Error exporting personnel history:', error);
+            setErrorMessage('조회화면 엑셀 다운로드에 실패했습니다. 다시 시도해주세요.');
+        }
+    };
+
+    const handleDownloadTaxExcel = () => {
         if (sortedHistoryData.length === 0) {
             alert('다운로드할 데이터가 없습니다. 먼저 조회해주세요.');
             return;
@@ -942,7 +905,17 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                 {/* Header Buttons Row */}
                 <div className="flex flex-wrap items-center gap-2">
                     <button
-                        onClick={handleDownloadExcel}
+                        type="button"
+                        onClick={handleDownloadScreenExcel}
+                        disabled={loading || initialLoading || sortedHistoryData.length === 0 || !resultDateRange}
+                        title="조회된 표의 항목, 정렬 순서, 전체 합계를 그대로 다운로드합니다."
+                        className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed transition-all shadow-sm font-medium text-sm"
+                    >
+                        <FontAwesomeIcon icon={faDownload} />
+                        조회화면 Excel
+                    </button>
+                    <button
+                        onClick={handleDownloadTaxExcel}
                         className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all shadow-sm font-medium text-sm"
                     >
                         <FontAwesomeIcon icon={faDownload} />
@@ -1098,6 +1071,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                         <div className="flex flex-col gap-1">
                             <label className="text-xs font-medium text-slate-500">급여방식</label>
                             <select
+                                aria-label="급여방식"
                                 value={salaryModel}
                                 onChange={(e) => setSalaryModel(e.target.value as SalaryModelFilter)}
                                 className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm min-w-32"
@@ -1113,6 +1087,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                         <div className="flex flex-col gap-1">
                             <label className="text-xs font-medium text-slate-500">팀</label>
                             <select
+                                aria-label="팀"
                                 value={selectedTeamId}
                                 onChange={(e) => setSelectedTeamId(e.target.value)}
                                 className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm min-w-40"
@@ -1331,7 +1306,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                             <td className={`px-4 py-3 text-center text-slate-400 text-xs border-b border-slate-100 ${isFixed ? 'sticky left-0 z-10 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`}>{index + 1}</td>
                                             <td className={`px-4 py-3 font-bold text-slate-800 border-b border-slate-100 ${isFixed ? 'sticky left-[48px] z-10 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`}>{item.name}</td>
                                             <td className={`px-4 py-3 text-slate-600 border-b border-slate-100 ${isFixed ? 'sticky left-[148px] z-10 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`}>{item.teamName || '-'}</td>
-                                            <td className="px-4 py-3 text-slate-500 font-sans tabular-nums text-xs border-b border-slate-100">{maskResidentNumberForDisplay(item.idNumber)}</td>
+                                            <td className="px-4 py-3 text-slate-500 font-sans tabular-nums text-xs border-b border-slate-100">{formatResidentNumberForDisplay(item.idNumber) || '-'}</td>
                                             <td className="px-4 py-3 border-b border-slate-100">
                                                 <span className={`px-2 py-0.5 rounded text-xs font-medium ${item.salaryModel === '일급제' ? 'bg-blue-50 text-blue-600' :
                                                     item.salaryModel === '월급제' ? 'bg-indigo-50 text-indigo-600' :
@@ -1345,7 +1320,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                                 className="px-4 py-3 text-right font-sans tabular-nums text-xs border-b border-r border-slate-100"
                                                 title={item.unitPriceBreakdown.length > 1
                                                     ? `기간 가중 평균: ${item.unitPrice.toLocaleString()}원\n${item.unitPriceBreakdown
-                                                        .map((price) => `${price.unitPrice.toLocaleString()}원 × ${formatManDay(price.manDay)}일 = ${price.amount.toLocaleString()}원`)
+                                                        .map(formatPersonnelHistoryPriceDetail)
                                                         .join('\n')}`
                                                     : undefined}
                                             >
@@ -1354,7 +1329,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                                         <span className="font-bold text-amber-700">단가 변동</span>
                                                         {item.unitPriceBreakdown.map((price) => (
                                                             <span key={price.unitPrice} className="text-[10px] leading-4 text-slate-500">
-                                                                {price.unitPrice.toLocaleString()}원 × {formatManDay(price.manDay)}일 = {price.amount.toLocaleString()}원
+                                                                {formatPersonnelHistoryPriceDetail(price)}
                                                             </span>
                                                         ))}
                                                     </div>
