@@ -4616,14 +4616,14 @@ export const TeamSettlementPage: React.FC = () => {
                     </button>
                   </div>
                   <div className="mt-2 overflow-auto">
-                    <table className="w-full text-sm border-collapse">
+                    <table data-compact="support" className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
                           <th scope="col" className="px-2 py-2 border text-center align-middle whitespace-nowrap">상대팀</th>
                           <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
                           <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">지원단가</th>
                           <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">노임총액</th>
-                          <th scope="col" className="px-2 py-2 border text-center align-middle">비고</th>
+                          <th scope="col" data-label="비고" className="px-2 py-2 border text-center align-middle">비고</th>
                           <th scope="col" className="px-2 py-2 border text-center align-middle"></th>
                         </tr>
                       </thead>
@@ -4650,14 +4650,14 @@ export const TeamSettlementPage: React.FC = () => {
                     </button>
                   </div>
                   <div className="mt-2 overflow-auto">
-                    <table className="w-full text-sm border-collapse">
+                    <table data-compact="transaction" className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
                           <th scope="col" className="px-2 py-2 border text-center align-middle whitespace-nowrap">구분</th>
                           <th scope="col" className="px-2 py-2 border text-center align-middle whitespace-nowrap">현장</th>
                           <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
                           <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">금액</th>
-                          <th scope="col" className="px-2 py-2 border text-center align-middle">비고</th>
+                          <th scope="col" data-label="비고" className="px-2 py-2 border text-center align-middle">비고</th>
                           <th scope="col" className="px-2 py-2 border text-center align-middle"></th>
                         </tr>
                       </thead>
@@ -4698,14 +4698,14 @@ export const TeamSettlementPage: React.FC = () => {
                   </div>
 
                   <div className="mt-2 overflow-auto">
-                    <table className="w-full text-sm border-collapse">
+                    <table data-compact="support" className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
                           <th scope="col" className="px-2 py-2 border text-center align-middle whitespace-nowrap">상대팀</th>
                           <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
                           <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">지원단가</th>
                           <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">노임총액</th>
-                          <th scope="col" className="px-2 py-2 border text-center align-middle">비고</th>
+                          <th scope="col" data-label="비고" className="px-2 py-2 border text-center align-middle">비고</th>
                           <th scope="col" className="px-2 py-2 border text-center align-middle"></th>
                         </tr>
                       </thead>
@@ -4843,13 +4843,13 @@ export const TeamSettlementPage: React.FC = () => {
                   </div>
 
                   <div className="mt-2 overflow-auto">
-                    <table className="w-full text-sm border-collapse">
+                    <table data-compact="adjustment" className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
                           <th scope="col" className="text-left px-2 py-2 border">구분</th>
                           <th scope="col" className="text-left px-2 py-2 border">항목</th>
                           <th scope="col" className="text-right px-2 py-2 border">금액</th>
-                          <th scope="col" className="text-left px-2 py-2 border">비고</th>
+                          <th scope="col" data-label="비고" className="text-left px-2 py-2 border">비고</th>
                           <th scope="col" className="text-center px-2 py-2 border whitespace-nowrap">상세</th>
                         </tr>
                       </thead>
@@ -5393,13 +5393,13 @@ export const TeamSettlementPage: React.FC = () => {
               </div>
 
               <div className="mt-3 overflow-auto">
-                <table className="w-full text-sm border-collapse">
+                <table data-compact="adjustment" className="w-full text-sm border-collapse">
                   <thead>
                     <tr className="bg-slate-50 text-slate-600">
                       <th scope="col" className="text-left px-2 py-2 border">구분</th>
                       <th scope="col" className="text-left px-2 py-2 border">항목</th>
                       <th scope="col" className="text-right px-2 py-2 border">금액</th>
-                      <th scope="col" className="text-left px-2 py-2 border">비고</th>
+                      <th scope="col" data-label="비고" className="text-left px-2 py-2 border">비고</th>
                       <th scope="col" className="text-center px-2 py-2 border whitespace-nowrap">상세</th>
                     </tr>
                   </thead>
