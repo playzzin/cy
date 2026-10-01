@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, memo, useMemo } from '
 import { SupportLedgerReview } from '../support/SupportLedgerReview';
 import { accommodationReviewBill } from '../../utils/supportLedgerReviewAdapters';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBuilding, faSave, faChevronLeft, faChevronRight, faExclamationTriangle, faFileInvoiceDollar, faUsers, faUser } from '@fortawesome/free-solid-svg-icons';
+import { faBuilding, faSave, faFileExcel, faChevronLeft, faChevronRight, faExclamationTriangle, faFileInvoiceDollar, faUsers, faUser } from '@fortawesome/free-solid-svg-icons';
 import { accommodationService } from '../../services/accommodationService';
 import { accommodationAssignmentService } from '../../services/accommodationAssignmentService';
 import { accommodationBillingTargetService } from '../../services/accommodationBillingTargetService';
@@ -275,6 +275,10 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
     // State for Year-Month
     const [currentDate, setCurrentDate] = useState(getSupportManagementMonthDate);
     const [yearMonth, setYearMonth] = useState('');
+    const requestedYearMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+    const requestedYearMonthRef = useRef(requestedYearMonth);
+    const loadRequestIdRef = useRef(0);
+    const [successfulLoad, setSuccessfulLoad] = useState<{ yearMonth: string; requestId: number } | null>(null);
 
     // Data State
     const [records, setRecords] = useState<UtilityRecord[]>([]);
@@ -294,6 +298,7 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
     const [loading, setLoading] = useState(false);
     const [reviewLoadError, setReviewLoadError] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [exporting, setExporting] = useState(false);
     const [isDirty, setIsDirty] = useState(false);
     const [billingSyncRetryCount, setBillingSyncRetryCount] = useState(0);
     const dirtyLedgerRecordKeysRef = useRef<Set<string>>(new Set());
@@ -452,6 +457,10 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
     }, [currentDate]);
 
     useEffect(() => subscribeSupportManagementYearMonth((nextYearMonth) => {
+        if (requestedYearMonthRef.current !== nextYearMonth) {
+            requestedYearMonthRef.current = nextYearMonth;
+            loadRequestIdRef.current += 1;
+        }
         const [year, month] = nextYearMonth.split('-').map(Number);
         setCurrentDate((previous) => (
             previous.getFullYear() === year && previous.getMonth() === month - 1
@@ -468,9 +477,15 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
             setBillingSyncRetryCount(0);
             loadLedger();
         }
+        return () => { loadRequestIdRef.current += 1; };
     }, [yearMonth]);
 
     const loadLedger = async () => {
+        if (yearMonth !== requestedYearMonthRef.current) return;
+        const requestId = ++loadRequestIdRef.current;
+        const isCurrentRequest = () => requestId === loadRequestIdRef.current
+            && yearMonth === requestedYearMonthRef.current;
+        setSuccessfulLoad(null);
         setLoading(true);
         setReviewLoadError(false);
         try {
@@ -485,6 +500,7 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
                 accommodationBillingTargetService.listTargets(),
                 accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth, strict: true })
             ]);
+            if (!isCurrentRequest()) return;
 
             setAccommodations(accList);
             setTeams(teamList);
@@ -507,12 +523,14 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
             });
             setBillingSyncRetryCount(pendingBillingRecordKeysRef.current.size);
             setIsDirty(pendingBillingRecordKeysRef.current.size > 0);
+            setSuccessfulLoad({ yearMonth, requestId });
         } catch (error) {
+            if (!isCurrentRequest()) return;
             console.error(error);
             alert("데이터를 불러오는데 실패했습니다.");
             setReviewLoadError(true);
         } finally {
-            setLoading(false);
+            if (isCurrentRequest()) setLoading(false);
         }
     };
 
@@ -522,6 +540,8 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
         }
         const newDate = new Date(currentDate);
         newDate.setMonth(newDate.getMonth() + delta);
+        requestedYearMonthRef.current = `${newDate.getFullYear()}-${String(newDate.getMonth() + 1).padStart(2, '0')}`;
+        loadRequestIdRef.current += 1;
         setCurrentDate(newDate);
     };
 
@@ -549,7 +569,21 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
         setIsDirty(true);
     }, [removeAutomaticOverchargeMemoFromRecord]);
 
+    // Read refs at invocation as well as render: navigation can precede React's effects.
+    const isCurrentLedgerLoad = () => Boolean(successfulLoad
+        && successfulLoad.yearMonth === yearMonth
+        && yearMonth === requestedYearMonth
+        && yearMonth === requestedYearMonthRef.current
+        && successfulLoad.requestId === loadRequestIdRef.current);
+    const canSaveLedger = () => !saving && !loading && !reviewLoadError && isCurrentLedgerLoad()
+        && records.every((record) => record.yearMonth === yearMonth);
+
     const handleSave = async () => {
+        if (!canSaveLedger()) {
+            alert('현재 월의 대장을 정상적으로 불러온 뒤 다시 저장해 주세요.');
+            return;
+        }
+        let ledgerSaved = false;
         try {
             setSaving(true);
             const recordsWithManualMemos = records.map(removeAutomaticOverchargeMemoFromRecord);
@@ -678,7 +712,15 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
                 if (!changedCandidateKeys.has(key)) return;
                 recordsToWrite.set(key, { ...record, billingSyncPending: true });
             });
+            // Preflight awaits may outlive navigation or a same-month reload.
+            if (!isCurrentLedgerLoad()
+                || Array.from(recordsToWrite.values()).some((record) => record.yearMonth !== yearMonth)
+                || previousSavedRecords.some((record) => record.yearMonth !== yearMonth)) {
+                alert('현재 월의 대장을 정상적으로 불러온 뒤 다시 저장해 주세요.');
+                return;
+            }
             await accommodationService.saveUtilityRecords(Array.from(recordsToWrite.values()));
+            ledgerSaved = true;
             recordsToPersist.forEach((record) => {
                 dirtyLedgerRecordKeysRef.current.delete(getUtilityRecordKey(record));
             });
@@ -824,7 +866,16 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
                 setBillingSyncRetryCount(pendingBillingRecordKeysRef.current.size);
                 setIsDirty(true);
             }
-            alert('저장에 실패했습니다. 대장과 팀별 경비를 확인한 뒤 다시 저장해 주세요.');
+            if (ledgerSaved) {
+                // The ledger write committed; a later read/sync failure must not invite a blind retry.
+                if (isCurrentLedgerLoad()) {
+                    setSuccessfulLoad(null);
+                    setReviewLoadError(true);
+                }
+                alert('대장은 저장되었지만 이후 조회 또는 팀별 경비 반영을 확인하지 못했습니다. 대장을 다시 불러온 뒤 확인해 주세요.');
+            } else {
+                alert('저장에 실패했습니다. 대장과 팀별 경비를 확인한 뒤 다시 저장해 주세요.');
+            }
         } finally {
             setSaving(false);
         }
@@ -1556,6 +1607,40 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
             .filter(({ record }) => recordMatchesSearchText(record))
             .sort(compareBillingRowsByTarget);
     }, [records, billingTargets, assignments, teams, workers, accommodations, yearMonth, selectedTeamId, searchText]);
+
+    const visibleRecords = useMemo(() => visibleRows.map(({ record }) => record), [visibleRows]);
+    const canExportLedger = () => canSaveLedger() && !exporting && !billingProcessingId
+        && !bulkBillingAction && visibleRows.length > 0;
+    const handleExcelDownload = async () => {
+        if (!canExportLedger()) return;
+        const options = {
+            yearMonth,
+            teamName: selectedTeamId ? resolveTeamIdentity(selectedTeamId).teamName || selectedTeamId : '전체',
+            searchText,
+            hasUnsavedChanges: isDirty,
+            rows: visibleRows.map(({ record }) => {
+                const summary = getAssignmentSummary(record);
+                const accommodation = resolveAccommodation({ id: record.accommodationId, name: record.accommodationName });
+                return {
+                    record, accommodation,
+                    assignedTeams: summary?.assignedTeams.map(team => team.name) || [],
+                    assignedWorkers: summary?.assignedWorkers || [],
+                    billingTargets: summary?.billingTeams.map(team => team.name) || [],
+                    exceededAmount: getAccommodationOvercharge(record, accommodation)?.exceededAmount || 0,
+                };
+            }),
+        };
+        setExporting(true);
+        try {
+            const { buildAccommodationLedgerWorkbook, downloadAccommodationWorkbook } = await import('../../utils/accommodationExcelExport');
+            await downloadAccommodationWorkbook(buildAccommodationLedgerWorkbook(options), `숙소_통합관리대장_${yearMonth}.xlsx`);
+        } catch (error) {
+            console.error('Failed to export accommodation ledger', error);
+            alert('엑셀 다운로드에 실패했습니다. 다시 시도해 주세요.');
+        } finally {
+            setExporting(false);
+        }
+    };
 
     const overchargeTargets = useMemo(() => (
         records
@@ -2572,8 +2657,18 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
                         <span className="text-sm font-bold text-slate-600">목록 고정</span>
                     </label>
                     <button
+                        type="button"
+                        onClick={handleExcelDownload}
+                        disabled={!canExportLedger()}
+                        title={isDirty ? '미저장 변경사항을 포함한 현재 조회 목록을 다운로드합니다.' : '현재 조회 목록을 다운로드합니다.'}
+                        className="flex items-center gap-2 whitespace-nowrap rounded-xl border border-emerald-200 bg-white px-4 py-2.5 font-bold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        <FontAwesomeIcon icon={faFileExcel} />
+                        {exporting ? '엑셀 생성 중...' : '엑셀 다운로드'}
+                    </button>
+                    <button
                         onClick={handleSave}
-                        disabled={saving}
+                        disabled={!canSaveLedger()}
                         className={`px-5 py-2.5 rounded-xl font-bold text-white shadow-lg shadow-indigo-200 transition-all active:scale-95 flex items-center gap-2 whitespace-nowrap
                             ${saving ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:-translate-y-0.5'}
                         `}
@@ -2929,14 +3024,14 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
                             <tfoot className="bg-slate-800 text-white font-bold text-sm tracking-wide sticky bottom-0 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                                 <tr>
                                     <td colSpan={4} className="p-4 border-r border-slate-600 text-center">합계</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-amber-300">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.rent || 0), 0))}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.electricity || 0), 0))}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.gas || 0), 0))}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.water || 0), 0))}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.internet || 0), 0))}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.maintenance || 0), 0))}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.other || 0), 0))}</td>
-                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-indigo-300 text-lg">{formatNumberForDisplay(records.reduce((sum, r) => sum + (r.costs.total || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-amber-300">{formatNumberForDisplay(visibleRecords.reduce((sum, r) => sum + (r.costs.rent || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(visibleRecords.reduce((sum, r) => sum + (r.costs.electricity || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(visibleRecords.reduce((sum, r) => sum + (r.costs.gas || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(visibleRecords.reduce((sum, r) => sum + (r.costs.water || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(visibleRecords.reduce((sum, r) => sum + (r.costs.internet || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(visibleRecords.reduce((sum, r) => sum + (r.costs.maintenance || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums">{formatNumberForDisplay(visibleRecords.reduce((sum, r) => sum + (r.costs.other || 0), 0))}</td>
+                                    <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-indigo-300 text-lg">{formatNumberForDisplay(visibleRecords.reduce((sum, r) => sum + (r.costs.total || 0), 0))}</td>
                                     <td colSpan={2} className="bg-slate-900 border-l border-slate-700"></td>
                                 </tr>
                             </tfoot>

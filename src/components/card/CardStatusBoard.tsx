@@ -14,6 +14,8 @@ import { iconMap } from '../../constants/iconMap';
 import { cardService } from '../../services/cardService';
 import { OFFICE_ASSIGNMENT_TEAM_NAME, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
 import { getContrastingTextColor } from '../../utils/color';
+import { SupportExcelDownloadButton } from '../support/SupportExcelDownloadButton';
+import type { SupportExportContext } from '../../utils/supportResourceExcelExport';
 
 interface TeamInfo {
     color: string;
@@ -21,6 +23,8 @@ interface TeamInfo {
 }
 
 interface CardStatusBoardProps {
+    exportButtonContainer?: HTMLElement | null;
+    exportContext?: SupportExportContext;
     cards: Card[];
     teams?: Team[];
     loading: boolean;
@@ -74,18 +78,24 @@ const compareTeamThenCard = (leftTeam: string, rightTeam: string, leftName: stri
     return normalizeKey(leftName).localeCompare(normalizeKey(rightName), 'ko-KR');
 };
 
-export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams = [], loading, onEdit, onAssign, onBillingTargetAssign, onCancelUse, onRestoreUse, restoringCardId = null }) => {
+export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams = [], loading, onEdit, onAssign, onBillingTargetAssign, onCancelUse, onRestoreUse, restoringCardId = null, exportContext, exportButtonContainer }) => {
     const [viewMode, setViewMode] = useState<'list' | 'card'>(getInitialViewMode);
     const [statusFilter, setStatusFilter] = useState<CardStatusFilter>('active');
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
     const [billingTargets, setBillingTargets] = useState<CardBillingTargetRecord[]>([]);
+    const [exportReadyCards, setExportReadyCards] = useState<Card[] | null>(null);
+    const [exportWorkersReady, setExportWorkersReady] = useState(false);
 
     React.useEffect(() => {
         let mounted = true;
+        setExportReadyCards(null);
         cardService.listAllCardBillingTargets()
             .then((records) => {
-                if (mounted) setBillingTargets(records);
+                if (mounted) {
+                    setBillingTargets(records);
+                    setExportReadyCards(cards);
+                }
             })
             .catch((error) => {
                 console.error('Failed to load card billing targets:', error);
@@ -122,6 +132,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                 ]);
                 setWorkers(data);
                 setOfficeStaffRows(officeStaffList);
+                setExportWorkersReady(true);
             } catch (e) {
                 console.error('Failed to load workers:', e);
             }
@@ -378,6 +389,19 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
         return { label: '배정자와 동일', className: 'bg-emerald-50 text-emerald-700 border-emerald-100' };
     };
 
+    const handleExcelDownload = async () => {
+        const context = { ...exportContext, statusLabel: {
+            work: '확인 필요', active: '현재 관리', all: '전체', ASSIGNED: '배정됨', AVAILABLE: '보관중', inactive: '정지·해지',
+        }[statusFilter] };
+        const exportRows = sortedCards.map(card => ({
+            card, effectiveStatus: getEffectiveCardStatus(card),
+            billingTarget: [getResolvedBillingTargetTypeLabel(card), getResolvedBillingTargetName(card)].filter(Boolean).join(' · '),
+            billingMode: getBillingModeBadge(card, Boolean(getLatestBillingTarget(card) || (card.billingTargetType && card.billingTargetId)), getResolvedBillingTargetName(card)).label,
+        }));
+        const { buildCardStatusWorkbook, downloadSupportResourceWorkbook } = await import('../../utils/supportResourceExcelExport');
+        await downloadSupportResourceWorkbook(buildCardStatusWorkbook(context, exportRows), '카드_배정현황.xlsx');
+    };
+
     if (loading) {
         return (
             <div className="h-64 flex items-center justify-center text-slate-400">
@@ -514,6 +538,8 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                         </button>
                     )}
                 </div>
+                <SupportExcelDownloadButton disabled={loading || exportReadyCards !== cards || !exportWorkersReady || sortedCards.length === 0}
+                    container={exportButtonContainer} compact onDownload={handleExcelDownload} />
                 <div className="flex bg-slate-100 rounded-lg p-0.5">
                     <button
                         type="button"

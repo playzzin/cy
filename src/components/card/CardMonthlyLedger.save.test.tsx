@@ -1,5 +1,7 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { act, render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { buildCardLedgerWorkbook, downloadSupportResourceWorkbook } from '../../utils/supportResourceExcelExport';
+import { rememberSupportManagementYearMonth } from '../../utils/supportManagementState';
 import '@testing-library/jest-dom';
 import { CardMonthlyLedger } from './CardMonthlyLedger';
 import { cardService } from '../../services/cardService';
@@ -10,6 +12,8 @@ import { manpowerService } from '../../services/manpowerService';
 import { officeStaffService } from '../../services/officeStaffService';
 import type { Card, CardTransaction } from '../../types/card';
 import type { CardMonthlyLedgerSaveResult } from '../../services/cardMonthlyLedgerMutationService';
+
+jest.mock('../../utils/supportResourceExcelExport', () => ({ buildCardLedgerWorkbook: jest.fn(() => ({})), downloadSupportResourceWorkbook: jest.fn() }));
 
 jest.mock('firebase/storage', () => ({ getDownloadURL: () => { throw Error('SDK forbidden'); }, ref: () => { throw Error('SDK forbidden'); }, uploadBytes: () => { throw Error('SDK forbidden'); } }));
 jest.mock('../../config/firebase', () => ({ storage: null }));
@@ -43,6 +47,8 @@ const billings = jest.mocked(cardBillingService.getBillingsByMonth);
 const protection = jest.mocked(teamSettlementProtectionService.getConfirmedTeamSettlementKeys);
 
 beforeEach(() => {
+  jest.mocked(buildCardLedgerWorkbook).mockClear();
+  jest.mocked(downloadSupportResourceWorkbook).mockReset().mockResolvedValue(undefined);
   sequence = [];
   transactions = [];
   window.sessionStorage.setItem('cy.support-management.year-month', '2026-07');
@@ -75,6 +81,33 @@ async function editAndSave(beforeSave?: () => void) {
   beforeSave?.();
   fireEvent.click(screen.getByRole('button', { name: /^저장$/ }));
 }
+
+it('exports the displayed card rows and current edits without saving', async () => {
+  // Flush both the initial load and the load triggered by worker hydration.
+  // eslint-disable-next-line testing-library/no-unnecessary-act
+  await act(async () => { render(<CardMonthlyLedger cards={cards} teams={teams} loadingCards={false} exportContext={{ teamName: '시험팀', searchText: '시험카드' }} />); });
+  await waitFor(() => expect(screen.getByRole('button', { name: '엑셀 다운로드' })).toBeEnabled());
+  const amount = screen.getAllByRole('textbox')[0];
+  fireEvent.change(amount, { target: { value: '1234' } });
+  fireEvent.blur(amount);
+  fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
+  await waitFor(() => expect(downloadSupportResourceWorkbook).toHaveBeenCalledTimes(1));
+  expect(buildCardLedgerWorkbook).toHaveBeenCalledWith(expect.objectContaining({ yearMonth: '2026-07', teamName: '시험팀', searchText: '시험카드', hasUnsavedChanges: true }),
+    [expect.objectContaining({ card, total: 1234, amounts: expect.objectContaining({ OTHER: 1234 }) })]);
+  expect(ledger).not.toHaveBeenCalled();
+  expect(cardBillingService.replaceDraftBilling).not.toHaveBeenCalled();
+});
+
+it('blocks card export while loading a changed filter and after a failed month load', async () => {
+  const { rerender } = render(<CardMonthlyLedger cards={cards} teams={teams} loadingCards={false} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: '엑셀 다운로드' })).toBeEnabled());
+  jest.mocked(cardService.getTransactionsByMonth).mockRejectedValueOnce(Error('fixture new month failure'));
+  await act(async () => rememberSupportManagementYearMonth('2026-08'));
+  expect(screen.getByRole('button', { name: '엑셀 다운로드' })).toBeDisabled();
+  rerender(<CardMonthlyLedger cards={[]} teams={teams} loadingCards={true} />);
+  expect(screen.getByRole('button', { name: '엑셀 다운로드' })).toBeDisabled();
+  expect(downloadSupportResourceWorkbook).not.toHaveBeenCalled();
+});
 
 it('post-save settlement read failure remains a ledger-preserving warning even when diagnostics throw', async () => {
   protection.mockResolvedValueOnce({ teamIds: new Set(), teamNames: new Set() })

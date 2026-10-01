@@ -83,6 +83,7 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
     const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
     const [selectedTeamId, setSelectedTeamId] = useState<string>('');
     const [searchTerm, setSearchTerm] = useState('');
+    const [exportButtonContainer, setExportButtonContainer] = useState<HTMLDivElement | null>(null);
 
     // Tab State
     const [activeTab, setActiveTab] = useState<CardTabId>(() => normalizeCardTab(initialTab));
@@ -553,6 +554,7 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
                 </div>
 
                 <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
+                    {activeTab === 'status' && <div ref={setExportButtonContainer} className="contents" />}
                     <span className="whitespace-nowrap px-1 text-xs font-bold text-slate-400">
                         조회 {filteredCards.length} / {cards.length}
                     </span>
@@ -582,6 +584,7 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
                 ) : activeTab === 'ledger' ? (
                     <CardMonthlyLedger
                         cards={filteredCards}
+                        exportContext={{ teamName: selectedTeamIdentity.team?.name || '전체', searchText: searchTerm }}
                         teams={teams}
                         loadingCards={loading}
                         onOpenSetup={openAssignCard}
@@ -590,6 +593,8 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
                 ) : (
                     <CardStatusBoard
                         cards={filteredCards}
+                        exportButtonContainer={exportButtonContainer}
+                        exportContext={{ teamName: selectedTeamIdentity.team?.name || '전체', searchText: searchTerm }}
                         teams={teams}
                         loading={loading}
                         onEdit={openEditCard}

@@ -61,6 +61,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
     const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
     const [selectedTeamId, setSelectedTeamId] = useState<string>('');
     const [searchTerm, setSearchTerm] = useState('');
+    const [exportButtonContainer, setExportButtonContainer] = useState<HTMLDivElement | null>(null);
 
     // Tab State
     const [activeTab, setActiveTab] = useState<VehicleTabId>(initialTab);
@@ -519,6 +520,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                 </div>
 
                 <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
+                    {activeTab === 'status' && <div ref={setExportButtonContainer} className="contents" />}
                     <span className="whitespace-nowrap px-1 text-xs font-bold text-slate-400">
                         조회 {filteredVehicles.length} / {vehicles.length}
                     </span>
@@ -548,6 +550,8 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                 ) : activeTab === 'status' ? (
                     <VehicleStatusBoard
                         vehicles={filteredVehicles}
+                        exportButtonContainer={exportButtonContainer}
+                        exportContext={{ teamName: selectedTeamIdentity.team?.name || '전체', searchText: searchTerm }}
                         teams={assignableTeams}
                         workers={workers}
                         loading={loading}

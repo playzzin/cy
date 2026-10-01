@@ -1,4 +1,6 @@
 import { saveCardMonthlyLedger } from '../../services/cardMonthlyLedgerSaveCoordinator';
+import { SupportExcelDownloadButton } from '../support/SupportExcelDownloadButton';
+import type { SupportExportContext } from '../../utils/supportResourceExcelExport';
 import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -322,6 +324,7 @@ const getCardLedgerStructureFingerprint = (row: CardLedgerRow): string => JSON.s
 });
 
 interface CardMonthlyLedgerProps {
+    exportContext?: SupportExportContext;
     cards: Card[];
     teams?: Team[];
     loadingCards: boolean;
@@ -337,9 +340,14 @@ const hexToRgba = (hex: string, alpha: number) => {
     return `rgba(${r},${g},${b},${alpha})`;
 };
 
-export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, teams = [], loadingCards, onOpenSetup, onOpenBillingTarget }) => {
+export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, teams = [], loadingCards, onOpenSetup, onOpenBillingTarget, exportContext }) => {
     const [currentDate, setCurrentDate] = useState(getSupportManagementMonthDate);
     const [yearMonth, setYearMonth] = useState('');
+    const requestedYearMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+    const exportScopeRef = useRef({ yearMonth: requestedYearMonth, cards });
+    exportScopeRef.current = { yearMonth: requestedYearMonth, cards };
+    const loadRequestIdRef = useRef(0);
+    const [loadedExportScope, setLoadedExportScope] = useState<{ yearMonth: string; cards: Card[] } | null>(null);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [isDirty, setIsDirty] = useState(false);
@@ -746,7 +754,11 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         rows: CardLedgerRow[];
         billings: CardBillingDocument[];
     } | null> => {
-        if (!yearMonth) return null;
+        if (!yearMonth || yearMonth !== exportScopeRef.current.yearMonth) return null;
+        const requestId = ++loadRequestIdRef.current;
+        const isCurrentRequest = () => requestId === loadRequestIdRef.current
+            && yearMonth === exportScopeRef.current.yearMonth && cards === exportScopeRef.current.cards;
+        setLoadedExportScope(null);
         setLoading(true);
         try {
             const billingPromise = options?.strictBillingRead
@@ -758,6 +770,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 cardService.listAllCardBillingTargets(),
                 billingPromise
             ]);
+            if (!isCurrentRequest()) return null;
             const dedupedTransactions = dedupeImportedStatementTransactions(txs);
             // Keep every physical document for the next save/cancel pass. Only the
             // displayed totals are deduplicated; otherwise a hidden duplicate can
@@ -816,14 +829,16 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
 
             newRows.sort(compareCardLedgerRowsByBillingTarget);
             setRows(newRows);
+            setLoadedExportScope({ yearMonth, cards });
             setIsDirty(false);
             return { rows: newRows, billings };
         } catch (e) {
+            if (!isCurrentRequest()) return null;
             console.error('카드 월별대장 로드 실패:', e);
             if (!options?.strictBillingRead) setRows([]);
             return null;
         } finally {
-            setLoading(false);
+            if (isCurrentRequest()) setLoading(false);
         }
     }, [yearMonth, cards, buildSegmentsForCard]);
 
@@ -1235,6 +1250,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
 
     useEffect(() => {
         if (yearMonth) loadData();
+        return () => { loadRequestIdRef.current += 1; };
     }, [yearMonth, loadData]);
 
     const handleMonthChange = (delta: number) => {
@@ -1622,6 +1638,23 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         }
     };
 
+    const canExportLedger = !loadingCards && !loading && !saving && !statementUploadingRowId && !isStatementImportOpen
+        && loadedExportScope?.yearMonth === requestedYearMonth && loadedExportScope?.cards === cards && rows.length > 0;
+    const handleExcelDownload = async () => {
+        if (!canExportLedger) return;
+        const context = { ...exportContext, yearMonth, hasUnsavedChanges: isDirty };
+        const exportRows = rows.map(row => {
+            const summary = getAssignmentSummary(row);
+            return { ...row,
+                assignedTeams: summary.assignedTeams.map(team => team.name),
+                assignedWorkers: summary.assignedWorkers,
+                billingTargets: summary.billingTargets.map(target => target.name),
+            };
+        });
+        const { buildCardLedgerWorkbook, downloadSupportResourceWorkbook } = await import('../../utils/supportResourceExcelExport');
+        await downloadSupportResourceWorkbook(buildCardLedgerWorkbook(context, exportRows), `카드_통합관리대장_${yearMonth}.xlsx`);
+    };
+
     const totals = useMemo(() => {
         const result = { ...emptyCategoryAmounts(), total: 0 };
         rows.forEach(r => {
@@ -1708,6 +1741,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                         />
                         <span className="text-sm font-bold text-slate-600">목록 고정</span>
                     </label>
+                    <SupportExcelDownloadButton disabled={!canExportLedger} hasUnsavedChanges={isDirty} onDownload={handleExcelDownload} />
                     <button
                         onClick={handleSave}
                         disabled={saving}

@@ -8,6 +8,9 @@
  * No extracted-hook substitute and no product UI implementation in this task.
  */
 import React from 'react';
+import '@testing-library/jest-dom';
+import { buildVehicleLedgerWorkbook, downloadSupportResourceWorkbook } from '../../utils/supportResourceExcelExport';
+import { rememberSupportManagementYearMonth } from '../../utils/supportManagementState';
 import { Timestamp } from 'firebase/firestore';
 import { manpowerService } from '../../services/manpowerService';
 import { officeStaffService } from '../../services/officeStaffService';
@@ -21,6 +24,8 @@ import { saveVehicleMonthlyLedgerWithBilling } from '../../services/vehicleMonth
 import type { Vehicle, VehicleExpenseRecord } from '../../types/vehicle';
 import type { VehicleBillingDocument } from '../../types/vehicleBilling';
 import { SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../../utils/supportWriteErrorReporting';
+
+jest.mock('../../utils/supportResourceExcelExport', () => ({ buildVehicleLedgerWorkbook: jest.fn(() => ({})), downloadSupportResourceWorkbook: jest.fn() }));
 
 jest.mock('../../services/vehicleService', () => ({ vehicleService: {
   getExpensesByMonth: jest.fn(), listAllVehicleAssignments: jest.fn(),
@@ -145,6 +150,7 @@ function expectEpochFixtureContract() {
 beforeEach(() => {
   expectEpochFixtureContract();
   jest.clearAllMocks();
+  jest.mocked(downloadSupportResourceWorkbook).mockResolvedValue(undefined);
   const actual = jest.requireActual<typeof import('../../services/vehicleMonthlyLedgerSaveCoordinator')>(
     '../../services/vehicleMonthlyLedgerSaveCoordinator'
   );
@@ -192,7 +198,7 @@ async function ready(vehicles: Vehicle[] = [vehicle('A')]) {
   await waitFor(() => expect([
     successfulExpenseReads, successfulBillingReads, successfulAssignmentReads, successfulTargetReads
   ].every(count => count > 0)).toBe(true));
-  expect(screen.queryByText('데이터를 불러오는 중입니다...')).toBeNull();
+  await waitFor(() => expect(screen.queryByText('데이터를 불러오는 중입니다...')).toBeNull());
   expect(screen.queryByRole('columnheader', { name: /메모/ })).toBeNull();
 }
 function editAmount(id = 'A') {
@@ -204,6 +210,39 @@ function editAmount(id = 'A') {
   fireEvent.blur(inputs[0]);
   expect(screen.getByText('● 수정사항 있음')).toBeTruthy();
 }
+
+it('exports only the searched vehicle with the visible totals and does not save', async () => {
+  // Flush both the initial load and the load triggered by worker hydration.
+  // eslint-disable-next-line testing-library/no-unnecessary-act
+  await act(async () => { render(<VehicleMonthlyLedger vehicles={[vehicle('A'), vehicle('B')]} teams={[]} loadingVehicles={false} searchText="TEST-A" />); });
+  await waitFor(() => expect(screen.getByRole('button', { name: '엑셀 다운로드' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
+  await waitFor(() => expect(downloadSupportResourceWorkbook).toHaveBeenCalledTimes(1));
+  expect(buildVehicleLedgerWorkbook).toHaveBeenCalledWith(expect.objectContaining({ yearMonth: '2026-09', searchText: 'TEST-A' }),
+    [expect.objectContaining({ vehicle: expect.objectContaining({ id: 'A' }), rentFee: 100, total: 100 })]);
+  expect(ledger).not.toHaveBeenCalled();
+  expect(replacement).not.toHaveBeenCalled();
+});
+
+it('exports unsaved vehicle edits without running the save coordinator', async () => {
+  await ready();
+  editAmount();
+  fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
+  await waitFor(() => expect(buildVehicleLedgerWorkbook).toHaveBeenCalledTimes(1));
+  expect(buildVehicleLedgerWorkbook).toHaveBeenCalledWith(expect.objectContaining({ hasUnsavedChanges: true }),
+    [expect.objectContaining({ amounts: expect.objectContaining({ FUEL: 25 }), total: 125 })]);
+  expect(coordinator).not.toHaveBeenCalled();
+});
+
+it('disables vehicle export after a failed month change', async () => {
+  await ready();
+  const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  expenses.mockRejectedValueOnce(Error('fixture new month failure'));
+  await act(async () => rememberSupportManagementYearMonth('2026-10'));
+  expect(screen.getByRole('button', { name: '엑셀 다운로드' })).toBeDisabled();
+  expect(downloadSupportResourceWorkbook).not.toHaveBeenCalled();
+  error.mockRestore();
+});
 async function save() {
   fireEvent.click(screen.getByRole('button', { name: /^저장$/ }));
   await waitFor(() => expect(screen.queryByRole('button', { name: '저장 중...' })).toBeNull());

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBuilding, faFileInvoiceDollar, faPlus, faChartPie, faMapMarkerAlt, faUser, faBed, faWonSign, faExclamationTriangle, faBell, faBoxArchive, faList, faTh, faUsers, faStickyNote, faPen, faRotateRight, faHistory, faSearch, faChevronDown, faChevronUp } from '@fortawesome/free-solid-svg-icons';
+import { faBuilding, faFileInvoiceDollar, faFileExcel, faPlus, faChartPie, faMapMarkerAlt, faUser, faBed, faWonSign, faExclamationTriangle, faBell, faBoxArchive, faList, faTh, faUsers, faStickyNote, faPen, faRotateRight, faHistory, faSearch, faChevronDown, faChevronUp } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { iconMap } from '../../constants/iconMap';
 import { accommodationService } from '../../services/accommodationService';
@@ -124,6 +124,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     const [currentMonthLedgerRecords, setCurrentMonthLedgerRecords] = useState<UtilityRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [summaryMonth, setSummaryMonth] = useState(getSupportManagementYearMonth);
+    const [exportReadyMonth, setExportReadyMonth] = useState<string | null>(null);
+    const [exporting, setExporting] = useState(false);
     const loadSequence = useRef(0);
     useEffect(() => subscribeSupportManagementYearMonth(setSummaryMonth), []);
 
@@ -274,6 +276,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
 
     const loadData = async () => {
         const sequence = ++loadSequence.current;
+        setExportReadyMonth(null);
+        let exportDataComplete = true;
         try {
             setLoading(true);
             const targetYearMonth = summaryMonth;
@@ -283,10 +287,12 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                 companyService.getCompanies(),
                 accommodationService.getAssignments(),
                 accommodationService.getMonthlyLedger(targetYearMonth).catch((error) => {
+                    exportDataComplete = false;
                     console.error('Failed to load accommodation monthly ledger', error);
                     return [] as UtilityRecord[];
                 }),
                 accommodationBillingTargetService.listTargets().catch((error) => {
+                    exportDataComplete = false;
                     console.error('Failed to load accommodation billing targets', error);
                     return [] as AccommodationBillingTarget[];
                 })
@@ -304,6 +310,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
             setCurrentMonthLedgerRecords(ledgerList);
             setTeams(appendOfficeAssignmentTeam(sortedTeams, sortedTeams)); // Full list for state
             setSelectableTeams(appendOfficeAssignmentTeam(allowedTeams, sortedTeams)); // Filtered list for assignment
+            if (exportDataComplete) setExportReadyMonth(targetYearMonth);
         } catch (error) {
             console.error("Failed to load accommodations", error);
         } finally {
@@ -1304,6 +1311,49 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
             ? [{ label: '다원', ...ownershipMonthSummary.Dawon }] : []),
     ];
 
+    const canExportStatus = !loading && !exporting && exportReadyMonth === summaryMonth
+        && (sortedFilteredAccommodations.length > 0 || monthScopedAccommodations.length > 0);
+    const handleExcelDownload = async () => {
+        if (!canExportStatus) return;
+        const options = {
+            yearMonth: summaryMonth,
+            teamName: selectedTeamId ? selectedTeamCanonicalName || selectedTeamId : '전체',
+            searchText: searchTerm,
+            statusLabel: { all: '전체', active: '운영 중', inactive: '보관/종료', todo: '확인 필요' }[filterStatus],
+            rows: sortedFilteredAccommodations.map(accommodation => {
+                const activeList = getActiveAssignmentsForAccommodation(accommodation);
+                const target = getBillingTargetForAccommodation(accommodation);
+                const targetLabel = buildBillingTargetLabel(accommodation, activeList);
+                const targetName = buildBillingTargetWorkerList(accommodation, activeList)
+                    || getBillingTeamNameForAccommodation(accommodation);
+                return {
+                    accommodation,
+                    rent: getAccommodationRent(accommodation),
+                    deposit: getAccommodationDeposit(accommodation),
+                    assignedTeam: getAssignedTeamNameForAccommodation(accommodation),
+                    assignedWorkers: Array.from(new Set(activeList.map(assignment => (
+                        assignment.workerName || assignment.teamName || assignment.workerId
+                    )).filter(Boolean))),
+                    occupantCount: activeList.length,
+                    billingTarget: [targetLabel, targetName].filter(Boolean).join(' · '),
+                    billingMode: getBillingModeBadge(accommodation, target, activeList.length > 0).label,
+                };
+            }),
+            monthAccommodations: monthScopedAccommodations,
+            monthRecords: normalizedMonthLedgerRecords,
+        };
+        setExporting(true);
+        try {
+            const { buildAccommodationStatusWorkbook, downloadAccommodationWorkbook } = await import('../../utils/accommodationExcelExport');
+            await downloadAccommodationWorkbook(buildAccommodationStatusWorkbook(options), `숙소_배정경비현황_${summaryMonth}.xlsx`);
+        } catch (error) {
+            console.error('Failed to export accommodation status', error);
+            void Swal.fire('다운로드 실패', '엑셀 다운로드에 실패했습니다. 다시 시도해 주세요.', 'error');
+        } finally {
+            setExporting(false);
+        }
+    };
+
     // Calculate Alerts (Rent Due Soon)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1440,6 +1490,18 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                     </div>
 
                     <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
+                        {activeTab === 'status' && (
+                            <button
+                                type="button"
+                                onClick={handleExcelDownload}
+                                disabled={!canExportStatus}
+                                title="현재 조회 목록과 선택 월의 계약 집계를 다운로드합니다."
+                                className="flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-emerald-200 bg-white px-4 py-2 text-sm font-bold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                <FontAwesomeIcon icon={faFileExcel} />
+                                {exporting ? '엑셀 생성 중...' : '엑셀 다운로드'}
+                            </button>
+                        )}
                         {activeTab === 'status' && (
                             <span className="whitespace-nowrap px-1 text-xs font-bold text-slate-400">
                                 조회 {filteredAccommodations.length} / {selectedTeamScopedAccommodations.length}
