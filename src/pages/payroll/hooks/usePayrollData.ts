@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { dailyReportService } from '../../../services/dailyReportService';
 import { manpowerService, Worker } from '../../../services/manpowerService';
 import { siteService, Site } from '../../../services/siteService';
@@ -225,6 +225,7 @@ export const usePayrollData = (
   const [basePaymentData, setBasePaymentData] = useState<PaymentData[]>([]);
   const [ledgerRowsData, setLedgerRowsData] = useState<MonthlyAdvanceLedgerRow[]>([]);
   const [errorCount, setErrorCount] = useState(0);
+  const fetchSequenceRef = useRef(0);
 
   const validateItem = useCallback((item: Partial<PaymentData>): { isValid: boolean, errors: Record<string, boolean> } => {
     const errors: Record<string, boolean> = {};
@@ -253,10 +254,12 @@ export const usePayrollData = (
   }, []);
 
   const fetchData = useCallback(async () => {
-    if (!startMonth || !endMonth) return;
-
+    const sequence = ++fetchSequenceRef.current;
     const months = buildMonthRange(startMonth, endMonth);
-    if (months.length === 0) return;
+    if (months.length === 0) {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     try {
@@ -267,6 +270,7 @@ export const usePayrollData = (
         teamService.getTeams(),
         payrollConfigService.getConfig()
       ]);
+      if (sequence !== fetchSequenceRef.current) return;
       const deductionLabelMap = buildDeductionLabelMap(config);
 
       const workerMap = new Map<string, Worker>();
@@ -704,20 +708,23 @@ export const usePayrollData = (
         };
       });
 
+      // 월/팀 변경과 연속 조회가 겹쳐도 마지막 요청만 화면 상태를 갱신한다.
+      if (sequence !== fetchSequenceRef.current) return;
       setPaymentData(processedPaymentData);
       setBasePaymentData(processedPaymentData);
       setLedgerRowsData(processedLedgerRows);
       setErrorCount(errs);
       console.log('Data fetched successfully');
     } catch (error) {
-      console.error('Error fetching payroll data:', error);
+      if (sequence === fetchSequenceRef.current) console.error('Error fetching payroll data:', error);
     } finally {
-      setLoading(false);
+      if (sequence === fetchSequenceRef.current) setLoading(false);
     }
   }, [startMonth, endMonth, selectedTeamId, selectedWorkerId, validateItem]);
 
   useEffect(() => {
     fetchData();
+    return () => { fetchSequenceRef.current += 1; };
   }, [fetchData]);
 
   return {

@@ -2671,6 +2671,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
     React.useEffect(() => {
         return () => {
+            applyRunSeqRef.current += 1;
             if (applyDebounceRef.current !== null) {
                 clearTimeout(applyDebounceRef.current);
                 applyDebounceRef.current = null;
@@ -2678,6 +2679,15 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             clearApplyWatchdog();
         };
     }, [clearApplyWatchdog]);
+
+    // 계산 대기 중 재조회가 끝나도 사용자가 마지막으로 선택한 설정을 유지한다.
+    const requestedCalculationOptionsRef = useRef({
+        applyInsurance: false,
+        applyBusinessIncome: false,
+        applyUtilities: true,
+        applyDailyFee: false,
+        applyInsuranceTeamSiteOnly: false,
+    });
 
     const applyCalculatedDeductions = useCallback((params: {
         applyInsurance: boolean;
@@ -2694,6 +2704,13 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             return;
         }
 
+        requestedCalculationOptionsRef.current = { ...params, applyUtilities: effectiveApplyUtilities };
+        setInsuranceApplied(params.applyInsurance);
+        setInsuranceTeamSiteOnly(params.applyInsuranceTeamSiteOnly);
+        setBusinessIncomeApplied(params.applyBusinessIncome);
+        setUtilitiesApplied(effectiveApplyUtilities);
+        setDailyFeeApplied(params.applyDailyFee);
+
         const runSeq = applyRunSeqRef.current + 1;
         applyRunSeqRef.current = runSeq;
         markApplyStarted(runSeq);
@@ -2709,7 +2726,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             applyDebounceRef.current = null;
 
             try {
-                const basePD = basePaymentDataRef.current.length > 0 ? basePaymentDataRef.current : paymentDataRef.current;
+                const basePD = basePaymentDataRef.current;
                 const ledgerInputsMap = ledgerInputsRef.current;
                 const dailyFeePerManDay = Math.max(0, Math.floor(toNumber(config?.insuranceConfig?.dailyWorkerFeePerManDay ?? 0)));
 
@@ -2870,11 +2887,6 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 if (runSeq !== applyRunSeqRef.current) return;
 
                 setPaymentData(newPaymentData);
-                setInsuranceApplied(params.applyInsurance);
-                setInsuranceTeamSiteOnly(params.applyInsuranceTeamSiteOnly);
-                setBusinessIncomeApplied(params.applyBusinessIncome);
-                setUtilitiesApplied(effectiveApplyUtilities);
-                setDailyFeeApplied(params.applyDailyFee);
 
                 requestAnimationFrame(() => {
                     setTimeout(() => {
@@ -2899,28 +2911,58 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         selectedTeamId || undefined
     ), [monthRangeSet, savedPayrollSettlements, selectedTeamId]);
 
-    useEffect(() => {
-        if (loading || payrollSettlementLoading || !payrollConfig || !savedCalculationOptions) return;
+    const appliedCalculationSourceRef = useRef<{
+        data: typeof basePaymentData;
+        config: typeof payrollConfig;
+        calculate: typeof applyCalculatedDeductions;
+    } | null>(null);
 
-        const restorationKey = [
+    useEffect(() => {
+        if (loading || payrollSettlementLoading) {
+            applyRunSeqRef.current += 1;
+            if (applyDebounceRef.current !== null) {
+                clearTimeout(applyDebounceRef.current);
+                applyDebounceRef.current = null;
+            }
+            clearApplyWatchdog();
+            setDeductionApplyInProgress(false);
+            // 취소한 계산은 조회가 끝난 뒤 최신 원본으로 다시 실행한다.
+            appliedCalculationSourceRef.current = null;
+            return;
+        }
+        if (!payrollConfig) return;
+
+        const restorationKey = savedCalculationOptions ? [
             startMonth,
             endMonth,
             selectedTeamId || 'all',
             makePayrollCalculationOptionsSignature(savedCalculationOptions),
-        ].join('|');
-        if (restoredCalculationOptionsRef.current === restorationKey) return;
+        ].join('|') : '';
+        const shouldRestore = Boolean(savedCalculationOptions && restoredCalculationOptionsRef.current !== restorationKey);
         restoredCalculationOptionsRef.current = restorationKey;
 
-        applyCalculatedDeductions({
+        const previous = appliedCalculationSourceRef.current;
+        if (!shouldRestore && previous?.data === basePaymentData
+            && previous.config === payrollConfig && previous.calculate === applyCalculatedDeductions) return;
+        appliedCalculationSourceRef.current = { data: basePaymentData, config: payrollConfig, calculate: applyCalculatedDeductions };
+
+        // 조회 결과는 세금 계산 전 원본이다. 저장 설정 복원 여부와 별개로
+        // 새 원본에는 현재 적용 중인 설정을 다시 계산해야 한다.
+        const options = shouldRestore && savedCalculationOptions ? {
             applyInsurance: savedCalculationOptions.insuranceApplied,
             applyInsuranceTeamSiteOnly: savedCalculationOptions.insuranceTeamSiteOnly,
             applyBusinessIncome: savedCalculationOptions.businessIncomeApplied,
             applyUtilities: savedCalculationOptions.utilitiesApplied,
             applyDailyFee: savedCalculationOptions.dailyFeeApplied,
+        } : requestedCalculationOptionsRef.current;
+        applyCalculatedDeductions({
+            ...options,
             immediate: true,
         });
     }, [
         applyCalculatedDeductions,
+        basePaymentData,
+        clearApplyWatchdog,
         endMonth,
         loading,
         payrollConfig,
