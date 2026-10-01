@@ -116,8 +116,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const [selectedTeam, setSelectedTeam] = useState('');
     const [baseYear, setBaseYear] = useState(currentYear);
     const selectedTeamInputRef = useRef<HTMLInputElement | null>(null);
-    const ledgerSearchInputRef = useRef<HTMLInputElement | null>(null);
-    const summarySearchInputRef = useRef<HTMLInputElement | null>(null);
     const baseYearInputRef = useRef<HTMLInputElement | null>(null);
     const inputRowsRef = useRef<InputRow[]>([]);
     const selectedTeamRef = useRef('');
@@ -125,9 +123,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     if (inputRowsRef.current.length === 0) {
         inputRowsRef.current = createEmptyInputRows();
     }
-
-    const [ledgerSearchTarget, setLedgerSearchTarget] = useState<'partnerName' | 'siteName' | 'teamName'>('partnerName');
-    const [summarySearchTarget, setSummarySearchTarget] = useState<'partnerName' | 'siteName' | 'teamName'>('partnerName');
 
     const [ledgerDateSearchMode, setLedgerDateSearchMode] = useState<DateSearchMode>('range');
     const [ledgerMonth, setLedgerMonth] = useState(currentMonthValue);
@@ -5661,41 +5656,26 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             </div>
                         </div>
 
-                        <div className="workbook-query-search">
-                            <div className="workbook-query-targets" role="group" aria-label="검색 대상">
-                                {([
-                                    { key: 'partnerName', label: '거래처' },
-                                    { key: 'siteName', label: '현장명' },
-                                    { key: 'teamName', label: '팀명' }
-                                ] as const).map((target) => (
-                                    <button
-                                        key={target.key}
-                                        type="button"
-                                        aria-pressed={ledgerSearchTarget === target.key}
-                                        onClick={() => {
-                                            ledgerSearchInputRef.current?.focus();
-                                            if (ledgerSearchTarget === target.key) return;
-                                            setLedgerSearchTarget(target.key);
-                                            setLedgerDraft((prev) => ({ ...prev, partnerName: '', siteName: '', teamName: '', [target.key]: prev[ledgerSearchTarget] }));
+                        <div className="workbook-query-search" role="group" aria-label="검색 조건">
+                            {([
+                                { key: 'partnerName', label: '거래처', placeholder: '거래처 전체' },
+                                { key: 'siteName', label: '현장명', placeholder: '현장 전체' },
+                                { key: 'teamName', label: '팀명', placeholder: '팀 전체' }
+                            ] as const).map((field) => (
+                                <label key={field.key} className="workbook-input-field">
+                                    <span>{field.label}</span>
+                                    <input
+                                        aria-label={`${field.label} 검색`}
+                                        autoComplete="off"
+                                        value={ledgerDraft[field.key]}
+                                        onChange={(event) => setLedgerDraft((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter' && !event.nativeEvent.isComposing) applyLedgerFilter();
                                         }}
-                                    >
-                                        {target.label}
-                                    </button>
-                                ))}
-                            </div>
-                            <label className="workbook-input-field">
-                                <input
-                                    ref={ledgerSearchInputRef}
-                                    aria-label={ledgerSearchTarget === 'partnerName' ? '거래처 검색' : ledgerSearchTarget === 'siteName' ? '현장명 검색' : '팀명 검색'}
-                                    autoComplete="off"
-                                    value={ledgerDraft[ledgerSearchTarget]}
-                                    onChange={(event) => setLedgerDraft((prev) => ({ ...prev, [ledgerSearchTarget]: event.target.value }))}
-                                    onKeyDown={(event) => {
-                                        if (event.key === 'Enter' && !event.nativeEvent.isComposing) applyLedgerFilter();
-                                    }}
-                                    placeholder={ledgerSearchTarget === 'partnerName' ? '거래처 전체' : ledgerSearchTarget === 'siteName' ? '현장 전체' : '팀 전체'}
-                                />
-                            </label>
+                                        placeholder={field.placeholder}
+                                    />
+                                </label>
+                            ))}
                             <button type="button" className="excel-button excel-button-green workbook-query-submit" onClick={applyLedgerFilter}>
                                 <FontAwesomeIcon icon={faMagnifyingGlass} />조회</button>
                         </div>
@@ -5907,41 +5887,26 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         )}
 
 
-                        <div className="workbook-query-search">
-                            <div className="workbook-query-targets" role="group" aria-label="검색 대상">
-                                {([
-                                    { key: 'partnerName', label: '거래처' },
-                                    { key: 'siteName', label: '현장명' },
-                                    { key: 'teamName', label: '팀명' }
-                                ] as const).map((target) => (
-                                    <button
-                                        key={target.key}
-                                        type="button"
-                                        aria-pressed={summarySearchTarget === target.key}
-                                        onClick={() => {
-                                            summarySearchInputRef.current?.focus();
-                                            if (summarySearchTarget === target.key) return;
-                                            setSummarySearchTarget(target.key);
-                                            setSummaryDraft((prev) => ({ ...prev, partnerName: '', siteName: '', teamName: '', [target.key]: prev[summarySearchTarget] }));
+                        <div className="workbook-query-search" role="group" aria-label="검색 조건">
+                            {([
+                                { key: 'partnerName', label: '거래처', placeholder: '거래처 전체' },
+                                { key: 'siteName', label: '현장명', placeholder: '현장 전체' },
+                                { key: 'teamName', label: '팀명', placeholder: '팀 전체' }
+                            ] as const).map((field) => (
+                                <label key={field.key} className="workbook-input-field">
+                                    <span>{field.label}</span>
+                                    <input
+                                        aria-label={`${field.label} 검색`}
+                                        autoComplete="off"
+                                        value={summaryDraft[field.key]}
+                                        onChange={(event) => setSummaryDraft((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter' && !event.nativeEvent.isComposing) applySummaryFilter();
                                         }}
-                                    >
-                                        {target.label}
-                                    </button>
-                                ))}
-                            </div>
-                            <label className="workbook-input-field">
-                                <input
-                                    ref={summarySearchInputRef}
-                                    aria-label={summarySearchTarget === 'partnerName' ? '거래처 검색' : summarySearchTarget === 'siteName' ? '현장명 검색' : '팀명 검색'}
-                                    autoComplete="off"
-                                    value={summaryDraft[summarySearchTarget]}
-                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, [summarySearchTarget]: event.target.value }))}
-                                    onKeyDown={(event) => {
-                                        if (event.key === 'Enter' && !event.nativeEvent.isComposing) applySummaryFilter();
-                                    }}
-                                    placeholder={summarySearchTarget === 'partnerName' ? '거래처 전체' : summarySearchTarget === 'siteName' ? '현장 전체' : '팀 전체'}
-                                />
-                            </label>
+                                        placeholder={field.placeholder}
+                                    />
+                                </label>
+                            ))}
                             <button type="button" className="excel-button excel-button-green workbook-query-submit" onClick={applySummaryFilter}>
                                 <FontAwesomeIcon icon={faMagnifyingGlass} />조회</button>
                         </div>
