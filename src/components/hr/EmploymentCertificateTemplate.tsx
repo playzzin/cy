@@ -17,6 +17,7 @@ interface EmploymentCertificateTemplateProps {
     joinDate: Date | null;
     endDate: Date | null;
     isServing: boolean;
+    includeStamp?: boolean;
 }
 
 const A4_WIDTH_MM = 210;
@@ -335,7 +336,7 @@ const WarningText = styled.p`
 `;
 
 export const EmploymentCertificateTemplate = forwardRef<HTMLDivElement, EmploymentCertificateTemplateProps>(
-    ({ company, worker, purpose, issueDate, position, duties, joinDate, endDate, isServing }, ref) => {
+    ({ company, worker, purpose, issueDate, position, duties, joinDate, endDate, isServing, includeStamp = true }, ref) => {
         const sealUrl = useDocumentStamp('employment', company?.name);
         const workerDisplayName = String(worker?.name || '').replace(/\d+/g, '').trim();
 
@@ -440,13 +441,13 @@ export const EmploymentCertificateTemplate = forwardRef<HTMLDivElement, Employme
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <CeoText>대표이사 {company?.ceoName || 'OOO'} (인)</CeoText>
                                 <OfficialSeal>
-                                    {sealUrl ? (
+                                    {includeStamp && (sealUrl ? (
                                         <img src={sealUrl} alt="직인" />
                                     ) : (
                                         getSealText(company?.name).split('\n').map((line, i) => (
                                             <div key={i}>{line}</div>
                                         ))
-                                    )}
+                                    ))}
                                 </OfficialSeal>
                             </div>
                         </SignatureArea>

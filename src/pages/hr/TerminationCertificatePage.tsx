@@ -363,6 +363,7 @@ const TerminationCertificatePage: React.FC = () => {
   const [serviceEndDate, setServiceEndDate] = useState<Date | null>(new Date());
   const [serviceDescription, setServiceDescription] = useState('건설현장 시스템비계 및 해체');
   const [purpose, setPurpose] = useState('퇴직용');
+  const [includeStamp, setIncludeStamp] = useState(true);
 
   const componentRef = useRef<HTMLDivElement>(null);
 
@@ -597,6 +598,18 @@ const TerminationCertificatePage: React.FC = () => {
             />
           </FormGroup>
 
+          <FormGroup>
+            <Label htmlFor="termination-stamp-print">도장 인쇄</Label>
+            <Select
+              id="termination-stamp-print"
+              value={includeStamp ? 'include' : 'exclude'}
+              onChange={(event) => setIncludeStamp(event.target.value === 'include')}
+            >
+              <option value="include">도장 포함</option>
+              <option value="exclude">도장 제외</option>
+            </Select>
+          </FormGroup>
+
           <HelperText>
             재직증명서와 동일한 방식으로 미리보기, 인쇄, PDF 저장이 가능합니다.
           </HelperText>
@@ -619,6 +632,7 @@ const TerminationCertificatePage: React.FC = () => {
             serviceEndDate={serviceEndDate}
             serviceDescription={serviceDescription}
             purpose={purpose}
+            includeStamp={includeStamp}
           />
         </div>
       </PreviewArea>

@@ -362,6 +362,7 @@ const EmploymentCertificatePage: React.FC = () => {
     const [joinDate, setJoinDate] = useState<Date | null>(null);
     const [endDate, setEndDate] = useState<Date | null>(null);
     const [isServing, setIsServing] = useState(true);
+    const [includeStamp, setIncludeStamp] = useState(true);
 
     const componentRef = useRef<HTMLDivElement>(null);
 
@@ -649,6 +650,18 @@ const EmploymentCertificatePage: React.FC = () => {
                         />
                     </FormGroup>
 
+                    <FormGroup>
+                        <Label htmlFor="employment-stamp-print">도장 인쇄</Label>
+                        <Select
+                            id="employment-stamp-print"
+                            value={includeStamp ? 'include' : 'exclude'}
+                            onChange={(event) => setIncludeStamp(event.target.value === 'include')}
+                        >
+                            <option value="include">도장 포함</option>
+                            <option value="exclude">도장 제외</option>
+                        </Select>
+                    </FormGroup>
+
                     <Button onClick={handlePrintClick} disabled={!selectedWorker || loading}>
                         <FontAwesomeIcon icon={faPrint} />
                         재직증명서 인쇄 / PDF 저장
@@ -669,6 +682,7 @@ const EmploymentCertificatePage: React.FC = () => {
                         joinDate={joinDate}
                         endDate={endDate}
                         isServing={isServing}
+                        includeStamp={includeStamp}
                     />
                 </div>
             </PreviewArea>

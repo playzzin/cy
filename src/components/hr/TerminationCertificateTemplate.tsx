@@ -14,6 +14,7 @@ interface TerminationCertificateTemplateProps {
   serviceEndDate: Date | null;
   serviceDescription: string;
   purpose: string;
+  includeStamp?: boolean;
 }
 
 const A4_WIDTH_MM = 210;
@@ -351,7 +352,7 @@ const formatWorkerName = (worker?: Worker | null) => String(worker?.name || '').
 const getCompanyDisplayName = (company?: Company | null) => company?.name || '주식회사 청연이엔지';
 
 export const TerminationCertificateTemplate = forwardRef<HTMLDivElement, TerminationCertificateTemplateProps>(
-  ({ company, worker, issueDate, serviceStartDate, serviceEndDate, serviceDescription, purpose }, ref) => {
+  ({ company, worker, issueDate, serviceStartDate, serviceEndDate, serviceDescription, purpose, includeStamp = true }, ref) => {
     const sealUrl = useDocumentStamp('termination', company?.name);
 
 
@@ -437,13 +438,13 @@ export const TerminationCertificateTemplate = forwardRef<HTMLDivElement, Termina
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <CeoText>대표이사 {company?.ceoName || 'OOO'} (인)</CeoText>
                   <OfficialSeal>
-                    {sealUrl ? (
+                    {includeStamp && (sealUrl ? (
                       <img src={sealUrl} alt="직인" />
                     ) : (
                       getSealText(company?.name).split('\n').map((line, index) => (
                         <div key={index}>{line}</div>
                       ))
-                    )}
+                    ))}
                   </OfficialSeal>
                 </div>
               </SignatureArea>
