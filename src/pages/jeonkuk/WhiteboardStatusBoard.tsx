@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion, type MotionProps } from 'framer-motion';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faChartBar, faSearch, faBuilding, faUserGroup,
@@ -195,8 +195,66 @@ const getReadableColorOnWhite = (color: string): string => (
     getReadableAccentColor(color, '#ffffff', 4.5)
 );
 
+const BOARD_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+const getCardRevealMotion = (index: number, reducedMotion: boolean): MotionProps => ({
+    initial: { opacity: reducedMotion ? 1 : 0, y: reducedMotion ? 0 : 16 },
+    animate: {
+        opacity: 1,
+        y: 0,
+        transition: {
+            duration: reducedMotion ? 0 : 0.42,
+            delay: reducedMotion ? 0 : Math.min(index, 8) * 0.025,
+            ease: BOARD_EASE
+        }
+    },
+    exit: {
+        opacity: 0,
+        y: reducedMotion ? 0 : -6,
+        transition: { duration: reducedMotion ? 0 : 0.16, ease: BOARD_EASE }
+    }
+});
+
+const BoardDisclosure: React.FC<{
+    open: boolean;
+    reducedMotion: boolean;
+    className?: string;
+    children: () => React.ReactNode;
+}> = ({ open, reducedMotion, className, children }) => (
+    <AnimatePresence initial={false}>
+        {open && (
+            <motion.div
+                layout={reducedMotion ? false : 'position'}
+                transition={{ layout: { duration: reducedMotion ? 0 : 0.42, ease: BOARD_EASE } }}
+                initial={{ height: 0, opacity: 0 }}
+                animate={{
+                    height: 'auto',
+                    opacity: 1,
+                    transition: {
+                        height: { duration: reducedMotion ? 0 : 0.38, ease: BOARD_EASE },
+                        opacity: { duration: reducedMotion ? 0 : 0.22, delay: reducedMotion ? 0 : 0.06 }
+                    }
+                }}
+                exit={{
+                    height: 0,
+                    opacity: 0,
+                    transition: {
+                        height: { duration: reducedMotion ? 0 : 0.28, ease: BOARD_EASE },
+                        opacity: { duration: reducedMotion ? 0 : 0.12 }
+                    }
+                }}
+                className="overflow-hidden"
+            >
+                <div className={className}>{children()}</div>
+            </motion.div>
+        )}
+    </AnimatePresence>
+);
+
 const WhiteboardStatusBoard: React.FC = () => {
     const navigate = useNavigate();
+    const reducedMotion = Boolean(useReducedMotion());
+    const layoutTransition = { duration: reducedMotion ? 0 : 0.42, ease: BOARD_EASE };
     const [searchParams, setSearchParams] = useSearchParams();
     // Context에서 마스터 데이터 가져오기 (Firebase 호출 없이 바로 사용!)
     const { companies, teams, sites, loading: masterDataLoading } = useMasterData();
@@ -257,7 +315,8 @@ const WhiteboardStatusBoard: React.FC = () => {
     }, []);
 
     const containerRef = useRef<HTMLDivElement>(null);
-    const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+    const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => () => clearTimeout(scrollTimeoutRef.current), []);
     const lastSyncedSearchRef = useRef(searchParams.toString());
 
     const normalizeName = React.useCallback((value: string | undefined | null) => String(value ?? '').replace(/\s+/g, '').trim(), []);
@@ -1133,6 +1192,7 @@ const WhiteboardStatusBoard: React.FC = () => {
 
     const toggleAccordion = (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
+        clearTimeout(scrollTimeoutRef.current);
         const newSet = new Set(expandedItems);
         // Exclusive Open Logic: Close all others when opening a new one
         if (newSet.has(id)) {
@@ -1142,11 +1202,11 @@ const WhiteboardStatusBoard: React.FC = () => {
             newSet.add(id);
 
             // Scroll Container to Top (Since item moves to #1 spot)
-            setTimeout(() => {
+            scrollTimeoutRef.current = setTimeout(() => {
                 if (containerRef.current) {
-                    containerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+                    containerRef.current.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
                 }
-            }, 100);
+            }, reducedMotion ? 0 : 100);
         }
         setExpandedItems(newSet);
     };
@@ -1453,9 +1513,10 @@ const WhiteboardStatusBoard: React.FC = () => {
             </div>
 
             {/* Grid Area */}
-            <div
+            <motion.div
+                layoutScroll
                 ref={containerRef}
-                className="flex-1 overflow-y-auto p-8 bg-slate-100/50 relative scroll-smooth"
+                className="flex-1 overflow-y-auto p-8 bg-slate-100/50 relative scroll-smooth motion-reduce:scroll-auto"
             >
                 {/* Background Grid Pattern */}
                 <div className="absolute inset-0 opacity-[0.03] pointer-events-none"
@@ -1468,8 +1529,9 @@ const WhiteboardStatusBoard: React.FC = () => {
                         <p className="font-semibold">현황 데이터를 불러오는 중입니다.</p>
                     </div>
                 ) : dashboardItems.length > 0 ? (
-                    <div className="flex flex-wrap gap-2 w-full px-2">
-                        {sortedItems.map(item => {
+                    <div key={`${viewMode}:${year}-${month}:${selectedCompanyId}:${selectedTeamId}`} className="flex flex-wrap gap-2 w-full px-2 relative">
+                        <AnimatePresence mode="popLayout">
+                        {sortedItems.map((item, itemIndex) => {
                             // Check expansion state for dynamic sizing
                             const isItemExpanded = expandedItems.has(item.id);
                             // Check if any detail is expanded
@@ -1505,6 +1567,10 @@ const WhiteboardStatusBoard: React.FC = () => {
                                 : undefined;
                             const responsibleTeamColor = normalizeHexColor(responsibleTeamForItem?.color);
                             const displayedResponsibleTeamColor = responsibleTeamColor || (item.responsibleTeamName ? '#8b5cf6' : undefined);
+                            const headerColor = item.type === 'site'
+                                ? displayedResponsibleTeamColor
+                                : normalizeHexColor(resolveDashboardTeam(item.id, item.name)?.color) || '#8b5cf6';
+                            const headerTextColor = headerColor ? getContrastingTextColor(headerColor) : undefined;
                             const externalSiteTeamColor = item.type === 'site' && isOtherCompany
                                 ? displayedResponsibleTeamColor
                                 : undefined;
@@ -1525,24 +1591,31 @@ const WhiteboardStatusBoard: React.FC = () => {
 
                             return (
                                 <motion.div
-                                    layout
-                                    transition={{ layout: { duration: 0.3, type: "spring", stiffness: 300, damping: 30 } }}
-                                    key={item.id}
-                                    ref={(el) => {
-                                        if (el) itemRefs.current.set(item.id, el);
-                                        else itemRefs.current.delete(item.id);
-                                    }}
+                                    {...getCardRevealMotion(itemIndex, reducedMotion)}
+                                    layout={!reducedMotion}
+                                    transition={{ layout: layoutTransition }}
+                                    whileHover={!isItemExpanded && !reducedMotion ? { y: -3, transition: { duration: 0.2, ease: BOARD_EASE } } : undefined}
+                                    key={`${item.type}:${item.id}`}
                                     className={`bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden transition-shadow duration-300 ease-in-out group cursor-pointer 
                                         ${colSpanClass} 
-                                        ${isItemExpanded ? 'ring-1 shadow-xl z-20' : 'hover:shadow-lg hover:-translate-y-1'}
+                                        ${isItemExpanded ? 'ring-1 shadow-xl z-20' : 'hover:shadow-lg'}
                                     `}
-                                    style={ringStyle}
+                                    style={{ ...ringStyle, borderRadius: 16 }}
                                     onClick={(e) => toggleAccordion(item.id, e)}
                                 >
-                                    <div className="p-3 border-b border-slate-200 bg-gradient-to-br from-white to-slate-50/30">
+                                    <motion.div
+                                        layout={reducedMotion ? false : 'position'}
+                                        transition={{ layout: layoutTransition }}
+                                        className={`p-3 border-b border-slate-200 ${headerColor ? '' : 'bg-gradient-to-br from-white to-slate-50/30'}`}
+                                        style={headerColor ? { backgroundColor: headerColor } : undefined}
+                                    >
                                         {/* 컨텐츠 영역 */}
                                         <div className="min-w-0 flex-1">
-                                            <h3 className="font-bold text-base text-slate-800 truncate whitespace-nowrap flex items-center gap-2" title={item.name}>
+                                            <h3
+                                                className="font-bold text-base text-slate-800 truncate whitespace-nowrap flex items-center gap-2"
+                                                title={item.name}
+                                                style={headerTextColor ? { color: headerTextColor } : undefined}
+                                            >
                                                 {item.type === 'site' && (
                                                     <span
                                                         className="inline-flex items-center justify-center w-6 h-6 rounded-full border border-slate-200 flex-shrink-0"
@@ -1599,11 +1672,11 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                 </span>
                                             )}
                                         </div>
-                                    </div>
+                                    </motion.div>
 
 
-                                    {!isItemExpanded && (
-                                        <div className="p-3 flex flex-col gap-2 min-h-[96px] relative">
+                                    <BoardDisclosure open={!isItemExpanded} reducedMotion={reducedMotion} className="p-3 flex flex-col gap-2 min-h-[96px] relative">
+                                        {() => (<>
                                             <div className="flex items-baseline justify-between gap-4">
                                                 <div>
                                                     <div className="text-[10px] font-extrabold text-indigo-700 uppercase tracking-wider whitespace-nowrap drop-shadow-sm">
@@ -1636,18 +1709,12 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                 </span>
                                             </div>
 
-                                        </div>
-                                    )}
+                                        </>)}
+                                    </BoardDisclosure>
 
                                     {/* Accordion Content (Smart Dynamic Layout) */}
-                                    <AnimatePresence>
-                                        {isItemExpanded && item.workDetails && (
-                                            <motion.div
-                                                initial={{ opacity: 0, height: 0 }}
-                                                animate={{ opacity: 1, height: 'auto' }}
-                                                exit={{ opacity: 0, height: 0 }}
-                                                className="bg-white border-t border-slate-100 text-sm p-4"
-                                            >
+                                    <BoardDisclosure open={isItemExpanded && Boolean(item.workDetails)} reducedMotion={reducedMotion} className="bg-white border-t border-slate-100 text-sm p-4">
+                                        {() => (<>
 
                                                 {/* 1. Header Summary Section */}
                                                 <div className="flex flex-col md:flex-row justify-between items-end border-b border-slate-100 pb-4 mb-4">
@@ -1686,31 +1753,20 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                 </div>
 
                                                 {/* 2. Team Grid (Response to "30 Teams") */}
-                                                <div className="mb-6 p-1 min-h-[300px] transition-all duration-500">
+                                                <div className="mb-6 p-1 min-h-[300px]">
                                                     <div className="flex justify-between items-center mb-3">
                                                         <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                                                             <FontAwesomeIcon icon={faCalculator} className="text-indigo-500" />
-                                                            상세 목록 ({item.workDetails.length}건)
+                                                            상세 목록 ({item.workDetails?.length || 0}건)
                                                         </h4>
                                                     </div>
 
                                                     {/* Smart Grid: Sequential Expansion logic - Responsive Cols Adjustment */}
-                                                    <motion.div
-                                                        variants={{
-                                                            hidden: { opacity: 0 },
-                                                            show: {
-                                                                opacity: 1,
-                                                                transition: {
-                                                                    staggerChildren: 0.03
-                                                                }
-                                                            }
-                                                        }}
-                                                        initial="hidden"
-                                                        animate="show"
+                                                    <div
                                                         className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 auto-rows-min grid-flow-row-dense"
                                                     >
                                                         {item.workDetails
-                                                            .map((detail, idx) => {
+                                                            ?.map((detail, idx) => {
                                                                 const isDetailSelected = expandedDetails.has(`${item.id}-${detail.targetId}`);
 
                                                                 // Logic for Level 2 (Team in Site)
@@ -1734,11 +1790,10 @@ const WhiteboardStatusBoard: React.FC = () => {
 
                                                                 return (
                                                                     <motion.div
-                                                                        key={idx}
-                                                                        variants={{
-                                                                            hidden: { opacity: 0, y: 20 },
-                                                                            show: { opacity: 1, y: 0 }
-                                                                        }}
+                                                                        key={detail.targetId}
+                                                                        {...getCardRevealMotion(idx, reducedMotion)}
+                                                                        layout={reducedMotion ? false : 'position'}
+                                                                        transition={{ layout: layoutTransition }}
                                                                         className={`
                                                                     relative rounded-xl transition-colors duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden
                                                                     ${isDetailSelected
@@ -1751,7 +1806,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                         <div
                                                                             onClick={(e) => toggleDetail(item.id, detail.targetId, e)}
                                                                             className={`
-                                                                        cursor-pointer text-center flex flex-col items-center justify-center transition-all relative
+                                                                        cursor-pointer text-center flex flex-col items-center justify-center transition-colors relative
                                                                         ${isDetailSelected ? 'p-4 border-b border-indigo-100 bg-white' : 'p-2 min-h-[80px] hover:bg-slate-50'}
                                                                     `}
                                                                         >
@@ -1812,8 +1867,8 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                         </div>
 
                                                                         {/* EXPANDED CONTENT: Worker List (Level 3) */}
-                                                                        {isDetailSelected && (
-                                                                            <div className="p-4 animate-fadeIn bg-slate-50/50">
+                                                                        <BoardDisclosure open={isDetailSelected} reducedMotion={reducedMotion} className="p-4 bg-slate-50/50">
+                                                                            {() => (<>
                                                                                 <div className="flex justify-between items-center mb-4">
                                                                                     <h4 className="text-sm font-bold text-slate-600 flex items-center gap-2 whitespace-nowrap">
                                                                                         <FontAwesomeIcon icon={faUsers} className="text-slate-400" />
@@ -1838,11 +1893,13 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                         detail.workers.map((worker, wIdx) => {
                                                                                             const isWorkerExpanded = expandedWorkers.has(`${item.id}-${detail.targetId}-${worker.workerName}`);
                                                                                             return (
-                                                                                                <div
-                                                                                                    key={wIdx}
-                                                                                                    style={{ animationDelay: `${wIdx * 30}ms`, animationFillMode: 'forwards' }}
+                                                                                                <motion.div
+                                                                                                    key={worker.workerName}
+                                                                                                    {...getCardRevealMotion(wIdx, reducedMotion)}
+                                                                                                    layout={reducedMotion ? false : 'position'}
+                                                                                                    transition={{ layout: layoutTransition }}
                                                                                                     className={`
-                                                                                                rounded-xl overflow-hidden transition-all duration-300 border
+                                                                                                rounded-xl overflow-hidden transition-shadow duration-300 border
                                                                                                 ${isWorkerExpanded
                                                                                                             ? 'bg-white border-indigo-200 shadow-xl ring-2 ring-indigo-200 col-span-full z-10'
                                                                                                             : 'bg-white border-slate-200 hover:shadow-sm col-span-1'
@@ -1868,15 +1925,18 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                                             <span className={`font-black tracking-tight whitespace-nowrap ${isWorkerExpanded ? 'text-indigo-600 text-xl' : 'text-indigo-600 text-lg'}`}>
                                                                                                                 {(worker.manDay || 0).toFixed(1)}
                                                                                                             </span>
-                                                                                                            <FontAwesomeIcon
-                                                                                                                icon={isWorkerExpanded ? faChevronDown : faChevronRight}
-                                                                                                                className={`text-xs transition-transform duration-300 ${isWorkerExpanded ? 'rotate-180 text-indigo-400' : 'text-slate-300'}`}
-                                                                                                            />
+                                                                                                            <motion.span
+                                                                                                                animate={{ rotate: isWorkerExpanded ? 90 : 0 }}
+                                                                                                                transition={{ duration: reducedMotion ? 0 : 0.22, ease: BOARD_EASE }}
+                                                                                                                className={`inline-flex text-xs ${isWorkerExpanded ? 'text-indigo-400' : 'text-slate-300'}`}
+                                                                                                            >
+                                                                                                                <FontAwesomeIcon icon={faChevronRight} />
+                                                                                                            </motion.span>
                                                                                                         </div>
                                                                                                     </div>
 
-                                                                                                    {isWorkerExpanded && (
-                                                                                                        <div className="bg-slate-50 border-t border-indigo-100/30">
+                                                                                                    <BoardDisclosure open={isWorkerExpanded} reducedMotion={reducedMotion} className="bg-slate-50 border-t border-indigo-100/30">
+                                                                                                        {() => (<>
                                                                                                             {/* Level 3 Formula Explanation */}
                                                                                                             <div className="px-3 py-2 bg-indigo-50/30 border-b border-indigo-100/30 text-[10px] text-indigo-800 flex items-center gap-2">
                                                                                                                 <FontAwesomeIcon icon={faInfoCircle} className="text-indigo-400 flex-shrink-0" />
@@ -1895,9 +1955,9 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                                                     </div>
                                                                                                                 ))}
                                                                                                             </div>
-                                                                                                        </div>
-                                                                                                    )}
-                                                                                                </div>
+                                                                                                        </>)}
+                                                                                                    </BoardDisclosure>
+                                                                                                </motion.div>
                                                                                             );
                                                                                         })
                                                                                     ) : (
@@ -1906,12 +1966,12 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                         </div>
                                                                                     )}
                                                                                 </div>
-                                                                            </div>
-                                                                        )}
+                                                                            </>)}
+                                                                        </BoardDisclosure>
                                                                     </motion.div>
                                                                 );
                                                             })}
-                                                    </motion.div>
+                                                    </div>
                                                 </div>
 
                                                 {/* Close Button */}
@@ -1924,12 +1984,12 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                     </button>
                                                 </div>
 
-                                            </motion.div>
-                                        )}
-                                    </AnimatePresence>
+                                        </>)}
+                                    </BoardDisclosure>
                                 </motion.div>
                             );
                         })}
+                        </AnimatePresence>
                     </div >
                 ) : (
 
@@ -1946,7 +2006,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                     </div>
                 )
                 }
-            </div >
+            </motion.div>
         </div >
     );
 };
