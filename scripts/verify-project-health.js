@@ -32,6 +32,7 @@ const commandSteps = [
 
 function runCommand(name, command, args) {
   console.log(`\n== ${name} ==`);
+  const startedAt = performance.now();
   const result = spawnSync(command, args, {
     stdio: 'inherit',
     shell: isWindows,
@@ -46,6 +47,7 @@ function runCommand(name, command, args) {
     console.error(`${name} failed with exit code ${result.status}.`);
     process.exit(result.status || 1);
   }
+  console.log(`${name} completed in ${((performance.now() - startedAt) / 1000).toFixed(1)}s.`);
 }
 
 function verifyJsonFiles() {

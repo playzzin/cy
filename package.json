@@ -96,8 +96,8 @@
     "release:deploy": "node scripts/deploy-verified.cjs",
     "verify:hosting-build": "node scripts/verify-hosting-build.js",
     "verify:project": "node scripts/verify-project-health.js",
-    "typecheck": "tsc --noEmit",
-    "test:ci": "react-scripts test --watchAll=false",
+    "typecheck": "node scripts/typecheck.cjs",
+    "test:ci": "node scripts/react-scripts-test.cjs",
     "test:card-statement-import": "react-scripts test --watchAll=false --runTestsByPath src/utils/cardStatementImportAnalysisHarness.test.ts",
     "functions:build": "npm --prefix functions run build",
     "test:bank-rules": "node scripts/run-bank-rules-test.mjs",
@@ -114,7 +114,9 @@
     "eject": "react-scripts eject",
     "build:staging": "node scripts/build-staging.cjs",
     "staging:config": "node scripts/staging-project.cjs config",
-    "staging:deploy": "node scripts/deploy-staging.cjs"
+    "staging:deploy": "node scripts/deploy-staging.cjs",
+    "test:release-tools": "node --test scripts/release-manifest.test.cjs scripts/staging-isolation.test.cjs scripts/browser-env-security.test.cjs scripts/build-performance.test.cjs scripts/typecheck.test.cjs scripts/react-scripts-test.test.cjs scripts/hosting-build-cache.test.cjs scripts/check-release.test.cjs scripts/clean-build-artifacts.test.cjs",
+    "clean:generated": "node scripts/clean-build-artifacts.cjs"
   },
   "eslintConfig": {
     "extends": [
