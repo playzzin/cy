@@ -57,6 +57,7 @@ import {
   formatTeamSettlementSummaryManDay
 } from '../../utils/teamSettlementTransactionSummary';
 import { DEFAULT_SUPPORT_UNIT_PRICE } from '../../utils/teamSettlementSupportRateOverrides';
+import { formatTeamSettlementMemo } from '../../utils/teamSettlementMemo';
 import type { UtilityRecord } from '../../types/accommodation';
 import type { AccommodationAssignment } from '../../types/accommodationAssignment';
 import type { AccommodationBillingDocument } from '../../types/accommodationBilling';
@@ -784,7 +785,7 @@ const buildDeductionDisplayItems = (
       origin,
       category: `${originLabel} 전체`,
       amount,
-      memo: `${originLabel} ${originItems.length}건 합계`,
+      memo: `${originItems.length}건`,
       isAggregate: true,
       itemCount: originItems.length
     }];
@@ -2205,7 +2206,7 @@ export const TeamSettlementPage: React.FC = () => {
         manDay: safeNumber(s.manDay),
         quantity: typeof s.quantity === 'number' ? s.quantity : undefined,
         amount: safeNumber(s.amount),
-        memo: s.memo
+        memo: formatTeamSettlementMemo(s)
       }));
 
     const purchases: SettlementUnifiedLine[] = doc.purchases
@@ -2223,7 +2224,7 @@ export const TeamSettlementPage: React.FC = () => {
         counterTeamName: p.counterTeamName,
         manDay: safeNumber(p.manDay),
         amount: safeNumber(p.amount),
-        memo: p.memo
+        memo: formatTeamSettlementMemo(p)
       }));
 
     const lines = [...sales, ...purchases];
@@ -2321,7 +2322,7 @@ export const TeamSettlementPage: React.FC = () => {
           subject = extractParenthesizedText(String(deduction.category ?? '')) || '-',
           category = String(deduction.category ?? '').trim() || getDeductionSourceSummaryLabel(deduction.origin)
         ): ExpenseAggregateDetailRow => {
-          const memoParts = splitMemoParts(deduction.memo);
+          const memoParts = splitMemoParts(formatTeamSettlementMemo(deduction));
           const date = memoParts.find((part) => /^\d{4}-\d{2}-\d{2}/.test(part));
           const memo = memoParts.filter((part) => part !== date).join(' / ');
           return {
@@ -2360,7 +2361,7 @@ export const TeamSettlementPage: React.FC = () => {
             subject,
             category,
             amount: detailRows.reduce((sum, row) => sum + safeNumber(row.amount), 0),
-            memo: deduction.memo,
+            memo: formatTeamSettlementMemo(deduction),
             details: detailRows.map(({ subject: _subject, ...detail }) => detail)
           }));
         };
@@ -4914,7 +4915,7 @@ export const TeamSettlementPage: React.FC = () => {
                             <div className="flex min-w-0 items-center gap-2 md:min-w-[220px]">
                               <input aria-label="비고"
                                 className="team-settlement-page__readonly-input min-w-0 flex-1 border rounded px-2 py-1"
-                                value={item.memo ?? ''}
+                                value={formatTeamSettlementMemo(item)}
                                 disabled={!editableRow}
                                 onChange={(e) => {
                                   const next = e.target.value;
@@ -4924,7 +4925,7 @@ export const TeamSettlementPage: React.FC = () => {
                                   }));
                                 }}
                               />
-                              {(!editableRow) && <span className="team-settlement-page__readonly-value">{(item.memo ?? '') || '—'}</span>}
+                              {(!editableRow) && <span className="team-settlement-page__readonly-value">{formatTeamSettlementMemo(item) || '—'}</span>}
                             </div>
                           </td>
                           <td data-label="상세" className="px-2 py-2 border text-center">
@@ -5443,7 +5444,7 @@ export const TeamSettlementPage: React.FC = () => {
                             <div className="flex min-w-0 items-center gap-2 md:min-w-[220px]">
                               <input aria-label="비고"
                                 className="team-settlement-page__readonly-input min-w-0 flex-1 border rounded px-2 py-1"
-                                value={item.memo ?? ''}
+                                value={formatTeamSettlementMemo(item)}
                                 disabled={!editableRow}
                                 onChange={(e) => {
                                   const next = e.target.value;
@@ -5453,7 +5454,7 @@ export const TeamSettlementPage: React.FC = () => {
                                   }));
                                 }}
                               />
-                              {(!editableRow) && <span className="team-settlement-page__readonly-value">{(item.memo ?? '') || '—'}</span>}
+                              {(!editableRow) && <span className="team-settlement-page__readonly-value">{formatTeamSettlementMemo(item) || '—'}</span>}
                             </div>
                           </td>
                           <td data-label="상세" className="px-2 py-2 border text-center">

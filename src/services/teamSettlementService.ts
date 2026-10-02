@@ -45,6 +45,7 @@ import {
   type SupportMonthlyRateOverrides
 } from '../utils/teamSettlementSupportRateOverrides';
 import { getTeamSettlementConfirmationIssues } from '../utils/teamSettlementDraft';
+import { buildTeamExpenseSettlementMemo, compactTeamSettlementAutoMemo } from '../utils/teamSettlementMemo';
 import { repairLegacyScopedCardBillingDuplicates } from '../utils/teamSettlementBillingSnapshot';
 
 export type {
@@ -2200,14 +2201,6 @@ export const teamSettlementService = {
 
         const categoryLabel = getTeamExpenseCategoryLabel(claim.category);
         const description = String(claim.description ?? '').trim();
-        const counterpartyName = String(claim.payerTeamName ?? '').trim();
-        const memoParts = [
-          String(claim.date ?? '').trim(),
-          String(claim.siteName ?? '').trim(),
-          String(claim.cardLabel ?? '').trim(),
-          isOtherExpense ? (claim.claimType === 'officeExpense' ? '사무실경비' : '기타청구') : `후청구: ${counterpartyName || '사용팀 미지정'}`,
-          String(claim.memo ?? '').trim()
-        ].filter(Boolean);
 
         return [{
           id: `team_expense_claim:${params.yearMonth}:${claim.id}:deduction`,
@@ -2215,7 +2208,7 @@ export const teamSettlementService = {
           origin: 'team_expense_claim',
           category: `경비(${categoryLabel}${description ? ` - ${description}` : ''})`,
           amount,
-          memo: memoParts.join(' / ')
+          memo: buildTeamExpenseSettlementMemo(claim, 'deduction')
         }];
       });
 
@@ -2230,14 +2223,6 @@ export const teamSettlementService = {
 
         const categoryLabel = getTeamExpenseCategoryLabel(claim.category);
         const description = String(claim.description ?? '').trim();
-        const chargeToName = String(claim.chargeToTeamName ?? '').trim();
-        const memoParts = [
-          String(claim.date ?? '').trim(),
-          String(claim.siteName ?? '').trim(),
-          String(claim.cardLabel ?? '').trim(),
-          `받을 후청구: ${chargeToName || '청구대상 미지정'}`,
-          String(claim.memo ?? '').trim()
-        ].filter(Boolean);
 
         return [{
           id: `team_expense_claim:${params.yearMonth}:${claim.id}:addition`,
@@ -2245,7 +2230,7 @@ export const teamSettlementService = {
           origin: 'team_expense_claim',
           category: `경비 환급(${categoryLabel}${description ? ` - ${description}` : ''})`,
           amount,
-          memo: memoParts.join(' / ')
+          memo: buildTeamExpenseSettlementMemo(claim, 'addition')
         }];
       });
 
@@ -2402,10 +2387,10 @@ export const teamSettlementService = {
       yearMonth: params.yearMonth,
       teamId: params.teamId,
       teamName: params.teamName,
-      sales,
-      purchases,
-      deductions,
-      additions,
+      sales: sales.map(compactTeamSettlementAutoMemo),
+      purchases: purchases.map(compactTeamSettlementAutoMemo),
+      deductions: deductions.map(compactTeamSettlementAutoMemo),
+      additions: additions.map(compactTeamSettlementAutoMemo),
       summary: {
         prevCarryover: 0,
         deposit: 0
