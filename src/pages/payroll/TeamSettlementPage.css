@@ -1,4 +1,52 @@
-/* Desktop keeps the original tables; mobile uses compact, aligned ledger rows. */
+/* Keep headings, values, and editable fields aligned across settlement tables. */
+.team-settlement-page .overflow-auto > table > :is(thead, tbody) > tr > :is(th, td[data-label]) {
+  text-align: center;
+  vertical-align: middle;
+}
+.team-settlement-page table td[data-label] input {
+  text-align: center;
+}
+.team-settlement-page #settlement-rate-validation table { table-layout: fixed; }
+.team-settlement-page #settlement-rate-validation th:nth-child(1) { width: 12%; }
+.team-settlement-page #settlement-rate-validation th:nth-child(2) { width: 40%; }
+.team-settlement-page #settlement-rate-validation th:nth-child(3) { width: 10%; }
+.team-settlement-page #settlement-rate-validation th:nth-child(4) { width: 6%; }
+.team-settlement-page #settlement-rate-validation th:nth-child(5) { width: 12%; }
+.team-settlement-page #settlement-rate-validation th:nth-child(6) { width: 20%; }
+.team-settlement-page #settlement-rate-validation td[data-label] { overflow-wrap: anywhere; }
+
+@media (min-width: 768px) {
+  .team-settlement-page table:is([data-compact="support"], [data-compact="transaction"]) {
+    min-width: 560px;
+    table-layout: fixed;
+  }
+  .team-settlement-page table:is([data-compact="support"], [data-compact="transaction"]) > tbody > tr > td[data-label] {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .team-settlement-page table:is([data-compact="support"], [data-compact="transaction"]) > tbody > tr > td[data-label] > input {
+    max-width: 100%;
+  }
+  .team-settlement-page table:is([data-compact="support"], [data-compact="transaction"]) > tbody > tr > td[data-label="비고"] > div {
+    min-width: 0;
+  }
+  .team-settlement-page table:is([data-compact="support"], [data-compact="transaction"]) > tbody > tr > td[data-label="공수"] > input {
+    width: 100%;
+    padding-inline: 2px;
+  }
+  .team-settlement-page table[data-compact="support"] > thead > tr > th:nth-child(1) { width: 100px; }
+  .team-settlement-page table[data-compact="support"] > thead > tr > th:nth-child(2) { width: 64px; }
+  .team-settlement-page table[data-compact="support"] > thead > tr > th:nth-child(3) { width: 104px; }
+  .team-settlement-page table[data-compact="support"] > thead > tr > th:nth-child(4) { width: 128px; }
+  .team-settlement-page table[data-compact="support"] > thead > tr > th:nth-child(6) { width: 56px; }
+  .team-settlement-page table[data-compact="transaction"] > thead > tr > th:nth-child(1) { width: 56px; }
+  .team-settlement-page table[data-compact="transaction"] > thead > tr > th:nth-child(3) { width: 64px; }
+  .team-settlement-page table[data-compact="transaction"] > thead > tr > th:nth-child(4) { width: 128px; }
+  .team-settlement-page table[data-compact="transaction"] > thead > tr > th:nth-child(5) { width: 20%; }
+  .team-settlement-page table[data-compact="transaction"] > thead > tr > th:nth-child(6) { width: 56px; }
+}
+
+/* Mobile uses compact ledger rows with a separate memo line. */
 .team-settlement-page__readonly-value { display: none; }
 
 @media (max-width: 767px) {
@@ -70,6 +118,12 @@
   .team-settlement-page .overflow-auto > table > :is(thead, tbody) > tr > :is(th, td) {
     padding: 4px 2px; white-space: normal; overflow-wrap: anywhere; vertical-align: middle;
   }
+  .team-settlement-page #settlement-rate-validation th:nth-child(1) { width: 10%; }
+  .team-settlement-page #settlement-rate-validation th:nth-child(2) { width: 29%; }
+  .team-settlement-page #settlement-rate-validation th:nth-child(3) { width: 17%; }
+  .team-settlement-page #settlement-rate-validation th:nth-child(4) { width: 10%; }
+  .team-settlement-page #settlement-rate-validation th:nth-child(5) { width: 18%; }
+  .team-settlement-page #settlement-rate-validation th:nth-child(6) { width: 16%; }
   .team-settlement-page table input { width: 100%; margin: 0; padding: 3px 1px; min-height: 28px; font-size: 11px; }
   .team-settlement-page table input:disabled {
     background: transparent; border-color: transparent; color: #334155; -webkit-text-fill-color: #334155; opacity: 1;
@@ -99,13 +153,13 @@
   .team-settlement-page table[data-compact] > tbody > tr > td[data-label="비고"] {
     order: 1; grid-column: 1 / -1; display: flex; align-items: center; gap: 6px;
     padding: 2px 4px; border-bottom: 2px solid var(--team-settlement-accent-border, #cbd5e1);
-    color: #64748b; text-align: left;
+    color: #64748b; text-align: center;
   }
   .team-settlement-page table[data-compact] > tbody > tr > td[data-label="비고"]::before {
     content: '비고'; flex: 0 0 auto; font-size: 10px; color: #64748b;
   }
   .team-settlement-page table[data-compact] > tbody > tr > td[data-label="비고"] > div { flex: 1; }
-  .team-settlement-page table[data-compact] td[data-label="비고"] input { min-height: 24px; text-align: left; }
+  .team-settlement-page table[data-compact] td[data-label="비고"] input { min-height: 24px; text-align: center; }
   .team-settlement-page table[data-compact] > thead > tr > th[data-label="비고"] { display: none; }
   .team-settlement-page table[data-compact] > tbody > tr > td[colspan] { grid-column: 1 / -1; }
 }
