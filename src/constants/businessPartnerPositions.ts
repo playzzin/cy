@@ -63,7 +63,7 @@ export const BUSINESS_PARTNER_POSITIONS: BusinessPartnerPositionDefinition[] = [
             { id: 'rental_transaction', text: '임대 거래명세표', icon: 'fa-file-invoice', path: '/transaction/manage' },
             { id: 'rental_estimate', text: '임대 견적', icon: 'fa-calculator', path: '/estimate/manage' },
             { id: 'rental_materials', text: '자재 통합관리', icon: 'fa-boxes-stacked', path: '/materials' },
-            { id: 'rental_workbook_ledger', text: '매입매출 스마트 장부', icon: 'fa-file-invoice-dollar', path: '/payroll/workbook-ledger-upgrade' },
+            { id: 'rental_workbook_ledger', text: '매입매출 관리', icon: 'fa-file-invoice-dollar', path: '/payroll/workbook-ledger' },
             { id: 'rental_notices', text: '공지사항', icon: 'fa-bullhorn', path: '/notices' },
         ]),
     },

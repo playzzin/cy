@@ -219,7 +219,6 @@ const ReceivablesDashboardPage = React.lazy(() => import('./pages/taxinvoice/Rec
 const WorkbookLedgerPage = React.lazy(() => import('./pages/taxinvoice/WorkbookLedgerPage'));
 const ExcelConversionPage = React.lazy(() => import('./pages/tools/ExcelConversionPage'));
 const WorkbookLedgerLogPage = React.lazy(() => import('./pages/taxinvoice/WorkbookLedgerLogPage'));
-const WorkbookLedgerUpgradePage = React.lazy(() => import('./pages/taxinvoice/WorkbookLedgerUpgradePage'));
 const PartnerTransactionLedgerPage = React.lazy(() => import('./pages/taxinvoice/PartnerTransactionLedgerPage'));
 const KakaoNotificationPage = React.lazy(() => import('./pages/taxinvoice/KakaoNotificationPage'));
 const RefineWrapper = lazyNamed(() => import('./providers/refine/RefineWrapper'), 'RefineWrapper');
@@ -442,7 +441,7 @@ const App: React.FC = () => {
               <Route path="taxinvoice/dashboard" element={<ReceivablesDashboardPage />} />
               <Route path="workbook-ledger" element={<WorkbookLedgerPage key="cheongyeon" tenantKey="cheongyeon" companyLabel="청연" />} />
               <Route path="workbook-ledger/logs" element={<WorkbookLedgerLogPage />} />
-              <Route path="workbook-ledger-upgrade" element={<WorkbookLedgerUpgradePage key="cheongyeon-upgrade" tenantKey="cheongyeon" companyLabel="청연" />} />
+              <Route path="workbook-ledger-upgrade" element={<Navigate to="/payroll/workbook-ledger" replace />} />
               <Route path="workbook-ledger-dawon" element={<WorkbookLedgerPage key="dawon" tenantKey="dawon" companyLabel="다원" />} />
               <Route path="partner-ledger" element={<PartnerTransactionLedgerPage />} />
               <Route path="kakao-notification" element={<KakaoNotificationPage />} />

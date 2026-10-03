@@ -261,7 +261,7 @@ const BUSINESS_PARTNER_DASHBOARD_OVERRIDES: Record<BusinessPartnerPositionId, Pa
             { label: '임대 거래명세표', desc: '임대 거래 문서 작성', path: '/transaction/manage', icon: faClipboardList, color: 'amber' },
             { label: '임대 견적', desc: '임대 견적 작성 및 관리', path: '/estimate/manage', icon: faFileExcel, color: 'sky' },
             { label: '자재 통합관리', desc: '자재 입출고와 재고 확인', path: '/materials', icon: faBuilding, color: 'slate' },
-            { label: '매입매출 장부', desc: '임대 거래 매입매출 확인', path: '/payroll/workbook-ledger-upgrade', icon: faFileInvoiceDollar, color: 'green' },
+            { label: '매입매출 장부', desc: '임대 거래 매입매출 확인', path: '/payroll/workbook-ledger', icon: faFileInvoiceDollar, color: 'green' },
         ],
     },
     referral: {

@@ -1127,6 +1127,39 @@ const normalizeSupportAssetMenu = (config: SiteDataType): boolean => {
 
 // Removed: mergeSubItems, fillMissingPaths, mergeMenuItemsWithDefaults, ensureMenuWithDefaults
 
+const RETIRED_WORKBOOK_LEDGER_MENU_TEXTS = new Set([
+    '매입매출 스마트 장부',
+    '매입매출 업그레이드',
+    '매입매출V2',
+    '미수미지급 관리'
+]);
+
+// Saved menu configurations may still contain the removed page, including
+// renamed links and legacy text-only entries. Do not write on read.
+const removeWorkbookLedgerUpgradeMenus = (config: SiteDataType): void => {
+    const filterItems = (items: (MenuItem | string)[]): (MenuItem | string)[] =>
+        items.flatMap((item): (MenuItem | string)[] => {
+            const text = (typeof item === 'string' ? item : item.text).trim();
+            const path = typeof item === 'string' ? '' : (item.path || '').trim();
+            const pathname = path.split(/[?#]/)[0].replace(/\/+$/, '');
+            const children = typeof item !== 'string' && Array.isArray(item.sub)
+                ? filterItems(item.sub)
+                : undefined;
+            if (pathname === '/payroll/workbook-ledger-upgrade'
+                || (!path && RETIRED_WORKBOOK_LEDGER_MENU_TEXTS.has(text))) {
+                return children || [];
+            }
+            return [typeof item !== 'string' && children ? { ...item, sub: children } : item];
+        });
+
+    Object.values(config).forEach((site) => {
+        MENU_ROLE_SURFACES.forEach((surface) => {
+            const items = site[surface];
+            if (Array.isArray(items)) site[surface] = filterItems(items) as MenuItem[];
+        });
+    });
+};
+
 // This is the new "Init" logic: normalize inputs, prune illegal items, fix structure.
 // But it DOES NOT merge with defaults.
 const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
@@ -1155,6 +1188,7 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
     ensureOfficeMenuPages(final);
     removeRetiredHardcodedMenuSeeds(final);
     ensureRequiredLogManagementItems(final);
+    removeWorkbookLedgerUpgradeMenus(final);
 
     return final;
 };

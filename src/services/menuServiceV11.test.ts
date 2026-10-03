@@ -120,6 +120,55 @@ describe('menuServiceV11 canonical Firestore document', () => {
     expect((pruned!.admin.menu.find(item => item.text === '그룹')!.sub as any[]).filter(item => item.text === '-')).toHaveLength(2);
   });
 
+  it('removes retired ledger links from saved menus without writing or losing active ledger pages', async () => {
+    const currentLedger = { text: '매입매출 관리', path: '/payroll/workbook-ledger' };
+    const ledgerLogs = { text: '매입매출 로그', path: '/payroll/workbook-ledger/logs' };
+    const dawonLedger = { text: '다원 장부', path: '/payroll/workbook-ledger-dawon' };
+    const customLink = { text: '매입매출 스마트 장부', path: '/custom-ledger' };
+    const legacy = { pos_ceo: { name: '대표', icon: 'faFolder', menu: [
+      { text: '세무관리', sub: [currentLedger, ledgerLogs, dawonLedger,
+        { text: '사용자 지정 이름', path: '/payroll/workbook-ledger-upgrade/?tab=open#ledger' },
+        '매입매출 스마트 장부', '매입매출 업그레이드', '매입매출V2', '미수미지급 관리', customLink
+      ] },
+      { text: '옛 장부', path: '/payroll/workbook-ledger-upgrade', sub: [{ text: '보존할 메뉴', path: '/custom-child' }] }
+    ], headerActions: [{ text: '장부 바로가기', path: '/payroll/workbook-ledger-upgrade' }],
+    trash: [{ text: '삭제된 장부', path: '/payroll/workbook-ledger-upgrade' }] } };
+    mockedGetDoc.mockResolvedValue(existingDoc(legacy) as any);
+
+    const loaded = await menuServiceV11.getMenuConfig();
+
+    expect(loaded!.pos_ceo.menu[0].sub).toEqual([
+      expect.objectContaining(currentLedger), expect.objectContaining(ledgerLogs),
+      expect.objectContaining(dawonLedger), expect.objectContaining(customLink)
+    ]);
+    expect(loaded!.pos_ceo.menu[1]).toMatchObject({ path: '/custom-child' });
+    expect(loaded!.pos_ceo.headerActions).toEqual([]);
+    expect(loaded!.pos_ceo.trash).toEqual([]);
+    expect(mockedSetDoc).not.toHaveBeenCalled();
+    expect(legacy.pos_ceo.menu[0].sub).toHaveLength(9);
+  });
+
+  it('keeps the retired ledger out of saved configs and rental defaults after reload', async () => {
+    const config = { admin: { name: '관리자', icon: 'faFolder', menu: [
+      { text: '매입매출 관리' },
+      { text: '옛 장부', path: '/payroll/workbook-ledger-upgrade' }
+    ] } };
+
+    const saved = await menuServiceV11.saveMenuConfig(config);
+    expect(saved.admin.menu).toEqual([expect.objectContaining({
+      text: '매입매출 관리', path: '/payroll/workbook-ledger'
+    })]);
+    expect(saved.pos_rental.menu).toContainEqual(expect.objectContaining({
+      id: 'rental_workbook_ledger', text: '매입매출 관리', path: '/payroll/workbook-ledger'
+    }));
+    expect(JSON.stringify(mockedSetDoc.mock.calls[0][1])).not.toContain('/payroll/workbook-ledger-upgrade');
+    mockedGetDoc.mockResolvedValue(existingDoc(saved) as any);
+    menuServiceV11.clearCache();
+    const reloaded = await menuServiceV11.getMenuConfig();
+    expect(reloaded!.admin.menu).toEqual(saved.admin.menu);
+    expect(JSON.stringify(reloaded)).not.toContain('/payroll/workbook-ledger-upgrade');
+  });
+
   it('registers Gemini usage in an existing CEO log folder without replacing custom items or duplicating it', async () => {
     const legacy = JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG));
     legacy.pos_ceo.menu = [{ text: '설정', sub: [{ text: '로그관리', sub: [{ text: '기존 기록', path: '/custom-log' }] }] }];
