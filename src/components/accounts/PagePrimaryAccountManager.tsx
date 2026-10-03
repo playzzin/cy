@@ -3,9 +3,9 @@ import { PRIMARY_ACCOUNT_PAGES, PrimaryAccountScope } from '../../services/prima
 import { usePagePrimaryAccount } from '../../hooks/usePagePrimaryAccount';
 import PagePrimaryAccountCard from './PagePrimaryAccountCard';
 
-export function PagePrimaryAccountSettings({ scope, showPageLink = false }: { scope: PrimaryAccountScope; showPageLink?: boolean }) {
+export function PagePrimaryAccountSettings({ scope, showPageLink = false, compact = false }: { scope: PrimaryAccountScope; showPageLink?: boolean; compact?: boolean }) {
     const state = usePagePrimaryAccount(scope);
-    return <PagePrimaryAccountCard state={state} showPageLink={showPageLink} />;
+    return <PagePrimaryAccountCard state={state} showPageLink={showPageLink} compact={compact} />;
 }
 
 export default function PagePrimaryAccountManager() {

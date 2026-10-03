@@ -1,4 +1,5 @@
 import { PagePrimaryAccountSettings } from '../../components/accounts/PagePrimaryAccountManager';
+import PayrollIssueTopTabs from '../../components/payroll/PayrollIssueTopTabs';
 import { usePagePrimaryAccount, ensurePagePrimaryAccountReady } from '../../hooks/usePagePrimaryAccount';
 import PagePrimaryAccountCard from '../../components/accounts/PagePrimaryAccountCard';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -4406,7 +4407,8 @@ const SummaryCard: React.FC<{
     value: React.ReactNode;
     icon: any;
     tone: 'emerald' | 'sky' | 'orange' | 'violet';
-}> = ({ label, value, icon, tone }) => {
+    compact?: boolean;
+}> = ({ label, value, icon, tone, compact = false }) => {
     const toneMap = {
         emerald: { bg: 'bg-emerald-50', icon: 'text-emerald-500', text: 'text-emerald-700' },
         sky: { bg: 'bg-sky-50', icon: 'text-sky-500', text: 'text-sky-700' },
@@ -4415,12 +4417,13 @@ const SummaryCard: React.FC<{
     } as const;
 
     return (
-        <div className="rounded-xl border border-slate-100 bg-white p-3 shadow-sm">
-            <div className={`mb-2 inline-flex h-8 w-8 items-center justify-center rounded-lg ${toneMap[tone].bg}`}>
+        <div className={`min-w-0 rounded-xl border border-slate-100 bg-white ${compact ? 'px-3 py-2' : 'p-3'} shadow-sm`}>
+            <div className={compact ? 'flex items-center gap-1.5' : `mb-2 inline-flex h-8 w-8 items-center justify-center rounded-lg ${toneMap[tone].bg}`}>
                 <FontAwesomeIcon icon={icon} className={`text-sm ${toneMap[tone].icon}`} />
+                {compact && <p className="text-sm font-bold text-slate-500">{label}</p>}
             </div>
-            <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">{label}</p>
-            <p className={`mt-0.5 text-lg font-black leading-tight ${toneMap[tone].text}`}>{value}</p>
+            {!compact && <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">{label}</p>}
+            <p className={`${compact ? '' : 'mt-0.5'} break-words text-lg font-black leading-tight ${toneMap[tone].text}`}>{value}</p>
         </div>
     );
 };
@@ -6048,25 +6051,22 @@ const SupportClientSitePage: React.FC = () => {
     const standardClientGroupRowSpan = standardClientGroups.reduce((sum, client) => sum + getClientVisibleRowCount(client), 0);
 
     return (
-        <div className="support-team-font w-full max-w-none space-y-6 p-6 font-['Pretendard']">
-            <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white px-6 py-5 shadow-sm md:flex-row md:items-center md:justify-between">
-                <div className="flex items-center gap-4">
-                    <div className="rounded-xl bg-emerald-100 p-3 text-emerald-600 shadow-inner">
-                        <FontAwesomeIcon icon={faBuilding} size="lg" />
+        <div className="support-team-font w-full min-w-0 max-w-none space-y-2 p-2 font-['Pretendard'] sm:px-3">
+            <PayrollIssueTopTabs />
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
+                        <FontAwesomeIcon icon={faBuilding} />
                     </div>
                     <div>
-                        <h1 className="text-2xl font-black tracking-tight text-slate-800">발주사별 현장별 지원 정산</h1>
-                        <p className="mt-0.5 flex items-center gap-2 text-[13px] font-bold text-slate-500">
-                            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-700">BETA</span>
-                            지원팀 지급 관리 데이터를 발주사와 현장 단위로 재집계합니다.
-                        </p>
+                        <h1 className="text-lg font-black tracking-tight text-slate-800" title="지원팀 지급 관리 데이터를 발주사와 현장 단위로 재집계합니다.">발주사별 현장별 지원 정산</h1>
                     </div>
                 </div>
-                <div className="flex flex-wrap gap-2.5">
+                <div className="flex flex-wrap gap-1.5">
                     <button
                         type="button"
                         onClick={() => navigate('/payroll/support-team')}
-                        className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-200 px-4 py-2.5 text-sm font-black text-slate-600 transition hover:bg-slate-50"
+                        className="inline-flex min-h-8 items-center gap-2 rounded-lg border border-slate-200 px-3 py-1 text-sm font-black text-slate-600 transition hover:bg-slate-50"
                     >
                         <FontAwesomeIcon icon={faArrowLeft} />
                         지원팀 지급 관리
@@ -6075,7 +6075,7 @@ const SupportClientSitePage: React.FC = () => {
                         type="button"
                         onClick={handleDownloadExcel}
                         disabled={!hasRows}
-                        className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex min-h-8 items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1 text-sm font-black text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         <FontAwesomeIcon icon={faDownload} />
                         엑셀 다운로드
@@ -6083,9 +6083,9 @@ const SupportClientSitePage: React.FC = () => {
                 </div>
             </div>
 
-            <PagePrimaryAccountSettings scope="support-client-site" />
+            <PagePrimaryAccountSettings compact scope="support-client-site" />
 
-            <div className="flex w-full flex-col gap-6 lg:flex-row">
+            <div className="flex w-full flex-col gap-3 lg:flex-row">
                 <aside className="hidden">
                     <div className="sticky top-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                         <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3.5">
@@ -6125,13 +6125,13 @@ const SupportClientSitePage: React.FC = () => {
                     </div>
                 </aside>
 
-                <main className="min-w-0 flex-1 space-y-6">
-                    <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:flex-row xl:items-center xl:justify-between">
-                        <div className="flex flex-wrap items-center gap-3">
-                            <div className="flex items-center gap-3">
+                <main className="min-w-0 flex-1 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                            <div className="flex items-center gap-2">
                                 <FontAwesomeIcon icon={faCalendarAlt} className="text-emerald-500" />
                                 <span className="text-sm font-bold text-slate-500">집계 기준월</span>
-                                <div className="flex min-h-10 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 shadow-sm" aria-label="집계 기준월 선택">
+                                <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-1 shadow-sm" aria-label="집계 기준월 선택">
                                     <button
                                         type="button"
                                         onClick={() => setSelectedMonth((current) => shiftYearMonth(current, -1))}
@@ -6205,11 +6205,11 @@ const SupportClientSitePage: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
                             <select
                                 value={selectedDirection}
                                 onChange={(event) => setSelectedDirection(event.target.value as 'all' | SupportDirection)}
-                                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-black outline-none focus:ring-2 focus:ring-emerald-500"
+                                className="max-w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-black outline-none focus:ring-2 focus:ring-emerald-500"
                             >
                                 {DIRECTION_OPTIONS.map((option) => (
                                     <option key={option.id} value={option.id}>{option.label}</option>
@@ -6235,32 +6235,32 @@ const SupportClientSitePage: React.FC = () => {
                         </div>
                     )}
 
-                    <div className={`grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 ${showAllocationColumns ? '2xl:grid-cols-11' : '2xl:grid-cols-7'}`}>
-                        <SummaryCard label="총 투입 공수" value={`${formatManDay(totalSummary.totalManDay)} 공수`} icon={faCalendarAlt} tone="violet" />
-                        <SummaryCard label="총 노무금액" value={`${formatNumber(totalSummary.totalAmount)} 원`} icon={faCircleCheck} tone="emerald" />
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
+                        <SummaryCard compact label="총 투입 공수" value={`${formatManDay(totalSummary.totalManDay)} 공수`} icon={faCalendarAlt} tone="violet" />
+                        <SummaryCard compact label="총 노무금액" value={`${formatNumber(totalSummary.totalAmount)} 원`} icon={faCircleCheck} tone="emerald" />
                         {showAllocationColumns && (
-                            <SummaryCard label="총 청구금액" value={`${formatNumber(totalSummary.totalBillingAmount)} 원`} icon={faFileInvoiceDollar} tone="orange" />
+                            <SummaryCard compact label="총 청구금액" value={`${formatNumber(totalSummary.totalBillingAmount)} 원`} icon={faFileInvoiceDollar} tone="orange" />
                         )}
-                        <SummaryCard label="총 발행금액" value={`${formatNumber(amountSummary.totalIssuedAmount)} 원`} icon={faDownload} tone="sky" />
-                        <SummaryCard label="총 정산금액" value={`${formatNumber(amountSummary.totalSettlementAmount)} 원`} icon={faReceipt} tone="emerald" />
+                        <SummaryCard compact label="총 발행금액" value={`${formatNumber(amountSummary.totalIssuedAmount)} 원`} icon={faDownload} tone="sky" />
+                        <SummaryCard compact label="총 정산금액" value={`${formatNumber(amountSummary.totalSettlementAmount)} 원`} icon={faReceipt} tone="emerald" />
                         {showAllocationColumns && (
                             <>
-                        <SummaryCard label="총 차액" value={`${formatNumber(amountSummary.totalDistributableAmount)} 원`} icon={faShareNodes} tone="violet" />
-                        <SummaryCard label="배분합계" value={`${formatNumber(amountSummary.totalAllocatedAmount)} 원`} icon={faFileInvoiceDollar} tone="sky" />
-                        <SummaryCard label="미배분" value={`${formatNumber(amountSummary.totalUnallocatedAmount)} 원`} icon={faTriangleExclamation} tone={amountSummary.totalUnallocatedAmount < 0 ? 'orange' : 'violet'} />
+                        <SummaryCard compact label="총 차액" value={`${formatNumber(amountSummary.totalDistributableAmount)} 원`} icon={faShareNodes} tone="violet" />
+                        <SummaryCard compact label="배분합계" value={`${formatNumber(amountSummary.totalAllocatedAmount)} 원`} icon={faFileInvoiceDollar} tone="sky" />
+                        <SummaryCard compact label="미배분" value={`${formatNumber(amountSummary.totalUnallocatedAmount)} 원`} icon={faTriangleExclamation} tone={amountSummary.totalUnallocatedAmount < 0 ? 'orange' : 'violet'} />
                             </>
                         )}
-                        <SummaryCard label="평균 쓰꾸미" value={amountSummary.avgSsukkumi > 0 ? `${formatNumber(amountSummary.avgSsukkumi)} 원` : '-'} icon={faCircleCheck} tone="orange" />
-                        <SummaryCard label="발주사 / 현장" value={`${formatNumber(totalSummary.clientCount)} / ${formatNumber(totalSummary.siteCount)}`} icon={faBuilding} tone="sky" />
-                        <SummaryCard label="투입 인원" value={`${formatNumber(totalSummary.workerCount)} 명`} icon={faUsers} tone="orange" />
+                        <SummaryCard compact label="평균 쓰꾸미" value={amountSummary.avgSsukkumi > 0 ? `${formatNumber(amountSummary.avgSsukkumi)} 원` : '-'} icon={faCircleCheck} tone="orange" />
+                        <SummaryCard compact label="발주사 / 현장" value={`${formatNumber(totalSummary.clientCount)} / ${formatNumber(totalSummary.siteCount)}`} icon={faBuilding} tone="sky" />
+                        <SummaryCard compact label="투입 인원" value={`${formatNumber(totalSummary.workerCount)} 명`} icon={faUsers} tone="orange" />
                     </div>
 
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-black text-amber-800">
                         계산서 현장 부가세 합계: {formatNumber(amountSummary.totalVatAmount)}원
                     </div>
 
                     <div className="overflow-hidden border border-slate-900 bg-white shadow-sm">
-                        <div className="flex flex-col gap-2 border-b border-slate-900 bg-white px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-slate-900 bg-white px-3 py-2">
                             <h2 className="text-base font-black text-slate-900">
                                 {selectedClientKey
                                     ? clientOptions.find((client) => client.key === selectedClientKey)?.clientCompanyName || '선택 발주사'

@@ -2005,7 +2005,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
     // ─────────────────────────────────────────────
     return (
         <IssueEditingContext.Provider value={{ disabled: writeBlocked || mutation === 'structure', drafts: cellDrafts, onDraftChange }}>
-        <div className="flex flex-col p-6 gap-5 bg-slate-50 min-h-full">
+        <div className="flex min-h-full min-w-0 flex-col gap-2 bg-slate-50 p-2 sm:px-3">
             {/* 숫자 입력창 스핀 버튼 제거 스타일 */}
             <style>
                 {`
