@@ -4,6 +4,7 @@ import {
     faArrowsRotate,
     faDownload,
     faFileExcel,
+    faPen,
     faPlus,
     faTrash,
 } from '@fortawesome/free-solid-svg-icons';
@@ -19,6 +20,7 @@ import {
     settlementTargetService,
 } from '../../services/settlementTargetService';
 import { YearMonthPicker } from '../../components/common/YearMonthPicker';
+import BuybackTargetDialog, { type BuybackTargetEditor } from './components/BuybackTargetDialog';
 
 type PaymentStatus = BuybackWorkbookPaymentStatus;
 
@@ -128,6 +130,7 @@ const FieldBuybackWorkbookPage: React.FC = () => {
     const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
     const [pendingSaveCount, setPendingSaveCount] = useState(0);
     const [showTargetScrollHint, setShowTargetScrollHint] = useState(false);
+    const [targetEditor, setTargetEditor] = useState<BuybackTargetEditor | null>(null);
     const saveTimersRef = useRef(new Map<string, number>());
     const pendingRowIdsRef = useRef(new Set<string>());
     const gridCellRefs = useRef(new Map<string, HTMLElement>());
@@ -137,7 +140,7 @@ const FieldBuybackWorkbookPage: React.FC = () => {
 
     const activeSheet = workbook.sheets.find((sheet) => sheet.id === activeSheetId) || workbook.sheets[0];
     const activeSheetIndex = Math.max(0, workbook.sheets.findIndex((sheet) => sheet.id === activeSheet?.id));
-    const activeAfterTaxPercent = Math.round(normalizeSettlementTargetAfterTaxRate(activeSheet?.afterTaxRate) * 100);
+    const activeAfterTaxPercent = Number((normalizeSettlementTargetAfterTaxRate(activeSheet?.afterTaxRate) * 100).toFixed(4));
     const displayRows = useMemo(() => {
         if (!activeSheet) return [];
         return activeSheet.rows.length >= VISIBLE_ROW_COUNT
@@ -155,6 +158,42 @@ const FieldBuybackWorkbookPage: React.FC = () => {
         };
     }, [activeSheet]);
     const hasActiveRows = Boolean(activeSheet?.rows.length);
+    const activeTarget = buybackTargets.find((target): target is SettlementTarget & { id: string } => Boolean(target.id) && target.id === activeSheet?.targetId);
+
+    const handleTargetSaved = (target: SettlementTarget & { id: string }) => {
+        const sheetId = `target_${target.id}`;
+        setBuybackTargets(current => current.some(item => item.id === target.id)
+            ? current.map(item => item.id === target.id ? target : item)
+            : [...current, target]);
+        // Keep in-progress rows when the relationship changes; reloading would replace them.
+        setWorkbook(current => {
+            const existing = current.sheets.some(sheet => sheet.targetId === target.id);
+            const details = { name: getTargetName(target), afterTaxRate: normalizeSettlementTargetAfterTaxRate(target.defaultAfterTaxRate) };
+            return { sheets: existing
+                ? current.sheets.map(sheet => sheet.targetId === target.id ? { ...sheet, ...details } : sheet)
+                : [...current.sheets, { id: sheetId, targetId: target.id, ...details, titleColor: SHEET_COLORS[current.sheets.length % SHEET_COLORS.length], rows: [] }] };
+        });
+        setActiveSheetId(sheetId);
+        setSelectedRowIds([]);
+        setTargetEditor(null);
+        if (targetEditor?.mode === 'create') {
+            window.requestAnimationFrame(() => {
+                const tab = targetTabRefs.current.get(sheetId);
+                tab?.focus({ preventScroll: true });
+                tab?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+            });
+        }
+    };
+
+    const handleTargetDeleted = (id: string) => {
+        setBuybackTargets(current => current.filter(target => target.id !== id));
+        setWorkbook(current => ({ sheets: current.sheets.filter(sheet => sheet.targetId !== id) }));
+        setActiveSheetId('');
+        setSelectedRowIds([]);
+        setTargetEditor(null);
+    };
+
+    const targetDialog = targetEditor && <BuybackTargetDialog editor={targetEditor} onSaved={handleTargetSaved} onDeleted={handleTargetDeleted} onClose={() => setTargetEditor(null)} />;
 
     const updateTargetScrollHint = useCallback(() => {
         const tabList = targetTabListRef.current;
@@ -643,53 +682,49 @@ const FieldBuybackWorkbookPage: React.FC = () => {
                     <FontAwesomeIcon icon={faFileExcel} className="text-3xl text-[#217346]" />
                     <h1 className="mt-3 text-xl font-black">관계자별 바이백</h1>
                     <p className="mt-2 text-sm text-slate-600">
-                        {targetLoading ? '바이백 관계자 DB를 불러오는 중입니다.' : '등록된 바이백 관계자가 없습니다. 정산 대상자 DB에서 관계자를 바이백 관계자로 지정해 주세요.'}
+                        {targetLoading ? '바이백 관계자 DB를 불러오는 중입니다.' : '등록된 바이백 관계자가 없습니다. 정산 관계자를 등록하고 바로 정산을 시작하세요.'}
                     </p>
                     {targetError && <p className="mt-3 text-sm font-bold text-rose-700">{targetError}</p>}
-                    <button type="button" onClick={() => setTargetRefreshKey((value) => value + 1)} className="mt-5 border border-slate-600 bg-white px-4 py-2 text-sm font-black hover:bg-slate-100">
+                    <button type="button" disabled={targetLoading} onClick={() => setTargetEditor({ mode: 'create' })} className="mr-2 mt-5 min-h-11 rounded-lg bg-[#217346] px-4 py-2 text-sm font-black text-white hover:bg-emerald-800 disabled:opacity-50">
+                        <FontAwesomeIcon icon={faPlus} className="mr-2" />정산 관계자 등록
+                    </button>
+                    <button type="button" disabled={targetLoading} onClick={() => setTargetRefreshKey((value) => value + 1)} className="mt-5 min-h-11 rounded-lg border border-slate-600 bg-white px-4 py-2 text-sm font-black hover:bg-slate-100 disabled:opacity-50">
                         <FontAwesomeIcon icon={faArrowsRotate} className="mr-2" />관계자 새로고침
                     </button>
                 </div>
+                {targetDialog}
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f6f8] p-3 font-['Malgun_Gothic',Arial,sans-serif] text-slate-900 md:p-5">
+        <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f6f8] p-3 font-['Malgun_Gothic',Arial,sans-serif] text-slate-900 md:p-3">
             <div className="mx-auto min-w-0 max-w-[1800px]">
-                <section className="mb-3 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                    <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="flex min-w-0 items-center gap-3">
-                            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-[#217346]"><FontAwesomeIcon icon={faFileExcel} className="text-xl" /></span>
-                            <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <h1 className="text-base font-black">관계자별 바이백 정산</h1>
-                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">관계자 DB 기준</span>
-                                </div>
-                                <p className="mt-0.5 text-xs text-slate-500">년월 → 현장 → 세전만 입력하면 세후 금액이 자동 계산됩니다.</p>
-                            </div>
+                <section aria-label="바이백 정산 도구" className="mb-2 rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <div className="flex min-w-0 items-center justify-between gap-2 px-3 py-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-[#217346]"><FontAwesomeIcon icon={faFileExcel} /></span>
+                            <h1 className="truncate text-sm font-black sm:text-base">관계자별 바이백 정산</h1>
                         </div>
-                        <div className="flex min-w-0 flex-wrap gap-2 text-xs">
-                            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5"><span className="text-slate-500">현재 관계자</span><span className="ml-2 font-black text-slate-900">{activeSheet.name}</span></div>
-                            <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-1.5"><span className="text-emerald-700">세후율</span><span className="ml-2 font-black text-emerald-800">{activeAfterTaxPercent}%</span></div>
-                            <div className="rounded-lg border border-sky-100 bg-sky-50 px-3 py-1.5 text-sky-800"><span className="text-sky-700">관계자 DB:</span><span className="ml-1 font-black">{targetLoading ? '연결 중' : '연결됨'}</span></div>
-                            <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-1.5 text-amber-800"><span className="text-amber-700">현장 DB:</span><span className="ml-1 font-black">미연동</span></div>
-                            <div className={`rounded-lg border px-3 py-1.5 ${targetError ? 'border-rose-200 bg-rose-50 text-rose-700' : pendingSaveCount > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-sky-100 bg-sky-50 text-sky-800'}`}>
+                        <div className="flex shrink-0 items-center gap-2 text-xs">
+                            <span className="hidden whitespace-nowrap rounded-md bg-emerald-50 px-2 py-1 text-emerald-800 sm:inline"><span className="mr-1 text-emerald-700">세후율</span><strong>{activeAfterTaxPercent}%</strong></span>
+                            <span role="status" className={`hidden items-center whitespace-nowrap text-xs sm:inline-flex ${targetError ? 'text-rose-700' : pendingSaveCount > 0 ? 'text-amber-700' : 'text-slate-500'}`}>
                                 <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-current" />
-                                {targetError || (pendingSaveCount > 0 ? `저장 중 ${pendingSaveCount}건` : lastSavedAt ? '저장 완료' : '자동 저장 준비')}
-                            </div>
+                                {targetLoading ? '불러오는 중' : targetError ? '저장 상태 확인' : pendingSaveCount > 0 ? `저장 중 ${pendingSaveCount}건` : lastSavedAt ? '저장 완료' : '자동 저장 준비'}
+                            </span>
+                            <button type="button" onClick={() => setTargetRefreshKey((value) => value + 1)} disabled={targetLoading} title="관계자 DB 새로고침" aria-label="관계자 DB 새로고침" className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50"><FontAwesomeIcon icon={faArrowsRotate} className={targetLoading ? 'animate-spin' : ''} /></button>
                         </div>
                     </div>
+                    {targetError && <p role="alert" className="mx-3 mb-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{targetError}</p>}
 
-                    <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-                        <div className="mb-2 flex items-center justify-between gap-3"><span className="text-xs font-black text-slate-700">정산 관계자</span><span className="text-[11px] font-bold text-slate-400">좌우 방향키로 이동</span></div>
-                        <div className="relative min-w-0">
+                    <div className="flex min-w-0 items-center gap-2 border-t border-slate-100 bg-slate-50/70 px-2 py-1.5">
+                        <div className="relative min-w-0 flex-1">
                             <div
                                 ref={targetTabListRef}
                                 role="tablist"
                                 aria-label="정산 관계자"
                                 onScroll={updateTargetScrollHint}
-                                className="flex max-w-full gap-2 overflow-x-auto pb-1 pr-14 [scrollbar-width:thin]"
+                                className="flex max-w-full flex-nowrap items-center gap-1 overflow-x-auto pr-7 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                             >
                             {workbook.sheets.map((sheet, sheetIndex) => {
                                 const active = sheet.id === activeSheet.id;
@@ -708,34 +743,38 @@ const FieldBuybackWorkbookPage: React.FC = () => {
                                         tabIndex={active ? 0 : -1}
                                         onClick={() => activateSheet(sheet)}
                                         onKeyDown={(event) => handleTargetTabKeyDown(event, sheetIndex)}
-                                        style={active ? { backgroundColor: sheet.titleColor, borderColor: sheet.titleColor } : undefined}
-                                        className={`min-h-11 shrink-0 rounded-lg border px-3 py-2 text-xs font-black transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#217346] md:min-h-0 ${active ? (sheet.titleColor === '#ffc000' ? 'text-slate-950 shadow-sm' : 'text-white shadow-sm') : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-100'}`}
+                                        className={`min-h-11 shrink-0 whitespace-nowrap rounded-lg border px-3 py-1.5 text-xs font-bold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#217346] md:min-h-9 ${active ? 'border-emerald-200 bg-emerald-50 text-emerald-900 shadow-sm' : 'border-transparent text-slate-500 hover:bg-white hover:text-slate-900'}`}
                                     >
+                                        <span aria-hidden="true" className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${active ? 'bg-[#217346]' : 'bg-slate-300'}`} />
                                         {sheet.name}
                                     </button>
                                 );
                             })}
                             </div>
                             {showTargetScrollHint && (
-                                <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 flex w-16 items-center justify-end bg-gradient-to-l from-slate-50 via-slate-50/95 to-transparent pr-1 text-lg font-black text-slate-500">
-                                    <span className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white/95 shadow-sm">→</span>
+                                <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 flex w-8 items-center justify-end bg-gradient-to-l from-slate-50 via-slate-50/95 to-transparent pr-1 text-sm font-black text-slate-400">
+                                    <span>›</span>
                                 </div>
                             )}
                         </div>
+                        <div className="flex shrink-0 items-center gap-1 border-l border-slate-200 pl-2 text-xs font-bold">
+                            <button type="button" aria-label="정산 관계자 등록" title="정산 관계자 등록" disabled={targetLoading} onClick={() => setTargetEditor({ mode: 'create' })} className="flex min-h-11 min-w-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#217346] px-2.5 text-white hover:bg-emerald-800 disabled:opacity-50 md:min-h-9"><FontAwesomeIcon icon={faPlus} /><span className="hidden sm:inline">등록</span></button>
+                            <button type="button" aria-label="관계자 수정" title="선택한 관계자 수정" disabled={targetLoading || !activeTarget} onClick={() => { if (activeTarget) setTargetEditor({ mode: 'edit', target: activeTarget }); }} className="flex min-h-11 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-[#217346] disabled:opacity-50 md:min-h-9"><FontAwesomeIcon icon={faPen} /></button>
+                            <button type="button" aria-label="관계자 삭제" title="선택한 관계자 삭제" disabled={targetLoading || !activeTarget} onClick={() => { if (activeTarget) setTargetEditor({ mode: 'delete', target: activeTarget }); }} className="flex min-h-11 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50 md:min-h-9"><FontAwesomeIcon icon={faTrash} /></button>
+                        </div>
                     </div>
 
-                    {hasActiveRows && <div className="flex flex-col gap-3 px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
-                        <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-slate-200 text-xs">
-                            <div className="bg-white px-3 py-2"><span className="block text-[11px] font-bold text-slate-400">세전 합계</span><strong className="font-mono text-sm">{formatNumber(totals.preTax)}</strong></div>
-                            <div className="border-x border-slate-200 bg-emerald-50 px-3 py-2"><span className="block text-[11px] font-bold text-emerald-700">정산 세후</span><strong className="font-mono text-sm text-emerald-900">{formatNumber(totals.buyback)}</strong></div>
-                            <div className="bg-amber-50 px-3 py-2"><span className="block text-[11px] font-bold text-amber-700">미입금</span><strong className="font-mono text-sm text-amber-900">{formatNumber(Math.max(0, totals.buyback - totals.paid))}</strong></div>
+                    {hasActiveRows && <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-t border-slate-100 px-3 py-1.5">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                            <span className="whitespace-nowrap text-slate-500">세전 <strong className="ml-1 font-mono text-slate-800">{formatNumber(totals.preTax)}</strong></span>
+                            <span className="whitespace-nowrap text-emerald-700">세후 <strong className="ml-1 font-mono text-emerald-900">{formatNumber(totals.buyback)}</strong></span>
+                            <span className="whitespace-nowrap text-amber-700">미입금 <strong className="ml-1 font-mono text-amber-900">{formatNumber(Math.max(0, totals.buyback - totals.paid))}</strong></span>
                         </div>
-                        <div className="flex flex-wrap gap-2 text-xs font-black">
-                            <button type="button" onClick={() => appendRows(1, true)} className="min-h-11 rounded-lg bg-[#217346] px-3.5 py-2 text-white shadow-sm hover:bg-emerald-800 md:min-h-0"><FontAwesomeIcon icon={faPlus} className="mr-1.5" />새 정산 행</button>
-                            <button type="button" onClick={applyAutoCalculation} className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 py-2 hover:bg-[#fff7bf] md:min-h-0"><FontAwesomeIcon icon={faArrowsRotate} className="mr-1.5" />세후율 다시 적용</button>
-                            <button type="button" onClick={deleteSelectedRows} disabled={selectedRowIds.length === 0} className="min-h-11 rounded-lg border border-rose-200 bg-white px-3 py-2 text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40 md:min-h-0"><FontAwesomeIcon icon={faTrash} className="mr-1.5" />선택 삭제</button>
-                            <button type="button" onClick={exportCsv} className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 py-2 hover:bg-slate-100 md:min-h-0"><FontAwesomeIcon icon={faDownload} className="mr-1.5" />엑셀 다운로드</button>
-                            <button type="button" onClick={() => setTargetRefreshKey((value) => value + 1)} disabled={targetLoading} title="관계자 DB 새로고침" aria-label="관계자 DB 새로고침" className="min-h-11 min-w-11 rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-600 hover:bg-slate-100 disabled:cursor-wait disabled:opacity-50 md:min-h-0 md:min-w-0"><FontAwesomeIcon icon={faArrowsRotate} /></button>
+                        <div className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto whitespace-nowrap text-xs font-bold [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                            <button type="button" onClick={() => appendRows(1, true)} className="min-h-11 shrink-0 rounded-md bg-emerald-50 px-2.5 py-1.5 text-[#217346] hover:bg-emerald-100 md:min-h-8"><FontAwesomeIcon icon={faPlus} className="mr-1.5" />새 정산 행</button>
+                            <button type="button" onClick={applyAutoCalculation} className="min-h-11 shrink-0 rounded-md px-2 py-1.5 text-slate-600 hover:bg-slate-100 md:min-h-8"><FontAwesomeIcon icon={faArrowsRotate} className="mr-1.5" />세후율 다시 적용</button>
+                            <button type="button" onClick={deleteSelectedRows} disabled={selectedRowIds.length === 0} className="min-h-11 shrink-0 rounded-md px-2 py-1.5 text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40 md:min-h-8"><FontAwesomeIcon icon={faTrash} className="mr-1.5" />선택 삭제</button>
+                            <button type="button" onClick={exportCsv} className="min-h-11 shrink-0 rounded-md px-2 py-1.5 text-slate-600 hover:bg-slate-100 md:min-h-8"><FontAwesomeIcon icon={faDownload} className="mr-1.5" />엑셀 다운로드</button>
                         </div>
                     </div>}
                 </section>
@@ -757,18 +796,6 @@ const FieldBuybackWorkbookPage: React.FC = () => {
                     </div>
                 ) : (
                     <>
-                <div className="mb-2 hidden flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-900 md:flex">
-                    <span className="font-black">키보드 빠른 입력</span>
-                    <span>↑ ↓ ← → 셀 이동</span>
-                    <span>Enter 아래 · Shift+Enter 위</span>
-                    <span>Tab 다음 셀</span>
-                    <span>Ctrl+S 즉시 저장</span>
-                    <span>Ctrl+C/X/V 복사·잘라내기·붙여넣기</span>
-                    <span>Ctrl+D 위 셀 복사</span>
-                    <span>Ctrl+; 현재 연월</span>
-                    <span>Delete 셀 비우기</span>
-                </div>
-
                 <div data-testid="field-buyback-mobile-cards" className="space-y-3 md:hidden">
                     {activeSheet.rows.map((row, index) => {
                         const selected = selectedRowIds.includes(row.id);
@@ -859,7 +886,7 @@ const FieldBuybackWorkbookPage: React.FC = () => {
                     </div>
                 </details>
 
-                <div data-testid="field-buyback-desktop-grid" className="hidden max-h-[calc(100vh-350px)] overflow-auto rounded-xl border-2 border-slate-700 bg-white shadow-sm md:block">
+                <div data-testid="field-buyback-desktop-grid" className="hidden max-h-[calc(100vh-245px)] overflow-auto rounded-xl border-2 border-slate-700 bg-white shadow-sm md:block">
                     <table aria-label="관계자별 바이백 엑셀 입력표" onCopy={handleGridCopy} onCut={handleGridCut} onPaste={handleGridPaste} className="min-w-[1170px] w-full table-fixed border-collapse text-[13px]">
                         <colgroup>
                             <col className="w-10" /><col className="w-[75px]" /><col className="w-[192px]" /><col className="w-[140px]" />
@@ -942,11 +969,18 @@ const FieldBuybackWorkbookPage: React.FC = () => {
                     <span><span className="text-sky-700">관계자 DB: 연결됨</span> · 바이백 관계자 {buybackTargets.length}명</span>
                     <span className="text-amber-700">현장 DB: 미연동</span>
                     <span>{lastSavedAt ? `최근 저장 ${lastSavedAt.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}` : '입력하면 자동으로 DB에 저장됩니다.'}</span>
+                    <details className="relative hidden md:block">
+                        <summary className="cursor-pointer rounded px-2 py-1 text-slate-500 hover:bg-slate-100">키보드 빠른 입력</summary>
+                        <div className="absolute bottom-full right-0 z-30 mb-2 grid w-72 gap-1.5 rounded-xl border border-slate-200 bg-white p-4 text-xs font-medium leading-5 text-slate-600 shadow-lg">
+                            <span>방향키: 셀 이동 · Tab: 다음 셀</span><span>Enter / Shift+Enter: 아래 / 위</span><span>Ctrl+S: 즉시 저장</span><span>Ctrl+C/X/V: 복사·잘라내기·붙여넣기</span><span>Ctrl+D: 위 셀 복사</span><span>Ctrl+;: 현재 연월 · Delete: 셀 비우기</span>
+                        </div>
+                    </details>
                 </div>
                     </>
                 )}
                 </div>
             </div>
+            {targetDialog}
         </div>
     );
 };
