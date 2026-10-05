@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, onSnapshot, Unsubscribe, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, Unsubscribe, updateDoc, runTransaction } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { MenuItem, SiteDataType } from '../types/menu';
 import { DEFAULT_MENU_CONFIG } from '../constants/defaultMenu';
@@ -15,6 +15,7 @@ import {
 } from '../utils/devAdminFixtures';
 import { isOperationManagementMenuPath, isOperationManagementMenuText } from '../utils/operationMenuAccess';
 import { permissionAuditService } from './permissionAuditService';
+import { mergeMenuConfigChanges } from '../utils/menuConfigChanges';
 
 export type { MenuItem, SiteDataType };
 
@@ -24,11 +25,12 @@ export const MENU_DOCUMENT_ID = 'menus_v12';
 const getMenuDocRef = () => doc(db, COLLECTION_NAME, MENU_DOCUMENT_ID);
 
 // Options no longer need mergeWithDefaults
-interface MenuSubscribeOptions { }
+interface MenuSubscribeOptions { onError?: (error: unknown) => void }
 interface MenuFetchOptions { }
 
 interface MenuListener {
     callback: (data: SiteDataType) => void;
+    onError?: (error: unknown) => void;
 }
 
 interface AllowedMenuMap {
@@ -1234,11 +1236,14 @@ const setupSnapshotListener = () => {
             },
             (error) => {
                 console.error('[MenuService] Snapshot listener error:', error);
+                unsubscribeSnapshot = null;
+                listeners.forEach(listener => listener.onError?.(error));
             }
         );
     })
         .catch((error) => {
             console.error('[MenuService] Failed to subscribe to menus_v12:', error);
+            listeners.forEach(listener => listener.onError?.(error));
         })
         .finally(() => {
             snapshotSetupPromise = null;
@@ -1247,7 +1252,7 @@ const setupSnapshotListener = () => {
 
 export const menuServiceV11 = {
     subscribe: (callback: (data: SiteDataType) => void, options: MenuSubscribeOptions = {}) => {
-        const listener: MenuListener = { callback };
+        const listener: MenuListener = { callback, onError: options.onError };
         listeners.add(listener);
 
         if (isDevAdminSessionEnabled()) {
@@ -1298,6 +1303,7 @@ export const menuServiceV11 = {
                 const rawConfig = normalizeSiteDataType(snapshot.data() as SiteDataType);
                 currentRawConfig = deepClone(rawConfig);
                 currentConfig = processIncomingConfig(rawConfig);
+                setupSnapshotListener();
                 return deepClone(currentConfig);
             }
 
@@ -1312,7 +1318,7 @@ export const menuServiceV11 = {
         }
     },
 
-    saveMenuConfig: async (newConfig: SiteDataType) => {
+    saveMenuConfig: async (newConfig: SiteDataType, baseConfig?: SiteDataType) => {
         if (isDevAdminSessionEnabled()) {
             setDevMenuConfig(processIncomingConfig(newConfig));
             currentConfig = getDevMenuConfig();
@@ -1337,7 +1343,10 @@ export const menuServiceV11 = {
 
         try {
             const sanitizedData = JSON.parse(JSON.stringify(result.data));
-            const saveFingerprint = JSON.stringify(sanitizedData);
+            const normalizedBase = baseConfig
+                ? JSON.parse(JSON.stringify(SiteDataTypeSchema.parse(pruneLargeConfig(processIncomingConfig(normalizeSiteDataType(baseConfig)))))) as SiteDataType
+                : undefined;
+            const saveFingerprint = JSON.stringify([sanitizedData, normalizedBase]);
 
             if (latestQueuedSavePromise && latestQueuedSaveFingerprint === saveFingerprint) {
                 return await latestQueuedSavePromise;
@@ -1346,26 +1355,41 @@ export const menuServiceV11 = {
             const nextSavePromise = saveWriteQueue
                 .catch(() => undefined)
                 .then(async () => {
-                    const previousConfig = currentRawConfig ? deepClone(currentRawConfig) : null;
+                    let previousConfig = currentRawConfig ? deepClone(currentRawConfig) : null;
+                    let savedData = sanitizedData as SiteDataType;
 
                     // Full replacement keeps Firestore in sync with the menu editor after deletions.
-                    await setDoc(getMenuDocRef(), sanitizedData);
-                    currentRawConfig = deepClone(sanitizedData as SiteDataType);
-                    currentConfig = processIncomingConfig(normalizeSiteDataType(sanitizedData as SiteDataType));
+                    if (normalizedBase) {
+                        savedData = await runTransaction(db, async transaction => {
+                            const snapshot = await transaction.get(getMenuDocRef());
+                            if (!snapshot.exists()) throw new Error('메뉴 설정을 찾을 수 없습니다. 최신 메뉴를 불러와주세요.');
+                            const latest = SiteDataTypeSchema.parse(pruneLargeConfig(processIncomingConfig(normalizeSiteDataType(snapshot.data() as SiteDataType)))) as SiteDataType;
+                            previousConfig = latest;
+                            const merged = mergeMenuConfigChanges(latest, normalizedBase, sanitizedData);
+                            const validated = JSON.parse(JSON.stringify(SiteDataTypeSchema.parse(merged))) as SiteDataType;
+                            transaction.set(getMenuDocRef(), validated);
+                            return validated;
+                        });
+                    } else {
+                        await setDoc(getMenuDocRef(), sanitizedData);
+                    }
+                    currentRawConfig = deepClone(savedData);
+                    const committedConfig = processIncomingConfig(normalizeSiteDataType(savedData));
+                    currentConfig = committedConfig;
 
                     // Do not wait for the Firestore snapshot to make the sidebar consistent.
                     // The snapshot remains the cross-tab/server source of truth.
                     notifyListeners();
 
                     try {
-                        await permissionAuditService.logMenuAccessChanges(previousConfig, sanitizedData as SiteDataType);
+                        await permissionAuditService.logMenuAccessChanges(previousConfig, savedData);
                     } catch (auditError) {
                         // The menu write already succeeded. An audit failure must not make the
                         // editor report that the menu itself was lost.
                         console.error('Failed to audit menu configuration change:', auditError);
                     }
 
-                    return deepClone(currentConfig);
+                    return deepClone(committedConfig);
                 });
 
             saveWriteQueue = nextSavePromise.then(() => undefined, () => undefined);

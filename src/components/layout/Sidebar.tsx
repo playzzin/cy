@@ -56,6 +56,8 @@ import { resolveIcon } from '../../constants/iconMap';
 import SidebarMenuSearch from './SidebarMenuSearch';
 import MenuDivider from './MenuDivider';
 import { isMenuDivider } from '../../utils/menuDivider';
+import { getLinkedMenuRef } from '../../utils/linkedPositionMenus';
+import SidebarMenuBranch from './SidebarMenuBranch';
 
 interface SidebarProps {
     currentSite: string;
@@ -401,6 +403,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     // Filter menu items based on permissions
     const filterMenuEntry = (entry: string | MenuItem): string | MenuItem | null => {
+        if (typeof entry === 'object' && entry.hide) return null;
         if (isMenuDivider(entry)) return typeof entry === 'object' && entry.hide ? null : entry;
         if (typeof entry === 'string') {
             return hasPermission(entry, undefined, menuPaths[entry]) ? entry : null;
@@ -418,6 +421,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             return { ...entry, sub: filteredSub };
         }
 
+        if (getLinkedMenuRef(entry.id)?.itemId === undefined && getLinkedMenuRef(entry.id)) return { ...entry, sub: filteredSub || [] };
         if (hasOriginalChildren && !directPath) return null;
 
         return hasPermission(entry.text, entry.roles, directPath) ? { ...entry, sub: filteredSub } : null;
@@ -431,6 +435,9 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     // State for hover menu in collapsed mode
     const [hoveredMenuItem, setHoveredMenuItem] = useState<MenuItem | null>(null);
+    const liveHoveredMenuItem = hoveredMenuItem
+        ? finalMenu.find(item => item.id ? item.id === hoveredMenuItem.id : item === hoveredMenuItem) || null
+        : null;
     const [hoveredItemTop, setHoveredItemTop] = useState<number>(0);
     const [isPanelHovered, setIsPanelHovered] = useState(false);
     const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -440,7 +447,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             clearTimeout(timeoutRef.current);
             timeoutRef.current = null;
         }
-        if (isSidebarCollapsed && item.sub) {
+        if (isSidebarCollapsed && !isMobile && item.sub) {
             const rect = e.currentTarget.getBoundingClientRect();
             setHoveredMenuItem(item);
             setHoveredItemTop(rect.top);
@@ -551,7 +558,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <ul className="menu-list" style={{ paddingBottom: '20px' }}>
                         {finalMenu.map((item: MenuItem, index: number) => {
                             if (isMenuDivider(item)) return <li key={`divider-${item.id || index}`}><MenuDivider item={item} /></li>;
-                            const hasSub = item.sub && item.sub.length > 0;
+                            const hasSub = Boolean(item.sub?.length) || Boolean(getLinkedMenuRef(item.id) && getLinkedMenuRef(item.id)?.itemId === undefined);
                             const uniqueKey = item.id || `menu-${index}`;
                             const itemId = uniqueKey;
                             const isExpanded = activeMenuItems[itemId];
@@ -578,6 +585,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     {hasSub ? (
                                         <button
                                             className="menu-btn"
+                                            aria-label={getMenuDisplayText(item.text)}
+                                            aria-expanded={isSidebarCollapsed && !isMobile ? liveHoveredMenuItem === item : Boolean(isExpanded)}
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 if (isMobile) {
@@ -585,6 +594,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                     toggleSubmenu(itemId);
                                                 } else if (isSidebarCollapsed) {
                                                     e.preventDefault();
+                                                    setHoveredMenuItem(item);
+                                                    setHoveredItemTop(e.currentTarget.getBoundingClientRect().top);
                                                 } else {
                                                     toggleSubmenu(itemId);
                                                 }
@@ -607,6 +618,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         <a
                                             href={item.path || menuPaths[item.text] || '/'}
                                             className="menu-link"
+                                            aria-label={getMenuDisplayText(item.text)}
                                             onClick={(e) => {
                                                 e.preventDefault();
                                                 const directPath = item.path || menuPaths[item.text] || '';
@@ -645,207 +657,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                                             )}
                                         </a>
                                     )}
-                                    {hasSub && (
-                                        <ul className="submenu-list">
-                                            {item.sub?.map((subItem: string | MenuItem, subIndex: number) => {
-                                                if (isMenuDivider(subItem)) return <li key={`divider-${subIndex}`}><MenuDivider item={subItem} /></li>;
-                                                let isLeaf = false;
-                                                let linkText = '';
-                                                let linkPath = '';
-                                                let subUniqueKey = `sub-${uniqueKey}-${subIndex}`;
-                                                let subItemIconColor = undefined;
-                                                let subItemActiveColor = '#1abc9c';
-
-                                                if (typeof subItem === 'string') {
-                                                    isLeaf = true;
-                                                    linkText = subItem;
-                                                    linkPath = menuPaths[subItem] || '';
-                                                    subUniqueKey = `sub-${linkText}`;
-                                                } else {
-                                                    const menuItem = subItem as MenuItem;
-                                                    subUniqueKey = menuItem.id || `sub-${uniqueKey}-${subIndex}`;
-                                                    subItemIconColor = menuItem.iconColor;
-                                                    subItemActiveColor = menuItem.activeColor || '#1abc9c';
-
-                                                    if (!menuItem.sub || menuItem.sub.length === 0) {
-                                                        isLeaf = true;
-                                                        linkText = menuItem.text;
-                                                        linkPath = menuItem.path || menuPaths[menuItem.text] || '';
-                                                    }
-                                                }
-
-                                                if (isLeaf) {
-                                                    const isSubActive = isActiveCheck(linkPath);
-                                                    const linkDisplayText = getMenuDisplayText(linkText);
-                                                    return (
-                                                        <li key={subUniqueKey} className="submenu-leaf-item">
-                                                            <a
-                                                                href={linkPath || '/'}
-                                                                onClick={(e) => {
-                                                                    e.preventDefault();
-                                                                    if (linkPath) {
-                                                                        openMenuPath(linkPath);
-                                                                    }
-                                                                }}
-                                                                className={isSubActive ? 'active' : ''}
-                                                                style={{
-                                                                    color: isSubActive ? subItemActiveColor : undefined,
-                                                                    fontWeight: isSubActive ? 'bold' : 'normal'
-                                                                }}
-                                                            >
-                                                                <span>{linkDisplayText}</span>
-                                                                {!isSidebarCollapsed && (
-                                                                    <button
-                                                                        className="submenu-open-new-btn"
-                                                                        onClick={(e) => {
-                                                                            e.preventDefault();
-                                                                            e.stopPropagation();
-                                                                            if (linkPath) window.open(linkPath, '_blank');
-                                                                        }}
-                                                                        title="새 창에서 열기"
-                                                                        aria-label={`${linkDisplayText} 새 창에서 열기`}
-                                                                    >
-                                                                        <FontAwesomeIcon icon={faUpRightFromSquare} size="xs" />
-                                                                    </button>
-                                                                )}
-                                                            </a>
-                                                        </li>
-                                                    );
-                                                } else {
-                                                    const menuItem = subItem as MenuItem;
-                                                    const nestedItemId = menuItem.id || `nested-${index}-${subIndex}`;
-                                                    const isNestedActive = activeNestedMenuItems[nestedItemId];
-                                                    const nestedActiveColor = menuItem.activeColor || '#1abc9c';
-                                                    const nestedIconColor = menuItem.iconColor;
-
-                                                    return (
-                                                        <li key={subUniqueKey} className="nested-submenu">
-                                                            <button
-                                                                className="submenu-header-btn"
-                                                                onClick={(e) => {
-                                                                    toggleNestedSubmenu(nestedItemId);
-                                                                }}
-                                                            >
-                                                                <div style={{ display: 'flex', alignItems: 'center' }}>
-                                                                    <FontAwesomeIcon
-                                                                        icon={resolveIcon(menuItem.icon, faChartPie)}
-                                                                        style={{
-                                                                            marginRight: '8px',
-                                                                            fontSize: '12px',
-                                                                            color: isNestedActive ? nestedActiveColor : (nestedIconColor || 'inherit')
-                                                                        }}
-                                                                    />
-                                                                    <span style={isNestedActive ? { color: nestedActiveColor } : {}}>
-                                                                        {getMenuDisplayText(menuItem.text)}
-                                                                    </span>
-                                                                </div>
-                                                                <FontAwesomeIcon
-                                                                    icon={faChevronRight}
-                                                                    className={`arrow-icon ${isNestedActive ? 'rotated' : ''}`}
-                                                                    style={{ fontSize: '10px', transition: 'transform 0.3s' }}
-                                                                />
-                                                            </button>
-                                                            {isNestedActive && (
-                                                                <ul className="nested-submenu-list" style={{ paddingLeft: '15px' }}>
-                                                                    {menuItem.sub?.map((nestedItem: string | MenuItem, nestedIndex: number) => {
-                                                                        if (isMenuDivider(nestedItem)) return <li key={`divider-${nestedIndex}`}><MenuDivider item={nestedItem} /></li>;
-                                                                        let nestedUniqueKey = `nested-${subUniqueKey}-${nestedIndex}`;
-                                                                        let nestedDeepActiveColor = '#1abc9c';
-
-                                                                        if (typeof nestedItem === 'string') {
-                                                                            nestedUniqueKey = `nested-leaf-${nestedItem}`;
-                                                                            const path = menuPaths[nestedItem];
-                                                                            const isSubActive = isActiveCheck(path);
-                                                                            if (!hasPermission(nestedItem, undefined, path)) return null;
-
-                                                                            return (
-                                                                                <li key={nestedUniqueKey}>
-                                                                                        <a
-                                                                                            href={path || '/'}
-                                                                                            onClick={(e) => {
-                                                                                                e.preventDefault();
-                                                                                                if (path) {
-                                                                                                    openMenuPath(path);
-                                                                                                    return;
-                                                                                                }
-                                                                                                handleSubMenuClick(nestedItem as string);
-                                                                                            }}
-                                                                                            className={isSubActive ? 'active' : ''}
-                                                                                            style={isSubActive ? { color: nestedDeepActiveColor, fontWeight: 'bold' } : {}}
-                                                                                        >
-                                                                                            <span>{getMenuDisplayText(nestedItem)}</span>
-                                                                                            {!isSidebarCollapsed && (
-                                                                                                <button
-                                                                                                    className="submenu-open-new-btn"
-                                                                                                    onClick={(e) => {
-                                                                                                        e.preventDefault();
-                                                                                                        e.stopPropagation();
-                                                                                                        if (path) window.open(path, '_blank');
-                                                                                                    }}
-                                                                                                    title="새 창에서 열기"
-                                                                                                    aria-label={`${getMenuDisplayText(nestedItem)} 새 창에서 열기`}
-                                                                                                >
-                                                                                                    <FontAwesomeIcon icon={faUpRightFromSquare} size="xs" />
-                                                                                                </button>
-                                                                                            )}
-                                                                                        </a>
-                                                                                </li>
-                                                                            );
-                                                                        } else {
-                                                                            const nestedObj = nestedItem as MenuItem;
-                                                                            nestedUniqueKey = nestedObj.id || nestedUniqueKey;
-                                                                            nestedDeepActiveColor = nestedObj.activeColor || '#1abc9c';
-
-                                                                            if (!nestedObj.sub || nestedObj.sub.length === 0) {
-                                                                                const linkPath = nestedObj.path || menuPaths[nestedObj.text];
-                                                                                const isSubActive = isActiveCheck(linkPath);
-                                                                                if (!hasPermission(nestedObj.text, nestedObj.roles, linkPath)) return null;
-                                                                                return (
-                                                                                    <li key={nestedUniqueKey}>
-                                                                                        <a
-                                                                                            href={linkPath || '/'}
-                                                                                            onClick={(e) => {
-                                                                                                e.preventDefault();
-                                                                                                const directPath = nestedObj.path || linkPath;
-                                                                                                if (directPath && shouldOpenInNewTab(directPath)) {
-                                                                                                    openMenuPath(directPath);
-                                                                                                    return;
-                                                                                                }
-                                                                                                if (nestedObj.path) handleMenuItemClick(nestedObj);
-                                                                                                else handleSubMenuClick(nestedObj.text);
-                                                                                            }}
-                                                                                            className={isSubActive ? 'active' : ''}
-                                                                                            style={isSubActive ? { color: nestedDeepActiveColor, fontWeight: 'bold' } : {}}
-                                                                                        >
-                                                                                            <span>{getMenuDisplayText(nestedObj.text)}</span>
-                                                                                            {!isSidebarCollapsed && (
-                                                                                                <button
-                                                                                                    className="submenu-open-new-btn"
-                                                                                                    onClick={(e) => {
-                                                                                                        e.preventDefault();
-                                                                                                        e.stopPropagation();
-                                                                                                        const path = nestedObj.path || linkPath || '';
-                                                                                                        if (path) window.open(path, '_blank');
-                                                                                                    }}
-                                                                                                    title="새 창에서 열기"
-                                                                                                    aria-label={`${getMenuDisplayText(nestedObj.text)} 새 창에서 열기`}
-                                                                                                >
-                                                                                                    <FontAwesomeIcon icon={faUpRightFromSquare} size="xs" />
-                                                                                                </button>
-                                                                                            )}
-                                                                                        </a>
-                                                                                    </li>
-                                                                                )
-                                                                            }
-                                                                        }
-                                                                        return null;
-                                                                    })}
-                                                                </ul>
-                                                            )}
-                                                        </li>
-                                                    );
-                                                }
-                                            })}
+                                    {hasSub && isExpanded && (!isSidebarCollapsed || isMobile) && (
+                                        <ul className="submenu-list" style={{ maxHeight: isExpanded ? 'none' : 0 }}>
+                                            <SidebarMenuBranch items={item.sub || []} parentId={itemId}
+                                                expanded={activeNestedMenuItems} onToggle={toggleNestedSubmenu}
+                                                menuPaths={menuPaths} onNavigate={openMenuPath} isActive={isActiveCheck}
+                                                displayText={getMenuDisplayText} iconName={inferMenuIconName} />
+                                            {!item.sub?.length && <li className="px-5 py-3 text-xs text-slate-400">등록된 메뉴가 없습니다.</li>}
                                         </ul>
                                     )}
                                 </li>
@@ -857,9 +675,9 @@ const Sidebar: React.FC<SidebarProps> = ({
             </nav>
 
             {/* Hover Submenu Panel for Collapsed Mode (Portal to body) */}
-            {isSidebarCollapsed && hoveredMenuItem && createPortal(
+            {isSidebarCollapsed && !isMobile && liveHoveredMenuItem && createPortal(
                 <div
-                    className={`submenu-panel ${hoveredMenuItem ? 'open' : ''}`}
+                    className={`submenu-panel ${liveHoveredMenuItem ? 'open' : ''}`}
                     onMouseEnter={handlePanelMouseEnter}
                     onMouseLeave={handlePanelMouseLeave}
                     style={{
@@ -868,172 +686,29 @@ const Sidebar: React.FC<SidebarProps> = ({
                         top: Math.min(hoveredItemTop, window.innerHeight - 300) + 'px',
                         left: '60px',
                         transformOrigin: 'left top',
-                        borderColor: hoveredMenuItem.activeColor // Optional border color?
+                        borderColor: liveHoveredMenuItem.activeColor // Optional border color?
                     }}
                 >
-                    <div className="submenu-panel-header" style={hoveredMenuItem.activeColor ? { borderBottomColor: hoveredMenuItem.activeColor } : {}}>
-                        <span className="submenu-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: hoveredMenuItem.activeColor || '#1abc9c' }}>
+                    <div className="submenu-panel-header" style={liveHoveredMenuItem.activeColor ? { borderBottomColor: liveHoveredMenuItem.activeColor } : {}}>
+                        <span className="submenu-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: liveHoveredMenuItem.activeColor || '#1abc9c' }}>
                             <FontAwesomeIcon
-                                icon={resolveIcon(hoveredMenuItem.icon, faChartPie)}
-                                style={{ color: hoveredMenuItem.activeColor || hoveredMenuItem.iconColor || '#1abc9c' }}
+                                icon={resolveIcon(liveHoveredMenuItem.icon, faChartPie)}
+                                style={{ color: liveHoveredMenuItem.activeColor || liveHoveredMenuItem.iconColor || '#1abc9c' }}
                             />
-                            {getMenuDisplayText(hoveredMenuItem.text)}
+                            {getMenuDisplayText(liveHoveredMenuItem.text)}
                         </span>
                         <button className="submenu-close-btn" onClick={() => setHoveredMenuItem(null)} aria-label="하위 메뉴 닫기" title="하위 메뉴 닫기">
                             <FontAwesomeIcon icon={faXmark} />
                         </button>
                     </div>
                     <div className="submenu-panel-content">
-                        {hoveredMenuItem.sub?.map((subItem: string | MenuItem, idx: number) => {
-                            if (isMenuDivider(subItem)) return <MenuDivider key={`divider-${idx}`} item={subItem} />;
-                            let isLeaf = false;
-                            let itemText = '';
-                            let itemPath = '';
-                            let itemIcon = DEFAULT_SUBMENU_ICON;
-                            let itemActiveColor = '#1abc9c';
-                            let itemIconColor = undefined;
-
-                            if (typeof subItem === 'string') {
-                                isLeaf = true;
-                                itemText = subItem;
-                                itemPath = menuPaths[subItem];
-                                itemIcon = inferMenuIconName(itemText, itemPath);
-                            } else {
-                                const mi = subItem as MenuItem;
-                                itemActiveColor = mi.activeColor || '#1abc9c';
-                                itemIconColor = mi.iconColor;
-                                const miPath = mi.path || menuPaths[mi.text];
-                                itemIcon = inferMenuIconName(mi.text, miPath, mi.icon);
-                                if (!mi.sub || mi.sub.length === 0) {
-                                    isLeaf = true;
-                                    itemText = mi.text;
-                                    itemPath = miPath;
-                                } else {
-                                    isLeaf = false;
-                                    itemText = mi.text;
-                                }
-                            }
-
-                            if (isLeaf) {
-                                const isSubActive = isActiveCheck(itemPath);
-                                return (
-                                    <button
-                                        key={idx}
-                                        className={`submenu-item ${isSubActive ? 'active' : ''}`}
-                                        style={{
-                                            cursor: 'pointer', userSelect: 'none', textAlign: 'left', width: '100%',
-                                            color: isSubActive ? itemActiveColor : undefined,
-                                            fontWeight: isSubActive ? 'bold' : 'normal',
-                                            justifyContent: 'flex-start',
-                                            gap: '8px'
-                                        }}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (itemPath) {
-                                                openMenuPath(itemPath);
-                                            } else {
-                                                alert(`경로를 찾을 수 없습니다: ${itemText}`);
-                                            }
-                                            setHoveredMenuItem(null);
-                                        }}
-                                    >
-                                        <FontAwesomeIcon
-                                            icon={resolveIcon(itemIcon, faCircle)}
-                                            style={{
-                                                fontSize: itemIcon === DEFAULT_SUBMENU_ICON ? '7px' : '10px',
-                                                width: '12px',
-                                                flexShrink: 0,
-                                                color: isSubActive ? itemActiveColor : itemIconColor
-                                            }}
-                                        />
-                                        <span>{getMenuDisplayText(itemText)}</span>
-                                    </button>
-                                );
-                            } else {
-                                const menuItem = subItem as MenuItem;
-                                return (
-                                    <div key={idx}>
-                                        <div className="submenu-item nested-header" style={{ userSelect: 'none' }}>
-                                            <span style={{ color: itemActiveColor, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                <FontAwesomeIcon
-                                                    icon={resolveIcon(itemIcon, faCircle)}
-                                                    style={{
-                                                        fontSize: itemIcon === DEFAULT_SUBMENU_ICON ? '7px' : '10px',
-                                                        width: '12px',
-                                                        flexShrink: 0,
-                                                        color: itemIconColor
-                                                    }}
-                                                />
-                                                {getMenuDisplayText(menuItem.text)}
-                                            </span>
-                                        </div>
-                                        {menuItem.sub?.map((nested: string | MenuItem, nIdx: number) => {
-                                            if (isMenuDivider(nested)) return <MenuDivider key={`divider-${nIdx}`} item={nested} />;
-                                            let deepText = '';
-                                            let deepPath = '';
-                                            let deepPermission = '';
-                                            let deepIcon = DEFAULT_SUBMENU_ICON;
-                                            let deepIconColor = undefined;
-                                            let deepActiveColor = '#1abc9c';
-
-                                            if (typeof nested === 'string') {
-                                                deepText = nested;
-                                                deepPath = menuPaths[nested];
-                                                deepPermission = nested;
-                                                deepIcon = inferMenuIconName(deepText, deepPath);
-                                            } else {
-                                                deepText = nested.text;
-                                                deepPath = nested.path || menuPaths[nested.text];
-                                                deepPermission = nested.text;
-                                                deepIcon = inferMenuIconName(nested.text, deepPath, nested.icon);
-                                                deepIconColor = nested.iconColor;
-                                                deepActiveColor = nested.activeColor || '#1abc9c';
-                                            }
-
-                                            if (!hasPermission(deepPermission, typeof nested === 'string' ? undefined : nested.roles, deepPath)) return null;
-
-                                            const isNestedActive = isActiveCheck(deepPath);
-
-                                            return (
-                                                <button
-                                                    key={`${idx}-${nIdx}`}
-                                                    className={`submenu-item nested-item ${isNestedActive ? 'active' : ''}`}
-                                                    style={{
-                                                        cursor: 'pointer', userSelect: 'none', textAlign: 'left', width: '100%',
-                                                        color: isNestedActive ? deepActiveColor : undefined,
-                                                        fontWeight: isNestedActive ? 'bold' : 'normal',
-                                                        justifyContent: 'flex-start',
-                                                        gap: '8px'
-                                                    }}
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        if (deepPath) {
-                                                            openMenuPath(deepPath);
-                                                        } else {
-                                                            console.warn("No deepPath found, falling back to handleSubMenuClick");
-                                                            alert(`이 메뉴에는 연결된 경로가 없습니다: ${deepText}\n메뉴 관리에서 경로를 설정해주세요.`);
-                                                            handleSubMenuClick(deepText);
-                                                        }
-                                                        setHoveredMenuItem(null);
-                                                    }}
-                                                >
-                                                    <FontAwesomeIcon
-                                                        icon={resolveIcon(deepIcon, faCircle)}
-                                                        style={{
-                                                            fontSize: deepIcon === DEFAULT_SUBMENU_ICON ? '7px' : '10px',
-                                                            width: '12px',
-                                                            flexShrink: 0,
-                                                            color: isNestedActive ? deepActiveColor : deepIconColor
-                                                        }}
-                                                    />
-                                                    <span>{getMenuDisplayText(deepText)}</span>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                );
-                            }
-                        })}
+                        <ul>
+                            <SidebarMenuBranch key={liveHoveredMenuItem.id || liveHoveredMenuItem.text} items={liveHoveredMenuItem.sub || []} parentId={liveHoveredMenuItem.id || 'panel'}
+                                expanded={activeNestedMenuItems} onToggle={toggleNestedSubmenu} panel
+                                menuPaths={menuPaths} onNavigate={path => { openMenuPath(path); setHoveredMenuItem(null); }}
+                                isActive={isActiveCheck} displayText={getMenuDisplayText} iconName={inferMenuIconName} />
+                            {!liveHoveredMenuItem.sub?.length && <li className="px-5 py-3 text-xs text-slate-400">등록된 메뉴가 없습니다.</li>}
+                        </ul>
                     </div>
                 </div>,
                 document.body

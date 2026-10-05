@@ -24,6 +24,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { SiteDataType } from '../../../../types/menu';
+import { isDevPositionSite } from '../../../../utils/linkedPositionMenus';
 
 interface MenuManagerHeaderProps {
     menuData: SiteDataType;
@@ -133,7 +134,7 @@ const MenuManagerHeader: React.FC<MenuManagerHeaderProps> = ({
         .sort((a, b) => (menuData[a].order ?? 999) - (menuData[b].order ?? 999))
         .map(key => ({ id: key, name: menuData[key].name }));
 
-    const roles = (menuData.admin?.positionConfig || [])
+    const roles = [...(menuData.admin?.positionConfig || [])]
         .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
         .map(pos => ({ id: pos.id, name: pos.name, fullId: pos.id === 'full' ? 'admin' : (pos.id.startsWith('pos_') ? pos.id : `pos_${pos.id}`) }));
 
@@ -253,6 +254,22 @@ const MenuManagerHeader: React.FC<MenuManagerHeaderProps> = ({
                     <FontAwesomeIcon icon={faCog} />
                 </button>
             </div>
+            {isDevPositionSite(menuData, selectedSite) && (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-700 bg-slate-800 px-4 py-3">
+                    <div>
+                        <div className="text-sm font-bold text-slate-100">직책별 메뉴 연결</div>
+                        <p className="mt-1 text-xs text-slate-400">DEV 메뉴 아래에 다른 직책을 표시합니다. 어느 쪽에서 수정해도 같은 메뉴에 반영됩니다.</p>
+                    </div>
+                    <button type="button" role="switch" aria-label="직책별 메뉴 연결 사용"
+                        aria-checked={menuData[selectedSite].linkedPositionMenusEnabled !== false}
+                        onClick={() => onUpdateMenuData({ ...menuData, [selectedSite]: {
+                            ...menuData[selectedSite], linkedPositionMenusEnabled: menuData[selectedSite].linkedPositionMenusEnabled === false
+                        } })}
+                        className="rounded-lg border border-blue-400 bg-blue-600 px-4 py-2 text-sm font-bold text-white">
+                        {menuData[selectedSite].linkedPositionMenusEnabled !== false ? '연결 중' : '연결 안 함'}
+                    </button>
+                </div>
+            )}
             {menuData[selectedSite] && (
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-700 bg-slate-800 px-4 py-3">
                     <div>

@@ -10,6 +10,7 @@ import { MenuItem } from '../../../../services/menuServiceV11';
 import IconPicker from './IconPicker';
 import DividerSettings from './DividerSettings';
 import { isMenuDivider } from '../../../../utils/menuDivider';
+import { getLinkedMenuRef } from '../../../../utils/linkedPositionMenus';
 import * as Fas from '@fortawesome/free-solid-svg-icons';
 import { IconName } from '@fortawesome/fontawesome-svg-core';
 
@@ -96,7 +97,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                             </div>
                             <div>
                                 <h2 className="font-bold text-gray-100 text-base line-clamp-1">{isMenuDivider(localState) ? '구분선 설정' : localState.text}</h2>
-                                <p className="text-xs text-gray-500 line-clamp-1">{isMenuDivider(localState) ? '메뉴 사이의 시각적 구분' : localState.id}</p>
+                                <p className="text-xs text-gray-500 line-clamp-1">{isMenuDivider(localState) ? '메뉴 사이의 시각적 구분' : getLinkedMenuRef(localState.id) ? '연결된 직책 메뉴 · 원본에 반영' : localState.id}</p>
                             </div>
                         </div>
                     ) : (

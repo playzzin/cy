@@ -9,7 +9,7 @@ import type { SiteDataType } from '../../../types/menu';
 jest.mock('../../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: null }) }));
 jest.mock('../../../contexts/SiteModeContext', () => ({ useSiteMode: () => ({ positions: [], changePosition: jest.fn() }) }));
 jest.mock('../../../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: () => false }));
-jest.mock('../../../services/menuServiceV11', () => ({ menuServiceV11: { getMenuConfig: jest.fn(), saveMenuConfig: jest.fn() } }));
+jest.mock('../../../services/menuServiceV11', () => ({ menuServiceV11: { subscribe: jest.fn(), getMenuConfig: jest.fn(), saveMenuConfig: jest.fn() } }));
 jest.mock('./components/MenuManagerHeader', () => () => null);
 jest.mock('./components/RoleManager', () => () => null);
 jest.mock('./components/SiteManager', () => () => null);
@@ -26,6 +26,7 @@ beforeEach(() => {
     jest.clearAllMocks();
     localStorage.clear();
     (menuServiceV11.getMenuConfig as jest.Mock).mockResolvedValue(JSON.parse(JSON.stringify(config)));
+    (menuServiceV11.subscribe as jest.Mock).mockImplementation(listener => { listener(JSON.parse(JSON.stringify(config))); return jest.fn(); });
     (menuServiceV11.saveMenuConfig as jest.Mock).mockImplementation(async data => data);
 });
 

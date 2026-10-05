@@ -23,6 +23,8 @@ export interface SiteData {
     headerActions?: MenuItem[];
     /** 선택한 사이트·직책의 좌측 메뉴 검색창 표시 여부 (기본: 꺼짐) */
     sidebarSearchEnabled?: boolean;
+    /** DEV 좌측 메뉴 아래에 직책별 원본 메뉴 연결 (기본: 켜짐) */
+    linkedPositionMenusEnabled?: boolean;
     deletedItems?: string[];
     /** 시스템 페이지 원본 경로별 사용자 지정 표시명 */
     systemPageLabels?: Record<string, string>;

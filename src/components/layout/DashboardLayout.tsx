@@ -28,6 +28,7 @@ import {
 } from '../../utils/themeMode';
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 import { getMenuModeStorageKey } from '../../utils/menuModeStorage';
+import { getPositionMenuView } from '../../utils/linkedPositionMenus';
 
 // Removed hardcoded siteData in favor of dynamic loading
 
@@ -462,8 +463,11 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     const effectiveSite = (isSiteLayerMode || currentPosition === 'full' || !positionSite)
         ? baseSite
         : (siteData?.[positionSite]?.menu ? positionSite : baseSite);
-    const currentSiteData = siteData
+    const sourceSiteData = siteData
         ? (siteData[effectiveSite] || siteData[fallbackSite] || null)
+        : null;
+    const currentSiteData = sourceSiteData && siteData
+        ? { ...sourceSiteData, menu: getPositionMenuView(siteData, effectiveSite) }
         : null;
 
     const handleMenuItemClick = (item: MenuItem, position?: number) => {

@@ -1,5 +1,5 @@
 import { useAuth } from '../../../contexts/AuthContext';
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { getMenuModeStorageKey } from '../../../utils/menuModeStorage';
 import {
@@ -29,7 +29,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { arrayMove } from '@dnd-kit/sortable';
 
-import { menuServiceV11, SiteDataType, MenuItem } from '../../../services/menuServiceV11';
+import type { SiteDataType, MenuItem } from '../../../types/menu';
 import { DEFAULT_MENU_CONFIG } from '../../../constants/defaultMenu';
 import { MENU_PATHS } from '../../../constants/menuPaths';
 import ToolboxPanel from './components/ToolboxPanel';
@@ -43,6 +43,9 @@ import { addMenuItemsSafely } from './menuBulkApply';
 import { isDevAdminSessionEnabled } from '../../../utils/devAdminSession';
 import { useSiteMode } from '../../../contexts/SiteModeContext';
 import { createMenuDivider, isMenuDivider } from '../../../utils/menuDivider';
+import { getLinkedMenuRef, getPositionMenuView, isLinkedMenuContainer, linkedMenuId, setPositionMenuView } from '../../../utils/linkedPositionMenus';
+
+import { useMenuEditorPersistence } from './useMenuEditorPersistence';
 
 // --- Recursive Helpers ---
 
@@ -189,6 +192,7 @@ const getPositionSiteKey = (positionId: string | null) => {
 type MenuSurface = 'menu' | 'headerActions';
 
 const getSurfaceItems = (data: SiteDataType | null, siteKey: string, surface: MenuSurface): MenuItem[] => {
+    if (surface === 'menu') return getPositionMenuView(data, siteKey);
     const site = data?.[siteKey] as any;
     const items = site?.[surface];
     return Array.isArray(items) ? items : [];
@@ -196,7 +200,8 @@ const getSurfaceItems = (data: SiteDataType | null, siteKey: string, surface: Me
 
 const setSurfaceItems = (data: SiteDataType, siteKey: string, surface: MenuSurface, items: MenuItem[]) => {
     if (!data[siteKey]) return;
-    (data[siteKey] as any)[surface] = items;
+    if (surface === 'menu') setPositionMenuView(data, siteKey, items);
+    else data[siteKey] = { ...data[siteKey], [surface]: items };
 };
 
 const getNormalizedMenuRoute = (item: MenuItem | string): string => {
@@ -282,7 +287,8 @@ const AdvancedMenuManagerEditor: React.FC = () => {
     const { positions: previewPositions, changePosition: changePreviewPosition } = useSiteMode();
 
     // --- State ---
-    const [menuData, setMenuData] = useState<SiteDataType | null>(null);
+    const { menuData, history, saveStatus, saveError, isReloading, updateMenuData,
+        handleUndo, handleRedo, reloadLatestMenus } = useMenuEditorPersistence();
     const [selectedSite, setSelectedSite] = useState<string>(initialSite);
     const [selectedSurface, setSelectedSurface] = useState<MenuSurface>('menu');
     const [leftPanelOpen, setLeftPanelOpen] = useState(true);
@@ -294,6 +300,9 @@ const AdvancedMenuManagerEditor: React.FC = () => {
     const [moveTargetParentId, setMoveTargetParentId] = useState<string>(ROOT_PARENT_ID);
 
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const editingSourceSite = selectedSurface === 'menu'
+        ? (getLinkedMenuRef(selectedIds[0])?.siteKey || selectedSite)
+        : selectedSite;
     // Derived state: Get actual item objects from IDs
     const selectedItems = useMemo(() => {
         if (!menuData) return [];
@@ -301,7 +310,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
         const items: MenuItem[] = [];
         selectedIds.forEach(id => {
             const item = findMenuItemInTree(surfaceItems, id);
-            if (item) items.push(item);
+            if (item && !isLinkedMenuContainer(item.id)) items.push(item);
         });
         return items;
     }, [menuData, selectedSite, selectedSurface, selectedIds]);
@@ -310,62 +319,16 @@ const AdvancedMenuManagerEditor: React.FC = () => {
 
     const currentMenuDuplicateCount = useMemo(() => {
         if (!menuData) return 0;
-        return removeDuplicateLeafMenuRoutes(getSurfaceItems(menuData, selectedSite, 'menu')).removed;
-    }, [menuData, selectedSite]);
-
-    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-    const [saveError, setSaveError] = useState<string>('');
-    const latestSaveRequestRef = useRef(0);
-
-    const formatSaveError = useCallback((err: any): string => {
-        if (!err) return 'Unknown error';
-        if (Array.isArray(err.issues)) {
-            const details = err.issues
-                .map((i: any) => `${Array.isArray(i.path) ? i.path.join('.') : ''}: ${i.message}`)
-                .join('\n');
-            return `${err.message || 'Invalid Menu Configuration'}\n${details}`.trim();
-        }
-        if (err.code) {
-            return `${String(err.code)}: ${String(err.message || '')}`.trim();
-        }
-        return String(err.message || err);
-    }, []);
-
-    const persistMenuData = useCallback((data: SiteDataType) => {
-        const saveRequestId = ++latestSaveRequestRef.current;
-        setSaveStatus('saving');
-        setSaveError('');
-        menuServiceV11.saveMenuConfig(data)
-            .then((savedData) => {
-                if (saveRequestId !== latestSaveRequestRef.current) return;
-                setMenuData(savedData);
-                setSaveStatus('saved');
-                setSaveError('');
-            })
-            .catch((err) => {
-                console.error('[MenuManager] saveMenuConfig failed:', err);
-                if (saveRequestId !== latestSaveRequestRef.current) return;
-                setSaveStatus('error');
-                setSaveError(formatSaveError(err));
-            });
-    }, [formatSaveError]);
-
-    useEffect(() => {
-        if (saveStatus !== 'saving') return;
-
-        const preventReloadDuringSave = (event: BeforeUnloadEvent) => {
-            event.preventDefault();
-            event.returnValue = '';
-        };
-
-        window.addEventListener('beforeunload', preventReloadDuringSave);
-        return () => window.removeEventListener('beforeunload', preventReloadDuringSave);
-    }, [saveStatus]);
+        return removeDuplicateLeafMenuRoutes(menuData[editingSourceSite]?.menu || []).removed;
+    }, [menuData, editingSourceSite]);
 
     // Actions
     const handleNodeSelect = useCallback((id: string, multiSelect: boolean = false) => {
+        if (isLinkedMenuContainer(id) && !getLinkedMenuRef(id)) return;
         if (multiSelect) {
             setSelectedIds(prev => {
+                if (isLinkedMenuContainer(id) || prev.some(isLinkedMenuContainer)) return [id];
+                if (getLinkedMenuRef(prev[0])?.siteKey !== getLinkedMenuRef(id)?.siteKey) return [id];
                 if (prev.includes(id)) {
                     return prev.filter(item => item !== id);
                 } else {
@@ -379,14 +342,14 @@ const AdvancedMenuManagerEditor: React.FC = () => {
     }, []);
 
     const handleIndent = useCallback((id: string) => {
-        if (!menuData) return;
-        const currentMenu = [...getSurfaceItems(menuData, selectedSite, selectedSurface)];
+        if (!menuData || isLinkedMenuContainer(id)) return;
+        const currentMenu = JSON.parse(JSON.stringify(getSurfaceItems(menuData, selectedSite, selectedSurface))) as MenuItem[];
         const ref = findRef(currentMenu, id);
 
         if (!ref || ref.index <= 0) return; // Can't indent if first item
 
         const prevSibling = ref.list[ref.index - 1];
-        if (typeof prevSibling === 'string' || isMenuDivider(prevSibling)) return;
+        if (typeof prevSibling === 'string' || isMenuDivider(prevSibling) || isLinkedMenuContainer(prevSibling.id)) return;
 
         // Remove from current list
         const [movedItem] = ref.list.splice(ref.index, 1);
@@ -398,37 +361,38 @@ const AdvancedMenuManagerEditor: React.FC = () => {
         // Update state
         const newData = { ...menuData };
         setSurfaceItems(newData, selectedSite, selectedSurface, currentMenu as MenuItem[]);
-        setMenuData(newData);
-        persistMenuData(newData);
-    }, [menuData, selectedSite, selectedSurface, persistMenuData]);
+        updateMenuData(newData);
+    }, [menuData, selectedSite, selectedSurface, updateMenuData]);
 
     const handleDeleteItem = useCallback((id: string) => {
+        if (isLinkedMenuContainer(id)) return;
         if (!window.confirm('정말 삭제하시겠습니까? 휴지통으로 이동하지 않고 즉시 삭제됩니다.')) return;
         if (!menuData) return;
         
         // Deep clone to ensure immutable update and prevent side effects in nested structures
         const newData = JSON.parse(JSON.stringify(menuData));
-        const result = findRef(getSurfaceItems(newData, selectedSite, selectedSurface), id);
+        const items = getSurfaceItems(newData, selectedSite, selectedSurface);
+        const result = findRef(items, id);
         
         if (result) {
             result.list.splice(result.index, 1);
+            setSurfaceItems(newData, selectedSite, selectedSurface, items);
             
             // Clear from selectedIds if it was deleted
             setSelectedIds(prev => prev.filter(sid => sid !== id));
             
-            setMenuData(newData);
-            persistMenuData(newData);
+            updateMenuData(newData);
         } else {
             console.warn(`[MenuManager] Failed to find item with ID: ${id} for deletion`);
         }
-    }, [menuData, selectedSite, selectedSurface, persistMenuData]);
+    }, [menuData, selectedSite, selectedSurface, updateMenuData]);
 
     const handleOutdent = useCallback((id: string) => {
-        if (!menuData) return;
-        const currentMenu = [...getSurfaceItems(menuData, selectedSite, selectedSurface)];
+        if (!menuData || isLinkedMenuContainer(id)) return;
+        const currentMenu = JSON.parse(JSON.stringify(getSurfaceItems(menuData, selectedSite, selectedSurface))) as MenuItem[];
         const ref = findRef(currentMenu, id);
 
-        if (!ref || !ref.parent) return; // Can't outdent if root
+        if (!ref || !ref.parent || isLinkedMenuContainer(ref.parent.id)) return;
 
         const parentRef = findRef(currentMenu, ref.parent.id || ref.parent.text || '');
         if (!parentRef) return; // Should not happen
@@ -442,9 +406,8 @@ const AdvancedMenuManagerEditor: React.FC = () => {
         // Update state
         const newData = { ...menuData };
         setSurfaceItems(newData, selectedSite, selectedSurface, currentMenu as MenuItem[]);
-        setMenuData(newData);
-        persistMenuData(newData);
-    }, [menuData, selectedSite, selectedSurface, persistMenuData]);
+        updateMenuData(newData);
+    }, [menuData, selectedSite, selectedSurface, updateMenuData]);
 
     const handleBatchUpdate = (updates: Partial<MenuItem>) => {
         if (!menuData) return;
@@ -454,7 +417,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
                 if (typeof node === 'string') return node;
 
                 let newNode = { ...node };
-                if (selectedIds.includes(node.id || '')) {
+                if (selectedIds.includes(node.id || '') && !isLinkedMenuContainer(node.id)) {
                     newNode = { ...newNode, ...updates };
                 }
 
@@ -472,7 +435,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
     };
 
     const handleInspectorUpdate = (updatedItem: MenuItem) => {
-        if (!menuData) return;
+        if (!menuData || isLinkedMenuContainer(updatedItem.id)) return;
         const newMenu = updateMenuItemInTree(getSurfaceItems(menuData, selectedSite, selectedSurface), updatedItem);
         const newData = { ...menuData };
         setSurfaceItems(newData, selectedSite, selectedSurface, newMenu as MenuItem[]);
@@ -484,65 +447,19 @@ const AdvancedMenuManagerEditor: React.FC = () => {
     const [isSiteManagerOpen, setIsSiteManagerOpen] = useState(false);
     const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
 
-    // History for Undo/Redo
-    const [history, setHistory] = useState<{ past: SiteDataType[], future: SiteDataType[] }>({
-        past: [],
-        future: []
-    });
-
-    // --- Effects ---
     useEffect(() => {
-        // Load initial data
-        const loadData = async () => {
-            const data = await menuServiceV11.getMenuConfig();
-            if (data) {
-                // [Sync Logic] Ensure all 'pos_' sites exist for defined roles
-                // Disabled auto-repair to allow manual deletion of site tabs. (User Feedback: "Deleted items reappear")
-                /*
-                const syncedData = { ...data };
-                let hasChanges = false;
-                const positions = syncedData.admin?.positionConfig || [];
+        if (menuData) setSelectedSite(previous => resolveExistingMenuSite(menuData, previous || initialSite, currentUser?.uid));
+    }, [menuData, initialSite, currentUser?.uid]);
 
-                positions.forEach(pos => {
-                    // Skip 'full' as it maps to 'admin'
-                    if (pos.id === 'full') return;
-
-                    const siteKey = pos.id.startsWith('pos_') ? pos.id : `pos_${pos.id}`;
-                    if (!syncedData[siteKey]) {
-                        console.log(`[Auto-Repair] Creating missing site: ${siteKey}`);
-                        syncedData[siteKey] = {
-                            name: pos.name,
-                            icon: pos.icon,
-                            menu: [],
-                            // Inherit color/order if needed, or default
-                        };
-                        hasChanges = true;
-                    }
-                });
-                
-                if (hasChanges) {
-                    menuServiceV11.saveMenuConfig(syncedData);
-                    // Use synced data
-                    setMenuData(syncedData);
-                } else {
-                    setMenuData(data);
-                }
-                */
-                setMenuData(data);
-
-                // If we patched data, save it silently or just keep in state? 
-                // Better to save it ensuring consistency for next reload
-                /*
-                if (hasChanges) {
-                    menuServiceV11.saveMenuConfig(syncedData);
-                }
-                */
-
-                setSelectedSite(previous => resolveExistingMenuSite(data, previous || initialSite, currentUser?.uid));
-            }
-        };
-        loadData();
-    }, []);
+    // Prune selection after a remote deletion or disconnect; stale IDs must not
+    // keep future additions targeting an invisible/deleted source position.
+    useEffect(() => {
+        const visible = getSurfaceItems(menuData, selectedSite, selectedSurface);
+        setSelectedIds(previous => {
+            const valid = previous.filter(id => Boolean(findMenuItemInTree(visible, id)));
+            return valid.length === previous.length ? previous : valid;
+        });
+    }, [menuData, selectedSite, selectedSurface]);
 
     // Reset selection when site changes (Fix for: "Menu structure doesn't seem to change")
     useEffect(() => {
@@ -571,45 +488,6 @@ const AdvancedMenuManagerEditor: React.FC = () => {
 
     // --- Actions ---
 
-    const updateMenuData = useCallback((newData: SiteDataType) => {
-        if (!menuData) return;
-
-        // Push to history
-        setHistory(prev => ({
-            past: [...prev.past, JSON.parse(JSON.stringify(menuData))],
-            future: []
-        }));
-
-        setMenuData(newData);
-        persistMenuData(newData);
-    }, [menuData, persistMenuData]);
-
-    const handleUndo = () => {
-        if (history.past.length === 0 || !menuData) return;
-        const previous = history.past[history.past.length - 1];
-        const newPast = history.past.slice(0, history.past.length - 1);
-
-        setHistory({
-            past: newPast,
-            future: [menuData, ...history.future]
-        });
-        setMenuData(previous);
-        persistMenuData(previous);
-    };
-
-    const handleRedo = () => {
-        if (history.future.length === 0 || !menuData) return;
-        const next = history.future[0];
-        const newFuture = history.future.slice(1);
-
-        setHistory({
-            past: [...history.past, menuData],
-            future: newFuture
-        });
-        setMenuData(next);
-        persistMenuData(next);
-    };
-
     const handleRenameSystemPage = useCallback((path: string, name: string) => {
         if (!menuData?.admin) return;
 
@@ -630,32 +508,32 @@ const AdvancedMenuManagerEditor: React.FC = () => {
         if (!normalizedPath) return false;
 
         return Boolean(findMenuItemByRoute(
-            getSurfaceItems(menuData, selectedSite, 'menu'),
+            (menuData?.[editingSourceSite]?.menu || []),
             normalizedPath
         ));
-    }, [menuData, selectedSite]);
+    }, [menuData, editingSourceSite]);
 
     const handleAddSystemPage = useCallback((page: { name: string; path: string }) => {
-        if (!menuData?.[selectedSite]) return;
+        if (!menuData?.[editingSourceSite]) return;
 
         const normalizedPath = String(page.path || '').trim();
         const normalizedName = String(page.name || '').trim();
         if (!normalizedPath || !normalizedName) return;
 
         const existingItem = findMenuItemByRoute(
-            getSurfaceItems(menuData, selectedSite, 'menu'),
+            (menuData?.[editingSourceSite]?.menu || []),
             normalizedPath
         );
 
         setSelectedSurface('menu');
         if (existingItem) {
             const existingId = getMenuItemId(existingItem);
-            setSelectedIds(existingId ? [existingId] : []);
+            setSelectedIds(existingId ? [editingSourceSite === selectedSite ? existingId : linkedMenuId(editingSourceSite, existingId)] : []);
             return;
         }
 
         const newData = JSON.parse(JSON.stringify(menuData)) as SiteDataType;
-        const targetMenu = [...getSurfaceItems(newData, selectedSite, 'menu')];
+        const targetMenu = [...(newData[editingSourceSite]?.menu || [])];
         const existingIds = collectMenuIds(targetMenu);
         const baseId = `menu-${Date.now()}`;
         let newId = baseId;
@@ -672,44 +550,53 @@ const AdvancedMenuManagerEditor: React.FC = () => {
             path: normalizedPath,
             icon: 'faFileLines'
         });
-        setSurfaceItems(newData, selectedSite, 'menu', targetMenu);
+        newData[editingSourceSite] = { ...newData[editingSourceSite], menu: targetMenu };
         updateMenuData(newData);
-        setSelectedIds([newId]);
-    }, [menuData, selectedSite, updateMenuData]);
+        setSelectedIds([editingSourceSite === selectedSite ? newId : linkedMenuId(editingSourceSite, newId)]);
+    }, [menuData, editingSourceSite, selectedSite, updateMenuData]);
 
     const handleRemoveDuplicateMenuLinks = useCallback(() => {
         if (!menuData || currentMenuDuplicateCount === 0) return;
 
-        const siteName = menuData[selectedSite]?.name || selectedSite;
+        const siteName = menuData[editingSourceSite]?.name || editingSourceSite;
         const confirmed = window.confirm(
             `${siteName} 좌측 메뉴에서 같은 이동 경로를 사용하는 중복 링크 ${currentMenuDuplicateCount}개를 정리할까요?\n\n위에 있는 메뉴를 남기고 나머지만 제거합니다.`
         );
         if (!confirmed) return;
 
         const newData = JSON.parse(JSON.stringify(menuData)) as SiteDataType;
-        const cleanup = removeDuplicateLeafMenuRoutes(getSurfaceItems(newData, selectedSite, 'menu'));
-        setSurfaceItems(newData, selectedSite, 'menu', cleanup.items as MenuItem[]);
+        const cleanup = removeDuplicateLeafMenuRoutes((newData[editingSourceSite]?.menu || []));
+        newData[editingSourceSite] = { ...newData[editingSourceSite], menu: cleanup.items as MenuItem[] };
         setSelectedIds([]);
         updateMenuData(newData);
-    }, [currentMenuDuplicateCount, menuData, selectedSite, updateMenuData]);
+    }, [currentMenuDuplicateCount, menuData, editingSourceSite, updateMenuData]);
 
     const handleAddDivider = useCallback(() => {
         if (!menuData?.[selectedSite] || selectedSurface !== 'menu') return;
         const newData = JSON.parse(JSON.stringify(menuData)) as SiteDataType;
         const items = getSurfaceItems(newData, selectedSite, 'menu');
-        const existingIds = collectMenuIds(items);
+        const existingIds = collectMenuIds(menuData[editingSourceSite]?.menu || []);
         const baseId = `divider-${Date.now()}`;
         let id = baseId;
         let suffix = 1;
         while (existingIds.has(id)) id = `${baseId}-${suffix++}`;
-        const divider = createMenuDivider(id);
+        const displayId = editingSourceSite === selectedSite ? id : linkedMenuId(editingSourceSite, id);
+        const divider = createMenuDivider(displayId);
         const target = selectedIds.length === 1 ? findRef(items, selectedIds[0]) : null;
-        if (target) target.list.splice(target.index + 1, 0, divider);
-        else items.push(divider);
+        if (target && isLinkedMenuContainer(selectedIds[0])) {
+            const group = target.list[target.index] as MenuItem;
+            group.sub = [...(group.sub || []), divider];
+        } else if (target) target.list.splice(target.index + 1, 0, divider);
+        else if (editingSourceSite !== selectedSite) {
+            const group = items.find(item => item.id === linkedMenuId(editingSourceSite));
+            if (!group) return;
+            group.sub = [...(group.sub || []), divider];
+        } else items.push(divider);
+        setSurfaceItems(newData, selectedSite, 'menu', items);
         updateMenuData(newData);
-        setSelectedIds([id]);
+        setSelectedIds([displayId]);
         setLeftPanelOpen(false);
-    }, [menuData, selectedSite, selectedSurface, selectedIds, updateMenuData]);
+    }, [menuData, selectedSite, selectedSurface, selectedIds, editingSourceSite, updateMenuData]);
 
     const handleCopyFromPosition = useCallback((sourceSite: string, itemIds: string[], targetSites: string[]) => {
         if (!menuData) return;
@@ -757,38 +644,9 @@ const AdvancedMenuManagerEditor: React.FC = () => {
 
     const handleResetDefaults = () => {
         if (window.confirm('정말 초기화하시겠습니까? 기존 메뉴 설정이 모두 사라지고 기본값(한글)으로 복원됩니다.')) {
-            // Push current state to history before resetting
-            if (menuData) {
-                setHistory(prev => ({
-                    past: [...prev.past, JSON.parse(JSON.stringify(menuData))],
-                    future: []
-                }));
-            }
-            // Use defaults
-            setMenuData(JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG)));
-            persistMenuData(DEFAULT_MENU_CONFIG);
+            updateMenuData(JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG)));
         }
     };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     // --- DnD Sensors ---
     const sensors = useSensors(
@@ -800,6 +658,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
     );
 
     const handleDragStart = (event: DragStartEvent) => {
+        if (isLinkedMenuContainer(String(event.active.id))) return;
         setActiveDragId(String(event.active.id));
     };
 
@@ -812,6 +671,11 @@ const AdvancedMenuManagerEditor: React.FC = () => {
         let newMenu = JSON.parse(JSON.stringify(getSurfaceItems(menuData, selectedSite, selectedSurface)));
         const activeId = String(active.id);
         const overId = String(over.id);
+        if (isLinkedMenuContainer(activeId)) return;
+        const activeSource = getLinkedMenuRef(activeId)?.siteKey;
+        const targetRef = getLinkedMenuRef(overId);
+        const isNewItem = active.data.current?.type === 'new-item' || active.data.current?.type === 'system-page';
+        if (!isNewItem && overId !== 'trash-zone' && activeSource !== targetRef?.siteKey) return;
 
         // 1. Drop into Trash
         if (overId === 'trash-zone') {
@@ -828,7 +692,11 @@ const AdvancedMenuManagerEditor: React.FC = () => {
         // 2. New Item from Toolbox
         if (active.data.current?.type === 'new-item' || active.data.current?.type === 'system-page') {
             const data = active.data.current;
-            const newId = `menu-${Date.now()}`;
+            const existingIds = collectMenuIds(menuData[targetRef?.siteKey || selectedSite]?.[selectedSurface] || []);
+            const baseId = `menu-${Date.now()}`;
+            let newId = baseId;
+            let suffix = 1;
+            while (existingIds.has(newId)) newId = `${baseId}-${suffix++}`;
 
             let newItem: MenuItem;
 
@@ -850,7 +718,11 @@ const AdvancedMenuManagerEditor: React.FC = () => {
             }
 
             const dst = findRef(newMenu, overId);
-            if (dst) {
+            if (targetRef) newItem.id = linkedMenuId(targetRef.siteKey, newId);
+            if (dst && targetRef?.itemId === undefined && targetRef) {
+                const group = dst.list[dst.index] as MenuItem;
+                group.sub = [...(group.sub || []), newItem];
+            } else if (dst) {
                 dst.list.splice(dst.index, 0, newItem);
             } else if (overId === 'root-drop-zone') {
                 newMenu.push(newItem);
@@ -861,7 +733,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
             const newData = { ...menuData };
             setSurfaceItems(newData, selectedSite, selectedSurface, newMenu as MenuItem[]);
             updateMenuData(newData);
-            setSelectedIds([newId]);
+            setSelectedIds([newItem.id || newId]);
             if (isMenuDivider(newItem)) setLeftPanelOpen(false);
             return;
         }
@@ -870,6 +742,11 @@ const AdvancedMenuManagerEditor: React.FC = () => {
         if (activeId !== overId) {
             const src = findRef(newMenu, activeId);
             const dst = findRef(newMenu, overId);
+
+            // Keep linked source roots fixed; prevent moving a parent into its descendants.
+            if (isLinkedMenuContainer(overId)) return;
+            const moving = src?.list[src.index];
+            if (moving && collectDescendantIds(moving).has(overId)) return;
 
             if (src && dst) {
                 if (src.list === dst.list) {
@@ -895,8 +772,13 @@ const AdvancedMenuManagerEditor: React.FC = () => {
 
     if (!menuData) return (
         <div className="flex flex-col items-center justify-center h-screen bg-gray-900 text-white gap-4">
-            <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-            <span className="text-lg font-medium text-gray-300">메뉴 시스템 로딩 중...</span>
+            {saveStatus === 'error' ? <>
+                <p role="alert">{saveError}</p>
+                <button type="button" disabled={isReloading} onClick={reloadLatestMenus}>최신 메뉴 불러오기</button>
+            </> : <>
+                <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-lg font-medium text-gray-300">메뉴 시스템 로딩 중...</span>
+            </>}
         </div>
     );
 
@@ -967,6 +849,12 @@ const AdvancedMenuManagerEditor: React.FC = () => {
                     개발 관리자 모드에서는 메뉴 설정이 현재 브라우저에 저장됩니다. 다른 탭에는 즉시 동기화되며, 다른 브라우저와는 공유되지 않습니다.
                 </div>
             )}
+            {saveStatus === 'error' && (
+                <div role="alert" className="flex items-center justify-between gap-3 bg-red-950 px-6 py-3 text-sm text-red-100">
+                    <span>{saveError}<small className="block mt-1">최신 메뉴를 불러오면 저장되지 않은 수정 내용은 사라집니다.</small></span>
+                    <button type="button" disabled={isReloading} onClick={async () => { if (await reloadLatestMenus()) setSelectedIds([]); }} className="shrink-0 rounded border border-red-300 px-3 py-2">{isReloading ? '불러오는 중…' : '최신 메뉴 불러오기'}</button>
+                </div>
+            )}
 
             {/* New Tabs Header */}
             {menuData && (
@@ -1029,7 +917,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
                         toggle={() => setLeftPanelOpen(!leftPanelOpen)}
                         systemPageLabels={menuData.admin?.systemPageLabels}
                         onRenameSystemPage={handleRenameSystemPage}
-                        targetMenuName={menuData[selectedSite]?.name || selectedSite}
+                        targetMenuName={menuData[editingSourceSite]?.name || editingSourceSite}
                         isSystemPageAdded={isSystemPageAdded}
                         onAddSystemPage={handleAddSystemPage}
                         onAddDivider={selectedSurface === 'menu' ? handleAddDivider : undefined}
@@ -1056,8 +944,17 @@ const AdvancedMenuManagerEditor: React.FC = () => {
                             onDelete={handleDeleteItem}
                             onIndent={handleIndent}
                             onOutdent={handleOutdent}
+                            onToggleVisibility={id => {
+                                const item = findMenuItemInTree(getSurfaceItems(menuData, selectedSite, selectedSurface), id);
+                                if (item) handleInspectorUpdate({ ...item, hide: !item.hide });
+                            }}
                             headerActions={(
                                 <>
+                                    {editingSourceSite !== selectedSite && (
+                                        <p role="status" className="w-full rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-200">
+                                            {menuData[editingSourceSite]?.name} 메뉴 편집 중 · 변경하면 해당 직책 메뉴에도 바로 반영됩니다.
+                                        </p>
+                                    )}
                                     <div className="flex items-center rounded-lg border border-slate-700 bg-slate-950/50 p-1">
                                         <button
                                             type="button"
@@ -1115,7 +1012,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
 
                     {/* 3. Inspector Panel (Right) */}
                     <InspectorPanel
-                        isOpen={selectedIds.length > 0}
+                        isOpen={selectedItems.length > 0}
                         toggle={() => setSelectedIds([])}
                         selectedItems={selectedItems}
                         onUpdate={handleInspectorUpdate}
