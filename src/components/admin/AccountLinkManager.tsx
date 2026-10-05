@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faArrowRight,
@@ -42,6 +42,9 @@ interface AccountLinkManagerProps {
     embedded?: boolean;
     className?: string;
     onManageAccess?: (uid: string) => void;
+    onManageConnections?: (uid: string) => void;
+    approvalsOnly?: boolean;
+    initialPendingScope?: 'all' | 'selected';
     previewData?: { companies: Company[]; officeStaff: OfficeStaff[]; links: AccountLink[] };
 }
 
@@ -118,6 +121,9 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
     embedded = false,
     className = '',
     onManageAccess,
+    onManageConnections,
+    approvalsOnly = false,
+    initialPendingScope = 'all',
     previewData,
 }) => {
     const isControlledUserWorkerData = Array.isArray(users) && Array.isArray(workers);
@@ -129,9 +135,12 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
     const [accountLinks, setAccountLinks] = useState<AccountLink[]>([]);
     const [internalLoading, setInternalLoading] = useState(!isControlledUserWorkerData);
     const [metaLoading, setMetaLoading] = useState(true);
+    const [metadataLoaded, setMetadataLoaded] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [successMessage, setSuccessMessage] = useState('');
+    const [pendingScope, setPendingScope] = useState(initialPendingScope);
     const [userSearch, setUserSearch] = useState('');
     const [connectionFilter, setConnectionFilter] = useState<'all' | 'linked' | 'unlinked' | 'pending'>('all');
     const [targetSearch, setTargetSearch] = useState('');
@@ -145,6 +154,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
     const [pendingReview, setPendingReview] = useState<{ linkId: string; mode: PendingReviewMode } | null>(null);
     const [rejectionReason, setRejectionReason] = useState('');
     const [processingLinkId, setProcessingLinkId] = useState('');
+    const processingReviewRef = useRef(false);
     const [didOpenPendingTab, setDidOpenPendingTab] = useState(false);
 
     const effectiveUsers = users ?? internalUsers;
@@ -155,6 +165,13 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
         () => lockedUserId ? effectiveUsers.filter((user) => user.uid === lockedUserId) : effectiveUsers,
         [effectiveUsers, lockedUserId]
     );
+
+    useEffect(() => {
+        setPendingScope(lockedUserId ? 'selected' : initialPendingScope);
+        setTargetSearch('');
+        setPendingReview(null);
+        setRejectionReason('');
+    }, [initialPendingScope, selectedUserId, lockedUserId, approvalsOnly]);
 
     const fetchInternalUserWorkerData = useCallback(async () => {
         if (isControlledUserWorkerData) return;
@@ -173,11 +190,13 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
 
     const fetchMetaData = useCallback(async () => {
         setMetaLoading(true);
+        setMetadataLoaded(false);
         try {
             if (previewData) {
                 setCompanies(previewData.companies);
                 setOfficeStaffRows(previewData.officeStaff);
                 setAccountLinks(previewData.links);
+                setMetadataLoaded(true);
                 return;
             }
             const [companyRows, officeRows, linkRows] = await Promise.all([
@@ -188,6 +207,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
             setCompanies(companyRows);
             setOfficeStaffRows(officeRows);
             setAccountLinks(linkRows);
+            setMetadataLoaded(true);
         } catch {
             setError('연결 정보를 불러오지 못했습니다. 새로고침을 눌러 다시 시도해 주세요.');
         } finally {
@@ -212,6 +232,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
     };
 
     const handleRefresh = async () => {
+        if (busy || processingReviewRef.current || refreshing) return;
         setRefreshing(true);
         setError(null);
         try {
@@ -415,6 +436,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
     }, [companyLinksByUserId, linkedOfficeStaffByUserId, linkedWorkersByUserId, userSearch, visibleUsers, connectionSummaries, connectionFilter]);
 
     useEffect(() => {
+        if (approvalsOnly) return;
         if (visibleUsers.length === 0) {
             if (!selectedUserId) setInternalSelectedUserId('');
             return;
@@ -426,7 +448,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                 else setInternalSelectedUserId(nextUid);
             }
         }
-    }, [activeSelectedUserId, visibleUsers, lockedUserId, onSelectUser, selectedUserId]);
+    }, [activeSelectedUserId, visibleUsers, lockedUserId, onSelectUser, selectedUserId, approvalsOnly]);
 
     useEffect(() => {
         setSelectedWorkerId(''); setSelectedOfficeStaffId(''); setSelectedCompanyId('');
@@ -513,15 +535,22 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
     }, [officeStaffRows, ownerByOfficeStaffId, targetSearch, userByUid]);
 
     const pendingLinks = useMemo(() => {
-        return accountLinks.filter((link) => link.status === 'pending');
-    }, [accountLinks]);
+        return metadataLoaded ? accountLinks.filter((link) => link.status === 'pending' && (!lockedUserId || link.uid === lockedUserId)) : [];
+    }, [accountLinks, lockedUserId, metadataLoaded]);
+
+    const pendingAccountUsers = useMemo(() => {
+        if (!metadataLoaded) return [];
+        const requestedUserIds = new Set(pendingLinks.map((link) => link.uid));
+        return visibleUsers.filter((user) => user.status === 'pending' && !requestedUserIds.has(user.uid));
+    }, [pendingLinks, visibleUsers, metadataLoaded]);
+    const pendingRequestCount = pendingLinks.length + pendingAccountUsers.length;
 
     useEffect(() => {
-        if (didOpenPendingTab || metaLoading || pendingLinks.length === 0 || selectedUserId || lockedUserId) return;
+        if (approvalsOnly || didOpenPendingTab || metaLoading || pendingRequestCount === 0 || selectedUserId || lockedUserId) return;
         setActiveTab('pending');
         setTargetSearch('');
         setDidOpenPendingTab(true);
-    }, [didOpenPendingTab, metaLoading, pendingLinks.length, selectedUserId, lockedUserId]);
+    }, [approvalsOnly, didOpenPendingTab, metaLoading, pendingRequestCount, selectedUserId, lockedUserId]);
 
     const summary = useMemo(() => {
         const linkedUsers = visibleUsers.filter((user) =>
@@ -543,9 +572,9 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
             officeStaff: officeStaffRows.length,
             unlinkedOfficeStaff: Math.max(officeStaffRows.length - linkedOfficeStaffCount, 0),
             companies: companies.length,
-            pending: pendingLinks.length,
+            pending: pendingRequestCount,
         };
-    }, [companies.length, companyLinksByUserId, effectiveWorkers, linkedOfficeStaffByUserId, linkedWorkersByUserId, officeStaffRows, ownerByOfficeStaffId, ownerByWorkerId, pendingLinks.length, visibleUsers]);
+    }, [companies.length, companyLinksByUserId, effectiveWorkers, linkedOfficeStaffByUserId, linkedWorkersByUserId, officeStaffRows, ownerByOfficeStaffId, ownerByWorkerId, pendingRequestCount, visibleUsers]);
 
     const selectUser = (uid: string) => {
         setError(null);
@@ -555,6 +584,19 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
         if (lockedUserId) return;
         if (onSelectUser) onSelectUser(uid);
         else setInternalSelectedUserId(uid);
+    };
+
+    const handleManageConnections = (uid: string) => {
+        if (busy || processingReviewRef.current || !metadataLoaded) return;
+        if (approvalsOnly) {
+            onManageConnections?.(uid);
+            return;
+        }
+        selectUser(uid);
+        setActiveTab('worker');
+        setTargetSearch('');
+        setPendingReview(null);
+        setRejectionReason('');
     };
 
     const handleWorkerLink = async () => {
@@ -696,7 +738,8 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
     };
 
     const handleApproveLink = async (link: AccountLink) => {
-        if (previewData) return;
+        if (previewData || busy || processingReviewRef.current || !metadataLoaded) return;
+        setSuccessMessage('');
         const user = userByUid.get(link.uid);
         if (!link.id) {
             setError('승인할 연결 요청 번호가 없습니다.');
@@ -709,7 +752,8 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
     };
 
     const handleRejectLink = async (link: AccountLink) => {
-        if (previewData) return;
+        if (previewData || busy || processingReviewRef.current || !metadataLoaded) return;
+        setSuccessMessage('');
         if (!link.id) {
             setError('반려할 연결 요청 번호가 없습니다.');
             return;
@@ -720,10 +764,12 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
     };
 
     const handleConfirmPendingReview = async (link: AccountLink) => {
-        if (previewData) return;
-        if (!link.id || pendingReview?.linkId !== link.id) return;
+        if (previewData || busy || processingReviewRef.current || !metadataLoaded) return;
+        if (!link.id || link.status !== 'pending' || pendingReview?.linkId !== link.id) return;
+        if (lockedUserId && link.uid !== lockedUserId) return;
 
         const nextStatus = pendingReview.mode === 'approve' ? 'active' : 'rejected';
+        processingReviewRef.current = true;
         setProcessingLinkId(link.id);
         setError(null);
         try {
@@ -738,16 +784,20 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
             )));
             setPendingReview(null);
             setRejectionReason('');
+            const requester = userByUid.get(link.uid)?.displayName || link.userDisplayName || link.userEmail || '요청 사용자';
+            setSuccessMessage(pendingReview.mode === 'approve'
+                ? requester + '님의 ' + link.entityName + ' 연결을 승인했습니다.'
+                : requester + '님의 ' + link.entityName + ' 연결 요청을 반려했습니다.');
 
             try {
                 await reloadAfterChange();
             } catch (refreshError) {
-                console.error('[AccountLinkManager] Review succeeded but refresh failed.', refreshError);
                 setError(`${pendingReview.mode === 'approve' ? '승인' : '반려'} 처리는 완료됐지만 목록 새로고침에 실패했습니다. 새로고침 버튼을 눌러 주세요.`);
             }
         } catch (err) {
             setError(getErrorMessage(err));
         } finally {
+            processingReviewRef.current = false;
             setProcessingLinkId('');
         }
     };
@@ -1012,12 +1062,19 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
 
     const renderPendingTargets = () => {
         const queryText = targetSearch.trim().toLowerCase();
+        const selectedScope = Boolean(lockedUserId) || pendingScope === 'selected';
+        const scopedLinks = selectedScope ? pendingLinks.filter((link) => link.uid === activeSelectedUserId) : pendingLinks;
+        const scopedAccounts = selectedScope ? pendingAccountUsers.filter((user) => user.uid === activeSelectedUserId) : pendingAccountUsers;
+        const selectedCount = pendingLinks.filter((link) => link.uid === activeSelectedUserId).length
+            + pendingAccountUsers.filter((user) => user.uid === activeSelectedUserId).length;
         const visiblePendingLinks = queryText
-            ? pendingLinks.filter((link) => {
+            ? scopedLinks.filter((link) => {
                 const user = userByUid.get(link.uid);
                 const text = [
+                    link.uid,
                     link.entityName,
                     link.entitySubType,
+                    getAccountRelationRoleLabel(link.relationRole, link.entityType),
                     link.userEmail,
                     link.userDisplayName,
                     link.requestedEntity?.businessNumber,
@@ -1030,14 +1087,61 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                 ].map(toText).join(' ').toLowerCase();
                 return text.includes(queryText);
             })
-            : pendingLinks;
+            : scopedLinks;
+        const visiblePendingAccounts = scopedAccounts.filter((user) => !queryText || [
+            user.uid, user.displayName, user.email, user.position, user.role, user.accountType, '사용 승인 연결 대상 지정',
+        ].map(toText).join(' ').toLowerCase().includes(queryText));
+        const visibleCount = visiblePendingLinks.length + visiblePendingAccounts.length;
+        const changeScope = (scope: 'all' | 'selected') => {
+            setPendingScope(scope);
+            setPendingReview(null);
+            setRejectionReason('');
+        };
 
         return (
-            <div className="um-link-scroll flex-1 overflow-y-auto p-2">
-                {visiblePendingLinks.length === 0 ? (
-                    <div className="p-6 text-center text-sm text-slate-400">승인 대기 요청이 없습니다.</div>
-                ) : (
-                    visiblePendingLinks.map((link) => {
+            <div className="um-approval-list flex min-h-0 flex-1 flex-col">
+                <div className="um-approval-controls border-b border-slate-100 p-3 space-y-3">
+                    {!lockedUserId && (
+                        <div className="um-approval-scopes flex flex-wrap gap-2" aria-label="승인 요청 범위">
+                            <button type="button" className="um-button" aria-pressed={!selectedScope} disabled={Boolean(processingLinkId)} onClick={() => changeScope('all')}>전체 요청 {pendingRequestCount}</button>
+                            <button type="button" className="um-button" aria-pressed={selectedScope} disabled={!activeSelectedUserId || Boolean(processingLinkId)} onClick={() => changeScope('selected')}>선택 사용자{selectedUser ? ' · ' + getUserLabel(selectedUser) : ''} {selectedCount}</button>
+                        </div>
+                    )}
+                    {lockedUserId && <strong className="text-sm text-slate-700">{getUserLabel(selectedUser)}님의 승인 요청</strong>}
+                    <div className="um-approval-search flex items-center gap-2">
+                        <div className="relative flex-1">
+                            <input value={targetSearch} aria-label="승인 요청 검색" placeholder="이름, 이메일, 연결 대상 검색" disabled={Boolean(processingLinkId)}
+                                onChange={(event) => { setTargetSearch(event.target.value); setPendingReview(null); setRejectionReason(''); }}
+                                className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500" />
+                            <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-3 text-xs text-slate-400" />
+                        </div>
+                        {targetSearch && <button type="button" className="um-text-button" disabled={Boolean(processingLinkId)} onClick={() => setTargetSearch('')}>검색 지우기</button>}
+                    </div>
+                    <p className="um-approval-count text-xs text-slate-500" aria-live="polite">{visibleCount}건 표시 · 전체 {pendingRequestCount}건</p>
+                </div>
+                <div className="um-link-scroll flex-1 overflow-y-auto p-3">
+                {visibleCount === 0 && (
+                    <div className="um-approval-empty p-6 text-center text-sm text-slate-500">
+                        {queryText ? '검색 조건에 맞는 승인 요청이 없습니다.' : selectedScope ? '선택한 사용자의 승인 대기 요청이 없습니다.' : '승인 대기 요청이 없습니다.'}
+                    </div>
+                )}
+                {visiblePendingAccounts.map((user) => (
+                    <article key={user.uid} className="um-approval-account mb-3 rounded-xl border border-amber-200 bg-white p-4 shadow-sm" aria-label={getUserLabel(user) + ' 사용 승인 요청'}>
+                        <span className="um-badge um-warning">사용 승인 대기</span>
+                        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                            <div className="min-w-0">
+                                <strong className="text-sm text-slate-900">{getUserLabel(user)}</strong>
+                                <p className="break-all text-xs text-slate-500">{user.email || '이메일 미등록'}</p>
+                                <p className="mt-2 text-xs text-slate-600">연결할 인원·회사를 지정하면 검토 후 승인할 수 있습니다.</p>
+                                {user.position && <p className="mt-1 text-xs text-slate-500">현재 직책: {user.position}</p>}
+                            </div>
+                            {(!approvalsOnly || onManageConnections)
+                                ? <button type="button" className="um-button um-primary" disabled={busy || Boolean(processingLinkId)} onClick={() => handleManageConnections(user.uid)}>연결 대상 지정·승인 <FontAwesomeIcon icon={faArrowRight} /></button>
+                                : <span className="text-xs text-slate-500">사용자 관리의 계정 연결에서 연결 대상을 지정해 주세요.</span>}
+                        </div>
+                    </article>
+                ))}
+                {visiblePendingLinks.map((link) => {
                         const user = userByUid.get(link.uid);
                         const isNewCompanyRequest = link.entityType === 'company' && !companyById.has(link.entityId);
                         const isOfficePlaceholderRequest = link.entityType === 'office' && link.entityId.startsWith('new_');
@@ -1087,13 +1191,14 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
 
                                     <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                                         {link.requestedEntity && (
-                                            <div className="min-w-0 flex-1 rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-xs text-slate-600">
-                                                <div>식별번호: {link.requestedEntity.businessNumber || link.requestedEntity.idNumber || '-'}</div>
+                                            <details className="min-w-0 flex-1 rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-xs text-slate-600">
+                                                <summary className="cursor-pointer font-semibold text-slate-600">요청 상세 정보</summary>
+                                                <div className="mt-2">식별번호: {link.requestedEntity.businessNumber || link.requestedEntity.idNumber || '-'}</div>
                                                 <div>대표자/직책: {link.requestedEntity.ceoName || link.requestedEntity.role || '-'}</div>
                                                 <div>연락처: {link.requestedEntity.phone || '-'}</div>
                                                 {link.requestedEntity.department && <div>부서: {link.requestedEntity.department}</div>}
                                                 {link.requestedEntity.memo && <div>메모: {link.requestedEntity.memo}</div>}
-                                            </div>
+                                            </details>
                                         )}
                                         <div className="grid shrink-0 grid-cols-2 gap-2">
                                         <button type="button" onClick={() => void handleApproveLink(link)} disabled={busy || Boolean(processingLinkId) || Boolean(previewData)} className="min-h-10 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-extrabold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
@@ -1113,6 +1218,10 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                                                 ? `${requesterEmail} 계정을 ${link.entityName}에 연결합니다.`
                                                 : `${requesterEmail} 계정의 요청을 반려합니다.`}
                                         </div>
+                                        <p className="mt-2 text-xs font-semibold text-slate-600">
+                                            요청 사용자: {requesterName} · 연결 대상: {link.entityName} · 관계: {getAccountRelationRoleLabel(link.relationRole, link.entityType)}
+                                        </p>
+                                        {pendingReview.mode === 'approve' && getAccountLinkPositionName(link) && <p className="mt-1 text-xs text-slate-600">요청 직책: {getAccountLinkPositionName(link)}</p>}
                                         {pendingReview.mode === 'reject' && (
                                             <label className="mt-3 block text-xs font-bold text-rose-700">
                                                 반려 사유 <span className="font-medium text-rose-500">(사용자에게 표시됩니다)</span>
@@ -1120,6 +1229,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                                                     value={rejectionReason}
                                                     onChange={(event) => setRejectionReason(event.target.value.slice(0, 500))}
                                                     rows={3}
+                                                    disabled={processingThisLink}
                                                     autoFocus
                                                     placeholder="예: 등록된 전화번호를 확인해 다시 요청해 주세요."
                                                     className="mt-1.5 w-full resize-none rounded-lg border border-rose-200 bg-white p-2.5 text-sm font-medium text-slate-700 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100"
@@ -1157,24 +1267,30 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                                 )}
                             </div>
                         );
-                    })
-                )}
+                    })}
+                </div>
             </div>
         );
     };
 
     return (
         <div className={containerClass}>
-            <div className="um-link-stats">
+            {approvalsOnly ? (
+                <div className="um-approval-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
+                    <div><strong className="text-base text-slate-900">요청된 승인 {metadataLoaded && <span className="um-badge um-warning">{summary.pending}</span>}</strong><p className="mt-1 text-sm text-slate-500">요청 내용과 연결 대상을 확인하고 바로 처리하세요.</p></div>
+                    <button type="button" className="um-button" onClick={handleRefresh} disabled={refreshing || loading || busy || Boolean(processingLinkId)} aria-label="승인 요청 새로고침"><FontAwesomeIcon icon={refreshing ? faSpinner : faArrowsRotate} spin={refreshing} /> 새로고침</button>
+                </div>
+            ) : <div className="um-link-stats">
                 <strong>계정 연결·승인</strong>
                 <span>전체 <b>{summary.users}</b></span>
                 <span>연결됨 <b>{visibleUsers.filter((user) => (connectionSummaries.get(user.uid) || []).some((link) => link.status === 'active')).length}</b></span>
-                <button type="button" onClick={() => { setActiveTab('pending'); setTargetSearch(''); }}>전체 승인 요청 <b>{summary.pending}</b></button>
-                <button type="button" onClick={handleRefresh} disabled={refreshing || loading || busy} aria-label="계정 연결 정보 새로고침"><FontAwesomeIcon icon={refreshing ? faSpinner : faArrowsRotate} spin={refreshing} /></button>
-            </div>
+                <button type="button" disabled={Boolean(processingLinkId)} onClick={() => { setActiveTab('pending'); setPendingScope('all'); setTargetSearch(''); }}>전체 승인 요청 <b>{metadataLoaded ? summary.pending : '확인 필요'}</b></button>
+                <button type="button" onClick={handleRefresh} disabled={refreshing || loading || busy || Boolean(processingLinkId)} aria-label="계정 연결 정보 새로고침"><FontAwesomeIcon icon={refreshing ? faSpinner : faArrowsRotate} spin={refreshing} /></button>
+            </div>}
+            {successMessage && <div role="status" className="um-approval-notice um-approval-success border-b border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800"><FontAwesomeIcon icon={faCheckCircle} className="mr-2" />{successMessage}</div>}
             {previewData && <div className="px-3 py-2 text-xs text-sky-800 bg-sky-50">샘플 연결 정보입니다. 연결·승인 변경은 실제 로그인 후 사용할 수 있습니다.</div>}
             {error && (
-                <div className="border-b border-rose-100 bg-rose-50 px-5 py-3 text-sm font-bold text-rose-700">
+                <div role="alert" className="border-b border-rose-100 bg-rose-50 px-5 py-3 text-sm font-bold text-rose-700">
                     {error}
                 </div>
             )}
@@ -1184,7 +1300,12 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                     <FontAwesomeIcon icon={faSpinner} spin className="mr-2" />
                     계정 연결 정보를 불러오는 중...
                 </div>
-            ) : (
+            ) : !metadataLoaded ? (
+                <div className="um-approval-empty flex min-h-[240px] flex-col items-center justify-center gap-3 p-6 text-center text-sm text-slate-600">
+                    <p>연결 정보를 확인할 수 없어 승인 요청을 표시하지 않습니다.</p>
+                    <button type="button" className="um-button" onClick={handleRefresh} disabled={refreshing || busy || Boolean(processingLinkId)}>다시 불러오기</button>
+                </div>
+            ) : approvalsOnly ? renderPendingTargets() : (
                 <div className="um-link-layout">
                     {renderUserList()}
 
@@ -1195,7 +1316,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                                     ['worker', '작업자', faHardHat],
                                     ['office', '사무실', faIdBadge],
                                     ['company', '회사', faBuilding],
-                                    ['pending', `전체 승인 ${pendingLinks.length}`, faHourglassHalf],
+                                    ['pending', `전체 승인 ${pendingRequestCount}`, faHourglassHalf],
                                 ] as const).map(([tab, label, icon]) => (
                                     <button
                                         key={tab}
@@ -1217,7 +1338,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                                 ))}
                             </div>
 
-                            <div className="relative">
+                            {activeTab !== 'pending' && <div className="relative">
                                 <input
                                     value={targetSearch}
                                     onChange={(event) => setTargetSearch(event.target.value)}
@@ -1225,7 +1346,7 @@ const AccountLinkManager: React.FC<AccountLinkManagerProps> = ({
                                     className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                                 />
                                 <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-3 text-xs text-slate-400" />
-                            </div>
+                            </div>}
 
                             {activeTab === 'company' && (
                                 <div className="flex flex-wrap items-center gap-2">

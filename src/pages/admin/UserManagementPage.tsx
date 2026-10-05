@@ -4,6 +4,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faArrowsRotate,
     faCheck,
+    faHourglassHalf,
     faCircleInfo,
     faShieldHalved,
     faSpinner,
@@ -36,7 +37,7 @@ import { accessRoleLabel, normalizeAccessRole, selectPositionAccess, summarizeAc
 import './UserManagementPage.css';
 
 type CanonicalSystemRole = 'admin' | 'manager' | 'user';
-type UserManagementSection = 'access' | 'account-links' | 'positions' | 'integrity';
+type UserManagementSection = 'access' | 'approvals' | 'account-links' | 'positions' | 'integrity';
 
 const SYSTEM_ROLE_OPTIONS: Array<{ value: CanonicalSystemRole; label: string }> = [
     { value: 'admin', label: '관리자' },
@@ -53,6 +54,13 @@ const USER_MANAGEMENT_SECTIONS: Array<{
     path: string;
     icon: typeof faUserGear;
 }> = [
+    {
+        id: 'approvals',
+        label: '승인 요청',
+        description: '대기 중인 가입·연결 요청을 확인하고 승인합니다.',
+        path: '/admin/user-management/approvals',
+        icon: faHourglassHalf
+    },
     {
         id: 'access',
         label: '직책·권한',
@@ -84,6 +92,7 @@ const USER_MANAGEMENT_SECTIONS: Array<{
 ];
 
 const getUserManagementSection = (pathname: string): UserManagementSection => {
+    if (pathname.endsWith('/approvals')) return 'approvals';
     if (pathname.endsWith('/account-links')) return 'account-links';
     if (pathname.endsWith('/positions')) return 'positions';
     if (pathname.endsWith('/integrity')) return 'integrity';
@@ -285,10 +294,15 @@ const UserManagementPage: React.FC = () => {
 
     const issueRows = integrityRows.filter((row) => row.missingBasePosition || row.invalidBasePosition || row.mismatchWithLinkedWorker || row.invalidAdditionalPositions.length > 0 || row.roleMismatch);
 
+    const pendingLinks = accountLinks.filter((link) => link.status === 'pending');
+    const pendingAccessUsers = users.filter((user) => user.status === 'pending' && !pendingLinks.some((link) => link.uid === user.uid));
+    const approvalCount = pendingLinks.length + pendingAccessUsers.length;
+    const selectedPendingLinks = pendingLinks.filter((link) => link.uid === selectedUserId);
+
     const filteredUsers = useMemo(() => {
         const q = search.trim().toLowerCase();
         return users.filter((user) => {
-            if (userFilter === 'pending' && user.status !== 'pending') return false;
+            if (userFilter === 'pending' && user.status !== 'pending' && !(connectionsByUser.get(user.uid) || []).some((link) => link.status === 'pending')) return false;
             if (userFilter === 'issues' && !integrityRows.some((row) => row.uid === user.uid && (row.missingBasePosition || row.invalidBasePosition || row.mismatchWithLinkedWorker || row.roleMismatch || row.invalidAdditionalPositions.length > 0))) return false;
             const text = `${user.displayName || ''} ${user.email || ''} ${user.position || ''} ${accessRoleLabel(user.role)} ${(connectionsByUser.get(user.uid) || []).map((link) => link.name).join(' ')}`.toLowerCase();
             return text.includes(q);
@@ -509,8 +523,7 @@ const UserManagementPage: React.FC = () => {
     const hasChanges = Boolean(selectedUser && (draftRole !== normalizeSystemRole(selectedUser.role)
         || draftPosition !== (selectedUser.position || '') || syncLinkedWorkerRole
         || JSON.stringify([...draftAdditionalPositions].sort()) !== JSON.stringify([...(userPositionMap[selectedUserId] || [])].sort())));
-    const needsApproval = Boolean(selectedUser && selectedUser.status !== 'active' && draftPosition);
-    const canSaveAccess = hasChanges || needsApproval;
+    const canSaveAccess = hasChanges;
     useEffect(() => {
         if (!hasChanges) return;
         const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
@@ -526,11 +539,14 @@ const UserManagementPage: React.FC = () => {
         setDraftRole(normalizeSystemRole(selectedUser.role)); setDraftPosition(selectedUser.position || '');
         setDraftAdditionalPositions(userPositionMap[selectedUserId] || []); setSyncLinkedWorkerRole(false); setAdvancedRole(false);
     };
-    const openSection = async (section: UserManagementSection, uid = selectedUserId) => {
+    const openSection = async (section: UserManagementSection, uid = selectedUserId, selectedRequests = false) => {
         if (savingUserAccess || !(await canLeaveEditor())) return;
         resetDraft();
         const target = USER_MANAGEMENT_SECTIONS.find((item) => item.id === section)!;
-        navigate(`${target.path}${uid ? `?user=${encodeURIComponent(uid)}` : ''}`);
+        const params = new URLSearchParams();
+        if (uid) params.set('user', uid);
+        if (selectedRequests) params.set('scope', 'selected');
+        navigate(`${target.path}${params.toString() ? `?${params}` : ''}`);
     };
     const selectUser = async (uid: string) => {
         if (uid === selectedUserId || savingUserAccess || !(await canLeaveEditor())) return;
@@ -574,6 +590,7 @@ const UserManagementPage: React.FC = () => {
                         const active = section.id === activeSection || (section.id === 'access' && activeSection === 'positions');
                         return <button key={section.id} type="button" onClick={() => void openSection(section.id)} aria-current={active ? 'page' : undefined}>
                             <FontAwesomeIcon icon={section.icon} /> {section.label}
+                            {section.id === 'approvals' && !connectionError && <span className="um-count">{approvalCount}</span>}
                             {section.id === 'integrity' && issueRows.length > 0 && <span className="um-count">{issueRows.length}</span>}
                         </button>;
                     })}
@@ -589,6 +606,11 @@ const UserManagementPage: React.FC = () => {
                     <button type="button" aria-pressed={activeSection === 'positions'} onClick={() => void openSection('positions')}>직책별 설정 <span>{positions.length}</span></button>
                 </div><p>직책을 선택하면 연결된 권한이 함께 적용됩니다.</p>
             </div>}
+            {activeSection === 'approvals' && <AccountLinkManager key={location.search} users={users} workers={workers} loading={refreshing} selectedUserId={selectedUserId}
+                onSelectUser={setSelectedUserId} onChanged={loadAll} actorEmail={currentUser?.email || 'system'} embedded approvalsOnly
+                initialPendingScope={new URLSearchParams(location.search).get('scope') === 'selected' ? 'selected' : 'all'}
+                onManageConnections={(uid) => void openSection('account-links', uid)}
+                onManageAccess={(uid) => void openSection('access', uid)} previewData={previewLinkData} />}
             {activeSection === 'account-links' && <AccountLinkManager users={users} workers={workers} loading={refreshing} selectedUserId={selectedUserId}
                 onSelectUser={setSelectedUserId} onChanged={loadAll} actorEmail={currentUser?.email || 'system'} embedded
                 onManageAccess={(uid) => void openSection('access', uid)} previewData={previewLinkData} />}
@@ -612,6 +634,14 @@ const UserManagementPage: React.FC = () => {
                 </aside>
                 {!selectedUser ? <div className="um-panel um-empty">관리할 사용자를 선택해 주세요.</div> : <section className="um-panel um-editor" aria-label="선택 사용자 직책·권한">
                     <div className="um-editor-heading"><div><div className="um-eyebrow">선택한 로그인 계정</div><h2>{selectedUser.displayName || '이름 없음'}</h2><p className="um-email">{selectedUser.email || '이메일 없음'}</p></div><span className={`um-badge ${selectedUser.status === 'active' ? 'um-good' : 'um-warning'}`}>{userStatusLabel(selectedUser.status)}</span></div>
+                    {selectedPendingLinks.length > 0 && !connectionError && <div className="um-approval-notice">
+                        <div><strong>확인할 승인 요청 {selectedPendingLinks.length}건</strong><p>{selectedPendingLinks.map((link) => link.entityName).join(' · ')} 연결을 요청했습니다.</p></div>
+                        <button type="button" className="um-button um-primary" disabled={savingUserAccess} onClick={() => void openSection('approvals', selectedUserId, true)}>요청 확인·승인 →</button>
+                    </div>}
+                    {selectedUser.status === 'pending' && selectedPendingLinks.length === 0 && !connectionError && <div className="um-approval-notice">
+                        <div><strong>연결할 대상을 지정해 승인하세요</strong><p>연결할 인원·회사를 선택하고 확인하면 계정이 승인됩니다.</p></div>
+                        <button type="button" className="um-button um-primary" disabled={savingUserAccess} onClick={() => void openSection('account-links')}>연결 대상 지정·승인 →</button>
+                    </div>}
                     <div className="um-editor-section um-linked-overview">
                         <div className="um-section-title"><h3><FontAwesomeIcon icon={faLink} /> 연결된 인원·회사</h3><button type="button" className="um-text-button" onClick={() => void openSection('account-links')}>연결 관리 →</button></div>
                         {connectionError ? <p className="um-notice" role="status">연결 정보를 불러오지 못했습니다. 새로고침해 주세요.</p> : selectedConnections.length ? <div className="um-connection-list">{selectedConnections.map((link) => <div key={link.key} className="um-connection"><span className="um-badge">{link.label}</span><div><strong>{link.name}</strong>{link.detail && <small>{link.detail}</small>}</div><span className={`um-badge ${link.status === 'pending' || link.missing ? 'um-warning' : 'um-good'}`}>{link.status === 'pending' ? '승인 대기' : link.missing ? '대상 확인 필요' : '연결됨'}</span></div>)}</div> : <p className="um-muted">아직 연결된 대상이 없습니다. 연결 관리에서 인원이나 회사를 선택하세요.</p>}
@@ -628,8 +658,8 @@ const UserManagementPage: React.FC = () => {
                             {advancedRole && <label className="um-field-label">이 계정의 권한만 다르게 설정<select aria-label="개별 시스템 권한" value={draftRole} onChange={(e) => setDraftRole(e.target.value as CanonicalSystemRole)}>{SYSTEM_ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
                             {(selectedLinkedWorkers.length > 0 || selectedLinkedOfficeStaff.length > 0) && <label className="um-checkbox"><input type="checkbox" checked={syncLinkedWorkerRole} onChange={(e) => setSyncLinkedWorkerRole(e.target.checked)} disabled={!draftPosition} /><span>연결된 인원 {selectedLinkedWorkers.length + selectedLinkedOfficeStaff.length}명의 직책도 함께 맞추기</span></label>}
                             {selectedUserIntegrity?.mismatchWithLinkedWorker && <p className="um-notice">현재 연결 인원의 직책({selectedUserIntegrity.linkedRole})이 계정과 다릅니다.</p>}
-                            {selectedUser.status !== 'active' && <p className="um-notice">직책을 저장하면 사용 가능한 상태로 승인됩니다.</p>}
-                            {!draftPosition && <p className="um-notice">미지정 상태로 저장하면 직책과 접근 승인이 해제됩니다.</p>}
+                            {selectedUser.status !== 'active' && <p className="um-notice">직책 저장만으로 사용 승인되지 않습니다. 승인 요청을 처리하거나 연결할 대상을 지정해 주세요.</p>}
+                            {!draftPosition && selectedUser.status !== 'pending' && <p className="um-notice">미지정 상태로 저장하면 직책과 접근 승인이 해제됩니다.</p>}
                         </div>
                         <details className="um-editor-section um-details" key={`additional-${selectedUserId}`}>
                             <summary><FontAwesomeIcon icon={faTag} /> 추가 직책 <span className="um-badge">{draftAdditionalPositions.length}개</span><span className="um-muted">겸직·추가 메뉴가 필요할 때</span></summary>
@@ -642,7 +672,7 @@ const UserManagementPage: React.FC = () => {
                             <div className="um-menu-preview">{previewMenuRows.map((row, index) => <div key={`${row.id}:${index}`}><span>{row.menuPath}</span><span className={`um-badge ${canAccessMenuRoles(previewAccessRoles, row.roles) ? 'um-good' : ''}`}>{canAccessMenuRoles(previewAccessRoles, row.roles) ? '표시' : '숨김'}</span></div>)}</div>
                         </details>
                     </fieldset>
-                    <div className="um-savebar"><span role="status" className="um-muted">{hasChanges ? '저장하지 않은 변경이 있습니다' : needsApproval ? '저장하면 이 직책으로 사용을 승인합니다' : '저장된 설정입니다'}</span><div><button type="button" className="um-button" onClick={resetDraft} disabled={!hasChanges || savingUserAccess}>되돌리기</button><button type="button" className="um-button um-primary" onClick={() => void saveAccess()} disabled={!canSaveAccess || savingUserAccess}><FontAwesomeIcon icon={savingUserAccess ? faSpinner : faCheck} spin={savingUserAccess} /> 직책·권한 저장</button></div></div>
+                    <div className="um-savebar"><span role="status" className="um-muted">{hasChanges ? '저장하지 않은 변경이 있습니다' : selectedUser.status === 'pending' ? '계정 승인은 연결 요청 또는 연결 관리에서 처리해 주세요' : '저장된 설정입니다'}</span><div><button type="button" className="um-button" onClick={resetDraft} disabled={!hasChanges || savingUserAccess}>되돌리기</button><button type="button" className="um-button um-primary" onClick={() => void saveAccess()} disabled={!canSaveAccess || savingUserAccess}><FontAwesomeIcon icon={savingUserAccess ? faSpinner : faCheck} spin={savingUserAccess} /> 직책·권한 저장</button></div></div>
                 </section>}
             </div>}
             {activeSection === 'integrity' && <section className="um-panel um-integrity">
