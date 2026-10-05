@@ -1,10 +1,11 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import TeamExpenseRequestPage from './TeamExpenseRequestPage';
 import { teamExpenseRequestService } from '../../services/teamExpenseRequestService';
 
-jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'leader' } }) }));
+let mockCurrentUser: { uid: string } | null = { uid: 'leader' };
+jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: mockCurrentUser }) }));
 jest.mock('../../services/teamExpenseRequestService', () => ({
   teamExpenseRequestService: { list: jest.fn(), upload: jest.fn(), submit: jest.fn(), review: jest.fn(), analyze: jest.fn() },
   validateRequestReceiptFiles: (files: File[]) => { if (!files.length) throw new Error('영수증을 첨부해 주세요.'); },
@@ -16,6 +17,7 @@ const data = { canReview: false, payerTeams: [payer], teams: [payer, billing], c
 const request: any = { id: 'request-a', status: 'pending', teamId: 'team-a', teamName: 'A팀', submitterName: '팀장', description: '점심 식대', amount: 25000, date: '2026-09-20', categoryLabel: '식대', paymentMethod: '현찰', attachments: [{ id: 'receipt', url: 'https://example.test/receipt.png' }] };
 beforeEach(() => {
   jest.clearAllMocks();
+  mockCurrentUser = { uid: 'leader' };
   Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { randomUUID: () => `test-${Math.random()}` } });
   URL.createObjectURL = jest.fn(() => 'blob:test-receipt');
   URL.revokeObjectURL = jest.fn();
@@ -160,4 +162,75 @@ test('추가 조회에서 승인 권한이 줄면 이전 타인 경비를 제거
   await screen.findByText('타인 경비');
   fireEvent.click(screen.getByRole('button', { name: '다음 100건 더 보기' }));
   await waitFor(() => expect(screen.queryByText('타인 경비')).not.toBeInTheDocument());
+});
+
+test('새로고침은 새 요청을 보내고 승인 권한이 줄면 열려 있던 승인 창을 닫는다', async () => {
+  service.list.mockResolvedValueOnce({ ...data, canReview: true, requests: [request] }).mockResolvedValueOnce(data);
+  render(<TeamExpenseRequestPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '승인 및 반영' }));
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(service.list).toHaveBeenLastCalledWith(expect.any(String), undefined, { forceReload: true });
+  expect(screen.queryByText('점심 식대')).not.toBeInTheDocument();
+});
+
+test('월을 빠르게 변경하면 늦게 도착한 이전 월 내역이 현재 월을 덮어쓰지 않는다', async () => {
+  let finishPrevious!: (value: any) => void;
+  service.list.mockResolvedValueOnce(data)
+    .mockReturnValueOnce(new Promise(resolve => { finishPrevious = resolve; }))
+    .mockResolvedValueOnce({ ...data, requests: [{ ...request, id: 'new-month', description: '현재 월 경비' }] });
+  render(<TeamExpenseRequestPage />);
+  const month = await screen.findByLabelText('조회 월');
+  fireEvent.change(month, { target: { value: '2026-07' } });
+  fireEvent.change(month, { target: { value: '2026-08' } });
+  await screen.findByText('현재 월 경비');
+  await act(async () => { finishPrevious({ ...data, requests: [{ ...request, description: '이전 월 경비' }] }); });
+  expect(screen.queryByText('이전 월 경비')).not.toBeInTheDocument();
+  expect(screen.getByText('현재 월 경비')).toBeInTheDocument();
+});
+
+test('계정 전환 후 늦게 도착한 이전 계정의 신청을 표시하지 않는다', async () => {
+  let finishPrevious!: (value: any) => void;
+  service.list.mockReturnValueOnce(new Promise(resolve => { finishPrevious = resolve; }))
+    .mockResolvedValueOnce({ ...data, requests: [{ ...request, id: 'new-user', description: '현재 계정 경비' }] });
+  const { rerender } = render(<TeamExpenseRequestPage />);
+  mockCurrentUser = { uid: 'other-leader' };
+  rerender(<TeamExpenseRequestPage />);
+  await screen.findByText('현재 계정 경비');
+  await act(async () => { finishPrevious({ ...data, requests: [{ ...request, description: '이전 계정 경비' }] }); });
+  expect(screen.queryByText('이전 계정 경비')).not.toBeInTheDocument();
+  expect(screen.getByText('현재 계정 경비')).toBeInTheDocument();
+});
+
+test('첫 조회 중에는 신청 요약을 0건으로 확정하지 않고 준비 상태를 표시한다', async () => {
+  let finishLoading!: (value: typeof data) => void;
+  service.list.mockReturnValueOnce(new Promise(resolve => { finishLoading = resolve; }));
+  render(<TeamExpenseRequestPage />);
+  expect(screen.getByRole('status')).toHaveTextContent('경비 신청을 불러오는 중입니다.');
+  expect(screen.getByLabelText('경비 신청 요약')).toHaveAttribute('aria-busy', 'true');
+  expect(within(screen.getByLabelText('경비 신청 요약')).getAllByRole('definition').map(item => item.textContent)).toEqual(['—건', '—건', '—건', '—건']);
+  expect(screen.queryByLabelText('청구팀')).not.toBeInTheDocument();
+  expect(service.analyze).not.toHaveBeenCalled();
+  await act(async () => { finishLoading(data); });
+  expect(screen.queryByText('경비 신청을 불러오는 중입니다.')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('청구팀')).toBeInTheDocument();
+});
+
+test('요약은 불러온 신청의 상태와 대기 금액을 집계하고 목록 필터와 구분한다', async () => {
+  service.list.mockResolvedValueOnce({ ...data, canReview: true, requests: [
+    request,
+    { ...request, id: 'approved-request', status: 'approved', amount: 90000, description: '승인된 경비' },
+    { ...request, id: 'rejected-request', status: 'rejected', amount: 80000, description: '반려된 경비' },
+  ] });
+  render(<TeamExpenseRequestPage />);
+  await screen.findByText('승인된 경비');
+  const summary = screen.getByLabelText('경비 신청 요약');
+  expect(within(summary).getAllByRole('definition').map(item => item.textContent)).toEqual(['3건', '1건', '1건', '1건']);
+  expect(summary).toHaveTextContent('25,000원');
+  fireEvent.change(screen.getByLabelText('상태'), { target: { value: 'rejected' } });
+  expect(screen.queryByText('승인된 경비')).not.toBeInTheDocument();
+  expect(screen.getByText('반려된 경비')).toBeInTheDocument();
+  expect(within(summary).getAllByRole('definition')[0]).toHaveTextContent('3건');
+  expect(within(screen.getByRole('main')).getByRole('region', { name: '미제출 첨부 정리' })).toBeInTheDocument();
 });

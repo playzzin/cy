@@ -18,8 +18,8 @@ const safeId = (value: unknown) => { const result = text(value); if (!/^[a-zA-Z0
 const documentKind = (value: unknown): WorkerDocumentKind => { if (!['identity', 'bank'].includes(String(value))) fail('invalid-argument', '서류 종류를 확인해 주세요.'); return value as WorkerDocumentKind; };
 const isCompanyName = (value: unknown) => ['청연이엔지', '청연eng'].includes(text(value).normalize('NFKC').toLowerCase().replace(/주식회사|\(주\)|[\s㈜]/g, ''));
 
-export async function registrationCompany() {
-    const snapshot = await admin.firestore().collection('companies').select('name', 'status', 'isActive').limit(1001).get();
+export async function registrationCompany(db: FirebaseFirestore.Firestore = admin.firestore()) {
+    const snapshot = await db.collection('companies').select('name', 'status', 'isActive').limit(1001).get();
     if (snapshot.size > 1000) fail('resource-exhausted', '회사 설정을 확인해 주세요.');
     const matches = snapshot.docs.filter(doc => isCompanyName(doc.data().name) && doc.data().isActive !== false && !['inactive', 'archived'].includes(doc.data().status));
     if (matches.length !== 1) fail('failed-precondition', '통합DB에서 청연이엔지 소속회사를 하나로 확인할 수 없습니다. 사무실에서 회사 등록을 확인해 주세요.');
@@ -41,20 +41,22 @@ export function workerPayroll(input: any) {
     return { payType, salaryModel: payType, unitPrice };
 }
 
+export async function readTeamWorkerRequestList(db: FirebaseFirestore.Firestore, actor: Awaited<ReturnType<typeof actorFor>>, input: any) {
+    const yearMonth = text(input.yearMonth);
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) fail('invalid-argument', '조회 월을 확인해 주세요.');
+    const scope = actor.canReview ? db.collection(COLLECTION).where('yearMonth', '==', yearMonth) : db.collection(COLLECTION).where('ownerUid', '==', actor.uid).where('yearMonth', '==', yearMonth);
+    const [snapshot, company] = await Promise.all([readRequestPage(scope, input), registrationCompany(db)]);
+    const requests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any)).filter(row => ['pending', 'approved', 'rejected'].includes(row.status) && row.yearMonth === yearMonth).sort((a, b) => text(b.submittedAt || b.createdAt).localeCompare(text(a.submittedAt || a.createdAt)));
+    return { canReview: actor.canReview, teams: actor.teams, company, requests, nextCursor: snapshot.nextCursor };
+}
+
 export async function handleTeamWorkerRequest(input: any, context: functions.https.CallableContext) {
     const auth = requireCallableAuth(context);
     const actor = await actorFor(auth.uid);
     const db = admin.firestore();
     const action = text(input?.action);
     if (['drafts', 'discardDraft'].includes(action)) return maintainRequestDrafts(input, actor.canReview, COLLECTION, DOCUMENTS);
-    if (action === 'list') {
-        const yearMonth = text(input.yearMonth);
-        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) fail('invalid-argument', '조회 월을 확인해 주세요.');
-        const scope = actor.canReview ? db.collection(COLLECTION).where('yearMonth', '==', yearMonth) : db.collection(COLLECTION).where('ownerUid', '==', actor.uid).where('yearMonth', '==', yearMonth);
-        const snapshot = await readRequestPage(scope, input);
-        const requests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any)).filter(row => ['pending', 'approved', 'rejected'].includes(row.status) && row.yearMonth === yearMonth).sort((a, b) => text(b.submittedAt || b.createdAt).localeCompare(text(a.submittedAt || a.createdAt)));
-        return { canReview: actor.canReview, teams: actor.teams, company: await registrationCompany(), requests, nextCursor: snapshot.nextCursor };
-    }
+    if (action === 'list') return readTeamWorkerRequestList(db, actor, input);
     if (action === 'document') {
         const ref = db.collection(COLLECTION).doc(safeId(input.id));
         const row = (await ref.get()).data();

@@ -30,9 +30,14 @@ const month = (value: unknown) => {
 };
 const reviewerRoles = new Set(['admin', 'administrator', 'superadmin', 'owner', 'dev', 'developer', 'systemadmin', '관리자', '사장', '대표', 'ceo', '실장', '개발', '개발자', '시스템관리자', 'office', 'officestaff', '사무실', '사무실직원', '사무직원', '사무', 'finance', 'financemanager', 'accounting', 'accountingmanager', '회계', '재무', '경리', '회계담당', '재무담당']);
 
+const roleFields = ['role', 'position', 'systemRole', 'accountType', 'roles', 'additionalPositions'];
+const actorFields = ['status', ...roleFields, 'linkedWorkerIds', 'name', 'displayName', 'admin.positionConfig'];
+const workerScopeFields = ['isActive', 'status', 'role', 'teamId'];
+const teamScopeFields = ['isActive', 'name', 'color', 'icon', 'iconKey'];
+
 export function resolvedRoleNames(profile: any, menu: any): string[] {
     const positions: Array<{ id: string; name: string }> = menu?.admin?.positionConfig || [];
-    return ['role', 'position', 'systemRole', 'accountType', 'roles', 'additionalPositions']
+    return roleFields
         .flatMap(field => Array.isArray(profile?.[field]) ? profile[field] : [profile?.[field]])
         .flatMap(role => [text(role), positions.find(position => role === position.id || role === `pos_${position.id}`)?.name || '']);
 }
@@ -44,45 +49,68 @@ export async function requireCurrentReviewer(transaction: FirebaseFirestore.Tran
     }
 }
 
-export async function actorFor(uid: string) {
-    const db = admin.firestore();
-    const profile = (await db.doc(`users/${uid}`).get()).data();
+export async function actorFor(uid: string, db: FirebaseFirestore.Firestore = admin.firestore()) {
+    // Read current authorization and display fields without transferring full menus or worker records.
+    const [profileSnapshot, menuSnapshot] = await db.getAll(db.doc(`users/${uid}`), db.doc('settings/menus_v12'), { fieldMask: actorFields });
+    const profile = profileSnapshot.data();
     if (!profile || profile.status !== 'active') fail('permission-denied', '활성 계정이 필요합니다.');
-    const menu = (await db.doc('settings/menus_v12').get()).data();
+    const menu = menuSnapshot.data();
     const positions: Array<{ id: string; name: string }> = menu?.admin?.positionConfig || [];
-    const roles = ['role', 'position', 'systemRole', 'accountType', 'roles', 'additionalPositions']
+    const roles = roleFields
         .flatMap(field => Array.isArray(profile![field]) ? profile![field] : [profile![field]]).map(text);
     const names = roles.flatMap(role => [role, positions.find(position => role === position.id || role === `pos_${position.id}`)?.name]);
     const canReview = names.some(role => reviewerRoles.has(key(role)));
     const links = Array.isArray(profile!.linkedWorkerIds) ? [...new Set<string>(profile!.linkedWorkerIds.map(text).filter(Boolean))] : [];
     if (links.length > 30) fail('failed-precondition', '작업자 연결 정보를 확인해 주세요.');
-    const workers = links.length ? (await db.getAll(...links.map(id => db.collection('workers').doc(id)))).filter(doc => doc.exists).map(doc => doc.data()!).filter(worker => worker.isActive !== false && !['퇴사', 'inactive', 'retired', 'archived'].includes(text(worker.status))) : [];
+    const workers = links.length ? (await db.getAll(...links.map(id => db.collection('workers').doc(id)), { fieldMask: workerScopeFields })).filter(doc => doc.exists).map(doc => doc.data()!).filter(worker => worker.isActive !== false && !['퇴사', 'inactive', 'retired', 'archived'].includes(text(worker.status))) : [];
     const leader = names.some(isTeamLeader) || workers.some(worker => isTeamLeader(worker.role));
     if (!canReview && !leader) fail('permission-denied', '팀장 또는 사무실 직원만 이용할 수 있습니다.');
     const teamIds = [...new Set(workers.map(worker => text(worker.teamId)).filter(Boolean))];
     // Keep document IDs separate from legacy data-field queries: their mixed
     // OR query requires a production-only index that the emulator does not.
-    const teamDocs = teamIds.length ? [
-            ...await db.getAll(...teamIds.map(id => db.collection('teams').doc(id))),
-            ...(await db.collection('teams').where('legacyId', 'in', teamIds).limit(100).get()).docs,
-        ] : [];
+    const teamDocs = teamIds.length ? await Promise.all([
+        db.getAll(...teamIds.map(id => db.collection('teams').doc(id)), { fieldMask: teamScopeFields }),
+        db.collection('teams').where('legacyId', 'in', teamIds).select(...teamScopeFields).limit(100).get().then(snapshot => snapshot.docs),
+    ]).then(results => results.flat()) : [];
     const teams = [...new Map(teamDocs.filter(doc => doc.exists && doc.data()?.isActive !== false).map(doc => [doc.id, { ...doc.data(), id: doc.id }])).values()];
     return { uid, name: text(profile!.name || profile!.displayName) || '사용자', canReview, teams: teams.map((team: any) => ({ id: team.id, name: text(team.name), color: teamColor(team.color), icon: teamIcon(team) })) };
 }
 
-async function categoriesFor() {
+async function categoriesFor(db: FirebaseFirestore.Firestore = admin.firestore()) {
     const defaults = [
         { id: 'meal', label: '식대' }, { id: 'parking', label: '주차비' }, { id: 'toll', label: '통행료' },
         { id: 'fieldGoods', label: '현장물품' }, { id: 'etc', label: '기타' },
     ];
     const rows = new Map(defaults.map(row => [row.id, row]));
-    const saved = await admin.firestore().collection('team_expense_categories').get();
+    const saved = await db.collection('team_expense_categories').select('isActive', 'scope', 'label').get();
     saved.docs.forEach(doc => {
         const data = doc.data();
         if (data.isActive === false || !['teamCharge', 'both'].includes(data.scope)) rows.delete(doc.id);
         else rows.set(doc.id, { id: doc.id, label: text(data.label) || doc.id });
     });
     return [...rows.values()];
+}
+
+export async function readTeamExpenseRequestList(db: FirebaseFirestore.Firestore, actor: Awaited<ReturnType<typeof actorFor>>, input: any) {
+    const yearMonth = month(input.yearMonth);
+    const scope = actor.canReview ? db.collection(COLLECTION).where('yearMonth', '==', yearMonth)
+        : db.collection(COLLECTION).where('ownerUid', '==', actor.uid).where('yearMonth', '==', yearMonth);
+    // These reads only depend on the freshly checked actor, not on each other.
+    const [snapshot, directory, categories] = await Promise.all([
+        readRequestPage(scope, input),
+        actor.canReview || input.includeBillingTeams === true
+            ? db.collection('teams').select('name', 'color', 'icon', 'iconKey').limit(1001).get()
+            : Promise.resolve(null),
+        categoriesFor(db),
+    ]);
+    if (directory && directory.size > 1000) fail('resource-exhausted', '팀 목록이 많습니다. 사무실에 문의해 주세요.');
+    const requests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any))
+        .filter(row => row.yearMonth === yearMonth && ['pending', 'approved', 'rejected'].includes(row.status))
+        .sort((a, b) => text(b.submittedAt || b.createdAt).localeCompare(text(a.submittedAt || a.createdAt)));
+    // Old pages still use `teams` as the payer selector. The billing directory
+    // continues to project only public team fields.
+    const teams = directory ? directory.docs.map(teamOption).sort((a, b) => a.name.localeCompare(b.name, 'ko')) : actor.teams;
+    return { canReview: actor.canReview, payerTeams: actor.teams, teams, categories, requests, nextCursor: snapshot.nextCursor };
 }
 
 export const validateExpenseReceipt = (contentType: string, encoded: string): Buffer => {
@@ -102,24 +130,7 @@ export async function handleTeamExpenseRequest(input: any, context: functions.ht
     const db = admin.firestore();
     const action = text(input?.action);
     if (['drafts', 'discardDraft'].includes(action)) return maintainRequestDrafts(input, actor.canReview, COLLECTION, RECEIPTS);
-    if (action === 'list') {
-        const yearMonth = month(input.yearMonth);
-        const scope = actor.canReview ? db.collection(COLLECTION).where('yearMonth', '==', yearMonth)
-            : db.collection(COLLECTION).where('ownerUid', '==', actor.uid).where('yearMonth', '==', yearMonth);
-        const snapshot = await readRequestPage(scope, input);
-        const requests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any))
-            .filter(row => row.yearMonth === yearMonth && ['pending', 'approved', 'rejected'].includes(row.status))
-            .sort((a, b) => text(b.submittedAt || b.createdAt).localeCompare(text(a.submittedAt || a.createdAt)));
-        // Old pages still use `teams` as the payer selector. New pages explicitly
-        // request the minimal billing directory, without private team fields.
-        let teams = actor.teams;
-        if (actor.canReview || input.includeBillingTeams === true) {
-            const directory = await db.collection('teams').select('name', 'color', 'icon', 'iconKey').limit(1001).get();
-            if (directory.size > 1000) fail('resource-exhausted', '팀 목록이 많습니다. 사무실에 문의해 주세요.');
-            teams = directory.docs.map(teamOption).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-        }
-        return { canReview: actor.canReview, payerTeams: actor.teams, teams, categories: await categoriesFor(), requests, nextCursor: snapshot.nextCursor };
-    }
+    if (action === 'list') return readTeamExpenseRequestList(db, actor, input);
     if (action === 'receipt') {
         const ref = db.collection(COLLECTION).doc(safeId(input.id));
         const row = (await ref.get()).data();
