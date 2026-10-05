@@ -25,7 +25,9 @@ const reuseBuild = !process.argv.includes('--force') && canReuseBuild(buildIdent
 process.once('exit', code => {
   if (code !== 0) return;
   try {
-    if (!reuseBuild) recordBuild(buildIdentity);
+    // Reused assets also need a proof for the source state that postbuild records.
+    // recordBuild still rejects any source/environment changes during this run.
+    recordBuild(buildIdentity);
     console.log(`웹 빌드 완료 (${((performance.now() - buildStartedAt) / 1000).toFixed(1)}초).`);
   } catch (error) {
     console.error(error.message);
@@ -34,13 +36,13 @@ process.once('exit', code => {
 });
 require('./release-manifest.cjs').beginBuild();
 if (reuseBuild) {
-  console.log('소스·환경·의존성과 모든 출력 파일이 일치하여 완료된 웹 빌드를 재사용합니다.');
+  console.log('웹 소스·환경·의존성과 모든 출력 파일이 일치하여 완료된 웹 빌드를 재사용합니다. 배포 기록은 현재 코드로 갱신합니다.');
   process.exit(0);
 }
 invalidateBuild();
 
 const verifiedTypecheck = hasVerifiedTypecheck();
 if (verifiedTypecheck) console.log('동일한 소스의 전체 TypeScript 검사 결과를 재사용합니다.');
-patchReactScriptsWebpack({ verifiedTypecheck });
+patchReactScriptsWebpack({ verifiedTypecheck, timings: process.argv.includes('--timings') });
 installWebpackShutdown();
 require('react-scripts/scripts/build');

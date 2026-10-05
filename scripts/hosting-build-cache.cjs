@@ -9,11 +9,23 @@ function inputIdentity(workspaceRoot = root, environment = process.env) {
     const installedLock = path.join(workspaceRoot, 'node_modules', '.package-lock.json');
     const buildEnvironment = Object.keys(environment).filter(key => BUILD_ENV.test(key)).sort().map(key => [key, environment[key]]);
     return {
-        schemaVersion: 1,
+        schemaVersion: 2,
         source: sourceState(workspaceRoot),
         runtime: [process.version, process.platform, process.arch],
         environment: hash(JSON.stringify(buildEnvironment)),
         installedDependencies: fs.existsSync(installedLock) ? hash(fs.readFileSync(installedLock)) : null,
+    };
+}
+
+function compilationIdentity(identity) {
+    // Keep the complete source state in the proof for release verification, but
+    // backend-only edits and new commits do not change the compiled web assets.
+    return {
+        schemaVersion: identity.schemaVersion,
+        hosting: identity.source.fingerprints.hosting,
+        runtime: identity.runtime,
+        environment: identity.environment,
+        installedDependencies: identity.installedDependencies,
     };
 }
 
@@ -57,11 +69,14 @@ function canReuseBuild(identity, workspaceRoot = root) {
         if (!identity.installedDependencies) return false;
         const proof = JSON.parse(fs.readFileSync(proofPath(workspaceRoot), 'utf8'));
         const release = JSON.parse(fs.readFileSync(path.join(workspaceRoot, 'build/release.json'), 'utf8'));
-        return JSON.stringify(proof.identity) === JSON.stringify(identity)
+        return identity.schemaVersion === 2 && proof.identity.schemaVersion === 2
+            && JSON.stringify(compilationIdentity(proof.identity)) === JSON.stringify(compilationIdentity(identity))
             && release.schemaVersion === 1
-            && release.commit === identity.source.commit
-            && release.dirty === identity.source.dirty
-            && Object.entries(identity.source.fingerprints).every(([key, value]) => release.fingerprints?.[key] === value)
+            // The existing manifest must still match the build that produced it.
+            // postbuild refreshes both provenance and backend fingerprints.
+            && release.commit === proof.identity.source.commit
+            && release.dirty === proof.identity.source.dirty
+            && Object.entries(proof.identity.source.fingerprints).every(([key, value]) => release.fingerprints?.[key] === value)
             && release.assetManifestHash === hash(fs.readFileSync(path.join(workspaceRoot, 'build/asset-manifest.json')))
             && proof.outputs === outputDigest(workspaceRoot);
     } catch { return false; }

@@ -569,7 +569,7 @@ describe('QuickCameraCapture exact-pixel current-tab capture', () => {
     it('keeps history and the last region across camera panel close and reopen', async () => {
         const props = { togglePanel: jest.fn(), activeTool: 'camera' as const };
         const view = render(<LayoutBottomPanel {...props} isOpen />);
-        fireEvent.click(screen.getByRole('button', { name: '실제 영역 선택 시작' }));
+        fireEvent.click(await screen.findByRole('button', { name: '실제 영역 선택 시작' }));
         await chooseRectangle();
         fireEvent.click(screen.getByRole('button', { name: '캡처 후 클립보드 복사' }));
         await waitFor(() => expect(screen.getByRole('button', { name: '마지막 영역 다시 캡처' })).toBeEnabled());

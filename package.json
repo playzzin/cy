@@ -115,8 +115,15 @@
     "build:staging": "node scripts/build-staging.cjs",
     "staging:config": "node scripts/staging-project.cjs config",
     "staging:deploy": "node scripts/deploy-staging.cjs",
-    "test:release-tools": "node --test scripts/release-manifest.test.cjs scripts/staging-isolation.test.cjs scripts/browser-env-security.test.cjs scripts/build-performance.test.cjs scripts/typecheck.test.cjs scripts/react-scripts-test.test.cjs scripts/hosting-build-cache.test.cjs scripts/check-release.test.cjs scripts/clean-build-artifacts.test.cjs",
-    "clean:generated": "node scripts/clean-build-artifacts.cjs"
+    "test:release-tools": "node --test scripts/release-manifest.test.cjs scripts/staging-isolation.test.cjs scripts/browser-env-security.test.cjs scripts/build-performance.test.cjs scripts/typecheck.test.cjs scripts/react-scripts-test.test.cjs scripts/hosting-build-cache.test.cjs scripts/check-release.test.cjs scripts/clean-build-artifacts.test.cjs scripts/test-verification-cache.test.cjs scripts/verify-project-health.test.cjs scripts/deploy-selected.test.cjs",
+    "clean:generated": "node scripts/clean-build-artifacts.cjs",
+    "deploy:hosting": "node scripts/deploy-verified.cjs",
+    "deploy:functions": "node scripts/deploy-selected.cjs functions",
+    "deploy:rules": "node scripts/deploy-selected.cjs firestore:rules",
+    "deploy:indexes": "node scripts/deploy-selected.cjs firestore:indexes",
+    "deploy:storage": "node scripts/deploy-selected.cjs storage",
+    "verify:hosting": "node scripts/verify-project-health.js --scope=hosting",
+    "verify:functions": "node scripts/verify-project-health.js --scope=functions"
   },
   "eslintConfig": {
     "extends": [

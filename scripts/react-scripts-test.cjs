@@ -15,6 +15,6 @@ function ciTestArgs(args, { platform = process.platform, cwd = process.cwd() } =
 
 module.exports = { ciTestArgs };
 if (require.main === module) {
-  process.argv = [process.argv[0], require.resolve('react-scripts/scripts/test'), ...ciTestArgs(process.argv.slice(2))];
-  require('react-scripts/scripts/test');
+  try { require('./test-verification-cache.cjs').runTests(process.argv.slice(2)); }
+  catch (error) { console.error(error.message); process.exitCode = 1; }
 }
