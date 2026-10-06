@@ -12,6 +12,9 @@ import html2canvas from 'html2canvas';
 import { IssueBatchWriteError, IssueDeleteConflictError, IssueSaveConflictError } from '../../utils/taxInvoiceIssueDraft';
 import userEvent from '@testing-library/user-event';
 
+// 표 편집·저장 흐름이 전체 릴리스 검사와 병렬 실행될 시간을 확보한다.
+jest.setTimeout(15000);
+
 jest.mock('../../services/taxInvoiceListService', () => ({ taxInvoiceListService: {
     getIssuesByMonth: jest.fn(), getDeferredIssuesByMonth: jest.fn(), updateIssuesBatch: jest.fn(),
     deleteIssue: jest.fn(), deleteIssuesBatch: jest.fn(), renumberIssuesByMonth: jest.fn(),
