@@ -7,11 +7,14 @@ import {
     faCalculator, faUsers, faSort, faHardHat
 } from '@fortawesome/free-solid-svg-icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { dailyReportService } from '../../services/dailyReportService';
+import { dailyReportService, type DailyReport } from '../../services/dailyReportService';
 import { Site } from '../../services/siteService';
 import { Team } from '../../services/teamService';
 import { Company } from '../../services/companyService';
 import { useMasterData } from '../../contexts/MasterDataContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { getTeamScopedRows } from '../../services/teamScopedReadService';
+import { loadWhiteboardTeamAccess, scopeWhiteboardReports, type WhiteboardTeamAccess } from './whiteboardAccess';
 import OutputManagementTabs from '../../components/common/OutputManagementTabs';
 import MonthNavigator from '../../components/common/MonthNavigator';
 import WhiteboardTeamSelector, { type WhiteboardTeamOption } from './WhiteboardTeamSelector';
@@ -248,12 +251,55 @@ const BoardDisclosure: React.FC<{
 );
 
 const WhiteboardStatusBoard: React.FC = () => {
+    const { currentUser } = useAuth();
+    return <WhiteboardAccessGate key={currentUser?.uid || 'signed-out'} signedIn={Boolean(currentUser)} />;
+};
+
+const WhiteboardAccessGate: React.FC<{ signedIn: boolean }> = ({ signedIn }) => {
+    const master = useMasterData();
+    const [access, setAccess] = useState<WhiteboardTeamAccess | null>();
+    const [error, setError] = useState('');
+    const [retry, setRetry] = useState(0);
+
+    useEffect(() => {
+        let active = true;
+        if (!signedIn) return;
+        setError('');
+        setAccess(undefined);
+        loadWhiteboardTeamAccess().then(result => {
+            if (active) setAccess(result);
+        }).catch(() => {
+            if (active) setError('소속 팀과 조회 권한을 확인하지 못했습니다. 계정의 팀 연결을 확인해 주세요.');
+        });
+        return () => { active = false; };
+    }, [retry, signedIn]);
+
+    if (!signedIn || error) return (
+        <div className="p-6" role="alert">
+            {error || '로그인이 필요합니다.'}
+            {signedIn && <button className="ml-3 text-indigo-600" onClick={() => setRetry(value => value + 1)}>다시 시도</button>}
+        </div>
+    );
+    if (access === undefined || master.loading) return <div className="p-6" role="status">조회 권한을 확인하는 중입니다.</div>;
+
+    const teams = access?.teams ?? master.teams;
+    const sites = access?.sites ?? master.sites;
+    const companyIds = new Set([...teams, ...sites].map(row => row.companyId));
+    const companies = access ? master.companies.filter(company => companyIds.has(company.id)) : master.companies;
+    return <WhiteboardStatusContent companies={companies} teams={teams} sites={sites} teamAccess={access} />;
+};
+
+const WhiteboardStatusContent: React.FC<{
+    companies: Company[];
+    teams: Team[];
+    sites: Site[];
+    teamAccess: WhiteboardTeamAccess | null;
+}> = ({ companies, teams, sites, teamAccess }) => {
     const navigate = useNavigate();
     const reducedMotion = Boolean(useReducedMotion());
     const layoutTransition = { duration: reducedMotion ? 0 : 0.42, ease: BOARD_EASE };
     const [searchParams, setSearchParams] = useSearchParams();
-    // Context에서 마스터 데이터 가져오기 (Firebase 호출 없이 바로 사용!)
-    const { companies, teams, sites, loading: masterDataLoading } = useMasterData();
+    const masterDataLoading = false;
     const today = React.useMemo(() => new Date(), []);
     const urlYear = parseYearParam(searchParams.get('year'));
     const urlMonth = parseMonthParam(searchParams.get('month'));
@@ -283,13 +329,16 @@ const WhiteboardStatusBoard: React.FC = () => {
     const [month, setMonth] = useState(urlMonth ?? persistedViewState.month);
 
     // Filter State
-    const [selectedCompanyId, setSelectedCompanyId] = useState<string>(urlSelectedCompanyId ?? persistedViewState.selectedCompanyId);
+    const [requestedCompanyId, setSelectedCompanyId] = useState<string>(urlSelectedCompanyId ?? persistedViewState.selectedCompanyId);
+    const selectedCompanyId = teamAccess ? '' : requestedCompanyId;
     const [searchQuery, setSearchQuery] = useState<string>(urlSearchQuery ?? persistedViewState.searchQuery);
     const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc'>(urlSortBy ?? (persistedViewState.sortBy === 'name-desc' ? 'name-desc' : 'name-asc'));
-    const [selectedTeamId, setSelectedTeamId] = useState<string>(urlSelectedTeamId ?? persistedViewState.selectedTeamId);
+    const [requestedTeamId, setSelectedTeamId] = useState<string>(urlSelectedTeamId ?? persistedViewState.selectedTeamId);
+    const selectedTeamId = teamAccess ? (teams.length === 1 ? teams[0].id || '' : '') : requestedTeamId;
     const [mainCompanyId, setMainCompanyId] = useState<string>(persistedViewState.mainCompanyId);
 
-    const [rawReports, setRawReports] = useState<any[]>([]);
+    const [rawReports, setRawReports] = useState<DailyReport[]>([]);
+    const reportRequestRef = useRef(0);
     const [loading, setLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState('');
 
@@ -327,10 +376,11 @@ const WhiteboardStatusBoard: React.FC = () => {
 
     const visibleCompanies = React.useMemo(
         () => companies.filter((company) => {
+            if (teamAccess) return true;
             const name = normalizeName(company.name);
             return name.includes('청연') || name.includes('다원');
         }).sort(compareCompaniesByPriorityThenName),
-        [companies, normalizeName]
+        [companies, normalizeName, teamAccess]
     );
 
     const visibleCompanyIdSet = React.useMemo(
@@ -665,10 +715,6 @@ const WhiteboardStatusBoard: React.FC = () => {
     }, [dashboardTeamSelectorOptions, errorMessage, loading, masterDataLoading, selectedTeamId, viewMode]);
 
     useEffect(() => {
-        fetchReports();
-    }, [year, month]);
-
-    useEffect(() => {
         const currentSearch = searchParams.toString();
         if (currentSearch === lastSyncedSearchRef.current) return;
         lastSyncedSearchRef.current = currentSearch;
@@ -687,8 +733,8 @@ const WhiteboardStatusBoard: React.FC = () => {
         if (nextMonth && nextMonth !== month) setMonth(nextMonth);
         if (nextViewMode && nextViewMode !== viewMode) setViewMode(nextViewMode);
         if (nextSortBy && nextSortBy !== sortBy) setSortBy(nextSortBy);
-        if (nextSelectedCompanyId !== null && nextSelectedCompanyId !== selectedCompanyId) setSelectedCompanyId(nextSelectedCompanyId);
-        if (nextSelectedTeamId !== null && nextSelectedTeamId !== selectedTeamId) setSelectedTeamId(nextSelectedTeamId);
+        if (!teamAccess && nextSelectedCompanyId !== null && nextSelectedCompanyId !== selectedCompanyId) setSelectedCompanyId(nextSelectedCompanyId);
+        if (!teamAccess && nextSelectedTeamId !== null && nextSelectedTeamId !== selectedTeamId) setSelectedTeamId(nextSelectedTeamId);
         if (nextSearchQuery !== null && nextSearchQuery !== searchQuery) setSearchQuery(nextSearchQuery);
     }, [searchParams]);
 
@@ -735,23 +781,36 @@ const WhiteboardStatusBoard: React.FC = () => {
         } satisfies WhiteboardStatusViewState);
     }, [mainCompanyId, month, searchQuery, selectedCompanyId, selectedTeamId, sortBy, viewMode, year]);
 
-    const fetchReports = async () => {
+    const fetchReports = React.useCallback(async () => {
+        const requestId = ++reportRequestRef.current;
         setLoading(true);
+        setRawReports([]);
         setErrorMessage('');
         try {
             const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
             const lastDay = new Date(year, month, 0).getDate();
             const endDate = `${year}-${String(month).padStart(2, '0')}-${lastDay}`;
-            const reports = await dailyReportService.getReportsByRange(startDate, endDate);
-            setRawReports(reports);
+            const reports = teamAccess
+                ? await getTeamScopedRows<DailyReport>('daily_reports', { startDate, endDate })
+                : await dailyReportService.getReportsByRange(startDate, endDate);
+            if (reports === null) throw new Error('팀 조회 권한을 다시 확인해 주세요.');
+            if (reportRequestRef.current === requestId) {
+                setRawReports(teamAccess ? scopeWhiteboardReports(reports, teamAccess) : reports);
+            }
         } catch (error) {
+            if (reportRequestRef.current !== requestId) return;
             console.error("Error fetching reports:", error);
             setRawReports([]);
             setErrorMessage('현황 데이터를 불러오지 못했습니다. 네트워크 또는 권한 상태를 확인한 뒤 새로고침해주세요.');
         } finally {
-            setLoading(false);
+            if (reportRequestRef.current === requestId) setLoading(false);
         }
-    };
+    }, [month, teamAccess, year]);
+
+    useEffect(() => {
+        void fetchReports();
+        return () => { reportRequestRef.current += 1; };
+    }, [fetchReports]);
 
     const openDailyReportList = React.useCallback((item: BoardItem, event: React.MouseEvent) => {
         event.stopPropagation();
@@ -1301,7 +1360,7 @@ const WhiteboardStatusBoard: React.FC = () => {
 
                         <div className="flex flex-wrap items-center gap-2">
                             {/* Company Filter - 청연/다원만 표시 */}
-                            <select
+                            {!teamAccess && <select
                                 aria-label="회사 선택"
                                 value={selectedCompanyId}
                                 onChange={(e) => { setSelectedCompanyId(e.target.value); setExpandedItems(new Set()); }}
@@ -1311,7 +1370,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                 {visibleCompanies.map(company => (
                                     <option key={company.id} value={company.id}>{company.name}</option>
                                 ))}
-                            </select>
+                            </select>}
 
                             {/* View Mode Toggle */}
                             <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 ml-2">
@@ -1398,7 +1457,11 @@ const WhiteboardStatusBoard: React.FC = () => {
                     </div>
                 </div>
 
-                <WhiteboardTeamSelector
+                {teamAccess ? (
+                    <p className="text-sm font-semibold text-indigo-700" role="status">
+                        {teams.map(team => team.name).join(', ')} · 내 팀 담당 현장만 조회할 수 있습니다.
+                    </p>
+                ) : <WhiteboardTeamSelector
                     compact
                     internalTeams={dashboardTeamSelectorOptions.internal}
                     supportTeams={dashboardTeamSelectorOptions.support}
@@ -1410,7 +1473,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                         setExpandedDetails(new Set());
                         setExpandedWorkers(new Set());
                     }}
-                />
+                />}
 
                 {errorMessage && (
                     <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
@@ -1463,7 +1526,9 @@ const WhiteboardStatusBoard: React.FC = () => {
                                     <FontAwesomeIcon icon={faBuilding} className="text-slate-400" />
                                     {companies.find(c => c.id === selectedCompanyId)?.name || '청연 · 다원'}
                         </span>
-                        {selectedTeamId ? (
+                        {teamAccess ? (
+                            <span>내 팀 담당 현장의 팀원 공수와 상세 내역입니다.</span>
+                        ) : selectedTeamId ? (
                             <>
                                 <span className="font-bold text-slate-800 inline-flex items-center gap-1 mr-1">
                                     <FontAwesomeIcon icon={faUserGroup} className="text-slate-400" />
