@@ -75,10 +75,32 @@ export interface CardStatementImportFile {
   cardCount: number;
   transactionCount: number;
   analysisSource?: CardStatementImportAnalysisSource;
+  detailAnalysisStatus?: CardStatementFileAnalysisStatus;
   warnings: string[];
   errorMessage?: string;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
+}
+
+export type CardStatementFileAnalysisStatus = 'not_analyzed' | 'analyzing' | 'completed' | 'failed';
+
+export interface StoredCardStatementInput {
+  fileId?: string;
+  storagePath?: string;
+  yearMonth?: string;
+  originalFileName?: string;
+}
+
+export interface CardStatementFileDetailPayload {
+  ok: boolean;
+  analysisAvailable?: boolean;
+  readNotice?: string;
+  file: CardStatementImportFile;
+  job: CardStatementImportJob | null;
+  results: CardStatementImportResult[];
+  analysisStatus: CardStatementFileAnalysisStatus;
+  analysisError?: string;
+  analyzedAt?: Timestamp;
 }
 
 export interface CardStatementImportTransaction {

@@ -1731,6 +1731,13 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                             className="h-8 whitespace-nowrap rounded-md border border-slate-200 px-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40">
                             업로드 내역
                         </button>
+                        <a href={`/support/cards/statements?month=${encodeURIComponent(yearMonth)}`}
+                            aria-disabled={isDirty || saving}
+                            onClick={event => { if (isDirty || saving) event.preventDefault(); }}
+                            title={isDirty ? '변경사항을 먼저 전체 저장해 주세요.' : '저장된 명세서의 거래별 내역 조회 및 Gemini 분석'}
+                            className={`inline-flex h-8 items-center whitespace-nowrap rounded-md border border-indigo-200 px-2.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 ${isDirty || saving ? 'cursor-not-allowed opacity-40' : ''}`}>
+                            명세서 상세내역
+                        </a>
                     </div>
                     <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border border-indigo-100 hover:bg-gray-50 h-[46px] shadow-sm whitespace-nowrap">
                         <input
