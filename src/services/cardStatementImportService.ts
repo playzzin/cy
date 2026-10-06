@@ -10,8 +10,11 @@ import {
 } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes } from 'firebase/storage';
 import { db, functions, storage } from '../config/firebase';
+import { getStoredStatementRecordDetail, isStatementReadEndpointUnavailable, listStoredStatementRecords } from './cardStatementStoredReadService';
 import type {
   CardStatementImportFile,
+  CardStatementFileDetailPayload,
+  StoredCardStatementInput,
   CardStatementImportJob,
   CardStatementImportJobPayload,
   CardStatementImportResult,
@@ -82,6 +85,46 @@ export const cardStatementImportService = {
     const snapshot = await getDocs(query(collection(db, COLLECTIONS.files), where('yearMonth', '==', yearMonth)));
     return snapshot.docs.map((entry) => ({ ...entry.data(), id: entry.id } as CardStatementImportFile))
       .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0) || a.fileIndex - b.fileIndex);
+  },
+
+  async listStoredFiles(yearMonth: string): Promise<CardStatementImportFile[]> {
+    assertYearMonth(yearMonth);
+    const callable = httpsCallable<{ yearMonth: string }, { ok: boolean; files: CardStatementImportFile[] }>(
+      functions, 'listCardStatementFiles',
+    );
+    let files: CardStatementImportFile[];
+    try {
+      const response = await callable({ yearMonth });
+      files = response.data.files || [];
+    } catch (error) {
+      if (!isStatementReadEndpointUnavailable(error)) throw error;
+      files = await listStoredStatementRecords(yearMonth);
+    }
+    return files
+      .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0) || a.fileIndex - b.fileIndex);
+  },
+
+  async getFileDetail(input: StoredCardStatementInput): Promise<CardStatementFileDetailPayload> {
+    const callable = httpsCallable<StoredCardStatementInput, CardStatementFileDetailPayload>(
+      functions, 'getCardStatementFileDetail',
+    );
+    let payload: CardStatementFileDetailPayload;
+    try {
+      const result = await callable(input);
+      payload = result.data;
+    } catch (error) {
+      if (!isStatementReadEndpointUnavailable(error)) throw error;
+      payload = await getStoredStatementRecordDetail(input);
+    }
+    return { ...payload, results: sortResults(payload.results || []) };
+  },
+
+  async analyzeStoredFile(input: StoredCardStatementInput): Promise<CardStatementFileDetailPayload> {
+    const callable = httpsCallable<StoredCardStatementInput, CardStatementFileDetailPayload>(
+      functions, 'analyzeStoredCardStatementFile', { timeout: LONG_MUTATION_CALLABLE_TIMEOUT_MS },
+    );
+    const result = await callable(input);
+    return { ...result.data, results: sortResults(result.data.results || []) };
   },
 
   async cancelStoredFile(fileId: string): Promise<void> {

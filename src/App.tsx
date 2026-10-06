@@ -102,6 +102,7 @@ const VehicleBillingLogPage = React.lazy(() => import('./pages/support/VehicleBi
 const EngineOilCyclePage = React.lazy(() => import('./pages/support/EngineOilCyclePage'));
 const TeamEquipmentStatusPage = React.lazy(() => import('./pages/support/TeamEquipmentStatusPage'));
 const CardBillingLogPage = React.lazy(() => import('./pages/support/CardBillingLogPage'));
+const CardStatementDetailsPage = React.lazy(() => import('./pages/support/CardStatementDetailsPage'));
 const CardExpenseAuditPage = React.lazy(() => import('./pages/support/CardExpenseAuditPage'));
 const AccommodationBillingLogPage = React.lazy(() => import('./pages/support/AccommodationBillingLogPage'));
 const TeamResourceDetailPage = React.lazy(() => import('./pages/support/TeamResourceDetailPage'));
@@ -662,6 +663,7 @@ const App: React.FC = () => {
             <Route path="/support/vehicles/logs" element={<VehicleBillingLogPage />} />
             <Route path="/support/cards" element={<SupportManagerPage />} />
             <Route path="/support/cards/logs" element={<CardBillingLogPage />} />
+            <Route path="/support/cards/statements" element={<CardStatementDetailsPage />} />
             <Route path="/support/card-audit" element={<CardExpenseAuditPage />} />
             <Route path="/support/cards/audit" element={<Navigate to="/support/card-audit" replace />} />
             <Route path="/support/expense-ledger" element={<SupportManagerPage />} />
