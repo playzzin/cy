@@ -1,6 +1,7 @@
 import { waitForCaptureOperation, waitForCapturedFrame, waitForCapturePaint } from './captureFrameReadiness';
 import { CaptureQuality, getCaptureParts, getScrollCaptureScale } from './capturePolicy';
 import { createScrollStitchSlice, getScrollStitchBoundaryContentY, ScrollStitchSlice } from './scrollCaptureStitching';
+import { getScrollCaptureViewport } from './scrollCaptureGeometry';
 
 export type CaptureImagePart = { blob: Blob; width: number; height: number };
 type Rect = { left: number; top: number; width: number; height: number };
@@ -136,14 +137,33 @@ export const captureScrollRangeParts = async (options: {
     const initialClientWidth = target.clientWidth;
     const initialClientHeight = target.clientHeight;
     const maxScrollTop = Math.max(0, initialScrollHeight - initialClientHeight);
+    const getVisibleViewport = () => {
+        const viewport = getScrollCaptureViewport(target);
+        const requested = options.getVisibleRect();
+        const left = Math.max(viewport.left, requested.left);
+        const top = Math.max(viewport.top, requested.top);
+        return {
+            left, top,
+            width: Math.max(0, Math.min(viewport.left + viewport.width, requested.left + requested.width) - left),
+            height: Math.max(0, Math.min(viewport.top + viewport.height, requested.top + requested.height) - top),
+            contentTop: viewport.contentTop + top - viewport.top
+        };
+    };
+    const initialVisible = getVisibleViewport();
+    const visibleContentOffset = initialVisible.contentTop - options.getScrollTop();
     const check = () => {
         validate();
         if (signal.aborted) throw new Error('capture-aborted');
         if (!target.isConnected || target.scrollHeight !== initialScrollHeight || target.clientWidth !== initialClientWidth || target.clientHeight !== initialClientHeight) throw new Error('scroll-content-changing');
         if (window.innerWidth !== viewportWidth || window.innerHeight !== viewportHeight) throw new Error('capture-viewport-changed');
+        const visible = getVisibleViewport();
+        if (visible.height < 1 || visible.width < 1
+            || Math.abs(visible.left - initialVisible.left) > 0.5 || Math.abs(visible.top - initialVisible.top) > 0.5
+            || Math.abs(visible.width - initialVisible.width) > 0.5 || Math.abs(visible.height - initialVisible.height) > 0.5
+            || Math.abs(visible.contentTop - options.getScrollTop() - visibleContentOffset) > 0.5) throw new Error('scroll-content-changing');
     };
     const scale = getScrollCaptureScale(video.videoWidth, viewportWidth, range.width,
-        Math.min(viewportHeight, options.getVisibleRect().height, range.bottomContentY - range.topContentY), options.quality);
+        Math.min(viewportHeight, initialVisible.height, range.bottomContentY - range.topContentY), options.quality);
     const outputWidth = Math.max(1, Math.round(range.width * scale));
     const outputHeight = Math.max(1, Math.round((range.bottomContentY - range.topContentY) * scale));
     const writer = createPagedCaptureWriter(outputWidth, outputHeight, signal);
@@ -151,7 +171,8 @@ export const captureScrollRangeParts = async (options: {
     let committed = range.topContentY;
     let capturedUntil = range.topContentY;
     let previousFingerprint: number | null = null;
-    let requestedTop = Math.min(maxScrollTop, Math.max(0, range.topContentY));
+    let previousScrollTop: number | null = null;
+    let requestedTop = Math.min(maxScrollTop, Math.max(0, range.topContentY - visibleContentOffset));
     let restoreFrameUi: (() => void) | null = null;
     const drawThrough = async (end: number) => {
         if (!pending) return;
@@ -182,11 +203,12 @@ export const captureScrollRangeParts = async (options: {
             await waitForCapturedFrame(video, 3000, false, signal);
             check();
             const top = options.getScrollTop();
-            const visible = options.getVisibleRect();
-            const segmentTop = Math.max(range.topContentY, top);
-            const bottom = Math.min(range.bottomContentY, top + visible.height);
+            const visible = getVisibleViewport();
+            const segmentTop = Math.max(range.topContentY, visible.contentTop);
+            const bottom = Math.min(range.bottomContentY, visible.contentTop + visible.height);
+            if (previousScrollTop !== null && top <= previousScrollTop + 0.2) throw new Error('scroll-frame-gap');
             if (bottom <= capturedUntil + 0.2 || segmentTop > capturedUntil + 0.5) throw new Error('scroll-frame-gap');
-            const rect = { left: range.left, top: visible.top + segmentTop - top, width: range.width, height: bottom - segmentTop };
+            const rect = { left: range.left, top: visible.top + segmentTop - visible.contentTop, width: range.width, height: bottom - segmentTop };
             let canvas = crop(rect);
             let fingerprint = frameFingerprint(canvas);
             if (fingerprint !== null && fingerprint === previousFingerprint && pending?.canvas.height === canvas.height) {
@@ -194,9 +216,12 @@ export const captureScrollRangeParts = async (options: {
                 canvas.height = 0;
                 await waitForCapturedFrame(video, 3000, false, signal);
                 check();
+                if (Math.abs(options.getScrollTop() - top) > 0.2) throw new Error('scroll-frame-gap');
                 canvas = crop(rect);
                 fingerprint = frameFingerprint(canvas);
-                if (fingerprint === previousFingerprint) { canvas.width = 0; canvas.height = 0; throw new Error('scroll-frame-unchanged'); }
+                // Repeated/empty table rows can legitimately produce identical
+                // pixels. A fresh compositor frame and advancing scroll/content
+                // coordinates establish progress; a small image hash cannot.
             }
             const current = { canvas, topContentY: segmentTop, bottomContentY: bottom, sourceHeight: canvas.height };
             restoreFrameUi();
@@ -209,9 +234,10 @@ export const captureScrollRangeParts = async (options: {
             }
             pending = current;
             previousFingerprint = fingerprint;
+            previousScrollTop = top;
             capturedUntil = bottom;
             options.onProgress(Math.round(100 * (capturedUntil - range.topContentY) / (range.bottomContentY - range.topContentY)));
-            requestedTop = Math.min(maxScrollTop, Math.max(top + 1, bottom - 24));
+            requestedTop = Math.min(maxScrollTop, Math.max(top + 1, bottom - visibleContentOffset - 24));
         }
         check();
         if (capturedUntil < range.bottomContentY - 0.5) throw new Error('scroll-range-too-long');

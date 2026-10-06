@@ -5,6 +5,7 @@ import html2canvas from 'html2canvas';
 import { createCaptureDiagnostics, CaptureDiagnosticRun, CAPTURE_STAGE_LABELS } from './captureDiagnostics';
 import { createCaptureIdentity } from './captureIdentity';
 import { captureScrollRangeParts, CaptureImagePart, encodeCapturePng } from './scrollCapturePipeline';
+import { getScrollCaptureViewport, getScrollCaptureContentY } from './scrollCaptureGeometry';
 import CaptureImageEditor from './CaptureImageEditor';
 import {
     CaptureQuality, CaptureViewport, readCaptureViewport, isSameCaptureViewport,
@@ -904,29 +905,7 @@ const isDocumentScrollRoot = (el: HTMLElement | null) => {
 };
 
 const getVisibleRectForScrollableTarget = (target: HTMLElement): Rect => {
-    if (isDocumentScrollRoot(target)) {
-        const viewport = getViewportMetrics();
-        return {
-            left: 0,
-            top: 0,
-            width: viewport.width,
-            height: viewport.height
-        };
-    }
-
-    const box = target.getBoundingClientRect();
-    const viewport = getViewportMetrics();
-    const left = Math.max(0, box.left);
-    const top = Math.max(0, box.top);
-    const right = Math.min(viewport.width, box.right);
-    const bottom = Math.min(viewport.height, box.bottom);
-
-    return {
-        left,
-        top,
-        width: Math.max(0, right - left),
-        height: Math.max(0, bottom - top)
-    };
+    return getScrollCaptureViewport(target);
 };
 
 const intersectRects = (a: Rect, b: Rect): Rect | null => {
@@ -1099,22 +1078,10 @@ const forceInstantScrollBehavior = (target: HTMLElement) => {
 };
 
 export const getContentYForViewportPoint = (target: HTMLElement, y: number): number => {
-    const targetRect = getVisibleRectForScrollableTarget(target);
-    const clampedY = Math.min(
-        targetRect.top + targetRect.height,
-        Math.max(targetRect.top, y)
-    );
-    const scrollViewportTop = isDocumentScrollRoot(target)
-        ? 0
-        : target.getBoundingClientRect().top + target.clientTop;
-
-    return getScrollTop(target) + Math.min(
-        target.clientHeight,
-        Math.max(0, clampedY - scrollViewportTop)
-    );
+    return getScrollCaptureContentY(target, y);
 };
 
-export const resolveScrollRangeCapturePlan = (anchor: ScrollSelectionAnchor, endPoint: Point): ScrollCapturePlan => {
+export const resolveScrollRangeCapturePlan = (anchor: ScrollSelectionAnchor, endPoint: Point, toBottom = false): ScrollCapturePlan => {
     const anchoredTarget = anchor.target?.isConnected ? anchor.target : null;
     const target = anchoredTarget ?? findScrollableTargetFromPoint(endPoint.x, endPoint.y);
 
@@ -1122,12 +1089,13 @@ export const resolveScrollRangeCapturePlan = (anchor: ScrollSelectionAnchor, end
         return resolveScrollCapturePlan(buildRect(anchor.point, endPoint), null);
     }
 
-    const targetRect = getVisibleRectForScrollableTarget(target);
+    const targetRect = getScrollCaptureViewport(target);
     const endScrollTop = getScrollTop(target);
+    const visibleOffsetTop = targetRect.contentTop - endScrollTop;
     const startContentY = anchoredTarget === target
         ? anchor.contentY
         : getContentYForViewportPoint(target, anchor.point.y);
-    const endContentY = getContentYForViewportPoint(target, endPoint.y);
+    const endContentY = toBottom ? target.scrollHeight : getContentYForViewportPoint(target, endPoint.y);
     const topContentY = Math.min(startContentY, endContentY);
     const bottomContentY = Math.max(startContentY, endContentY);
     const left = Math.max(targetRect.left, Math.min(anchor.point.x, endPoint.x));
@@ -1138,9 +1106,10 @@ export const resolveScrollRangeCapturePlan = (anchor: ScrollSelectionAnchor, end
     const width = Math.max(0, right - left);
     const maxScrollTop = getMaxScrollTop(target);
     const anchorScrollTop = anchoredTarget === target ? anchor.scrollTop : getScrollTop(target);
-    const initialScrollTop = Math.max(0, Math.min(maxScrollTop, Math.min(anchorScrollTop, endScrollTop, topContentY)));
-    const firstVisibleBottom = Math.min(bottomContentY, initialScrollTop + targetRect.height);
-    const firstTop = targetRect.top + Math.max(0, topContentY - initialScrollTop);
+    const initialScrollTop = Math.max(0, Math.min(maxScrollTop, anchorScrollTop, endScrollTop, topContentY - visibleOffsetTop));
+    const firstContentTop = initialScrollTop + visibleOffsetTop;
+    const firstVisibleBottom = Math.min(bottomContentY, firstContentTop + targetRect.height);
+    const firstTop = targetRect.top + Math.max(0, topContentY - firstContentTop);
     const firstHeight = Math.max(1, firstVisibleBottom - topContentY);
     const captureRect = {
         left,
@@ -1153,7 +1122,7 @@ export const resolveScrollRangeCapturePlan = (anchor: ScrollSelectionAnchor, end
     const scrollStepCss = Math.max(1, Math.floor(targetRect.height));
     const canScroll = target.scrollHeight > target.clientHeight + 1 && rangeHeight >= MIN_SIZE;
     const estimatedSteps = canScroll
-        ? Math.max(1, 1 + Math.ceil(Math.max(0, bottomContentY - (initialScrollTop + targetRect.height)) / scrollStepCss))
+        ? Math.max(1, 1 + Math.ceil(Math.max(0, bottomContentY - (firstContentTop + targetRect.height)) / scrollStepCss))
         : 1;
 
     return {
@@ -1417,6 +1386,7 @@ const QuickCameraCapture: React.FC<{ active?: boolean }> = ({ active = true }) =
     const [captureHistory, setCaptureHistory] = useState<CaptureHistoryItem[]>([]);
     const [pendingClipboardCopy, setPendingClipboardCopy] = useState<PendingClipboardCopy | null>(null);
     const [scrollAnchorPoint, setScrollAnchorPoint] = useState<Point | null>(null);
+    const [scrollControlsAtTop, setScrollControlsAtTop] = useState(true);
     const [selectionReady, setSelectionReady] = useState(false);
     const [frozenFramePreviewReady, setFrozenFramePreviewReady] = useState(false);
 
@@ -1668,6 +1638,7 @@ const QuickCameraCapture: React.FC<{ active?: boolean }> = ({ active = true }) =
         setSelectionRect(null);
         setCursorPoint(null);
         setScrollAnchorPoint(null);
+        setScrollControlsAtTop(true);
         clearProcessingGuide();
         setIsSelecting(true);
     }, [captureMode, clearProcessingGuide, hideHostPanel]);
@@ -2838,6 +2809,43 @@ const QuickCameraCapture: React.FC<{ active?: boolean }> = ({ active = true }) =
         await capturePermissionFreeFullContent(target, clipboardReservation);
     }, [capturePermissionFreeFullContent]);
 
+    const finishScrollSelection = (scrollPlan: ScrollCapturePlan) => {
+        const rect = scrollPlan.captureRect;
+        const rangeHeight = getScrollCapturePlanHeight(scrollPlan);
+        if (rect.width < MIN_SIZE || rangeHeight < MIN_SIZE) {
+            setMessage('선택 구간이 너무 작습니다. 시작점은 유지했습니다. 더 넓은 구간의 끝점을 클릭하세요.');
+            setIsSuccess(false);
+            return;
+        }
+        scrollSelectionAnchorRef.current = null;
+        selectionScrollTargetRef.current = scrollPlan.target ?? selectionScrollTargetRef.current;
+        scrollCapturePlanRef.current = scrollPlan;
+        draggingRef.current = false;
+        dragStartRef.current = null;
+        setScrollAnchorPoint(null);
+        setSelectionRect(rect);
+        setIsSelecting(false);
+        // Keep the existing stream and reserve clipboard access in this gesture.
+        void copySelectionToClipboard(rect);
+    };
+
+    const captureScrollToBottom = () => {
+        const anchor = scrollSelectionAnchorRef.current;
+        const target = anchor?.target;
+        if (!anchor || !target?.isConnected) return;
+        const visible = getScrollCaptureViewport(target);
+        const visibleOffsetTop = visible.contentTop - getScrollTop(target);
+        if (visibleOffsetTop + visible.height < target.clientHeight - 1) {
+            setMessage('스크롤 영역의 하단이 화면 밖에 가려져 있습니다. 선택을 취소하고 영역 하단이 보이도록 화면을 이동한 뒤 다시 시작해 주세요.');
+            setIsSuccess(false);
+            return;
+        }
+        finishScrollSelection(resolveScrollRangeCapturePlan(anchor, {
+            x: visible.left + visible.width,
+            y: visible.top + visible.height
+        }, true));
+    };
+
     const handlePointerDown: React.PointerEventHandler<HTMLDivElement> = (e) => {
         if (!isSelecting || isProcessing) return;
         if (e.button !== 0) return;
@@ -2919,34 +2927,7 @@ const QuickCameraCapture: React.FC<{ active?: boolean }> = ({ active = true }) =
                 return;
             }
 
-            const scrollPlan = resolveScrollRangeCapturePlan(existingAnchor, start);
-            const rect = scrollPlan.captureRect;
-            const rangeHeight = scrollPlan.range
-                ? scrollPlan.range.bottomContentY - scrollPlan.range.topContentY
-                : rect.height;
-
-            scrollSelectionAnchorRef.current = null;
-            selectionScrollTargetRef.current = scrollPlan.target ?? selectionScrollTargetRef.current;
-            scrollCapturePlanRef.current = scrollPlan;
-            draggingRef.current = false;
-            dragStartRef.current = null;
-            setScrollAnchorPoint(null);
-
-            if (rect.width < MIN_SIZE || rangeHeight < MIN_SIZE) {
-                setMessage('선택 구간이 너무 작습니다. 선택 화면을 유지했으니 시작점을 다시 지정해 주세요.');
-                setIsSuccess(false);
-                setSelectionRect(null);
-                setSelectionReady(false);
-                scrollCapturePlanRef.current = null;
-                selectionScrollTargetRef.current = null;
-                return;
-            }
-
-            setSelectionRect(rect);
-            setIsSelecting(false);
-            // Reserve clipboard access in this pointer gesture using the
-            // stream that was prepared before selecting the start point.
-            void copySelectionToClipboard(rect);
+            finishScrollSelection(resolveScrollRangeCapturePlan(existingAnchor, start));
             return;
         }
 
@@ -3328,6 +3309,29 @@ const QuickCameraCapture: React.FC<{ active?: boolean }> = ({ active = true }) =
                 && !!target.closest(
                     'button, input, textarea, select, a[href], [contenteditable="true"], [role="button"]'
                 );
+            const isEditingTarget = target instanceof Element
+                && !!target.closest('input, textarea, select, [contenteditable="true"]');
+            if (captureMode === 'scroll' && !isEditingTarget) {
+                const scrollTarget = scrollSelectionAnchorRef.current?.target;
+                if (!scrollTarget?.isConnected) return;
+                const top = getScrollTop(scrollTarget);
+                const pageStep = Math.max(120, getVisibleRectForScrollableTarget(scrollTarget).height * 0.72);
+                const destinations: Record<string, number> = {
+                    ArrowUp: top - 40,
+                    ArrowDown: top + 40,
+                    PageUp: top - pageStep,
+                    PageDown: top + pageStep,
+                    Home: 0,
+                    End: getMaxScrollTop(scrollTarget)
+                };
+                if (e.key in destinations) {
+                    e.preventDefault();
+                    const restoreBehavior = forceInstantScrollBehavior(scrollTarget);
+                    scrollElementTo(scrollTarget, Math.max(0, Math.min(getMaxScrollTop(scrollTarget), destinations[e.key])));
+                    restoreBehavior();
+                }
+                return;
+            }
             const activeSelectionRect = selectionRectRef.current;
             if (
                 captureMode !== 'screen'
@@ -4124,14 +4128,24 @@ const QuickCameraCapture: React.FC<{ active?: boolean }> = ({ active = true }) =
                     <div
                         data-selection-controls="true"
                         className="absolute left-1/2 z-30 flex max-w-[calc(100vw-16px)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-xl border border-white/20 bg-slate-950/95 p-2.5 text-white shadow-2xl backdrop-blur"
-                        style={{ bottom: 'max(16px, env(safe-area-inset-bottom))' }}
+                        style={scrollControlsAtTop
+                            ? { top: 'max(16px, env(safe-area-inset-top))' }
+                            : { bottom: 'max(16px, env(safe-area-inset-bottom))' }}
                         onPointerDown={(event) => event.stopPropagation()}
                     >
-                        <div className="w-full px-1 text-center text-[11px] leading-4 text-slate-300">
-                            {scrollAnchorPoint
-                                ? '화면을 이동한 뒤 원하는 마지막 지점을 클릭하세요.'
+                        <div role="status" aria-live="polite" className={`w-full px-1 text-center text-[11px] leading-4 ${isSuccess === false ? 'text-rose-200' : 'text-slate-300'}`}>
+                            {isSuccess === false ? message : scrollAnchorPoint
+                                ? '휠·방향키·End로 이동한 뒤 끝점을 클릭하세요. 맨 아래까지는 시작점부터 보이는 오른쪽 끝까지 캡처합니다.'
                                 : '스크롤 영역 안쪽을 클릭해 시작점을 고정하세요.'}
                         </div>
+                        <button
+                            type="button"
+                            className="rounded-md border border-white/20 px-2.5 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
+                            onClick={() => setScrollControlsAtTop((atTop) => !atTop)}
+                            aria-label={scrollControlsAtTop ? '선택 도구 아래로 이동' : '선택 도구 위로 이동'}
+                        >
+                            {scrollControlsAtTop ? '도구 ↓' : '도구 ↑'}
+                        </button>
                         {scrollAnchorPoint && (
                             <>
                                 <button
@@ -4157,6 +4171,15 @@ const QuickCameraCapture: React.FC<{ active?: boolean }> = ({ active = true }) =
                                 >
                                     ↓ 아래로
                                 </button>
+                                {scrollSelectionAnchorRef.current?.target && (
+                                    <button
+                                        type="button"
+                                        className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
+                                        onClick={captureScrollToBottom}
+                                    >
+                                        시작점부터 맨 아래까지 캡처
+                                    </button>
+                                )}
                             </>
                         )}
                         <button
@@ -4174,11 +4197,11 @@ const QuickCameraCapture: React.FC<{ active?: boolean }> = ({ active = true }) =
                         </button>
                     </div>
                 )}
-                {!isScreenSelectionReady && (
+                {captureMode === 'screen' && !isScreenSelectionReady && (
                     <div
                         role="status"
                         aria-live="polite"
-                        className={`absolute left-1/2 top-6 max-w-[calc(100vw-24px)] -translate-x-1/2 rounded-md border px-3 py-1.5 text-center text-xs leading-5 text-white ${
+                        className={`pointer-events-none absolute left-1/2 top-3 max-w-[calc(100vw-24px)] -translate-x-1/2 rounded-md border px-3 py-1.5 text-center text-xs leading-5 text-white ${
                             isSuccess === false
                                 ? 'border-rose-300/70 bg-rose-950/90'
                                 : 'border-white/10 bg-black/75'
