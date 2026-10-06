@@ -8,11 +8,13 @@ import { dailyReportService } from '../../services/dailyReportService';
 import { companyService } from '../../services/companyService';
 import { manpowerService } from '../../services/manpowerService';
 import { teamService } from '../../services/teamService';
+import { teamSettlementService } from '../../services/teamSettlementService';
 
 jest.mock('../../services/dailyReportService', () => ({ dailyReportService: { getReportWorkerRowsByRange: jest.fn() } }));
 jest.mock('../../services/companyService', () => ({ companyService: { getCompanies: jest.fn() } }));
 jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: jest.fn() } }));
 jest.mock('../../services/teamService', () => ({ teamService: { getTeams: jest.fn() } }));
+jest.mock('../../services/teamSettlementService', () => ({ teamSettlementService: { getTeamDisplayOrder: jest.fn() } }));
 jest.mock('../../components/common/OutputManagementTabs', () => () => null);
 jest.mock('xlsx-js-style', () => ({ ...jest.requireActual('xlsx-js-style'), writeFile: jest.fn() }));
 
@@ -29,6 +31,7 @@ const reportRows = workers.map(worker => ({
 
 beforeEach(() => {
     jest.clearAllMocks();
+    (teamSettlementService.getTeamDisplayOrder as jest.Mock).mockResolvedValue([]);
     (teamService.getTeams as jest.Mock).mockResolvedValue([
         { id: 'team-a', name: '검증팀', companyId: 'company' },
         { id: 'team-b', name: '다른팀', companyId: 'company' },
@@ -44,7 +47,7 @@ const renderPage = async () => {
 };
 
 const searchMonthlyTeam = async () => {
-    fireEvent.change(screen.getByLabelText('팀'), { target: { value: 'team-a' } });
+    fireEvent.click(screen.getByRole('button', { name: '검증팀 선택' }));
     fireEvent.change(screen.getByLabelText('급여방식'), { target: { value: '월급제' } });
     fireEvent.change(screen.getByLabelText('조회 시작일'), { target: { value: '2026-09-01' } });
     fireEvent.change(screen.getByLabelText('조회 종료일'), { target: { value: '2026-09-30' } });
@@ -84,7 +87,7 @@ test('팀·월급제 조회 결과와 정렬·전체 합계를 그대로 내려�
 test('조회 후 조건만 바꿔도 다운로드는 현재 표와 실제 조회 기간을 사용한다', async () => {
     await renderPage();
     await searchMonthlyTeam();
-    fireEvent.change(screen.getByLabelText('팀'), { target: { value: 'team-b' } });
+    fireEvent.click(screen.getByRole('button', { name: '다른팀 선택' }));
     fireEvent.change(screen.getByLabelText('급여방식'), { target: { value: '일급제' } });
     fireEvent.change(screen.getByLabelText('조회 시작일'), { target: { value: '2026-08-01' } });
     fireEvent.click(screen.getByRole('button', { name: '조회화면 Excel' }));

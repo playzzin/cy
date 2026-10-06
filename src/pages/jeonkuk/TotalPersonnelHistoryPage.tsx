@@ -13,6 +13,7 @@ import { buildTeamIdsByAffiliation } from '../../utils/cheongyeonTeams';
 import { buildWorkedTeamIds } from '../../utils/personnelHistoryWorkedTeams';
 import OutputManagementTabs from '../../components/common/OutputManagementTabs';
 import MonthNavigator from '../../components/common/MonthNavigator';
+import CompanyTeamSelector from '../../components/common/CompanyTeamSelector';
 import { useSearchParams } from 'react-router-dom';
 import { formatNumberForDisplay } from '../../utils/zeroDisplay';
 import { buildPersonnelHistoryWorkbook, formatManDay, formatPersonnelHistoryPriceDetail, formatResidentNumberForDisplay, PersonnelHistoryRow, SalaryModelFilter } from '../../utils/personnelHistoryExcel';
@@ -441,6 +442,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     };
 
     useEffect(() => {
+        if (initialLoading) return;
         const selectableTeamIds = new Set(
             teamOptions
                 .map((team) => String(team.id ?? '').trim())
@@ -456,7 +458,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         if (selectedWorkerId && !workerOptions.some((w) => w.id === selectedWorkerId)) {
             setSelectedWorkerId('');
         }
-    }, [selectedTeamId, selectedWorkerId, teamOptions, workerOptions]);
+    }, [initialLoading, selectedTeamId, selectedWorkerId, teamOptions, workerOptions]);
 
     const validateDateRange = (nextStartDate: string, nextEndDate: string): string => {
         if (nextStartDate > nextEndDate) {
@@ -892,7 +894,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     return (
         <div className="flex-1 flex flex-col min-h-0 bg-slate-50 overflow-hidden">
             {/* Header */}
-            <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-shrink-0">
+            <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 flex-shrink-0">
                 <div className="flex flex-col">
                     <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                         <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-blue-600" />
@@ -932,9 +934,9 @@ const TotalPersonnelHistoryInner: React.FC = () => {
             </div>
 
             {/* Main Content */}
-            <div className="flex-1 flex flex-col p-4 overflow-hidden gap-3">
+            <div className="flex-1 flex flex-col p-3 overflow-hidden gap-2">
                 {/* Filter Bar */}
-                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col gap-3 flex-shrink-0">
+                <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col gap-2 flex-shrink-0">
                     <div className="flex flex-wrap items-stretch sm:items-end gap-3">
                         <div className="flex flex-col gap-1">
                             <span className="text-xs font-medium text-slate-500">조회 방식</span>
@@ -1084,23 +1086,6 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                             </select>
                         </div>
 
-                        <div className="flex flex-col gap-1">
-                            <label className="text-xs font-medium text-slate-500">팀</label>
-                            <select
-                                aria-label="팀"
-                                value={selectedTeamId}
-                                onChange={(e) => setSelectedTeamId(e.target.value)}
-                                className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm min-w-40"
-                            >
-                                <option value="">전체 팀</option>
-                                {teamOptions.map((team) => (
-                                    <option key={team.id} value={team.id}>
-                                        {team.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
                         <div className="flex flex-col gap-1 relative w-full sm:w-auto">
                             <label className="text-xs font-medium text-slate-500">작업자 검색 및 선택</label>
                             <div className="relative">
@@ -1236,6 +1221,14 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                         </button>
                     </div>
                 </div>
+
+                <CompanyTeamSelector
+                    compact
+                    internalTeams={teamOptions.map((team) => ({ id: String(team.id), name: team.name, color: team.color }))}
+                    selectedTeamId={selectedTeamId}
+                    onChange={setSelectedTeamId}
+                    ariaLabel="인원 전체내역 팀 선택"
+                />
 
                 {errorMessage && (
                     <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm flex items-center justify-between gap-3">

@@ -14,6 +14,7 @@ import { Company } from '../../services/companyService';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import OutputManagementTabs from '../../components/common/OutputManagementTabs';
 import MonthNavigator from '../../components/common/MonthNavigator';
+import WhiteboardTeamSelector, { type WhiteboardTeamOption } from './WhiteboardTeamSelector';
 import { loadSessionState, saveSessionState } from '../../utils/sessionStorage';
 import { getContrastingTextColor, getReadableAccentColor } from '../../utils/color';
 
@@ -69,12 +70,7 @@ type WhiteboardStatusViewState = {
     mainCompanyId: string;
 };
 
-type TeamSelectorOption = {
-    id: string;
-    name: string;
-    companyId?: string;
-    isSupport?: boolean;
-};
+type TeamSelectorOption = WhiteboardTeamOption;
 
 const WHITEBOARD_STATUS_VIEW_KEY = 'output-management:whiteboard-status:v1';
 
@@ -294,7 +290,7 @@ const WhiteboardStatusBoard: React.FC = () => {
     const [mainCompanyId, setMainCompanyId] = useState<string>(persistedViewState.mainCompanyId);
 
     const [rawReports, setRawReports] = useState<any[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState('');
 
     // Accordion State
@@ -552,6 +548,7 @@ const WhiteboardStatusBoard: React.FC = () => {
             .map((team) => ({
                 id: String(team.id ?? '').trim(),
                 name: team.name,
+                color: team.color,
                 companyId: String(team.companyId ?? '').trim() || undefined,
                 isSupport: false
             }))
@@ -581,6 +578,7 @@ const WhiteboardStatusBoard: React.FC = () => {
             optionMap.set(optionId, {
                 id: optionId,
                 name: optionName,
+                color: resolvedTeam?.color,
                 companyId: teamCompanyId || undefined,
                 isSupport: !isInternalVisibleTeam
             });
@@ -643,14 +641,16 @@ const WhiteboardStatusBoard: React.FC = () => {
     }, [mainCompanyId, normalizeName, visibleCompanies]);
 
     useEffect(() => {
+        if (masterDataLoading) return;
         if (!selectedCompanyId) return;
         if (visibleCompanyIdSet.has(selectedCompanyId)) return;
 
         const defaultCompany = visibleCompanies.find((company) => normalizeName(company.name).includes('청연')) ?? visibleCompanies[0];
         setSelectedCompanyId(defaultCompany?.id ?? '');
-    }, [normalizeName, selectedCompanyId, visibleCompanies, visibleCompanyIdSet]);
+    }, [masterDataLoading, normalizeName, selectedCompanyId, visibleCompanies, visibleCompanyIdSet]);
 
     useEffect(() => {
+        if (masterDataLoading || loading || (viewMode === 'team' && errorMessage)) return;
         if (!selectedTeamId) return;
 
         const selectableTeamIds = new Set(
@@ -662,7 +662,7 @@ const WhiteboardStatusBoard: React.FC = () => {
         if (!selectableTeamIds.has(selectedTeamId)) {
             setSelectedTeamId('');
         }
-    }, [dashboardTeamSelectorOptions, selectedTeamId]);
+    }, [dashboardTeamSelectorOptions, errorMessage, loading, masterDataLoading, selectedTeamId, viewMode]);
 
     useEffect(() => {
         fetchReports();
@@ -1291,17 +1291,18 @@ const WhiteboardStatusBoard: React.FC = () => {
             <OutputManagementTabs activeTab="status" />
 
             {/* Header Controls */}
-            <div className="bg-white border-b border-slate-200 p-6 flex flex-col gap-4 shadow-sm z-10">
-                <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                    <div className="flex items-center gap-6">
+            <div className="bg-white border-b border-slate-200 px-4 py-3 flex flex-col gap-2 shadow-sm z-10">
+                <div className="flex flex-wrap justify-between items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-4">
                         <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
                             <FontAwesomeIcon icon={faChartBar} className="text-indigo-600" />
                             통합 현황판
                         </h1>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                             {/* Company Filter - 청연/다원만 표시 */}
                             <select
+                                aria-label="회사 선택"
                                 value={selectedCompanyId}
                                 onChange={(e) => { setSelectedCompanyId(e.target.value); setExpandedItems(new Set()); }}
                                 className="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3 py-2 font-bold focus:outline-none focus:border-indigo-500"
@@ -1310,29 +1311,6 @@ const WhiteboardStatusBoard: React.FC = () => {
                                 {visibleCompanies.map(company => (
                                     <option key={company.id} value={company.id}>{company.name}</option>
                                 ))}
-                            </select>
-
-                            {/* Team Filter */}
-                            <select
-                                value={selectedTeamId}
-                                onChange={(e) => { setSelectedTeamId(e.target.value); setExpandedItems(new Set()); }}
-                                className="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3 py-2 font-bold focus:outline-none focus:border-indigo-500 ml-2"
-                            >
-                                <option value="">전체 팀 (All Teams)</option>
-                                {dashboardTeamSelectorOptions.internal.length > 0 && (
-                                    <optgroup label={selectedCompanyId ? '소속팀' : '청연팀'}>
-                                        {dashboardTeamSelectorOptions.internal.map(team => (
-                                            <option key={team.id} value={team.id}>{team.name}</option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                                {dashboardTeamSelectorOptions.support.length > 0 && (
-                                    <optgroup label="지원팀">
-                                        {dashboardTeamSelectorOptions.support.map(team => (
-                                            <option key={team.id} value={team.id}>{team.name}</option>
-                                        ))}
-                                    </optgroup>
-                                )}
                             </select>
 
                             {/* View Mode Toggle */}
@@ -1361,7 +1339,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-4">
                         {/* 검색 입력 필드 */}
                         <div className="relative">
                             <input
@@ -1419,6 +1397,20 @@ const WhiteboardStatusBoard: React.FC = () => {
                         </button>
                     </div>
                 </div>
+
+                <WhiteboardTeamSelector
+                    compact
+                    internalTeams={dashboardTeamSelectorOptions.internal}
+                    supportTeams={dashboardTeamSelectorOptions.support}
+                    internalLabel={selectedCompanyId ? '소속팀' : '청연팀'}
+                    selectedTeamId={selectedTeamId}
+                    onChange={(teamId) => {
+                        setSelectedTeamId(teamId);
+                        setExpandedItems(new Set());
+                        setExpandedDetails(new Set());
+                        setExpandedWorkers(new Set());
+                    }}
+                />
 
                 {errorMessage && (
                     <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">

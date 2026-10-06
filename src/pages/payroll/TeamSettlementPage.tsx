@@ -1,23 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
 import './TeamSettlementPage.css';
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  type DragEndEvent,
-  useSensor,
-  useSensors
-} from '@dnd-kit/core';
-import {
-  arrayMove,
-  horizontalListSortingStrategy,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable
-} from '@dnd-kit/sortable';
-import { CSS as DndCss } from '@dnd-kit/utilities';
+import CompanyTeamSelector, { readCompanyTeamOrder } from '../../components/common/CompanyTeamSelector';
+import { applySupportTeamOrder } from '../../utils/supportTeamOrder';
 import { CurrencyInput } from '../../components/common/CurrencyInput';
 import {
   TeamSettlementWorkspaceHeader,
@@ -88,7 +73,6 @@ const buildDefaultYearMonth = (): string => {
 };
 
 const MONTH_BUTTON_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1);
-const TEAM_SETTLEMENT_TEAM_ORDER_STORAGE_KEY = 'team-settlement:team-order:v1';
 
 const parseYearMonthValue = (value: string): { year: number; month: number } => {
   const now = new Date();
@@ -146,116 +130,6 @@ const getReadableTextColor = (hex: string): string => {
   if (!rgb) return '#ffffff';
   const luminance = (0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b) / 255;
   return luminance > 0.55 ? '#0f172a' : '#ffffff';
-};
-
-const getTeamButtonStyle = (color: string | null | undefined, selected: boolean): React.CSSProperties => {
-  const normalized = normalizeHexColor(color) ?? DEFAULT_TEAM_BUTTON_COLOR;
-  const rgb = hexToRgb(normalized);
-  if (!rgb) return {};
-
-  if (selected) {
-    return {
-      backgroundColor: normalized,
-      borderColor: normalized,
-      color: getReadableTextColor(normalized)
-    };
-  }
-
-  return {
-    backgroundColor: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.12)`,
-    borderColor: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.45)`,
-    color: 'var(--team-settlement-team-chip-text, #1f2937)'
-  };
-};
-
-const getTeamOrderId = (team: Team): string => String(team.id ?? team.legacyId ?? team.name).trim();
-
-const readTeamOrderPreference = (): string[] => {
-  if (typeof window === 'undefined') return [];
-
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(TEAM_SETTLEMENT_TEAM_ORDER_STORAGE_KEY) ?? '[]');
-    if (!Array.isArray(parsed)) return [];
-    return Array.from(new Set(parsed.map((value) => String(value).trim()).filter(Boolean)));
-  } catch {
-    return [];
-  }
-};
-
-const applyTeamOrderPreference = (rows: Team[], preferredOrder: string[] = readTeamOrderPreference()): Team[] => {
-  const order = preferredOrder;
-  if (order.length === 0) return rows;
-
-  const rankById = new Map(order.map((id, index) => [id, index]));
-  return rows
-    .map((team, sourceIndex) => ({ team, sourceIndex, rank: rankById.get(getTeamOrderId(team)) }))
-    .sort((a, b) => {
-      const aRank = a.rank ?? Number.MAX_SAFE_INTEGER;
-      const bRank = b.rank ?? Number.MAX_SAFE_INTEGER;
-      return aRank - bRank || a.sourceIndex - b.sourceIndex;
-    })
-    .map(({ team }) => team);
-};
-
-const saveTeamOrderPreference = (rows: Team[]): void => {
-  if (typeof window === 'undefined') return;
-
-  try {
-    window.localStorage.setItem(
-      TEAM_SETTLEMENT_TEAM_ORDER_STORAGE_KEY,
-      JSON.stringify(rows.map(getTeamOrderId).filter(Boolean))
-    );
-  } catch {
-    // localStorage가 차단된 환경에서는 현재 세션의 순서만 유지한다.
-  }
-};
-
-interface SortableTeamButtonProps {
-  team: Team;
-  isSelected: boolean;
-  isOrderEditing: boolean;
-  onSelect: (teamId: string) => void;
-}
-
-const SortableTeamButton: React.FC<SortableTeamButtonProps> = ({
-  team,
-  isSelected,
-  isOrderEditing,
-  onSelect
-}) => {
-  const teamId = String(team.id ?? '');
-  const sortableId = getTeamOrderId(team);
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: sortableId,
-    disabled: !isOrderEditing
-  });
-
-  return (
-    <button
-      ref={setNodeRef}
-      type="button"
-      className={`relative inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border px-4 text-sm font-black tracking-tight transition hover:brightness-95 ${isSelected
-        ? 'shadow-md ring-2 ring-slate-900/20 ring-offset-1'
-        : 'shadow-sm'
-        } ${isOrderEditing ? 'cursor-grab touch-none active:cursor-grabbing' : ''} ${isDragging ? 'z-30 opacity-70 shadow-xl' : ''}`}
-      style={{
-        ...getTeamButtonStyle(team.color, isSelected),
-        transform: DndCss.Transform.toString(transform),
-        transition
-      }}
-      {...(isOrderEditing ? attributes : {})}
-      {...(isOrderEditing ? listeners : {})}
-      aria-pressed={!isOrderEditing ? isSelected : undefined}
-      aria-label={isOrderEditing ? `${team.name} 순서 변경` : `${team.name} 선택`}
-      title={isOrderEditing ? '드래그해서 순서를 변경하세요' : `${team.name} 정산 보기`}
-      onClick={() => {
-        if (!isOrderEditing) onSelect(teamId);
-      }}
-    >
-      {isOrderEditing && <span className="text-base leading-none opacity-70" aria-hidden="true">⠿</span>}
-      <span className="whitespace-nowrap">{team.name}</span>
-    </button>
-  );
 };
 
 type TeamSettlementAccentStyle = React.CSSProperties & {
@@ -971,10 +845,6 @@ const buildMonthRange = (yearMonth: string): { startDate: string; endDate: strin
 export const TeamSettlementPage: React.FC = () => {
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string>('');
-  const [isTeamOrderEditing, setIsTeamOrderEditing] = useState<boolean>(false);
-  const [isTeamOrderSaving, setIsTeamOrderSaving] = useState<boolean>(false);
-  const [isTeamOrderDirty, setIsTeamOrderDirty] = useState<boolean>(false);
-  const [defaultTeamOrderIds, setDefaultTeamOrderIds] = useState<string[]>([]);
   const [yearMonth, setYearMonth] = useState<string>(buildDefaultYearMonth());
   const [doc, setDoc] = useState<TeamSettlementDocument | null>(null);
   const transactionMemoRef = useRef<HTMLTextAreaElement>(null);
@@ -987,13 +857,18 @@ export const TeamSettlementPage: React.FC = () => {
     };
     resize();
     let previousWidth = textarea.clientWidth;
+    let resizeFrame = 0;
     const observer = new ResizeObserver(() => {
       if (textarea.clientWidth === previousWidth) return;
       previousWidth = textarea.clientWidth;
-      resize();
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(resize);
     });
     observer.observe(textarea);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(resizeFrame);
+    };
   }, [doc?.transactionMemo, doc?.teamId, doc?.yearMonth]);
   const [savedDocumentFingerprint, setSavedDocumentFingerprint] = useState<string>('');
   const [saveState, setSaveState] = useState<TeamSettlementSaveState>('idle');
@@ -1013,11 +888,6 @@ export const TeamSettlementPage: React.FC = () => {
   const [supportRates, setSupportRates] = useState<SupportRate[]>([]);
   const [supportRatesLoaded, setSupportRatesLoaded] = useState<boolean>(false);
   const [bulkSupportRateInput, setBulkSupportRateInput] = useState<string>(() => formatCurrency(DEFAULT_SUPPORT_UNIT_PRICE));
-  const teamOrderSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-
   const currentDocumentFingerprint = useMemo(
     () => createTeamSettlementDraftFingerprint(doc),
     [doc]
@@ -1075,10 +945,8 @@ export const TeamSettlementPage: React.FC = () => {
         });
 
         const rows = siteConstructionTeams.length > 0 ? siteConstructionTeams : constructionCompanyTeams;
-        const baseOrderIds = rows.map(getTeamOrderId).filter(Boolean);
-        const preferredOrder = serverTeamOrder.length > 0 ? serverTeamOrder : readTeamOrderPreference();
-        setDefaultTeamOrderIds(baseOrderIds);
-        setTeams(applyTeamOrderPreference(rows, preferredOrder));
+        const preferredOrder = serverTeamOrder.length > 0 ? serverTeamOrder : readCompanyTeamOrder();
+        setTeams(applySupportTeamOrder(rows, preferredOrder));
       } catch (error) {
         console.error(error);
         toast.error('팀 목록 로드 실패');
@@ -2037,75 +1905,6 @@ export const TeamSettlementPage: React.FC = () => {
       setSelectedTeamId(teamId);
     })();
   }, [confirmBeforeDiscard, selectedTeamId]);
-
-  const handleTeamOrderDragEnd = useCallback(({ active, over }: DragEndEvent) => {
-    if (!over || active.id === over.id) return;
-
-    setTeams((currentTeams) => {
-      const oldIndex = currentTeams.findIndex((team) => getTeamOrderId(team) === String(active.id));
-      const newIndex = currentTeams.findIndex((team) => getTeamOrderId(team) === String(over.id));
-      if (oldIndex < 0 || newIndex < 0) return currentTeams;
-
-      const reorderedTeams = arrayMove(currentTeams, oldIndex, newIndex);
-      saveTeamOrderPreference(reorderedTeams);
-      setIsTeamOrderDirty(true);
-      return reorderedTeams;
-    });
-  }, []);
-
-  const handleTeamOrderEditingToggle = useCallback(() => {
-    if (isTeamOrderSaving) return;
-
-    if (!isTeamOrderEditing) {
-      setIsTeamOrderEditing(true);
-      setIsTeamOrderDirty(false);
-      return;
-    }
-
-    if (!isTeamOrderDirty) {
-      setIsTeamOrderEditing(false);
-      return;
-    }
-
-    void (async () => {
-      setIsTeamOrderSaving(true);
-      try {
-        const orderedTeamIds = teams.map(getTeamOrderId).filter(Boolean);
-        await teamSettlementService.saveTeamDisplayOrder(orderedTeamIds);
-        saveTeamOrderPreference(teams);
-        setIsTeamOrderDirty(false);
-        setIsTeamOrderEditing(false);
-        toast.success('회사 공통 팀 순서를 저장했습니다.');
-      } catch (error) {
-        console.error(error);
-        toast.error('팀 순서를 서버에 저장하지 못했습니다.');
-      } finally {
-        setIsTeamOrderSaving(false);
-      }
-    })();
-  }, [isTeamOrderDirty, isTeamOrderEditing, isTeamOrderSaving, teams]);
-
-  const handleResetTeamOrder = useCallback(() => {
-    if (isTeamOrderSaving || defaultTeamOrderIds.length === 0) return;
-
-    void (async () => {
-      setIsTeamOrderSaving(true);
-      try {
-        const resetTeams = applyTeamOrderPreference(teams, defaultTeamOrderIds);
-        await teamSettlementService.resetTeamDisplayOrder();
-        saveTeamOrderPreference(resetTeams);
-        setTeams(resetTeams);
-        setIsTeamOrderDirty(false);
-        setIsTeamOrderEditing(false);
-        toast.success('회사 공통 팀 순서를 기본값으로 초기화했습니다.');
-      } catch (error) {
-        console.error(error);
-        toast.error('팀 순서를 초기화하지 못했습니다.');
-      } finally {
-        setIsTeamOrderSaving(false);
-      }
-    })();
-  }, [defaultTeamOrderIds, isTeamOrderSaving, teams]);
 
   const toggleLineExpanded = useCallback((id: string) => {
     setExpandedLineIds((prev) => {
@@ -4166,20 +3965,6 @@ export const TeamSettlementPage: React.FC = () => {
           line-height: 1.5rem;
         }
 
-        .team-settlement-page__team-list {
-          -webkit-overflow-scrolling: touch;
-          flex-wrap: nowrap;
-          overflow-x: auto;
-          padding: 0 0.125rem 0.375rem;
-          scroll-snap-type: x proximity;
-          scrollbar-width: thin;
-        }
-
-        .team-settlement-page__team-list > button {
-          flex: 0 0 auto;
-          scroll-snap-align: start;
-        }
-
         .team-settlement-page .overflow-auto {
           -webkit-overflow-scrolling: touch;
           overscroll-behavior-inline: contain;
@@ -4202,13 +3987,6 @@ export const TeamSettlementPage: React.FC = () => {
             word-break: keep-all;
           }
 
-          .team-settlement-page__team-list {
-            scroll-snap-type: x proximity;
-          }
-
-          .team-settlement-page__team-list > button {
-            min-height: 44px;
-          }
         }
       `}</style>
       <TeamSettlementWorkspaceHeader
@@ -4230,7 +4008,7 @@ export const TeamSettlementPage: React.FC = () => {
         onUnconfirm={handleUnconfirm}
       />
 
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:mt-6 sm:gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:mt-6 sm:gap-4">
         <div className="team-settlement-page__selector-card rounded-xl border bg-white p-3 sm:p-2.5">
           <div className="text-sm font-semibold text-slate-700">정산월</div>
           <div className="mt-2 flex flex-col gap-2 lg:flex-row lg:items-center">
@@ -4276,87 +4054,17 @@ export const TeamSettlementPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="team-settlement-page__selector-card rounded-xl border bg-white p-3 sm:p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <div className="text-base font-black text-slate-900">팀</div>
-                <span className="hidden rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-600 md:inline-flex">
-                  회사 공통 순서
-                </span>
-              </div>
-              {isTeamOrderEditing && (
-                <div className="mt-0.5 hidden text-xs font-semibold text-blue-600 md:block">
-                  팀 버튼을 드래그해 순서를 바꾸세요.
-                </div>
-              )}
-            </div>
-            <div className="hidden items-center gap-1.5 md:flex">
-              {isTeamOrderEditing && (
-                <button
-                  type="button"
-                  className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
-                  disabled={isTeamOrderSaving}
-                  onClick={handleResetTeamOrder}
-                >
-                  기본 순서
-                </button>
-              )}
-              <button
-                type="button"
-                className={`inline-flex h-8 items-center justify-center rounded-lg border px-3 text-xs font-black transition disabled:opacity-50 ${isTeamOrderEditing
-                  ? 'border-blue-600 bg-blue-600 text-white shadow-sm hover:bg-blue-700'
-                  : 'border-slate-300 bg-white text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700'
-                  }`}
-                aria-pressed={isTeamOrderEditing}
-                disabled={isTeamOrderSaving}
-                onClick={handleTeamOrderEditingToggle}
-              >
-                {isTeamOrderSaving ? '저장 중...' : isTeamOrderEditing ? '순서 변경 완료' : '순서 변경'}
-              </button>
-            </div>
-          </div>
-          <label className="sr-only" htmlFor="team-settlement-team-select">정산 팀 선택</label>
-          <select
-            id="team-settlement-team-select"
-            className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 md:hidden"
-            value={selectedTeamId}
-            onChange={(event) => handleTeamSelect(event.target.value)}
-          >
-            {teams.map((team) => (
-              <option key={String(team.id ?? '')} value={String(team.id ?? '')}>{team.name}</option>
-            ))}
-          </select>
-          <DndContext
-            sensors={teamOrderSensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleTeamOrderDragEnd}
-          >
-            <SortableContext
-              items={teams.map(getTeamOrderId)}
-              strategy={horizontalListSortingStrategy}
-            >
-              <div
-                className="team-settlement-page__team-list mt-2 hidden gap-2.5 md:flex"
-                role="group"
-                aria-label={isTeamOrderEditing ? '팀 순서 변경' : '팀 선택'}
-              >
-                {teams.map((team) => {
-                  const teamId = String(team.id ?? '');
-                  return (
-                    <SortableTeamButton
-                      key={getTeamOrderId(team)}
-                      team={team}
-                      isSelected={teamId === String(selectedTeamId)}
-                      isOrderEditing={isTeamOrderEditing}
-                      onSelect={handleTeamSelect}
-                    />
-                  );
-                })}
-              </div>
-            </SortableContext>
-          </DndContext>
-        </div>
+        <CompanyTeamSelector
+          internalTeams={teams.filter((team) => team.id).map((team) => ({
+            id: String(team.id),
+            name: team.name,
+            color: team.color
+          }))}
+          selectedTeamId={selectedTeamId}
+          onChange={handleTeamSelect}
+          allowAllTeams={false}
+          ariaLabel="정산 팀 선택"
+        />
       </div>
 
       {doc && (
