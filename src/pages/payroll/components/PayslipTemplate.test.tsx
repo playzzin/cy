@@ -59,6 +59,19 @@ const paymentData: PaymentData = {
 };
 
 describe('PayslipTemplate', () => {
+    it('등록된 계좌번호는 그대로 표시하고 등록된 0% 세율을 누락으로 안내하지 않는다', () => {
+        render(<PayslipTemplate data={{ ...paymentData, accountNumber: '012-345-678901' }} month="2026-07" />);
+        expect(screen.getByText('012-345-678901')).toBeTruthy();
+        expect(screen.queryByText('세율 정보가 없습니다.')).toBeNull();
+    });
+
+    it.each([undefined, {}])('계좌와 세율이 없으면 명세서에 누락 안내를 포함한다 (%p)', (snapshot) => {
+        render(<PayslipTemplate data={{ ...paymentData, accountNumber: ' ', taxRateSnapshot: snapshot as PaymentData['taxRateSnapshot'] }} month="2026-07" />);
+        expect(screen.getByText('계좌번호가 없습니다.')).toBeTruthy();
+        expect(screen.getByText('세율 정보가 없습니다.')).toBeTruthy();
+        expect(screen.getAllByText('100,000원').length).toBeGreaterThan(0);
+    });
+
     it('선택한 시공사 상호를 기존 데이터보다 우선 표시한다', () => {
         render(
             <PayslipTemplate

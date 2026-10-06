@@ -35,7 +35,7 @@ import {
 import * as XLSX from 'xlsx-js-style';
 import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faFileExcel, faFilePdf, faSpinner, faExclamationTriangle, faCopy, faChevronUp, faChevronDown, faDownload, faCheckCircle } from '@fortawesome/free-solid-svg-icons';
+import { faFileExcel, faFilePdf, faSpinner, faExclamationTriangle, faCopy, faChevronUp, faChevronDown, faCheckCircle } from '@fortawesome/free-solid-svg-icons';
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 import { PayslipTemplate } from './components/PayslipTemplate';
@@ -1499,6 +1499,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [payslipOutputIds, setPayslipOutputIds] = useState<Record<string, string>>({});
     const [issuingPayslip, setIssuingPayslip] = useState<boolean>(false);
     const [payslipIssueMessage, setPayslipIssueMessage] = useState<string>('');
+    const [payslipExportNotice, setPayslipExportNotice] = useState<string>('');
     const applyRunSeqRef = React.useRef(0);
     const applyWatchdogRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const restoredCalculationOptionsRef = React.useRef<string>('');
@@ -3174,10 +3175,15 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
     const selectedPayslipOutputId = resolvedPayslipTarget ? (payslipOutputIds[resolvedPayslipTarget.id] ?? '') : '';
 
-    const ensurePayslipIssueReady = useCallback((rows: PaymentData[], actionLabel: string): boolean => {
+    useEffect(() => {
+        setPayslipExportNotice('');
+    }, [resolvedPayslipTarget, showPayslipModal]);
+
+    const ensurePayslipIssueReady = useCallback((rows: PaymentData[], actionLabel: string, confirmWarnings = false): boolean => {
         if (!ensurePayrollReady()) return false;
         const summary = validateMonthlyPayslipRows(rows);
         const topIssues = summary.issues.slice(0, 8).map(getPayslipIssueLabel).join('\n');
+        setPayslipExportNotice('');
 
         if (summary.errorCount > 0) {
             alert([
@@ -3187,11 +3193,16 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             return false;
         }
 
-        if (summary.warningCount > 0) {
+        if (summary.warningCount > 0 && confirmWarnings) {
             return window.confirm([
                 `${actionLabel} 전 확인이 필요한 항목 ${summary.warningCount}건이 있습니다. 계속 진행할까요?`,
                 topIssues,
             ].filter(Boolean).join('\n\n'));
+        }
+
+        if (summary.warningCount > 0) {
+            const notices = Array.from(new Set(summary.issues.map((issue) => issue.message)));
+            setPayslipExportNotice(`${notices.join(' ')} 입력된 내용으로 출력할 수 있습니다.`);
         }
 
         return true;
@@ -3276,7 +3287,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         if (!resolvedPayslipTarget) return;
         const method = selectedPayslipOutputId ? 'reissue' : 'confirm';
         const actionLabel = selectedPayslipOutputId ? '재발행 기록' : '발행 확정';
-        if (!ensurePayslipIssueReady([resolvedPayslipTarget], actionLabel)) return;
+        if (!ensurePayslipIssueReady([resolvedPayslipTarget], actionLabel, true)) return;
 
         setIssuingPayslip(true);
         try {
@@ -4849,32 +4860,6 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
     const [batchDownloading, setBatchDownloading] = useState(false);
     const batchRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
-
-    const handleDownloadImage = async () => {
-        if (!ensurePayrollReady()) return;
-        if (!printRef.current || !resolvedPayslipTarget) return;
-        if (!ensurePayslipIssueReady([resolvedPayslipTarget], '파일 저장')) return;
-
-        try {
-            const canvas = await (html2canvas as any)(printRef.current, {
-                scale: 2, // Higher quality for file download
-                backgroundColor: '#ffffff',
-                logging: false,
-                useCORS: true
-            });
-
-            canvas.toBlob((blob: Blob | null) => {
-                if (!blob) {
-                    alert('이미지 생성에 실패했습니다.');
-                    return;
-                }
-                saveAs(blob, `노임명세서_${resolvedPayslipTarget.workerName}_${resolvedPayslipTarget.month}.png`);
-            }, 'image/png');
-        } catch (error) {
-            console.error('Download failed:', error);
-            alert('다운로드 중 오류가 발생했습니다.');
-        }
-    };
 
     const handleBatchDownload = async () => {
         if (!ensurePayrollReady()) return;
@@ -6824,7 +6809,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                     )}
                                 </div>
                             </aside>
-                            <div className="flex-1 overflow-auto p-6 bg-slate-50">
+                            <div className="min-w-0 flex-1 overflow-auto p-6 bg-slate-50">
                                 <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50/70 p-4 shadow-sm">
                                     <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
                                         <div className="min-w-[240px] flex-1">
@@ -6893,7 +6878,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                     </div>
                                     {selectedPayslipIssueSummary.issues.length > 0 && (
                                         <div className="mt-3 grid gap-1 text-xs">
-                                            {selectedPayslipIssueSummary.issues.slice(0, 5).map((issue, idx) => (
+                                            {selectedPayslipIssueSummary.issues.map((issue, idx) => (
                                                 <div
                                                     key={`${issue.code}-${idx}`}
                                                     className={issue.severity === 'error' ? 'text-rose-700' : 'text-amber-700'}
@@ -6926,14 +6911,13 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                     </div>
                                 )}
 
-                                <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                                    <p className="text-sm text-slate-600">
-                                        <span className="font-semibold text-slate-800">{resolvedPayslipTarget?.workerName ?? '-'}</span>
-                                        {' · 실지급 '}
-                                        <span className="text-brand-600 font-bold">{resolvedPayslipTarget ? resolvedPayslipTarget.totalAmount.toLocaleString() : 0}원</span>
-                                        <span className="ml-2 text-xs text-slate-500">PDF와 엑셀은 미리보기와 같은 카드형 명세서로 출력됩니다.</span>
+                                {payslipExportNotice && (
+                                    <p role="status" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                        {payslipExportNotice}
                                     </p>
-                                    <div className="flex flex-wrap gap-2">
+                                )}
+                                <div className="mt-4 overflow-x-auto pb-1">
+                                    <div role="group" aria-label="명세서 출력 및 발행" className="flex w-max min-w-full flex-nowrap items-center justify-end gap-2 whitespace-nowrap">
                                         <button
                                             onClick={handleCopyToClipboard}
                                             disabled={!resolvedPayslipTarget || copying}
@@ -6964,7 +6948,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                             className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-bold flex items-center gap-2 disabled:opacity-50"
                                         >
                                             <FontAwesomeIcon icon={faFileExcel} />
-                                            개별 Excel
+                                            개별 EXCEL
                                         </button>
                                         <button
                                             onClick={handleDownloadBatchIndividualPayslips}
@@ -6972,15 +6956,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                             className="px-4 py-2 text-sm bg-green-700 text-white rounded-lg hover:bg-green-800 font-bold flex items-center gap-2 disabled:opacity-50"
                                         >
                                             {batchExcelDownloading ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faFileExcel} />}
-                                            일괄 개별 Excel ({payslipPaymentData.length}명)
-                                        </button>
-                                        <button
-                                            onClick={handleDownloadImage}
-                                            disabled={!payslipTarget}
-                                            className="px-4 py-2 text-sm bg-slate-700 text-white rounded-lg hover:bg-slate-800 font-bold flex items-center gap-2 disabled:opacity-50"
-                                        >
-                                            <FontAwesomeIcon icon={faDownload} />
-                                            파일 저장
+                                            일괄 EXCEL ({payslipPaymentData.length}명)
                                         </button>
                                         <button
                                             onClick={handleIssueCurrentPayslip}

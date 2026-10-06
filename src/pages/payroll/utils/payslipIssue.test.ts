@@ -49,6 +49,18 @@ const validRow = {
 };
 
 describe('payslipIssue utilities', () => {
+    it.each([undefined, {}, { incomeTaxRate: NaN }, { thresholdDays: 8 }])('계좌·세율 누락은 출력 가능한 경고로 유지한다 (%p)', (snapshot) => {
+        const summary = validateMonthlyPayslipRows([{
+            ...validRow, accountNumber: ' ', taxRateSnapshot: snapshot,
+        }]);
+        expect(summary.errorCount).toBe(0);
+        expect(summary.readyRows).toBe(1);
+        expect(summary.issues).toEqual(expect.arrayContaining([
+            expect.objectContaining({ code: 'missingAccountNumber', severity: 'warning' }),
+            expect.objectContaining({ code: 'missingTaxSnapshot', severity: 'warning', message: '세율 정보가 없습니다.' }),
+        ]));
+    });
+
     it('masks resident IDs and account numbers before display/export', () => {
         expect(maskResidentId('9001011234567')).toBe('900101-1******');
         expect(maskResidentId('900101-1234567')).toBe('900101-1******');
