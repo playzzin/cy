@@ -61,6 +61,21 @@ const paymentData: PaymentData = {
 };
 
 describe('buildPayslipWorkbook', () => {
+    it.each([true, false])('계좌·세율 누락 여부와 관계없이 안내를 포함한 Excel 파일을 만든다 (누락: %s)', (missing) => {
+        const data = {
+            ...paymentData,
+            accountNumber: missing ? ' ' : '012-345-678901',
+            taxRateSnapshot: missing ? undefined : paymentData.taxRateSnapshot,
+        } as PaymentData;
+        const { workbook, sheetName } = buildPayslipWorkbook(data, '검증 시공사');
+        const bytes = XLSX.write(workbook, { type: 'array', bookType: 'xlsx', cellStyles: true });
+        const restored = XLSX.read(bytes, { type: 'array' });
+        const cells = Object.values(restored.Sheets[sheetName]).map(cell => cell?.v);
+        expect(cells).toContain(missing ? '계좌번호가 없습니다.' : '012-345-678901');
+        expect(cells.includes('세율 정보가 없습니다.')).toBe(missing);
+        expect(cells).toContain(paymentData.totalAmount);
+    });
+
     it('미리보기형 A:H 인쇄영역과 계산식을 포함한 엑셀을 만든다', () => {
         const result = buildPayslipWorkbook(paymentData, '(주)청연이엔지');
         const sheet = result.workbook.Sheets[result.sheetName];

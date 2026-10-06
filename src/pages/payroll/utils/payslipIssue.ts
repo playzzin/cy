@@ -98,6 +98,16 @@ export const toFiniteNumber = (value: unknown, fallback = 0): number => {
 
 const hasText = (value: unknown): boolean => toText(value).length > 0;
 
+export const hasPayslipTaxRates = (snapshot?: object | null): boolean => {
+    if (!snapshot) return false;
+    const rates = snapshot as Record<string, unknown>;
+    return [
+        'pensionRate', 'healthRate', 'longtermRate', 'careRateOfHealth', 'employmentRate',
+        'incomeTaxRate', 'residentTaxRate', 'businessIncomeTaxRate', 'businessResidentTaxRate',
+        'withholdingIncomeTaxRate', 'withholdingResidentTaxRate',
+    ].some((key) => typeof rates[key] === 'number' && Number.isFinite(rates[key]));
+};
+
 const getRowId = (row: MonthlyPayslipRowLike): string =>
     toText(row.id) || `${toText(row.month) || 'unknown-month'}__${toText(row.workerId) || toText(row.workerName) || 'unknown-worker'}`;
 
@@ -212,7 +222,7 @@ export const validateMonthlyPayslipRows = (rows: MonthlyPayslipRowLike[]): Paysl
         if (!resolvePayrollBankCode(row.bankName, row.bankCode)) addIssue(issues, row, 'warning', 'missingBankCode', '은행코드가 없습니다.');
         if (!hasText(row.accountNumber)) addIssue(issues, row, 'warning', 'missingAccountNumber', '계좌번호가 없습니다.');
         if (!hasText(row.accountHolder)) addIssue(issues, row, 'warning', 'missingAccountHolder', '예금주가 없습니다.');
-        if (!row.taxRateSnapshot || Object.keys(row.taxRateSnapshot).length === 0) addIssue(issues, row, 'warning', 'missingTaxSnapshot', '세율 스냅샷이 없습니다.');
+        if (!hasPayslipTaxRates(row.taxRateSnapshot)) addIssue(issues, row, 'warning', 'missingTaxSnapshot', '세율 정보가 없습니다.');
     });
 
     duplicateMap.forEach((group) => {

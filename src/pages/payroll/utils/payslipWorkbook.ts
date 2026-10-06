@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx-js-style';
 import JSZip from 'jszip';
 import type { PaymentData } from '../types/payroll';
 import { formatPayrollPaymentDate } from './paymentDate';
-import { maskAccountNumber, maskResidentId } from './payslipIssue';
+import { hasPayslipTaxRates, maskResidentId } from './payslipIssue';
 
 type PayslipSheet = XLSX.WorkSheet & {
     '!pageSetup'?: Record<string, unknown>;
@@ -202,10 +202,21 @@ export const buildPayslipWorkbook = (
     const infoRow2 = pushRow([
         '근로자 식별', maskResidentId(data.idNumber || data.workerId), '',
         '시공사', contractorName || data.companyName || '-', '',
-        '은행 · 계좌', `${data.bankName || '-'} · ${maskAccountNumber(data.accountNumber)}`,
+        '예금주', data.accountHolder?.trim() || '예금주 없음',
     ]);
     merge(infoRow2, 1, infoRow2, 2);
     merge(infoRow2, 4, infoRow2, 5);
+
+    const accountRow = pushRow([
+        '입금은행', data.bankName?.trim() || '은행명 없음', '',
+        '계좌번호', data.accountNumber?.trim() || '계좌번호가 없습니다.',
+    ]);
+    merge(accountRow, 1, accountRow, 2);
+    merge(accountRow, 4, accountRow, 7);
+    const missingTaxRow = !hasPayslipTaxRates(data.taxRateSnapshot)
+        ? pushRow(['세율 정보가 없습니다.'])
+        : null;
+    if (missingTaxRow !== null) merge(missingTaxRow, 0, missingTaxRow, 7);
 
     const summaryLabelRow = pushRow(['총 공수', '', '지급전 금액', '', '', '실 지급액']);
     merge(summaryLabelRow, 0, summaryLabelRow, 1);
@@ -327,6 +338,15 @@ export const buildPayslipWorkbook = (
     [1, 3, 5, 7].forEach((col) => applyStyle(sheet, infoRow1, col, infoValueStyle));
     [0, 3, 6].forEach((col) => applyStyle(sheet, infoRow2, col, infoKeyStyle));
     [[1, 2], [4, 5], [7, 7]].forEach(([start, end]) => applyRangeStyle(sheet, infoRow2, infoRow2, start, end, infoValueStyle));
+    [0, 3].forEach((col) => applyStyle(sheet, accountRow, col, infoKeyStyle));
+    [[1, 2], [4, 7]].forEach(([start, end]) => applyRangeStyle(sheet, accountRow, accountRow, start, end, infoValueStyle));
+    if (missingTaxRow !== null) {
+        applyRangeStyle(sheet, missingTaxRow, missingTaxRow, 0, 7, {
+            ...infoValueStyle,
+            font: { ...BASE_FONT, color: { rgb: COLORS.amber } },
+            fill: solidFill(COLORS.amberSoft),
+        });
+    }
 
     const summaryLabelStyle: XLSX.CellObject['s'] = {
         font: { ...BASE_FONT, bold: true, color: { rgb: COLORS.slate500 } },

@@ -4,6 +4,12 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import MonthlyWageDraftPage from './MonthlyWageDraftPage';
 import { dailyReportService } from '../../services/dailyReportService';
 import { monthlyPayrollSettlementService } from '../../services/monthlyPayrollSettlementService';
+import { manpowerService } from '../../services/manpowerService';
+import * as XLSX from 'xlsx-js-style';
+import { saveAs } from 'file-saver';
+
+jest.mock('xlsx-js-style', () => ({ ...jest.requireActual('xlsx-js-style'), writeFile: jest.fn() }));
+jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: null }) }));
 jest.mock('../../hooks/usePagePrimaryAccount', () => ({ usePagePrimaryAccount: () => ({ account: null }) }));
@@ -11,12 +17,12 @@ jest.mock('../../components/accounts/PagePrimaryAccountCard', () => () => null);
 jest.mock('../../services/companyService', () => ({ companyService: { getCompanies: async () => [] } }));
 jest.mock('../../services/siteService', () => ({ siteService: { getSites: async () => [] } }));
 jest.mock('../../services/teamService', () => ({ teamService: { getTeams: async () => [{ id: 'team', name: '검증팀' }] } }));
-jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: async () => (
+jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: jest.fn(async () => (
     ['월급제', '일급제', '용역팀'].map((payType, index) => ({
         id: `worker-${index}`, name: `검증${index}`, teamId: 'team', teamName: '검증팀', payType,
         bankName: '국민은행', accountNumber: 'fixture-account', accountHolder: `검증${index}`,
     }))
-) } }));
+)) } }));
 jest.mock('../../services/dailyReportService', () => ({ dailyReportService: { getReportsByRange: jest.fn() } }));
 jest.mock('../../services/advancePaymentService', () => ({ advancePaymentService: { getAdvancePaymentsByYearMonth: async () => [] } }));
 jest.mock('../../services/statementOutputService', () => ({ statementOutputService: { getOutputsByMonth: async () => [] } }));
@@ -34,7 +40,10 @@ jest.mock('../../services/payrollConfigService', () => ({
         insuranceConfig: { thresholdDays: 8, dailyWorkerFeePerManDay: 1000 },
     }) },
 }));
-jest.mock('./components/PayslipTemplate', () => ({ PayslipTemplate: () => null }));
+jest.mock('./components/PayslipTemplate', () => {
+    const React = require('react');
+    return { PayslipTemplate: React.forwardRef((_props: any, ref: any) => <div ref={ref} className="payslip-template-card">검증용 명세서</div>) };
+});
 // Keep the real page, data hook and tax calculation; expose only the table inputs.
 jest.mock('./components/MonthlyAdvanceLedger', () => {
     const React = require('react');
@@ -84,6 +93,12 @@ const ready = async () => {
 
 beforeEach(() => {
     jest.clearAllMocks();
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue(
+        ['월급제', '일급제', '용역팀'].map((payType, index) => ({
+            id: `worker-${index}`, name: `검증${index}`, teamId: 'team', teamName: '검증팀', payType,
+            bankName: '국민은행', accountNumber: 'fixture-account', accountHolder: `검증${index}`,
+        }))
+    );
     (dailyReportService.getReportsByRange as jest.Mock).mockResolvedValue(reports());
     (monthlyPayrollSettlementService.getSettlementsByYear as jest.Mock).mockResolvedValue([]);
 });
@@ -225,4 +240,43 @@ it('정산 조회 실패 중 저장과 출력을 막고 재조회로 복구한�
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByRole('button', { name: '명세서' })).toBeEnabled());
     warning.mockRestore();
+});
+
+it('계좌와 세율이 없는 명세서도 확인창 없이 개별·일괄 Excel과 PDF를 출력한다', async () => {
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue(
+        ['월급제', '일급제', '용역팀'].map((payType, index) => ({
+            id: `worker-${index}`, name: `검증${index}`, teamId: 'team', teamName: '검증팀', payType,
+            bankName: '', accountNumber: '', accountHolder: '',
+        }))
+    );
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+    const print = jest.spyOn(window, 'print').mockImplementation(() => undefined);
+    try {
+        render(<MonthlyWageDraftPage />);
+        await ready();
+        await waitFor(() => expect(screen.getByRole('button', { name: '명세서' })).toBeEnabled());
+        fireEvent.click(screen.getByRole('button', { name: '명세서' }));
+        await waitFor(() => expect(screen.getByRole('button', { name: '명세서' })).toBeEnabled());
+        expect(screen.getByText('확인 · 계좌번호가 없습니다.')).toBeInTheDocument();
+        expect(screen.getByText('확인 · 세율 정보가 없습니다.')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: '개별 EXCEL' }));
+        expect(XLSX.writeFile).toHaveBeenCalledTimes(1);
+        fireEvent.click(screen.getByRole('button', { name: /일괄 EXCEL/ }));
+        await waitFor(() => expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), expect.stringMatching(/\.zip$/)));
+
+        fireEvent.click(screen.getByRole('button', { name: '개별 PDF' }));
+        await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(screen.getByRole('button', { name: /일괄 PDF/ })).toBeEnabled());
+        fireEvent.click(screen.getByRole('button', { name: /일괄 PDF/ }));
+        await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
+        expect(confirm).not.toHaveBeenCalled();
+
+        // 발행 기록에는 기존 경고 확인을 유지한다. 취소하므로 저장하지 않는다.
+        fireEvent.click(screen.getByRole('button', { name: '발행 확정' }));
+        expect(confirm).toHaveBeenCalledTimes(1);
+    } finally {
+        confirm.mockRestore();
+        print.mockRestore();
+    }
 });
