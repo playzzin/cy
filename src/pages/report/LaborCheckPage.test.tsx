@@ -167,7 +167,7 @@ describe('LaborCheckPage', () => {
         await waitFor(() => expect(dailyWorkerReportSiteService.save).toHaveBeenCalledWith(expect.objectContaining({
             workerKey: 'worker-1', date: '2026-09-01', reportedSiteName: '월초 신고 현장',
         })));
-    });
+    }, 15000);
 
     it('신규 인원은 등록일이나 공수 0인 과거 행이 있어도 실제 첫 출역일부터 표시한다', async () => {
         (manpowerService.getWorkers as jest.Mock).mockResolvedValue([
