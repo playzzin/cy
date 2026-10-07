@@ -3535,7 +3535,9 @@ export const TeamSettlementPage: React.FC = () => {
               : 'bg-white';
 
       const incomingTeamRows = isExpanded ? getIncomingTeamsForSettlementLine(line, incomingRows ?? []) : [];
-      const useIncomingSummary = isIncomingSettlementLine(line) && supportDetailData.source === 'live' && incomingTeamRows.length > 0;
+      // A saved (including empty) worker-detail snapshot must not hide the
+      // separately authorized incoming-team aggregate from a team leader.
+      const useIncomingSummary = isIncomingSettlementLine(line) && incomingTeamRows.length > 0;
       const detail = isExpanded && !useIncomingSummary ? getLineDetailRows(line) : [];
       const isSupportFeeLine = isSupportSettlementOrigin(line.origin);
       const lineIsSupportOrigin = isSupportOrigin(line.origin);
@@ -3756,7 +3758,7 @@ export const TeamSettlementPage: React.FC = () => {
                         <div className="text-sm font-black text-rose-900">지원 공수 요약과 상세가 일치하지 않습니다.</div>
                         <div className="mt-0.5 text-xs font-semibold text-rose-700">
                           요약 {formatManDay1(supportDetailConsistency.expectedManDay)}공수 · 상세 {formatManDay1(supportDetailConsistency.detailManDay)}공수
-                          {supportDetailData.source === 'live'
+                          {useIncomingSummary || supportDetailData.source === 'live'
                             ? ' · 저장 후 일보가 변경된 구 스냅샷입니다.'
                             : ' · 저장된 상세 스냅샷을 다시 생성해야 합니다.'}
                         </div>
@@ -4440,7 +4442,7 @@ export const TeamSettlementPage: React.FC = () => {
                   지원 온 팀을 불러오지 못했습니다.
                   <button type="button" className="ml-2 underline" onClick={() => setIncomingRetry(value => value + 1)}>다시 조회</button>
                 </div>}
-                {incomingRows && <details className="mt-3 rounded-lg border border-orange-200 p-3">
+                {incomingRows && <details open={incomingRows.length > 0} className="mt-3 rounded-lg border border-orange-200 p-3">
                   <summary className="cursor-pointer font-semibold text-slate-800">내 현장에 지원 온 팀 · {new Set(incomingRows.map(row => row.teamId || row.teamName)).size}개 팀</summary>
                   {incomingRows.length > 0 ? <TeamSettlementIncomingDetail rows={incomingRows} />
                     : <p className="mt-2 text-sm text-slate-500">선택한 월의 출력일보에는 이 팀의 담당 현장으로 지원 온 다른 팀이 없습니다.</p>}
