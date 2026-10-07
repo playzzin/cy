@@ -563,20 +563,14 @@ type DeductionGroupDefinition = {
 type DeductionGroup = DeductionGroupDefinition & {
   items: TeamSettlementDeductionItem[];
   displayItems: DeductionDisplayItem[];
-  sourceSummaries: DeductionSourceSummary[];
   totalAmount: number;
 };
 
 type DeductionDisplayItem = TeamSettlementDeductionItem & {
   isAggregate?: boolean;
   itemCount?: number;
-};
-
-type DeductionSourceSummary = {
-  origin: TeamSettlementDeductionItem['origin'];
-  label: string;
-  amount: number;
-  count: number;
+  officeExpenseKind?: '직영' | '도급';
+  isOfficeExpenseAdjustment?: boolean;
 };
 
 const PAYROLL_DEDUCTION_ORIGIN_ORDER: Partial<Record<TeamSettlementDeductionItem['origin'], number>> = {
@@ -617,38 +611,42 @@ const getDeductionSourceSummaryLabel = (origin: TeamSettlementDeductionItem['ori
   return formatDeductionOrigin(origin);
 };
 
-const buildDeductionSourceSummaries = (items: TeamSettlementDeductionItem[]): DeductionSourceSummary[] => {
-  const byOrigin = new Map<TeamSettlementDeductionItem['origin'], DeductionSourceSummary>();
-
-  items.forEach((item) => {
-    const prev = byOrigin.get(item.origin) ?? {
-      origin: item.origin,
-      label: getDeductionSourceSummaryLabel(item.origin),
-      amount: 0,
-      count: 0
-    };
-    byOrigin.set(item.origin, {
-      ...prev,
-      amount: prev.amount + safeNumber(item.amount),
-      count: prev.count + 1
-    });
-  });
-
-  return Array.from(byOrigin.values())
-    .filter((summary) => summary.amount > 0 || summary.count > 0)
-    .sort((a, b) => {
-      const expenseOrder = (EXPENSE_DEDUCTION_ORIGIN_ORDER[a.origin] ?? 99) - (EXPENSE_DEDUCTION_ORIGIN_ORDER[b.origin] ?? 99);
-      if (expenseOrder !== 0) return expenseOrder;
-      const payrollOrder = (PAYROLL_DEDUCTION_ORIGIN_ORDER[a.origin] ?? 99) - (PAYROLL_DEDUCTION_ORIGIN_ORDER[b.origin] ?? 99);
-      if (payrollOrder !== 0) return payrollOrder;
-      return a.label.localeCompare(b.label, 'ko');
-    });
-};
-
 const buildDeductionDisplayItems = (
   groupKey: string,
-  items: TeamSettlementDeductionItem[]
+  items: TeamSettlementDeductionItem[],
+  sales: TeamSettlementSalesItem[] = []
 ): DeductionDisplayItem[] => {
+  if (groupKey === 'office_expense') {
+    return items.flatMap((item): DeductionDisplayItem[] => {
+      if (item.source !== 'auto') return [item];
+      const rates = item.officeExpenseRates ?? LEGACY_TEAM_SETTLEMENT_OFFICE_RATES;
+      const rows: DeductionDisplayItem[] = (['직영', '도급'] as const).map((kind) => {
+        const detail = calculateTeamSettlementOfficeExpense(sales.filter(sale => sale.kind === kind), rates);
+        const rate = kind === '직영' ? rates.direct : rates.contract;
+        return {
+          ...item,
+          id: `${item.id}:${kind}`,
+          category: `${kind} 사무실비`,
+          amount: detail.totalAmount,
+          memo: `${detail.totalManDay}공수 × ${formatCurrency(rate)}원`,
+          officeExpenseKind: kind
+        };
+      });
+      // Display-only rows must reconcile to the saved deduction without changing it.
+      const difference = safeNumber(item.amount) - rows.reduce((sum, row) => sum + row.amount, 0);
+      if (difference !== 0) {
+        rows.push({
+          ...item,
+          id: `${item.id}:saved-difference`,
+          category: '저장 금액 차이',
+          amount: difference,
+          memo: '저장된 사무실비와 공수별 계산 합계의 차액',
+          isOfficeExpenseAdjustment: true
+        });
+      }
+      return rows;
+    });
+  }
   if (groupKey !== 'expense') return items;
   if (items.length === 0) return [];
 
@@ -673,6 +671,8 @@ const buildDeductionDisplayItems = (
 };
 
 const getDeductionDisplayOriginLabel = (item: DeductionDisplayItem): string => {
+  if (item.officeExpenseKind) return item.officeExpenseKind;
+  if (item.isOfficeExpenseAdjustment) return '차액';
   if (item.id.startsWith(EXPENSE_GROUP_AGGREGATE_PREFIX)) return formatDeductionOrigin(item.origin);
   return item.isAggregate ? getDeductionSourceSummaryLabel(item.origin) : formatDeductionOrigin(item.origin);
 };
@@ -1612,8 +1612,7 @@ export const TeamSettlementPage: React.FC = () => {
       return {
         ...definition,
         items,
-        displayItems: buildDeductionDisplayItems(definition.key, items),
-        sourceSummaries: buildDeductionSourceSummaries(items),
+        displayItems: buildDeductionDisplayItems(definition.key, items, doc?.sales),
         totalAmount: items.reduce((sum, item) => sum + safeNumber(item.amount), 0)
       };
     });
@@ -1627,7 +1626,6 @@ export const TeamSettlementPage: React.FC = () => {
         origins: [],
         items: otherItems,
         displayItems: buildDeductionDisplayItems('other', otherItems),
-        sourceSummaries: buildDeductionSourceSummaries(otherItems),
         totalAmount: otherItems.reduce((sum, item) => sum + safeNumber(item.amount), 0)
       });
     }
@@ -2076,7 +2074,7 @@ export const TeamSettlementPage: React.FC = () => {
   }, [doc]);
 
   const getDeductionDetail = useCallback(
-    (item: TeamSettlementDeductionItem):
+    (item: DeductionDisplayItem):
       | ({ kind: 'office_expense'; savedAmount: number } & ReturnType<typeof calculateTeamSettlementOfficeExpense>)
       | { kind: 'payroll'; rows: Array<{ workerId: string; workerName: string; manDay: number; amount: number }>; totalManDay: number; totalAmount: number }
       | {
@@ -2522,9 +2520,12 @@ export const TeamSettlementPage: React.FC = () => {
       }
 
       if (item.origin === 'office_expense') {
+        const sales = item.officeExpenseKind ? doc.sales.filter(sale => sale.kind === item.officeExpenseKind) : doc.sales;
+        const detail = calculateTeamSettlementOfficeExpense(sales, item.officeExpenseRates ?? LEGACY_TEAM_SETTLEMENT_OFFICE_RATES);
         return {
           kind: 'office_expense',
-          ...calculateTeamSettlementOfficeExpense(doc.sales, item.officeExpenseRates ?? LEGACY_TEAM_SETTLEMENT_OFFICE_RATES),
+          ...detail,
+          memo: item.officeExpenseKind ? `${item.officeExpenseKind} ${item.memo}` : detail.memo,
           savedAmount: item.amount
         };
       }
@@ -3945,27 +3946,15 @@ export const TeamSettlementPage: React.FC = () => {
 
   const renderAdjustmentGroup = (group: DeductionGroup) => (
     <div key={group.key} className="border-t border-slate-200 pt-4 first:border-t-0 first:pt-0">
-      <div className="flex flex-wrap items-start justify-between gap-2">
+      <div role="group" aria-label={`${group.title} 합계`} className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-bold text-slate-800">{group.title}</h3>
-          <div className="text-xs text-slate-500 mt-0.5">{group.description}</div>
+          {group.key !== 'payroll' && group.key !== 'expense' && (
+            <div className="text-xs text-slate-500 mt-0.5">{group.description}</div>
+          )}
         </div>
         <div className="text-right">
-          <div className="text-xs text-slate-500">{group.items.length}건</div>
           <div className="text-sm font-extrabold text-slate-900">{formatCurrency(group.totalAmount)}원</div>
-          {group.sourceSummaries.length > 0 && (group.key === 'expense' || group.sourceSummaries.length > 1) && (
-            <div className="mt-2 flex max-w-sm flex-wrap justify-end gap-1">
-              {group.sourceSummaries.map((summary) => (
-                <span
-                  key={`${group.key}-${summary.origin}`}
-                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
-                >
-                  <span>{summary.label}</span>
-                  <span className="text-slate-900">{formatCurrency(summary.amount)}원</span>
-                </span>
-              ))}
-            </div>
-          )}
         </div>
       </div>
 
@@ -3997,7 +3986,7 @@ export const TeamSettlementPage: React.FC = () => {
             ) : group.displayItems.map((item) => {
         const editableRow = canEdit && item.source === 'manual';
         const canExpand =
-          item.source === 'auto' &&
+          item.source === 'auto' && !item.isOfficeExpenseAdjustment &&
           (
             item.origin === 'office_expense' ||
             item.origin === 'daily_wage_payroll' ||
@@ -4101,17 +4090,17 @@ export const TeamSettlementPage: React.FC = () => {
                       <div>
                         <div className="text-sm font-semibold text-slate-800">급여 상세</div>
                         <div className="text-xs text-slate-500 mt-1">
-                          작업자별 공수·금액 합계
+                          작업자별 공수·급여 내역
                         </div>
 
                         <div className="mt-3 overflow-auto">
-                          <table className="w-full text-xs border-collapse">
+                          <table aria-label="급여 상세 내역" className="w-full text-xs border-collapse">
                             <thead>
                               <tr className="bg-slate-50 text-slate-600">
                                 <th scope="col" className="text-left px-2 py-2 border">작업자</th>
                                 <th scope="col" className="text-right px-2 py-2 border">공수</th>
-                                <th scope="col" className="text-right px-2 py-2 border">금액</th>
-                                <th scope="col" className="text-right px-2 py-2 border">원/공수</th>
+                                <th scope="col" className="text-right px-2 py-2 border">급여</th>
+                                <th scope="col" className="text-right px-2 py-2 border">총급여</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -4126,10 +4115,10 @@ export const TeamSettlementPage: React.FC = () => {
                                   <tr key={r.workerId} className="bg-white">
                                     <td data-label="작업자" className="px-2 py-2 border text-slate-800 font-medium">{r.workerName}</td>
                                     <td data-label="공수" className="px-2 py-2 border text-right">{formatManDay1(r.manDay)}</td>
-                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(r.amount)}</td>
-                                    <td data-label="원/공수" className="px-2 py-2 border text-right">
+                                    <td data-label="급여" className="px-2 py-2 border text-right">
                                       {formatAverageCurrency(safeAverage(r.amount, r.manDay))}
                                     </td>
+                                    <td data-label="총급여" className="px-2 py-2 border text-right">{formatCurrency(r.amount)}</td>
                                   </tr>
                                 ))
                               )}
@@ -4143,7 +4132,7 @@ export const TeamSettlementPage: React.FC = () => {
                             <div className="font-bold text-slate-900">{formatManDay1(detail.totalManDay)}</div>
                           </div>
                           <div className="flex items-center justify-between mt-1">
-                            <div className="text-slate-600">총금액</div>
+                            <div className="text-slate-600">총급여</div>
                             <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
                           </div>
                         </div>
