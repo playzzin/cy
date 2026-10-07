@@ -8,6 +8,7 @@ import { getWorkerCacheRevision } from '../utils/workerCacheRevision';
 import {
     collection,
     getDocs,
+    getCountFromServer,
     query,
     where,
     Timestamp,
@@ -75,6 +76,20 @@ const snapshotWorker = (id: string, data: Record<string, unknown>): Record<strin
 
 export const manpowerService = {
     // Get all workers (Paginated)
+    getWorkerCounts: async (): Promise<{ total: number; active: number }> => {
+        const scoped = await getTeamScopedRows<Worker>('workers');
+        const workers = scoped ?? (isDevAdminSessionEnabled() ? devWorkers : null);
+        if (workers !== null) {
+            return { total: workers.length, active: workers.filter(worker => worker.status === '재직').length };
+        }
+        const workersRef = collection(db, 'workers');
+        const [total, active] = await Promise.all([
+            getCountFromServer(workersRef),
+            getCountFromServer(query(workersRef, where('status', '==', '재직'))),
+        ]);
+        return { total: total.data().count, active: active.data().count };
+    },
+
     getWorkersPaginated: async (limitCount: number, lastDoc: any = null): Promise<{ workers: Worker[], lastDoc: any }> => {
         let q = query(
             collection(db, 'workers'),

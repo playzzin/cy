@@ -6,6 +6,67 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { hash } = require('./release-manifest.cjs');
 const { inputIdentity, canReuseBuild, invalidateBuild, recordBuild, proofPath } = require('./hosting-build-cache.cjs');
+const { beginBuild, writeManifest } = require('./release-manifest.cjs');
+const { resolveBuildDirectory } = require('./hosting-build-paths.cjs');
+const { verifyHostingBuild } = require('./verify-hosting-build.js');
+const { assertHostingDirectory } = require('./verify-hosting-target.cjs');
+
+for (const absolute of [false, true]) test(`custom output is used for manifest, cache and verification (${absolute ? 'absolute' : 'relative'})`, t => {
+    const parent = path.resolve(os.tmpdir());
+    const directory = fs.mkdtempSync(path.join(parent, 'cy-hosting-cache-test-'));
+    t.after(() => {
+        assert.ok(directory.startsWith(parent + path.sep) && path.basename(directory).startsWith('cy-hosting-cache-test-'));
+        fs.rmSync(directory, { recursive: true, force: true });
+    });
+    const git = args => execFileSync('git', args, { cwd: directory, stdio: 'pipe' });
+    git(['init', '--quiet']);
+    git(['-c', 'user.name=Synthetic Test', '-c', 'user.email=synthetic@example.test', 'commit', '--quiet', '--allow-empty', '-m', 'fixture']);
+    const write = (name, value) => {
+        fs.mkdirSync(path.dirname(name), { recursive: true });
+        fs.writeFileSync(name, value);
+    };
+    write(path.join(directory, '.gitignore'), 'node_modules/\nbuild/\n.tmp/\n.firebase/\n');
+    write(path.join(directory, 'node_modules/.package-lock.json'), '{}');
+    const defaultEnv = { NODE_ENV: 'production' };
+    const relative = '.tmp/hosting output';
+    const customEnv = { ...defaultEnv, BUILD_PATH: absolute ? path.join(directory, relative) : relative };
+    const defaultOutput = resolveBuildDirectory(directory, defaultEnv);
+    const customOutput = resolveBuildDirectory(directory, customEnv);
+    for (const [output, name] of [[defaultOutput, 'default'], [customOutput, 'custom']]) {
+        write(path.join(output, 'index.html'), '<script src="/static/js/main.js"></script>');
+        write(path.join(output, 'asset-manifest.json'), JSON.stringify({ name }));
+        write(path.join(output, 'static/js/main.js'), 'exact-pixel-current-tab-selection-v3 document.body allowTaint');
+    }
+    // Starting the second output must not consume or overwrite the first marker.
+    beginBuild(directory, defaultEnv);
+    beginBuild(directory, customEnv);
+    const original = writeManifest(directory, defaultEnv);
+    const custom = writeManifest(directory, customEnv);
+    assert.notEqual(original.assetManifestHash, custom.assetManifestHash);
+    assert.equal(custom.assetManifestHash, hash(fs.readFileSync(path.join(customOutput, 'asset-manifest.json'))));
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(defaultOutput, 'release.json'))), original);
+    const defaultIdentity = inputIdentity(directory, defaultEnv);
+    const customIdentity = inputIdentity(directory, customEnv);
+    recordBuild(defaultIdentity, directory, defaultEnv);
+    assert.equal(canReuseBuild(customIdentity, directory), false);
+    recordBuild(customIdentity, directory, customEnv);
+    assert.equal(canReuseBuild(defaultIdentity, directory), true);
+    assert.equal(canReuseBuild(customIdentity, directory), true);
+    assert.match(verifyHostingBuild(directory, customEnv), /verified/);
+    assert.throws(() => assertHostingDirectory('build', directory, customEnv), /경로가 다릅니다/);
+    assert.doesNotThrow(() => assertHostingDirectory(relative, directory, customEnv));
+    invalidateBuild(directory, customOutput);
+    assert.equal(canReuseBuild(customIdentity, directory), false);
+    assert.equal(canReuseBuild(defaultIdentity, directory), true);
+    recordBuild(customIdentity, directory, customEnv);
+    fs.unlinkSync(path.join(customOutput, 'asset-manifest.json'));
+    assert.equal(canReuseBuild(customIdentity, directory), false);
+    assert.equal(canReuseBuild(defaultIdentity, directory), true);
+    assert.throws(() => verifyHostingBuild(directory, customEnv), /incomplete/);
+    beginBuild(directory, customEnv);
+    assert.throws(() => writeManifest(directory, customEnv), /ENOENT/);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(defaultOutput, 'release.json'))), original);
+});
 
 test('reuse requires unchanged inputs and every output, including lazy chunks and public files', t => {
     const parent = path.resolve(os.tmpdir());

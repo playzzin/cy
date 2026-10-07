@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { root, hash, sourceState, compareRelease } = require('./release-manifest.cjs');
+const { resolveBuildDirectory, loadBuildEnvironment } = require('./hosting-build-paths.cjs');
 
 async function readRemoteJson(base, name) {
   const url = new URL(name, `${base.replace(/\/$/, '')}/`);
@@ -26,12 +27,14 @@ async function waitForRelease(base, local, localAssets, { read = readRemoteJson,
   throw lastError || new Error('배포 버전을 확인하지 못했습니다.');
 }
 async function checkRelease(base) {
-  const local = JSON.parse(fs.readFileSync(path.join(root, 'build', 'release.json'), 'utf8'));
+  loadBuildEnvironment();
+  const directory = resolveBuildDirectory();
+  const local = JSON.parse(fs.readFileSync(path.join(directory, 'release.json'), 'utf8'));
   const state = sourceState();
   if (state.dirty || local.dirty || local.commit !== state.commit || Object.keys(state.fingerprints).some(key => state.fingerprints[key] !== local.fingerprints[key])) {
     throw new Error('현재 코드와 배포 파일이 다릅니다. 변경 사항을 커밋한 뒤 다시 빌드해 주세요.');
   }
-  const localAssets = JSON.parse(fs.readFileSync(path.join(root, 'build', 'asset-manifest.json'), 'utf8'));
+  const localAssets = JSON.parse(fs.readFileSync(path.join(directory, 'asset-manifest.json'), 'utf8'));
   const remote = await waitForRelease(base, local, localAssets);
   console.log(`웹 반영 확인 완료: ${remote.commit.slice(0, 8)} · ${base}`);
   console.log('서버 기능·권한 설정은 별도 배포 결과와 동작 점검으로 확인합니다. 웹 기록만으로 서버 반영을 판단하지 않습니다.');
