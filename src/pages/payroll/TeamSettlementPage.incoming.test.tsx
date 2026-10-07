@@ -136,3 +136,56 @@ it('기존 상세 안에서 오류를 알리고 재시도로 작업자 상세를
   fireEvent.click(screen.getByRole('button', { name: /^상세$/ }));
   expect(await screen.findByText('방문 작업자 A')).toBeVisible();
 });
+
+it('급여 세 종류를 매입 지원 아래에 표시하고 중복 차감 없이 매입 합계에 포함한다', async () => {
+  const saved = document();
+  saved.sales = [{ id: 'sale', source: 'manual', origin: 'manual', kind: '직영',
+    siteName: '검증 현장', manDay: 10, amount: 5000000 }];
+  saved.deductions = [
+    { id: 'monthly', source: 'auto', origin: 'monthly_wage_payroll', category: '월급제 급여', amount: 1000000 },
+    { id: 'daily', source: 'auto', origin: 'daily_wage_payroll', category: '일급제 급여', amount: 2000000 },
+    { id: 'service', source: 'auto', origin: 'service_team_payroll', category: '용역팀 급여', amount: 300000 },
+    { id: 'office', source: 'auto', origin: 'office_expense', category: '사무실비', amount: 50000 },
+    { id: 'manual', source: 'manual', origin: 'manual', category: '기타 차감', amount: 10000 }
+  ];
+  saved.additions = [{ id: 'addition', source: 'manual', origin: 'manual', category: '추가 지급', amount: 20000 }];
+  saved.summary = { prevCarryover: 100000, deposit: 200000 };
+  const unchanged = JSON.parse(JSON.stringify(saved));
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  render(<TeamSettlementPage />);
+  const purchases = await screen.findByRole('region', { name: '매입 내역' });
+  const payroll = within(purchases).getByRole('heading', { name: '급여' });
+  const support = within(purchases).getByText('지원', { exact: true });
+  expect(support.compareDocumentPosition(payroll) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(purchases).getByText('3,300,000원')).toBeVisible();
+  for (const category of ['월급제 급여', '일급제 급여', '용역팀 급여']) {
+    expect(within(purchases).getByDisplayValue(category)).toBeDisabled();
+  }
+  const deductions = screen.getByRole('region', { name: '공제 내역' });
+  expect(within(deductions).queryByText('급여', { exact: true })).not.toBeInTheDocument();
+  expect(within(deductions).getByDisplayValue('기타 차감')).toBeVisible();
+  expect(screen.getByLabelText('매입 - 3,840,000원 (2공수)')).toBeVisible();
+  const summary = screen.getByRole('region', { name: '정산 요약' });
+  expect(within(summary).getByText('3,840,000원')).toBeVisible();
+  expect(within(summary).getByText('60,000원')).toBeVisible();
+  expect(within(summary).getByText('1,420,000원')).toBeVisible();
+  for (const category of ['월급제 급여', '일급제 급여', '용역팀 급여']) {
+    const row = within(purchases).getAllByRole('row')
+      .find(candidate => within(candidate).queryByDisplayValue(category))!;
+    fireEvent.click(within(row).getByRole('button', { name: '상세' }));
+    expect(within(purchases).getByText('급여 상세')).toBeVisible();
+    fireEvent.click(within(row).getByRole('button', { name: '닫기' }));
+  }
+  expect(saved).toEqual(unchanged);
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+  expect(teamSettlementService.recalculateAndSaveTeamSettlement).not.toHaveBeenCalled();
+});
+
+it('급여가 없는 정산도 매입에 빈 급여 영역을 유지한다', async () => {
+  render(<TeamSettlementPage />);
+  const purchases = await screen.findByRole('region', { name: '매입 내역' });
+  expect(within(purchases).getByText('급여', { exact: true })).toBeVisible();
+  expect(within(purchases).getByText('내역 없음')).toBeVisible();
+  expect(screen.getByLabelText('매입 - 540,000원 (2공수)')).toBeVisible();
+  expect(screen.getByRole('region', { name: '공제 내역' })).not.toHaveTextContent('급여');
+});

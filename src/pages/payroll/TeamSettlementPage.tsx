@@ -585,6 +585,10 @@ const PAYROLL_DEDUCTION_ORIGIN_ORDER: Partial<Record<TeamSettlementDeductionItem
   service_team_payroll: 3
 };
 
+const isPayrollItem = (item: TeamSettlementDeductionItem): boolean => (
+  PAYROLL_DEDUCTION_ORIGIN_ORDER[item.origin] !== undefined
+);
+
 const EXPENSE_DEDUCTION_ORIGIN_ORDER: Partial<Record<TeamSettlementDeductionItem['origin'], number>> = {
   accommodation_billing: 1,
   vehicle_billing: 2,
@@ -684,7 +688,7 @@ const DEDUCTION_GROUP_DEFINITIONS: DeductionGroupDefinition[] = [
   {
     key: 'payroll',
     title: '급여',
-    description: '월급제·일급제·용역팀 급여 공제',
+    description: '월급제·일급제·용역팀 급여 매입',
     origins: ['monthly_wage_payroll', 'daily_wage_payroll', 'service_team_payroll'],
     showWhenEmpty: true
   },
@@ -1257,6 +1261,10 @@ export const TeamSettlementPage: React.FC = () => {
     const salesContract = summarize(sales.filter((line) => line.kind === '도급'));
     const salesDirect = summarize(sales.filter((line) => line.kind === '직영'));
     const purchaseSupport = summarize(purchases.filter((line) => line.kind === '지원'));
+    // Stored payroll rows remain compatible with existing settlement documents.
+    const payrollAmount = (doc?.deductions ?? []).filter(isPayrollItem)
+      .reduce((sum, item) => sum + safeNumber(item.amount), 0);
+    const purchasesTotal = summarize(purchases);
 
     return {
       salesSupport,
@@ -1264,14 +1272,15 @@ export const TeamSettlementPage: React.FC = () => {
       salesDirect,
       purchaseSupport,
       salesTotal: summarize(sales),
-      purchasesTotal: summarize(purchases)
+      purchasesTotal: { ...purchasesTotal, amount: purchasesTotal.amount + payrollAmount }
     };
   }, [doc]);
 
   const totals = useMemo(() => {
     const salesTotal = transactionSectionTotals.salesTotal.amount;
     const purchasesTotal = transactionSectionTotals.purchasesTotal.amount;
-    const deductionsTotal = (doc?.deductions ?? []).reduce((sum, x) => sum + safeNumber(x.amount), 0);
+    const deductionsTotal = (doc?.deductions ?? []).filter(item => !isPayrollItem(item))
+      .reduce((sum, x) => sum + safeNumber(x.amount), 0);
     const additionsTotal = (doc?.additions ?? []).reduce((sum, x) => sum + safeNumber(x.amount), 0);
     const prevCarryover = safeNumber(doc?.summary?.prevCarryover ?? 0);
     const deposit = safeNumber(doc?.summary?.deposit ?? 0);
@@ -3934,6 +3943,530 @@ export const TeamSettlementPage: React.FC = () => {
     });
   };
 
+  const renderAdjustmentGroup = (group: DeductionGroup) => (
+    <div key={group.key} className="border-t border-slate-200 pt-4 first:border-t-0 first:pt-0">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-bold text-slate-800">{group.title}</h3>
+          <div className="text-xs text-slate-500 mt-0.5">{group.description}</div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-slate-500">{group.items.length}건</div>
+          <div className="text-sm font-extrabold text-slate-900">{formatCurrency(group.totalAmount)}원</div>
+          {group.sourceSummaries.length > 0 && (group.key === 'expense' || group.sourceSummaries.length > 1) && (
+            <div className="mt-2 flex max-w-sm flex-wrap justify-end gap-1">
+              {group.sourceSummaries.map((summary) => (
+                <span
+                  key={`${group.key}-${summary.origin}`}
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+                >
+                  <span>{summary.label}</span>
+                  <span className="text-slate-900">{formatCurrency(summary.amount)}원</span>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {group.items.some(item => item.origin === 'office_expense' && !item.officeExpenseRates) && (
+        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          사무실비 새 기준은 도급 공수×10,000원 + 직영 공수×5,000원입니다.
+          {' '}{doc?.confirmedAt ? '확정취소 후 재집계하면' : '상단의 재집계를 누르면'} 이 정산에도 새 기준이 적용됩니다.
+        </p>
+      )}
+
+      <div className="mt-2 overflow-auto">
+        <table data-compact="adjustment" className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="bg-slate-50 text-slate-600">
+              <th scope="col" className="text-left px-2 py-2 border">구분</th>
+              <th scope="col" className="text-left px-2 py-2 border">항목</th>
+              <th scope="col" className="text-right px-2 py-2 border">금액</th>
+              <th scope="col" data-label="비고" className="text-left px-2 py-2 border">비고</th>
+              <th scope="col" className="text-center px-2 py-2 border whitespace-nowrap">상세</th>
+            </tr>
+          </thead>
+          <tbody>
+            {group.displayItems.length === 0 ? (
+              <tr className="bg-white">
+                <td className="px-2 py-3 border text-center text-slate-400" colSpan={5}>
+                  내역 없음
+                </td>
+              </tr>
+            ) : group.displayItems.map((item) => {
+        const editableRow = canEdit && item.source === 'manual';
+        const canExpand =
+          item.source === 'auto' &&
+          (
+            item.origin === 'office_expense' ||
+            item.origin === 'daily_wage_payroll' ||
+            item.origin === 'monthly_wage_payroll' ||
+            item.origin === 'service_team_payroll' ||
+            item.origin === 'team_expense_claim' ||
+            item.origin === 'accommodation_billing' ||
+            item.origin === 'vehicle_billing' ||
+            item.origin === 'card_billing'
+          );
+        const isExpanded = canExpand && expandedDeductionIds.has(item.id);
+        const detail = isExpanded ? getDeductionDetail(item) : null;
+        return (
+          <React.Fragment key={item.id}>
+            <tr className={item.source === 'auto' ? 'bg-white' : 'bg-amber-50'}>
+              <td data-label="구분" className="px-2 py-2 border text-slate-700">
+                {getDeductionDisplayOriginLabel(item)}
+              </td>
+              <td data-label="항목" className="px-2 py-2 border">
+                <input aria-label="항목"
+                  className="team-settlement-page__readonly-input w-full border rounded px-2 py-1"
+                  value={item.category}
+                  disabled={!editableRow}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    updateDoc((prev) => ({
+                      ...prev,
+                      deductions: prev.deductions.map((x) => (x.id === item.id ? { ...x, category: next } : x))
+                    }));
+                  }}
+                />
+                {(!editableRow) && <span className="team-settlement-page__readonly-value">{(item.category) || '—'}</span>}
+              </td>
+              <td data-label="금액" className="px-2 py-2 border text-right">
+                <CurrencyInput aria-label="금액"
+                  className="w-full border rounded px-2 py-1 text-right"
+                  value={item.amount}
+                  disabled={!editableRow}
+                  onChange={(n) => {
+                    updateDoc((prev) => ({
+                      ...prev,
+                      deductions: prev.deductions.map((x) => (x.id === item.id ? { ...x, amount: n } : x))
+                    }));
+                  }}
+                />
+              </td>
+              <td data-label="비고" className="px-2 py-2 border">
+                <div className="flex min-w-0 items-center gap-2 md:min-w-[220px]">
+                  <input aria-label="비고"
+                    className="team-settlement-page__readonly-input min-w-0 flex-1 border rounded px-2 py-1"
+                    value={formatTeamSettlementMemo(item)}
+                    disabled={!editableRow}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      updateDoc((prev) => ({
+                        ...prev,
+                        deductions: prev.deductions.map((x) => (x.id === item.id ? { ...x, memo: next } : x))
+                      }));
+                    }}
+                  />
+                  {(!editableRow) && <span className="team-settlement-page__readonly-value">{formatTeamSettlementMemo(item) || '—'}</span>}
+                </div>
+              </td>
+              <td data-label="상세" className="px-2 py-2 border text-center">
+                <div className="flex items-center justify-center gap-1">
+                  {canExpand && (
+                    <button
+                      type="button"
+                      className={ghostButtonClassName}
+                      onClick={() => toggleDeductionExpanded(item.id)}
+                    >
+                      {isExpanded ? '닫기' : '상세'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="px-2 py-1 rounded border bg-white text-slate-700 disabled:opacity-50"
+                    disabled={!editableRow}
+                    onClick={() => {
+                      updateDoc((prev) => ({
+                        ...prev,
+                        deductions: prev.deductions.filter((x) => x.id !== item.id)
+                      }));
+                    }}
+                  >
+                    삭제
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            {isExpanded && detail && (
+              <tr className={item.source === 'auto' ? 'bg-white' : 'bg-amber-50'}>
+                <td className="px-3 py-3 border" colSpan={5}>
+                  <div className={`rounded-lg border bg-white p-3 ${group.key === 'expense' ? 'team-settlement-page__expense-expanded-detail' : ''}`}>
+                    {detail.kind === 'office_expense' && (
+                      <TeamSettlementOfficeExpenseDetail detail={detail} />
+                    )}
+
+                    {detail.kind === 'payroll' && (
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">급여 상세</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          작업자별 공수·금액 합계
+                        </div>
+
+                        <div className="mt-3 overflow-auto">
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-600">
+                                <th scope="col" className="text-left px-2 py-2 border">작업자</th>
+                                <th scope="col" className="text-right px-2 py-2 border">공수</th>
+                                <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                                <th scope="col" className="text-right px-2 py-2 border">원/공수</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.rows.length === 0 ? (
+                                <tr>
+                                  <td className="px-2 py-2 border text-slate-500" colSpan={4}>
+                                    데이터 없음
+                                  </td>
+                                </tr>
+                              ) : (
+                                detail.rows.map((r) => (
+                                  <tr key={r.workerId} className="bg-white">
+                                    <td data-label="작업자" className="px-2 py-2 border text-slate-800 font-medium">{r.workerName}</td>
+                                    <td data-label="공수" className="px-2 py-2 border text-right">{formatManDay1(r.manDay)}</td>
+                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(r.amount)}</td>
+                                    <td data-label="원/공수" className="px-2 py-2 border text-right">
+                                      {formatAverageCurrency(safeAverage(r.amount, r.manDay))}
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="mt-3 text-sm">
+                          <div className="flex items-center justify-between">
+                            <div className="text-slate-600">총공수</div>
+                            <div className="font-bold text-slate-900">{formatManDay1(detail.totalManDay)}</div>
+                          </div>
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="text-slate-600">총금액</div>
+                            <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {detail.kind === 'accommodation_billing' && (
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">숙소 공제 상세</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          {detail.mode === 'document' ? '숙소 청구서 기준' : '월별 공과금 대장 배분 기준'}
+                        </div>
+
+                        <div className="mt-3 overflow-auto">
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-600">
+                                <th scope="col" className="text-left px-2 py-2 border">대상</th>
+                                <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                                {detail.mode === 'ledger' && (
+                                  <th scope="col" className="text-right px-2 py-2 border">배분일수(팀/전체)</th>
+                                )}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.rows.length === 0 ? (
+                                <tr>
+                                  <td className="px-2 py-2 border text-slate-500" colSpan={detail.mode === 'ledger' ? 4 : 3}>
+                                    데이터 없음
+                                  </td>
+                                </tr>
+                              ) : (
+                                detail.rows.map((row, idx) => (
+                                  <tr key={`accommodation-row-${idx}`} className="bg-white">
+                                    <td data-label="대상" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
+                                    <td data-label="항목" className="px-2 py-2 border">{row.label}</td>
+                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                    {detail.mode === 'ledger' && (
+                                      <td data-label="배분일수(팀/전체)" className="px-2 py-2 border text-right">
+                                        {safeNumber(row.teamDays)}/{safeNumber(row.totalDays)}
+                                      </td>
+                                    )}
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="mt-3 text-sm">
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="text-slate-600">총금액</div>
+                            <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {detail.kind === 'vehicle_billing' && (
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">차량 공제 상세</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          {detail.mode === 'document' ? '차량 청구서 기준' : '월별 차량 대장 자동집계 기준'}
+                        </div>
+
+                        <div className="mt-3 overflow-auto">
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-600">
+                                <th scope="col" className="text-left px-2 py-2 border">차량</th>
+                                <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                <th scope="col" className="text-left px-2 py-2 border">구분</th>
+                                <th scope="col" className="text-left px-2 py-2 border">일자</th>
+                                <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.rows.length === 0 ? (
+                                <tr>
+                                  <td className="px-2 py-2 border text-slate-500" colSpan={5}>
+                                    데이터 없음
+                                  </td>
+                                </tr>
+                              ) : (
+                                detail.rows.map((row, idx) => (
+                                  <tr key={`vehicle-row-${idx}`} className="bg-white">
+                                    <td data-label="차량" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
+                                    <td data-label="항목" className="px-2 py-2 border">{row.label}</td>
+                                    <td data-label="구분" className="px-2 py-2 border">{row.note ?? '-'}</td>
+                                    <td data-label="일자" className="px-2 py-2 border">{row.date ?? '-'}</td>
+                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="mt-3 text-sm">
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="text-slate-600">총금액</div>
+                            <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {detail.kind === 'card_billing' && (
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">카드 공제 상세</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          {detail.mode === 'document' ? '카드 청구서 기준' : '월별 카드 대장 자동집계 기준'}
+                        </div>
+
+                        <div className="mt-3 overflow-auto">
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-600">
+                                <th scope="col" className="text-left px-2 py-2 border">카드</th>
+                                <th scope="col" className="text-left px-2 py-2 border">사용처</th>
+                                <th scope="col" className="text-left px-2 py-2 border">구분</th>
+                                <th scope="col" className="text-left px-2 py-2 border">일자</th>
+                                <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.rows.length === 0 ? (
+                                <tr>
+                                  <td className="px-2 py-2 border text-slate-500" colSpan={5}>
+                                    데이터 없음
+                                  </td>
+                                </tr>
+                              ) : (
+                                detail.rows.map((row, idx) => (
+                                  <tr key={`card-row-${idx}`} className="bg-white">
+                                    <td data-label="카드" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
+                                    <td data-label="사용처" className="px-2 py-2 border">{row.label}</td>
+                                    <td data-label="구분" className="px-2 py-2 border">{row.note ?? '-'}</td>
+                                    <td data-label="일자" className="px-2 py-2 border">{row.date ?? '-'}</td>
+                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="mt-3 text-sm">
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="text-slate-600">총금액</div>
+                            <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {detail.kind === 'expense_aggregate' && (
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">경비 상세</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          차량·숙소·카드·경비 청구 공제 항목 합계 기준
+                        </div>
+
+                        <div className="mt-3 overflow-auto">
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-600">
+                                <th scope="col" className="text-left px-2 py-2 border">구분</th>
+                                <th scope="col" className="text-left px-2 py-2 border">대상</th>
+                                <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                <th scope="col" className="text-left px-2 py-2 border">비고</th>
+                                <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                                <th scope="col" className="text-center px-2 py-2 border whitespace-nowrap">더상세</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.rows.length === 0 ? (
+                                <tr>
+                                  <td className="px-2 py-2 border text-slate-500" colSpan={6}>
+                                    데이터 없음
+                                  </td>
+                                </tr>
+                              ) : (
+                                detail.rows.map((row, idx) => {
+                                  const hasMoreDetail = row.details.length > 0;
+                                  const isMoreDetailExpanded = expandedExpenseDetailKeys.has(row.key);
+                                  return (
+                                    <React.Fragment key={`expense-aggregate-row-${row.key}-${idx}`}>
+                                      <tr className="bg-white">
+                                        <td data-label="구분" className="px-2 py-2 border text-slate-800 font-medium">{row.originLabel}</td>
+                                        <td data-label="대상" className="px-2 py-2 border">{row.subject}</td>
+                                        <td data-label="항목" className="px-2 py-2 border">{row.category}</td>
+                                        <td data-label="비고" className="px-2 py-2 border">{row.memo || '-'}</td>
+                                        <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                        <td data-label="더상세" className="px-2 py-2 border text-center">
+                                          {hasMoreDetail ? (
+                                            <button
+                                              type="button"
+                                              className={ghostButtonClassName}
+                                              onClick={() => toggleExpenseDetailExpanded(row.key)}
+                                            >
+                                              {isMoreDetailExpanded ? '닫기' : '더상세'}
+                                            </button>
+                                          ) : (
+                                            <span className="text-slate-400">-</span>
+                                          )}
+                                        </td>
+                                      </tr>
+
+                                      {hasMoreDetail && isMoreDetailExpanded && (
+                                        <tr className="bg-slate-50">
+                                          <td className="px-3 py-3 border" colSpan={6}>
+                                            <div className="rounded-md border bg-white p-3">
+                                              <div className="text-xs font-semibold text-slate-700">
+                                                {row.originLabel}별 경비
+                                              </div>
+                                              <div className="mt-2 overflow-auto">
+                                                <table className="w-full text-xs border-collapse">
+                                                  <thead>
+                                                    <tr className="bg-slate-50 text-slate-600">
+                                                      <th scope="col" className="text-left px-2 py-2 border">대상</th>
+                                                      <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                                      <th scope="col" className="text-left px-2 py-2 border">비고</th>
+                                                      <th scope="col" className="text-right px-2 py-2 border">세부</th>
+                                                      <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody>
+                                                    {row.details.map((child, childIdx) => (
+                                                      <tr key={`expense-aggregate-child-${row.key}-${childIdx}`} className="bg-white">
+                                                        <td data-label="대상" className="px-2 py-2 border">{child.subject || child.label}</td>
+                                                        <td data-label="항목" className="px-2 py-2 border">{child.category || '-'}</td>
+                                                        <td data-label="비고" className="px-2 py-2 border">{child.note || '-'}</td>
+                                                        <td data-label="세부" className="px-2 py-2 border text-right">{child.allocation || '-'}</td>
+                                                        <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(child.amount)}</td>
+                                                      </tr>
+                                                    ))}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </React.Fragment>
+                                  );
+                                })
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="mt-3 text-sm">
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="text-slate-600">총금액</div>
+                            <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {detail.kind === 'team_expense_claim' && (
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">경비 차감 상세</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          청구완료/정산완료 경비내역 기준
+                        </div>
+
+                        <div className="mt-3 overflow-auto">
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-600">
+                                <th scope="col" className="text-left px-2 py-2 border">일자</th>
+                                <th scope="col" className="text-left px-2 py-2 border">상대/대상</th>
+                                <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                <th scope="col" className="text-left px-2 py-2 border">비고</th>
+                                <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.rows.length === 0 ? (
+                                <tr>
+                                  <td className="px-2 py-2 border text-slate-500" colSpan={5}>
+                                    데이터 없음
+                                  </td>
+                                </tr>
+                              ) : (
+                                detail.rows.map((row, idx) => (
+                                  <tr key={`team-expense-row-${idx}`} className="bg-white">
+                                    <td data-label="일자" className="px-2 py-2 border">{row.date || '-'}</td>
+                                    <td data-label="상대/대상" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
+                                    <td data-label="항목" className="px-2 py-2 border">{row.label}</td>
+                                    <td data-label="비고" className="px-2 py-2 border">{row.note || '-'}</td>
+                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="mt-3 text-sm">
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="text-slate-600">총금액</div>
+                            <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            )}
+          </React.Fragment>
+        );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
   return (
     <div className="team-settlement-page min-w-0 w-full p-3 sm:p-4 lg:p-6" style={teamSettlementAccentStyle}>
       <style>{`
@@ -4421,7 +4954,7 @@ export const TeamSettlementPage: React.FC = () => {
                 </div>
               </div>
 
-              <div>
+              <div role="region" aria-label="매입 내역">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="team-settlement-page__transaction-section-title font-semibold text-slate-800">매입</div>
                 </div>
@@ -4460,6 +4993,9 @@ export const TeamSettlementPage: React.FC = () => {
                     <span className="font-semibold text-orange-700">공수</span>
                     <span className="font-extrabold text-orange-900">{formatManDay1(transactionSectionTotals.purchaseSupport.manDay)}공</span>
                   </div>
+                </div>
+                <div id="settlement-purchase-payroll" className="mt-6">
+                  {deductionGroups.filter(group => group.key === 'payroll').map(renderAdjustmentGroup)}
                 </div>
               </div>
             </div>
@@ -4546,11 +5082,11 @@ export const TeamSettlementPage: React.FC = () => {
             </div>
           </section>
 
-          <section id="settlement-deductions" className="min-w-0 scroll-mt-36 rounded-2xl border bg-white p-3 shadow-sm sm:p-5">
+          <section id="settlement-deductions" aria-label="공제 내역" className="min-w-0 scroll-mt-36 rounded-2xl border bg-white p-3 shadow-sm sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold text-slate-900"><span className="mr-2 text-blue-600">02</span>공제</h2>
-                <div className="text-xs text-slate-500 mt-0.5">사무실비·급여·차량·숙소·카드·경비 구분</div>
+                <div className="text-xs text-slate-500 mt-0.5">사무실비·차량·숙소·카드·경비 구분</div>
               </div>
               <button type="button" className={addButtonClassName} onClick={handleAddManualDeduction} disabled={!canEdit}>
                 + 수기 공제
@@ -4558,529 +5094,7 @@ export const TeamSettlementPage: React.FC = () => {
             </div>
 
             <div className="mt-4 space-y-5">
-              {deductionGroups.map((group) => (
-                <div key={group.key} className="border-t border-slate-200 pt-4 first:border-t-0 first:pt-0">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <div className="text-sm font-bold text-slate-800">{group.title}</div>
-                      <div className="text-xs text-slate-500 mt-0.5">{group.description}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs text-slate-500">{group.items.length}건</div>
-                      <div className="text-sm font-extrabold text-slate-900">{formatCurrency(group.totalAmount)}원</div>
-                      {group.sourceSummaries.length > 0 && (group.key === 'expense' || group.sourceSummaries.length > 1) && (
-                        <div className="mt-2 flex max-w-sm flex-wrap justify-end gap-1">
-                          {group.sourceSummaries.map((summary) => (
-                            <span
-                              key={`${group.key}-${summary.origin}`}
-                              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
-                            >
-                              <span>{summary.label}</span>
-                              <span className="text-slate-900">{formatCurrency(summary.amount)}원</span>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {group.items.some(item => item.origin === 'office_expense' && !item.officeExpenseRates) && (
-                    <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                      사무실비 새 기준은 도급 공수×10,000원 + 직영 공수×5,000원입니다.
-                      {' '}{doc?.confirmedAt ? '확정취소 후 재집계하면' : '상단의 재집계를 누르면'} 이 정산에도 새 기준이 적용됩니다.
-                    </p>
-                  )}
-
-                  <div className="mt-2 overflow-auto">
-                    <table data-compact="adjustment" className="w-full text-sm border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 text-slate-600">
-                          <th scope="col" className="text-left px-2 py-2 border">구분</th>
-                          <th scope="col" className="text-left px-2 py-2 border">항목</th>
-                          <th scope="col" className="text-right px-2 py-2 border">금액</th>
-                          <th scope="col" data-label="비고" className="text-left px-2 py-2 border">비고</th>
-                          <th scope="col" className="text-center px-2 py-2 border whitespace-nowrap">상세</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {group.displayItems.length === 0 ? (
-                          <tr className="bg-white">
-                            <td className="px-2 py-3 border text-center text-slate-400" colSpan={5}>
-                              내역 없음
-                            </td>
-                          </tr>
-                        ) : group.displayItems.map((item) => {
-                    const editableRow = canEdit && item.source === 'manual';
-                    const canExpand =
-                      item.source === 'auto' &&
-                      (
-                        item.origin === 'office_expense' ||
-                        item.origin === 'daily_wage_payroll' ||
-                        item.origin === 'monthly_wage_payroll' ||
-                        item.origin === 'service_team_payroll' ||
-                        item.origin === 'team_expense_claim' ||
-                        item.origin === 'accommodation_billing' ||
-                        item.origin === 'vehicle_billing' ||
-                        item.origin === 'card_billing'
-                      );
-                    const isExpanded = canExpand && expandedDeductionIds.has(item.id);
-                    const detail = isExpanded ? getDeductionDetail(item) : null;
-                    return (
-                      <React.Fragment key={item.id}>
-                        <tr className={item.source === 'auto' ? 'bg-white' : 'bg-amber-50'}>
-                          <td data-label="구분" className="px-2 py-2 border text-slate-700">
-                            {getDeductionDisplayOriginLabel(item)}
-                          </td>
-                          <td data-label="항목" className="px-2 py-2 border">
-                            <input aria-label="항목"
-                              className="team-settlement-page__readonly-input w-full border rounded px-2 py-1"
-                              value={item.category}
-                              disabled={!editableRow}
-                              onChange={(e) => {
-                                const next = e.target.value;
-                                updateDoc((prev) => ({
-                                  ...prev,
-                                  deductions: prev.deductions.map((x) => (x.id === item.id ? { ...x, category: next } : x))
-                                }));
-                              }}
-                            />
-                            {(!editableRow) && <span className="team-settlement-page__readonly-value">{(item.category) || '—'}</span>}
-                          </td>
-                          <td data-label="금액" className="px-2 py-2 border text-right">
-                            <CurrencyInput aria-label="금액"
-                              className="w-full border rounded px-2 py-1 text-right"
-                              value={item.amount}
-                              disabled={!editableRow}
-                              onChange={(n) => {
-                                updateDoc((prev) => ({
-                                  ...prev,
-                                  deductions: prev.deductions.map((x) => (x.id === item.id ? { ...x, amount: n } : x))
-                                }));
-                              }}
-                            />
-                          </td>
-                          <td data-label="비고" className="px-2 py-2 border">
-                            <div className="flex min-w-0 items-center gap-2 md:min-w-[220px]">
-                              <input aria-label="비고"
-                                className="team-settlement-page__readonly-input min-w-0 flex-1 border rounded px-2 py-1"
-                                value={formatTeamSettlementMemo(item)}
-                                disabled={!editableRow}
-                                onChange={(e) => {
-                                  const next = e.target.value;
-                                  updateDoc((prev) => ({
-                                    ...prev,
-                                    deductions: prev.deductions.map((x) => (x.id === item.id ? { ...x, memo: next } : x))
-                                  }));
-                                }}
-                              />
-                              {(!editableRow) && <span className="team-settlement-page__readonly-value">{formatTeamSettlementMemo(item) || '—'}</span>}
-                            </div>
-                          </td>
-                          <td data-label="상세" className="px-2 py-2 border text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              {canExpand && (
-                                <button
-                                  type="button"
-                                  className={ghostButtonClassName}
-                                  onClick={() => toggleDeductionExpanded(item.id)}
-                                >
-                                  {isExpanded ? '닫기' : '상세'}
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                className="px-2 py-1 rounded border bg-white text-slate-700 disabled:opacity-50"
-                                disabled={!editableRow}
-                                onClick={() => {
-                                  updateDoc((prev) => ({
-                                    ...prev,
-                                    deductions: prev.deductions.filter((x) => x.id !== item.id)
-                                  }));
-                                }}
-                              >
-                                삭제
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-
-                        {isExpanded && detail && (
-                          <tr className={item.source === 'auto' ? 'bg-white' : 'bg-amber-50'}>
-                            <td className="px-3 py-3 border" colSpan={5}>
-                              <div className={`rounded-lg border bg-white p-3 ${group.key === 'expense' ? 'team-settlement-page__expense-expanded-detail' : ''}`}>
-                                {detail.kind === 'office_expense' && (
-                                  <TeamSettlementOfficeExpenseDetail detail={detail} />
-                                )}
-
-                                {detail.kind === 'payroll' && (
-                                  <div>
-                                    <div className="text-sm font-semibold text-slate-800">급여 상세</div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      작업자별 공수·금액 합계
-                                    </div>
-
-                                    <div className="mt-3 overflow-auto">
-                                      <table className="w-full text-xs border-collapse">
-                                        <thead>
-                                          <tr className="bg-slate-50 text-slate-600">
-                                            <th scope="col" className="text-left px-2 py-2 border">작업자</th>
-                                            <th scope="col" className="text-right px-2 py-2 border">공수</th>
-                                            <th scope="col" className="text-right px-2 py-2 border">금액</th>
-                                            <th scope="col" className="text-right px-2 py-2 border">원/공수</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detail.rows.length === 0 ? (
-                                            <tr>
-                                              <td className="px-2 py-2 border text-slate-500" colSpan={4}>
-                                                데이터 없음
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            detail.rows.map((r) => (
-                                              <tr key={r.workerId} className="bg-white">
-                                                <td data-label="작업자" className="px-2 py-2 border text-slate-800 font-medium">{r.workerName}</td>
-                                                <td data-label="공수" className="px-2 py-2 border text-right">{formatManDay1(r.manDay)}</td>
-                                                <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(r.amount)}</td>
-                                                <td data-label="원/공수" className="px-2 py-2 border text-right">
-                                                  {formatAverageCurrency(safeAverage(r.amount, r.manDay))}
-                                                </td>
-                                              </tr>
-                                            ))
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-
-                                    <div className="mt-3 text-sm">
-                                      <div className="flex items-center justify-between">
-                                        <div className="text-slate-600">총공수</div>
-                                        <div className="font-bold text-slate-900">{formatManDay1(detail.totalManDay)}</div>
-                                      </div>
-                                      <div className="flex items-center justify-between mt-1">
-                                        <div className="text-slate-600">총금액</div>
-                                        <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {detail.kind === 'accommodation_billing' && (
-                                  <div>
-                                    <div className="text-sm font-semibold text-slate-800">숙소 공제 상세</div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      {detail.mode === 'document' ? '숙소 청구서 기준' : '월별 공과금 대장 배분 기준'}
-                                    </div>
-
-                                    <div className="mt-3 overflow-auto">
-                                      <table className="w-full text-xs border-collapse">
-                                        <thead>
-                                          <tr className="bg-slate-50 text-slate-600">
-                                            <th scope="col" className="text-left px-2 py-2 border">대상</th>
-                                            <th scope="col" className="text-left px-2 py-2 border">항목</th>
-                                            <th scope="col" className="text-right px-2 py-2 border">금액</th>
-                                            {detail.mode === 'ledger' && (
-                                              <th scope="col" className="text-right px-2 py-2 border">배분일수(팀/전체)</th>
-                                            )}
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detail.rows.length === 0 ? (
-                                            <tr>
-                                              <td className="px-2 py-2 border text-slate-500" colSpan={detail.mode === 'ledger' ? 4 : 3}>
-                                                데이터 없음
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            detail.rows.map((row, idx) => (
-                                              <tr key={`accommodation-row-${idx}`} className="bg-white">
-                                                <td data-label="대상" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
-                                                <td data-label="항목" className="px-2 py-2 border">{row.label}</td>
-                                                <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
-                                                {detail.mode === 'ledger' && (
-                                                  <td data-label="배분일수(팀/전체)" className="px-2 py-2 border text-right">
-                                                    {safeNumber(row.teamDays)}/{safeNumber(row.totalDays)}
-                                                  </td>
-                                                )}
-                                              </tr>
-                                            ))
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-
-                                    <div className="mt-3 text-sm">
-                                      <div className="flex items-center justify-between mt-1">
-                                        <div className="text-slate-600">총금액</div>
-                                        <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {detail.kind === 'vehicle_billing' && (
-                                  <div>
-                                    <div className="text-sm font-semibold text-slate-800">차량 공제 상세</div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      {detail.mode === 'document' ? '차량 청구서 기준' : '월별 차량 대장 자동집계 기준'}
-                                    </div>
-
-                                    <div className="mt-3 overflow-auto">
-                                      <table className="w-full text-xs border-collapse">
-                                        <thead>
-                                          <tr className="bg-slate-50 text-slate-600">
-                                            <th scope="col" className="text-left px-2 py-2 border">차량</th>
-                                            <th scope="col" className="text-left px-2 py-2 border">항목</th>
-                                            <th scope="col" className="text-left px-2 py-2 border">구분</th>
-                                            <th scope="col" className="text-left px-2 py-2 border">일자</th>
-                                            <th scope="col" className="text-right px-2 py-2 border">금액</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detail.rows.length === 0 ? (
-                                            <tr>
-                                              <td className="px-2 py-2 border text-slate-500" colSpan={5}>
-                                                데이터 없음
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            detail.rows.map((row, idx) => (
-                                              <tr key={`vehicle-row-${idx}`} className="bg-white">
-                                                <td data-label="차량" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
-                                                <td data-label="항목" className="px-2 py-2 border">{row.label}</td>
-                                                <td data-label="구분" className="px-2 py-2 border">{row.note ?? '-'}</td>
-                                                <td data-label="일자" className="px-2 py-2 border">{row.date ?? '-'}</td>
-                                                <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
-                                              </tr>
-                                            ))
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-
-                                    <div className="mt-3 text-sm">
-                                      <div className="flex items-center justify-between mt-1">
-                                        <div className="text-slate-600">총금액</div>
-                                        <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {detail.kind === 'card_billing' && (
-                                  <div>
-                                    <div className="text-sm font-semibold text-slate-800">카드 공제 상세</div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      {detail.mode === 'document' ? '카드 청구서 기준' : '월별 카드 대장 자동집계 기준'}
-                                    </div>
-
-                                    <div className="mt-3 overflow-auto">
-                                      <table className="w-full text-xs border-collapse">
-                                        <thead>
-                                          <tr className="bg-slate-50 text-slate-600">
-                                            <th scope="col" className="text-left px-2 py-2 border">카드</th>
-                                            <th scope="col" className="text-left px-2 py-2 border">사용처</th>
-                                            <th scope="col" className="text-left px-2 py-2 border">구분</th>
-                                            <th scope="col" className="text-left px-2 py-2 border">일자</th>
-                                            <th scope="col" className="text-right px-2 py-2 border">금액</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detail.rows.length === 0 ? (
-                                            <tr>
-                                              <td className="px-2 py-2 border text-slate-500" colSpan={5}>
-                                                데이터 없음
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            detail.rows.map((row, idx) => (
-                                              <tr key={`card-row-${idx}`} className="bg-white">
-                                                <td data-label="카드" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
-                                                <td data-label="사용처" className="px-2 py-2 border">{row.label}</td>
-                                                <td data-label="구분" className="px-2 py-2 border">{row.note ?? '-'}</td>
-                                                <td data-label="일자" className="px-2 py-2 border">{row.date ?? '-'}</td>
-                                                <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
-                                              </tr>
-                                            ))
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-
-                                    <div className="mt-3 text-sm">
-                                      <div className="flex items-center justify-between mt-1">
-                                        <div className="text-slate-600">총금액</div>
-                                        <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {detail.kind === 'expense_aggregate' && (
-                                  <div>
-                                    <div className="text-sm font-semibold text-slate-800">경비 상세</div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      차량·숙소·카드·경비 청구 공제 항목 합계 기준
-                                    </div>
-
-                                    <div className="mt-3 overflow-auto">
-                                      <table className="w-full text-xs border-collapse">
-                                        <thead>
-                                          <tr className="bg-slate-50 text-slate-600">
-                                            <th scope="col" className="text-left px-2 py-2 border">구분</th>
-                                            <th scope="col" className="text-left px-2 py-2 border">대상</th>
-                                            <th scope="col" className="text-left px-2 py-2 border">항목</th>
-                                            <th scope="col" className="text-left px-2 py-2 border">비고</th>
-                                            <th scope="col" className="text-right px-2 py-2 border">금액</th>
-                                            <th scope="col" className="text-center px-2 py-2 border whitespace-nowrap">더상세</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detail.rows.length === 0 ? (
-                                            <tr>
-                                              <td className="px-2 py-2 border text-slate-500" colSpan={6}>
-                                                데이터 없음
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            detail.rows.map((row, idx) => {
-                                              const hasMoreDetail = row.details.length > 0;
-                                              const isMoreDetailExpanded = expandedExpenseDetailKeys.has(row.key);
-                                              return (
-                                                <React.Fragment key={`expense-aggregate-row-${row.key}-${idx}`}>
-                                                  <tr className="bg-white">
-                                                    <td data-label="구분" className="px-2 py-2 border text-slate-800 font-medium">{row.originLabel}</td>
-                                                    <td data-label="대상" className="px-2 py-2 border">{row.subject}</td>
-                                                    <td data-label="항목" className="px-2 py-2 border">{row.category}</td>
-                                                    <td data-label="비고" className="px-2 py-2 border">{row.memo || '-'}</td>
-                                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
-                                                    <td data-label="더상세" className="px-2 py-2 border text-center">
-                                                      {hasMoreDetail ? (
-                                                        <button
-                                                          type="button"
-                                                          className={ghostButtonClassName}
-                                                          onClick={() => toggleExpenseDetailExpanded(row.key)}
-                                                        >
-                                                          {isMoreDetailExpanded ? '닫기' : '더상세'}
-                                                        </button>
-                                                      ) : (
-                                                        <span className="text-slate-400">-</span>
-                                                      )}
-                                                    </td>
-                                                  </tr>
-
-                                                  {hasMoreDetail && isMoreDetailExpanded && (
-                                                    <tr className="bg-slate-50">
-                                                      <td className="px-3 py-3 border" colSpan={6}>
-                                                        <div className="rounded-md border bg-white p-3">
-                                                          <div className="text-xs font-semibold text-slate-700">
-                                                            {row.originLabel}별 경비
-                                                          </div>
-                                                          <div className="mt-2 overflow-auto">
-                                                            <table className="w-full text-xs border-collapse">
-                                                              <thead>
-                                                                <tr className="bg-slate-50 text-slate-600">
-                                                                  <th scope="col" className="text-left px-2 py-2 border">대상</th>
-                                                                  <th scope="col" className="text-left px-2 py-2 border">항목</th>
-                                                                  <th scope="col" className="text-left px-2 py-2 border">비고</th>
-                                                                  <th scope="col" className="text-right px-2 py-2 border">세부</th>
-                                                                  <th scope="col" className="text-right px-2 py-2 border">금액</th>
-                                                                </tr>
-                                                              </thead>
-                                                              <tbody>
-                                                                {row.details.map((child, childIdx) => (
-                                                                  <tr key={`expense-aggregate-child-${row.key}-${childIdx}`} className="bg-white">
-                                                                    <td data-label="대상" className="px-2 py-2 border">{child.subject || child.label}</td>
-                                                                    <td data-label="항목" className="px-2 py-2 border">{child.category || '-'}</td>
-                                                                    <td data-label="비고" className="px-2 py-2 border">{child.note || '-'}</td>
-                                                                    <td data-label="세부" className="px-2 py-2 border text-right">{child.allocation || '-'}</td>
-                                                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(child.amount)}</td>
-                                                                  </tr>
-                                                                ))}
-                                                              </tbody>
-                                                            </table>
-                                                          </div>
-                                                        </div>
-                                                      </td>
-                                                    </tr>
-                                                  )}
-                                                </React.Fragment>
-                                              );
-                                            })
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-
-                                    <div className="mt-3 text-sm">
-                                      <div className="flex items-center justify-between mt-1">
-                                        <div className="text-slate-600">총금액</div>
-                                        <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {detail.kind === 'team_expense_claim' && (
-                                  <div>
-                                    <div className="text-sm font-semibold text-slate-800">경비 차감 상세</div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      청구완료/정산완료 경비내역 기준
-                                    </div>
-
-                                    <div className="mt-3 overflow-auto">
-                                      <table className="w-full text-xs border-collapse">
-                                        <thead>
-                                          <tr className="bg-slate-50 text-slate-600">
-                                            <th scope="col" className="text-left px-2 py-2 border">일자</th>
-                                            <th scope="col" className="text-left px-2 py-2 border">상대/대상</th>
-                                            <th scope="col" className="text-left px-2 py-2 border">항목</th>
-                                            <th scope="col" className="text-left px-2 py-2 border">비고</th>
-                                            <th scope="col" className="text-right px-2 py-2 border">금액</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detail.rows.length === 0 ? (
-                                            <tr>
-                                              <td className="px-2 py-2 border text-slate-500" colSpan={5}>
-                                                데이터 없음
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            detail.rows.map((row, idx) => (
-                                              <tr key={`team-expense-row-${idx}`} className="bg-white">
-                                                <td data-label="일자" className="px-2 py-2 border">{row.date || '-'}</td>
-                                                <td data-label="상대/대상" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
-                                                <td data-label="항목" className="px-2 py-2 border">{row.label}</td>
-                                                <td data-label="비고" className="px-2 py-2 border">{row.note || '-'}</td>
-                                                <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
-                                              </tr>
-                                            ))
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-
-                                    <div className="mt-3 text-sm">
-                                      <div className="flex items-center justify-between mt-1">
-                                        <div className="text-slate-600">총금액</div>
-                                        <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
+              {deductionGroups.filter(group => group.key !== 'payroll').map(renderAdjustmentGroup)}
             </div>
 
             <div id="settlement-additions" className="mt-6 scroll-mt-36">
