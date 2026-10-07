@@ -26,7 +26,7 @@ export type CardStatementImportResultStatus =
   | 'committed'
   | 'failed';
 
-export type CardStatementImportAnalysisSource = 'fast_text' | 'gemini';
+export type CardStatementImportAnalysisSource = 'fast_text' | 'pdf_text' | 'gemini';
 
 export interface CardStatementImportJob {
   id: string;

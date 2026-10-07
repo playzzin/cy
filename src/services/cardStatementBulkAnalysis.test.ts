@@ -24,6 +24,8 @@ test('targets unprocessed and failed files, never completed or in-progress files
   expect(needsCardStatementDetailAnalysis(file('failed', { detailAnalysisStatus: 'failed' }))).toBe(true);
   expect(needsCardStatementDetailAnalysis(file('saved', { detailAnalysisStatus: 'completed' }))).toBe(false);
   expect(needsCardStatementDetailAnalysis(file('saved-import', { analysisSource: 'gemini' }))).toBe(false);
+  expect(needsCardStatementDetailAnalysis(file('verified-pdf', { analysisSource: 'pdf_text' }))).toBe(false);
+  expect(needsCardStatementDetailAnalysis(file('empty-pdf', { analysisSource: 'pdf_text', transactionCount: 0 }))).toBe(true);
   for (const status of ['cancelled', 'uploading', 'analyzing'] as const) expect(needsCardStatementDetailAnalysis(file(status, { status }))).toBe(false);
   expect(needsCardStatementDetailAnalysis(file('busy', { detailAnalysisStatus: 'analyzing' }))).toBe(false);
 });

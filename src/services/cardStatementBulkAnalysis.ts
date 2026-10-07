@@ -4,7 +4,7 @@ import { cardStatementImportService } from './cardStatementImportService';
 export const needsCardStatementDetailAnalysis = (file: CardStatementImportFile): boolean => {
   if (['uploading', 'cancelled', 'analyzing'].includes(file.status)) return false;
   if (file.detailAnalysisStatus) return ['not_analyzed', 'failed'].includes(file.detailAnalysisStatus);
-  return !(file.analysisSource === 'gemini' && file.transactionCount > 0);
+  return !((file.analysisSource === 'gemini' || file.analysisSource === 'pdf_text') && file.transactionCount > 0);
 };
 
 export const cardStatementAnalysisInput = (file: CardStatementImportFile, yearMonth: string): StoredCardStatementInput =>
