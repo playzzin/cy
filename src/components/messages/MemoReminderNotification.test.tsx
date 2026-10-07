@@ -34,3 +34,33 @@ it('shows the reminder in the header notification popover', async () => {
     expect(messageService.markAsRead).toHaveBeenCalledWith('notification', 'viewer');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
+
+it('opens the original content even when the read receipt fails', async () => {
+    (messageService.markAsRead as jest.Mock).mockRejectedValueOnce(new Error('offline'));
+    render(<MessageIndicator />);
+    fireEvent.click(screen.getByRole('button', { name: '메시지함, 안 읽은 메시지 1건' }));
+    fireEvent.click(screen.getByRole('button', { name: /메모 알림: 현장 확인/ }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/memos?memoId=site-check'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('읽음 상태를 저장하지 못했습니다');
+    fireEvent.click(screen.getByRole('button', { name: '읽음 처리 다시 시도' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(messageService.markAsRead).toHaveBeenCalledTimes(2);
+});
+
+it('still opens dashboard content when saving the receipt fails', async () => {
+    (messageService.markAsRead as jest.Mock).mockRejectedValueOnce(new Error('offline'));
+    render(<DashboardMessageWidget />);
+    fireEvent.click(screen.getByRole('button', { name: /메모 알림: 현장 확인/ }));
+    expect(mockNavigate).toHaveBeenCalledWith('/memos?memoId=site-check');
+    expect(await screen.findByRole('alert')).toHaveTextContent('읽음 상태를 저장하지 못했습니다');
+});
+
+it('closes the header popover on Escape and restores focus to the trigger', () => {
+    render(<MessageIndicator />);
+    const trigger = screen.getByRole('button', { name: '메시지함, 안 읽은 메시지 1건' });
+    fireEvent.click(trigger);
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+});

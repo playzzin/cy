@@ -121,15 +121,18 @@ const subscribeMergedQueries = (
   limitCount?: number
 ): Unsubscribe => {
   const snapshots: Array<QuerySnapshot<DocumentData> | null> = queries.map(() => null);
+  const failures = new Set<number>();
 
   const unsubscribes = queries.map((messageQuery, index) =>
     onSnapshot(
       messageQuery,
       (snapshot) => {
         snapshots[index] = snapshot;
-        publishMergedSnapshots(snapshots, callback, limitCount);
+        failures.delete(index);
+        if (snapshots.every(Boolean) && failures.size === 0) publishMergedSnapshots(snapshots, callback, limitCount);
       },
       (error) => {
+        failures.add(index);
         console.error('[messageService] subscription failed:', error);
         onError?.(error);
       }
@@ -323,19 +326,20 @@ export const messageService = {
 
     if (!uid) return;
 
-    const unreadMessages = messages.filter((message) => !message.readBy.includes(uid)).slice(0, 450);
+    const unreadMessages = Array.from(new Map(messages.filter((message) => !message.readBy.includes(uid)).map(message => [message.id, message])).values());
     if (unreadMessages.length === 0) return;
 
-    const batch = writeBatch(db);
-    unreadMessages.forEach((message) => {
-      batch.update(doc(db, COLLECTION_NAME, message.id), {
-        readBy: arrayUnion(uid),
-        [`readAtBy.${safeReadAtKey(uid)}`]: serverTimestamp(),
-        updatedAt: serverTimestamp()
+    for (let index = 0; index < unreadMessages.length; index += 450) {
+      const batch = writeBatch(db);
+      unreadMessages.slice(index, index + 450).forEach((message) => {
+        batch.update(doc(db, COLLECTION_NAME, message.id), {
+          readBy: arrayUnion(uid),
+          [`readAtBy.${safeReadAtKey(uid)}`]: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
       });
-    });
-
-    await batch.commit();
+      await batch.commit();
+    }
   },
 
   archiveMessage: async (messageId: string): Promise<void> => {

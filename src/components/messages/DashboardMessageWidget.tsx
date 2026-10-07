@@ -4,6 +4,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faEnvelopeOpenText, faArrowRight, faCheckDouble } from '@fortawesome/free-solid-svg-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMessageInbox } from '../../hooks/useMessageInbox';
+import { useMessageReadActions } from '../../hooks/useMessageReadActions';
 import { messageService } from '../../services/messageService';
 import type { ErpMessage } from '../../types/erpMessage';
 import { messageDestination } from '../../utils/messageNavigation';
@@ -20,23 +21,19 @@ const formatTime = (message: ErpMessage): string =>
 export const DashboardMessageWidget: React.FC = () => {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
-  const { messages, summary, loading } = useMessageInbox(currentUser?.uid);
+  const { messages, summary, loading, error, retry } = useMessageInbox(currentUser?.uid);
+  const { markRead, markAllRead, busy, error: actionError, retry: retryRead } = useMessageReadActions(currentUser?.uid);
   const visibleMessages = [...messages].sort((left, right) => {
     if (!currentUser?.uid) return 0;
     return Number(messageService.isReadBy(left, currentUser.uid)) - Number(messageService.isReadBy(right, currentUser.uid));
   }).slice(0, 3);
 
-  const openMessage = async (message: ErpMessage) => {
-    if (currentUser?.uid && !messageService.isReadBy(message, currentUser.uid)) {
-      await messageService.markAsRead(message.id, currentUser.uid);
-    }
+  const openMessage = (message: ErpMessage) => {
+    void markRead(message);
     navigate(messageDestination(message));
   };
 
-  const markAllAsRead = async () => {
-    if (!currentUser?.uid) return;
-    await messageService.markAllAsRead(messages, currentUser.uid);
-  };
+  const markAllAsRead = () => markAllRead(messages);
 
   return (
     <section className="erp-message-dashboard-card" aria-label="대시보드 메시지 요약">
@@ -60,7 +57,7 @@ export const DashboardMessageWidget: React.FC = () => {
             type="button"
             className="erp-message-secondary-button"
             onClick={markAllAsRead}
-            disabled={summary.unread === 0}
+            disabled={summary.unread === 0 || busy || loading || Boolean(error)}
           >
             <FontAwesomeIcon icon={faCheckDouble} />
             모두 읽음
@@ -76,7 +73,12 @@ export const DashboardMessageWidget: React.FC = () => {
         </div>
       </div>
 
-      {messages.length === 0 ? (
+      {actionError && <div role="alert" className="erp-message-read-error">{actionError}
+        <button type="button" disabled={busy} onClick={() => void retryRead?.()}>읽음 처리 다시 시도</button>
+      </div>}
+      {error ? <div role="alert" className="erp-message-empty">메시지를 불러오지 못했습니다.<button type="button" onClick={retry}>다시 불러오기</button></div>
+      : loading ? <div role="status" className="erp-message-empty">메시지를 불러오는 중입니다.</div>
+      : messages.length === 0 ? (
         <div className="erp-message-dashboard-empty">현재 확인할 메시지가 없습니다.</div>
       ) : (
         <div className="erp-message-dashboard-list">

@@ -1622,3 +1622,25 @@
     right: -56px;
   }
 }
+.erp-message-read-error {
+  padding: 12px;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 14px;
+}
+
+.erp-message-read-error button {
+  margin-left: 8px;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.erp-message-indicator > .erp-message-read-error {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: calc(var(--z-modal, 1000) + 1);
+  width: min(340px, calc(100vw - 24px));
+}

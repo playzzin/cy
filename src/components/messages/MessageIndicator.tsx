@@ -4,6 +4,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faEnvelope, faCheckDouble } from '@fortawesome/free-solid-svg-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMessageNotifications } from '../../hooks/useMessageInbox';
+import { useMessageReadActions } from '../../hooks/useMessageReadActions';
 import { messageService } from '../../services/messageService';
 import type { ErpMessage } from '../../types/erpMessage';
 import { messageDestination } from '../../utils/messageNavigation';
@@ -30,8 +31,21 @@ export const MessageIndicator: React.FC = () => {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const { messages, summary, loading } = useMessageNotifications(currentUser?.uid);
+  const { markRead, markAllRead, busy, error: actionError, retry: retryRead } = useMessageReadActions(currentUser?.uid);
+  const { messages, summary, loading, error, retry } = useMessageNotifications(currentUser?.uid);
+
+  useEffect(() => { setOpen(false); }, [currentUser?.uid]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setOpen(false); triggerRef.current?.focus(); }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -44,24 +58,21 @@ export const MessageIndicator: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const openMessage = async (message: ErpMessage) => {
-    if (currentUser?.uid && !messageService.isReadBy(message, currentUser.uid)) {
-      await messageService.markAsRead(message.id, currentUser.uid);
-    }
+  const openMessage = (message: ErpMessage) => {
+    if (!currentUser?.uid) return;
+    void markRead(message);
     setOpen(false);
     navigate(messageDestination(message));
   };
 
-  const markAllAsRead = async () => {
-    if (!currentUser?.uid) return;
-    await messageService.markAllAsRead(messages, currentUser.uid);
-  };
+  const markAllAsRead = () => markAllRead(messages);
 
   const unreadLabel = summary.unread > 99 ? '99+' : String(summary.unread);
 
   return (
     <div className="erp-message-indicator" ref={containerRef}>
       <button
+        ref={triggerRef}
         type="button"
         className={`header-btn erp-message-button ${summary.unread > 0 ? 'has-unread' : ''}`}
         onClick={() => setOpen((value) => !value)}
@@ -72,6 +83,10 @@ export const MessageIndicator: React.FC = () => {
         <FontAwesomeIcon icon={faEnvelope} />
         {summary.unread > 0 && <span className="erp-message-badge">{unreadLabel}</span>}
       </button>
+
+      {actionError && <div role="alert" className="erp-message-read-error">{actionError}
+        <button type="button" disabled={busy} onClick={() => void retryRead?.()}>읽음 처리 다시 시도</button>
+      </div>}
 
       {open && (
         <div className="erp-message-popover" role="dialog" aria-label="최근 메시지">
@@ -87,8 +102,9 @@ export const MessageIndicator: React.FC = () => {
                 type="button"
                 className="erp-message-text-button"
                 onClick={markAllAsRead}
-                disabled={summary.unread === 0}
+                disabled={summary.unread === 0 || busy || loading || Boolean(error)}
                 title="모두 읽음 처리"
+                aria-label="모든 알림 읽음 처리"
               >
                 <FontAwesomeIcon icon={faCheckDouble} />
               </button>
@@ -96,10 +112,11 @@ export const MessageIndicator: React.FC = () => {
           </div>
 
           <div className="erp-message-popover-list">
-            {messages.length === 0 ? (
+            {error && <div role="alert" className="erp-message-empty">알림을 불러오지 못했습니다.<button type="button" onClick={retry} className="erp-message-text-button">다시 불러오기</button></div>}
+            {loading ? <div role="status" className="erp-message-empty">알림을 불러오는 중입니다.</div> : !error && messages.length === 0 ? (
               <div className="erp-message-empty">도착한 메시지가 없습니다.</div>
             ) : (
-              messages.slice(0, 6).map((message) => {
+              !error && [...messages].sort((a, b) => Number(messageService.isReadBy(a, currentUser?.uid || '')) - Number(messageService.isReadBy(b, currentUser?.uid || '')) || b.createdAt.toMillis() - a.createdAt.toMillis()).slice(0, 6).map((message) => {
                 const unread = currentUser?.uid ? !messageService.isReadBy(message, currentUser.uid) : false;
 
                 return (
@@ -108,6 +125,7 @@ export const MessageIndicator: React.FC = () => {
                     type="button"
                     className={`erp-message-preview ${unread ? 'unread' : ''}`}
                     onClick={() => void openMessage(message)}
+                    disabled={busy}
                   >
                     <div className="erp-message-preview-topline">
                       <span className="erp-message-preview-title">{message.title}</span>

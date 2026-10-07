@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { messageService } from '../services/messageService';
 import type { ErpMessage, ErpMessageSummary } from '../types/erpMessage';
 
@@ -39,87 +39,55 @@ export const playMessageNotificationSound = () => {
 };
 
 export const useMessageInbox = (uid?: string | null, limitCount?: number) => {
-  const [messages, setMessages] = useState<ErpMessage[]>([]);
-  const [loading, setLoading] = useState(Boolean(uid));
-  const [error, setError] = useState<Error | null>(null);
+  const [state, setState] = useState<{ owner?: string | null; messages: ErpMessage[]; loading: boolean; error: Error | null }>({
+    owner: uid, messages: [], loading: Boolean(uid), error: null
+  });
+  const [revision, setRevision] = useState(0);
+  const retry = useCallback(() => setRevision(value => value + 1), []);
 
   useEffect(() => {
-    if (!uid) {
-      setMessages([]);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-
-    setLoading(true);
+    let active = true;
+    setState({ owner: uid, messages: [], loading: Boolean(uid), error: null });
+    if (!uid) return;
     const unsubscribe = messageService.subscribeInbox(
       uid,
       (nextMessages) => {
-        setMessages(nextMessages);
-        setLoading(false);
+        if (active) setState({ owner: uid, messages: nextMessages, loading: false, error: null });
       },
       (nextError) => {
-        setError(nextError);
-        setLoading(false);
+        if (active) setState({ owner: uid, messages: [], loading: false, error: nextError });
       },
       limitCount
     );
 
-    return unsubscribe;
-  }, [uid, limitCount]);
+    return () => { active = false; unsubscribe(); };
+  }, [uid, limitCount, revision]);
+
+  const { messages, loading, error } = state.owner === uid ? state : { messages: [], loading: Boolean(uid), error: null };
 
   const summary = useMemo(() => {
     return uid ? messageService.buildSummary(uid, messages) : emptySummary;
   }, [uid, messages]);
 
-  return { messages, summary, loading, error };
+  return { messages, summary, loading, error, retry };
 };
 
 export const useMessageNotifications = (uid?: string | null) => {
-  const [messages, setMessages] = useState<ErpMessage[]>([]);
-  const [loading, setLoading] = useState(Boolean(uid));
-  const initializedRef = useRef(false);
-  const latestUnreadIdRef = useRef<string | null>(null);
-
+  const inbox = useMessageInbox(uid);
+  const previous = useRef<{ uid?: string | null; ids: Set<string>; initialized: boolean }>({ uid, ids: new Set(), initialized: false });
   useEffect(() => {
-    initializedRef.current = false;
-    latestUnreadIdRef.current = null;
-
-    if (!uid) {
-      setMessages([]);
-      setLoading(false);
-      return;
+    if (previous.current.uid !== uid || inbox.loading || inbox.error) {
+      previous.current = { uid, ids: new Set(), initialized: false };
     }
-
-    setLoading(true);
-    const unsubscribe = messageService.subscribeInbox(
-      uid,
-      (nextMessages) => {
-        const latestUnread = nextMessages.find((message) => !messageService.isReadBy(message, uid));
-        const latestUnreadId = latestUnread?.id || null;
-
-        if (initializedRef.current && latestUnreadId && latestUnreadId !== latestUnreadIdRef.current) {
-          playMessageNotificationSound();
-          if ('vibrate' in navigator) navigator.vibrate?.(80);
-        }
-
-        initializedRef.current = true;
-        latestUnreadIdRef.current = latestUnreadId;
-        setMessages(nextMessages);
-        setLoading(false);
-      },
-      () => {
-        setLoading(false);
-      },
-      20
-    );
-
-    return unsubscribe;
-  }, [uid]);
-
-  const summary = useMemo(() => {
-    return uid ? messageService.buildSummary(uid, messages) : emptySummary;
-  }, [uid, messages]);
-
-  return { messages, summary, loading };
+    if (!uid || inbox.loading || inbox.error) return;
+    const incoming = inbox.messages.some(message => !messageService.isReadBy(message, uid) && !previous.current.ids.has(message.id));
+    if (previous.current.initialized && incoming) {
+      playMessageNotificationSound();
+      try { navigator.vibrate?.(80); } catch { /* Optional device feedback. */ }
+    }
+    // Keep observed ids across read receipts, reordered lists and temporary omissions.
+    inbox.messages.forEach(message => previous.current.ids.add(message.id));
+    previous.current.initialized = true;
+  }, [uid, inbox.messages, inbox.loading, inbox.error]);
+  return inbox;
 };
