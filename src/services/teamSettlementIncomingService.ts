@@ -18,6 +18,11 @@ export interface TeamSettlementIncomingRow {
   rateSource?: string;
 }
 
+// Administrators already have their full support details. Team leaders need a
+// server projection because the other teams' catalogs and workers are private.
+export const getTeamSettlementOutgoingRows = (params: { yearMonth: string; teamId: string }): Promise<TeamSettlementIncomingRow[] | null> =>
+  getTeamScopedRows<TeamSettlementIncomingRow>('team_settlement_incoming', { ...params, direction: 'outgoing' });
+
 export const getTeamSettlementIncomingRows = async (params: { yearMonth: string; teamId: string }): Promise<TeamSettlementIncomingRow[]> => {
   if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(params.yearMonth) || !params.teamId.trim()) {
     throw new Error('정산 조회 월과 팀을 확인해 주세요.');

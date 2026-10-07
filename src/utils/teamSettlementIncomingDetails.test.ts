@@ -1,8 +1,15 @@
-import { applySavedIncomingSupportRates, getIncomingTeamsForSettlementLine } from './teamSettlementIncomingDetails';
+import { applySavedIncomingSupportRates, applySavedOutgoingSupportRates, getIncomingTeamsForSettlementLine, getOutgoingTeamsForSettlementLine } from './teamSettlementIncomingDetails';
 import type { TeamSettlementIncomingRow } from '../services/teamSettlementIncomingService';
 
 const row: TeamSettlementIncomingRow = { id: 'r', date: '2026-09-01', siteId: 'site-a', siteLegacyId: 'old-site', siteName: 'A현장', teamId: 'b', teamLegacyId: 'old-b', teamName: 'B팀', manDay: 2 };
 const siteLine = { source: 'auto', origin: 'daily_report', direction: 'sales', siteId: 'site-a' };
+it('지원 매출의 상대팀과 현장을 연결하고 저장된 우리 팀 지원단가를 사용한다', () => {
+  const line = { id: 'sale', source: 'auto' as const, origin: '내부지원간곳' as const, kind: '지원' as const,
+    siteId: 'old-site', siteName: 'A현장', counterTeamId: 'old-b', manDay: 2, amount: 540000 };
+  expect(getOutgoingTeamsForSettlementLine({ ...line, direction: 'sales' }, [row])).toEqual([row]);
+  expect(applySavedOutgoingSupportRates([row], [line])[0]).toMatchObject({ manDay: 2, supportRate: 270000, supportAmount: 540000 });
+  expect(getOutgoingTeamsForSettlementLine({ ...line, direction: 'purchase' }, [row])).toEqual([]);
+});
 it('도급·직영 현장 상세에 지원 온 팀을 연결한다', () => {
   expect(getIncomingTeamsForSettlementLine(siteLine, [row])).toEqual([row]);
   expect(getIncomingTeamsForSettlementLine({ ...siteLine, siteId: 'old-site' }, [row])).toEqual([row]);

@@ -17,10 +17,10 @@ const positiveRate = (value: unknown): number | null => {
     const rate = Number(typeof value === 'string' ? value.replace(/,/g, '') : value);
     return Number.isFinite(rate) && rate > 0 ? Math.round(rate) : null;
 };
-export const withIncomingSupportRates = (rows: IncomingTeamSummary[], teams: TeamRow[], siteRates: any[]) => rows.map(row => {
+export const withIncomingSupportRates = (rows: IncomingTeamSummary[], teams: TeamRow[], siteRates: any[], sendingTeam?: TeamRow) => rows.map(row => {
     const configured = siteRates.find(rate => [row.siteId, row.siteLegacyId].filter(Boolean).includes(text(rate.siteId || rate.id)));
     const siteRate = positiveRate(configured?.defaultRate);
-    const teamRate = positiveRate(teams.find(team => ids(team).includes(row.teamId))?.supportRate);
+    const teamRate = positiveRate((sendingTeam ?? teams.find(team => ids(team).includes(row.teamId)))?.supportRate);
     // The documented support default is 230,000. Worker unitPrice is never a
     // fallback here: that is an individual wage, not the team's support rate.
     const supportRate = siteRate ?? teamRate ?? 230000;
@@ -59,11 +59,42 @@ export const summarizeIncomingTeams = (reports: TeamRow[], scope: TeamReadScope,
     return [...summaries.values()].sort((a, b) => a.date.localeCompare(b.date) || a.teamName.localeCompare(b.teamName));
 };
 
+// Outgoing details include only the authorized team's own workers. The other
+// team's directory and workers remain server-side, as for incoming summaries.
+export const summarizeOutgoingTeams = (reports: TeamRow[], scope: TeamReadScope, teams: TeamRow[] = [], sites: TeamRow[] = []): IncomingTeamSummary[] => {
+    const grouped = new Map<string, IncomingTeamSummary>();
+    if (!scope.teamIds.length) return [];
+    for (const report of reports) {
+        const targetId = responsibleTeam(report);
+        if (!targetId || scope.teamIds.includes(targetId)) continue;
+        const team = teams.find(row => ids(row).includes(targetId));
+        const site = sites.find(row => ids(row).includes(text(report.siteId)));
+        const manDay = list(report.workers).filter(worker => scope.workerIds.includes(text(worker.workerId || worker.id)))
+            .reduce((total, worker) => {
+                const value = Number(worker.manDay);
+                return total + (Number.isFinite(value) && value > 0 ? value : 0);
+            }, 0);
+        if (manDay <= 0) continue;
+        const date = text(report.date), siteId = site?.id || text(report.siteId), teamId = team?.id || targetId;
+        const key = JSON.stringify([date, siteId || text(report.siteName), teamId]);
+        grouped.set(key, { id: key, date, siteId, siteName: text(report.siteName) || text(site?.name),
+            teamId, teamName: text(report.responsibleTeamName) || text(report.teamName) || text(team?.name) || '상대팀',
+            ...(text(team?.legacyId) ? { teamLegacyId: text(team?.legacyId) } : {}),
+            ...(text(site?.legacyId) ? { siteLegacyId: text(site?.legacyId) } : {}),
+            manDay: Math.round(((grouped.get(key)?.manDay || 0) + manDay) * 10000) / 10000 });
+    }
+    return [...grouped.values()].sort((a, b) => a.date.localeCompare(b.date) || a.teamName.localeCompare(b.teamName));
+};
+
 export const readTeamSettlementIncoming = async (
     db: admin.firestore.Firestore, authorizedTeams: TeamRow[], authorizedWorkers: TeamRow[],
     filters: Record<string, any>, metrics: TeamQueryMetrics
 ) => {
     const yearMonth = text(filters.yearMonth);
+    const direction = text(filters.direction) || 'incoming';
+    if (!['incoming', 'outgoing'].includes(direction)) {
+        throw new functions.https.HttpsError('invalid-argument', '지원 조회 구분을 확인해 주세요.');
+    }
     if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth)) {
         throw new functions.https.HttpsError('invalid-argument', '정산 조회 월을 확인해 주세요.');
     }
@@ -75,11 +106,12 @@ export const readTeamSettlementIncoming = async (
     const endDate = `${yearMonth}-${new Date(Date.UTC(year, month, 0)).getUTCDate()}`;
     const [reports, sites] = await Promise.all([
         queryRows(db.collection('daily_reports').where('date', '>=', `${yearMonth}-01`).where('date', '<=', endDate)
-            .select('date', 'siteId', 'siteName', 'responsibleTeamId', 'teamId', 'workers'), metrics),
+            .select('date', 'siteId', 'siteName', 'responsibleTeamId', 'responsibleTeamName', 'teamId', 'teamName', 'workers'), metrics),
         queryTeamCandidates(db, 'sites', scope, metrics).then(rows => rows.filter(row => scope.teamIds.includes(responsibleTeam(row)))),
     ]);
     scope.siteIds = sites.flatMap(ids);
-    const incoming = summarizeIncomingTeams(reports, scope);
+    const summarize = direction === 'outgoing' ? summarizeOutgoingTeams : summarizeIncomingTeams;
+    const incoming = summarize(reports, scope);
     // Master records stay server-side. Only canonical IDs and display names
     // enter the aggregate response; no wages, companies, or member lists.
     const [teams, reportSites, rateConfigs] = await Promise.all([
@@ -91,5 +123,6 @@ export const readTeamSettlementIncoming = async (
     if (typeof rateData === 'string') {
         try { rateData = JSON.parse(rateData); } catch { rateData = null; }
     }
-    return withIncomingSupportRates(summarizeIncomingTeams(reports, scope, teams, reportSites), teams, list(Array.isArray(rateData) ? rateData : rateData?.rates));
+    return withIncomingSupportRates(summarize(reports, scope, teams, reportSites), teams,
+        list(Array.isArray(rateData) ? rateData : rateData?.rates), direction === 'outgoing' ? team : undefined);
 };

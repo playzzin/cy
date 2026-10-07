@@ -5,7 +5,7 @@ import { teamService } from './teamService';
 import { siteService } from './siteService';
 import { manpowerService } from './manpowerService';
 import { supportRateService } from './supportRateService';
-import { getTeamSettlementIncomingRows } from './teamSettlementIncomingService';
+import { getTeamSettlementIncomingRows, getTeamSettlementOutgoingRows } from './teamSettlementIncomingService';
 
 jest.mock('../config/firebase', () => ({ auth: { currentUser: { uid: 'admin' } } }));
 jest.mock('./teamScopedReadService', () => ({ getTeamScopedRows: jest.fn() }));
@@ -77,6 +77,16 @@ it('현장 단가가 없으면 팀 지원단가, 팀 단가도 없으면 기본 
 it('잘못된 조회 월을 거부한다', async () => {
   await expect(getTeamSettlementIncomingRows({ ...params, yearMonth: '2026-13' })).rejects.toThrow('조회 월');
   expect(getTeamScopedRows).not.toHaveBeenCalled();
+});
+
+it('지원 간 우리 팀 공수도 팀장 서버 조회를 사용하며 관리자 전체 조회로 우회하지 않는다', async () => {
+  const rows = [{ id: 'outgoing', manDay: 3, supportRate: 270000 }];
+  (getTeamScopedRows as jest.Mock).mockResolvedValue(rows);
+  expect(await getTeamSettlementOutgoingRows(params)).toBe(rows);
+  expect(getTeamScopedRows).toHaveBeenCalledWith('team_settlement_incoming', { ...params, direction: 'outgoing' });
+  (getTeamScopedRows as jest.Mock).mockRejectedValue(new Error('permission-denied'));
+  await expect(getTeamSettlementOutgoingRows(params)).rejects.toThrow('permission-denied');
+  expect(dailyReportService.getReportsByRange).not.toHaveBeenCalled();
 });
 
 it('관리자 조회 도중 계정이 바뀌면 이전 계정의 결과를 반환하지 않는다', async () => {

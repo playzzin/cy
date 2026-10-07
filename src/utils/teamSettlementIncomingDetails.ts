@@ -1,5 +1,5 @@
 import type { TeamSettlementIncomingRow } from '../services/teamSettlementIncomingService';
-import type { TeamSettlementPurchaseItem } from '../types/teamSettlement';
+import type { TeamSettlementPurchaseItem, TeamSettlementSalesItem } from '../types/teamSettlement';
 
 type Line = {
   source: string; origin: string; direction: string;
@@ -24,10 +24,18 @@ export const getIncomingTeamsForSettlementLine = (line: Line, rows: TeamSettleme
     && (!incoming || matches(line.counterTeamId, line.counterTeamName, row.teamId, row.teamName, row.teamLegacyId)));
 };
 
-export const applySavedIncomingSupportRates = (rows: TeamSettlementIncomingRow[], purchases: TeamSettlementPurchaseItem[]): TeamSettlementIncomingRow[] => {
+export const getOutgoingTeamsForSettlementLine = (line: Line, rows: TeamSettlementIncomingRow[]): TeamSettlementIncomingRow[] => {
+  if (line.source !== 'auto' || line.direction !== 'sales'
+    || !['내부지원간곳', '외부지원간곳', 'support_outgoing', 'support_fee_outgoing'].includes(line.origin)) return [];
+  return rows.filter(row => matches(line.siteId, line.siteName, row.siteId, row.siteName, row.siteLegacyId)
+    && matches(line.counterTeamId, line.counterTeamName, row.teamId, row.teamName, row.teamLegacyId));
+};
+
+const applySavedSupportRates = (rows: TeamSettlementIncomingRow[], lines: Array<TeamSettlementPurchaseItem | TeamSettlementSalesItem>, direction: 'purchase' | 'sales'): TeamSettlementIncomingRow[] => {
   const groups = new Map<string, { indices: number[]; manDay: number; amount: number }>();
   const result = rows.map((row, index) => {
-    const matching = purchases.filter(line => line.kind === '지원' && getIncomingTeamsForSettlementLine({ ...line, direction: 'purchase' }, [row]).length > 0);
+    const select = direction === 'sales' ? getOutgoingTeamsForSettlementLine : getIncomingTeamsForSettlementLine;
+    const matching = lines.filter(line => line.kind === '지원' && select({ ...line, direction }, [row]).length > 0);
     const manDay = matching.reduce((sum, line) => sum + line.manDay, 0);
     if (!matching.length || manDay <= 0) return row;
     const amount = matching.reduce((sum, line) => sum + line.amount, 0);
@@ -47,3 +55,8 @@ export const applySavedIncomingSupportRates = (rows: TeamSettlementIncomingRow[]
   });
   return result;
 };
+
+export const applySavedIncomingSupportRates = (rows: TeamSettlementIncomingRow[], purchases: TeamSettlementPurchaseItem[]) =>
+  applySavedSupportRates(rows, purchases, 'purchase');
+export const applySavedOutgoingSupportRates = (rows: TeamSettlementIncomingRow[], sales: TeamSettlementSalesItem[]) =>
+  applySavedSupportRates(rows, sales, 'sales');

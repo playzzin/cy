@@ -3,7 +3,7 @@ import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { TeamSettlementPage } from './TeamSettlementPage';
 import { teamSettlementService } from '../../services/teamSettlementService';
-import { getTeamSettlementIncomingRows } from '../../services/teamSettlementIncomingService';
+import { getTeamSettlementIncomingRows, getTeamSettlementOutgoingRows } from '../../services/teamSettlementIncomingService';
 import type { TeamSettlementDocument } from '../../types/teamSettlement';
 import { teamService } from '../../services/teamService';
 import { companyService } from '../../services/companyService';
@@ -13,7 +13,7 @@ jest.mock('../../services/teamService', () => ({ teamService: { getTeams: jest.f
 jest.mock('../../services/companyService', () => ({ companyService: { getCompaniesByType: jest.fn().mockResolvedValue([{ id: 'company', name: '시공사' }]) } }));
 // The leader's ordinary report query has no visiting workers or other teams.
 jest.mock('../../services/dailyReportService', () => ({ dailyReportService: { getReportWorkerRowsByRange: jest.fn().mockResolvedValue([]) } }));
-jest.mock('../../services/teamSettlementIncomingService', () => ({ getTeamSettlementIncomingRows: jest.fn() }));
+jest.mock('../../services/teamSettlementIncomingService', () => ({ getTeamSettlementIncomingRows: jest.fn(), getTeamSettlementOutgoingRows: jest.fn() }));
 jest.mock('../../services/teamSettlementService', () => ({ teamSettlementService: {
   getTeamSettlement: jest.fn(), getTeamDisplayOrder: jest.fn().mockResolvedValue([]),
   getSupportRateOverrides: jest.fn().mockResolvedValue({}), getSupportSettlementDetailRows: jest.fn().mockResolvedValue([]),
@@ -60,9 +60,31 @@ beforeEach(() => {
   jest.mocked(companyService.getCompaniesByType).mockResolvedValue([{ id: 'company', name: '시공사' } as any]);
   jest.mocked(teamSettlementService.getSupportRateOverrides).mockResolvedValue({} as any);
   jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(document());
+  jest.mocked(getTeamSettlementOutgoingRows).mockResolvedValue(null);
   jest.mocked(getTeamSettlementIncomingRows).mockResolvedValue([{ id: 'incoming', date: '2026-08-03',
     siteId: 'site', siteName: '담당 현장', teamId: 'visitor', teamName: '지원 방문팀', manDay: 2,
     supportRate: 230000, supportAmount: 460000 }]);
+});
+
+it('상대팀 목록을 볼 수 없는 팀장도 상대팀 현장에 지원 간 우리 팀 공수와 지원단가를 본다', async () => {
+  const saved = document();
+  saved.purchases = [];
+  saved.sales = [{ id: 'sale', source: 'auto', origin: '내부지원간곳', kind: '지원', siteId: 'site-b',
+    siteName: '상대팀 현장', counterTeamId: 'host', counterTeamName: '상대 시공팀', manDay: 3, amount: 810000 }];
+  delete saved.sourceSnapshot!.supportDetails;
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  jest.mocked(getTeamSettlementIncomingRows).mockResolvedValue([]);
+  jest.mocked(getTeamSettlementOutgoingRows).mockResolvedValue([{ id: 'sent', date: '2026-08-05', siteId: 'site-b',
+    siteName: '상대팀 현장', teamId: 'host', teamName: '상대 시공팀', manDay: 3, supportRate: 230000, supportAmount: 690000 }]);
+  render(<TeamSettlementPage />);
+  await screen.findByRole('button', { name: '상세', exact: true });
+  fireEvent.click(screen.getByRole('button', { name: '상세', exact: true }));
+  const detail = await screen.findByRole('region', { name: '지원 간 현장 상세' });
+  expect(within(detail).getByText('상대 시공팀')).toBeVisible();
+  expect(within(detail).getAllByText('3공')).toHaveLength(2);
+  expect(within(detail).getByText('270,000원')).toBeVisible();
+  expect(within(detail).getAllByText('810,000원')).toHaveLength(2);
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
 });
 
 it('팀장 조회에서 저장된 빈 상세와 관계없이 지원 온 팀의 공수·정산 지원단가를 펼쳐 보여준다', async () => {

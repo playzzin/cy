@@ -1,7 +1,7 @@
 import { strict as assert } from 'assert';
 import { test } from 'node:test';
 import { filterTeamRows, TeamReadScope } from './teamReadPolicy';
-import { summarizeIncomingTeams, withIncomingSupportRates } from './teamSettlementRead';
+import { summarizeIncomingTeams, summarizeOutgoingTeams, withIncomingSupportRates } from './teamSettlementRead';
 import * as admin from 'firebase-admin';
 import { getTeamScopedData } from './teamScopedRead';
 
@@ -45,6 +45,19 @@ test('일반 일보 조회의 본인 작업자 제한은 유지된다', () => {
     assert.deepEqual(filterTeamRows('daily_reports', [{ ...report, workers: [incoming] }], scope), []);
 });
 
+test('지원 간 현장은 우리 팀 공수만 합산하고 보내는 팀 지원단가를 사용한다', () => {
+    const rows = summarizeOutgoingTeams([
+        { ...report, responsibleTeamId: 'old-b', workers: [incoming, { workerId: 'own', teamId: 'a', manDay: 2, unitPrice: 999999 }] },
+        { ...report, workers: [{ workerId: 'own', manDay: 9 }] },
+        { ...report, responsibleTeamId: 'c', workers: [{ workerId: 'private', teamId: 'a', manDay: 4 }] },
+    ], scope, [{ id: 'b', legacyId: 'old-b', name: '상대팀', supportRate: 999999 }]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].manDay, 2);
+    assert.equal(rows[0].teamId, 'b');
+    assert.equal(withIncomingSupportRates(rows, [], [], { id: 'a', supportRate: 240000 })[0].supportAmount, 480000);
+    assert.equal(JSON.stringify(rows).includes('999999'), false);
+});
+
 test('개인 급여가 아닌 현장 지원단가, 팀 지원단가, 기본 지원단가 순서로 계산한다', () => {
     const rows = summarizeIncomingTeams([{ ...report, workers: [{ ...incoming, manDay: 2, unitPrice: 999999 }] }], scope);
     const teams = [{ id: 'b', supportRate: 250000, unitPrice: 888888 }];
@@ -58,7 +71,7 @@ test('팀장 callable은 담당 현장의 선택 월 지원 공수만 반환하�
     const db = app.firestore();
     const fixtures: Record<string, unknown> = {
         'users/leader': { status: 'active', position: '팀장', linkedWorkerIds: ['own'] },
-        'teams/a': { legacyId: 'old-a', name: 'A팀' },
+        'teams/a': { legacyId: 'old-a', name: 'A팀', supportRate: 240000 },
         'teams/b': { legacyId: 'old-b', name: 'B지원팀', supportRate: 250000, bankAccount: 'never-return' },
         'workers/own': { teamId: 'a', role: '팀장' },
         'workers/other': { teamId: 'b', name: 'private-worker', unitPrice: 999999 },
@@ -68,6 +81,7 @@ test('팀장 callable은 담당 현장의 선택 월 지원 공수만 반환하�
         'daily_reports/mixed': { ...report, date: '2026-09-02', workers: [incoming, { ...incoming, workerId: 'own', teamId: 'a' }] },
         'daily_reports/other-site': { ...report, siteId: 'site-b', responsibleTeamId: 'b', workers: [incoming] },
         'daily_reports/other-month': { ...report, date: '2026-10-01', workers: [incoming] },
+        'daily_reports/outgoing': { ...report, siteId: 'site-b', responsibleTeamId: 'b', workers: [incoming, { workerId: 'own', teamId: 'a', manDay: 3, unitPrice: 999999 }] },
     };
     try {
         const batch = db.batch();
@@ -84,8 +98,17 @@ test('팀장 callable은 담당 현장의 선택 월 지원 공수만 반환하�
         for (const secret of ['never-return', 'private-worker', '999999']) assert.equal(JSON.stringify(result).includes(secret), false);
         const batched = await getTeamScopedData.run({ requests: [request, { collection: 'daily_reports', filters: { startDate: '2026-09-01', endDate: '2026-09-30' } }] }, context);
         assert.deepEqual(batched.results[0].rows, result.rows);
-        assert.equal(batched.results[1].rows.length, 1);
-        assert.deepEqual(batched.results[1].rows[0].workers.map((row: any) => row.workerId), ['own']);
+        assert.equal(batched.results[1].rows.length, 2);
+        assert.ok(batched.results[1].rows.every((row: any) => row.workers.every((worker: any) => worker.workerId === 'own')));
+        const outgoing = await getTeamScopedData.run({ ...request, filters: { ...request.filters, direction: 'outgoing' } }, context);
+        assert.equal(outgoing.rows.length, 1);
+        assert.equal(outgoing.rows[0].teamName, 'B지원팀');
+        assert.equal(outgoing.rows[0].manDay, 3);
+        assert.equal(outgoing.rows[0].supportRate, 240000);
+        assert.equal(outgoing.rows[0].supportAmount, 720000);
+        assert.ok(!JSON.stringify(outgoing).includes('999999'));
+        await assert.rejects(getTeamScopedData.run({ ...request, filters: { ...request.filters, direction: 'all' } }, context), (error: any) => error.code === 'invalid-argument');
+        await assert.rejects(getTeamScopedData.run({ ...request, filters: { ...request.filters, direction: 'outgoing', teamId: 'b' } }, context), (error: any) => error.code === 'permission-denied');
         await assert.rejects(getTeamScopedData.run({ ...request, filters: { ...request.filters, teamId: 'b' } }, context), (error: any) => error.code === 'permission-denied');
         for (const month of ['', '2026-13', '2026-09-01']) {
             await assert.rejects(getTeamScopedData.run({ ...request, filters: { ...request.filters, yearMonth: month } }, context), (error: any) => error.code === 'invalid-argument');
