@@ -2,6 +2,7 @@ import { strict as assert } from 'assert';
 import { test } from 'node:test';
 import { filterTeamRows, TeamReadScope } from './teamReadPolicy';
 import { summarizeIncomingTeams, summarizeOutgoingTeams, withIncomingSupportRates } from './teamSettlementRead';
+import { buildTeamSettlementSupportDetails } from './teamSettlementSupportDetails';
 import * as admin from 'firebase-admin';
 import { getTeamScopedData } from './teamScopedRead';
 
@@ -71,8 +72,8 @@ test('팀장 callable은 담당 현장의 선택 월 지원 공수만 반환하�
     const db = app.firestore();
     const fixtures: Record<string, unknown> = {
         'users/leader': { status: 'active', position: '팀장', linkedWorkerIds: ['own'] },
-        'teams/a': { legacyId: 'old-a', name: 'A팀', supportRate: 240000 },
-        'teams/b': { legacyId: 'old-b', name: 'B지원팀', supportRate: 250000, bankAccount: 'never-return' },
+        'teams/a': { legacyId: 'old-a', name: 'A팀', companyName: '청연', supportRate: 240000 },
+        'teams/b': { legacyId: 'old-b', name: 'B지원팀', companyName: '청연', supportRate: 250000, bankAccount: 'never-return' },
         'workers/own': { teamId: 'a', role: '팀장' },
         'workers/other': { teamId: 'b', name: 'private-worker', unitPrice: 999999 },
         'sites/site-a': { responsibleTeamId: 'a', name: 'A현장' },
@@ -100,6 +101,16 @@ test('팀장 callable은 담당 현장의 선택 월 지원 공수만 반환하�
         assert.deepEqual(batched.results[0].rows, result.rows);
         assert.equal(batched.results[1].rows.length, 2);
         assert.ok(batched.results[1].rows.every((row: any) => row.workers.every((worker: any) => worker.workerId === 'own')));
+        const detailsRequest = { collection: 'team_settlement_support_details', filters: request.filters };
+        const details = await getTeamScopedData.run(detailsRequest, context);
+        assert.equal(details.rows.length, 3);
+        assert.equal(details.rows.filter((row: any) => row.direction === '내부지원온곳').length, 2);
+        assert.equal(details.rows.find((row: any) => row.direction === '내부지원간곳').manDay, 3);
+        assert.ok(details.rows.every((row: any) => row.unitPrice === (row.direction === '내부지원간곳' ? 240000 : 250000)));
+        assert.ok(details.rows.some((row: any) => row.workerName === '개인 이름'));
+        for (const secret of ['never-return', 'private-worker', '999999', 'accountNumber']) assert.equal(JSON.stringify(details).includes(secret), false);
+        await assert.rejects(getTeamScopedData.run({ ...detailsRequest, filters: { ...request.filters, teamId: 'b' } }, context), (error: any) => error.code === 'permission-denied');
+        await assert.rejects(getTeamScopedData.run({ ...detailsRequest, filters: { ...request.filters, yearMonth: '2026-13' } }, context), (error: any) => error.code === 'invalid-argument');
         const outgoing = await getTeamScopedData.run({ ...request, filters: { ...request.filters, direction: 'outgoing' } }, context);
         assert.equal(outgoing.rows.length, 1);
         assert.equal(outgoing.rows[0].teamName, 'B지원팀');
@@ -119,4 +130,25 @@ test('팀장 callable은 담당 현장의 선택 월 지원 공수만 반환하�
         await Promise.all(Object.keys(fixtures).map(path => db.doc(path).delete()));
         await app.delete();
     }
+});
+
+test('기존 작업자별 지원 상세는 내부/외부 교류와 월별 지원단가를 구분하고 급여를 사용하지 않는다', () => {
+    const teams = [{ id: 'a', legacyId: 'old-a', name: 'A팀', companyName: '청연' },
+        { id: 'b', legacyId: 'old-b', name: 'B팀', companyName: '청연', supportRate: 250000 },
+        { id: 'external', name: '외부팀', companyName: '외부사' }];
+    const params = {teamIds: ['a','old-a'], teams, sites: [], companies: [], supportRates: [],
+        supportRateOverrides: {supportTeamRates: {},supportAggregateRates: {},supportSiteRates: {}},
+        reports: [{ ...report, constructorCompanyName: '청연', workers: [incoming,
+            {...incoming, workerId: 'ext', teamId: 'external'}, {...incoming, workerId:'own',teamId:'old-a'}] },
+            {...report,id:'sent',responsibleTeamId:'old-b',workers:[{...incoming,teamId:'old-a',manDay:3}]},
+            {...report,id:'irrelevant',responsibleTeamId:'b',workers:[incoming]}]};
+    const result = buildTeamSettlementSupportDetails(params);
+    assert.deepEqual(result.map(row => [row.direction,row.manDay,row.unitPrice]), [
+        ['내부지원온곳',1,250000],['외부지원온곳',1,230000],['내부지원간곳',3,230000]]);
+    assert.ok(!JSON.stringify(result).includes('999999'));
+    const monthly = buildTeamSettlementSupportDetails({...params,supportRateOverrides:{...params.supportRateOverrides,
+        supportSiteRates:{'내부지원온곳::a::site-a':270000}}});
+    assert.equal(monthly[0].unitPrice,270000);
+    assert.equal(monthly[0].amount,270000);
+    assert.deepEqual(buildTeamSettlementSupportDetails({...params,teamIds:['unknown']}),[]);
 });

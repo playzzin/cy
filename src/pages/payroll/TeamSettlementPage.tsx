@@ -5,9 +5,6 @@ import CompanyTeamSelector, { readCompanyTeamOrder } from '../../components/comm
 import { applySupportTeamOrder } from '../../utils/supportTeamOrder';
 import { calculateTeamSettlementOfficeExpense, LEGACY_TEAM_SETTLEMENT_OFFICE_RATES } from '../../utils/teamSettlementOfficeExpense';
 import { TeamSettlementOfficeExpenseDetail } from '../../components/payroll/TeamSettlementOfficeExpenseDetail';
-import { TeamSettlementIncomingDetail } from '../../components/payroll/TeamSettlementIncomingDetail';
-import { getTeamSettlementIncomingRows, getTeamSettlementOutgoingRows, type TeamSettlementIncomingRow } from '../../services/teamSettlementIncomingService';
-import { applySavedIncomingSupportRates, applySavedOutgoingSupportRates, getIncomingTeamsForSettlementLine, getOutgoingTeamsForSettlementLine, isIncomingSettlementLine } from '../../utils/teamSettlementIncomingDetails';
 import { CurrencyInput } from '../../components/common/CurrencyInput';
 import {
   TeamSettlementWorkspaceHeader,
@@ -882,16 +879,8 @@ export const TeamSettlementPage: React.FC = () => {
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' });
   const [detailRows, setDetailRows] = useState<DailyReportWorkerRow[]>([]);
   const [supportDetailRows, setSupportDetailRows] = useState<TeamSettlementSupportDetailRow[]>([]);
-  const [incomingDetail, setIncomingDetail] = useState<{ scope: string; rows: TeamSettlementIncomingRow[] | null; error: boolean }>({ scope: '', rows: null, error: false });
-  const [incomingRetry, setIncomingRetry] = useState(0);
-  const incomingScope = `${yearMonth}:${selectedTeamId}`;
-  const incomingRows = useMemo(() => incomingDetail.scope === incomingScope && incomingDetail.rows
-    ? applySavedIncomingSupportRates(incomingDetail.rows, doc?.purchases ?? []) : null, [incomingDetail, incomingScope, doc?.purchases]);
-  const incomingError = incomingDetail.scope === incomingScope && incomingDetail.error;
-  const [outgoingDetail, setOutgoingDetail] = useState<{ scope: string; rows: TeamSettlementIncomingRow[] | null; error: boolean }>({ scope: '', rows: null, error: false });
-  const outgoingRows = useMemo(() => outgoingDetail.scope === incomingScope && outgoingDetail.rows
-    ? applySavedOutgoingSupportRates(outgoingDetail.rows, doc?.sales ?? []) : null, [outgoingDetail, incomingScope, doc?.sales]);
-  const outgoingError = outgoingDetail.scope === incomingScope && outgoingDetail.error;
+  const [supportDetailError, setSupportDetailError] = useState(false);
+  const [supportDetailRetry, setSupportDetailRetry] = useState(0);
   const supportDetailData = useMemo(
     () => resolveTeamSettlementSupportDetails(doc?.sourceSnapshot, supportDetailRows),
     [doc?.sourceSnapshot, supportDetailRows]
@@ -1030,32 +1019,6 @@ export const TeamSettlementPage: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-    const scope = `${yearMonth}:${selectedTeamId}`;
-    setIncomingDetail({ scope, rows: null, error: false });
-    if (!doc || !selectedTeamId) return;
-    void getTeamSettlementIncomingRows({ yearMonth, teamId: selectedTeamId }).then(rows => {
-      if (!cancelled) setIncomingDetail({ scope, rows, error: false });
-    }).catch(() => {
-      if (!cancelled) setIncomingDetail({ scope, rows: null, error: true });
-    });
-    return () => { cancelled = true; };
-  }, [doc, selectedTeamId, yearMonth, incomingRetry]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const scope = `${yearMonth}:${selectedTeamId}`;
-    setOutgoingDetail({ scope, rows: null, error: false });
-    if (!doc || !selectedTeamId) return;
-    void getTeamSettlementOutgoingRows({ yearMonth, teamId: selectedTeamId }).then(rows => {
-      if (!cancelled) setOutgoingDetail({ scope, rows, error: false });
-    }).catch(() => {
-      if (!cancelled) setOutgoingDetail({ scope, rows: null, error: true });
-    });
-    return () => { cancelled = true; };
-  }, [doc, selectedTeamId, yearMonth, incomingRetry]);
-
-  useEffect(() => {
-    let cancelled = false;
     const loadDetails = async () => {
       if (!doc) {
         setDetailRows([]);
@@ -1065,20 +1028,24 @@ export const TeamSettlementPage: React.FC = () => {
       try {
         const range = buildMonthRange(yearMonth);
         const snapshotSupportRows = doc.sourceSnapshot?.supportDetails;
-        const [rows, supportRows] = await Promise.all([
+        setDetailRows([]);
+        setSupportDetailRows([]);
+        setSupportDetailError(false);
+        const [rows, supportRows] = await Promise.allSettled([
           dailyReportService.getReportWorkerRowsByRange({
             startDate: range.startDate,
             endDate: range.endDate
           }),
-          snapshotSupportRows
+          snapshotSupportRows?.length
             ? Promise.resolve(snapshotSupportRows)
             : selectedTeamId
             ? teamSettlementService.getSupportSettlementDetailRows({ yearMonth, teamId: selectedTeamId })
             : Promise.resolve([] as TeamSettlementSupportDetailRow[])
         ]);
         if (cancelled) return;
-        setDetailRows(rows);
-        setSupportDetailRows(supportRows);
+        setDetailRows(rows.status === 'fulfilled' ? rows.value : []);
+        setSupportDetailRows(supportRows.status === 'fulfilled' ? supportRows.value : []);
+        setSupportDetailError(supportRows.status === 'rejected');
       } catch (error) {
         console.error(error);
         if (cancelled) return;
@@ -1091,7 +1058,7 @@ export const TeamSettlementPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [doc, selectedTeamId, yearMonth]);
+  }, [doc, selectedTeamId, yearMonth, supportDetailRetry]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3069,6 +3036,12 @@ export const TeamSettlementPage: React.FC = () => {
         const consistency = getTeamSettlementSupportDetailConsistency(safeNumber(line.manDay), rows);
         if (consistency.matches) {
           const targetAmount = Math.round(safeNumber(line.amount));
+          const recordedRate = safeAverage(targetAmount, safeNumber(line.manDay));
+          const rates = new Set(rows.map(row => row.unitPrice));
+          if (recordedRate !== null && rates.size <= 1) rows.forEach(row => {
+            row.unitPrice = recordedRate;
+            row.amount = Math.round(row.manDay * recordedRate);
+          });
           const currentAmount = rows.reduce((sum, row) => sum + safeNumber(row.amount), 0);
           const diff = Math.round(targetAmount - currentAmount);
           if (rows.length > 0 && diff !== 0) {
@@ -3551,22 +3524,15 @@ export const TeamSettlementPage: React.FC = () => {
               ? 'bg-amber-50'
               : 'bg-white';
 
-      const incomingTeamRows = isExpanded ? getIncomingTeamsForSettlementLine(line, incomingRows ?? []) : [];
-      // A saved (including empty) worker-detail snapshot must not hide the
-      // separately authorized incoming-team aggregate from a team leader.
-      const useIncomingSummary = isIncomingSettlementLine(line) && incomingTeamRows.length > 0;
-      const outgoingTeamRows = isExpanded ? getOutgoingTeamsForSettlementLine(line, outgoingRows ?? []) : [];
-      const useSupportSummary = useIncomingSummary || outgoingTeamRows.length > 0;
-      const supportTeamRows = useIncomingSummary ? incomingTeamRows : outgoingTeamRows;
-      const detail = isExpanded && !useSupportSummary ? getLineDetailRows(line) : [];
+      const detail = isExpanded ? getLineDetailRows(line) : [];
       const isSupportFeeLine = isSupportSettlementOrigin(line.origin);
       const lineIsSupportOrigin = isSupportOrigin(line.origin);
       const supportUnitPrice = line.kind === '지원' ? safeAverage(safeNumber(line.amount), safeNumber(line.manDay)) : null;
       const supportRateAvg = isSupportFeeLine ? supportUnitPrice : null;
       const showSiteRateColumn = lineIsSupportOrigin && line.kind === '지원';
       const siteDetailColSpan = showSiteRateColumn ? 6 : 5;
-      const supportDetailConsistency = getTeamSettlementSupportDetailConsistency(safeNumber(line.manDay), useSupportSummary ? supportTeamRows : detail);
-      const hasSupportDetailMismatch = lineIsSupportOrigin && (detail.length > 0 || useSupportSummary) && !supportDetailConsistency.matches;
+      const supportDetailConsistency = getTeamSettlementSupportDetailConsistency(safeNumber(line.manDay), detail);
+      const hasSupportDetailMismatch = lineIsSupportOrigin && detail.length > 0 && !supportDetailConsistency.matches;
 
       const siteSummaries = (() => {
         if (detail.length === 0) return [] as Array<{ key: string; siteId?: string; siteName: string; manDay: number; amount: number; rows: LineDetailRow[] }>;
@@ -3766,13 +3732,13 @@ export const TeamSettlementPage: React.FC = () => {
                   <div className="text-sm text-slate-500 mt-1">
                     {detail.length > 0
                       ? `총 ${detail.length}건 / ${siteSummaries.length}개 현장`
-                      : outgoingTeamRows.length > 0 ? '상대팀 현장에 지원 간 우리 팀 공수를 아래에서 확인할 수 있습니다.'
-                      : incomingTeamRows.length > 0 ? '지원 온 팀의 공수를 아래에서 확인할 수 있습니다.'
                       : '상세 데이터 없음 (수기 항목이거나 필터 조건에 해당 없음)'}
                   </div>
 
-                  {(useIncomingSummary || !lineIsSupportOrigin) && <TeamSettlementIncomingDetail rows={incomingTeamRows} />}
-                  {outgoingTeamRows.length > 0 && <TeamSettlementIncomingDetail rows={outgoingTeamRows} direction="outgoing" />}
+                  {lineIsSupportOrigin && supportDetailError && <div role="alert" className="mt-3 text-sm text-amber-800">
+                    인력교류 상세를 불러오지 못했습니다.
+                    <button type="button" className="ml-2 underline" onClick={() => setSupportDetailRetry(value => value + 1)}>다시 조회</button>
+                  </div>}
 
                   {hasSupportDetailMismatch && (
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
@@ -3780,7 +3746,7 @@ export const TeamSettlementPage: React.FC = () => {
                         <div className="text-sm font-black text-rose-900">지원 공수 요약과 상세가 일치하지 않습니다.</div>
                         <div className="mt-0.5 text-xs font-semibold text-rose-700">
                           요약 {formatManDay1(supportDetailConsistency.expectedManDay)}공수 · 상세 {formatManDay1(supportDetailConsistency.detailManDay)}공수
-                          {useSupportSummary || supportDetailData.source === 'live'
+                          {supportDetailData.source === 'live'
                             ? ' · 저장 후 일보가 변경된 구 스냅샷입니다.'
                             : ' · 저장된 상세 스냅샷을 다시 생성해야 합니다.'}
                         </div>
@@ -4411,10 +4377,6 @@ export const TeamSettlementPage: React.FC = () => {
                     <span className="font-semibold text-purple-700">공수</span>
                     <span className="font-extrabold text-purple-900">{formatManDay1(transactionSectionTotals.salesSupport.manDay)}공</span>
                   </div>
-                  {outgoingError && <div role="alert" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                    지원 간 우리 팀 공수를 불러오지 못했습니다.
-                    <button type="button" className="ml-2 underline" onClick={() => setIncomingRetry(value => value + 1)}>다시 조회</button>
-                  </div>}
                 </div>
 
                 <div className="mt-6">
@@ -4464,15 +4426,6 @@ export const TeamSettlementPage: React.FC = () => {
                   <div className="team-settlement-page__transaction-section-title font-semibold text-slate-800">매입</div>
                 </div>
 
-                {incomingError && <div role="alert" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                  지원 온 팀을 불러오지 못했습니다.
-                  <button type="button" className="ml-2 underline" onClick={() => setIncomingRetry(value => value + 1)}>다시 조회</button>
-                </div>}
-                {incomingRows && <details open={incomingRows.length > 0} className="mt-3 rounded-lg border border-orange-200 p-3">
-                  <summary className="cursor-pointer font-semibold text-slate-800">내 현장에 지원 온 팀 · {new Set(incomingRows.map(row => row.teamId || row.teamName)).size}개 팀</summary>
-                  {incomingRows.length > 0 ? <TeamSettlementIncomingDetail rows={incomingRows} />
-                    : <p className="mt-2 text-sm text-slate-500">선택한 월의 출력일보에는 이 팀의 담당 현장으로 지원 온 다른 팀이 없습니다.</p>}
-                </details>}
 
                 <div className="mt-3">
                   <div className="flex items-center justify-between gap-3 flex-wrap">

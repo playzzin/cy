@@ -3,7 +3,6 @@ import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { TeamSettlementPage } from './TeamSettlementPage';
 import { teamSettlementService } from '../../services/teamSettlementService';
-import { getTeamSettlementIncomingRows, getTeamSettlementOutgoingRows } from '../../services/teamSettlementIncomingService';
 import type { TeamSettlementDocument } from '../../types/teamSettlement';
 import { teamService } from '../../services/teamService';
 import { companyService } from '../../services/companyService';
@@ -13,7 +12,6 @@ jest.mock('../../services/teamService', () => ({ teamService: { getTeams: jest.f
 jest.mock('../../services/companyService', () => ({ companyService: { getCompaniesByType: jest.fn().mockResolvedValue([{ id: 'company', name: '시공사' }]) } }));
 // The leader's ordinary report query has no visiting workers or other teams.
 jest.mock('../../services/dailyReportService', () => ({ dailyReportService: { getReportWorkerRowsByRange: jest.fn().mockResolvedValue([]) } }));
-jest.mock('../../services/teamSettlementIncomingService', () => ({ getTeamSettlementIncomingRows: jest.fn(), getTeamSettlementOutgoingRows: jest.fn() }));
 jest.mock('../../services/teamSettlementService', () => ({ teamSettlementService: {
   getTeamSettlement: jest.fn(), getTeamDisplayOrder: jest.fn().mockResolvedValue([]),
   getSupportRateOverrides: jest.fn().mockResolvedValue({}), getSupportSettlementDetailRows: jest.fn().mockResolvedValue([]),
@@ -60,57 +58,81 @@ beforeEach(() => {
   jest.mocked(companyService.getCompaniesByType).mockResolvedValue([{ id: 'company', name: '시공사' } as any]);
   jest.mocked(teamSettlementService.getSupportRateOverrides).mockResolvedValue({} as any);
   jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(document());
-  jest.mocked(getTeamSettlementOutgoingRows).mockResolvedValue(null);
-  jest.mocked(getTeamSettlementIncomingRows).mockResolvedValue([{ id: 'incoming', date: '2026-08-03',
-    siteId: 'site', siteName: '담당 현장', teamId: 'visitor', teamName: '지원 방문팀', manDay: 2,
-    supportRate: 230000, supportAmount: 460000 }]);
+  jest.mocked(teamSettlementService.getSupportSettlementDetailRows).mockResolvedValue([
+    { id: 'first', direction: '내부지원온곳', date: '2026-08-03', siteId: 'site', siteName: '담당 현장',
+      counterTeamId: 'visitor', counterTeamName: '지원 방문팀', workerId: 'worker-a', workerName: '방문 작업자 A',
+      workerTeamId: 'visitor', workerTeamName: '지원 방문팀', manDay: 1.5, unitPrice: 230000, amount: 345000 },
+    { id: 'second', direction: '내부지원온곳', date: '2026-08-03', siteId: 'site', siteName: '담당 현장',
+      counterTeamId: 'visitor', counterTeamName: '지원 방문팀', workerId: 'worker-b', workerName: '방문 작업자 B',
+      workerTeamId: 'visitor', workerTeamName: '지원 방문팀', manDay: 0.5, unitPrice: 230000, amount: 115000 }
+  ]);
 });
 
-it('상대팀 목록을 볼 수 없는 팀장도 상대팀 현장에 지원 간 우리 팀 공수와 지원단가를 본다', async () => {
-  const saved = document();
-  saved.purchases = [];
-  saved.sales = [{ id: 'sale', source: 'auto', origin: '내부지원간곳', kind: '지원', siteId: 'site-b',
-    siteName: '상대팀 현장', counterTeamId: 'host', counterTeamName: '상대 시공팀', manDay: 3, amount: 810000 }];
-  delete saved.sourceSnapshot!.supportDetails;
-  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
-  jest.mocked(getTeamSettlementIncomingRows).mockResolvedValue([]);
-  jest.mocked(getTeamSettlementOutgoingRows).mockResolvedValue([{ id: 'sent', date: '2026-08-05', siteId: 'site-b',
-    siteName: '상대팀 현장', teamId: 'host', teamName: '상대 시공팀', manDay: 3, supportRate: 230000, supportAmount: 690000 }]);
-  render(<TeamSettlementPage />);
-  await screen.findByRole('button', { name: /^상세$/ });
+async function expandOriginalDetails(siteName: string) {
+  fireEvent.click(await screen.findByRole('button', { name: /^상세$/ }));
+  expect(await screen.findByText('인력교류 상세')).toBeVisible();
+  await screen.findByRole('columnheader', { name: '작업자수' });
   fireEvent.click(screen.getByRole('button', { name: /^상세$/ }));
-  const detail = await screen.findByRole('region', { name: '지원 간 현장 상세' });
-  expect(within(detail).getByText('상대 시공팀')).toBeVisible();
-  expect(within(detail).getAllByText('3공')).toHaveLength(2);
-  expect(within(detail).getByText('270,000원')).toBeVisible();
-  expect(within(detail).getAllByText('810,000원')).toHaveLength(2);
-  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
-});
+  expect(await screen.findByText('작업자 상세 (' + siteName + ')')).toBeVisible();
+}
 
-it('팀장 조회에서 저장된 빈 상세와 관계없이 지원 온 팀의 공수·정산 지원단가를 펼쳐 보여준다', async () => {
-  const saved = document();
-  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+it('팀장도 기존 인력교류 상세의 현장별 표와 작업자별 표에서 방문팀을 본다', async () => {
   render(<TeamSettlementPage />);
-  const overview = await screen.findByRole('region', { name: '지원 온 팀 상세' });
-  fireEvent.click(screen.getByRole('button', { name: /^상세$/ }));
-  await waitFor(() => expect(screen.getAllByRole('region', { name: '지원 온 팀 상세' })).toHaveLength(2));
-  expect(within(overview).getByText('지원 방문팀')).toBeVisible();
-  expect(within(overview).getByText('270,000원')).toBeVisible();
-  const detail = screen.getAllByRole('region', { name: '지원 온 팀 상세' })[0];
-  expect(within(detail).getByText('지원 방문팀')).toBeVisible();
-  expect(within(detail).getByText('270,000원')).toBeVisible();
-  expect(within(detail).getAllByText('2공')).toHaveLength(2);
-  expect(saved).toEqual(document());
+  await expandOriginalDetails('담당 현장');
+  expect(screen.getByText('방문 작업자 A')).toBeVisible();
+  expect(screen.getByText('방문 작업자 B')).toBeVisible();
+  expect(screen.getAllByText('지원 방문팀').length).toBeGreaterThanOrEqual(2);
+  const workerRow = screen.getByRole('row', { name: /방문 작업자 A/ });
+  expect(within(workerRow).getByText('1.5')).toBeVisible();
+  expect(within(workerRow).getByText(/270,000/)).toBeVisible();
+  expect(within(workerRow).getByText(/405,000/)).toBeVisible();
+  expect(screen.queryByText(/내 현장에 지원 온 팀/)).not.toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: '지원 온 팀 상세' })).not.toBeInTheDocument();
   expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
   expect(teamSettlementService.recalculateAndSaveTeamSettlement).not.toHaveBeenCalled();
 });
 
-it('지원팀 조회 오류를 0건으로 표시하지 않고 재시도하면 권한이 허용한 팀 집계를 보여준다', async () => {
-  jest.mocked(getTeamSettlementIncomingRows).mockRejectedValueOnce(new Error('unavailable'));
+it('우리 팀이 상대 현장에 지원 간 공수도 같은 기존 작업자 표에서 표시한다', async () => {
+  const saved = document(); saved.purchases = [];
+  saved.sales = [{ id: 'sale', source: 'auto', origin: '내부지원간곳', kind: '지원', siteId: 'site-b',
+    siteName: '상대팀 현장', counterTeamId: 'host', counterTeamName: '상대 시공팀', manDay: 3, amount: 810000 }];
+  delete saved.sourceSnapshot!.supportDetails;
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  jest.mocked(teamSettlementService.getSupportSettlementDetailRows).mockResolvedValue([
+    { id: 'sent', direction: '내부지원간곳', date: '2026-08-05', siteId: 'site-b', siteName: '상대팀 현장',
+      counterTeamId: 'host', counterTeamName: '상대 시공팀', workerId: 'own-worker', workerName: '우리 작업자',
+      workerTeamId: 'own', workerTeamName: '조회팀', manDay: 3, unitPrice: 230000, amount: 690000 }
+  ]);
   render(<TeamSettlementPage />);
+  await expandOriginalDetails('상대팀 현장');
+  const row = screen.getByRole('row', { name: /우리 작업자/ });
+  expect(within(row).getByText('3.0')).toBeVisible();
+  expect(within(row).getByText(/270,000/)).toBeVisible();
+  expect(within(row).getByText(/810,000/)).toBeVisible();
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+});
+
+it('정상 저장된 상세는 유지하고 일반 일보 조회 실패가 지원 상세를 지우지 않는다', async () => {
+  const saved = document();
+  saved.sourceSnapshot!.supportDetails = [{ id: 'snap', direction: '내부지원온곳', date: '2026-08-03',
+    siteId: 'site', siteName: '담당 현장', counterTeamId: 'visitor', workerId: 'saved', workerName: '저장된 작업자',
+    workerTeamName: '지원 방문팀', manDay: 2, unitPrice: 270000, amount: 540000 }];
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  require('../../services/dailyReportService').dailyReportService.getReportWorkerRowsByRange.mockRejectedValue(new Error('denied'));
+  render(<TeamSettlementPage />);
+  await expandOriginalDetails('담당 현장');
+  expect(screen.getByText('저장된 작업자')).toBeVisible();
+  expect(teamSettlementService.getSupportSettlementDetailRows).not.toHaveBeenCalled();
+});
+
+it('기존 상세 안에서 오류를 알리고 재시도로 작업자 상세를 복구한다', async () => {
+  jest.mocked(teamSettlementService.getSupportSettlementDetailRows).mockRejectedValueOnce(new Error('unavailable'));
+  render(<TeamSettlementPage />);
+  fireEvent.click(await screen.findByRole('button', { name: /^상세$/ }));
   const alert = await screen.findByRole('alert');
-  expect(screen.queryByText(/내 현장에 지원 온 팀 · 0개 팀/)).not.toBeInTheDocument();
   fireEvent.click(within(alert).getByRole('button', { name: '다시 조회' }));
-  const incoming = await screen.findByRole('region', { name: '지원 온 팀 상세' });
-  expect(within(incoming).getByText('지원 방문팀')).toBeVisible();
+  await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+  await screen.findByRole('columnheader', { name: '작업자수' });
+  fireEvent.click(screen.getByRole('button', { name: /^상세$/ }));
+  expect(await screen.findByText('방문 작업자 A')).toBeVisible();
 });

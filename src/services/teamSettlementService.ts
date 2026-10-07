@@ -5,6 +5,7 @@ import {
   type CreateSystemConfigVariables,
   type UpdateSystemConfigVariables
 } from '../services/firestoreCrudCompat';
+import { getTeamScopedRows } from './teamScopedReadService';
 import { accommodationBillingService } from './accommodationBillingService';
 import { accommodationAssignmentService } from './accommodationAssignmentService';
 import { accommodationService } from './accommodationService';
@@ -688,6 +689,8 @@ export const teamSettlementService = {
   },
 
   async getSupportSettlementDetailRows(params: { yearMonth: string; teamId: string }): Promise<TeamSettlementSupportDetailRow[]> {
+    const scoped = await getTeamScopedRows<TeamSettlementSupportDetailRow>('team_settlement_support_details', params);
+    if (scoped !== null) return scoped;
     const team = await buildTeamIdVariants(params.teamId);
     const period = getMonthRange(params.yearMonth);
 
@@ -940,7 +943,7 @@ export const teamSettlementService = {
         const rateSiteId = rawSiteId || siteId;
         const configuredSupportRate = resolveConfiguredSiteRate(rateSiteId, rawSiteName || siteName);
         const sourceTeamSupportRate = toPositiveRate(resolvedSourceTeam?.supportRate);
-        const baseSupportRate = configuredSupportRate ?? sourceTeamSupportRate ?? toPositiveRate(reportWorker.unitPrice) ?? DEFAULT_SUPPORT_UNIT_PRICE;
+        const baseSupportRate = configuredSupportRate ?? sourceTeamSupportRate ?? DEFAULT_SUPPORT_UNIT_PRICE;
         const manDay = toFiniteNumberOrZero(reportWorker.manDay);
         if (manDay <= 0) return;
 
@@ -1552,7 +1555,7 @@ export const teamSettlementService = {
         const rateSiteId = rawSiteId || siteId;
         const configuredSupportRate = resolveConfiguredSiteRate(rateSiteId, rawSiteName || siteName);
         const sourceTeamSupportRate = toPositiveRate(resolvedSourceTeam?.supportRate);
-        const baseSupportRate = configuredSupportRate ?? sourceTeamSupportRate ?? toPositiveRate(reportWorker.unitPrice) ?? DEFAULT_SUPPORT_UNIT_PRICE;
+        const baseSupportRate = configuredSupportRate ?? sourceTeamSupportRate ?? DEFAULT_SUPPORT_UNIT_PRICE;
         const manDay = toFiniteNumberOrZero(reportWorker.manDay);
         if (manDay <= 0) return;
 

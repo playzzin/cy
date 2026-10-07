@@ -9,7 +9,7 @@ export const resolveTeamSettlementSupportDetails = (
   snapshot: TeamSettlementSourceSnapshot | undefined,
   liveRows: TeamSettlementSupportDetailSnapshot[]
 ): { rows: TeamSettlementSupportDetailSnapshot[]; source: TeamSettlementSupportDetailSource } => {
-  if (snapshot?.supportDetails) {
+  if (snapshot?.supportDetails?.length) {
     return { rows: snapshot.supportDetails, source: 'snapshot' };
   }
 

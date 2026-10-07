@@ -7,7 +7,7 @@ const leaderRoles = new Set(['팀장', '반장', 'teamlead', 'teamleader', 'fore
 const roleKey = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[\s_-]/g, '');
 const unrestricted = new Set(['admin', 'administrator', 'superadmin', 'owner', 'dev', 'developer', '관리자', '사장', '실장', 'manager', 'manager1', 'manager2', 'manager3', '매니저', '매니저1', '매니저2', '매니저3', '메니저1', '메니저2', '메니저3']);
 const scopedCollections = new Set([
-    'workers', 'teams', 'sites', 'companies', 'daily_reports', 'daily_dispatches', 'team_settlement_incoming',
+    'workers', 'teams', 'sites', 'companies', 'daily_reports', 'daily_dispatches', 'team_settlement_incoming', 'team_settlement_support_details',
     'schedule_confirmation_boards', 'field_schedule_requests',
     'accommodations', 'accommodationAssignments', 'accommodationUtilityRecords', 'accommodation_billing_documents', 'accommodation_billing_line_items', 'accommodation_billing_targets',
     'vehicles', 'vehicleAssignments', 'vehicleBillingTargets', 'vehicle_billing_documents', 'vehicleExpenses',
