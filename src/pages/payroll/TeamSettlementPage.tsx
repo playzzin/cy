@@ -3,6 +3,11 @@ import Swal from 'sweetalert2';
 import './TeamSettlementPage.css';
 import CompanyTeamSelector, { readCompanyTeamOrder } from '../../components/common/CompanyTeamSelector';
 import { applySupportTeamOrder } from '../../utils/supportTeamOrder';
+import { calculateTeamSettlementOfficeExpense, LEGACY_TEAM_SETTLEMENT_OFFICE_RATES } from '../../utils/teamSettlementOfficeExpense';
+import { TeamSettlementOfficeExpenseDetail } from '../../components/payroll/TeamSettlementOfficeExpenseDetail';
+import { TeamSettlementIncomingDetail } from '../../components/payroll/TeamSettlementIncomingDetail';
+import { getTeamSettlementIncomingRows, type TeamSettlementIncomingRow } from '../../services/teamSettlementIncomingService';
+import { applySavedIncomingSupportRates, getIncomingTeamsForSettlementLine, isIncomingSettlementLine } from '../../utils/teamSettlementIncomingDetails';
 import { CurrencyInput } from '../../components/common/CurrencyInput';
 import {
   TeamSettlementWorkspaceHeader,
@@ -872,9 +877,17 @@ export const TeamSettlementPage: React.FC = () => {
   }, [doc?.transactionMemo, doc?.teamId, doc?.yearMonth]);
   const [savedDocumentFingerprint, setSavedDocumentFingerprint] = useState<string>('');
   const [saveState, setSaveState] = useState<TeamSettlementSaveState>('idle');
+  const saveStateRef = useRef<TeamSettlementSaveState>(saveState);
+  saveStateRef.current = saveState;
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' });
   const [detailRows, setDetailRows] = useState<DailyReportWorkerRow[]>([]);
   const [supportDetailRows, setSupportDetailRows] = useState<TeamSettlementSupportDetailRow[]>([]);
+  const [incomingDetail, setIncomingDetail] = useState<{ scope: string; rows: TeamSettlementIncomingRow[] | null; error: boolean }>({ scope: '', rows: null, error: false });
+  const [incomingRetry, setIncomingRetry] = useState(0);
+  const incomingScope = `${yearMonth}:${selectedTeamId}`;
+  const incomingRows = useMemo(() => incomingDetail.scope === incomingScope && incomingDetail.rows
+    ? applySavedIncomingSupportRates(incomingDetail.rows, doc?.purchases ?? []) : null, [incomingDetail, incomingScope, doc?.purchases]);
+  const incomingError = incomingDetail.scope === incomingScope && incomingDetail.error;
   const supportDetailData = useMemo(
     () => resolveTeamSettlementSupportDetails(doc?.sourceSnapshot, supportDetailRows),
     [doc?.sourceSnapshot, supportDetailRows]
@@ -1010,6 +1023,19 @@ export const TeamSettlementPage: React.FC = () => {
       }
     }
   }, [teams, selectedTeamId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const scope = `${yearMonth}:${selectedTeamId}`;
+    setIncomingDetail({ scope, rows: null, error: false });
+    if (!doc || !selectedTeamId) return;
+    void getTeamSettlementIncomingRows({ yearMonth, teamId: selectedTeamId }).then(rows => {
+      if (!cancelled) setIncomingDetail({ scope, rows, error: false });
+    }).catch(() => {
+      if (!cancelled) setIncomingDetail({ scope, rows: null, error: true });
+    });
+    return () => { cancelled = true; };
+  }, [doc, selectedTeamId, yearMonth, incomingRetry]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1681,7 +1707,7 @@ export const TeamSettlementPage: React.FC = () => {
   }, [updateDoc]);
 
   const persistCurrentDocument = useCallback(async (showSuccessToast = true): Promise<TeamSettlementDocument | null> => {
-    if (!doc) return null;
+    if (!doc || saveStateRef.current === 'saving') return null;
 
     const scopeAtSave = settlementScope.current;
     const nextDoc: TeamSettlementDocument = {
@@ -1690,17 +1716,20 @@ export const TeamSettlementPage: React.FC = () => {
       updatedAt: new Date().toISOString()
     };
 
+    saveStateRef.current = 'saving';
     setSaveState('saving');
     try {
       await teamSettlementService.saveTeamSettlement(nextDoc);
       if (settlementScope.current !== scopeAtSave) return nextDoc;
       setDoc(current => current === doc ? nextDoc : current);
       setSavedDocumentFingerprint(createTeamSettlementDraftFingerprint(nextDoc));
+      saveStateRef.current = 'idle';
       setSaveState('idle');
       if (showSuccessToast) toast.success('변경사항을 저장했습니다.');
       return nextDoc;
     } catch (error) {
       console.error(error);
+      saveStateRef.current = 'error';
       setSaveState('error');
       toast.error('저장하지 못했습니다. 네트워크 상태를 확인해 주세요.');
       return null;
@@ -1840,34 +1869,51 @@ export const TeamSettlementPage: React.FC = () => {
   }, [confirmationIssues, doc, handleValidationIssueClick, isDirty, loadSettlement, selectedTeamName]);
 
   const handleUnconfirm = useCallback(async () => {
-    if (!doc) return;
+    const isSaving = () => saveStateRef.current === 'saving';
+    if (!doc?.confirmedAt || isSaving()) return;
+    const scope = settlementScope.current;
 
     const result = await Swal.fire({
       title: '확정 취소',
-      text: '확정된 팀정산을 취소하시겠습니까? 취소 후에는 다시 편집할 수 있습니다.',
+      text: '확정된 팀정산을 취소하시겠습니까? 취소 후에는 다시 편집하거나 재집계할 수 있습니다.',
       icon: 'warning',
       showCancelButton: true,
       confirmButtonText: '확정 취소',
       cancelButtonText: '닫기'
     });
 
-    if (!result.isConfirmed) return;
+    if (!result.isConfirmed || scope !== settlementScope.current || isSaving()) return;
 
+    saveStateRef.current = 'saving';
+    setSaveState('saving');
     try {
-      await teamSettlementService.unconfirmTeamSettlement({ yearMonth: doc.yearMonth, teamId: doc.teamId });
+      const unconfirmedDoc = await teamSettlementService.unconfirmTeamSettlement({ yearMonth: doc.yearMonth, teamId: doc.teamId });
+      if (scope === settlementScope.current) {
+        setDoc(unconfirmedDoc);
+        setSavedDocumentFingerprint(createTeamSettlementDraftFingerprint(unconfirmedDoc));
+      }
 
-      // Remove Office Fee from Office Management
-      await officeService.deleteTeamFeeTransaction(doc.teamId, doc.yearMonth);
+      try {
+        await officeService.deleteTeamFeeTransaction(doc.teamId, doc.yearMonth);
+      } catch (syncError) {
+        console.error(syncError);
+        toast.error('확정은 취소됐지만 사무실비 연결 내역 정리에 실패했습니다. 사무실 관리에서 확인해 주세요.');
+        return;
+      }
 
       toast.success('확정 취소 완료');
-      await loadSettlement();
     } catch (error) {
       console.error(error);
       toast.error('확정 취소 실패');
+    } finally {
+      if (scope === settlementScope.current) {
+        saveStateRef.current = 'idle';
+        setSaveState('idle');
+      }
     }
-  }, [doc, loadSettlement]);
+  }, [doc]);
 
-  const canEdit = isEditable(doc);
+  const canEdit = isEditable(doc) && saveState !== 'saving';
 
   const primaryButtonClassName =
     'inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed';
@@ -2038,7 +2084,7 @@ export const TeamSettlementPage: React.FC = () => {
 
   const getDeductionDetail = useCallback(
     (item: TeamSettlementDeductionItem):
-      | { kind: 'office_expense'; sites: SiteSkkumiRow[]; totalManDay: number; totalAmount: number }
+      | ({ kind: 'office_expense'; savedAmount: number } & ReturnType<typeof calculateTeamSettlementOfficeExpense>)
       | { kind: 'payroll'; rows: Array<{ workerId: string; workerName: string; manDay: number; amount: number }>; totalManDay: number; totalAmount: number }
       | {
         kind: 'accommodation_billing';
@@ -2483,24 +2529,11 @@ export const TeamSettlementPage: React.FC = () => {
       }
 
       if (item.origin === 'office_expense') {
-        const bySite = new Map<string, SiteSkkumiRow>();
-        doc.sales
-          .filter((s) => s.source === 'auto' && (s.origin === 'daily_report' || s.origin === 'support_client_site') && (s.kind === '도급' || s.kind === '직영'))
-          .forEach((s) => {
-            const siteName = String(s.siteName ?? '').trim() || '현장 미지정';
-            const prev = bySite.get(siteName) ?? { siteName, quantity: 0, manDay: 0, amount: 0 };
-            bySite.set(siteName, {
-              siteName,
-              quantity: prev.quantity,
-              manDay: prev.manDay + safeNumber(s.manDay),
-              amount: prev.amount + safeNumber(s.amount)
-            });
-          });
-
-        const sites = Array.from(bySite.values()).sort((a, b) => b.manDay - a.manDay);
-        const totalManDay = sites.reduce((sum, x) => sum + x.manDay, 0);
-        const totalAmount = sites.reduce((sum, x) => sum + x.amount, 0);
-        return { kind: 'office_expense', sites, totalManDay, totalAmount };
+        return {
+          kind: 'office_expense',
+          ...calculateTeamSettlementOfficeExpense(doc.sales, item.officeExpenseRates ?? LEGACY_TEAM_SETTLEMENT_OFFICE_RATES),
+          savedAmount: item.amount
+        };
       }
 
       if (
@@ -3501,15 +3534,17 @@ export const TeamSettlementPage: React.FC = () => {
               ? 'bg-amber-50'
               : 'bg-white';
 
-      const detail = isExpanded ? getLineDetailRows(line) : [];
+      const incomingTeamRows = isExpanded ? getIncomingTeamsForSettlementLine(line, incomingRows ?? []) : [];
+      const useIncomingSummary = isIncomingSettlementLine(line) && supportDetailData.source === 'live' && incomingTeamRows.length > 0;
+      const detail = isExpanded && !useIncomingSummary ? getLineDetailRows(line) : [];
       const isSupportFeeLine = isSupportSettlementOrigin(line.origin);
       const lineIsSupportOrigin = isSupportOrigin(line.origin);
       const supportUnitPrice = line.kind === '지원' ? safeAverage(safeNumber(line.amount), safeNumber(line.manDay)) : null;
       const supportRateAvg = isSupportFeeLine ? supportUnitPrice : null;
       const showSiteRateColumn = lineIsSupportOrigin && line.kind === '지원';
       const siteDetailColSpan = showSiteRateColumn ? 6 : 5;
-      const supportDetailConsistency = getTeamSettlementSupportDetailConsistency(safeNumber(line.manDay), detail);
-      const hasSupportDetailMismatch = lineIsSupportOrigin && detail.length > 0 && !supportDetailConsistency.matches;
+      const supportDetailConsistency = getTeamSettlementSupportDetailConsistency(safeNumber(line.manDay), useIncomingSummary ? incomingTeamRows : detail);
+      const hasSupportDetailMismatch = lineIsSupportOrigin && (detail.length > 0 || useIncomingSummary) && !supportDetailConsistency.matches;
 
       const siteSummaries = (() => {
         if (detail.length === 0) return [] as Array<{ key: string; siteId?: string; siteName: string; manDay: number; amount: number; rows: LineDetailRow[] }>;
@@ -3709,8 +3744,11 @@ export const TeamSettlementPage: React.FC = () => {
                   <div className="text-sm text-slate-500 mt-1">
                     {detail.length > 0
                       ? `총 ${detail.length}건 / ${siteSummaries.length}개 현장`
+                      : incomingTeamRows.length > 0 ? '지원 온 팀의 공수를 아래에서 확인할 수 있습니다.'
                       : '상세 데이터 없음 (수기 항목이거나 필터 조건에 해당 없음)'}
                   </div>
+
+                  {(useIncomingSummary || !lineIsSupportOrigin) && <TeamSettlementIncomingDetail rows={incomingTeamRows} />}
 
                   {hasSupportDetailMismatch && (
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
@@ -4398,6 +4436,15 @@ export const TeamSettlementPage: React.FC = () => {
                   <div className="team-settlement-page__transaction-section-title font-semibold text-slate-800">매입</div>
                 </div>
 
+                {incomingError && <div role="alert" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                  지원 온 팀을 불러오지 못했습니다.
+                  <button type="button" className="ml-2 underline" onClick={() => setIncomingRetry(value => value + 1)}>다시 조회</button>
+                </div>}
+                {incomingRows && incomingRows.length > 0 && <details className="mt-3 rounded-lg border border-orange-200 p-3">
+                  <summary className="cursor-pointer font-semibold text-slate-800">내 현장에 지원 온 팀 · {new Set(incomingRows.map(row => row.teamId || row.teamName)).size}개 팀</summary>
+                  <TeamSettlementIncomingDetail rows={incomingRows} />
+                </details>}
+
                 <div className="mt-3">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div className="team-settlement-page__transaction-section-title text-sm font-semibold text-slate-700">지원</div>
@@ -4485,7 +4532,11 @@ export const TeamSettlementPage: React.FC = () => {
                     정산 메모
                   </label>
                   <span id="team-settlement-transaction-memo-help" className="text-xs text-slate-500">
-                    {doc?.confirmedAt ? '확정된 정산입니다. 확정 해제 후 수정할 수 있습니다.' : '팀·월별 메모 · 상단 저장 버튼으로 저장'}
+                    {doc?.confirmedAt
+                      ? '확정된 정산입니다. 확정 해제 후 수정할 수 있습니다.'
+                      : saveState === 'saving'
+                      ? '저장 중입니다...'
+                      : '팀·월별 메모 · 상단 저장 버튼으로 저장'}
                   </span>
                 </div>
                 <textarea
@@ -4669,54 +4720,7 @@ export const TeamSettlementPage: React.FC = () => {
                             <td className="px-3 py-3 border" colSpan={5}>
                               <div className={`rounded-lg border bg-white p-3 ${group.key === 'expense' ? 'team-settlement-page__expense-expanded-detail' : ''}`}>
                                 {detail.kind === 'office_expense' && (
-                                  <div>
-                                    <div className="text-sm font-semibold text-slate-800">사무실비 상세</div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      도급+직영 총공수 {formatManDay1(detail.totalManDay)} 기준
-                                    </div>
-                                    <div className="mt-3 overflow-auto">
-                                      <table className="w-full text-xs border-collapse">
-                                        <thead>
-                                          <tr className="bg-slate-50 text-slate-600">
-                                            <th scope="col" className="text-left px-2 py-2 border">현장</th>
-                                            <th scope="col" className="text-right px-2 py-2 border">공수</th>
-                                            <th scope="col" className="text-right px-2 py-2 border">금액</th>
-                                            <th scope="col" className="text-right px-2 py-2 border">원/공수</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detail.sites.length === 0 ? (
-                                            <tr>
-                                              <td className="px-2 py-2 border text-slate-500" colSpan={4}>
-                                                데이터 없음
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            detail.sites.map((s) => (
-                                              <tr key={s.siteName} className="bg-white">
-                                                <td data-label="현장" className="px-2 py-2 border text-slate-800 font-medium">{s.siteName}</td>
-                                                <td data-label="공수" className="px-2 py-2 border text-right">{formatManDay1(s.manDay)}</td>
-                                                <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(s.amount)}</td>
-                                                <td data-label="원/공수" className="px-2 py-2 border text-right">
-                                                  {formatAverageCurrency(safeAverage(s.amount, s.manDay))}
-                                                </td>
-                                              </tr>
-                                            ))
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                    <div className="mt-3 text-sm">
-                                      <div className="flex items-center justify-between">
-                                        <div className="text-slate-600">총공수</div>
-                                        <div className="font-bold text-slate-900">{formatManDay1(detail.totalManDay)}</div>
-                                      </div>
-                                      <div className="flex items-center justify-between mt-1">
-                                        <div className="text-slate-600">사무실비(총공수×10,000)</div>
-                                        <div className="font-bold text-slate-900">{formatCurrency(Math.round(detail.totalManDay * 10000))}원</div>
-                                      </div>
-                                    </div>
-                                  </div>
+                                  <TeamSettlementOfficeExpenseDetail detail={detail} />
                                 )}
 
                                 {detail.kind === 'payroll' && (

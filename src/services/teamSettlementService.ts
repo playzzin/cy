@@ -47,6 +47,7 @@ import {
 import { getTeamSettlementConfirmationIssues } from '../utils/teamSettlementDraft';
 import { buildTeamExpenseSettlementMemo, compactTeamSettlementAutoMemo } from '../utils/teamSettlementMemo';
 import { repairLegacyScopedCardBillingDuplicates } from '../utils/teamSettlementBillingSnapshot';
+import { calculateTeamSettlementOfficeExpense, TEAM_SETTLEMENT_OFFICE_RATES } from '../utils/teamSettlementOfficeExpense';
 
 export type {
   SupportMonthlyRateOverridePatch,
@@ -1100,7 +1101,7 @@ export const teamSettlementService = {
     await this.saveAndConfirmTeamSettlement(doc);
   },
 
-  async unconfirmTeamSettlement(params: { yearMonth: string; teamId: string }): Promise<void> {
+  async unconfirmTeamSettlement(params: { yearMonth: string; teamId: string }): Promise<TeamSettlementDocument> {
     const doc = await this.getTeamSettlement(params);
     const nextDoc: TeamSettlementDocument = {
       ...doc,
@@ -1109,6 +1110,7 @@ export const teamSettlementService = {
     };
     await this.saveTeamSettlement(nextDoc);
     await notifyTeamSettlementSystemMessage('teamSettlement.unconfirmed', nextDoc);
+    return nextDoc;
   },
 
   async calculateAutoSettlement(params: {
@@ -2234,19 +2236,16 @@ export const teamSettlementService = {
         }];
       });
 
-    const officeExpenseManDay = roundManDay(
-      dailyReportSales
-        .filter((s) => s.kind === '도급' || s.kind === '직영')
-        .reduce((sum, s) => sum + (Number.isFinite(s.manDay) ? s.manDay : 0), 0)
-    );
+    const officeExpense = calculateTeamSettlementOfficeExpense(dailyReportSales);
 
     const officeExpenseDeduction: TeamSettlementDeductionItem = {
       id: `office_expense:${params.yearMonth}:${params.teamId}`,
       source: 'auto',
       origin: 'office_expense',
       category: '사무실비',
-      amount: Math.round(officeExpenseManDay * 10000),
-      memo: `도급+직영 총공수 ${officeExpenseManDay} * 10,000원`
+      amount: officeExpense.totalAmount,
+      officeExpenseRates: { ...TEAM_SETTLEMENT_OFFICE_RATES },
+      memo: officeExpense.memo
     };
 
     const getWorkerTeamId = (r: (typeof workerRows)[number]): string => {

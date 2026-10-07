@@ -6,9 +6,10 @@ import { protectedRegion, requireCallableAuth } from './auth';
 import { belongsToTeam, filterTeamRows, isTeamLeader, list, TeamReadScope, TeamRow, text } from './teamReadPolicy';
 import { mergeTeamQueryRows, queryByIds, queryRows, queryTeamCandidates } from './teamScopedQuery';
 import { readTeamCatalog } from './teamCatalogCache';
+import { readTeamSettlementIncoming } from './teamSettlementRead';
 
 const COLLECTIONS = new Set([
-    'workers', 'teams', 'sites', 'companies', 'daily_reports', 'daily_dispatches',
+    'workers', 'teams', 'sites', 'companies', 'daily_reports', 'daily_dispatches', 'team_settlement_incoming',
     'schedule_confirmation_boards', 'field_schedule_requests',
     'accommodations', 'accommodationAssignments', 'accommodationUtilityRecords', 'accommodation_billing_documents', 'accommodation_billing_line_items', 'accommodation_billing_targets',
     'vehicles', 'vehicleAssignments', 'vehicleBillingTargets', 'vehicle_billing_documents', 'vehicleExpenses',
@@ -153,6 +154,9 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
     const resolveRows = async (request: any) => {
         const collection = text(request.collection);
         const filters = request.filters || {};
+        if (collection === 'team_settlement_incoming') {
+            return { rows: serialize(await readTeamSettlementIncoming(db, teams, workers, filters, metrics)) };
+        }
         if (requiresSites(request)) await sitesReady;
         let rows = await read(collection, filters);
         if (collection === 'companies') {

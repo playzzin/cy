@@ -46,6 +46,11 @@ it('월 조회 조건을 서버에 전달한다', async () => {
     expect(call).toHaveBeenCalledWith(expect.objectContaining({ requests: [{ collection: 'cardTransactions', filters: { yearMonth: '2026-09' } }] }));
 });
 
+it('지원 온 팀 조회는 선택 월과 팀을 서버에 전달한다', async () => {
+    await getTeamScopedRows('team_settlement_incoming', { yearMonth: '2026-09', teamId: 'own-team' });
+    expect(call).toHaveBeenCalledWith(expect.objectContaining({ requests: [{ collection: 'team_settlement_incoming', filters: { yearMonth: '2026-09', teamId: 'own-team' } }] }));
+});
+
 it('동일 계정의 중복 조회를 합치고 완료 후에는 새로 조회한다', async () => {
     const results = await Promise.all(Array.from({ length: 12 }, () => getTeamScopedRows('workers')));
     expect(call).toHaveBeenCalledTimes(1);
