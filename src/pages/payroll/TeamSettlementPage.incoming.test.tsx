@@ -77,8 +77,8 @@ it('상대팀 목록을 볼 수 없는 팀장도 상대팀 현장에 지원 간 
   jest.mocked(getTeamSettlementOutgoingRows).mockResolvedValue([{ id: 'sent', date: '2026-08-05', siteId: 'site-b',
     siteName: '상대팀 현장', teamId: 'host', teamName: '상대 시공팀', manDay: 3, supportRate: 230000, supportAmount: 690000 }]);
   render(<TeamSettlementPage />);
-  await screen.findByRole('button', { name: '상세', exact: true });
-  fireEvent.click(screen.getByRole('button', { name: '상세', exact: true }));
+  await screen.findByRole('button', { name: /^상세$/ });
+  fireEvent.click(screen.getByRole('button', { name: /^상세$/ }));
   const detail = await screen.findByRole('region', { name: '지원 간 현장 상세' });
   expect(within(detail).getByText('상대 시공팀')).toBeVisible();
   expect(within(detail).getAllByText('3공')).toHaveLength(2);
@@ -92,7 +92,7 @@ it('팀장 조회에서 저장된 빈 상세와 관계없이 지원 온 팀의 �
   jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
   render(<TeamSettlementPage />);
   const overview = await screen.findByRole('region', { name: '지원 온 팀 상세' });
-  fireEvent.click(screen.getByRole('button', { name: '상세', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: /^상세$/ }));
   await waitFor(() => expect(screen.getAllByRole('region', { name: '지원 온 팀 상세' })).toHaveLength(2));
   expect(within(overview).getByText('지원 방문팀')).toBeVisible();
   expect(within(overview).getByText('270,000원')).toBeVisible();
