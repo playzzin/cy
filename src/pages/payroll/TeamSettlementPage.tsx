@@ -4440,9 +4440,10 @@ export const TeamSettlementPage: React.FC = () => {
                   지원 온 팀을 불러오지 못했습니다.
                   <button type="button" className="ml-2 underline" onClick={() => setIncomingRetry(value => value + 1)}>다시 조회</button>
                 </div>}
-                {incomingRows && incomingRows.length > 0 && <details className="mt-3 rounded-lg border border-orange-200 p-3">
+                {incomingRows && <details className="mt-3 rounded-lg border border-orange-200 p-3">
                   <summary className="cursor-pointer font-semibold text-slate-800">내 현장에 지원 온 팀 · {new Set(incomingRows.map(row => row.teamId || row.teamName)).size}개 팀</summary>
-                  <TeamSettlementIncomingDetail rows={incomingRows} />
+                  {incomingRows.length > 0 ? <TeamSettlementIncomingDetail rows={incomingRows} />
+                    : <p className="mt-2 text-sm text-slate-500">선택한 월의 출력일보에는 이 팀의 담당 현장으로 지원 온 다른 팀이 없습니다.</p>}
                 </details>}
 
                 <div className="mt-3">
@@ -4601,6 +4602,13 @@ export const TeamSettlementPage: React.FC = () => {
                       )}
                     </div>
                   </div>
+
+                  {group.items.some(item => item.origin === 'office_expense' && !item.officeExpenseRates) && (
+                    <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                      사무실비 새 기준은 도급 공수×10,000원 + 직영 공수×5,000원입니다.
+                      {' '}{doc?.confirmedAt ? '확정취소 후 재집계하면' : '상단의 재집계를 누르면'} 이 정산에도 새 기준이 적용됩니다.
+                    </p>
+                  )}
 
                   <div className="mt-2 overflow-auto">
                     <table data-compact="adjustment" className="w-full text-sm border-collapse">
