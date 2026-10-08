@@ -10,6 +10,7 @@ import { cardMonthlyLedgerMutationService } from '../../services/cardMonthlyLedg
 import { teamSettlementProtectionService } from '../../services/teamSettlementProtectionService';
 import { manpowerService } from '../../services/manpowerService';
 import { officeStaffService } from '../../services/officeStaffService';
+import CardStatementUsageDialog from './CardStatementUsageDialog';
 import type { Card, CardTransaction } from '../../types/card';
 import type { CardMonthlyLedgerSaveResult } from '../../services/cardMonthlyLedgerMutationService';
 
@@ -17,8 +18,17 @@ jest.mock('../../utils/supportResourceExcelExport', () => ({ buildCardLedgerWork
 
 jest.mock('firebase/storage', () => ({ getDownloadURL: () => { throw Error('SDK forbidden'); }, ref: () => { throw Error('SDK forbidden'); }, uploadBytes: () => { throw Error('SDK forbidden'); } }));
 jest.mock('../../config/firebase', () => ({ storage: null }));
+jest.mock('../../services/cardStatementAttachmentService', () => ({
+  cardStatementAttachmentService: { resolve: jest.fn() },
+  getCardStatementFileName: (path: string) => path.split('/').pop(),
+  getCardStatementAttachmentError: () => '파일 조회 실패',
+}));
 jest.mock('./CardStatementImportModal', () => ({ __esModule: true, default: () => null }));
 jest.mock('./CardStatementImportHistoryModal', () => ({ CardStatementImportHistoryModal: () => null }));
+jest.mock('./CardStatementUsageDialog', () => ({
+  __esModule: true,
+  default: jest.fn(({ onClose }: { onClose: () => void }) => <div role="dialog" aria-label="사용내역서 상세내역"><button onClick={onClose}>상세내역 닫기</button></div>),
+}));
 jest.mock('../../services/cardFirestoreService', () => ({ cardFirestoreService: {} }));
 jest.mock('../../services/firestoreCrudCompat', () => ({ listSystemConfigs: () => { throw Error('SDK forbidden'); } }));
 jest.mock('../../constants/iconMap', () => ({ iconMap: {} }));
@@ -48,6 +58,7 @@ const protection = jest.mocked(teamSettlementProtectionService.getConfirmedTeamS
 
 beforeEach(() => {
   jest.mocked(buildCardLedgerWorkbook).mockClear();
+  jest.mocked(CardStatementUsageDialog).mockClear().mockImplementation(({ onClose }) => <div role="dialog" aria-label="사용내역서 상세내역"><button onClick={onClose}>상세내역 닫기</button></div>);
   jest.mocked(downloadSupportResourceWorkbook).mockReset().mockResolvedValue(undefined);
   sequence = [];
   transactions = [];
@@ -69,6 +80,42 @@ beforeEach(() => {
   jest.mocked(cardBillingService.deleteDraftBillings).mockResolvedValue(undefined);
 });
 afterEach(() => { cleanup(); diagnostic.mockRestore(); });
+
+it('opens card analysis with every attachment and its ledger amount without ledger or billing writes', async () => {
+  transactions = [{ id: 'fixture-tx', cardId: card.id, cardLabel: card.name, date: '2026-07-01', yearMonth: '2026-07', merchant: 'fixture', category: 'OTHER', amount: 100, statementAttachmentPaths: ['statements/first.pdf', 'statements/second.pdf'] }];
+  // Both the initial read and the read after worker data hydration must settle.
+  // eslint-disable-next-line testing-library/no-unnecessary-act
+  await act(async () => { render(<CardMonthlyLedger cards={cards} teams={teams} loadingCards={false} />); });
+  fireEvent.click(screen.getByRole('button', { name: '상세내역' }));
+  expect(await screen.findByRole('dialog', { name: '사용내역서 상세내역' })).toBeInTheDocument();
+  expect(jest.mocked(CardStatementUsageDialog).mock.calls.slice(-1)[0][0]).toEqual(expect.objectContaining({
+    yearMonth: '2026-07', cardId: card.id, cardName: card.name, cardLast4: card.last4,
+    ledgerTotal: 100, paths: ['statements/first.pdf', 'statements/second.pdf'],
+  }));
+  expect(ledger).not.toHaveBeenCalled();
+  expect(cardBillingService.replaceDraftBilling).not.toHaveBeenCalled();
+});
+
+it('reconciles the whole card month across split rows and deduplicates their shared PDFs', async () => {
+  transactions = [
+    { id: 'tx-first', cardId: card.id, cardLabel: card.name, date: '2026-07-03', yearMonth: '2026-07', merchant: 'fixture', category: 'OTHER', amount: 100, statementAttachmentPaths: ['statements/shared.pdf'] },
+    { id: 'tx-second', cardId: card.id, cardLabel: card.name, date: '2026-07-20', yearMonth: '2026-07', merchant: 'fixture', category: 'OTHER', amount: 200, statementAttachmentPaths: ['statements/shared.pdf', 'statements/second.pdf'] },
+  ];
+  jest.mocked(cardService.listAllCardBillingTargets).mockResolvedValue([
+    { id: 'target-first', cardId: card.id, cardLabel: card.name, targetId: 'team-first', targetType: 'TEAM', targetName: '첫팀', startDate: '2026-07-01', endDate: '2026-07-15' },
+    { id: 'target-second', cardId: card.id, cardLabel: card.name, targetId: 'team-second', targetType: 'TEAM', targetName: '둘째팀', startDate: '2026-07-16' },
+  ]);
+  // eslint-disable-next-line testing-library/no-unnecessary-act
+  await act(async () => { render(<CardMonthlyLedger cards={cards} teams={teams} loadingCards={false} />); });
+  fireEvent.click(screen.getAllByRole('button', { name: '상세내역' })[0]);
+  expect(jest.mocked(CardStatementUsageDialog).mock.calls.slice(-1)[0][0]).toEqual(expect.objectContaining({
+    ledgerTotal: 300, paths: ['statements/shared.pdf', 'statements/second.pdf'],
+  }));
+  expect(ledger).not.toHaveBeenCalled();
+  expect(cardBillingService.replaceDraftBilling).not.toHaveBeenCalled();
+  await act(async () => rememberSupportManagementYearMonth('2026-08'));
+  expect(screen.queryByRole('dialog', { name: '사용내역서 상세내역' })).not.toBeInTheDocument();
+});
 
 async function editAndSave(beforeSave?: () => void) {
   render(<CardMonthlyLedger cards={cards} teams={teams} loadingCards={false} />);

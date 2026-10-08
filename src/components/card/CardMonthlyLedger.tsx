@@ -16,7 +16,8 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { FileText, Sparkles } from 'lucide-react';
 import { CardStatementImportHistoryModal } from './CardStatementImportHistoryModal';
-import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
+import { ref as storageRef, uploadBytes } from 'firebase/storage';
+import CardStatementUsageDialog from './CardStatementUsageDialog';
 import {
     Card,
     CardAssignmentRecord,
@@ -361,6 +362,8 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
     const [statementUploadingRowId, setStatementUploadingRowId] = useState('');
     const [isStatementImportOpen, setIsStatementImportOpen] = useState(false);
     const [isStatementHistoryOpen, setIsStatementHistoryOpen] = useState(false);
+    const [statementCardId, setStatementCardId] = useState<string | null>(null);
+    useEffect(() => { setStatementCardId(null); }, [requestedYearMonth, cards]);
     const originalTxsRef = useRef<CardTransaction[]>([]);
 
     const teamInfoMap = useMemo(() => {
@@ -1559,6 +1562,13 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         return dedupeStatementPaths(paths);
     };
 
+    const statementCardRows = rows.filter(row => row.card.id === statementCardId);
+    const statementCard = statementCardRows[0]?.card;
+    const statementCardPaths = dedupeStatementPaths(statementCardRows.flatMap(row => [
+        ...row.statementAttachmentPaths,
+        ...getStatementPathsForDocuments(getAllBillingDocumentsForRow(row)),
+    ]));
+
     const handleUploadStatement = async (
         row: CardLedgerRow,
         rowBillingDocuments: CardBillingDocument[],
@@ -1618,23 +1628,12 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             })));
 
             await loadData();
-            alert('PDF 파일이 카드 금액과 팀별 경비 자료에 연결되었습니다.');
+            setStatementCardId(row.card.id);
         } catch (error) {
             console.error(error);
             alert(error instanceof Error ? error.message : '청구서 파일 등록에 실패했습니다.');
         } finally {
             setStatementUploadingRowId('');
-        }
-    };
-
-    const handleOpenStatement = async (path: string) => {
-        if (!path) return;
-        try {
-            const url = await getDownloadURL(storageRef(storage, path));
-            window.open(url, '_blank', 'noopener,noreferrer');
-        } catch (error) {
-            console.error(error);
-            alert('청구서 파일을 열 수 없습니다.');
         }
     };
 
@@ -1736,7 +1735,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                             onClick={event => { if (isDirty || saving) event.preventDefault(); }}
                             title={isDirty ? '변경사항을 먼저 전체 저장해 주세요.' : '저장된 명세서의 거래별 내역 조회 및 Gemini 분석'}
                             className={`inline-flex h-8 items-center whitespace-nowrap rounded-md border border-indigo-200 px-2.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 ${isDirty || saving ? 'cursor-not-allowed opacity-40' : ''}`}>
-                            명세서 상세내역
+                            전체 명세서
                         </a>
                     </div>
                     <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border border-indigo-100 hover:bg-gray-50 h-[46px] shadow-sm whitespace-nowrap">
@@ -1975,15 +1974,15 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                     <button
                                                         type="button"
                                                         disabled={!latestStatementPath || isUploadingStatement}
-                                                        onClick={() => void handleOpenStatement(latestStatementPath)}
+                                                        onClick={() => setStatementCardId(row.card.id)}
                                                         className={`h-8 rounded-lg border px-2 text-[11px] font-bold ${
                                                             latestStatementPath && !isUploadingStatement
                                                                 ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                                                                 : 'border-slate-100 bg-slate-50 text-slate-300 cursor-not-allowed'
                                                         }`}
-                                                        title="카드 사용내역서 파일 열기"
+                                                        title="분석한 사용내역과 카드 총액 비교"
                                                     >
-                                                        열기
+                                                        상세내역
                                                     </button>
                                                 </div>
                                                 {statementPaths.length > 0 && (
@@ -2043,6 +2042,16 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 onCompleted={() => void loadData()}
             />
             <CardStatementImportHistoryModal isOpen={isStatementHistoryOpen} yearMonth={yearMonth} onClose={() => setIsStatementHistoryOpen(false)} onCancelled={() => void loadData()} />
+            {statementCard && <CardStatementUsageDialog
+                key={`${yearMonth}:${statementCard.id}`}
+                yearMonth={yearMonth}
+                cardId={statementCard.id}
+                cardLast4={statementCard.last4}
+                cardName={statementCard.name}
+                ledgerTotal={statementCardRows.reduce((sum, row) => sum + row.total, 0)}
+                paths={statementCardPaths}
+                onClose={() => setStatementCardId(null)}
+            />}
         </div>
     );
 };

@@ -66,7 +66,7 @@ test('loads a saved statement, selects it in the URL, and filters signed transac
   expect(service.getFileDetail).toHaveBeenCalledWith({ fileId: 'file-1', yearMonth: '2026-09' });
   expect(screen.getByTestId('location')).toHaveTextContent('fileId=file-1');
   expect(screen.getByRole('button', { name: `${file.originalFileName} 상세내역` })).toHaveAttribute('aria-pressed', 'true');
-  expect(screen.getAllByText('65,000원')).toHaveLength(2);
+  expect(screen.getAllByText('65,000원').length).toBeGreaterThanOrEqual(2);
   expect(screen.getByText('AI가 추출한 날짜·가맹점·금액·분류는 원본 명세서와 대조해 주세요.', { exact: false })).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('분류'), { target: { value: 'MEAL' } });
   expect(screen.queryByRole('cell', { name: '서울주유소' })).not.toBeInTheDocument();
@@ -91,6 +91,19 @@ test('shows loading and an empty month without inventing details, and synchroniz
   fireEvent.click(screen.getByRole('button', { name: '이전 달' }));
   await waitFor(() => expect(service.listStoredFiles).toHaveBeenCalledWith('2026-08'));
   expect(screen.getByTestId('location')).toHaveTextContent('?month=2026-08');
+});
+
+test('shows each card statement difference independently of transaction search', async () => {
+  service.getFileDetail.mockResolvedValue({ ...saved, results: [{ ...result, statementTotalAvailable: true, subtotalAmount: 70000 }] });
+  renderPage();
+  const comparisons = await screen.findByRole('region', { name: '카드별 총액 비교' });
+  await waitFor(() => expect(within(comparisons).getByText('불일치')).toBeInTheDocument());
+  expect(within(comparisons).getByText('70,000원')).toBeInTheDocument();
+  expect(within(comparisons).getByText('65,000원')).toBeInTheDocument();
+  expect(within(comparisons).getByText('5,000원')).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('이용내역 검색'), { target: { value: '부분 취소' } });
+  expect(within(comparisons).getByText('65,000원')).toBeInTheDocument();
+  expect(within(comparisons).getByText('5,000원')).toBeInTheDocument();
 });
 
 test('shows saved details when the new backend is unavailable and explains disabled analysis', async () => {

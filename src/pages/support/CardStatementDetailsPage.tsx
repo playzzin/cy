@@ -3,9 +3,10 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { ArrowLeft, CheckCircle2, FileText, Loader2, RefreshCw, Search, Sparkles } from 'lucide-react';
 import CardStatementFilesDialog from '../../components/card/CardStatementFilesDialog';
 import CardStatementBulkAnalysisPanel from '../../components/card/CardStatementBulkAnalysisPanel';
+import CardStatementReconciliation from '../../components/card/CardStatementReconciliation';
 import SupportWorkspaceHeader, { supportWorkspacePaths, type SupportTabId } from '../../components/support/SupportWorkspaceHeader';
 import { cardStatementImportService } from '../../services/cardStatementImportService';
-import type { CardStatementFileDetailPayload, CardStatementImportFile } from '../../types/cardStatementImport';
+import type { CardStatementFileDetailPayload, CardStatementImportFile, CardStatementImportResult } from '../../types/cardStatementImport';
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 import { getSupportManagementYearMonth, rememberSupportManagementYearMonth } from '../../utils/supportManagementState';
 
@@ -196,6 +197,19 @@ export const CardStatementDetailsPage: React.FC = () => {
     ].join(' ').toLocaleLowerCase().includes(term)));
   }, [transactions, search, category]);
   const totalAmount = transactions.reduce((sum, row) => sum + row.amount, 0);
+  const cardGroups = useMemo(() => {
+    const groups = new Map<string, { label: string; results: CardStatementImportResult[] }>();
+    (detail?.results || []).forEach(result => {
+      const key = result.matchedCardId || (result.cardLast4 ? `last4:${result.cardLast4}:${result.holderName || ''}` : result.id);
+      const group = groups.get(key) || {
+        label: `${result.matchedCardLabel || result.cardName || '카드 미확인'}${result.cardLast4 ? ` · ${result.cardLast4}` : ''}`,
+        results: [],
+      };
+      group.results.push(result);
+      groups.set(key, group);
+    });
+    return [...groups.entries()];
+  }, [detail]);
   const filteredAmount = filtered.reduce((sum, row) => sum + row.amount, 0);
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount - 1);
@@ -281,7 +295,13 @@ export const CardStatementDetailsPage: React.FC = () => {
               <div className="rounded-2xl border border-slate-200 bg-white p-4"><p className="text-xs font-bold text-slate-500">이용내역 합계</p><p className="mt-2 text-2xl font-extrabold text-indigo-700">{won(totalAmount)}</p></div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4"><p className="text-xs font-bold text-slate-500">명세서 카드</p><p className="mt-2 text-2xl font-extrabold text-slate-900">{detail.results.length}<span className="ml-1 text-sm font-medium text-slate-500">개</span></p></div>
             </div>
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-6 text-amber-900">AI가 추출한 날짜·가맹점·금액·분류는 원본 명세서와 대조해 주세요. 취소·할인·수수료·할부에 따라 이용내역 합계와 청구 총액이 다를 수 있습니다.{typeof detail.file.grandTotalAmount === 'number' && <span className="ml-1 font-bold">명세서 청구 총액: {won(detail.file.grandTotalAmount)}</span>}{warnings.length > 0 && <details className="mt-1"><summary className="cursor-pointer font-bold">분석 확인사항 {warnings.length}개</summary><ul className="mt-1 list-inside list-disc">{warnings.map(warning => <li key={warning}>{warning}</li>)}</ul></details>}</div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-6 text-amber-900">AI가 추출한 날짜·가맹점·금액·분류는 원본 명세서와 대조해 주세요. 취소·할인·수수료·할부에 따라 이용내역 합계와 청구 총액이 다를 수 있습니다.<span className="ml-1 font-bold">명세서 청구 총액: {detail.file.grandTotalAvailable === true && typeof detail.file.grandTotalAmount === 'number' ? won(detail.file.grandTotalAmount) : '원본 확인 필요'}</span>{warnings.length > 0 && <details className="mt-1"><summary className="cursor-pointer font-bold">분석 확인사항 {warnings.length}개</summary><ul className="mt-1 list-inside list-disc">{warnings.map(warning => <li key={warning}>{warning}</li>)}</ul></details>}</div>
+
+            <section aria-label="카드별 총액 비교" className="space-y-3">
+              <div><h2 className="text-base font-extrabold text-slate-900">카드별 총액 비교</h2><p className="mt-1 text-xs text-slate-500">카드 명세서에 적힌 총액과 취소 금액을 포함한 사용내역 합계를 비교합니다. 검색 조건과 관계없이 전체 내역을 기준으로 계산합니다.</p></div>
+              {cardGroups.map(([key, group]) => <CardStatementReconciliation key={key} results={group.results} analysisStatus={detail.analysisStatus} title={group.label} />)}
+              {!cardGroups.length && <p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">카드별 총액 비교를 위해 상세 분석이 필요합니다.</p>}
+            </section>
 
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
               <div className="flex flex-wrap items-end gap-3 border-b border-slate-100 p-4">

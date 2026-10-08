@@ -28,6 +28,9 @@ export {
 } from './partnerRecognition';
 export {
     analyzeCardBillingStatement,
+    analyzeStoredCardStatementFile,
+    getCardStatementFileDetail,
+    listCardStatementFiles,
     analyzeCardStatementImportJob,
     cancelCardStatementImportUploadSession,
     cancelCardStatementImportFile,

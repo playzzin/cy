@@ -72,6 +72,7 @@ export interface CardStatementImportFile {
   status: CardStatementImportFileStatus;
   statementMonth?: string;
   grandTotalAmount?: number;
+  grandTotalAvailable?: boolean;
   cardCount: number;
   transactionCount: number;
   analysisSource?: CardStatementImportAnalysisSource;
@@ -139,6 +140,12 @@ export interface CardStatementImportResult {
   matchCandidates: CardStatementMatchCandidate[];
   status: CardStatementImportResultStatus;
   subtotalAmount: number;
+  /** True only when the card subtotal was read independently from the statement. */
+  statementTotalAvailable?: boolean;
+  transactionTotalAmount?: number;
+  /** Itemized transaction sum minus the statement card subtotal. */
+  reconciliationDifference?: number | null;
+  reconciliationStatus?: 'matched' | 'mismatch' | 'missing_total' | 'no_transactions';
   transactionCount: number;
   transactions: CardStatementImportTransaction[];
   warnings: string[];

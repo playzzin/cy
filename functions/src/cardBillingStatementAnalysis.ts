@@ -5,7 +5,19 @@ import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { requireCallableAuth } from './auth';
 import { getServerGeminiSettings } from './serverAiSettings';
+import { analyzeKbApprovalPdf, KbApprovalReconciliationError } from './kbApprovalStatement';
 import { cancelStoredCardStatementFile } from './cardStatementImportCancellation';
+import { assertCardStatementHasTransactions, readCardStatementAmount, reconcileCardStatementAmounts } from './cardStatementReconciliation';
+import {
+    assertCardStatementStoragePath,
+    chunkCardStatementDetailResults,
+    getCardStatementFileAnalysisId,
+    getCardStatementDetailAnalysisState,
+    isActiveCardStatementProfile,
+    joinCardStatementDetailChunks,
+    resolveCardStatementYearMonth,
+    type CardStatementDetailChunk,
+} from './cardStatementFileDetails';
 import {
     buildCardStatementSourceClaimDocumentId,
     buildCardStatementTransactionDocumentId,
@@ -14,7 +26,6 @@ import {
 } from './cardStatementImportIdentity';
 
 declare const fetch: any;
-const { PDFParse } = require('pdf-parse');
 
 type CardStatementCategory = 'FUEL' | 'TOLL' | 'MEAL' | 'MATERIAL' | 'OTHER';
 
@@ -99,6 +110,7 @@ interface GeminiCardStatementCard {
     cardName?: string;
     holderName?: string;
     subtotalAmount: number;
+    statementTotalAvailable?: boolean;
     transactions: GeminiCardStatementTransaction[];
     warnings: string[];
     confidence: number;
@@ -108,6 +120,7 @@ interface GeminiKbCardStatementOutput {
     bankName: string;
     statementMonth: string;
     grandTotalAmount: number;
+    grandTotalAvailable?: boolean;
     cards: GeminiCardStatementCard[];
     warnings: string[];
 }
@@ -135,7 +148,7 @@ interface DownloadedStatementFile {
     sha256: string;
 }
 
-type CardStatementAnalysisSource = 'fast_text' | 'gemini';
+type CardStatementAnalysisSource = 'fast_text' | 'pdf_text' | 'gemini';
 
 interface CardStatementAnalysisResult {
     rawText: string;
@@ -295,7 +308,7 @@ const CARD_BILLING_STATEMENT_SCHEMA = {
     properties: {
         bankName: { type: 'string' },
         statementMonth: { type: 'string' },
-        grandTotalAmount: { type: 'number' },
+        grandTotalAmount: { type: ['number', 'null'] },
         cards: {
             type: 'array',
             items: {
@@ -304,7 +317,7 @@ const CARD_BILLING_STATEMENT_SCHEMA = {
                     cardLast4: { type: 'string' },
                     cardName: { type: 'string' },
                     holderName: { type: 'string' },
-                    subtotalAmount: { type: 'number' },
+                    subtotalAmount: { type: ['number', 'null'] },
                     transactions: {
                         type: 'array',
                         items: {
@@ -703,21 +716,29 @@ const hasAllowedAccess = (source: Record<string, unknown>): boolean => (
     hasAllowedRoleValue(source.erpRoleGroups)
 );
 
-const requireCardStatementAccess = async (
+const requireCardStatementFileAccess = async (
     context: functions.https.CallableContext
 ): Promise<functions.https.CallableContext['auth']> => {
     const auth = requireCallableAuth(context);
-    const token = (auth.token || {}) as Record<string, unknown>;
-    if (hasAllowedAccess(token)) return auth;
-
     const userSnap = await admin.firestore().collection('users').doc(auth.uid).get();
     const user = userSnap.data() || {};
-    if (hasAllowedAccess(user)) return auth;
+    if (isActiveCardStatementProfile(userSnap.exists, user)) return auth;
 
     throw new functions.https.HttpsError(
         'permission-denied',
-        '카드 청구서 분석 권한이 없습니다.'
+        '활성 사용자 계정이 아니므로 카드 명세서 이용 권한이 없습니다. 로그인 상태를 확인해 주세요.'
     );
+};
+
+const requireCardStatementAccess = async (
+    context: functions.https.CallableContext
+): Promise<functions.https.CallableContext['auth']> => {
+    const auth = await requireCardStatementFileAccess(context);
+    const token = (auth.token || {}) as Record<string, unknown>;
+    if (hasAllowedAccess(token)) return auth;
+    const user = (await admin.firestore().collection('users').doc(auth.uid).get()).data() || {};
+    if (hasAllowedAccess(user)) return auth;
+    throw new functions.https.HttpsError('permission-denied', '카드 청구서 검수 및 정산 변경 권한이 없습니다.');
 };
 
 const getGeminiSettingsOrThrow = async (): Promise<{ apiKey: string; model: string }> => {
@@ -876,125 +897,6 @@ const verifyDownloadedCardStatementForAnalysis = async (
     return expectedSha256;
 };
 
-const normalizeExtractedPdfText = (text: unknown): string =>
-    asString(text)
-        .replace(/\u00a0/g, ' ')
-        .replace(/[ \t]+/g, ' ')
-        .replace(/\s*\n\s*/g, '\n')
-        .trim();
-
-const parseKrwAmountText = (value: unknown): number | null => {
-    const normalized = asString(value).replace(/[^\d-]/g, '');
-    if (!normalized || normalized === '-') return null;
-    const parsed = Number(normalized);
-    return Number.isFinite(parsed) ? Math.round(parsed) : null;
-};
-
-const extractLabeledKrwAmount = (text: string): number | null => {
-    const labels = [
-        String.raw`총\s*정상\s*이용\s*금액`,
-        String.raw`정상\s*이용\s*금액`,
-        String.raw`총\s*청구\s*금액`,
-        String.raw`청구\s*금액`,
-        String.raw`이번\s*달\s*결제\s*금액`,
-        String.raw`결제\s*예정\s*금액`,
-        String.raw`최종\s*결제\s*금액`,
-    ];
-
-    for (const label of labels) {
-        const match = new RegExp(`${label}[^0-9-]{0,120}\\[?\\s*(-?[0-9][0-9,\\s]*)\\s*원`, 'i').exec(text);
-        const amount = parseKrwAmountText(match?.[1]);
-        if (amount !== null) return amount;
-    }
-
-    return null;
-};
-
-const extractLast4FromText = (text: string): string => {
-    const cardKeywordMatch = /(?:카드\s*(?:번호)?|card\s*(?:number)?|회원\s*번호)[^\d]{0,40}((?:\d[\s*-]?){12,19})/i.exec(text);
-    const keywordDigits = asString(cardKeywordMatch?.[1]).replace(/\D/g, '');
-    if (keywordDigits.length >= 4) return keywordDigits.slice(-4);
-
-    const fullCardMatch = /(?:\d{4}[\s*-]){3}\d{4}/.exec(text);
-    const fullCardDigits = asString(fullCardMatch?.[0]).replace(/\D/g, '');
-    if (fullCardDigits.length >= 4) return fullCardDigits.slice(-4);
-
-    return '';
-};
-
-const extractLast4FromFileName = (value: unknown): string => {
-    const fileName = asString(value).split(/[\\/]/).pop() || '';
-    const withoutExtension = fileName.replace(/\.[^.]+$/, '');
-    const groups = withoutExtension.match(/(^|\D)(\d{4})(?=\D|$)/g) || [];
-    if (groups.length === 0) return '';
-    const last = groups[groups.length - 1].replace(/\D/g, '');
-    return last.slice(-4);
-};
-
-const extractStatementMonthFromText = (text: string, fallbackYearMonth?: string): string => {
-    if (isValidYearMonth(fallbackYearMonth)) return asString(fallbackYearMonth);
-    const match = /(20\d{2})[.\-/년\s]+(0?[1-9]|1[0-2])\s*월?/.exec(text);
-    if (!match) return '';
-    return `${match[1]}-${match[2].padStart(2, '0')}`;
-};
-
-const buildFastTotalOnlyAnalysis = async (
-    input: AnalyzeCardBillingStatementRequest,
-    file: DownloadedStatementFile
-): Promise<CardStatementAnalysisResult | null> => {
-    if (file.mimeType !== 'application/pdf') return null;
-
-    let parser: any = null;
-    try {
-        parser = new PDFParse({ data: file.buffer });
-        const textResult = await parser.getText({ partial: [1] });
-        const text = normalizeExtractedPdfText(textResult?.text);
-        if (!text) return null;
-
-        const amount = extractLabeledKrwAmount(text);
-        const cardLast4 = extractLast4FromFileName(input.cardLabel)
-            || extractLast4FromFileName(input.statementPath)
-            || extractLast4FromText(text);
-        if (amount === null || !cardLast4) return null;
-
-        const statementMonth = extractStatementMonthFromText(text, input.yearMonth);
-        const warnings = [
-            '빠른 총액 모드: 거래 상세는 생략하고 총 정상이용금액/청구금액 기준 총액만 추출했습니다.',
-        ];
-        const output: GeminiKbCardStatementOutput = {
-            bankName: 'KB국민카드',
-            statementMonth,
-            grandTotalAmount: amount,
-            cards: [{
-                cardLast4,
-                cardName: 'KB국민카드',
-                holderName: '',
-                subtotalAmount: amount,
-                transactions: [],
-                warnings,
-                confidence: 0.94,
-            }],
-            warnings,
-        };
-        const parsed = toCompatibleOutput(output);
-        return {
-            rawText: JSON.stringify(parsed),
-            parsed,
-            source: 'fast_text',
-        };
-    } catch (error) {
-        functions.logger.warn('Fast KB card statement text extraction skipped', {
-            statementPath: input.statementPath,
-            message: getErrorMessage(error),
-        });
-        return null;
-    } finally {
-        if (parser) {
-            await parser.destroy().catch(() => undefined);
-        }
-    }
-};
-
 const extractGeminiText = (payload: any): string => {
     const parts = payload?.candidates?.[0]?.content?.parts;
     if (!Array.isArray(parts)) return '';
@@ -1022,10 +924,12 @@ const normalizeCategory = (value: unknown): CardStatementCategory => {
 
 const sanitizeTransaction = (value: unknown): GeminiCardStatementTransaction => {
     const raw = (value || {}) as Record<string, unknown>;
+    const amount = readCardStatementAmount(raw.amount);
+    if (amount === null) throw new Error('PDF 거래 금액을 읽지 못했습니다. 상세내역의 금액과 화질을 확인해 주세요.');
     return {
         date: asString(raw.date),
         merchant: asString(raw.merchant),
-        amount: Math.round(asFiniteNumber(raw.amount, 0)),
+        amount,
         category: normalizeCategory(raw.category),
         memo: asString(raw.memo) || undefined,
         confidence: clampConfidence(raw.confidence),
@@ -1037,14 +941,14 @@ const sanitizeCard = (value: unknown): GeminiCardStatementCard => {
     const transactions = Array.isArray(raw.transactions)
         ? raw.transactions.map(sanitizeTransaction)
         : [];
-    const transactionTotal = transactions.reduce((sum, item) => sum + item.amount, 0);
-    const subtotalAmount = Math.round(asFiniteNumber(raw.subtotalAmount, transactionTotal));
+    const sourceSubtotalAmount = readCardStatementAmount(raw.subtotalAmount);
 
     return {
         cardLast4: asString(raw.cardLast4).replace(/\D/g, '').slice(-4),
         cardName: asString(raw.cardName) || undefined,
         holderName: asString(raw.holderName) || undefined,
-        subtotalAmount,
+        subtotalAmount: sourceSubtotalAmount ?? 0,
+        statementTotalAvailable: sourceSubtotalAmount !== null,
         transactions,
         warnings: asStringArray(raw.warnings),
         confidence: clampConfidence(raw.confidence),
@@ -1054,13 +958,13 @@ const sanitizeCard = (value: unknown): GeminiCardStatementCard => {
 const sanitizeGeminiOutput = (value: unknown): GeminiKbCardStatementOutput => {
     const raw = (value || {}) as Record<string, unknown>;
     const cards = Array.isArray(raw.cards) ? raw.cards.map(sanitizeCard) : [];
-    const cardTotal = cards.reduce((sum, card) => sum + card.subtotalAmount, 0);
-    const grandTotalAmount = Math.round(asFiniteNumber(raw.grandTotalAmount, cardTotal));
+    const sourceGrandTotalAmount = readCardStatementAmount(raw.grandTotalAmount);
 
     return {
-        bankName: asString(raw.bankName) || 'KB국민은행',
+        bankName: asString(raw.bankName),
         statementMonth: asString(raw.statementMonth),
-        grandTotalAmount,
+        grandTotalAmount: sourceGrandTotalAmount ?? 0,
+        grandTotalAvailable: sourceGrandTotalAmount !== null,
         cards,
         warnings: asStringArray(raw.warnings),
     };
@@ -1205,9 +1109,13 @@ const addComputedWarnings = (
         warnings.push(`청구월 불일치: 선택 월 ${expectedYearMonth}, PDF ${output.statementMonth}`);
     }
 
-    const transactionTotal = card.transactions.reduce((sum, item) => sum + item.amount, 0);
-    if (card.transactions.length > 0 && Math.abs(transactionTotal - card.subtotalAmount) > 1) {
-        warnings.push(`카드 합계 불일치: 거래 합계 ${transactionTotal}, 카드 소계 ${card.subtotalAmount}, 차이 ${transactionTotal - card.subtotalAmount}`);
+    const reconciliation = reconcileCardStatementAmounts(card);
+    if (reconciliation.reconciliationStatus === 'no_transactions') {
+        warnings.push('카드 사용 상세내역 누락: 이 카드의 거래 행을 읽지 못해 합계를 검증할 수 없습니다.');
+    } else if (reconciliation.reconciliationStatus === 'missing_total') {
+        warnings.push('카드 명세서 소계 미확인: 원문에 별도로 표시된 카드 총액을 읽지 못해 거래 합계와 대사할 수 없습니다.');
+    } else if (reconciliation.reconciliationStatus === 'mismatch') {
+        warnings.push(`카드 합계 불일치: 거래 합계 ${reconciliation.transactionTotalAmount}, 카드 소계 ${card.subtotalAmount}, 차이 ${reconciliation.reconciliationDifference}`);
     }
 
     return Array.from(new Set(warnings.map(asString).filter(Boolean))).slice(0, 50);
@@ -1216,6 +1124,9 @@ const addComputedWarnings = (
 const isBlockingAnalysisWarning = (warning: unknown): boolean => {
     const text = asString(warning);
     return text.includes('카드 합계 불일치') ||
+        text.includes('명세서 전체 합계 불일치') ||
+        text.includes('카드 명세서 소계 미확인') ||
+        text.includes('카드 사용 상세내역 누락') ||
         (text.includes('거래 합계') && text.includes('카드 소계'));
 };
 
@@ -1761,7 +1672,7 @@ const toCompatibleOutput = (output: GeminiKbCardStatementOutput): CompatibleBill
 
     return {
         ...output,
-        totalAmount: output.grandTotalAmount || items.reduce((sum, item) => sum + item.amount, 0),
+        totalAmount: output.grandTotalAmount,
         items,
     };
 };
@@ -1774,7 +1685,7 @@ const buildPrompt = (input: AnalyzeCardBillingStatementRequest): string => {
     ].filter(Boolean).join('\n');
 
     return `
-You extract structured data from Korean KB Kookmin Bank corporate card documents.
+You extract structured data from Korean card statements and corporate card documents from any card issuer.
 The attachment may be a monthly billing statement, an approval-detail export named "승인내역결과",
 or an image/PDF of either format.
 
@@ -1783,23 +1694,31 @@ ${hints}
 Return only JSON matching the response schema.
 
 Rules:
-- bankName should be "KB국민은행" when the document is a KB/Kookmin statement.
+- Read bankName from the issuer shown in the document. Do not assume KB or any other issuer; use an empty string when it is unreadable.
 - statementMonth must be yyyy-MM. If the statement month is not visible, return an empty string and add a warning.
 - grandTotalAmount and all amounts must be integer KRW numbers without comma formatting.
+- Read grandTotalAmount and subtotalAmount independently from totals printed in the original document.
+  Return null when the respective total is not printed or unreadable. Never replace a missing total with
+  the sum of transactions or adjust a printed total to make it agree with the transactions.
 - Use the actual billing/payable amount for the month. Prefer labels such as "청구금액", "이번달 결제금액",
   "총 청구금액", "결제예정금액", or the final amount column that includes VAT and reflects cancellations/refunds.
-- Do not use "총 정상이용금액" as subtotalAmount or grandTotalAmount when the document also shows VAT,
-  cancelled/refunded amounts, discounts, or a separate payable/billing total. In those cases calculate the
-  billable total from the payable transaction rows and reconciliation totals.
+- For KB "승인내역결과" / "승인내역조회", "총 정상이용금액" is the gross normal approval total.
+  Subtract the separate "정상/취소(금액)" cancellation total exactly once. Read ALL pages and reconcile
+  normal/cancelled row counts and amounts separately against "정상/취소(건)" and "정상/취소(금액)".
+- In KB approval exports, "승인금액" ALREADY INCLUDES "부가세". The VAT field is informational;
+  NEVER add VAT to the approval amount or subtract VAT from it. A negative approval cancellation is
+  already signed: do not subtract it again or negate it into a positive charge.
 - Transaction amount must be the amount that affects the monthly bill. Include VAT when VAT is charged in
   the row amount. Subtract cancelled/refunded/credited rows as negative amounts. Do not include a cancelled
   original charge and its reversal as two positive billable charges.
-- For every card, the sum of transactions.amount should equal subtotalAmount. If the PDF total and visible
-  transaction rows disagree, keep the line-level billable transaction amounts, set subtotalAmount to the
-  best payable card total, and add a warning explaining which total was visible and why it differs.
+- Compare each card's transactions with its printed subtotalAmount. If the PDF total and visible
+  transaction rows disagree, preserve both the printed total and every line-level billable transaction
+  amount, and add a warning explaining which total was visible and why it differs.
 - Negative, cancelled, or refunded transactions must be returned as negative amounts when visible.
 - cardLast4 must contain only the visible last 4 digits of the card number. Do not invent hidden digits.
 - Split the result by card when multiple cards are included in one PDF.
+- Keep every visible transaction on every page, including repeated legitimate purchases and negative refunds.
+  Never invent a transaction for a summary, subtotal, prior balance, or a total-only page.
 - subtotalAmount is the final billable/payable amount for that card section, not merely the normal-use total.
 - For KB approval-detail exports, transaction rows often show merchant/payment/amount/tax fields in one visual column
   and approval date/time/card/approval number fields in another visual column. Align them by row order and visual layout.
@@ -1866,7 +1785,6 @@ const callGeminiCardStatementAnalysis = async (
             status: response.status,
             message,
             model,
-            rawText: rawResponseText,
         });
         throw new functions.https.HttpsError(code, `Gemini analysis failed: ${message}`);
     }
@@ -1876,7 +1794,17 @@ const callGeminiCardStatementAnalysis = async (
         throw new functions.https.HttpsError('failed-precondition', 'Gemini analysis returned an empty response.');
     }
 
-    const parsed = toCompatibleOutput(sanitizeGeminiOutput(parseJsonObject(rawText)));
+    const sanitized = sanitizeGeminiOutput(parseJsonObject(rawText));
+    assertCardStatementHasTransactions(sanitized.cards);
+    if (sanitized.grandTotalAvailable === false) {
+        sanitized.warnings.push('명세서 전체 총액 미확인: 원문 총액을 읽지 못해 파일 전체 금액은 검증할 수 없습니다.');
+    } else {
+        const transactionTotal = sanitized.cards.reduce((sum, card) => sum + card.transactions.reduce((total, row) => total + row.amount, 0), 0);
+        if (transactionTotal !== sanitized.grandTotalAmount) {
+            sanitized.warnings.push(`명세서 전체 합계 불일치: 거래 합계 ${transactionTotal}, 파일 총액 ${sanitized.grandTotalAmount}, 차이 ${transactionTotal - sanitized.grandTotalAmount}`);
+        }
+    }
+    const parsed = toCompatibleOutput(sanitized);
     return { rawText, parsed };
 };
 
@@ -1884,9 +1812,26 @@ const analyzeCardStatementImportFile = async (
     input: AnalyzeCardBillingStatementRequest,
     file: DownloadedStatementFile
 ): Promise<CardStatementAnalysisResult> => {
-    const fast = await buildFastTotalOnlyAnalysis(input, file);
-    if (fast) return fast;
-
+    if (file.mimeType === 'application/pdf') {
+        try {
+            const statement = await analyzeKbApprovalPdf(file.buffer);
+            if (statement) {
+                assertCardStatementHasTransactions(statement.cards);
+                const parsed = toCompatibleOutput({
+                    ...statement,
+                    grandTotalAvailable: true,
+                    // The validated file total is an independent card total only in a single-card export.
+                    cards: statement.cards.map((card) => ({ ...card, statementTotalAvailable: statement.cards.length === 1 })),
+                });
+                return { rawText: JSON.stringify(parsed), parsed, source: 'pdf_text' };
+            }
+        } catch (error) {
+            if (error instanceof KbApprovalReconciliationError) {
+                throw new functions.https.HttpsError('failed-precondition', error.message);
+            }
+            throw error;
+        }
+    }
     const gemini = await callGeminiCardStatementAnalysis(input, file);
     return {
         ...gemini,
@@ -1899,18 +1844,13 @@ export const analyzeCardBillingStatement = functions
     .region('asia-northeast3')
     .https.onCall(withGeminiUsageContext(async (data: AnalyzeCardBillingStatementRequest, context) => {
         try {
-            await requireCardStatementAccess(context);
+            await requireCardStatementFileAccess(context);
 
             const statementPath = asString(data?.statementPath);
-            if (!statementPath || statementPath.includes('..')) {
-                throw new functions.https.HttpsError(
-                    'invalid-argument',
-                    '분석할 청구서 파일 경로가 필요합니다.'
-                );
-            }
+            validateStoragePath(statementPath);
 
             const file = await downloadStorageFileAsBase64(statementPath);
-            const gemini = await callGeminiCardStatementAnalysis(
+            const gemini = await analyzeCardStatementImportFile(
                 {
                     statementPath,
                     billingId: asString(data?.billingId) || undefined,
@@ -1924,7 +1864,7 @@ export const analyzeCardBillingStatement = functions
                 ok: true,
                 analysis: {
                     status: 'completed',
-                    message: 'Gemini 카드 청구서 분석이 완료되었습니다.',
+                    message: '카드 청구서 분석이 완료되었습니다.',
                     file: {
                         statementPath,
                         mimeType: file.mimeType,
@@ -2014,9 +1954,7 @@ const deleteResultsForJob = async (jobId: string): Promise<void> => {
 };
 
 const validateStoragePath = (storagePath: string): void => {
-    if (!storagePath || storagePath.includes('..')) {
-        throw new functions.https.HttpsError('invalid-argument', '유효한 Storage 파일 경로가 필요합니다.');
-    }
+    assertCardStatementStoragePath(storagePath);
 };
 
 const sanitizeStorageFileName = (value: unknown): string => {
@@ -2076,7 +2014,8 @@ const buildSyntheticCardWhenNeeded = (parsed: CompatibleBillingStatementOutput):
         cardLast4: '',
         cardName: '',
         holderName: '',
-        subtotalAmount: parsed.grandTotalAmount || parsed.items.reduce((sum, item) => sum + item.amount, 0),
+        subtotalAmount: parsed.grandTotalAmount,
+        statementTotalAvailable: parsed.grandTotalAvailable !== false,
         transactions: parsed.items.map((item) => ({
             date: asString(item.date),
             merchant: asString(item.merchant || item.label),
@@ -2094,7 +2033,7 @@ export const createCardStatementImportUploadSession = functions
     .region('asia-northeast3')
     .https.onCall(withGeminiUsageContext(async (data: CreateCardStatementImportUploadSessionRequest, context) => {
         try {
-            const auth = await requireCardStatementAccess(context);
+            const auth = await requireCardStatementFileAccess(context);
             const yearMonth = asString(data?.yearMonth);
             if (!isValidYearMonth(yearMonth)) {
                 throw new functions.https.HttpsError('invalid-argument', '가져오기 월은 yyyy-MM 형식이어야 합니다.');
@@ -2123,7 +2062,7 @@ export const createCardStatementImportUploadSession = functions
             batch.set(jobRef, stripUndefinedDeep({
                 yearMonth,
                 status: 'uploading',
-                bankName: asString(data?.bankName) || 'KB국민카드',
+                bankName: asString(data?.bankName) || '카드명세서',
                 totalFiles: files.length,
                 uploadedFiles: 0,
                 analyzedFiles: 0,
@@ -2190,7 +2129,7 @@ export const completeCardStatementImportUpload = functions
     .region('asia-northeast3')
     .https.onCall(withGeminiUsageContext(async (data: CompleteCardStatementImportUploadRequest, context) => {
         try {
-            await requireCardStatementAccess(context);
+            await requireCardStatementFileAccess(context);
             const jobId = asString(data?.jobId);
             if (!jobId) {
                 throw new functions.https.HttpsError('invalid-argument', '가져오기 작업 ID가 필요합니다.');
@@ -2397,7 +2336,7 @@ export const createCardStatementImportJob = functions
     .region('asia-northeast3')
     .https.onCall(withGeminiUsageContext(async (data: CreateCardStatementImportJobRequest, context) => {
         try {
-            const auth = await requireCardStatementAccess(context);
+            const auth = await requireCardStatementFileAccess(context);
             const yearMonth = asString(data?.yearMonth);
             if (!isValidYearMonth(yearMonth)) {
                 throw new functions.https.HttpsError('invalid-argument', '가져오기 월은 yyyy-MM 형식이어야 합니다.');
@@ -2456,7 +2395,7 @@ export const createCardStatementImportJob = functions
             batch.set(jobRef, stripUndefinedDeep({
                 yearMonth,
                 status: 'queued',
-                bankName: asString(data?.bankName) || 'KB국민은행',
+                bankName: asString(data?.bankName) || '카드명세서',
                 totalFiles: verifiedFiles.length,
                 uploadedFiles: verifiedFiles.length,
                 analyzedFiles: 0,
@@ -2596,12 +2535,13 @@ const legacyAnalyzeCardStatementImportJob = functions
                     const statementCards = buildSyntheticCardWhenNeeded(parsed);
                     const fileWarnings = Array.from(new Set(parsed.warnings.map(asString).filter(Boolean)));
                     const fileTransactionCount = statementCards.reduce((sum, card) => sum + card.transactions.length, 0);
-                    const fileTotalAmount = parsed.grandTotalAmount || statementCards.reduce((sum, card) => sum + card.subtotalAmount, 0);
+                    const fileTotalAmount = parsed.grandTotalAmount;
 
                     await fileDoc.ref.set({
                         status: 'completed',
                         statementMonth: parsed.statementMonth || '',
                         grandTotalAmount: fileTotalAmount,
+                        grandTotalAvailable: parsed.grandTotalAvailable !== false,
                         cardCount: statementCards.length,
                         transactionCount: fileTransactionCount,
                         warnings: fileWarnings,
@@ -2653,6 +2593,7 @@ const legacyAnalyzeCardStatementImportJob = functions
                         analysisReviewRequired: Boolean(blockingReviewReason),
                         analysisReviewReason: blockingReviewReason || '',
                         subtotalAmount: statementCard.subtotalAmount,
+                        ...reconcileCardStatementAmounts(statementCard),
                             transactionCount: transactions.length,
                             transactions,
                             warnings,
@@ -3233,13 +3174,13 @@ const runCardStatementImportJobAnalysis = async (jobId: string, expectedRunId?: 
                 const statementCards = buildSyntheticCardWhenNeeded(parsed);
                 const fileWarnings = Array.from(new Set(parsed.warnings.map(asString).filter(Boolean)));
                 const fileTransactionCount = statementCards.reduce((sum, card) => sum + card.transactions.length, 0);
-                const fileTotalAmount = parsed.grandTotalAmount ||
-                    statementCards.reduce((sum, card) => sum + card.subtotalAmount, 0);
+                const fileTotalAmount = parsed.grandTotalAmount;
 
                 await fileDoc.ref.set({
                     status: 'completed',
                     statementMonth: parsed.statementMonth || '',
                     grandTotalAmount: fileTotalAmount,
+                    grandTotalAvailable: parsed.grandTotalAvailable !== false,
                     cardCount: statementCards.length,
                     transactionCount: fileTransactionCount,
                     warnings: fileWarnings,
@@ -3304,6 +3245,7 @@ const runCardStatementImportJobAnalysis = async (jobId: string, expectedRunId?: 
                         analysisReviewRequired: Boolean(blockingReviewReason),
                         analysisReviewReason: blockingReviewReason || '',
                         subtotalAmount: statementCard.subtotalAmount,
+                        ...reconcileCardStatementAmounts(statementCard),
                         transactionCount: transactions.length,
                         transactions,
                         warnings,
@@ -3412,7 +3354,7 @@ export const analyzeCardStatementImportJob = functions
     .region('asia-northeast3')
     .https.onCall(withGeminiUsageContext(async (data: AnalyzeCardStatementImportJobRequest, context) => {
         try {
-            await requireCardStatementAccess(context);
+            await requireCardStatementFileAccess(context);
             const jobId = asString(data?.jobId);
             if (!jobId) {
                 throw new functions.https.HttpsError('invalid-argument', 'Card statement import job id is required.');
@@ -3428,7 +3370,7 @@ export const recoverCardStatementImportJobAnalysis = functions
     .region('asia-northeast3')
     .https.onCall(withGeminiUsageContext(async (data: RecoverCardStatementImportJobAnalysisRequest, context) => {
         try {
-            await requireCardStatementAccess(context);
+            await requireCardStatementFileAccess(context);
             const jobId = asString(data?.jobId);
             if (!jobId) {
                 throw new functions.https.HttpsError('invalid-argument', 'Card statement import job id is required.');
@@ -3461,13 +3403,286 @@ export const getCardStatementImportJobStatus = functions
     .region('asia-northeast3')
     .https.onCall(withGeminiUsageContext(async (data: GetCardStatementImportJobStatusRequest, context) => {
         try {
-            await requireCardStatementAccess(context);
+            await requireCardStatementFileAccess(context);
             const jobId = asString(data?.jobId);
             if (!jobId) {
                 throw new functions.https.HttpsError('invalid-argument', '가져오기 작업 ID가 필요합니다.');
             }
             return await getJobStatusPayload(jobId);
         } catch (error) {
+            throw toHttpsError(error);
+        }
+    }));
+
+interface StoredCardStatementInput {
+    fileId?: string;
+    storagePath?: string;
+    yearMonth?: string;
+    originalFileName?: string;
+}
+
+const FILE_ANALYSES_COLLECTION = 'cardStatementFileAnalyses';
+
+const buildStoredStatementFile = (storagePath: string, metadata: any, originalFileName?: string): Record<string, any> => ({
+    id: `stored_${getCardStatementFileAnalysisId(storagePath)}`,
+    jobId: '',
+    yearMonth: resolveCardStatementYearMonth(storagePath),
+    fileIndex: 0,
+    storagePath,
+    originalFileName: asString(metadata.metadata?.originalFileName) || asString(originalFileName) || storagePath.split('/').pop(),
+    mimeType: inferMimeType(storagePath, metadata.contentType),
+    size: asFiniteNumber(metadata.size),
+    status: 'uploaded',
+    cardCount: 0,
+    transactionCount: 0,
+    warnings: [],
+    ...(metadata.timeCreated ? { createdAt: admin.firestore.Timestamp.fromDate(new Date(metadata.timeCreated)) } : {}),
+});
+
+const resolveStoredCardStatement = async (input: StoredCardStatementInput): Promise<Record<string, any>> => {
+    const db = admin.firestore();
+    const fileId = asString(input?.fileId);
+    let file: Record<string, any> | null = null;
+    if (fileId && !/^stored_[a-f0-9]{64}$/.test(fileId)) {
+        if (fileId.includes('/')) throw new functions.https.HttpsError('invalid-argument', '유효한 명세서 파일 ID가 필요합니다.');
+        const snapshot = await db.collection(COLLECTIONS.files).doc(fileId).get();
+        if (!snapshot.exists) throw new functions.https.HttpsError('not-found', '업로드한 명세서를 찾을 수 없습니다.');
+        file = { ...snapshot.data(), id: snapshot.id };
+    } else if (fileId) {
+        const snapshot = await db.collection(FILE_ANALYSES_COLLECTION).doc(fileId.slice(7)).get();
+        file = snapshot.data()?.file || null;
+        if (!file && !input.storagePath) throw new functions.https.HttpsError('not-found', '명세서 파일 경로가 필요합니다. 업로드 목록에서 다시 선택해 주세요.');
+    }
+
+    const storagePath = assertCardStatementStoragePath(file?.storagePath || input?.storagePath);
+    if (fileId.startsWith('stored_') && fileId !== `stored_${getCardStatementFileAnalysisId(storagePath)}`) {
+        throw new functions.https.HttpsError('invalid-argument', '파일 ID와 명세서 경로가 일치하지 않습니다.');
+    }
+    if (input?.storagePath && input.storagePath !== storagePath) {
+        throw new functions.https.HttpsError('invalid-argument', '파일 ID와 명세서 경로가 일치하지 않습니다.');
+    }
+    const yearMonth = resolveCardStatementYearMonth(storagePath, input?.yearMonth || file?.yearMonth);
+    if (!file) {
+        const imports = await db.collection(COLLECTIONS.files).where('storagePath', '==', storagePath).limit(1).get();
+        if (!imports.empty) file = { ...imports.docs[0].data(), id: imports.docs[0].id };
+    }
+    if (file) return file;
+
+    const [metadata] = await admin.storage().bucket().file(storagePath).getMetadata();
+    return { ...buildStoredStatementFile(storagePath, metadata, input?.originalFileName), yearMonth };
+};
+
+const getStoredCardStatementDetailPayload = async (file: Record<string, any>): Promise<Record<string, unknown>> => {
+    const db = admin.firestore();
+    const analysisRef = db.collection(FILE_ANALYSES_COLLECTION).doc(getCardStatementFileAnalysisId(file.storagePath));
+    const analysisSnap = await analysisRef.get();
+    const analysis = analysisSnap.data() || {};
+    const analysisState = getCardStatementDetailAnalysisState(analysis);
+    const jobSnap = file.jobId ? await db.collection(COLLECTIONS.jobs).doc(file.jobId).get() : null;
+    let results: Array<Record<string, unknown>> = [];
+    if (analysis.activeRunId) {
+        const chunks = await analysisRef.collection('results').where('runId', '==', analysis.activeRunId).get();
+        results = joinCardStatementDetailChunks(chunks.docs.map((entry) => entry.data() as unknown as CardStatementDetailChunk));
+    } else if (file.jobId) {
+        const existing = await db.collection(COLLECTIONS.results).where('fileId', '==', file.id).get();
+        results = existing.docs.map((entry) => ({ ...entry.data(), id: entry.id }))
+            .filter((result: any) => result.analysisSource !== 'fast_text')
+            .sort((a: any, b: any) => Number(a.resultIndex) - Number(b.resultIndex));
+    }
+    return stripUndefinedDeep({
+        ok: true,
+        file: {
+            ...file,
+            ...(analysis.activeRunId ? analysis.file : {}),
+            id: file.id,
+            jobId: file.jobId,
+            status: file.status,
+            detailAnalysisStatus: analysisState.analysisStatus || undefined,
+        },
+        job: jobSnap?.exists ? { ...jobSnap.data(), id: jobSnap.id } : null,
+        results,
+        analysisStatus: analysisState.analysisStatus || (results.some((result) => result.analysisSource !== 'fast_text'
+            && Array.isArray(result.transactions) && result.transactions.length > 0) ? 'completed' : 'not_analyzed'),
+        analysisError: analysisState.analysisError,
+        analyzedAt: analysis.analyzedAt,
+    }) as Record<string, unknown>;
+};
+
+export const listCardStatementFiles = functions
+    .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 10 })
+    .region('asia-northeast3')
+    .https.onCall(async (data: { yearMonth?: string }, context) => {
+        try {
+            await requireCardStatementFileAccess(context);
+            const yearMonth = asString(data?.yearMonth);
+            if (!isValidYearMonth(yearMonth)) throw new functions.https.HttpsError('invalid-argument', '조회 월은 yyyy-MM 형식이어야 합니다.');
+            const db = admin.firestore();
+            const [files, analyses, ledgerObjects, billingObjects] = await Promise.all([
+                db.collection(COLLECTIONS.files).where('yearMonth', '==', yearMonth).get(),
+                db.collection(FILE_ANALYSES_COLLECTION).where('yearMonth', '==', yearMonth).get(),
+                admin.storage().bucket().getFiles({ prefix: `card-ledger-statements/${yearMonth}/` }),
+                admin.storage().bucket().getFiles({ prefix: `card-billing-statements/${yearMonth}/` }),
+            ]);
+            const byPath = new Map<string, Record<string, any>>();
+            files.docs.forEach((entry) => byPath.set(asString(entry.data().storagePath), { ...entry.data(), id: entry.id }));
+            analyses.docs.forEach((entry) => {
+                const analysis = entry.data();
+                const file = analysis.file;
+                if (file?.storagePath) {
+                    const existing = byPath.get(file.storagePath);
+                    byPath.set(file.storagePath, {
+                        ...existing,
+                        ...file,
+                        ...(existing ? { id: existing.id, jobId: existing.jobId, status: existing.status } : {}),
+                        detailAnalysisStatus: getCardStatementDetailAnalysisState(analysis).analysisStatus,
+                    });
+                }
+            });
+            [...ledgerObjects[0], ...billingObjects[0]].forEach((object) => {
+                if (byPath.has(object.name) || object.name.endsWith('/')) return;
+                const mimeType = asString(object.metadata?.contentType);
+                if (!['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mimeType)
+                    && !/\.(pdf|png|jpe?g|webp|gif)$/i.test(object.name)) return;
+                byPath.set(object.name, buildStoredStatementFile(object.name, object.metadata || {}));
+            });
+            return { ok: true, files: Array.from(byPath.values()) };
+        } catch (error) {
+            throw toHttpsError(error);
+        }
+    });
+
+export const getCardStatementFileDetail = functions
+    .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 10 })
+    .region('asia-northeast3')
+    .https.onCall(async (data: StoredCardStatementInput, context) => {
+        try {
+            await requireCardStatementFileAccess(context);
+            return await getStoredCardStatementDetailPayload(await resolveStoredCardStatement(data));
+        } catch (error) {
+            throw toHttpsError(error);
+        }
+    });
+
+export const analyzeStoredCardStatementFile = functions
+    .runWith({ timeoutSeconds: 540, memory: '1GB', maxInstances: 3 })
+    .region('asia-northeast3')
+    .https.onCall(withGeminiUsageContext(async (data: StoredCardStatementInput, context) => {
+        let analysisRef: FirebaseFirestore.DocumentReference | undefined;
+        let runId = '';
+        try {
+            await requireCardStatementFileAccess(context);
+            const file = await resolveStoredCardStatement(data);
+            if (file.status === 'cancelled' || file.status === 'uploading') {
+                throw new functions.https.HttpsError('failed-precondition', '취소되었거나 업로드가 완료되지 않은 명세서는 분석할 수 없습니다.');
+            }
+            const db = admin.firestore();
+            analysisRef = db.collection(FILE_ANALYSES_COLLECTION).doc(getCardStatementFileAnalysisId(file.storagePath));
+            const candidateRunId = buildAnalysisRunId();
+            await db.runTransaction(async (transaction) => {
+                const current = (await transaction.get(analysisRef!)).data() || {};
+                if (current.analysisStatus === 'analyzing' && Number(current.analysisStartedAtMillis) > Date.now() - 600_000) {
+                    throw new functions.https.HttpsError('already-exists', '이 명세서를 분석하고 있습니다. 잠시 후 새로고침해 주세요.');
+                }
+                transaction.set(analysisRef!, {
+                    yearMonth: file.yearMonth,
+                    storagePath: file.storagePath,
+                    file: current.activeRunId ? current.file : file,
+                    analysisStatus: 'analyzing',
+                    analysisRunId: candidateRunId,
+                    analysisStartedAtMillis: Date.now(),
+                    analysisError: admin.firestore.FieldValue.delete(),
+                    updatedAt: safeTimestamp(),
+                }, { merge: true });
+            });
+            runId = candidateRunId;
+            const downloaded = await downloadStorageFileAsBase64(file.storagePath);
+            if (file.sha256) assertDownloadedCardStatementSource(downloaded, file.sha256, '업로드 원본이 변경되어 분석할 수 없습니다. 파일을 다시 등록해 주세요.');
+            const analysis = await analyzeCardStatementImportFile({
+                statementPath: file.storagePath,
+                yearMonth: file.yearMonth,
+                cardLabel: file.originalFileName,
+            }, downloaded);
+            // This snapshot intentionally has no billing/transaction commit side effects.
+            const cards = analysis.parsed.cards;
+            const registeredCards = await loadCardsForMatching();
+            const results = cards.map((card, resultIndex) => {
+                const match = matchStatementCard(card, registeredCards);
+                const warnings = uniqueStrings([...addComputedWarnings(analysis.parsed, card, file.yearMonth), ...match.warnings]);
+                const blockingReviewReason = getBlockingAnalysisReviewReason(warnings);
+                return {
+                    id: `${file.id}_detail_${resultIndex}`,
+                    jobId: file.jobId,
+                    fileId: file.id,
+                    fileIndex: Number(file.fileIndex || 0),
+                    resultIndex,
+                    yearMonth: file.yearMonth,
+                    statementMonth: analysis.parsed.statementMonth,
+                    cardLast4: card.cardLast4,
+                    cardName: card.cardName || '',
+                    holderName: card.holderName || '',
+                    matchedCardId: match.matchedCardId || null,
+                    matchedCardLabel: match.matchedCardLabel || null,
+                    matchConfidence: match.matchConfidence,
+                    matchCandidates: match.matchCandidates,
+                    status: match.matchedCardId && !blockingReviewReason ? 'matched' : 'needs_review',
+                    analysisReviewRequired: Boolean(blockingReviewReason),
+                    analysisReviewReason: blockingReviewReason,
+                    subtotalAmount: card.subtotalAmount,
+                    ...reconcileCardStatementAmounts(card),
+                    transactionCount: card.transactions.length,
+                    transactions: card.transactions.map((row, index) => ({ ...row, id: `tx_${index}`, memo: row.memo || '' })),
+                    warnings,
+                    analysisSource: analysis.source,
+                    sourceStoragePath: file.storagePath,
+                    sourceSha256: downloaded.sha256,
+                    originalFileName: file.originalFileName,
+                };
+            });
+            const chunks = chunkCardStatementDetailResults(results);
+            if (chunks.length > 450) throw new functions.https.HttpsError('failed-precondition', '명세서 상세내역이 너무 많습니다. PDF를 나누어 등록해 주세요.');
+            const savedFile = {
+                ...file,
+                sha256: downloaded.sha256,
+                mimeType: downloaded.mimeType,
+                size: downloaded.size,
+                statementMonth: analysis.parsed.statementMonth,
+                grandTotalAmount: analysis.parsed.grandTotalAmount,
+                grandTotalAvailable: analysis.parsed.grandTotalAvailable !== false,
+                cardCount: cards.length,
+                transactionCount: cards.reduce((sum, card) => sum + card.transactions.length, 0),
+                analysisSource: analysis.source,
+                warnings: analysis.parsed.warnings,
+                updatedAt: admin.firestore.Timestamp.now(),
+            };
+            await db.runTransaction(async (transaction) => {
+                const current = (await transaction.get(analysisRef!)).data() || {};
+                if (current.analysisRunId !== runId) throw new functions.https.HttpsError('aborted', '다른 분석 작업이 시작되어 이전 결과를 저장하지 않았습니다.');
+                if (file.jobId) {
+                    const sourceFile = await transaction.get(db.collection(COLLECTIONS.files).doc(file.id));
+                    if (!sourceFile.exists || sourceFile.data()?.status === 'cancelled') {
+                        throw new functions.https.HttpsError('failed-precondition', '분석 중 명세서가 취소되어 상세 결과를 저장하지 않았습니다.');
+                    }
+                }
+                chunks.forEach((chunk, index) => transaction.set(analysisRef!.collection('results').doc(`${runId}_${index}`), { ...chunk, runId }));
+                transaction.set(analysisRef!, {
+                    file: savedFile,
+                    activeRunId: runId,
+                    analysisStatus: 'completed',
+                    analyzedAt: safeTimestamp(),
+                    updatedAt: safeTimestamp(),
+                    analysisError: admin.firestore.FieldValue.delete(),
+                }, { merge: true });
+            });
+            return await getStoredCardStatementDetailPayload(await resolveStoredCardStatement(data));
+        } catch (error) {
+            if (analysisRef && runId) {
+                await admin.firestore().runTransaction(async (transaction) => {
+                    const current = (await transaction.get(analysisRef!)).data() || {};
+                    if (current.analysisRunId === runId && current.analysisStatus === 'analyzing') transaction.set(analysisRef!, {
+                        analysisStatus: 'failed', analysisError: getErrorMessage(error), updatedAt: safeTimestamp(),
+                    }, { merge: true });
+                }).catch(() => undefined);
+            }
             throw toHttpsError(error);
         }
     }));
