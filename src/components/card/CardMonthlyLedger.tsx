@@ -18,6 +18,7 @@ import { FileText, Sparkles } from 'lucide-react';
 import { CardStatementImportHistoryModal } from './CardStatementImportHistoryModal';
 import { ref as storageRef, uploadBytes } from 'firebase/storage';
 import CardStatementUsageDialog from './CardStatementUsageDialog';
+import CardStatementFilesDialog from './CardStatementFilesDialog';
 import {
     Card,
     CardAssignmentRecord,
@@ -363,6 +364,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
     const [isStatementImportOpen, setIsStatementImportOpen] = useState(false);
     const [isStatementHistoryOpen, setIsStatementHistoryOpen] = useState(false);
     const [statementCardId, setStatementCardId] = useState<string | null>(null);
+    const [statementView, setStatementView] = useState<'details' | 'original'>('details');
     useEffect(() => { setStatementCardId(null); }, [requestedYearMonth, cards]);
     const originalTxsRef = useRef<CardTransaction[]>([]);
 
@@ -1628,6 +1630,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             })));
 
             await loadData();
+            setStatementView('details');
             setStatementCardId(row.card.id);
         } catch (error) {
             console.error(error);
@@ -1948,7 +1951,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                             />
 
                                             <td className="px-2 py-3 border-l border-indigo-50 bg-white text-center">
-                                                <div className="flex items-center justify-center gap-1">
+                                                <div className="flex flex-wrap items-center justify-center gap-1">
                                                     <label
                                                         className={`inline-flex h-8 items-center justify-center gap-1 rounded-lg px-2 text-[11px] font-bold text-white transition-colors ${
                                                             isUploadingStatement
@@ -1974,7 +1977,16 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                     <button
                                                         type="button"
                                                         disabled={!latestStatementPath || isUploadingStatement}
-                                                        onClick={() => setStatementCardId(row.card.id)}
+                                                        onClick={() => { setStatementView('original'); setStatementCardId(row.card.id); }}
+                                                        className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300"
+                                                        title="카드 사용내역서 원본 PDF/이미지 열기"
+                                                    >
+                                                        원본 열기
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        disabled={!latestStatementPath || isUploadingStatement}
+                                                        onClick={() => { setStatementView('details'); setStatementCardId(row.card.id); }}
                                                         className={`h-8 rounded-lg border px-2 text-[11px] font-bold ${
                                                             latestStatementPath && !isUploadingStatement
                                                                 ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
@@ -2042,7 +2054,11 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 onCompleted={() => void loadData()}
             />
             <CardStatementImportHistoryModal isOpen={isStatementHistoryOpen} yearMonth={yearMonth} onClose={() => setIsStatementHistoryOpen(false)} onCancelled={() => void loadData()} />
-            {statementCard && <CardStatementUsageDialog
+            {statementCard && (statementView === 'original' ? <CardStatementFilesDialog
+                paths={statementCardPaths}
+                title={statementCard.name + ' 사용내역서 원본'}
+                onClose={() => setStatementCardId(null)}
+            /> : <CardStatementUsageDialog
                 key={`${yearMonth}:${statementCard.id}`}
                 yearMonth={yearMonth}
                 cardId={statementCard.id}
@@ -2051,7 +2067,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 ledgerTotal={statementCardRows.reduce((sum, row) => sum + row.total, 0)}
                 paths={statementCardPaths}
                 onClose={() => setStatementCardId(null)}
-            />}
+            />)}
         </div>
     );
 };

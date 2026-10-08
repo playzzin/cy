@@ -11,6 +11,7 @@ import { teamSettlementProtectionService } from '../../services/teamSettlementPr
 import { manpowerService } from '../../services/manpowerService';
 import { officeStaffService } from '../../services/officeStaffService';
 import CardStatementUsageDialog from './CardStatementUsageDialog';
+import CardStatementFilesDialog from './CardStatementFilesDialog';
 import type { Card, CardTransaction } from '../../types/card';
 import type { CardMonthlyLedgerSaveResult } from '../../services/cardMonthlyLedgerMutationService';
 
@@ -25,6 +26,7 @@ jest.mock('../../services/cardStatementAttachmentService', () => ({
 }));
 jest.mock('./CardStatementImportModal', () => ({ __esModule: true, default: () => null }));
 jest.mock('./CardStatementImportHistoryModal', () => ({ CardStatementImportHistoryModal: () => null }));
+jest.mock('./CardStatementFilesDialog', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('./CardStatementUsageDialog', () => ({
   __esModule: true,
   default: jest.fn(({ onClose }: { onClose: () => void }) => <div role="dialog" aria-label="사용내역서 상세내역"><button onClick={onClose}>상세내역 닫기</button></div>),
@@ -57,6 +59,7 @@ const billings = jest.mocked(cardBillingService.getBillingsByMonth);
 const protection = jest.mocked(teamSettlementProtectionService.getConfirmedTeamSettlementKeys);
 
 beforeEach(() => {
+  jest.mocked(CardStatementFilesDialog).mockClear().mockImplementation(({ onClose }) => <div role="dialog" aria-label="사용내역서 원본"><button onClick={onClose}>원본 닫기</button></div>);
   jest.mocked(buildCardLedgerWorkbook).mockClear();
   jest.mocked(CardStatementUsageDialog).mockClear().mockImplementation(({ onClose }) => <div role="dialog" aria-label="사용내역서 상세내역"><button onClick={onClose}>상세내역 닫기</button></div>);
   jest.mocked(downloadSupportResourceWorkbook).mockReset().mockResolvedValue(undefined);
@@ -86,6 +89,11 @@ it('opens card analysis with every attachment and its ledger amount without ledg
   // Both the initial read and the read after worker data hydration must settle.
   // eslint-disable-next-line testing-library/no-unnecessary-act
   await act(async () => { render(<CardMonthlyLedger cards={cards} teams={teams} loadingCards={false} />); });
+  fireEvent.click(screen.getByRole('button', { name: '원본 열기' }));
+  expect(await screen.findByRole('dialog', { name: '사용내역서 원본' })).toBeInTheDocument();
+  expect(jest.mocked(CardStatementFilesDialog).mock.calls.slice(-1)[0][0]).toEqual(expect.objectContaining({ paths: ['statements/first.pdf', 'statements/second.pdf'] }));
+  expect(CardStatementUsageDialog).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '원본 닫기' }));
   fireEvent.click(screen.getByRole('button', { name: '상세내역' }));
   expect(await screen.findByRole('dialog', { name: '사용내역서 상세내역' })).toBeInTheDocument();
   expect(jest.mocked(CardStatementUsageDialog).mock.calls.slice(-1)[0][0]).toEqual(expect.objectContaining({
