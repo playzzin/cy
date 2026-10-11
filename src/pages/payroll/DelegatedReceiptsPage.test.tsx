@@ -1,0 +1,209 @@
+import React from 'react';
+import '@testing-library/jest-dom';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import DelegatedReceiptsPage, { DelegatedReceiptsWorkspace } from './DelegatedReceiptsPage';
+import { DelegatedClaim } from '../../features/delegated-receipts/model';
+import { delegatedReceiptService } from '../../features/delegated-receipts/service';
+import { parseDelegatedWorkbook } from '../../features/delegated-receipts/workbookImport';
+import { userService } from '../../services/userService';
+import { workbookArchiveService } from '../../features/delegated-receipts/workbookArchiveService';
+
+jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'synthetic-user' }, loading: false }) }));
+jest.mock('../../services/userService', () => ({ userService: { getUser: jest.fn() } }));
+jest.mock('../../features/delegated-receipts/service', () => ({
+  delegatedReceiptService: { list: jest.fn(), importClaims: jest.fn(), saveClaim: jest.fn(), addReceipt: jest.fn() },
+  DelegatedReceiptImportError: class extends Error {},
+}));
+jest.mock('../../features/delegated-receipts/workbookImport', () => ({ parseDelegatedWorkbook: jest.fn() }));
+jest.mock('../../features/delegated-receipts/workbookArchiveService', () => ({ workbookArchiveService: { listArchives: jest.fn(), listReviewRows: jest.fn(), importWorkbook: jest.fn(), downloadOriginal: jest.fn() } }));
+jest.mock('xlsx', () => ({ read: jest.fn(() => ({})) }));
+
+const base: DelegatedClaim = {
+  id: 'synthetic-1', month: '2026-09', siteName: '가상현장 A', workerName: '검증작업자 가',
+  delegationType: 'delegate', paymentMethod: 'transfer', grossAmount: 100000, expectedAmount: 100000,
+  receipts: [{ id: 'first', amount: 40000, date: '2026-09-10', method: 'transfer', memo: '가상 분할 입금', createdAt: '2026-09-10T00:00:00Z' }],
+  sourceStatus: '완료', sourceLabel: '검증용', memo: '', updatedAt: '2026-09-10T00:00:00Z',
+};
+const fixtures: DelegatedClaim[] = [
+  base,
+  { ...base, id: 'synthetic-2', workerName: '검증작업자 나', siteName: '가상현장 B', delegationType: 'direct', expectedAmount: 200000, receipts: [] },
+  { ...base, id: 'synthetic-3', workerName: '검증작업자 다', delegationType: 'unknown', expectedAmount: null, receipts: [] },
+];
+const openFirst = () => fireEvent.click(screen.getByRole('button', { name: '검증작업자 가 입금 및 내역' }));
+
+describe('위임금 입금 확인 화면', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (delegatedReceiptService.list as jest.Mock).mockResolvedValue(fixtures);
+    (delegatedReceiptService.saveClaim as jest.Mock).mockResolvedValue(undefined);
+    (delegatedReceiptService.addReceipt as jest.Mock).mockResolvedValue(undefined);
+    (delegatedReceiptService.importClaims as jest.Mock).mockResolvedValue({ added: 2, skipped: 0 });
+    (workbookArchiveService.listArchives as jest.Mock).mockResolvedValue([]);
+    (workbookArchiveService.importWorkbook as jest.Mock).mockResolvedValue({ archiveId: 'synthetic-archive', added: 2, skipped: 0, reviewRows: 1 });
+    (userService.getUser as jest.Mock).mockResolvedValue({ role: 'admin', status: 'active' });
+  });
+
+  it('위임·직불·미확인을 기본으로 함께 표시하고 원본 완료를 입금액으로 간주하지 않는다', () => {
+    render(<DelegatedReceiptsWorkspace initialClaims={fixtures} />);
+    const table = screen.getByRole('table');
+    expect(within(table).getByText('검증작업자 가')).toBeInTheDocument();
+    expect(within(table).getByText('검증작업자 나')).toBeInTheDocument();
+    expect(within(table).getByText('검증작업자 다')).toBeInTheDocument();
+    const summary = screen.getByRole('region', { name: '입금 요약' });
+    expect(summary).toHaveTextContent('300,000원');
+    expect(summary).toHaveTextContent('40,000원');
+    expect(summary).toHaveTextContent('260,000원');
+    fireEvent.change(screen.getByLabelText('입금방법', { exact: true }), { target: { value: 'direct' } });
+    expect(within(table).queryByText('검증작업자 가')).not.toBeInTheDocument();
+    expect(within(table).getByText('검증작업자 나')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('작업자 검색'), { target: { value: '없는이름' } });
+    expect(screen.getByText('선택한 조건의 내역이 없습니다')).toBeInTheDocument();
+  });
+
+  it('사용자가 지정한 세율로 예정액을 계산하고 0%도 저장한다', async () => {
+    render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
+    openFirst();
+    fireEvent.click(screen.getByRole('button', { name: '기준 정보 수정' }));
+    fireEvent.change(screen.getByLabelText('금액 계산 방식'), { target: { value: 'tax' } });
+    fireEvent.change(screen.getByLabelText('적용 세율 (%)'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: '기준 정보 저장' }));
+    await waitFor(() => expect(delegatedReceiptService.saveClaim).toHaveBeenCalledWith(expect.objectContaining({ expectedAmount: 100000, taxAmount: 0, taxRate: 0 })));
+    await screen.findByText('기준 정보가 저장되었습니다.');
+  });
+
+  it('월 화살표로 이동하면 이전 달의 현장 필터를 해제한다', async () => {
+    const next = { ...base, id: 'next-month', month: '2026-10', siteName: '다음 달 현장', workerName: '다음 달 작업자' };
+    (delegatedReceiptService.list as jest.Mock).mockResolvedValue([next]);
+    render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
+    fireEvent.change(screen.getByLabelText('현장', { exact: true }), { target: { value: base.siteName } });
+    fireEvent.click(screen.getByRole('button', { name: '다음 달' }));
+    await waitFor(() => expect(within(screen.getByRole('table')).getByText(next.workerName)).toBeInTheDocument());
+    expect(screen.getByLabelText('현장', { exact: true })).toHaveValue('');
+  });
+
+  it('미확정 입금과 다른 작업자의 초과 입금으로 현장 입금률을 부풀리지 않는다', () => {
+    const paid = { ...base, expectedAmount: 100, receipts: [{ ...base.receipts[0], amount: 200 }] };
+    const unpaid = { ...base, id: 'unpaid', workerName: '미입금 작업자', expectedAmount: 100, receipts: [] };
+    const { rerender } = render(<DelegatedReceiptsWorkspace key="confirmed" initialClaims={[paid, unpaid]} />);
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
+    rerender(<DelegatedReceiptsWorkspace key="unconfirmed" initialClaims={[unpaid, { ...paid, expectedAmount: null }]} />);
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
+
+  it('전부 금액 미확정인 현장을 0원 잔액 또는 완납률로 표시하지 않는다', () => {
+    render(<DelegatedReceiptsWorkspace initialClaims={[fixtures[2]]} />);
+    const site = screen.getByRole('region', { name: '현장별 집계' });
+    expect(site).toHaveTextContent('확정분 잔액미확정');
+    expect(site).toHaveTextContent('예정 미확정');
+    expect(within(site).queryByRole('progressbar')).not.toBeInTheDocument();
+    const summary = screen.getByRole('region', { name: '입금 요약' });
+    expect(summary).toHaveTextContent(/확정분 받을 금액\s*미확정/);
+    expect(summary).toHaveTextContent(/확정분 남은 금액\s*미확정/);
+  });
+
+  it('분할 입금을 실제 일자·수령수단으로 저장하고 이중 클릭을 막는다', async () => {
+    let complete: (() => void) | undefined;
+    (delegatedReceiptService.addReceipt as jest.Mock).mockImplementation(() => new Promise<void>((resolve) => { complete = resolve; }));
+    render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
+    openFirst();
+    expect(screen.getByText('가상 분할 입금')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('입금액 (원)'), { target: { value: '25000' } });
+    fireEvent.change(screen.getByLabelText('실제 입금일'), { target: { value: '2026-09-12' } });
+    fireEvent.change(screen.getByLabelText('실제 수령수단'), { target: { value: 'cash' } });
+    const button = screen.getByRole('button', { name: '확인한 입금 기록 저장' });
+    fireEvent.click(button); fireEvent.click(button);
+    expect(delegatedReceiptService.addReceipt).toHaveBeenCalledTimes(1);
+    expect(delegatedReceiptService.addReceipt).toHaveBeenCalledWith(base.id, expect.objectContaining({ amount: 25000, date: '2026-09-12', method: 'cash' }));
+    complete?.();
+    await screen.findByText('입금 기록을 저장했습니다. 잔액이 갱신되었습니다.');
+  });
+
+  it('입금 저장 응답 실패 후 같은 내용 재시도에 같은 식별자를 사용한다', async () => {
+    (delegatedReceiptService.addReceipt as jest.Mock).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined);
+    render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
+    openFirst();
+    fireEvent.change(screen.getByLabelText('입금액 (원)'), { target: { value: '25000' } });
+    fireEvent.click(screen.getByRole('button', { name: '확인한 입금 기록 저장' }));
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: '확인한 입금 기록 저장' }));
+    await waitFor(() => expect(delegatedReceiptService.addReceipt).toHaveBeenCalledTimes(2));
+    const calls = (delegatedReceiptService.addReceipt as jest.Mock).mock.calls;
+    expect(calls[0][1]).toEqual(calls[1][1]);
+    await screen.findByText('입금 기록을 저장했습니다. 잔액이 갱신되었습니다.');
+  });
+
+  it('엑셀 미리보기에서 명시적으로 확인한 뒤 공통세율과 미확인 입금방법을 적용한다', async () => {
+    const reviewRow = { id: 'synthetic-review', sourceLabel: '가상 시트!A12:C12', sourceTitle: '', workerName: '검증 분류대기', grossAmount: 10000, sourceStatus: '완료', reason: '월·현장 확인 필요', rawCells: [{ address: 'A12', value: '검증 분류대기' }] };
+    const parsed = { claims: [fixtures[1], fixtures[2]], warnings: [], unclassifiedRows: [reviewRow], sheetSummaries: [{ name: '가상 시트', populatedCells: 20, claimCount: 2, reviewRowCount: 1 }] };
+    (parseDelegatedWorkbook as jest.Mock).mockReturnValue(parsed);
+    render(<DelegatedReceiptsWorkspace initialClaims={[]} />);
+    const file = new File(['synthetic'], '가상자료.xlsx');
+    Object.defineProperty(file, 'arrayBuffer', { value: jest.fn().mockResolvedValue(new ArrayBuffer(4)) });
+    fireEvent.change(screen.getByLabelText('입금 확인 엑셀 파일'), { target: { files: [file] } });
+    const dialog = await screen.findByRole('dialog', { name: '엑셀 가져오기 확인' });
+    expect(workbookArchiveService.importWorkbook).not.toHaveBeenCalled();
+    expect(dialog).toHaveTextContent('분류 대기 1건');
+    fireEvent.change(within(dialog).getByLabelText('공통 세율 (%) · 선택'), { target: { value: '10' } });
+    fireEvent.change(within(dialog).getByLabelText('미확인 입금방법 설정'), { target: { value: 'delegate' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '원본과 전체 3건 저장' }));
+    await waitFor(() => expect(workbookArchiveService.importWorkbook).toHaveBeenCalledWith(new Uint8Array(4), '가상자료.xlsx', parsed, [
+      expect.objectContaining({ id: 'synthetic-2', delegationType: 'direct', taxRate: 10, taxAmount: 10000, expectedAmount: 90000 }),
+      expect.objectContaining({ id: 'synthetic-3', delegationType: 'delegate', taxRate: 10, taxAmount: 10000, expectedAmount: 90000 }),
+    ]));
+    await screen.findByText('원본 전체 보관 완료 · 관리 2건 추가 · 기존 0건 유지 · 분류 대기 1건 보관');
+    expect(delegatedReceiptService.importClaims).not.toHaveBeenCalled();
+  });
+
+  it('월별 관리 내역이 없어도 원본과 분류 대기 행을 저장할 수 있다', async () => {
+    const parsed = { claims: [], warnings: [], unclassifiedRows: [{ id: 'review-only', sourceLabel: '가상!A2', sourceTitle: '', workerName: '검증 미분류', grossAmount: null, sourceStatus: '', reason: '제목 없음', rawCells: [{ address: 'A2', value: '검증 미분류' }] }], sheetSummaries: [{ name: '가상', populatedCells: 1, claimCount: 0, reviewRowCount: 1 }] };
+    (parseDelegatedWorkbook as jest.Mock).mockReturnValue(parsed);
+    (workbookArchiveService.importWorkbook as jest.Mock).mockResolvedValue({ archiveId: 'synthetic-only', added: 0, skipped: 0, reviewRows: 1 });
+    render(<DelegatedReceiptsWorkspace initialClaims={[]} />);
+    const file = new File(['synthetic'], '분류대기.xlsx');
+    Object.defineProperty(file, 'arrayBuffer', { value: jest.fn().mockResolvedValue(new ArrayBuffer(4)) });
+    fireEvent.change(screen.getByLabelText('입금 확인 엑셀 파일'), { target: { files: [file] } });
+    const save = await screen.findByRole('button', { name: '원본과 전체 1건 저장' });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await waitFor(() => expect(workbookArchiveService.importWorkbook).toHaveBeenCalledWith(new Uint8Array(4), '분류대기.xlsx', parsed, []));
+    await screen.findByText('원본 전체 보관 완료 · 관리 0건 추가 · 기존 0건 유지 · 분류 대기 1건 보관');
+  });
+
+  it('가상 초기 데이터 화면은 원본을 자동 조회하지 않고 보관함에서 저장월로 이동한다', async () => {
+    (workbookArchiveService.listArchives as jest.Mock).mockResolvedValue([{ id: 'archive-test', recordType: 'source-workbook', fileName: '가상 보관.xlsx', sha256: 'synthetic', byteLength: 10, chunkCount: 1, claimCount: 3, reviewRowCount: 0, months: ['2025-03'], status: 'complete', createdAt: '2026-09-11T00:00:00Z', sheetSummaries: [], warnings: [] }]);
+    render(<DelegatedReceiptsWorkspace initialClaims={[]} />);
+    expect(workbookArchiveService.listArchives).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '원본 보관함' }));
+    const button = await screen.findByRole('button', { name: '2025-03 저장 내역 보기' });
+    fireEvent.click(button);
+    expect(screen.queryByRole('dialog', { name: '원본 보관함' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('귀속월')).toHaveValue('2025-03');
+    await waitFor(() => expect(delegatedReceiptService.list).toHaveBeenCalledWith('2025-03'));
+  });
+
+  it('로딩 실패를 표시하고 다시 조회할 수 있다', async () => {
+    (delegatedReceiptService.list as jest.Mock).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(fixtures);
+    render(<DelegatedReceiptsWorkspace />);
+    expect(screen.getByText('입금 내역을 불러오고 있습니다')).toBeInTheDocument();
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: '다시 시도' }));
+    await waitFor(() => expect(delegatedReceiptService.list).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+  });
+
+  it('권한 없는 사용자는 조회 서비스를 호출하지 않는다', async () => {
+    (userService.getUser as jest.Mock).mockResolvedValue({ role: 'user', status: 'active' });
+    render(<DelegatedReceiptsPage />);
+    await screen.findByText('조회 권한이 필요합니다');
+    expect(delegatedReceiptService.list).not.toHaveBeenCalled();
+  });
+
+  it('읽기 전용 화면에서는 추가·가져오기·입금저장을 노출하지 않는다', () => {
+    render(<DelegatedReceiptsWorkspace initialClaims={[base]} canWrite={false} />);
+    expect(screen.queryByRole('button', { name: '직접 추가' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '엑셀 가져오기' })).not.toBeInTheDocument();
+    openFirst();
+    expect(screen.queryByRole('button', { name: '확인한 입금 기록 저장' })).not.toBeInTheDocument();
+    expect(screen.getByText('가상 분할 입금')).toBeInTheDocument();
+  });
+});

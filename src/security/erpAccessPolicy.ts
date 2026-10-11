@@ -172,6 +172,7 @@ export const ERP_RECRUITING_COLLECTIONS = [
 ];
 
 export const ERP_FINANCE_COLLECTIONS = [
+  'delegated_receipt_claims',
   'advance_payments',
   'advance_requests',
   'monthly_payroll_settlements',

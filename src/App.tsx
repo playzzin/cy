@@ -60,6 +60,7 @@ const SmartSiteRegistrationPage = React.lazy(() => import('./pages/manpower/Smar
 const SmartDailyReportRegistrationPage = React.lazy(() => import('./pages/report/SmartDailyReportRegistrationPage'));
 const PayslipPage = React.lazy(() => import('./pages/payroll/PayslipPage'));
 const TaxAdvanceTeamPayslipPage = React.lazy(() => import('./pages/payroll/TaxAdvanceTeamPayslipPage'));
+const DelegatedReceiptsPage = React.lazy(() => import('./pages/payroll/DelegatedReceiptsPage'));
 const WagePaymentPage = React.lazy(() => import('./pages/payroll/WagePaymentPage'));
 const DailyWageDraftPage = React.lazy(() => import('./pages/payroll/DailyWageDraftPage'));
 const DailyWageStatementPage = React.lazy(() => import('./pages/payroll/DailyWageStatementPage'));
@@ -400,6 +401,7 @@ const App: React.FC = () => {
             {/* Database Management */}
             {/* Payroll Management */}
             <Route path="/payroll">
+              <Route path="delegated-receipts" element={<DelegatedReceiptsPage />} />
               <Route path="wage-payment" element={<WagePaymentPage />} />
               <Route path="daily-wage" element={<DailyWageDraftPage />} />
               <Route path="daily-wage-statement" element={<DailyWageStatementPage />} />

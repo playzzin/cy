@@ -1,4 +1,5 @@
 export const MENU_PATHS: { [key: string]: string } = {
+    '위임금 입금 확인': '/payroll/delegated-receipts',
     '도장 이미지 관리': '/settings/stamps',
     '엑셀 양식 변환': '/tools/excel-converter',
     '양식변경': '/tools/excel-converter',
