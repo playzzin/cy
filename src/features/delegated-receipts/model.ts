@@ -3,6 +3,11 @@ export type DelegationType = 'delegate' | 'direct' | 'unknown';
 export type ReceiptStatus = 'unconfirmed' | 'unpaid' | 'partial' | 'paid' | 'overpaid';
 export type DepositStatus = 'unknown' | 'pending' | 'partial' | 'complete';
 export type RecipientKind = 'unknown' | 'personal' | 'site_leader' | 'jaewook_leader';
+export type ClaimListChange =
+    | { field: 'delegation'; value: DelegationType }
+    | { field: 'recipient'; value: RecipientKind }
+    | { field: 'status'; value: DepositStatus };
+export interface ClaimListEdit { id: string; recordedAt: string; change: ClaimListChange; }
 export interface DepositConfirmation {
     id: string;
     status: DepositStatus;
@@ -10,6 +15,7 @@ export interface DepositConfirmation {
     note: string;
     recordedAt: string;
     actorId?: string;
+    listChange?: ClaimListChange;
 }
 
 export interface Receipt {
@@ -27,6 +33,7 @@ export interface DelegatedClaim {
     siteName: string;
     workerName: string;
     delegationType: DelegationType;
+    delegationOverride?: DelegationType;
     paymentMethod: PaymentMethod;
     grossAmount: number | null;
     expectedAmount: number | null;

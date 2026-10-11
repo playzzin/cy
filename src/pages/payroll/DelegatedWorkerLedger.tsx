@@ -1,9 +1,9 @@
-import React from 'react';
-import { ChevronRight, UserRound } from 'lucide-react';
-import type { DelegatedClaim } from '../../features/delegated-receipts/model';
+import React, { useRef, useState } from 'react';
+import { Check, ChevronRight, UserRound } from 'lucide-react';
+import type { ClaimListChange, ClaimListEdit, DelegatedClaim } from '../../features/delegated-receipts/model';
 import { getClaimTotals } from '../../features/delegated-receipts/model';
 import { depositLabels, getDelegation, getDepositState, recipientLabels } from '../../features/delegated-receipts/depositState';
-import { getSiteTeam, ReceiptDirectory, recipientDetail, validTeamColor } from '../../features/delegated-receipts/teamDirectory';
+import { getSiteTeam, ReceiptDirectory, validTeamColor } from '../../features/delegated-receipts/teamDirectory';
 
 export function DepositBadge({ claim }: { claim: DelegatedClaim }) {
   const state = getDepositState(claim);
@@ -13,7 +13,7 @@ export function SiteTeamLabel({ claim, directory }: { claim: DelegatedClaim; dir
   const team = getSiteTeam(claim, directory);
   return <span className="dr-team-site" style={{ borderColor: validTeamColor(team?.color) }}>
     <span className="dr-team-dot" style={{ backgroundColor: validTeamColor(team?.color) }} aria-hidden="true" />
-    <span>{claim.siteName}<small>{team?.name || '담당 팀 연결 필요'}</small></span>
+    <span>{claim.siteName}</span>
   </span>;
 }
 function WorkerIdentity({ claim, directory }: { claim: DelegatedClaim; directory: ReceiptDirectory }) {
@@ -24,38 +24,75 @@ function WorkerIdentity({ claim, directory }: { claim: DelegatedClaim; directory
   </span>;
 }
 const won = (value: number | null) => value === null ? '금액 미설정' : `${value.toLocaleString('ko-KR')}원`;
-const delegationLabels = { delegate: '위임', direct: '직불', unknown: '구분 확인' };
+const delegationLabels = { delegate: '위임', direct: '직불', unknown: '미확인' };
+const fieldLabels = { delegation: '입금방법', recipient: '받는 계좌', status: '입금여부' };
+const fieldOptions = { delegation: delegationLabels, recipient: recipientLabels, status: depositLabels };
+type RowSave = { phase: 'saving' | 'saved' | 'error'; edit: ClaimListEdit };
 
-export default function DelegatedWorkerLedger({ claims, directory, canWrite, selectedIds, onSelect, onOpen }: {
+export default function DelegatedWorkerLedger({ claims, directory, canWrite, selectedIds, onSelect, onOpen, onUpdate }: {
   claims: DelegatedClaim[]; directory: ReceiptDirectory; canWrite: boolean; selectedIds: string[];
   onSelect: (ids: string[]) => void; onOpen: (claim: DelegatedClaim) => void;
+  onUpdate: (id: string, edit: ClaimListEdit) => Promise<void>;
 }) {
+  const [rowSaves, setRowSaves] = useState<Record<string, RowSave>>({});
+  const busyRows = useRef(new Set<string>());
+  const save = async (id: string, edit: ClaimListEdit) => {
+    if (!canWrite || busyRows.current.has(id)) return;
+    busyRows.current.add(id);
+    setRowSaves(previous => ({ ...previous, [id]: { phase: 'saving', edit } }));
+    try {
+      await onUpdate(id, edit);
+      setRowSaves(previous => ({ ...previous, [id]: { phase: 'saved', edit } }));
+    } catch {
+      setRowSaves(previous => ({ ...previous, [id]: { phase: 'error', edit } }));
+    } finally { busyRows.current.delete(id); }
+  };
+  const change = (id: string, value: ClaimListChange) => {
+    const edit = { id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `list-${Date.now()}-${Math.random().toString(36).slice(2)}`, recordedAt: new Date().toISOString(), change: value };
+    void save(id, edit);
+  };
+  const control = (claim: DelegatedClaim, field: ClaimListChange['field'], mobile = false) => {
+    const saved = rowSaves[claim.id];
+    const current = field === 'delegation' ? getDelegation(claim) : getDepositState(claim)[field];
+    const value = saved && saved.phase !== 'saved' && saved.edit.change.field === field ? saved.edit.change.value : current;
+    return <label className={`dr-inline-field dr-inline-${field}`}><span>{fieldLabels[field]}</span>
+      <select aria-label={`${claim.workerName}${mobile ? ' 모바일' : ''} ${fieldLabels[field]}`} className={field === 'status' ? `dr-deposit-${value}` : ''}
+        value={value} disabled={Boolean(saved && saved.phase !== 'saved')} onChange={event => change(claim.id, { field, value: event.target.value } as ClaimListChange)}>
+        {Object.entries(fieldOptions[field]).map(([option, label]) => <option key={option} value={option}>{label}</option>)}
+      </select></label>;
+  };
+  const feedback = (claim: DelegatedClaim) => {
+    const saved = rowSaves[claim.id];
+    if (!saved) return null;
+    return <div className={`dr-inline-feedback dr-inline-${saved.phase}`} role={saved.phase === 'error' ? 'alert' : 'status'}>
+      {saved.phase === 'saving' ? '저장 중…' : saved.phase === 'saved' ? <><Check size={14} />저장됨</> : <><span>저장 확인 실패</span><button onClick={() => void save(claim.id, saved.edit)} aria-label={`${claim.workerName} 목록 변경 다시 저장`}>다시 저장</button></>}
+    </div>;
+  };
   const toggle = (id: string) => onSelect(selectedIds.includes(id) ? selectedIds.filter(value => value !== id) : [...selectedIds, id].slice(0, 400));
   const allSelected = claims.length > 0 && claims.length <= 400 && claims.every(claim => selectedIds.includes(claim.id));
   return <>
     {canWrite && <label className="dr-select-all"><input type="checkbox" checked={allSelected} onChange={event => onSelect(event.target.checked ? claims.slice(0, 400).map(claim => claim.id) : [])} />현재 목록 선택 {claims.length > 400 && '(최대 400건)'}</label>}
-    <div className="dr-table-wrap"><table className="dr-table"><thead><tr>{canWrite && <th><span className="dr-sr-only">선택</span></th>}<th>작업자 / 현장·팀</th><th>입금방법 / 받는 계좌</th><th className="dr-align-right">원본 금액 / 받을 예정</th><th>입금여부</th><th><span className="dr-sr-only">상세 보기</span></th></tr></thead><tbody>
+    <div className="dr-table-wrap"><table className="dr-table"><thead><tr>{canWrite && <th><span className="dr-sr-only">선택</span></th>}<th>작업자 / 현장</th><th>입금방법 / 받는 계좌</th><th className="dr-align-right">원본 금액 / 받을 예정</th><th>입금여부</th><th><span className="dr-sr-only">상세 보기</span></th></tr></thead><tbody>
       {claims.map(claim => {
         const state = getDepositState(claim); const total = getClaimTotals(claim);
         return <tr key={claim.id} className={selectedIds.includes(claim.id) ? 'dr-row-selected' : ''}>
           {canWrite && <td className="dr-checkbox-cell"><input type="checkbox" aria-label={`${claim.workerName} 선택`} checked={selectedIds.includes(claim.id)} onChange={() => toggle(claim.id)} /></td>}
           <td><WorkerIdentity claim={claim} directory={directory} /><SiteTeamLabel claim={claim} directory={directory} /></td>
-          <td><span className="dr-delegation-label">{delegationLabels[getDelegation(claim)]}</span> {recipientLabels[state.recipient]}<span className="dr-cell-sub">{recipientDetail(claim, state.recipient, directory)}</span></td>
+          <td>{canWrite ? <div className="dr-inline-payment">{control(claim, 'delegation')}{control(claim, 'recipient')}</div> : <><span className="dr-delegation-label">{delegationLabels[getDelegation(claim)]}</span> {recipientLabels[state.recipient]}</>}</td>
           <td className="dr-align-right dr-number">{won(claim.grossAmount ?? claim.expectedAmount)}<span className="dr-cell-sub">{claim.grossAmount !== null ? `세전 · 받을 예정 ${won(claim.expectedAmount)}` : '원본 세후 금액'}</span></td>
-          <td><DepositBadge claim={claim} /><span className="dr-cell-sub">{state.basis}{claim.receipts.length > 0 ? ` · 기록 ${won(total.received)}` : ' · 금액 미기록'}</span></td>
-          <td><button className="dr-row-button" onClick={() => onOpen(claim)} aria-label={`${claim.workerName} 입금 및 내역`}>{canWrite ? '확인 · 내역' : '내역 보기'}<ChevronRight size={14} /></button></td>
+          <td>{canWrite ? control(claim, 'status') : <DepositBadge claim={claim} />}<span className="dr-cell-sub">{state.basis}{claim.receipts.length > 0 ? ` · 기록 ${won(total.received)}` : ' · 금액 미기록'}</span></td>
+          <td><button className="dr-row-button" disabled={rowSaves[claim.id]?.phase === 'saving'} onClick={() => onOpen(claim)} aria-label={`${claim.workerName} 입금 및 내역`}>내역 보기<ChevronRight size={14} /></button>{feedback(claim)}</td>
         </tr>;
       })}
     </tbody></table></div>
     <div className="dr-mobile-list">{claims.map(claim => {
       const state = getDepositState(claim); const total = getClaimTotals(claim); const team = getSiteTeam(claim, directory);
       return <article className={`dr-worker-card ${selectedIds.includes(claim.id) ? 'dr-row-selected' : ''}`} key={claim.id} style={{ borderLeft: `4px solid ${validTeamColor(team?.color)}` }}>
-        <div className="dr-worker-heading"><div className="dr-worker-select">{canWrite && <input type="checkbox" aria-label={`${claim.workerName} 모바일 선택`} checked={selectedIds.includes(claim.id)} onChange={() => toggle(claim.id)} />}<WorkerIdentity claim={claim} directory={directory} /></div><DepositBadge claim={claim} /></div>
+        <div className="dr-worker-heading"><div className="dr-worker-select">{canWrite && <input type="checkbox" aria-label={`${claim.workerName} 모바일 선택`} checked={selectedIds.includes(claim.id)} onChange={() => toggle(claim.id)} />}<WorkerIdentity claim={claim} directory={directory} /></div>{!canWrite && <DepositBadge claim={claim} />}</div>
         <SiteTeamLabel claim={claim} directory={directory} />
-        <div className="dr-worker-meta"><b>{delegationLabels[getDelegation(claim)]}</b><span>·</span>{recipientLabels[state.recipient]}</div>
-        <p className="dr-recipient-detail">{recipientDetail(claim, state.recipient, directory)}</p>
+        {canWrite ? <div className="dr-inline-mobile">{control(claim, 'delegation', true)}{control(claim, 'status', true)}{control(claim, 'recipient', true)}</div> : <div className="dr-worker-meta"><b>{delegationLabels[getDelegation(claim)]}</b><span>·</span>{recipientLabels[state.recipient]}</div>}
         <dl className="dr-worker-amounts"><div><dt>{claim.grossAmount !== null ? '원본 세전' : '원본 세후'}</dt><dd>{won(claim.grossAmount ?? claim.expectedAmount)}</dd></div><div><dt>받을 예정</dt><dd>{won(claim.expectedAmount)}</dd></div><div><dt>기록된 입금액</dt><dd>{claim.receipts.length ? won(total.received) : '미기록'}</dd></div></dl>
-        <div className="dr-worker-footer"><span>{state.basis}</span><button className="dr-button" onClick={() => onOpen(claim)} aria-label={`${claim.workerName} 모바일 입금 및 내역`}>확인 · 내역<ChevronRight size={16} /></button></div>
+        <div className="dr-worker-footer"><span>{state.basis}</span><button className="dr-button" disabled={rowSaves[claim.id]?.phase === 'saving'} onClick={() => onOpen(claim)} aria-label={`${claim.workerName} 모바일 입금 및 내역`}>내역 보기<ChevronRight size={16} /></button></div>{feedback(claim)}
       </article>;
     })}</div>
   </>;

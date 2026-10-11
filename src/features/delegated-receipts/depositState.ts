@@ -40,7 +40,7 @@ export function getDepositState(claim: DelegatedClaim): { status: DepositStatus;
 }
 
 export function getDelegation(claim: DelegatedClaim): DelegationType {
-    return claim.delegationType === 'unknown' ? interpretSource(claim.sourceStatus).delegation : claim.delegationType;
+    return claim.delegationOverride ?? (claim.delegationType === 'unknown' ? interpretSource(claim.sourceStatus).delegation : claim.delegationType);
 }
 
 /** 완료 표시는 은행 거래액을 만들지 않는다. 미기록된 완료 건의 잔액은 추정하지 않는다. */

@@ -1,6 +1,7 @@
 import { collection, doc, getDocs, query, runTransaction, where } from 'firebase/firestore';
 import { delegatedReceiptService } from './service';
 import type { DelegatedClaim, DepositConfirmation, Receipt } from './model';
+import { getDelegation, getDepositState } from './depositState';
 
 jest.mock('../../config/firebase', () => ({ db: {} }));
 jest.mock('firebase/firestore', () => ({
@@ -312,4 +313,47 @@ it('팀 일괄 연결은 월과 현장이 같은 내역에만 적용한다', asy
   expect(records.get('claim-a')?.assignedTeamId).toBeUndefined();
   await delegatedReceiptService.assignSiteTeam(['claim-a'], '2026-09', '테스트 현장', 'team-a');
   expect(records.get('claim-a')?.assignedTeamId).toBe('team-a');
+});
+
+it('목록 계좌와 입금여부 수정은 최신 반대 항목과 원본·금액·팀 정보를 보존한다', async () => {
+  const original = claim({ sourceStatus: '개인통장', receipts: [receipt()], assignedTeamId: 'team-a', expectedAmount: 300000 });
+  records.set('claim-a', original);
+  await delegatedReceiptService.confirmClaims(['claim-a'], confirmation({ status: 'pending' }));
+  const account = await delegatedReceiptService.updateListField('claim-a', { id: 'account', recordedAt: confirmation().recordedAt, change: { field: 'recipient', value: 'site_leader' } });
+  expect(getDepositState(account)).toMatchObject({ status: 'pending', recipient: 'site_leader' });
+  const status = await delegatedReceiptService.updateListField('claim-a', { id: 'status', recordedAt: confirmation().recordedAt, change: { field: 'status', value: 'complete' } });
+  expect(getDepositState(status)).toMatchObject({ status: 'complete', recipient: 'site_leader' });
+  expect(status).toMatchObject({ receipts: original.receipts, expectedAmount: 300000, sourceStatus: original.sourceStatus, sourceLabel: original.sourceLabel, assignedTeamId: 'team-a' });
+  expect(status.confirmationHistory).toHaveLength(3);
+});
+
+it('목록에서 미확인을 명시하면 원본 위임 추론을 덮어쓰고 입금여부는 건드리지 않는다', async () => {
+  const original = claim({ delegationType: 'unknown', sourceStatus: '이재욱 위임 입금완료' });
+  records.set('claim-a', original);
+  const updated = await delegatedReceiptService.updateListField('claim-a', { id: 'delegation', recordedAt: confirmation().recordedAt, change: { field: 'delegation', value: 'unknown' } });
+  expect(getDelegation(updated)).toBe('unknown');
+  expect(updated.confirmation).toBeUndefined();
+  expect(getDepositState(updated)).toEqual(getDepositState(original));
+  await delegatedReceiptService.saveClaim({ ...original, expectedAmount: 200000 });
+  expect(getDelegation(records.get('claim-a')!)).toBe('unknown');
+  expect(records.get('claim-a')?.confirmationHistory).toHaveLength(1);
+});
+
+it('목록 저장 재시도는 이후 변경을 되돌리거나 이력을 중복 생성하지 않는다', async () => {
+  records.set('claim-a', claim());
+  const edit = { id: 'list-a', recordedAt: confirmation().recordedAt, change: { field: 'status' as const, value: 'complete' as const } };
+  await delegatedReceiptService.updateListField('claim-a', edit);
+  await delegatedReceiptService.confirmClaims(['claim-a'], confirmation({ status: 'pending' }));
+  const retried = await delegatedReceiptService.updateListField('claim-a', edit);
+  expect(getDepositState(retried).status).toBe('pending');
+  expect(retried.confirmationHistory).toHaveLength(2);
+  await expect(delegatedReceiptService.updateListField('claim-a', { ...edit, change: { field: 'recipient', value: 'personal' } })).rejects.toThrow('같은 확인 식별자');
+});
+
+it('목록 수정은 잘못된 값과 누락 행을 저장하지 않는다', async () => {
+  const edit = { id: 'list-a', recordedAt: confirmation().recordedAt, change: { field: 'status' as const, value: 'complete' as const } };
+  await expect(delegatedReceiptService.updateListField('missing', edit)).rejects.toThrow('찾을 수 없습니다');
+  records.set('claim-a', claim());
+  await expect(delegatedReceiptService.updateListField('claim-a', { ...edit, change: { field: 'status', value: 'invalid' as 'complete' } })).rejects.toThrow('변경할 입금 정보');
+  expect(records.get('claim-a')?.confirmationHistory).toBeUndefined();
 });
