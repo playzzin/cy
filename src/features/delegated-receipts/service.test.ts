@@ -21,6 +21,7 @@ const claim = (overrides: Partial<DelegatedClaim> = {}): DelegatedClaim => ({
   receipts: [], sourceStatus: '', sourceLabel: '테스트', memo: '', updatedAt: '', ...overrides,
 });
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+const manual = (overrides: Partial<DelegatedClaim> = {}) => claim({ siteId: 's1', workerId: 'w1', manualBatchId: 'batch-1', paymentMethod: 'transfer', ...overrides });
 let records: Map<string, DelegatedClaim>;
 
 const createTransaction = () => {
@@ -68,6 +69,37 @@ it('해당 월만 조회하고 금액 미확정과 0원을 구분한다', async 
 it('잘못된 월로 전체 조회를 시도하지 않는다', async () => {
   await expect(delegatedReceiptService.list('2026-13')).rejects.toThrow('조회 월');
   expect(getDocs).not.toHaveBeenCalled();
+});
+
+it('일괄 직접 등록은 한 트랜잭션으로 저장하고 응답 유실 재시도는 기존 수정값을 보존한다', async () => {
+  const incoming = [manual(), manual({ id: 'claim-b', workerId: 'w2' })];
+  expect(await delegatedReceiptService.createClaims(incoming)).toEqual({ added: 2, skipped: 0 });
+  expect(runTransaction).toHaveBeenCalledTimes(1);
+  records.set('claim-a', { ...records.get('claim-a')!, expectedAmount: 700000, memo: '후속 수정', receipts: [receipt()] });
+  const edited = clone(records.get('claim-a'));
+  expect(await delegatedReceiptService.createClaims(incoming)).toEqual({ added: 0, skipped: 2 });
+  expect(records.get('claim-a')).toEqual(edited);
+});
+it('일괄 직접 등록의 ID 충돌은 새 행까지 모두 저장하지 않는다', async () => {
+  records.set('claim-a', claim());
+  await expect(delegatedReceiptService.createClaims([manual({ id: 'claim-b', workerId: 'w2' }), manual()])).rejects.toThrow('충돌');
+  expect(records.has('claim-b')).toBe(false);
+  expect(records.get('claim-a')).toEqual(claim());
+});
+it('같은 배치라도 다른 작업자의 ID를 재사용하면 거부한다', async () => {
+  records.set('claim-a', manual());
+  await expect(delegatedReceiptService.createClaims([manual({ workerId: 'w2' })])).rejects.toThrow('충돌');
+});
+it.each([
+  [manual(), manual({ id: 'b', expectedAmount: -1, workerId: 'w2' })],
+  [manual(), manual({ id: 'b' })],
+  [manual({ workerId: undefined })],
+  [manual({ receipts: [receipt()] })],
+  [],
+  Array.from({ length: 101 }, (_, index) => manual({ id: `r${index}`, workerId: `w${index}` })),
+])('일괄 등록의 전체 입력을 검증한 뒤 쓰기를 시작한다 (%#)', async (...rows) => {
+  await expect(delegatedReceiptService.createClaims(rows as DelegatedClaim[])).rejects.toThrow();
+  expect(runTransaction).not.toHaveBeenCalled();
 });
 
 it('재가져오기 및 같은 파일의 중복 행은 기존 수정값과 입금을 보존한다', async () => {

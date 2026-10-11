@@ -54,3 +54,10 @@ it('동명이인·미등록·색상 미설정 작업자는 현장 팀의 색상�
   expect(getWorkerColor(claim(), { ...directory, workers: [{ id: 'a', name: '가상 작업자' }] })).toBe('#94a3b8');
   expect(getWorkerColor(claim(), { ...directory, workers: [{ id: 'a', name: '가상 작업자', color: 'url(unsafe)' }] })).toBe('#94a3b8');
 });
+
+it('직접 선택한 ID는 동명이인·같은 현장명이 있어도 정확한 색상을 연결한다', () => {
+  const directory = { teams: [{ id: 't1', name: '팀 1', color: '#112233' }, { id: 't2', name: '팀 2', color: '#445566' }], sites: [{ id: 's1', name: '동일 현장', responsibleTeamId: 't1' }, { id: 's2', name: '동일 현장', responsibleTeamId: 't2' }], workers: [{ id: 'w1', name: '동명이인', color: '#123456' }, { id: 'w2', name: '동명이인', color: '#654321' }] };
+  const claim = { id: 'manual', month: '2026-10', siteId: 's2', workerId: 'w2', siteName: '동일 현장', workerName: '동명이인' } as DelegatedClaim;
+  expect(getWorkerColor(claim, directory)).toBe('#654321');
+  expect(getSiteTeam(claim, directory)?.id).toBe('t2');
+});

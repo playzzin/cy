@@ -128,6 +128,9 @@ const validateClaim = (claim: DelegatedClaim): DelegatedClaim => {
     id: validateId(claim.id), month: validateMonth(claim.month),
     siteName: requireText(claim.siteName, '현장명', 200, true),
     workerName: requireText(claim.workerName, '작업자명', 120, true),
+    ...(claim.siteId !== undefined ? { siteId: validateId(claim.siteId) } : {}),
+    ...(claim.workerId !== undefined ? { workerId: validateId(claim.workerId) } : {}),
+    ...(claim.manualBatchId !== undefined ? { manualBatchId: validateId(claim.manualBatchId) } : {}),
     delegationType: claim.delegationType, paymentMethod: validateMethod(claim.paymentMethod),
     ...(claim.delegationOverride !== undefined ? { delegationOverride: claim.delegationOverride } : {}),
     grossAmount, expectedAmount: validateAmount(claim.expectedAmount, true),
@@ -178,6 +181,39 @@ const collisionImportId = (claim: DelegatedClaim): string => {
 };
 
 export const delegatedReceiptService = {
+  async createClaims(claims: DelegatedClaim[]): Promise<{ added: number; skipped: number }> {
+    if (!Array.isArray(claims) || !claims.length || claims.length > 100) throw new Error('한 번에 1~100행을 등록해 주세요.');
+    const validated = claims.map(validateClaim);
+    if (new Set(validated.map(claim => claim.id)).size !== validated.length
+      || new Set(validated.map(claim => JSON.stringify([claim.month, claim.siteId, claim.workerId]))).size !== validated.length
+      || new Set(validated.map(claim => claim.manualBatchId)).size !== 1
+      || validated.some(claim => !claim.manualBatchId || !claim.siteId || !claim.workerId || claim.receipts.length)) {
+      throw new Error('등록할 현장·작업자와 중복 행을 확인해 주세요.');
+    }
+    if (new Blob([JSON.stringify(validated)]).size > MAX_IMPORT_CHUNK_JSON_BYTES) throw new Error('등록할 내역의 크기를 줄여 주세요.');
+    return runTransaction(db, async transaction => {
+      const refs = validated.map(claim => refFor(claim.id));
+      const snapshots = await Promise.all(refs.map(ref => transaction.get(ref)));
+      // An immutable batch ID makes a lost response safe to retry, even after later edits.
+      snapshots.forEach((snapshot, index) => {
+        if (snapshot.exists() && (snapshot.data().manualBatchId !== validated[index].manualBatchId
+          || snapshot.data().workerId !== validated[index].workerId || snapshot.data().siteId !== validated[index].siteId
+          || snapshot.data().month !== validated[index].month)) {
+          throw new Error('기존 내역과 등록 식별자가 충돌했습니다. 기존 내역은 보존했습니다.');
+        }
+      });
+      const actorId = auth?.currentUser?.uid;
+      let added = 0;
+      validated.forEach((claim, index) => {
+        if (snapshots[index].exists()) return;
+        const confirmation = claim.confirmation && { ...claim.confirmation, ...(actorId ? { actorId } : {}) };
+        transaction.set(refs[index], { ...claim, ...(confirmation ? { confirmation, confirmationHistory: [confirmation] } : {}), updatedAt: new Date().toISOString() });
+        added++;
+      });
+      return { added, skipped: validated.length - added };
+    });
+  },
+
   async list(month: string): Promise<DelegatedClaim[]> {
     const snapshot = await getDocs(query(collection(db, DELEGATED_RECEIPTS_COLLECTION), where('month', '==', validateMonth(month))));
     return snapshot.docs.map(row => validateClaim({ ...row.data(), id: row.id } as DelegatedClaim))

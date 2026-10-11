@@ -36,6 +36,9 @@ export interface DelegatedClaim {
     month: string;
     siteName: string;
     workerName: string;
+    siteId?: string;
+    workerId?: string;
+    manualBatchId?: string;
     delegationType: DelegationType;
     delegationOverride?: DelegationType;
     paymentMethod: PaymentMethod;

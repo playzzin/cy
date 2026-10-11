@@ -14,7 +14,7 @@ jest.mock('../../features/delegated-receipts/directoryService', () => ({ receipt
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'synthetic-user' }, loading: false }) }));
 jest.mock('../../services/userService', () => ({ userService: { getUser: jest.fn() } }));
 jest.mock('../../features/delegated-receipts/service', () => ({
-  delegatedReceiptService: { list: jest.fn(), importClaims: jest.fn(), saveClaim: jest.fn(), addReceipt: jest.fn(), confirmClaims: jest.fn(), assignSiteTeam: jest.fn(), updateListField: jest.fn() },
+  delegatedReceiptService: { list: jest.fn(), createClaims: jest.fn(), importClaims: jest.fn(), saveClaim: jest.fn(), addReceipt: jest.fn(), confirmClaims: jest.fn(), assignSiteTeam: jest.fn(), updateListField: jest.fn() },
   DelegatedReceiptImportError: class extends Error {},
 }));
 jest.mock('../../features/delegated-receipts/workbookImport', () => ({ parseDelegatedWorkbook: jest.fn() }));
@@ -460,4 +460,21 @@ it('상태별 세전·예정 합계를 표시하고 필터 변경과 미확정 �
   const recipient = within(screen.getByRole('table')).getByRole('combobox', { name: '대기 작업자 받는 계좌' });
   expect(within(recipient).getByRole('option', { name: '개인통장' })).toBeInTheDocument();
   expect(screen.queryByRole('option', { name: '작업자 개인통장' })).not.toBeInTheDocument();
+});
+
+it('직접 추가에서 현장·작업자를 골라 여러 행을 등록한 후 선택한 월을 조회한다', async () => {
+  (delegatedReceiptService.createClaims as jest.Mock).mockResolvedValue({ added: 2, skipped: 0 });
+  (delegatedReceiptService.list as jest.Mock).mockResolvedValue([]);
+  render(<DelegatedReceiptsWorkspace initialClaims={fixtures} initialDirectory={{ teams: [], sites: [{ id: 's1', name: '선택 현장' }], workers: [{ id: 'w1', name: '선택 가' }, { id: 'w2', name: '선택 나' }] }} />);
+  fireEvent.click(screen.getByRole('button', { name: '자료 관리' }));
+  fireEvent.click(screen.getByRole('button', { name: '직접 추가' }));
+  const dialog = screen.getByRole('dialog', { name: '직접 추가 · 일괄 등록' });
+  fireEvent.change(within(dialog).getByLabelText('등록 귀속월'), { target: { value: '2026-11' } });
+  fireEvent.change(within(dialog).getByRole('combobox', { name: '추가할 현장' }), { target: { value: 's1' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: '검색 결과 전체 선택' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '선택한 2명 행 추가' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '2행 한 번에 등록' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(delegatedReceiptService.createClaims).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ month: '2026-11', siteId: 's1', workerId: 'w1' }), expect.objectContaining({ month: '2026-11', workerId: 'w2' })]));
+  await waitFor(() => expect(delegatedReceiptService.list).toHaveBeenCalledWith('2026-11'));
 });
