@@ -4,23 +4,21 @@ import { useAuth } from '../../contexts/AuthContext';
 import { userService } from '../../services/userService';
 import { canAccessErpCollection } from '../../security/erpAccessPolicy';
 import { delegatedReceiptService, DelegatedReceiptImportError } from '../../features/delegated-receipts/service';
-import { ClaimListEdit, DelegatedClaim, DelegationType, PaymentMethod, RecipientKind, DepositStatus, Receipt, calculateExpectedAmount, filterClaims, getClaimTotals, summarizeClaims, summarizeClaimAmounts } from '../../features/delegated-receipts/model';
+import { ClaimListEdit, DelegatedClaim, DelegationType, RecipientKind, DepositStatus, calculateExpectedAmount, filterClaims, summarizeClaims, summarizeClaimAmounts } from '../../features/delegated-receipts/model';
 import { parseDelegatedWorkbook } from '../../features/delegated-receipts/workbookImport';
 import { workbookArchiveService, WorkbookArchive } from '../../features/delegated-receipts/workbookArchiveService';
 import WorkbookArchivePanel, { ArchiveService, SourceReviewRows } from './WorkbookArchivePanel';
-import { depositLabels, getDelegation, getDepositState, getDisplayRemaining, recipientLabels, sourceText } from '../../features/delegated-receipts/depositState';
+import { depositLabels, getDelegation, getDepositState, recipientLabels } from '../../features/delegated-receipts/depositState';
 import { emptyDirectory, getSiteTeam, ReceiptDirectory } from '../../features/delegated-receipts/teamDirectory';
 import { receiptDirectoryService } from '../../features/delegated-receipts/directoryService';
-import DelegatedWorkerLedger, { DepositBadge as StatusBadge, SiteIdentity } from './DelegatedWorkerLedger';
+import DelegatedWorkerLedger, { SiteIdentity } from './DelegatedWorkerLedger';
 import DepositConfirmationForm from './DepositConfirmationForm';
 import DelegatedBulkEntry from './DelegatedBulkEntry';
 import './DelegatedReceiptsPage.css';
 
-const methodLabels: Record<PaymentMethod, string> = { transfer: '계좌이체', cash: '현금', other: '기타', unknown: '미확인' };
 const delegationLabels: Record<DelegationType, string> = { delegate: '위임', direct: '직불', unknown: '미확인' };
 const won = (value: number | null) => value === null ? '미확정' : `${value.toLocaleString('ko-KR')}원`;
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-const createId = () => typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `receipt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const moveMonth = (month: string, distance: number) => {
   const [year, index] = month.split('-').map(Number);
   const date = new Date(year, index - 1 + distance, 1);
@@ -77,29 +75,17 @@ export function DelegatedReceiptsWorkspace({ initialClaims, initialDirectory, se
   const [directory, setDirectory] = useState<ReceiptDirectory>(initialDirectory || emptyDirectory);
   const [directoryError, setDirectoryError] = useState('');
   const [teamFilter, setTeamFilter] = useState('');
-  const [teamInput, setTeamInput] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [confirming, setConfirming] = useState<DelegatedClaim[] | null>(null);
   const [delegationType, setDelegationType] = useState<DelegationType | ''>('');
   const [status, setStatus] = useState<DepositStatus | ''>('');
   const [showTools, setShowTools] = useState(false);
   const [showSites, setShowSites] = useState(false);
-  const [selected, setSelected] = useState<DelegatedClaim | null>(null);
-  const [isNew, setIsNew] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [editMode, setEditMode] = useState(false);
-  const [expectedInput, setExpectedInput] = useState('');
-  const [taxInput, setTaxInput] = useState('');
-  const [grossInput, setGrossInput] = useState('');
-  const [amountMode, setAmountMode] = useState<'manual' | 'tax'>('manual');
-  const [receiptAmount, setReceiptAmount] = useState('');
-  const [receiptDate, setReceiptDate] = useState(today());
-  const [receiptMemo, setReceiptMemo] = useState('');
   const [dialogError, setDialogError] = useState('');
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
-  const pendingReceipt = useRef<{ signature: string; receipt: Receipt } | null>(null);
   const [readingFile, setReadingFile] = useState(false);
   const [preview, setPreview] = useState<ReturnType<typeof parseDelegatedWorkbook> | null>(null);
   const [previewName, setPreviewName] = useState('');
@@ -157,10 +143,6 @@ export function DelegatedReceiptsWorkspace({ initialClaims, initialDirectory, se
   }), [filtered, directory]);
   const availableMonths = useMemo(() => Array.from(new Set(preview?.claims.map((claim) => claim.month) || [])).sort(), [preview]);
   const activeFilterCount = [siteName, worker, recipient, teamFilter, status, delegationType].filter(Boolean).length;
-  const calculatedAmount = useMemo(() => {
-    if (amountMode !== 'tax' || grossInput === '' || taxInput === '') return null;
-    try { return calculateExpectedAmount(Number(grossInput), Number(taxInput)); } catch { return null; }
-  }, [amountMode, grossInput, taxInput]);
   const preparedImport = useMemo(() => {
     if (!preview) return [];
     return preview.claims.map((claim) => {
@@ -178,35 +160,13 @@ export function DelegatedReceiptsWorkspace({ initialClaims, initialDirectory, se
     setClaims(previous => previous.map(claim => claim.id === id ? updated : claim));
     setSelectedIds(previous => previous.filter(value => value !== id));
   };
-  const openClaim = (claim: DelegatedClaim, newEntry = false) => {
-    setTeamInput(claim.assignedTeamId || ''); setSelected({ ...claim, delegationType: getDelegation(claim) }); setIsNew(newEntry); setEditMode(newEntry); setExpectedInput(claim.expectedAmount === null ? '' : String(claim.expectedAmount));
-    setGrossInput(claim.grossAmount === null ? '' : String(claim.grossAmount)); setTaxInput(claim.taxRate === null || claim.taxRate === undefined ? '' : String(claim.taxRate)); setAmountMode(claim.taxRate !== null && claim.taxRate !== undefined ? 'tax' : 'manual'); pendingReceipt.current = null;
-    setReceiptAmount(''); setReceiptDate(today()); setReceiptMemo(''); setDialogError('');
-  };
-  const closeDialog = () => { if (!savingRef.current) { setSelected(null); setConfirming(null); setSelectedIds([]); setPreview(null); setPreviewBytes(null); setDialogError(''); } };
+  const closeDialog = () => { if (!savingRef.current) { setConfirming(null); setSelectedIds([]); setPreview(null); setPreviewBytes(null); setDialogError(''); } };
   const runSave = async (operation: () => Promise<void | string>, success: string) => {
     if (savingRef.current || !canWrite) return;
     savingRef.current = true; setSaving(true); setDialogError('');
-    try { const detail = await operation(); setNotice(detail || success); setSelected(null); setConfirming(null); setSelectedIds([]); setPreview(null); setPreviewBytes(null); setReload((value) => value + 1); }
+    try { const detail = await operation(); setNotice(detail || success); setConfirming(null); setSelectedIds([]); setPreview(null); setPreviewBytes(null); setReload((value) => value + 1); }
     catch (failure) { setDialogError(failure instanceof DelegatedReceiptImportError ? failure.message : '저장하지 못했습니다. 입력 내용과 연결 상태를 확인한 후 다시 시도해 주세요.'); }
     finally { savingRef.current = false; setSaving(false); }
-  };
-  const saveClaim = (event: React.FormEvent) => {
-    event.preventDefault(); if (!selected) return;
-    const gross = grossInput.trim() === '' ? null : Number(grossInput);
-    const amount = amountMode === 'tax' ? calculatedAmount?.expectedAmount ?? null : expectedInput.trim() === '' ? null : Number(expectedInput);
-    if ((amountMode === 'tax' && !calculatedAmount) || (gross !== null && (!Number.isSafeInteger(gross) || gross < 0))) { setDialogError('세전 금액은 0원 이상의 정수, 세율은 0~100%로 입력해 주세요.'); return; }
-    if (!selected.siteName.trim() || !selected.workerName.trim() || !/^\d{4}-\d{2}$/.test(selected.month) || (amount !== null && (!Number.isSafeInteger(amount) || amount < 0))) { setDialogError('현장·작업자·귀속월과 0원 이상의 정수 금액을 확인해 주세요.'); return; }
-    void runSave(() => service.saveClaim({ ...selected, siteName: selected.siteName.trim(), workerName: selected.workerName.trim(), grossAmount: gross, expectedAmount: amount, taxRate: amountMode === 'tax' ? Number(taxInput) : null, taxAmount: amountMode === 'tax' ? calculatedAmount?.taxAmount ?? null : null, updatedAt: new Date().toISOString() }), '기준 정보가 저장되었습니다.');
-  };
-  const addReceipt = (event: React.FormEvent) => {
-    event.preventDefault(); if (!selected) return;
-    const amount = Number(receiptAmount);
-    if (!Number.isSafeInteger(amount) || amount <= 0 || !receiptDate || receiptDate > today()) { setDialogError('실제 입금일과 1원 이상의 정수 금액을 입력해 주세요. 미래 날짜는 등록할 수 없습니다.'); return; }
-    const signature = JSON.stringify([selected.id, amount, receiptDate, 'transfer', receiptMemo.trim()]);
-    const receipt: Receipt = pendingReceipt.current?.signature === signature ? pendingReceipt.current.receipt : { id: createId(), amount, date: receiptDate, method: 'transfer', memo: receiptMemo.trim(), createdAt: new Date().toISOString() };
-    pendingReceipt.current = { signature, receipt };
-    void runSave(() => service.addReceipt(selected.id, receipt), '입금 기록을 저장했습니다. 잔액이 갱신되었습니다.');
   };
   const readFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; event.target.value = ''; if (!file || readingFile || !canWrite) return;
@@ -255,27 +215,12 @@ export function DelegatedReceiptsWorkspace({ initialClaims, initialDirectory, se
     {canWrite && selectedIds.length > 0 && <div className="dr-selection-bar"><strong>{selectedIds.length}건 선택</strong><button className="dr-button dr-button-primary" onClick={() => { setDialogError(''); setConfirming(filtered.filter(claim => selectedIds.includes(claim.id))); }}>선택 내역 입금여부 변경</button><button className="dr-text-button" onClick={() => setSelectedIds([])}>선택 해제</button></div>}
 
       {loading ? <div className="dr-empty" role="status"><RefreshCw className="dr-spin" size={25} /><h3>입금 내역을 불러오고 있습니다</h3></div> : filtered.length === 0 ? <div className="dr-empty"><div className="dr-empty-icon"><FileSpreadsheet size={29} /></div><h3>{claims.length ? '선택한 조건의 내역이 없습니다' : '이 달에 등록된 내역이 없습니다'}</h3><p>{claims.length ? '현장이나 입금 상태를 바꾸어 확인해 보세요.' : '노무 처리 확인 엑셀을 가져오거나 직접 내역을 추가해 주세요.'}</p><p className="dr-empty-hint">이전 자료는 해당 근무 귀속월을 선택해 조회할 수 있습니다.</p>{claims.length ? <button className="dr-button" onClick={resetFilters}>필터 초기화</button> : canWrite && <button className="dr-button dr-button-primary" onClick={() => fileInput.current?.click()} disabled={readingFile}><FileSpreadsheet size={16} />엑셀 가져오기</button>}</div> : <>
-        <DelegatedWorkerLedger key={month} claims={filtered} directory={directory} canWrite={canWrite} selectedIds={selectedIds} onSelect={setSelectedIds} onOpen={openClaim} onUpdate={updateListField} />
+        <DelegatedWorkerLedger key={month} claims={filtered} directory={directory} canWrite={canWrite} selectedIds={selectedIds} onSelect={setSelectedIds} onUpdate={updateListField} />
       </>}
       <footer className="dr-list-note"><CircleAlert size={15} /><span>엑셀의 입금완료·공동 입금 표시는 입금여부에 반영됩니다. 기록된 입금액은 별도이며, 완료 표시만으로 금액을 추정하지 않습니다.</span></footer>
     </section>
     {bulkOpen && canWrite && <Dialog title="직접 추가 · 일괄 등록" subtitle="엑셀처럼 여러 작업자의 내역을 한 번에 입력합니다." onClose={() => { if (!bulkBusy) setBulkOpen(false); }} busy={bulkBusy} wide><DelegatedBulkEntry month={month} directory={directory} existingClaims={claims} directoryError={directoryError} onSave={values => service.createClaims(values)} onBusy={setBulkBusy} onClose={() => { if (!bulkBusy) setBulkOpen(false); }} onComplete={(savedMonth, count) => { setBulkOpen(false); setMonth(savedMonth); resetFilters(); setNotice(count + "행을 등록했습니다."); setReload(value => value + 1); }} /></Dialog>}
     {confirming && <Dialog title="선택 내역 입금여부 변경" subtitle={`${confirming.length}건 · 현재 선택한 내역에 적용`} onClose={closeDialog} busy={saving}><div className="dr-modal-body"><DepositConfirmationForm claims={confirming} busy={saving} error={dialogError} onSave={(value, preserve) => { void runSave(() => service.confirmClaims(confirming.map(claim => claim.id), value, preserve), `${confirming.length}건의 입금여부를 저장했습니다.`); }} /></div></Dialog>}
-    {selected && <Dialog title={isNew ? '위임금 내역 추가' : `${selected.workerName} · 입금 확인`} subtitle={isNew ? '근무 귀속월과 받을 금액의 기준을 입력하세요.' : `${selected.month} · ${selected.siteName}`} onClose={closeDialog} busy={saving}>
-      <div className="dr-modal-body">
-        {dialogError && <p role="alert" className="dr-form-error">{dialogError}</p>}
-        {!isNew && <><div className="dr-detail-summary"><div><span>받을 예정</span><strong>{won(selected.expectedAmount)}</strong></div><div><span>기록된 입금액</span><strong className="dr-text-green">{selected.receipts.length ? won(getClaimTotals(selected).received) : '미기록'}</strong></div><div><span>남은 금액</span><strong>{getDisplayRemaining(selected) === null ? '계산 보류' : won(getDisplayRemaining(selected))}</strong></div></div><div className="dr-detail-status"><StatusBadge claim={selected} />{canWrite && <button className="dr-text-button" onClick={() => { setEditMode(!editMode); setDialogError(''); }}>{editMode ? '입금 확인으로 돌아가기' : '기준 정보 수정'}</button>}</div></>}
-        {editMode && canWrite ? <form onSubmit={saveClaim} className="dr-form"><h3>수금 기준 정보</h3><div className="dr-form-grid"><label>근무 귀속월<input type="month" required value={selected.month} disabled={!isNew} onChange={(event) => setSelected({ ...selected, month: event.target.value })} /></label><label>입금방법<select disabled={!isNew} title={isNew ? undefined : "입금방법은 작업자 목록에서 바로 변경할 수 있습니다."} value={selected.delegationType} onChange={(event) => setSelected({ ...selected, delegationType: event.target.value as DelegationType })}>{Object.entries(delegationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>현장명<input required maxLength={100} value={selected.siteName} disabled={!!selected.siteId} onChange={(event) => setSelected({ ...selected, siteName: event.target.value })} /></label><label>작업자명<input required maxLength={80} value={selected.workerName} disabled={!!selected.workerId} onChange={(event) => setSelected({ ...selected, workerName: event.target.value })} /></label><label>세전 금액 (원)<input type="number" min="0" step="1" inputMode="numeric" placeholder="원본 세전 금액" value={grossInput} onChange={(event) => setGrossInput(event.target.value)} /></label><label>금액 계산 방식<select value={amountMode} onChange={(event) => setAmountMode(event.target.value as 'manual' | 'tax')}><option value="manual">예정액 직접 입력</option><option value="tax">세율로 계산</option></select></label>{amountMode === 'tax' ? <><label>적용 세율 (%)<input type="number" required min="0" max="100" step="any" inputMode="decimal" placeholder="직접 설정" value={taxInput} onChange={(event) => setTaxInput(event.target.value)} /></label><div className="dr-tax-result"><span>공제 세금 {won(calculatedAmount?.taxAmount ?? null)}</span><strong>받을 예정 {won(calculatedAmount?.expectedAmount ?? null)}</strong></div></> : <label>받을 예정 금액 (원)<input type="number" min="0" step="1" inputMode="numeric" placeholder="미입력 시 금액 미확정" value={expectedInput} onChange={(event) => setExpectedInput(event.target.value)} /></label>}</div><p className="dr-form-help">실제로 받기로 한 금액을 입력하세요. 세율은 직접 설정하며, 세금은 원 단위 반올림합니다. 직접 입력으로 전환하면 세율·세금 정보는 초기화됩니다.</p>{isNew ? <label>메모<textarea rows={2} maxLength={2000} placeholder="예: 공제 후 확정액, 정산 기준" value={selected.memo} onChange={(event) => setSelected({ ...selected, memo: event.target.value })} /></label> : <p className="dr-form-help">메모는 작업자 목록의 스티커에서 수정할 수 있습니다.</p>}<button type="submit" className="dr-button dr-button-primary dr-full-width" disabled={saving}>{saving ? '저장 중…' : '기준 정보 저장'}</button></form> : <>
-          {canWrite && <DepositConfirmationForm claims={[selected]} busy={saving} error="" onSave={(value, preserve) => { void runSave(() => service.confirmClaims([selected.id], value, preserve), '입금여부와 받는 계좌를 저장했습니다.'); }} />}
-          <details className="dr-team-settings"><summary>현장 담당 팀 · 색상 연결</summary><p>{getSiteTeam(selected, directory)?.name || '연결된 팀 없음'} · 선택한 귀속월의 같은 현장 전체에 적용합니다.</p>{canWrite && <div className="dr-form"><label>현장 담당 팀<select value={teamInput} onChange={event => setTeamInput(event.target.value)}><option value="">ERP 현장 정보로 자동 연결</option>{directory.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label><button className="dr-button" disabled={saving} onClick={() => { const ids = claims.filter(claim => claim.month === selected.month && claim.siteName === selected.siteName).map(claim => claim.id); void runSave(() => service.assignSiteTeam(ids, selected.month, selected.siteName, teamInput), '현장 담당 팀과 색상을 연결했습니다.'); }}>이 현장의 팀 연결 저장</button></div>}</details>
-          <details className="dr-money-details"><summary>금액 기록 · 세금 · 원본 내역</summary>
-          <div className="dr-source-info"><p><span>원본 세전 금액</span><strong>{won(selected.originalGrossAmount !== undefined ? selected.originalGrossAmount : selected.grossAmount)}</strong></p>{selected.taxRate !== null && selected.taxRate !== undefined && <p><span>적용 세율 / 공제 세금</span><strong>{selected.taxRate}% / {won(selected.taxAmount ?? null)}</strong></p>}<p><span>원본 표시</span><strong>{sourceText(selected.sourceStatus) || '표시 없음'}</strong></p>{selected.sourceLabel && <p><span>원본 위치</span><strong>{selected.sourceLabel}</strong></p>}{selected.memo && <p className="dr-source-memo">{selected.memo}</p>}</div>
-          {canWrite && <form onSubmit={addReceipt} className="dr-form"><h3><Plus size={16} />입금 기록 추가</h3><p className="dr-form-help">통장 또는 입금 증빙을 확인한 금액만 입력하세요. 나누어 받은 금액도 각각 등록할 수 있습니다.</p><div className="dr-form-grid"><label>실제 입금일<input type="date" required max={today()} value={receiptDate} onChange={(event) => setReceiptDate(event.target.value)} /></label><label className="dr-field-span">입금액 (원)<input type="number" required min="1" step="1" inputMode="numeric" placeholder="입금된 금액 입력" value={receiptAmount} onChange={(event) => setReceiptAmount(event.target.value)} /></label><label className="dr-field-span">입금 메모<input maxLength={500} placeholder="예: 1차 입금, 증빙 확인 내용" value={receiptMemo} onChange={(event) => setReceiptMemo(event.target.value)} /></label></div>{selected.expectedAmount === null && <p className="dr-form-help dr-text-amber">예정 금액이 미확정입니다. 입금은 기록되며, 잔액은 기준액 확정 후 계산됩니다.</p>}{selected.expectedAmount !== null && Number(receiptAmount) > (getClaimTotals(selected).remaining || 0) && <p className="dr-form-help dr-text-amber">남은 받을 돈을 초과하는 입금입니다. 금액을 다시 확인해 주세요.</p>}<button type="submit" className="dr-button dr-button-primary dr-full-width" disabled={saving}>{saving ? '저장 중…' : '확인한 입금 기록 저장'}</button></form>}
-          <section className="dr-history"><div className="dr-section-title"><h3>입금 이력</h3><span>{selected.receipts.length}회</span></div>{selected.receipts.length ? <ul>{[...selected.receipts].sort((a, b) => b.date.localeCompare(a.date)).map((receipt) => <li key={receipt.id}><div className="dr-history-check"><Check size={14} /></div><div><strong>{receipt.date}<span>{methodLabels[receipt.method]}</span></strong>{receipt.memo && <p>{receipt.memo}</p>}</div><b>{won(receipt.amount)}</b></li>)}</ul> : <p className="dr-history-empty">아직 등록한 입금 기록이 없습니다.</p>}</section></details>
-          {(selected.confirmationHistory?.length || 0) > 0 && <details className="dr-confirm-history"><summary>입금여부 확인 이력 {selected.confirmationHistory!.length}건</summary><ul>{[...selected.confirmationHistory!].reverse().map(item => <li key={item.id}><strong>{depositLabels[item.status]} · {recipientLabels[item.recipient]}</strong><span>{new Date(item.recordedAt).toLocaleString('ko-KR')} · 확인 시각</span>{item.note && <p>{item.note}</p>}</li>)}</ul></details>}
-        </>}
-      </div>
-    </Dialog>}
     {archiveOpen && <Dialog title="원본 보관함" subtitle="저장된 엑셀과 분류 대기 내역을 확인하세요." onClose={() => setArchiveOpen(false)} wide><WorkbookArchivePanel service={archiveService} archives={archives} loading={archivesLoading} error={archivesError} onReload={() => setArchiveReload((value) => value + 1)} onSelectMonth={selectArchivedMonth} /></Dialog>}
     {preview && <Dialog title="엑셀 가져오기 확인" subtitle={previewName} onClose={closeDialog} wide busy={saving}>
       <div className="dr-modal-body"><div className="dr-import-summary"><FileSpreadsheet size={24} /><div><strong>월별 관리 {preview.claims.length.toLocaleString('ko-KR')}건 · 분류 대기 {preview.unclassifiedRows.length.toLocaleString('ko-KR')}건</strong><p>{availableMonths.join(' · ') || '월별 분류 전 · 원본과 분류 대기 행 보관'}</p></div></div><p className="dr-import-explainer">모든 시트·셀·수식·서식이 담긴 엑셀 원본 전체를 함께 보관합니다. 월·현장이 확인되지 않는 행도 분류 대기로 저장합니다. 공통 세율을 설정하면 세후 예정액을 계산합니다. 입금완료·입금 전은 병합된 공동 표시까지 반영합니다. 실제 입금액은 별도 입력하며, 같은 원본 내역은 중복 저장하지 않습니다.</p><div className="dr-form dr-import-settings"><div className="dr-form-grid"><label>공통 세율 (%) · 선택<input type="number" min="0" max="100" step="any" inputMode="decimal" placeholder="세전 내역에만 적용" value={importTax} onChange={(event) => setImportTax(event.target.value)} /></label><label>미확인 입금방법 설정<select value={importDelegation} onChange={(event) => setImportDelegation(event.target.value as DelegationType)}><option value="unknown">미확인 유지</option><option value="delegate">위임</option><option value="direct">직불</option></select></label></div><p className="dr-form-help">세금은 원 단위 반올림합니다. 원본에 위임·직불이 명시된 내역은 유지합니다. 원본에 세후 금액이 명시된 내역은 예정액을 유지합니다. 세전·세후 금액이 모두 없으면 미확정으로 남습니다.</p><p className="dr-import-total">세후 받을 예정 <strong>{won(summarizeClaims(preparedImport).expected)}</strong><span>금액 미확정 {summarizeClaims(preparedImport).unconfirmed}건</span></p></div>{preview.warnings.length > 0 && <div className="dr-import-warnings"><strong>확인할 내용 {preview.warnings.length}건</strong><ul>{preview.warnings.slice(0, 8).map((warning, index) => <li key={index}>{String(warning)}</li>)}</ul>{preview.warnings.length > 8 && <p>그 외 {preview.warnings.length - 8}건이 있습니다.</p>}</div>}<div className="dr-import-coverage"><span>원본 파일 전체 보관</span><span>{preview.sheetSummaries.length}개 시트 · 입력 셀 {preview.sheetSummaries.reduce((sum, sheet) => sum + sheet.populatedCells, 0).toLocaleString('ko-KR')}개</span></div>{preview.unclassifiedRows.length > 0 && <details className="dr-import-review-preview"><summary>분류 대기 {preview.unclassifiedRows.length}건 확인 · 원본 그대로 함께 저장</summary><p className="dr-form-help">아래 행은 월·현장을 추정하지 않고 원본 위치와 내용을 보관합니다. 가져온 뒤 원본 보관함에서 다시 확인할 수 있습니다.</p><SourceReviewRows rows={preview.unclassifiedRows} /></details>}<div className="dr-preview-list">{preparedImport.slice(0, 40).map((claim) => <div key={claim.id}><span><strong>{claim.workerName}</strong><small>{claim.month} · {claim.siteName}</small></span><span>{delegationLabels[claim.delegationType]}<small>원본 세전 {won(claim.grossAmount)}</small><small>세후 예정 {won(claim.expectedAmount)}</small></span></div>)}</div>{preview.claims.length > 40 && <p className="dr-form-help">미리보기는 앞 40건을 표시합니다. 전체 {preview.claims.length}건이 저장 대상입니다.</p>}{dialogError && <p role="alert" className="dr-form-error">{dialogError}</p>}<div className="dr-import-actions"><button className="dr-button" onClick={closeDialog} disabled={saving}>취소</button><button className="dr-button dr-button-primary" disabled={saving || !previewBytes || !canWrite || (importTax !== '' && (!Number.isFinite(Number(importTax)) || Number(importTax) < 0 || Number(importTax) > 100))} onClick={() => { const importing = preparedImport; const originalBytes = previewBytes; if (!originalBytes) return; void runSave(async () => { const result = await archiveService.importWorkbook(originalBytes, previewName, preview, importing); setArchiveRequested(true); setArchiveReload((value) => value + 1); setMonth(availableMonths[availableMonths.length - 1] || month); resetFilters(); return `원본 전체 보관 완료 · 관리 ${result.added}건 추가 · 기존 ${result.skipped}건 유지 · 분류 대기 ${result.reviewRows}건 보관`; }, '엑셀 내역을 가져왔습니다. 받을 예정 금액을 확인해 주세요.'); }}>{saving ? '원본과 내역 저장 중…' : `원본과 전체 ${preview.claims.length + preview.unclassifiedRows.length}건 저장`}</button></div></div>

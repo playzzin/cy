@@ -1,30 +1,32 @@
 import React, { useEffect, useRef } from 'react';
-import { Pencil, Plus, StickyNote, Trash2, Undo2 } from 'lucide-react';
+import { Pencil, Plus, StickyNote, Trash2 } from 'lucide-react';
 
 interface Props {
-  label: string; memo: string; draft?: string; deletedMemo?: string; canWrite: boolean; locked: boolean;
+  label: string; memo: string; draft?: string; canWrite: boolean; locked: boolean;
   onStart: () => void; onChange: (value: string) => void; onSave: () => void;
-  onCancel: () => void; onDelete: () => void; onRestore: () => void;
+  onCancel: () => void; onDelete: () => void;
 }
 
-export default function DelegatedMemoSticker({ label, memo, draft, deletedMemo, canWrite, locked, onStart, onChange, onSave, onCancel, onDelete, onRestore }: Props) {
+export default function DelegatedMemoSticker({ label, memo, draft, canWrite, locked, onStart, onChange, onSave, onCancel, onDelete }: Props) {
   const editing = draft !== undefined;
   const input = useRef<HTMLTextAreaElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const wasEditing = useRef(false);
+  const hadMemo = useRef(Boolean(memo));
   useEffect(() => {
-    const target = editing ? input.current : wasEditing.current ? trigger.current : null;
+    if (locked) return;
+    const target = editing ? input.current : wasEditing.current || (hadMemo.current && !memo) ? trigger.current : null;
     if (target?.getClientRects().length) target.focus();
     wasEditing.current = editing;
-  }, [editing]);
+    hadMemo.current = Boolean(memo);
+  }, [editing, memo, locked]);
 
   if (!memo && !editing) return <div className="dr-memo-empty">
-    {canWrite ? <button ref={trigger} className="dr-memo-add" disabled={locked} onClick={onStart} aria-label={`${label} 메모 등록`}><StickyNote size={17} /><Plus size={13} />메모</button> : <span className="dr-memo-none">메모 없음</span>}
-    {canWrite && deletedMemo && <button className="dr-memo-undo" disabled={locked} onClick={onRestore} aria-label={`${label} 메모 삭제 취소`}><Undo2 size={14} />삭제 취소</button>}
+    {canWrite ? <button type="button" ref={trigger} className="dr-memo-add" disabled={locked} onClick={onStart} aria-label={`${label} 새 메모`}><Plus size={16} />새 메모</button> : <span className="dr-memo-none">메모 없음</span>}
   </div>;
 
   return <section className={`dr-memo-sticker ${editing ? 'dr-memo-editing' : ''}`} aria-label={`${label} 메모`}>
-    <header><span><StickyNote size={15} />메모</span>{canWrite && !editing && <div>
+    <header><span><StickyNote size={15} />{!memo && editing ? '새 메모' : '메모'}</span>{canWrite && !editing && <div>
       <button ref={trigger} disabled={locked} onClick={onStart} aria-label={`${label} 메모 수정`} title="메모 수정"><Pencil size={15} /></button>
       <button disabled={locked} onClick={onDelete} aria-label={`${label} 메모 삭제`} title="메모 삭제"><Trash2 size={15} /></button>
     </div>}</header>

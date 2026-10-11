@@ -17,9 +17,7 @@
 .dr-worker-ledger .dr-inline-amount { width:155px; }
 .dr-worker-ledger .dr-table .dr-inline-payment { grid-template-columns:90px minmax(170px,1fr); }
 .dr-worker-ledger .dr-table .dr-inline-field select,.dr-worker-ledger .dr-inline-money-input { min-height:44px; }
-.dr-worker-ledger .dr-worker-detail { display:flex; width:max-content; margin-top:4px; }
 .dr-worker-ledger .dr-table .dr-inline-status { min-width:120px; }
-.dr-worker-ledger .dr-table .dr-cell-sub { white-space:normal; max-width:180px; }
 @container dr-ledger (max-width:1050px) {
   .dr-worker-ledger .dr-table .dr-inline-payment { grid-template-columns:minmax(170px,1fr); }
   .dr-worker-ledger .dr-inline-amount { width:140px; }

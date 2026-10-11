@@ -1,10 +1,10 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Building2, Check, ChevronRight, UserRound } from 'lucide-react';
+import { Building2, Check, UserRound } from 'lucide-react';
 import type { ClaimListChange, ClaimListEdit, DelegatedClaim } from '../../features/delegated-receipts/model';
 import { getClaimTotals, summarizeClaimAmounts } from '../../features/delegated-receipts/model';
 import { groupClaimsBySite, ReceiptSiteGroup } from '../../features/delegated-receipts/siteGroups';
 import { depositLabels, getDelegation, getDepositState, recipientLabels } from '../../features/delegated-receipts/depositState';
-import { getSiteTeam, getWorkerColor, ReceiptDirectory, validTeamColor } from '../../features/delegated-receipts/teamDirectory';
+import { getWorkerColor, ReceiptDirectory, validTeamColor } from '../../features/delegated-receipts/teamDirectory';
 import DelegatedMemoSticker from './DelegatedMemoSticker';
 import './DelegatedWorkerLedger.css';
 
@@ -17,9 +17,6 @@ export function SiteIdentity({ name, color }: { name: string; color?: string }) 
     <span className="dr-site-avatar" aria-hidden="true"><Building2 size={18} strokeWidth={2} /></span>
     <span className="dr-site-name">{name}</span>
   </span>;
-}
-export function SiteTeamLabel({ claim, directory }: { claim: DelegatedClaim; directory: ReceiptDirectory }) {
-  return <SiteIdentity name={claim.siteName} color={getSiteTeam(claim, directory)?.color} />;
 }
 function WorkerIdentity({ claim, directory }: { claim: DelegatedClaim; directory: ReceiptDirectory }) {
   const color = getWorkerColor(claim, directory);
@@ -41,9 +38,9 @@ function SiteGroupHeading({ group }: { group: ReceiptSiteGroup }) {
   return <div className="dr-site-group-heading"><h3><SiteIdentity name={group.name} color={group.color} /></h3><div className="dr-site-group-totals"><span><b>{group.claims.length}건</b></span><span>입금완료 <b>{complete}/{group.claims.length}건</b></span><span>세전 합계 <b>{won(gross.amount)}</b>{gross.amount !== null && gross.missing > 0 && <small>미확정 {gross.missing}건 제외</small>}</span></div></div>;
 }
 
-export default function DelegatedWorkerLedger({ claims, directory, canWrite, selectedIds, onSelect, onOpen, onUpdate }: {
+export default function DelegatedWorkerLedger({ claims, directory, canWrite, selectedIds, onSelect, onUpdate }: {
   claims: DelegatedClaim[]; directory: ReceiptDirectory; canWrite: boolean; selectedIds: string[];
-  onSelect: (ids: string[]) => void; onOpen: (claim: DelegatedClaim) => void;
+  onSelect: (ids: string[]) => void;
   onUpdate: (id: string, edit: ClaimListEdit) => Promise<void>;
 }) {
   const [rowSaves, setRowSaves] = useState<Record<string, RowSave>>({});
@@ -102,14 +99,12 @@ export default function DelegatedWorkerLedger({ claims, directory, canWrite, sel
     </div>;
   };
   const memoSticker = (claim: DelegatedClaim, mobile = false) => {
-    const lastMemoChange = [...(claim.confirmationHistory ?? [])].reverse().find(event => event.listChange?.field === 'memo');
-    const deletedMemo = !claim.memo && lastMemoChange?.listChange?.value === '' ? lastMemoChange.previousMemo : undefined;
-    return <DelegatedMemoSticker label={`${claim.workerName}${mobile ? ' 모바일' : ''}`} memo={claim.memo} draft={memoDrafts[claim.id]} deletedMemo={deletedMemo}
+    return <DelegatedMemoSticker label={`${claim.workerName}${mobile ? ' 모바일' : ''}`} memo={claim.memo} draft={memoDrafts[claim.id]}
       canWrite={canWrite} locked={Boolean(rowSaves[claim.id] && rowSaves[claim.id].phase !== 'saved')}
       onStart={() => setMemoDrafts(previous => ({ ...previous, [claim.id]: claim.memo }))}
       onChange={value => setMemoDrafts(previous => ({ ...previous, [claim.id]: value }))}
       onSave={() => change(claim.id, { field: 'memo', value: memoDrafts[claim.id] })} onCancel={() => clearMemo(claim.id)}
-      onDelete={() => change(claim.id, { field: 'memo', value: '' })} onRestore={() => { if (deletedMemo) change(claim.id, { field: 'memo', value: deletedMemo }); }} />;
+      onDelete={() => change(claim.id, { field: 'memo', value: '' })} />;
   };
   const toggle = (id: string) => onSelect(selectedIds.includes(id) ? selectedIds.filter(value => value !== id) : [...selectedIds, id].slice(0, 400));
   const allSelected = claims.length > 0 && claims.length <= 400 && claims.every(claim => selectedIds.includes(claim.id));
@@ -120,13 +115,13 @@ export default function DelegatedWorkerLedger({ claims, directory, canWrite, sel
     <div className="dr-table-wrap"><table className="dr-table" aria-label="현장별 작업자 내역"><thead><tr>{canWrite && <th scope="col"><span className="dr-sr-only">선택</span></th>}<th scope="col">작업자</th><th scope="col">입금방법 / 받는 계좌</th><th scope="col" className="dr-align-right">세전 금액 (원)</th><th scope="col">입금여부</th><th scope="col">메모</th></tr></thead>{groups.map(group => <tbody key={group.key} className="dr-site-group" style={groupStyle(group)} aria-label={`${group.name} 내역`}>
       <tr className="dr-site-group-head"><th scope="rowgroup" colSpan={canWrite ? 6 : 5}><SiteGroupHeading group={group} /></th></tr>
       {group.claims.map(claim => {
-        const state = getDepositState(claim); const total = getClaimTotals(claim);
+        const state = getDepositState(claim);
         return <tr key={claim.id} className={selectedIds.includes(claim.id) ? 'dr-row-selected' : ''}>
           {canWrite && <td className="dr-checkbox-cell"><input type="checkbox" aria-label={`${claim.workerName} 선택`} checked={selectedIds.includes(claim.id)} onChange={() => toggle(claim.id)} /></td>}
-          <td><WorkerIdentity claim={claim} directory={directory} /><button className="dr-row-button dr-worker-detail" disabled={rowSaves[claim.id]?.phase === 'saving'} onClick={() => onOpen(claim)} aria-label={`${claim.workerName} 입금 및 내역`}>내역 보기<ChevronRight size={14} /></button>{feedback(claim)}</td>
+          <td><WorkerIdentity claim={claim} directory={directory} />{feedback(claim)}</td>
           <td>{canWrite ? <div className="dr-inline-payment">{control(claim, 'delegation')}{control(claim, 'recipient')}</div> : <><span className="dr-delegation-label">{delegationLabels[getDelegation(claim)]}</span> {recipientLabels[state.recipient]}</>}</td>
           <td className="dr-align-right dr-number">{canWrite ? amountControl(claim) : won(claim.grossAmount)}</td>
-          <td>{canWrite ? control(claim, 'status') : <DepositBadge claim={claim} />}<span className="dr-cell-sub">{state.basis}{claim.receipts.length > 0 ? ` · 기록 ${won(total.received)}` : ' · 금액 미기록'}</span></td>
+          <td>{canWrite ? control(claim, 'status') : <DepositBadge claim={claim} />}</td>
           <td className="dr-memo-cell">{memoSticker(claim)}</td>
         </tr>;
       })}
@@ -137,7 +132,7 @@ export default function DelegatedWorkerLedger({ claims, directory, canWrite, sel
         <div className="dr-worker-heading"><div className="dr-worker-select">{canWrite && <input type="checkbox" aria-label={`${claim.workerName} 모바일 선택`} checked={selectedIds.includes(claim.id)} onChange={() => toggle(claim.id)} />}<WorkerIdentity claim={claim} directory={directory} /></div>{!canWrite && <DepositBadge claim={claim} />}</div>
         {canWrite ? <div className="dr-inline-mobile">{control(claim, 'delegation', true)}{control(claim, 'status', true)}{control(claim, 'recipient', true)}</div> : <div className="dr-worker-meta"><b>{delegationLabels[getDelegation(claim)]}</b><span>·</span>{recipientLabels[state.recipient]}</div>}
         <dl className="dr-worker-amounts"><div><dt>세전 금액 (원)</dt><dd>{canWrite ? amountControl(claim, true) : won(claim.grossAmount)}</dd></div><div><dt>기록된 입금액</dt><dd>{claim.receipts.length ? won(total.received) : '미기록'}</dd></div></dl>
-        <div className="dr-worker-footer"><span>{state.basis}</span><button className="dr-button" disabled={rowSaves[claim.id]?.phase === 'saving'} onClick={() => onOpen(claim)} aria-label={`${claim.workerName} 모바일 입금 및 내역`}>내역 보기<ChevronRight size={16} /></button></div>{feedback(claim)}<div className="dr-mobile-memo">{memoSticker(claim, true)}</div>
+        {feedback(claim)}<div className="dr-mobile-memo">{memoSticker(claim, true)}</div>
       </article>;
     })}</div></section>)}</div>
   </div>;

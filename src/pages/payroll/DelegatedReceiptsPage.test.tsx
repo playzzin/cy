@@ -32,7 +32,6 @@ const fixtures: DelegatedClaim[] = [
   { ...base, id: 'synthetic-2', workerName: '검증작업자 나', siteName: '가상현장 B', delegationType: 'direct', expectedAmount: 200000, receipts: [] },
   { ...base, id: 'synthetic-3', workerName: '검증작업자 다', delegationType: 'unknown', expectedAmount: null, receipts: [] },
 ];
-const openFirst = () => fireEvent.click(screen.getByRole('button', { name: '검증작업자 가 입금 및 내역' }));
 
 it('현장명을 묶음 상단에 한 번만 표시하고 작업자 색상과 현장별 합계를 유지한다', () => {
   const directory = { teams: [{ id: 't1', name: '가상팀', color: '#336699' }], sites: [{ id: 's1', name: base.siteName, responsibleTeamId: 't1' }], workers: [{ id: 'w1', name: base.workerName, color: '#DB2777' }] };
@@ -52,6 +51,19 @@ it('현장명을 묶음 상단에 한 번만 표시하고 작업자 색상과 �
   fireEvent.change(screen.getByLabelText('작업자 검색'), { target: { value: base.workerName } });
   expect(table.getByRole('rowgroup', { name: `${base.siteName} 내역` })).toHaveTextContent('세전 합계 100,000원');
   expect(table.queryByRole('rowgroup', { name: '가상현장 B 내역' })).not.toBeInTheDocument();
+});
+
+it('PC·모바일 목록에서 내역 보기와 입금 근거 설명을 숨기고 기존 메모는 스티커로 표시한다', () => {
+  render(<DelegatedReceiptsWorkspace initialClaims={[{ ...base, memo: '확인한 메모', sourceStatus: '공동 입금완료' }]} />);
+  expect(screen.queryByRole('button', { name: /입금 및 내역|내역 보기/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  const table = within(screen.getByRole('table'));
+  expect(table.queryByText(/엑셀 표시|엑셀 공동 표시|금액 미기록/)).not.toBeInTheDocument();
+  expect(table.getByRole('region', { name: '검증작업자 가 메모' })).toHaveTextContent('확인한 메모');
+  expect(table.queryByRole('button', { name: '검증작업자 가 새 메모' })).not.toBeInTheDocument();
+  const mobile = screen.getByRole('region', { name: `${base.siteName} 모바일 내역` });
+  expect(within(mobile).queryByText(/엑셀 표시|엑셀 공동 표시|직접 확인/)).not.toBeInTheDocument();
+  expect(within(mobile).getByRole('region', { name: '검증작업자 가 모바일 메모' })).toHaveTextContent('확인한 메모');
 });
 
 describe('위임금 입금 확인 화면', () => {
@@ -83,17 +95,6 @@ describe('위임금 입금 확인 화면', () => {
     expect(within(table).getByText('검증작업자 나')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('작업자 검색'), { target: { value: '없는이름' } });
     expect(screen.getByText('선택한 조건의 내역이 없습니다')).toBeInTheDocument();
-  });
-
-  it('사용자가 지정한 세율로 예정액을 계산하고 0%도 저장한다', async () => {
-    render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
-    openFirst();
-    fireEvent.click(screen.getByRole('button', { name: '기준 정보 수정' }));
-    fireEvent.change(screen.getByLabelText('금액 계산 방식'), { target: { value: 'tax' } });
-    fireEvent.change(screen.getByLabelText('적용 세율 (%)'), { target: { value: '0' } });
-    fireEvent.click(screen.getByRole('button', { name: '기준 정보 저장' }));
-    await waitFor(() => expect(delegatedReceiptService.saveClaim).toHaveBeenCalledWith(expect.objectContaining({ expectedAmount: 100000, taxAmount: 0, taxRate: 0 })));
-    await screen.findByText('기준 정보가 저장되었습니다.');
   });
 
   it('작업자 목록을 먼저 보여주고 현장 요약에서 선택하면 해당 작업자 목록으로 돌아온다', () => {
@@ -157,39 +158,6 @@ describe('위임금 입금 확인 화면', () => {
     const summary = screen.getByRole('region', { name: '입금 요약' });
     expect(summary).toHaveTextContent('입금여부 확인 필요1건');
     expect(summary).toHaveTextContent(/기록된 입금액\s*미기록/);
-  });
-
-  it('분할 입금을 실제 일자와 계좌이체로 저장하고 이중 클릭을 막는다', async () => {
-    let complete: (() => void) | undefined;
-    (delegatedReceiptService.addReceipt as jest.Mock).mockImplementation(() => new Promise<void>((resolve) => { complete = resolve; }));
-    render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
-    openFirst();
-    fireEvent.click(screen.getByText('금액 기록 · 세금 · 원본 내역'));
-    expect(screen.getByText('가상 분할 입금')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('입금액 (원)'), { target: { value: '25000' } });
-    fireEvent.change(screen.getByLabelText('실제 입금일'), { target: { value: '2026-09-12' } });
-    expect(screen.queryByLabelText('실제 수령수단')).not.toBeInTheDocument();
-    const button = screen.getByRole('button', { name: '확인한 입금 기록 저장' });
-    fireEvent.click(button); fireEvent.click(button);
-    expect(delegatedReceiptService.addReceipt).toHaveBeenCalledTimes(1);
-    expect(delegatedReceiptService.addReceipt).toHaveBeenCalledWith(base.id, expect.objectContaining({ amount: 25000, date: '2026-09-12', method: 'transfer' }));
-    complete?.();
-    await screen.findByText('입금 기록을 저장했습니다. 잔액이 갱신되었습니다.');
-  });
-
-  it('입금 저장 응답 실패 후 같은 내용 재시도에 같은 식별자를 사용한다', async () => {
-    (delegatedReceiptService.addReceipt as jest.Mock).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined);
-    render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
-    openFirst();
-    fireEvent.click(screen.getByText('금액 기록 · 세금 · 원본 내역'));
-    fireEvent.change(screen.getByLabelText('입금액 (원)'), { target: { value: '25000' } });
-    fireEvent.click(screen.getByRole('button', { name: '확인한 입금 기록 저장' }));
-    await screen.findByRole('alert');
-    fireEvent.click(screen.getByRole('button', { name: '확인한 입금 기록 저장' }));
-    await waitFor(() => expect(delegatedReceiptService.addReceipt).toHaveBeenCalledTimes(2));
-    const calls = (delegatedReceiptService.addReceipt as jest.Mock).mock.calls;
-    expect(calls[0][1]).toEqual(calls[1][1]);
-    await screen.findByText('입금 기록을 저장했습니다. 잔액이 갱신되었습니다.');
   });
 
   it('엑셀 미리보기에서 명시적으로 확인한 뒤 공통세율과 미확인 입금방법을 적용한다', async () => {
@@ -266,9 +234,7 @@ describe('위임금 입금 확인 화면', () => {
     fireEvent.click(screen.getByRole('button', { name: '자료 관리' }));
     expect(screen.queryByRole('button', { name: '직접 추가' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '엑셀 가져오기' })).not.toBeInTheDocument();
-    openFirst();
-    expect(screen.queryByRole('button', { name: '확인한 입금 기록 저장' })).not.toBeInTheDocument();
-    expect(screen.getByText('가상 분할 입금')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /입금 및 내역|내역 보기/ })).not.toBeInTheDocument();
   });
 });
 
@@ -277,7 +243,7 @@ it('원본 공동 완료를 금액 미설정이어도 표시하고 계좌 수단
   const table = screen.getByRole('table');
   expect(within(table).getByRole('combobox', { name: '검증작업자 가 입금여부' })).toHaveValue('complete');
   expect(within(table).getByText(/이재욱팀 팀장계좌/)).toBeInTheDocument();
-  expect(within(table).getByText('엑셀 공동 표시 · 금액 미기록')).toBeInTheDocument();
+  expect(within(table).queryByText(/엑셀 공동 표시|금액 미기록/)).not.toBeInTheDocument();
   expect(screen.queryByText(/수령수단/)).not.toBeInTheDocument();
 });
 it('선택 내역의 입금여부를 한번에 저장하고 기존 계좌 구분을 보존한다', async () => {
@@ -291,20 +257,6 @@ it('선택 내역의 입금여부를 한번에 저장하고 기존 계좌 구분
   await waitFor(() => expect(delegatedReceiptService.confirmClaims).toHaveBeenCalledWith(fixtures.map(row => row.id), expect.objectContaining({ status: 'complete' }), true));
   await screen.findByText('3건의 입금여부를 저장했습니다.');
 });
-it('팀 색상을 보여주고 팀 연결은 같은 귀속월 현장에만 적용한다', async () => {
-  (delegatedReceiptService.assignSiteTeam as jest.Mock).mockResolvedValue(undefined);
-  (delegatedReceiptService.list as jest.Mock).mockResolvedValue(fixtures);
-  const directory = { teams: [{ id: 'team-test', name: '가상 담당 팀', color: '#336699' }], sites: [{ id: 'site-test', name: base.siteName, responsibleTeamId: 'team-test' }] };
-  render(<DelegatedReceiptsWorkspace initialClaims={fixtures} initialDirectory={directory} />);
-  expect(within(screen.getByRole('table')).queryByText('가상 담당 팀')).not.toBeInTheDocument();
-  openFirst();
-  fireEvent.click(screen.getByText('현장 담당 팀 · 색상 연결'));
-  fireEvent.change(screen.getByLabelText('현장 담당 팀'), { target: { value: 'team-test' } });
-  fireEvent.click(screen.getByRole('button', { name: '이 현장의 팀 연결 저장' }));
-  await waitFor(() => expect(delegatedReceiptService.assignSiteTeam).toHaveBeenCalledWith(['synthetic-1', 'synthetic-3'], '2026-09', base.siteName, 'team-test'));
-  await screen.findByText('현장 담당 팀과 색상을 연결했습니다.');
-});
-
 it('목록에서 세 항목을 바로 저장하고 PC·모바일 표시와 요약을 함께 갱신한다', async () => {
   let saved = { ...base };
   (delegatedReceiptService.updateListField as jest.Mock).mockImplementation(async (_id, edit) => {
@@ -376,7 +328,7 @@ it('모바일 세전 금액은 취소할 수 있고 비우면 미확정으로 �
   expect(input).toHaveValue('');
 });
 
-it('오른쪽 메모 스티커를 등록·수정·삭제·복원하고 모바일과 초안을 공유한다', async () => {
+it('새 메모를 저장하면 스티커로 표시하고 수정·삭제 후 새 메모로 돌아간다', async () => {
   let saved = { ...base };
   (delegatedReceiptService.updateListField as jest.Mock).mockImplementation(async (_id: string, edit: ClaimListEdit) => {
     if (edit.change.field !== 'memo') throw Error('Unexpected change');
@@ -386,7 +338,7 @@ it('오른쪽 메모 스티커를 등록·수정·삭제·복원하고 모바일
   render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
   const table = within(screen.getByRole('table'));
   expect(table.getAllByRole('columnheader').at(-1)).toHaveTextContent('메모');
-  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 메모 등록' }));
+  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 새 메모' }));
   expect(table.getByRole('button', { name: '검증작업자 가 메모 저장' })).toBeDisabled();
   fireEvent.change(table.getByRole('textbox', { name: '검증작업자 가 메모 내용' }), { target: { value: '정산 확인\n금요일 다시 확인' } });
   expect(screen.getByRole('textbox', { name: '검증작업자 가 모바일 메모 내용' })).toHaveValue('정산 확인\n금요일 다시 확인');
@@ -403,9 +355,11 @@ it('오른쪽 메모 스티커를 등록·수정·삭제·복원하고 모바일
   fireEvent.keyDown(table.getByRole('textbox', { name: '검증작업자 가 메모 내용' }), { key: 'Enter', ctrlKey: true });
   await table.findByText('수정한 메모');
   fireEvent.click(table.getByRole('button', { name: '검증작업자 가 메모 삭제' }));
-  fireEvent.click(await table.findByRole('button', { name: '검증작업자 가 메모 삭제 취소' }));
-  await table.findByText('수정한 메모');
-  expect(delegatedReceiptService.updateListField).toHaveBeenCalledTimes(4);
+  expect(await table.findByRole('button', { name: '검증작업자 가 새 메모' })).toHaveTextContent('새 메모');
+  expect(table.queryByRole('region', { name: '검증작업자 가 메모' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /메모 삭제 취소/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '검증작업자 가 모바일 새 메모' })).toBeInTheDocument();
+  expect(delegatedReceiptService.updateListField).toHaveBeenCalledTimes(3);
   expect(table.getByRole('textbox', { name: '검증작업자 가 세전 금액' })).toHaveValue('100,000');
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
@@ -414,7 +368,7 @@ it('메모 저장 실패 시 초안을 유지하며 동일 요청으로 재시�
   (delegatedReceiptService.updateListField as jest.Mock).mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce({ ...base, memo: '보존할 메모' });
   render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
   const table = within(screen.getByRole('table'));
-  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 메모 등록' }));
+  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 새 메모' }));
   fireEvent.change(table.getByRole('textbox', { name: '검증작업자 가 메모 내용' }), { target: { value: '보존할 메모' } });
   fireEvent.click(table.getByRole('button', { name: '검증작업자 가 메모 저장' }));
   await table.findByText('저장 확인 실패');
@@ -429,7 +383,7 @@ it('메모 저장 실패 시 초안을 유지하며 동일 요청으로 재시�
 it('읽기 전용 메모는 보이되 등록·수정·삭제를 노출하지 않는다', () => {
   render(<DelegatedReceiptsWorkspace initialClaims={[{ ...base, memo: '기존 메모' }, { ...base, id: 'empty-memo', workerName: '검증작업자 나' }]} canWrite={false} />);
   expect(within(screen.getByRole('table')).getByText('기존 메모')).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /메모 (등록|수정|삭제)/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /새 메모|메모 (수정|삭제)/ })).not.toBeInTheDocument();
 });
 
 it('목록은 세전 입력창만 표시하고 수정 후 PC·모바일과 현장·상단 합계를 갱신한다', async () => {
