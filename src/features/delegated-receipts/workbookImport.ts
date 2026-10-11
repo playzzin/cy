@@ -110,8 +110,8 @@ function sourceRowStatus(sheet: XLSX.WorkSheet, row: number, statusCol: number):
     if (!merge) return { status, individualStatus: status };
     const groupStatus = text(cell(sheet, merge.s.r, merge.s.c)?.v);
     return {
-        status: `그룹 표시 ${XLSX.utils.encode_range(merge)}${groupStatus ? `: ${groupStatus}` : ''} (개별 확인 필요)`,
-        individualStatus: '',
+        status: `그룹 표시 ${XLSX.utils.encode_range(merge)}${groupStatus ? `: ${groupStatus}` : ''}`,
+        individualStatus: groupStatus,
         merge,
     };
 }
@@ -191,8 +191,8 @@ export function parseDelegatedWorkbook(workbook: XLSX.WorkBook): DelegatedWorkbo
                 if (statusMerge) {
                     const range = XLSX.utils.encode_range(statusMerge);
                     const groupStatus = text(cell(sheet, statusMerge.s.r, statusMerge.s.c)?.v);
-                    sourceStatus = `그룹 표시 ${range}${groupStatus ? `: ${groupStatus}` : ''} (개별 확인 필요)`;
-                    individualStatus = '';
+                    sourceStatus = `그룹 표시 ${range}${groupStatus ? `: ${groupStatus}` : ''}`;
+                    individualStatus = groupStatus;
                     mergedStatuses += 1;
                 }
                 const identity = JSON.stringify([title.month, title.siteName.normalize('NFKC'), workerName.normalize('NFKC')]);
@@ -325,7 +325,7 @@ export function parseDelegatedWorkbook(workbook: XLSX.WorkBook): DelegatedWorkbo
         sheetSummaries.push({ name: sheetName, populatedCells, claimCount: claims.length - initialCount, reviewRowCount });
     }
     if (invalidAmounts) warnings.push(`세전 금액을 확인할 수 없는 ${invalidAmounts}건은 금액 미설정으로 가져왔습니다.`);
-    if (mergedStatuses) warnings.push(`병합된 입금 표시 ${mergedStatuses}건은 개별 입금 여부와 입금방법을 확인해 주세요.`);
+    if (mergedStatuses) warnings.push(`병합된 입금 표시 ${mergedStatuses}건은 공동 표시를 각 작업자의 입금여부에 반영합니다. 실제 입금액은 따로 기록합니다.`);
     if (duplicateIdentities) warnings.push(`같은 월·현장·이름이 반복된 ${duplicateIdentities}개 행을 각각 가져왔습니다. 동명이인·분할 내역인지 확인하고, 행 순서를 바꾼 파일의 재가져오기는 주의해 주세요.`);
     if (claims.length) warnings.push('세전 내역은 받을 금액·세율을 확인해 주세요. 세후 내역은 원본 세후액을 받을 금액으로 보존하며 실제 입금액은 따로 확인합니다.');
     return { claims, warnings, unclassifiedRows, sheetSummaries };

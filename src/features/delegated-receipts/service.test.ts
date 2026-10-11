@@ -1,6 +1,6 @@
 import { collection, doc, getDocs, query, runTransaction, where } from 'firebase/firestore';
 import { delegatedReceiptService } from './service';
-import type { DelegatedClaim, Receipt } from './model';
+import type { DelegatedClaim, DepositConfirmation, Receipt } from './model';
 
 jest.mock('../../config/firebase', () => ({ db: {} }));
 jest.mock('firebase/firestore', () => ({
@@ -30,7 +30,7 @@ const createTransaction = () => {
       const value = records.get(ref.id);
       return { exists: () => Boolean(value), data: () => value && clone(value) };
     }),
-    set: jest.fn((ref: { id: string }, value: DelegatedClaim) => pending.set(ref.id, clone(value))),
+    set: jest.fn((ref: { id: string }, value: DelegatedClaim, options?: { merge: boolean }) => pending.set(ref.id, { ...(options?.merge ? clone(records.get(ref.id) || {} as DelegatedClaim) : {}), ...clone(value) })),
     update: jest.fn((ref: { id: string }, value: Partial<DelegatedClaim>) => {
       pending.set(ref.id, { ...clone(records.get(ref.id)!), ...clone(value) });
     }),
@@ -270,4 +270,46 @@ it('Firestore 실패를 성공한 저장이나 빈 조회로 처리하지 않는
   await expect(delegatedReceiptService.list('2026-09')).rejects.toThrow('permission-denied');
   (runTransaction as jest.Mock).mockRejectedValueOnce(new Error('unavailable'));
   await expect(delegatedReceiptService.saveClaim(claim())).rejects.toThrow('unavailable');
+});
+
+const confirmation = (changes: Partial<DepositConfirmation> = {}): DepositConfirmation => ({ id: 'confirmation-a', status: 'complete', recipient: 'personal', note: '', recordedAt: '2026-10-12T01:00:00Z', ...changes });
+it('일괄 확인은 실제 입금액 없이 완료를 저장하고 계좌 구분을 유지한다', async () => {
+  records.set('claim-a', claim({ sourceStatus: '개인 통장' }));
+  records.set('claim-b', claim({ id: 'claim-b', sourceStatus: '이재욱 위임 입금 전' }));
+  await delegatedReceiptService.confirmClaims(['claim-a', 'claim-b'], confirmation(), true);
+  expect(records.get('claim-a')).toMatchObject({ confirmation: { status: 'complete', recipient: 'personal' }, receipts: [], expectedAmount: null });
+  expect(records.get('claim-b')?.confirmation?.recipient).toBe('jaewook_leader');
+  await delegatedReceiptService.confirmClaims(['claim-a', 'claim-b'], confirmation(), true);
+  expect(records.get('claim-a')?.confirmationHistory).toHaveLength(1);
+});
+it('재시도는 이후 확인을 되돌리지 않고 같은 식별자의 다른 내용은 거부한다', async () => {
+  records.set('claim-a', claim());
+  await delegatedReceiptService.confirmClaims(['claim-a'], confirmation());
+  await delegatedReceiptService.confirmClaims(['claim-a'], confirmation({ id: 'confirmation-b', status: 'pending' }));
+  await delegatedReceiptService.confirmClaims(['claim-a'], confirmation());
+  expect(records.get('claim-a')?.confirmation?.status).toBe('pending');
+  await expect(delegatedReceiptService.confirmClaims(['claim-a'], confirmation({ status: 'unknown' }))).rejects.toThrow('같은 확인 식별자');
+});
+it('기준 금액 수정과 입금 기록 추가는 최신 확인 이력과 팀 연결을 지우지 않는다', async () => {
+  records.set('claim-a', claim({ confirmation: confirmation(), confirmationHistory: [confirmation()], assignedTeamId: 'team-a' }));
+  await delegatedReceiptService.saveClaim(claim({ expectedAmount: 100, confirmation: confirmation({ status: 'unknown' }) }));
+  await delegatedReceiptService.addReceipt('claim-a', receipt());
+  expect(records.get('claim-a')).toMatchObject({ confirmation: confirmation(), confirmationHistory: [confirmation()], assignedTeamId: 'team-a', expectedAmount: 100 });
+  expect(records.get('claim-a')?.receipts).toHaveLength(1);
+});
+it('누락 행이 있거나 확인 이력 한도를 넘으면 일괄 작업을 전부 거부한다', async () => {
+  records.set('claim-a', claim());
+  await expect(delegatedReceiptService.confirmClaims(['claim-a', 'missing'], confirmation())).rejects.toThrow();
+  expect(records.get('claim-a')?.confirmation).toBeUndefined();
+  records.set('claim-b', claim({ id: 'claim-b', confirmationHistory: Array.from({ length: 500 }, (_, i) => confirmation({ id: `old-${i}` })) }));
+  await expect(delegatedReceiptService.confirmClaims(['claim-a', 'claim-b'], confirmation())).rejects.toThrow('최대 건수');
+  expect(records.get('claim-a')?.confirmation).toBeUndefined();
+});
+it('팀 일괄 연결은 월과 현장이 같은 내역에만 적용한다', async () => {
+  records.set('claim-a', claim());
+  records.set('claim-b', claim({ id: 'claim-b', month: '2026-08' }));
+  await expect(delegatedReceiptService.assignSiteTeam(['claim-a', 'claim-b'], '2026-09', '테스트 현장', 'team-a')).rejects.toThrow('월·현장');
+  expect(records.get('claim-a')?.assignedTeamId).toBeUndefined();
+  await delegatedReceiptService.assignSiteTeam(['claim-a'], '2026-09', '테스트 현장', 'team-a');
+  expect(records.get('claim-a')?.assignedTeamId).toBe('team-a');
 });

@@ -1,6 +1,16 @@
 export type PaymentMethod = 'transfer' | 'cash' | 'other' | 'unknown';
 export type DelegationType = 'delegate' | 'direct' | 'unknown';
 export type ReceiptStatus = 'unconfirmed' | 'unpaid' | 'partial' | 'paid' | 'overpaid';
+export type DepositStatus = 'unknown' | 'pending' | 'partial' | 'complete';
+export type RecipientKind = 'unknown' | 'personal' | 'site_leader' | 'jaewook_leader';
+export interface DepositConfirmation {
+    id: string;
+    status: DepositStatus;
+    recipient: RecipientKind;
+    note: string;
+    recordedAt: string;
+    actorId?: string;
+}
 
 export interface Receipt {
     id: string;
@@ -26,6 +36,9 @@ export interface DelegatedClaim {
     sourceStatus: string;
     sourceLabel: string;
     sourceWorkbookId?: string;
+    confirmation?: DepositConfirmation;
+    confirmationHistory?: DepositConfirmation[];
+    assignedTeamId?: string;
     memo: string;
     updatedAt: string;
 }

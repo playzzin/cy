@@ -1,6 +1,7 @@
 import { collection, doc, getDocs, query, runTransaction, where } from 'firebase/firestore';
-import { db } from '../../config/firebase';
-import type { DelegatedClaim, PaymentMethod, Receipt } from './model';
+import { auth, db } from '../../config/firebase';
+import type { DelegatedClaim, DepositConfirmation, PaymentMethod, Receipt } from './model';
+import { getDepositState } from './depositState';
 
 export const DELEGATED_RECEIPTS_COLLECTION = 'delegated_receipt_claims';
 const IMPORT_CHUNK_SIZE = 100;
@@ -80,6 +81,26 @@ const validateReceipts = (values: Receipt[]): Receipt[] => {
   return receipts;
 };
 
+const validateConfirmation = (value: DepositConfirmation): DepositConfirmation => {
+  if (!value || !['unknown', 'pending', 'partial', 'complete'].includes(value.status)
+    || !['unknown', 'personal', 'site_leader', 'jaewook_leader'].includes(value.recipient)) throw new Error('입금여부와 받는 계좌를 확인해 주세요.');
+  const recordedAt = requireText(value.recordedAt, '확인 시각', 40, true);
+  if (!Number.isFinite(Date.parse(recordedAt))) throw new Error('확인 시각을 확인해 주세요.');
+  return { id: validateId(value.id), status: value.status, recipient: value.recipient,
+    note: requireText(value.note, '확인 메모', 1000), recordedAt,
+    ...(value.actorId ? { actorId: validateId(value.actorId) } : {}) };
+};
+const validateHistory = (values: DepositConfirmation[]): DepositConfirmation[] => {
+  if (!Array.isArray(values) || values.length > 500) throw new Error('입금 확인 이력의 최대 건수를 넘었습니다.');
+  const history = values.map(validateConfirmation);
+  if (new Set(history.map(item => item.id)).size !== history.length) throw new Error('확인 이력 식별자가 중복되었습니다.');
+  return history;
+};
+const batchIds = (ids: string[]) => {
+  if (!Array.isArray(ids) || !ids.length || ids.length > 400) throw new Error('한 번에 1~400건을 선택해 주세요.');
+  return [...new Set(ids.map(validateId))];
+};
+
 const validateClaim = (claim: DelegatedClaim): DelegatedClaim => {
   if (!claim || typeof claim !== 'object') throw new Error('위임금 내역을 확인해 주세요.');
   if (!['delegate', 'direct', 'unknown'].includes(claim.delegationType)) throw new Error('위임 구분을 확인해 주세요.');
@@ -104,6 +125,9 @@ const validateClaim = (claim: DelegatedClaim): DelegatedClaim => {
     sourceStatus: requireText(claim.sourceStatus, '원본 상태', 200),
     sourceLabel: requireText(claim.sourceLabel, '원본 위치', 500),
     ...(claim.sourceWorkbookId !== undefined ? { sourceWorkbookId: validateId(claim.sourceWorkbookId) } : {}),
+    ...(claim.confirmation ? { confirmation: validateConfirmation(claim.confirmation) } : {}),
+    ...(claim.confirmationHistory ? { confirmationHistory: validateHistory(claim.confirmationHistory) } : {}),
+    ...(claim.assignedTeamId !== undefined ? { assignedTeamId: claim.assignedTeamId === '' ? '' : validateId(claim.assignedTeamId) } : {}),
     memo: requireText(claim.memo, '메모', 2000), updatedAt: requireText(claim.updatedAt, '수정 시각', 40),
   };
   assertDocumentSize(validated);
@@ -204,8 +228,11 @@ export const delegatedReceiptService = {
       const ref = refFor(validated.id);
       const current = await transaction.get(ref);
       const receipts = current.exists() ? validateReceipts(current.data().receipts) : validated.receipts;
-      assertDocumentSize({ ...(current.exists() ? current.data() : {}), ...validated, receipts });
-      transaction.set(ref, { ...validated, receipts, updatedAt: new Date().toISOString() }, { merge: true });
+      // Financial edits cannot overwrite a newer account/status/team confirmation.
+      const next = { ...validated };
+      if (current.exists()) { delete next.confirmation; delete next.confirmationHistory; delete next.assignedTeamId; }
+      assertDocumentSize({ ...(current.exists() ? current.data() : {}), ...next, receipts });
+      transaction.set(ref, { ...next, receipts, updatedAt: new Date().toISOString() }, { merge: true });
     });
   },
 
@@ -224,6 +251,40 @@ export const delegatedReceiptService = {
       const next = validateReceipts([...receipts, validated]);
       assertDocumentSize({ ...current.data(), receipts: next });
       transaction.update(ref, { receipts: next, updatedAt: new Date().toISOString() });
+    });
+  },
+
+  async confirmClaims(ids: string[], confirmation: DepositConfirmation, preserveRecipient = false): Promise<void> {
+    const refs = batchIds(ids).map(refFor);
+    const validated = validateConfirmation({ ...confirmation, ...(auth?.currentUser ? { actorId: auth.currentUser.uid } : {}) });
+    await runTransaction(db, async transaction => {
+      const snapshots = await Promise.all(refs.map(ref => transaction.get(ref)));
+      const updates = snapshots.map((snapshot, index) => {
+        if (!snapshot.exists()) throw new Error('입금 내역을 찾을 수 없습니다. 새로고침해 주세요.');
+        const current = validateClaim({ ...snapshot.data(), id: refs[index].id } as DelegatedClaim);
+        const resolved = preserveRecipient ? { ...validated, recipient: getDepositState(current).recipient } : validated;
+        const history = current.confirmationHistory || [];
+        const duplicate = history.find(item => item.id === validated.id);
+        if (duplicate) {
+          if (duplicate.status !== validated.status || (!preserveRecipient && duplicate.recipient !== validated.recipient) || duplicate.note !== validated.note) throw new Error('같은 확인 식별자로 다른 내용이 저장되었습니다.');
+          return null;
+        }
+        const next = { confirmation: resolved, confirmationHistory: validateHistory([...history, resolved]), updatedAt: new Date().toISOString() };
+        assertDocumentSize({ ...current, ...next });
+        return next;
+      });
+      updates.forEach((update, index) => { if (update) transaction.update(refs[index], update); });
+    });
+  },
+
+  async assignSiteTeam(ids: string[], month: string, siteName: string, teamId: string): Promise<void> {
+    const refs = batchIds(ids).map(refFor);
+    validateMonth(month);
+    if (teamId) validateId(teamId);
+    await runTransaction(db, async transaction => {
+      const snapshots = await Promise.all(refs.map(ref => transaction.get(ref)));
+      if (snapshots.some(snapshot => !snapshot.exists() || snapshot.data().month !== month || snapshot.data().siteName !== siteName)) throw new Error('월·현장이 다른 내역이 포함되어 있습니다. 새로고침해 주세요.');
+      refs.forEach(ref => transaction.update(ref, { assignedTeamId: teamId, updatedAt: new Date().toISOString() }));
     });
   },
 };

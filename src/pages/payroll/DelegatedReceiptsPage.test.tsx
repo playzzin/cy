@@ -7,11 +7,13 @@ import { delegatedReceiptService } from '../../features/delegated-receipts/servi
 import { parseDelegatedWorkbook } from '../../features/delegated-receipts/workbookImport';
 import { userService } from '../../services/userService';
 import { workbookArchiveService } from '../../features/delegated-receipts/workbookArchiveService';
+import { receiptDirectoryService } from '../../features/delegated-receipts/directoryService';
 
+jest.mock('../../features/delegated-receipts/directoryService', () => ({ receiptDirectoryService: { load: jest.fn().mockResolvedValue({ teams: [], sites: [] }) } }));
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'synthetic-user' }, loading: false }) }));
 jest.mock('../../services/userService', () => ({ userService: { getUser: jest.fn() } }));
 jest.mock('../../features/delegated-receipts/service', () => ({
-  delegatedReceiptService: { list: jest.fn(), importClaims: jest.fn(), saveClaim: jest.fn(), addReceipt: jest.fn() },
+  delegatedReceiptService: { list: jest.fn(), importClaims: jest.fn(), saveClaim: jest.fn(), addReceipt: jest.fn(), confirmClaims: jest.fn(), assignSiteTeam: jest.fn() },
   DelegatedReceiptImportError: class extends Error {},
 }));
 jest.mock('../../features/delegated-receipts/workbookImport', () => ({ parseDelegatedWorkbook: jest.fn() }));
@@ -34,7 +36,10 @@ const openFirst = () => fireEvent.click(screen.getByRole('button', { name: '검�
 describe('위임금 입금 확인 화면', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (receiptDirectoryService.load as jest.Mock).mockResolvedValue({ teams: [], sites: [] });
     (delegatedReceiptService.list as jest.Mock).mockResolvedValue(fixtures);
+    (delegatedReceiptService.confirmClaims as jest.Mock).mockResolvedValue(undefined);
+    (delegatedReceiptService.assignSiteTeam as jest.Mock).mockResolvedValue(undefined);
     (delegatedReceiptService.saveClaim as jest.Mock).mockResolvedValue(undefined);
     (delegatedReceiptService.addReceipt as jest.Mock).mockResolvedValue(undefined);
     (delegatedReceiptService.importClaims as jest.Mock).mockResolvedValue({ added: 2, skipped: 0 });
@@ -50,9 +55,8 @@ describe('위임금 입금 확인 화면', () => {
     expect(within(table).getByText('검증작업자 나')).toBeInTheDocument();
     expect(within(table).getByText('검증작업자 다')).toBeInTheDocument();
     const summary = screen.getByRole('region', { name: '입금 요약' });
-    expect(summary).toHaveTextContent('300,000원');
     expect(summary).toHaveTextContent('40,000원');
-    expect(summary).toHaveTextContent('260,000원');
+    expect(summary).toHaveTextContent('입금여부 확인 필요2건');
     fireEvent.change(screen.getByLabelText('입금방법', { exact: true }), { target: { value: 'direct' } });
     expect(within(table).queryByText('검증작업자 가')).not.toBeInTheDocument();
     expect(within(table).getByText('검증작업자 나')).toBeInTheDocument();
@@ -85,13 +89,13 @@ describe('위임금 입금 확인 화면', () => {
     expect(within(screen.getByRole('table')).queryByText('검증작업자 가')).not.toBeInTheDocument();
   });
 
-  it('빠른 금액 확인 필터와 접힌 상세 조건을 초기화하고 검색어만 따로 지울 수 있다', () => {
+  it('입금여부 확인 필터와 접힌 상세 조건을 초기화하고 검색어만 따로 지울 수 있다', () => {
     render(<DelegatedReceiptsWorkspace initialClaims={fixtures} />);
-    fireEvent.click(screen.getByRole('button', { name: '금액 미확정' }));
+    fireEvent.click(screen.getByRole('button', { name: '확인 필요' }));
     expect(within(screen.getByRole('table')).getByText('검증작업자 다')).toBeInTheDocument();
     expect(within(screen.getByRole('table')).queryByText('검증작업자 가')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /상세 필터/ }));
-    fireEvent.change(screen.getByLabelText('수령수단', { exact: true }), { target: { value: 'cash' } });
+    fireEvent.change(screen.getByLabelText('받는 계좌', { exact: true }), { target: { value: 'personal' } });
     fireEvent.click(screen.getByRole('button', { name: /상세 필터/ }));
     fireEvent.click(within(screen.getByRole('region', { name: '입금 내역 필터' })).getByRole('button', { name: /필터 초기화/ }));
     expect(screen.getAllByRole('row')).toHaveLength(4);
@@ -119,34 +123,34 @@ describe('위임금 입금 확인 화면', () => {
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
     rerender(<DelegatedReceiptsWorkspace key="unconfirmed" initialClaims={[unpaid, { ...paid, expectedAmount: null }]} />);
     fireEvent.click(screen.getByRole('button', { name: '현장별 요약' }));
-    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
   });
 
   it('전부 금액 미확정인 현장을 0원 잔액 또는 완납률로 표시하지 않는다', () => {
     render(<DelegatedReceiptsWorkspace initialClaims={[fixtures[2]]} />);
     fireEvent.click(screen.getByRole('button', { name: '현장별 요약' }));
     const site = screen.getByRole('region', { name: '현장별 집계' });
-    expect(site).toHaveTextContent('확정분 잔액미확정');
-    expect(site).toHaveTextContent('예정 미확정');
-    expect(within(site).queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(site).toHaveTextContent('입금완료0 / 1건');
+    expect(within(site).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
     const summary = screen.getByRole('region', { name: '입금 요약' });
-    expect(summary).toHaveTextContent(/확정분 받을 금액\s*미확정/);
-    expect(summary).toHaveTextContent(/확정분 남은 금액\s*미확정/);
+    expect(summary).toHaveTextContent('입금여부 확인 필요1건');
+    expect(summary).toHaveTextContent(/기록된 입금액\s*미기록/);
   });
 
-  it('분할 입금을 실제 일자·수령수단으로 저장하고 이중 클릭을 막는다', async () => {
+  it('분할 입금을 실제 일자와 계좌이체로 저장하고 이중 클릭을 막는다', async () => {
     let complete: (() => void) | undefined;
     (delegatedReceiptService.addReceipt as jest.Mock).mockImplementation(() => new Promise<void>((resolve) => { complete = resolve; }));
     render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
     openFirst();
+    fireEvent.click(screen.getByText('금액 기록 · 세금 · 원본 내역'));
     expect(screen.getByText('가상 분할 입금')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('입금액 (원)'), { target: { value: '25000' } });
     fireEvent.change(screen.getByLabelText('실제 입금일'), { target: { value: '2026-09-12' } });
-    fireEvent.change(screen.getByLabelText('실제 수령수단'), { target: { value: 'cash' } });
+    expect(screen.queryByLabelText('실제 수령수단')).not.toBeInTheDocument();
     const button = screen.getByRole('button', { name: '확인한 입금 기록 저장' });
     fireEvent.click(button); fireEvent.click(button);
     expect(delegatedReceiptService.addReceipt).toHaveBeenCalledTimes(1);
-    expect(delegatedReceiptService.addReceipt).toHaveBeenCalledWith(base.id, expect.objectContaining({ amount: 25000, date: '2026-09-12', method: 'cash' }));
+    expect(delegatedReceiptService.addReceipt).toHaveBeenCalledWith(base.id, expect.objectContaining({ amount: 25000, date: '2026-09-12', method: 'transfer' }));
     complete?.();
     await screen.findByText('입금 기록을 저장했습니다. 잔액이 갱신되었습니다.');
   });
@@ -155,6 +159,7 @@ describe('위임금 입금 확인 화면', () => {
     (delegatedReceiptService.addReceipt as jest.Mock).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined);
     render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
     openFirst();
+    fireEvent.click(screen.getByText('금액 기록 · 세금 · 원본 내역'));
     fireEvent.change(screen.getByLabelText('입금액 (원)'), { target: { value: '25000' } });
     fireEvent.click(screen.getByRole('button', { name: '확인한 입금 기록 저장' }));
     await screen.findByRole('alert');
@@ -241,4 +246,37 @@ describe('위임금 입금 확인 화면', () => {
     expect(screen.queryByRole('button', { name: '확인한 입금 기록 저장' })).not.toBeInTheDocument();
     expect(screen.getByText('가상 분할 입금')).toBeInTheDocument();
   });
+});
+
+it('원본 공동 완료를 금액 미설정이어도 표시하고 계좌 수단은 노출하지 않는다', () => {
+  render(<DelegatedReceiptsWorkspace initialClaims={[{ ...base, expectedAmount: null, receipts: [], sourceStatus: '그룹 표시 G11:G15: 이재욱 위임 입금 완료 (개별 확인 필요)' }]} />);
+  const table = screen.getByRole('table');
+  expect(within(table).getByText('입금완료')).toBeInTheDocument();
+  expect(within(table).getByText(/이재욱팀 팀장계좌/)).toBeInTheDocument();
+  expect(within(table).getByText('엑셀 공동 표시 · 금액 미기록')).toBeInTheDocument();
+  expect(screen.queryByText(/수령수단/)).not.toBeInTheDocument();
+});
+it('선택 내역의 입금여부를 한번에 저장하고 기존 계좌 구분을 보존한다', async () => {
+  (delegatedReceiptService.confirmClaims as jest.Mock).mockResolvedValue(undefined);
+  (delegatedReceiptService.list as jest.Mock).mockResolvedValue(fixtures);
+  render(<DelegatedReceiptsWorkspace initialClaims={fixtures} />);
+  fireEvent.click(screen.getByRole('checkbox', { name: '현재 목록 선택' }));
+  fireEvent.click(screen.getByRole('button', { name: '선택 내역 입금여부 변경' }));
+  const dialog = screen.getByRole('dialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: '3건 입금완료 저장' }));
+  await waitFor(() => expect(delegatedReceiptService.confirmClaims).toHaveBeenCalledWith(fixtures.map(row => row.id), expect.objectContaining({ status: 'complete' }), true));
+  await screen.findByText('3건의 입금여부를 저장했습니다.');
+});
+it('팀 색상을 보여주고 팀 연결은 같은 귀속월 현장에만 적용한다', async () => {
+  (delegatedReceiptService.assignSiteTeam as jest.Mock).mockResolvedValue(undefined);
+  (delegatedReceiptService.list as jest.Mock).mockResolvedValue(fixtures);
+  const directory = { teams: [{ id: 'team-test', name: '가상 담당 팀', color: '#336699' }], sites: [{ id: 'site-test', name: base.siteName, responsibleTeamId: 'team-test' }] };
+  render(<DelegatedReceiptsWorkspace initialClaims={fixtures} initialDirectory={directory} />);
+  expect(within(screen.getByRole('table')).getAllByText('가상 담당 팀')).toHaveLength(2);
+  openFirst();
+  fireEvent.click(screen.getByText('현장 담당 팀 · 색상 연결'));
+  fireEvent.change(screen.getByLabelText('현장 담당 팀'), { target: { value: 'team-test' } });
+  fireEvent.click(screen.getByRole('button', { name: '이 현장의 팀 연결 저장' }));
+  await waitFor(() => expect(delegatedReceiptService.assignSiteTeam).toHaveBeenCalledWith(['synthetic-1', 'synthetic-3'], '2026-09', base.siteName, 'team-test'));
+  await screen.findByText('현장 담당 팀과 색상을 연결했습니다.');
 });

@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { getDepositState } from './depositState';
 import { mergeImportedClaims } from './model';
 import { parseDelegatedWorkbook } from './workbookImport';
 
@@ -44,13 +45,14 @@ describe('노무 처리 원본 블록 가져오기', () => {
         expect(result.warnings.join(' ')).toContain('실제 입금액은 따로');
     });
 
-    it('병합 입금완료 문구는 그룹 원문으로 보존하고 개별 행에 위임·수단·완료 판정을 퍼뜨리지 않는다', () => {
+    it('병합 입금완료 문구와 위임은 각 작업자에 적용하고 실제 입금액은 만들지 않는다', () => {
         const sheet = blockSheet();
         sheet['!merges'] = [XLSX.utils.decode_range('G11:G13')];
         delete sheet.G12;
         const result = parseDelegatedWorkbook(makeWorkbook({ '2025': sheet }));
         for (const claim of result.claims.slice(0, 3)) {
-            expect(claim).toMatchObject({ delegationType: 'unknown', paymentMethod: 'unknown', receipts: [] });
+            expect(claim).toMatchObject({ delegationType: 'delegate', paymentMethod: 'unknown', receipts: [] });
+            expect(getDepositState(claim).status).toBe('complete');
             expect(claim.sourceStatus).toContain('그룹 표시 G11:G13');
             expect(claim.sourceStatus).toContain('위임 입금완료');
         }
