@@ -87,7 +87,7 @@ describe('위임금 입금 확인 화면', () => {
 
   it('빠른 금액 확인 필터와 접힌 상세 조건을 초기화하고 검색어만 따로 지울 수 있다', () => {
     render(<DelegatedReceiptsWorkspace initialClaims={fixtures} />);
-    fireEvent.click(screen.getByRole('button', { name: '금액 미확정', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '금액 미확정' }));
     expect(within(screen.getByRole('table')).getByText('검증작업자 다')).toBeInTheDocument();
     expect(within(screen.getByRole('table')).queryByText('검증작업자 가')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /상세 필터/ }));
