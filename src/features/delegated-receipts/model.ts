@@ -8,6 +8,7 @@ export type ClaimListChange =
     | { field: 'recipient'; value: RecipientKind }
     | { field: 'status'; value: DepositStatus }
     | { field: 'expectedAmount'; value: number | null }
+    | { field: 'grossAmount'; value: number | null }
     | { field: 'memo'; value: string };
 export interface ClaimListEdit { id: string; recordedAt: string; change: ClaimListChange; }
 export interface DepositConfirmation {
@@ -39,6 +40,7 @@ export interface DelegatedClaim {
     delegationOverride?: DelegationType;
     paymentMethod: PaymentMethod;
     grossAmount: number | null;
+    originalGrossAmount?: number | null;
     expectedAmount: number | null;
     originalExpectedAmount?: number | null;
     taxRate?: number | null;
@@ -111,6 +113,15 @@ export function summarizeClaims(claims: DelegatedClaim[]): {
             count: summary.count + 1,
         };
     }, { expected: 0, received: 0, remaining: 0, overpaid: 0, unconfirmed: 0, count: 0 });
+}
+
+/** Missing amounts are excluded from the known subtotal, never treated as confirmed zero. */
+export function summarizeClaimAmounts(claims: DelegatedClaim[]) {
+    const sum = (field: 'grossAmount' | 'expectedAmount') => {
+        const known = claims.filter(claim => isMoney(claim[field]));
+        return { amount: claims.length && !known.length ? null : known.reduce((total, claim) => total + claim[field]!, 0), missing: claims.length - known.length };
+    };
+    return { gross: sum('grossAmount'), expected: sum('expectedAmount') };
 }
 
 function normalizeSearch(value: string): string {

@@ -1,5 +1,5 @@
 import {
-    calculateExpectedAmount, DelegatedClaim, filterClaims, getClaimTotals, mergeImportedClaims, Receipt, summarizeClaims,
+    calculateExpectedAmount, DelegatedClaim, filterClaims, getClaimTotals, mergeImportedClaims, Receipt, summarizeClaims, summarizeClaimAmounts,
 } from './model';
 
 const receipt = (amount: number): Receipt => ({
@@ -9,6 +9,13 @@ const claim = (overrides: Partial<DelegatedClaim> = {}): DelegatedClaim => ({
     id: 'claim-1', month: '2025-01', siteName: '가상 현장 A', workerName: '가상 작업자', delegationType: 'delegate',
     paymentMethod: 'transfer', grossAmount: 1000000, expectedAmount: null, receipts: [], sourceStatus: '', sourceLabel: '',
     memo: '', updatedAt: '2025-01-01T00:00:00Z', ...overrides,
+});
+
+it('현황 합계는 미확정과 0원을 구분하고 세전·예정을 각각 합산한다', () => {
+    expect(summarizeClaimAmounts([claim({ grossAmount: null })])).toEqual({ gross: { amount: null, missing: 1 }, expected: { amount: null, missing: 1 } });
+    expect(summarizeClaimAmounts([claim({ grossAmount: 0, expectedAmount: 0 }), claim({ grossAmount: null, expectedAmount: 100 })]))
+        .toEqual({ gross: { amount: 0, missing: 1 }, expected: { amount: 100, missing: 0 } });
+    expect(summarizeClaimAmounts([])).toEqual({ gross: { amount: 0, missing: 0 }, expected: { amount: 0, missing: 0 } });
 });
 
 describe('위임금 합계', () => {

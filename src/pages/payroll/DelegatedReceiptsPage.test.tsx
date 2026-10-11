@@ -411,3 +411,53 @@ it('읽기 전용 메모는 보이되 등록·수정·삭제를 노출하지 않
   expect(within(screen.getByRole('table')).getByText('기존 메모')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /메모 (등록|수정|삭제)/ })).not.toBeInTheDocument();
 });
+
+it('세전과 예정 입력창을 각각 표시하고 세전 수정 후 PC·모바일과 상단 합계를 갱신한다', async () => {
+  const taxable = { ...base, grossAmount: 100000, expectedAmount: 96700, taxRate: 3.3, taxAmount: 3300 };
+  (delegatedReceiptService.updateListField as jest.Mock).mockResolvedValue({ ...taxable, grossAmount: 200000, expectedAmount: 193400, taxAmount: 6600, originalGrossAmount: 100000 });
+  render(<DelegatedReceiptsWorkspace initialClaims={[taxable]} />);
+  const table = within(screen.getByRole('table'));
+  const gross = table.getByRole('textbox', { name: '검증작업자 가 세전 금액' });
+  expect(gross).toHaveValue('100,000');
+  expect(table.getByRole('textbox', { name: '검증작업자 가 받을 예정 금액' })).toHaveValue('96,700');
+  fireEvent.change(gross, { target: { value: '-1' } });
+  expect(table.getByRole('button', { name: '검증작업자 가 세전 금액 저장' })).toBeDisabled();
+  fireEvent.keyDown(gross, { key: 'Escape' });
+  expect(gross).toHaveValue('100,000');
+  fireEvent.change(gross, { target: { value: '200,000' } });
+  expect(screen.getByRole('textbox', { name: '검증작업자 가 모바일 세전 금액' })).toHaveValue('200,000');
+  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 세전 금액 저장' }));
+  await table.findByText('저장됨');
+  expect(delegatedReceiptService.updateListField).toHaveBeenCalledWith(base.id, expect.objectContaining({ change: { field: 'grossAmount', value: 200000 } }));
+  expect(table.getByRole('textbox', { name: '검증작업자 가 받을 예정 금액' })).toHaveValue('193,400');
+  expect(screen.getByRole('textbox', { name: '검증작업자 가 모바일 받을 예정 금액' })).toHaveValue('193,400');
+  expect(screen.getByRole('article', { name: '조회 금액 현황' })).toHaveTextContent('200,000원');
+  expect(screen.getByRole('article', { name: '조회 금액 현황' })).toHaveTextContent('193,400원');
+  expect(screen.getByRole('article', { name: '조회 금액 현황' })).toHaveTextContent('40,000원');
+});
+
+it('상태별 세전·예정 합계를 표시하고 필터 변경과 미확정 금액을 정확히 반영한다', () => {
+  render(<DelegatedReceiptsWorkspace initialClaims={[
+    { ...base, receipts: [], sourceStatus: '입금완료', expectedAmount: 90000 },
+    { ...base, id: 'pending', workerName: '대기 작업자', grossAmount: 200000, expectedAmount: 180000, receipts: [], sourceStatus: '입금 전' },
+    { ...base, id: 'unknown', workerName: '확인 작업자', grossAmount: null, expectedAmount: null, receipts: [], sourceStatus: '개인통장' },
+  ]} />);
+  const complete = screen.getByRole('article', { name: '입금완료 현황' });
+  expect(complete).toHaveTextContent('100,000원');
+  expect(complete).toHaveTextContent('90,000원');
+  const pending = screen.getByRole('article', { name: '입금 전·일부 현황' });
+  expect(pending).toHaveTextContent('200,000원');
+  expect(pending).toHaveTextContent('180,000원');
+  expect(screen.getByRole('article', { name: '확인 필요 현황' })).toHaveTextContent('미확정');
+  const total = screen.getByRole('article', { name: '조회 금액 현황' });
+  expect(total).toHaveTextContent('300,000원');
+  expect(total).toHaveTextContent('270,000원');
+  expect(total).toHaveTextContent('미확정 1건 제외');
+  expect(total).toHaveTextContent('미기록');
+  fireEvent.change(screen.getByLabelText('작업자 검색'), { target: { value: '대기 작업자' } });
+  expect(total).toHaveTextContent('200,000원');
+  expect(total).not.toHaveTextContent('300,000원');
+  const recipient = within(screen.getByRole('table')).getByRole('combobox', { name: '대기 작업자 받는 계좌' });
+  expect(within(recipient).getByRole('option', { name: '개인통장' })).toBeInTheDocument();
+  expect(screen.queryByRole('option', { name: '작업자 개인통장' })).not.toBeInTheDocument();
+});

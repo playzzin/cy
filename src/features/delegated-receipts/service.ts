@@ -1,6 +1,7 @@
 import { collection, doc, getDocs, query, runTransaction, where } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
 import type { ClaimListChange, ClaimListEdit, DelegatedClaim, DepositConfirmation, PaymentMethod, Receipt } from './model';
+import { calculateExpectedAmount } from './model';
 import { depositLabels, getDepositState, recipientLabels } from './depositState';
 
 export const DELEGATED_RECEIPTS_COLLECTION = 'delegated_receipt_claims';
@@ -82,7 +83,7 @@ const validateReceipts = (values: Receipt[]): Receipt[] => {
 };
 
 const validateListChange = (change: ClaimListChange): ClaimListChange => {
-  if (change?.field === 'expectedAmount') return { field: change.field, value: validateAmount(change.value, true) };
+  if (change?.field === 'expectedAmount' || change?.field === 'grossAmount') return { field: change.field, value: validateAmount(change.value, true) };
   if (change?.field === 'memo') return { field: change.field, value: requireText(change.value, '메모', 2000) };
   const options = { delegation: ['delegate', 'direct', 'unknown'], recipient: ['unknown', 'personal', 'site_leader', 'jaewook_leader'], status: ['unknown', 'pending', 'partial', 'complete'] };
   if (!change || !Object.prototype.hasOwnProperty.call(options, change.field) || !options[change.field].includes(change.value)) throw new Error('변경할 입금 정보를 확인해 주세요.');
@@ -130,6 +131,7 @@ const validateClaim = (claim: DelegatedClaim): DelegatedClaim => {
     delegationType: claim.delegationType, paymentMethod: validateMethod(claim.paymentMethod),
     ...(claim.delegationOverride !== undefined ? { delegationOverride: claim.delegationOverride } : {}),
     grossAmount, expectedAmount: validateAmount(claim.expectedAmount, true),
+    ...(claim.originalGrossAmount !== undefined ? { originalGrossAmount: validateAmount(claim.originalGrossAmount, true) } : {}),
     ...(claim.originalExpectedAmount !== undefined ? { originalExpectedAmount: validateAmount(claim.originalExpectedAmount, true) } : {}),
     ...(claim.taxRate !== undefined ? { taxRate: claim.taxRate } : {}),
     ...(taxAmount !== undefined ? { taxAmount } : {}),
@@ -242,7 +244,7 @@ export const delegatedReceiptService = {
       const receipts = current.exists() ? validateReceipts(current.data().receipts) : validated.receipts;
       // Financial edits cannot overwrite a newer account/status/team confirmation.
       const next: Partial<DelegatedClaim> = { ...validated };
-      if (current.exists()) { delete next.confirmation; delete next.confirmationHistory; delete next.assignedTeamId; delete next.delegationType; delete next.delegationOverride; delete next.originalExpectedAmount; delete next.memo; }
+      if (current.exists()) { delete next.confirmation; delete next.confirmationHistory; delete next.assignedTeamId; delete next.delegationType; delete next.delegationOverride; delete next.originalExpectedAmount; delete next.originalGrossAmount; delete next.memo; }
       assertDocumentSize({ ...(current.exists() ? current.data() : {}), ...next, receipts });
       transaction.set(ref, { ...next, receipts, updatedAt: new Date().toISOString() }, { merge: true });
     });
@@ -270,10 +272,18 @@ export const delegatedReceiptService = {
         status: change.field === 'status' ? change.value : state.status,
         recipient: change.field === 'recipient' ? change.value : state.recipient,
         note: change.field === 'memo' ? (change.value ? (current.memo ? '메모 수정' : '메모 등록') : '메모 삭제')
-          : change.field === 'expectedAmount' ? `받을 예정 금액 직접 입력: ${change.value === null ? '미확정' : `${change.value.toLocaleString('ko-KR')}원`}`
+          : change.field === 'expectedAmount' || change.field === 'grossAmount' ? `${change.field === 'grossAmount' ? '세전 금액' : '받을 예정 금액'} 직접 입력: ${change.value === null ? '미확정' : `${change.value.toLocaleString('ko-KR')}원`}`
           : change.field === 'delegation' ? `입금방법 변경: ${{ delegate: '위임', direct: '직불', unknown: '미확인' }[change.value]}`
           : change.field === 'recipient' ? `받는 계좌 변경: ${recipientLabels[change.value]}` : `입금여부 변경: ${depositLabels[change.value]}` };
-      const patch = { ...(change.field === 'memo' ? { memo: change.value }
+      const grossPatch = change.field === 'grossAmount' ? {
+        grossAmount: change.value,
+        originalGrossAmount: current.originalGrossAmount !== undefined ? current.originalGrossAmount : current.grossAmount,
+        originalExpectedAmount: current.originalExpectedAmount !== undefined ? current.originalExpectedAmount : current.expectedAmount,
+        ...(current.taxRate !== undefined && current.taxRate !== null
+          ? (change.value === null ? { expectedAmount: null, taxAmount: null } : calculateExpectedAmount(change.value, current.taxRate))
+          : { taxAmount: null }),
+      } : {};
+      const patch = { ...(change.field === 'grossAmount' ? grossPatch : change.field === 'memo' ? { memo: change.value }
         : change.field === 'expectedAmount' ? { expectedAmount: change.value, originalExpectedAmount: current.originalExpectedAmount !== undefined ? current.originalExpectedAmount : current.expectedAmount, taxRate: null, taxAmount: null }
         : change.field === 'delegation' ? { delegationOverride: change.value } : { confirmation }),
         confirmationHistory: validateHistory([...history, confirmation]), updatedAt: new Date().toISOString() };

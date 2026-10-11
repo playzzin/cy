@@ -4,7 +4,7 @@ export const depositLabels: Record<DepositStatus, string> = {
     unknown: '확인 필요', pending: '입금 전', partial: '일부 입금', complete: '입금완료',
 };
 export const recipientLabels: Record<RecipientKind, string> = {
-    unknown: '받는 계좌 확인 필요', personal: '작업자 개인통장',
+    unknown: '받는 계좌 확인 필요', personal: '개인통장',
     site_leader: '현장 팀장계좌', jaewook_leader: '이재욱팀 팀장계좌',
 };
 

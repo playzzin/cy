@@ -412,3 +412,35 @@ it('메모는 2,000자까지 저장하고 초과 내용은 쓰기 전에 거부�
   records.set('claim-a', claim());
   expect((await delegatedReceiptService.updateListField('claim-a', { ...edit, change: { field: 'memo', value: '가'.repeat(2000) } })).memo).toHaveLength(2000);
 });
+
+it('세전 금액 변경은 설정 세율로 재계산하고 원본·입금·메모·팀을 보존한다', async () => {
+  const original = claim({ grossAmount: 300000, expectedAmount: 290100, taxRate: 3.3, taxAmount: 9900, receipts: [receipt()], confirmation: confirmation(), assignedTeamId: 'team-a', memo: '유지할 메모' });
+  records.set('claim-a', original);
+  const edit = { id: 'gross-a', recordedAt: confirmation().recordedAt, change: { field: 'grossAmount' as const, value: 400000 } };
+  const updated = await delegatedReceiptService.updateListField('claim-a', edit);
+  expect(updated).toMatchObject({ grossAmount: 400000, expectedAmount: 386800, taxAmount: 13200, taxRate: 3.3, originalGrossAmount: 300000, originalExpectedAmount: 290100, receipts: original.receipts, confirmation: original.confirmation, assignedTeamId: 'team-a', memo: original.memo });
+  await delegatedReceiptService.updateListField('claim-a', { ...edit, id: 'gross-b', change: { field: 'grossAmount', value: 500000 } });
+  await delegatedReceiptService.updateListField('claim-a', edit);
+  expect(records.get('claim-a')).toMatchObject({ grossAmount: 500000, expectedAmount: 483500, originalGrossAmount: 300000 });
+  expect(records.get('claim-a')?.confirmationHistory).toHaveLength(2);
+  await delegatedReceiptService.saveClaim(original);
+  expect(records.get('claim-a')?.originalGrossAmount).toBe(300000);
+});
+
+it.each([0, null, 200000])('세전 금액 %s를 입력해도 세율 없는 수동 예정액은 유지한다', async amount => {
+  records.set('claim-a', claim({ grossAmount: 100000, expectedAmount: 95000, taxRate: null }));
+  const updated = await delegatedReceiptService.updateListField('claim-a', { id: 'gross-manual', recordedAt: confirmation().recordedAt, change: { field: 'grossAmount', value: amount } });
+  expect(updated).toMatchObject({ grossAmount: amount, expectedAmount: 95000, originalGrossAmount: 100000, originalExpectedAmount: 95000 });
+});
+
+it('세율 0%도 다시 계산하며 세전 금액을 비우면 자동 계산 예정액도 미확정으로 바꾼다', async () => {
+  records.set('claim-a', claim({ grossAmount: 100000, expectedAmount: 100000, taxRate: 0, taxAmount: 0 }));
+  const edit = { id: 'gross-zero', recordedAt: confirmation().recordedAt, change: { field: 'grossAmount' as const, value: 0 } };
+  expect(await delegatedReceiptService.updateListField('claim-a', edit)).toMatchObject({ grossAmount: 0, expectedAmount: 0, taxAmount: 0, taxRate: 0 });
+  expect(await delegatedReceiptService.updateListField('claim-a', { ...edit, id: 'gross-blank', change: { field: 'grossAmount', value: null } })).toMatchObject({ grossAmount: null, expectedAmount: null, taxAmount: null, taxRate: 0 });
+});
+
+it.each([-1, 0.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])('잘못된 세전 금액 %s는 저장하지 않는다', async amount => {
+  await expect(delegatedReceiptService.updateListField('claim-a', { id: 'gross-invalid', recordedAt: confirmation().recordedAt, change: { field: 'grossAmount', value: amount } })).rejects.toThrow('금액');
+  expect(runTransaction).not.toHaveBeenCalled();
+});
