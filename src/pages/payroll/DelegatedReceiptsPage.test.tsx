@@ -34,6 +34,26 @@ const fixtures: DelegatedClaim[] = [
 ];
 const openFirst = () => fireEvent.click(screen.getByRole('button', { name: '검증작업자 가 입금 및 내역' }));
 
+it('현장명을 묶음 상단에 한 번만 표시하고 작업자 색상과 현장별 합계를 유지한다', () => {
+  const directory = { teams: [{ id: 't1', name: '가상팀', color: '#336699' }], sites: [{ id: 's1', name: base.siteName, responsibleTeamId: 't1' }], workers: [{ id: 'w1', name: base.workerName, color: '#DB2777' }] };
+  render(<DelegatedReceiptsWorkspace initialClaims={fixtures} initialDirectory={directory} />);
+  const table = within(screen.getByRole('table'));
+  const group = table.getByRole('rowgroup', { name: `${base.siteName} 내역` });
+  expect(within(group).getAllByText(base.siteName)).toHaveLength(1);
+  expect(group).toHaveStyle({ '--dr-group-color': '#336699' });
+  expect(group).toHaveTextContent('세전 합계 200,000원');
+  expect(within(group).getByText(base.workerName)).toBeInTheDocument();
+  expect(within(group).getByRole('row', { name: /검증작업자 가 선택/ })).not.toHaveTextContent(base.siteName);
+  expect(table.queryByRole('textbox', { name: /받을 예정/ })).not.toBeInTheDocument();
+  const mobile = screen.getByRole('region', { name: `${base.siteName} 모바일 내역` });
+  expect(within(mobile).getAllByText(base.siteName)).toHaveLength(1);
+  expect(within(mobile).getAllByRole('article')).toHaveLength(2);
+  expect(mobile).not.toHaveTextContent('받을 예정');
+  fireEvent.change(screen.getByLabelText('작업자 검색'), { target: { value: base.workerName } });
+  expect(table.getByRole('rowgroup', { name: `${base.siteName} 내역` })).toHaveTextContent('세전 합계 100,000원');
+  expect(table.queryByRole('rowgroup', { name: '가상현장 B 내역' })).not.toBeInTheDocument();
+});
+
 describe('위임금 입금 확인 화면', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -100,11 +120,11 @@ describe('위임금 입금 확인 화면', () => {
     expect(within(screen.getByRole('table')).queryByText('검증작업자 가')).not.toBeInTheDocument();
     fireEvent.change(within(screen.getByRole('region', { name: '입금 내역 필터' })).getByLabelText('받는 계좌', { exact: true }), { target: { value: 'personal' } });
     fireEvent.click(within(screen.getByRole('region', { name: '입금 내역 필터' })).getByRole('button', { name: /필터 초기화/ }));
-    expect(screen.getAllByRole('row')).toHaveLength(4);
+    expect(screen.getAllByRole('row')).toHaveLength(6);
     fireEvent.change(screen.getByLabelText('작업자 검색'), { target: { value: '검증작업자 가' } });
-    expect(screen.getAllByRole('row')).toHaveLength(2);
+    expect(screen.getAllByRole('row')).toHaveLength(3);
     fireEvent.click(screen.getByRole('button', { name: '작업자 검색 지우기' }));
-    expect(screen.getAllByRole('row')).toHaveLength(4);
+    expect(screen.getAllByRole('row')).toHaveLength(6);
   });
 
   it('월 화살표로 이동하면 이전 달의 현장 필터를 해제한다', async () => {
@@ -255,7 +275,7 @@ describe('위임금 입금 확인 화면', () => {
 it('원본 공동 완료를 금액 미설정이어도 표시하고 계좌 수단은 노출하지 않는다', () => {
   render(<DelegatedReceiptsWorkspace initialClaims={[{ ...base, expectedAmount: null, receipts: [], sourceStatus: '그룹 표시 G11:G15: 이재욱 위임 입금 완료 (개별 확인 필요)' }]} />);
   const table = screen.getByRole('table');
-  expect(within(table).getByText('입금완료')).toBeInTheDocument();
+  expect(within(table).getByRole('combobox', { name: '검증작업자 가 입금여부' })).toHaveValue('complete');
   expect(within(table).getByText(/이재욱팀 팀장계좌/)).toBeInTheDocument();
   expect(within(table).getByText('엑셀 공동 표시 · 금액 미기록')).toBeInTheDocument();
   expect(screen.queryByText(/수령수단/)).not.toBeInTheDocument();
@@ -324,34 +344,34 @@ it('목록 저장 실패를 표시하고 같은 요청으로 다시 저장한다
   expect(calls[1]).toEqual(calls[0]);
 });
 
-it('예정 금액은 입력 후 저장하며 잘못된 금액은 거부하고 0원을 허용한다', async () => {
-  (delegatedReceiptService.updateListField as jest.Mock).mockResolvedValue({ ...base, expectedAmount: 0, originalExpectedAmount: base.expectedAmount });
+it('세전 금액은 입력 후 저장하며 잘못된 금액은 거부하고 0원을 허용한다', async () => {
+  (delegatedReceiptService.updateListField as jest.Mock).mockResolvedValue({ ...base, grossAmount: 0, originalGrossAmount: base.grossAmount });
   render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
   const table = within(screen.getByRole('table'));
-  const input = table.getByRole('textbox', { name: '검증작업자 가 받을 예정 금액' });
+  const input = table.getByRole('textbox', { name: '검증작업자 가 세전 금액' });
   fireEvent.change(input, { target: { value: '1.5' } });
-  expect(table.getByRole('button', { name: '검증작업자 가 금액 저장' })).toBeDisabled();
+  expect(table.getByRole('button', { name: '검증작업자 가 세전 금액 저장' })).toBeDisabled();
   expect(delegatedReceiptService.updateListField).not.toHaveBeenCalled();
   fireEvent.change(input, { target: { value: '0' } });
-  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 금액 저장' }));
+  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 세전 금액 저장' }));
   await table.findByText('저장됨');
-  expect(delegatedReceiptService.updateListField).toHaveBeenCalledWith(base.id, expect.objectContaining({ change: { field: 'expectedAmount', value: 0 } }));
+  expect(delegatedReceiptService.updateListField).toHaveBeenCalledWith(base.id, expect.objectContaining({ change: { field: 'grossAmount', value: 0 } }));
   expect(input).toHaveValue('0');
-  expect(screen.getByRole('textbox', { name: '검증작업자 가 모바일 받을 예정 금액' })).toHaveValue('0');
+  expect(screen.getByRole('textbox', { name: '검증작업자 가 모바일 세전 금액' })).toHaveValue('0');
   expect(screen.getByRole('region', { name: '입금 요약' })).toHaveTextContent('40,000원');
 });
 
-it('모바일 예정 금액은 취소할 수 있고 비우면 미확정으로 저장한다', async () => {
-  (delegatedReceiptService.updateListField as jest.Mock).mockResolvedValue({ ...base, expectedAmount: null, originalExpectedAmount: base.expectedAmount });
+it('모바일 세전 금액은 취소할 수 있고 비우면 미확정으로 저장한다', async () => {
+  (delegatedReceiptService.updateListField as jest.Mock).mockResolvedValue({ ...base, grossAmount: null, originalGrossAmount: base.grossAmount });
   render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
-  const input = screen.getByRole('textbox', { name: '검증작업자 가 모바일 받을 예정 금액' });
+  const input = screen.getByRole('textbox', { name: '검증작업자 가 모바일 세전 금액' });
   fireEvent.change(input, { target: { value: '120,000' } });
   fireEvent.keyDown(input, { key: 'Escape' });
   expect(input).toHaveValue('100,000');
   expect(delegatedReceiptService.updateListField).not.toHaveBeenCalled();
   fireEvent.change(input, { target: { value: '' } });
-  fireEvent.click(screen.getByRole('button', { name: '검증작업자 가 모바일 금액 저장' }));
-  await waitFor(() => expect(delegatedReceiptService.updateListField).toHaveBeenCalledWith(base.id, expect.objectContaining({ change: { field: 'expectedAmount', value: null } })));
+  fireEvent.click(screen.getByRole('button', { name: '검증작업자 가 모바일 세전 금액 저장' }));
+  await waitFor(() => expect(delegatedReceiptService.updateListField).toHaveBeenCalledWith(base.id, expect.objectContaining({ change: { field: 'grossAmount', value: null } })));
   await waitFor(() => expect(input).toBeEnabled());
   expect(input).toHaveValue('');
 });
@@ -386,7 +406,7 @@ it('오른쪽 메모 스티커를 등록·수정·삭제·복원하고 모바일
   fireEvent.click(await table.findByRole('button', { name: '검증작업자 가 메모 삭제 취소' }));
   await table.findByText('수정한 메모');
   expect(delegatedReceiptService.updateListField).toHaveBeenCalledTimes(4);
-  expect(table.getByRole('textbox', { name: '검증작업자 가 받을 예정 금액' })).toHaveValue('100,000');
+  expect(table.getByRole('textbox', { name: '검증작업자 가 세전 금액' })).toHaveValue('100,000');
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
@@ -412,14 +432,14 @@ it('읽기 전용 메모는 보이되 등록·수정·삭제를 노출하지 않
   expect(screen.queryByRole('button', { name: /메모 (등록|수정|삭제)/ })).not.toBeInTheDocument();
 });
 
-it('세전과 예정 입력창을 각각 표시하고 세전 수정 후 PC·모바일과 상단 합계를 갱신한다', async () => {
+it('목록은 세전 입력창만 표시하고 수정 후 PC·모바일과 현장·상단 합계를 갱신한다', async () => {
   const taxable = { ...base, grossAmount: 100000, expectedAmount: 96700, taxRate: 3.3, taxAmount: 3300 };
   (delegatedReceiptService.updateListField as jest.Mock).mockResolvedValue({ ...taxable, grossAmount: 200000, expectedAmount: 193400, taxAmount: 6600, originalGrossAmount: 100000 });
   render(<DelegatedReceiptsWorkspace initialClaims={[taxable]} />);
   const table = within(screen.getByRole('table'));
   const gross = table.getByRole('textbox', { name: '검증작업자 가 세전 금액' });
   expect(gross).toHaveValue('100,000');
-  expect(table.getByRole('textbox', { name: '검증작업자 가 받을 예정 금액' })).toHaveValue('96,700');
+  expect(screen.queryByRole('textbox', { name: /받을 예정 금액/ })).not.toBeInTheDocument();
   fireEvent.change(gross, { target: { value: '-1' } });
   expect(table.getByRole('button', { name: '검증작업자 가 세전 금액 저장' })).toBeDisabled();
   fireEvent.keyDown(gross, { key: 'Escape' });
@@ -429,8 +449,9 @@ it('세전과 예정 입력창을 각각 표시하고 세전 수정 후 PC·모�
   fireEvent.click(table.getByRole('button', { name: '검증작업자 가 세전 금액 저장' }));
   await table.findByText('저장됨');
   expect(delegatedReceiptService.updateListField).toHaveBeenCalledWith(base.id, expect.objectContaining({ change: { field: 'grossAmount', value: 200000 } }));
-  expect(table.getByRole('textbox', { name: '검증작업자 가 받을 예정 금액' })).toHaveValue('193,400');
-  expect(screen.getByRole('textbox', { name: '검증작업자 가 모바일 받을 예정 금액' })).toHaveValue('193,400');
+  expect(gross).toHaveValue('200,000');
+  expect(screen.getByRole('textbox', { name: '검증작업자 가 모바일 세전 금액' })).toHaveValue('200,000');
+  expect(table.getByRole('rowgroup', { name: `${base.siteName} 내역` })).toHaveTextContent('세전 합계 200,000원');
   expect(screen.getByRole('article', { name: '조회 금액 현황' })).toHaveTextContent('200,000원');
   expect(screen.getByRole('article', { name: '조회 금액 현황' })).toHaveTextContent('193,400원');
   expect(screen.getByRole('article', { name: '조회 금액 현황' })).toHaveTextContent('40,000원');
