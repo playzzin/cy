@@ -206,6 +206,35 @@
 .dr-table td { padding:17px 16px; border-bottom:1px solid #edf0f4; white-space:nowrap; vertical-align:middle; }
 .dr-table td:first-child { white-space:normal; min-width:120px; max-width:240px; overflow-wrap:anywhere; }
 .dr-table tbody tr:hover { background:#fbfcfe; }
+.dr-worker-detail { margin-top:8px; }
+.dr-table td.dr-memo-cell { width:190px; min-width:160px; max-width:240px; white-space:normal; }
+.dr-memo-sticker { position:relative; border:1px solid #ecdaa1; border-radius:3px 3px 10px 3px; padding:8px 10px 12px; background:#fff8d9; box-shadow:1px 2px 3px #80672e12; color:#665124; }
+.dr-memo-sticker::after { content:''; position:absolute; right:0; bottom:0; width:12px; height:12px; background:linear-gradient(135deg,#ead798 50%,#fffdf5 51%); border-radius:0 0 8px 0; pointer-events:none; }
+.dr-memo-sticker>header,.dr-memo-sticker>header>span,.dr-memo-sticker>header>div { display:flex; align-items:center; gap:4px; }
+.dr-memo-sticker>header { justify-content:space-between; gap:6px; margin-bottom:4px; font-size:12px; }
+.dr-memo-sticker button { display:inline-flex; align-items:center; justify-content:center; min-height:32px; min-width:32px; padding:5px; border:0; border-radius:5px; color:#755925; background:transparent; cursor:pointer; }
+.dr-memo-sticker button:hover { background:#f0e4b7; }
+.dr-memo-sticker button:disabled,.dr-memo-empty button:disabled { opacity:.5; cursor:default; }
+.dr-memo-text { margin:0; font-size:14px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; max-height:134px; overflow:auto; }
+.dr-memo-empty { display:flex; align-items:flex-start; flex-direction:column; gap:5px; }
+.dr-memo-add { display:inline-flex; align-items:center; justify-content:center; gap:3px; min-height:40px; border:1px dashed #dcca96; border-radius:6px; background:#fffdf4; color:#886d30; padding:8px 12px; cursor:pointer; font-size:13px; }
+.dr-memo-add:hover { background:#fff5cf; border-color:#bba162; }
+.dr-memo-undo { display:inline-flex; align-items:center; gap:4px; padding:5px 0; min-height:32px; border:0; background:transparent; color:#826528; cursor:pointer; font-size:12px; }
+.dr-memo-none { color:#8b95a3; font-size:12px; }
+.dr-page .dr-memo-sticker textarea { display:block; box-sizing:border-box; width:100%; min-width:0; border:1px solid #d7c486; border-radius:4px; background:#fffef4; color:#4f4022; padding:8px; font:inherit; font-size:14px; line-height:1.6; resize:vertical; }
+.dr-memo-editor-footer { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:4px 8px; margin-top:6px; }
+.dr-memo-editor-footer>small { margin-right:auto; font-size:10px; color:#927a43; }
+.dr-memo-editor-footer>div { display:flex; gap:4px; }
+.dr-memo-editor-footer button { padding:5px 8px; font-size:12px; }
+.dr-memo-editor-footer button[type=submit] { background:#796026; color:#fff; }
+.dr-mobile-memo { margin-top:12px; }
+.dr-mobile-memo .dr-memo-add,.dr-mobile-memo .dr-memo-sticker button,.dr-mobile-memo .dr-memo-undo { min-height:44px; }
+.dr-mobile-memo .dr-memo-sticker>header button { min-width:44px; }
+.dr-page .dr-mobile-memo textarea { font-size:16px; }
+@container dr-ledger (max-width:1050px) {
+  .dr-page .dr-table th,.dr-page .dr-table td { padding-left:8px; padding-right:8px; }
+  .dr-table td.dr-memo-cell { width:160px; }
+}
 .dr-table td strong { font-size:15px; font-weight:650; }
 .dr-cell-sub { display:block; font-size:12px; color:#8690a0; margin-top:5px; font-weight:400; }
 .dr-original-status { display:block; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#8791a0; font-size:9px; margin-top:6px; font-weight:400; }

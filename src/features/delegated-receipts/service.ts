@@ -83,6 +83,7 @@ const validateReceipts = (values: Receipt[]): Receipt[] => {
 
 const validateListChange = (change: ClaimListChange): ClaimListChange => {
   if (change?.field === 'expectedAmount') return { field: change.field, value: validateAmount(change.value, true) };
+  if (change?.field === 'memo') return { field: change.field, value: requireText(change.value, '메모', 2000) };
   const options = { delegation: ['delegate', 'direct', 'unknown'], recipient: ['unknown', 'personal', 'site_leader', 'jaewook_leader'], status: ['unknown', 'pending', 'partial', 'complete'] };
   if (!change || !Object.prototype.hasOwnProperty.call(options, change.field) || !options[change.field].includes(change.value)) throw new Error('변경할 입금 정보를 확인해 주세요.');
   return { field: change.field, value: change.value } as ClaimListChange;
@@ -95,7 +96,8 @@ const validateConfirmation = (value: DepositConfirmation): DepositConfirmation =
   return { id: validateId(value.id), status: value.status, recipient: value.recipient,
     note: requireText(value.note, '확인 메모', 1000), recordedAt,
     ...(value.actorId ? { actorId: validateId(value.actorId) } : {}),
-    ...(value.listChange ? { listChange: validateListChange(value.listChange) } : {}) };
+    ...(value.listChange ? { listChange: validateListChange(value.listChange) } : {}),
+    ...(value.previousMemo !== undefined ? { previousMemo: requireText(value.previousMemo, '이전 메모', 2000) } : {}) };
 };
 const validateHistory = (values: DepositConfirmation[]): DepositConfirmation[] => {
   if (!Array.isArray(values) || values.length > 500) throw new Error('입금 확인 이력의 최대 건수를 넘었습니다.');
@@ -240,7 +242,7 @@ export const delegatedReceiptService = {
       const receipts = current.exists() ? validateReceipts(current.data().receipts) : validated.receipts;
       // Financial edits cannot overwrite a newer account/status/team confirmation.
       const next: Partial<DelegatedClaim> = { ...validated };
-      if (current.exists()) { delete next.confirmation; delete next.confirmationHistory; delete next.assignedTeamId; delete next.delegationType; delete next.delegationOverride; delete next.originalExpectedAmount; }
+      if (current.exists()) { delete next.confirmation; delete next.confirmationHistory; delete next.assignedTeamId; delete next.delegationType; delete next.delegationOverride; delete next.originalExpectedAmount; delete next.memo; }
       assertDocumentSize({ ...(current.exists() ? current.data() : {}), ...next, receipts });
       transaction.set(ref, { ...next, receipts, updatedAt: new Date().toISOString() }, { merge: true });
     });
@@ -264,12 +266,15 @@ export const delegatedReceiptService = {
       // Resolve untouched fields inside the transaction, never from a stale list row.
       const state = getDepositState(current);
       const confirmation: DepositConfirmation = { ...event,
+        ...(change.field === 'memo' ? { previousMemo: current.memo } : {}),
         status: change.field === 'status' ? change.value : state.status,
         recipient: change.field === 'recipient' ? change.value : state.recipient,
-        note: change.field === 'expectedAmount' ? `받을 예정 금액 직접 입력: ${change.value === null ? '미확정' : `${change.value.toLocaleString('ko-KR')}원`}`
+        note: change.field === 'memo' ? (change.value ? (current.memo ? '메모 수정' : '메모 등록') : '메모 삭제')
+          : change.field === 'expectedAmount' ? `받을 예정 금액 직접 입력: ${change.value === null ? '미확정' : `${change.value.toLocaleString('ko-KR')}원`}`
           : change.field === 'delegation' ? `입금방법 변경: ${{ delegate: '위임', direct: '직불', unknown: '미확인' }[change.value]}`
           : change.field === 'recipient' ? `받는 계좌 변경: ${recipientLabels[change.value]}` : `입금여부 변경: ${depositLabels[change.value]}` };
-      const patch = { ...(change.field === 'expectedAmount' ? { expectedAmount: change.value, originalExpectedAmount: current.originalExpectedAmount !== undefined ? current.originalExpectedAmount : current.expectedAmount, taxRate: null, taxAmount: null }
+      const patch = { ...(change.field === 'memo' ? { memo: change.value }
+        : change.field === 'expectedAmount' ? { expectedAmount: change.value, originalExpectedAmount: current.originalExpectedAmount !== undefined ? current.originalExpectedAmount : current.expectedAmount, taxRate: null, taxAmount: null }
         : change.field === 'delegation' ? { delegationOverride: change.value } : { confirmation }),
         confirmationHistory: validateHistory([...history, confirmation]), updatedAt: new Date().toISOString() };
       const next = validateClaim({ ...current, ...patch });

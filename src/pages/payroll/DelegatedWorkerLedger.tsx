@@ -4,6 +4,7 @@ import type { ClaimListChange, ClaimListEdit, DelegatedClaim } from '../../featu
 import { getClaimTotals } from '../../features/delegated-receipts/model';
 import { depositLabels, getDelegation, getDepositState, recipientLabels } from '../../features/delegated-receipts/depositState';
 import { getSiteTeam, ReceiptDirectory, validTeamColor } from '../../features/delegated-receipts/teamDirectory';
+import DelegatedMemoSticker from './DelegatedMemoSticker';
 
 export function DepositBadge({ claim }: { claim: DelegatedClaim }) {
   const state = getDepositState(claim);
@@ -28,7 +29,7 @@ const originalAmount = (claim: DelegatedClaim) => claim.grossAmount ?? (claim.or
 const delegationLabels = { delegate: '위임', direct: '직불', unknown: '미확인' };
 const fieldLabels = { delegation: '입금방법', recipient: '받는 계좌', status: '입금여부' };
 const fieldOptions = { delegation: delegationLabels, recipient: recipientLabels, status: depositLabels };
-type SelectField = Exclude<ClaimListChange['field'], 'expectedAmount'>;
+type SelectField = Exclude<ClaimListChange['field'], 'expectedAmount' | 'memo'>;
 type RowSave = { phase: 'saving' | 'saved' | 'error'; edit: ClaimListEdit };
 
 export default function DelegatedWorkerLedger({ claims, directory, canWrite, selectedIds, onSelect, onOpen, onUpdate }: {
@@ -38,7 +39,9 @@ export default function DelegatedWorkerLedger({ claims, directory, canWrite, sel
 }) {
   const [rowSaves, setRowSaves] = useState<Record<string, RowSave>>({});
   const [amountDrafts, setAmountDrafts] = useState<Record<string, string>>({});
+  const [memoDrafts, setMemoDrafts] = useState<Record<string, string>>({});
   const clearAmount = (id: string) => setAmountDrafts(previous => { const next = { ...previous }; delete next[id]; return next; });
+  const clearMemo = (id: string) => setMemoDrafts(previous => { const next = { ...previous }; delete next[id]; return next; });
   const busyRows = useRef(new Set<string>());
   const save = async (id: string, edit: ClaimListEdit) => {
     if (!canWrite || busyRows.current.has(id)) return;
@@ -47,6 +50,7 @@ export default function DelegatedWorkerLedger({ claims, directory, canWrite, sel
     try {
       await onUpdate(id, edit);
       if (edit.change.field === 'expectedAmount') clearAmount(id);
+      if (edit.change.field === 'memo') clearMemo(id);
       setRowSaves(previous => ({ ...previous, [id]: { phase: 'saved', edit } }));
     } catch {
       setRowSaves(previous => ({ ...previous, [id]: { phase: 'error', edit } }));
@@ -88,20 +92,30 @@ export default function DelegatedWorkerLedger({ claims, directory, canWrite, sel
       {saved.phase === 'saving' ? '저장 중…' : saved.phase === 'saved' ? <><Check size={14} />저장됨</> : <><span>저장 확인 실패</span><button onClick={() => void save(claim.id, saved.edit)} aria-label={`${claim.workerName} 목록 변경 다시 저장`}>다시 저장</button></>}
     </div>;
   };
+  const memoSticker = (claim: DelegatedClaim, mobile = false) => {
+    const lastMemoChange = [...(claim.confirmationHistory ?? [])].reverse().find(event => event.listChange?.field === 'memo');
+    const deletedMemo = !claim.memo && lastMemoChange?.listChange?.value === '' ? lastMemoChange.previousMemo : undefined;
+    return <DelegatedMemoSticker label={`${claim.workerName}${mobile ? ' 모바일' : ''}`} memo={claim.memo} draft={memoDrafts[claim.id]} deletedMemo={deletedMemo}
+      canWrite={canWrite} locked={Boolean(rowSaves[claim.id] && rowSaves[claim.id].phase !== 'saved')}
+      onStart={() => setMemoDrafts(previous => ({ ...previous, [claim.id]: claim.memo }))}
+      onChange={value => setMemoDrafts(previous => ({ ...previous, [claim.id]: value }))}
+      onSave={() => change(claim.id, { field: 'memo', value: memoDrafts[claim.id] })} onCancel={() => clearMemo(claim.id)}
+      onDelete={() => change(claim.id, { field: 'memo', value: '' })} onRestore={() => { if (deletedMemo) change(claim.id, { field: 'memo', value: deletedMemo }); }} />;
+  };
   const toggle = (id: string) => onSelect(selectedIds.includes(id) ? selectedIds.filter(value => value !== id) : [...selectedIds, id].slice(0, 400));
   const allSelected = claims.length > 0 && claims.length <= 400 && claims.every(claim => selectedIds.includes(claim.id));
   return <>
     {canWrite && <label className="dr-select-all"><input type="checkbox" checked={allSelected} onChange={event => onSelect(event.target.checked ? claims.slice(0, 400).map(claim => claim.id) : [])} />현재 목록 선택 {claims.length > 400 && '(최대 400건)'}</label>}
-    <div className="dr-table-wrap"><table className="dr-table"><thead><tr>{canWrite && <th><span className="dr-sr-only">선택</span></th>}<th>작업자 / 현장</th><th>입금방법 / 받는 계좌</th><th className="dr-align-right">원본 금액 / 받을 예정</th><th>입금여부</th><th><span className="dr-sr-only">상세 보기</span></th></tr></thead><tbody>
+    <div className="dr-table-wrap"><table className="dr-table"><thead><tr>{canWrite && <th><span className="dr-sr-only">선택</span></th>}<th>작업자 / 현장</th><th>입금방법 / 받는 계좌</th><th className="dr-align-right">원본 금액 / 받을 예정</th><th>입금여부</th><th>메모</th></tr></thead><tbody>
       {claims.map(claim => {
         const state = getDepositState(claim); const total = getClaimTotals(claim);
         return <tr key={claim.id} className={selectedIds.includes(claim.id) ? 'dr-row-selected' : ''}>
           {canWrite && <td className="dr-checkbox-cell"><input type="checkbox" aria-label={`${claim.workerName} 선택`} checked={selectedIds.includes(claim.id)} onChange={() => toggle(claim.id)} /></td>}
-          <td><WorkerIdentity claim={claim} directory={directory} /><SiteTeamLabel claim={claim} directory={directory} /></td>
+          <td><WorkerIdentity claim={claim} directory={directory} /><SiteTeamLabel claim={claim} directory={directory} /><button className="dr-row-button dr-worker-detail" disabled={rowSaves[claim.id]?.phase === 'saving'} onClick={() => onOpen(claim)} aria-label={`${claim.workerName} 입금 및 내역`}>내역 보기<ChevronRight size={14} /></button>{feedback(claim)}</td>
           <td>{canWrite ? <div className="dr-inline-payment">{control(claim, 'delegation')}{control(claim, 'recipient')}</div> : <><span className="dr-delegation-label">{delegationLabels[getDelegation(claim)]}</span> {recipientLabels[state.recipient]}</>}</td>
           <td className="dr-align-right dr-number">{canWrite ? <><span className="dr-cell-sub dr-source-amount">{claim.grossAmount !== null ? '세전' : '원본 세후'} {won(originalAmount(claim))}</span>{amountControl(claim)}</> : <>{won(originalAmount(claim))}<span className="dr-cell-sub">받을 예정 {won(claim.expectedAmount)}</span></>}</td>
           <td>{canWrite ? control(claim, 'status') : <DepositBadge claim={claim} />}<span className="dr-cell-sub">{state.basis}{claim.receipts.length > 0 ? ` · 기록 ${won(total.received)}` : ' · 금액 미기록'}</span></td>
-          <td><button className="dr-row-button" disabled={rowSaves[claim.id]?.phase === 'saving'} onClick={() => onOpen(claim)} aria-label={`${claim.workerName} 입금 및 내역`}>내역 보기<ChevronRight size={14} /></button>{feedback(claim)}</td>
+          <td className="dr-memo-cell">{memoSticker(claim)}</td>
         </tr>;
       })}
     </tbody></table></div>
@@ -112,7 +126,7 @@ export default function DelegatedWorkerLedger({ claims, directory, canWrite, sel
         <SiteTeamLabel claim={claim} directory={directory} />
         {canWrite ? <div className="dr-inline-mobile">{control(claim, 'delegation', true)}{control(claim, 'status', true)}{control(claim, 'recipient', true)}</div> : <div className="dr-worker-meta"><b>{delegationLabels[getDelegation(claim)]}</b><span>·</span>{recipientLabels[state.recipient]}</div>}
         <dl className="dr-worker-amounts"><div><dt>{claim.grossAmount !== null ? '원본 세전' : '원본 세후'}</dt><dd>{won(originalAmount(claim))}</dd></div><div><dt>받을 예정</dt><dd>{canWrite ? amountControl(claim, true) : won(claim.expectedAmount)}</dd></div><div><dt>기록된 입금액</dt><dd>{claim.receipts.length ? won(total.received) : '미기록'}</dd></div></dl>
-        <div className="dr-worker-footer"><span>{state.basis}</span><button className="dr-button" disabled={rowSaves[claim.id]?.phase === 'saving'} onClick={() => onOpen(claim)} aria-label={`${claim.workerName} 모바일 입금 및 내역`}>내역 보기<ChevronRight size={16} /></button></div>{feedback(claim)}
+        <div className="dr-worker-footer"><span>{state.basis}</span><button className="dr-button" disabled={rowSaves[claim.id]?.phase === 'saving'} onClick={() => onOpen(claim)} aria-label={`${claim.workerName} 모바일 입금 및 내역`}>내역 보기<ChevronRight size={16} /></button></div>{feedback(claim)}<div className="dr-mobile-memo">{memoSticker(claim, true)}</div>
       </article>;
     })}</div>
   </>;

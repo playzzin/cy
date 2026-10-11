@@ -2,7 +2,7 @@ import React from 'react';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import DelegatedReceiptsPage, { DelegatedReceiptsWorkspace } from './DelegatedReceiptsPage';
-import { DelegatedClaim } from '../../features/delegated-receipts/model';
+import { ClaimListEdit, DelegatedClaim } from '../../features/delegated-receipts/model';
 import { delegatedReceiptService } from '../../features/delegated-receipts/service';
 import { parseDelegatedWorkbook } from '../../features/delegated-receipts/workbookImport';
 import { userService } from '../../services/userService';
@@ -354,4 +354,60 @@ it('모바일 예정 금액은 취소할 수 있고 비우면 미확정으로 �
   await waitFor(() => expect(delegatedReceiptService.updateListField).toHaveBeenCalledWith(base.id, expect.objectContaining({ change: { field: 'expectedAmount', value: null } })));
   await waitFor(() => expect(input).toBeEnabled());
   expect(input).toHaveValue('');
+});
+
+it('오른쪽 메모 스티커를 등록·수정·삭제·복원하고 모바일과 초안을 공유한다', async () => {
+  let saved = { ...base };
+  (delegatedReceiptService.updateListField as jest.Mock).mockImplementation(async (_id: string, edit: ClaimListEdit) => {
+    if (edit.change.field !== 'memo') throw Error('Unexpected change');
+    saved = { ...saved, memo: edit.change.value.trim(), confirmationHistory: [...(saved.confirmationHistory ?? []), { ...getDepositState(saved), id: edit.id, recordedAt: edit.recordedAt, note: '', listChange: edit.change, previousMemo: saved.memo }] };
+    return saved;
+  });
+  render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
+  const table = within(screen.getByRole('table'));
+  expect(table.getAllByRole('columnheader').at(-1)).toHaveTextContent('메모');
+  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 메모 등록' }));
+  expect(table.getByRole('button', { name: '검증작업자 가 메모 저장' })).toBeDisabled();
+  fireEvent.change(table.getByRole('textbox', { name: '검증작업자 가 메모 내용' }), { target: { value: '정산 확인\n금요일 다시 확인' } });
+  expect(screen.getByRole('textbox', { name: '검증작업자 가 모바일 메모 내용' })).toHaveValue('정산 확인\n금요일 다시 확인');
+  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 메모 저장' }));
+  const sticker = await table.findByRole('region', { name: '검증작업자 가 메모' });
+  await waitFor(() => expect(within(sticker).queryByRole('textbox')).not.toBeInTheDocument());
+  expect(sticker).toHaveTextContent('정산 확인 금요일 다시 확인');
+  fireEvent.click(screen.getByRole('button', { name: '검증작업자 가 모바일 메모 수정' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '검증작업자 가 모바일 메모 내용' }), { target: { value: '취소할 초안' } });
+  fireEvent.keyDown(screen.getByRole('textbox', { name: '검증작업자 가 모바일 메모 내용' }), { key: 'Escape' });
+  expect(delegatedReceiptService.updateListField).toHaveBeenCalledTimes(1);
+  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 메모 수정' }));
+  fireEvent.change(table.getByRole('textbox', { name: '검증작업자 가 메모 내용' }), { target: { value: '수정한 메모' } });
+  fireEvent.keyDown(table.getByRole('textbox', { name: '검증작업자 가 메모 내용' }), { key: 'Enter', ctrlKey: true });
+  await table.findByText('수정한 메모');
+  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 메모 삭제' }));
+  fireEvent.click(await table.findByRole('button', { name: '검증작업자 가 메모 삭제 취소' }));
+  await table.findByText('수정한 메모');
+  expect(delegatedReceiptService.updateListField).toHaveBeenCalledTimes(4);
+  expect(table.getByRole('textbox', { name: '검증작업자 가 받을 예정 금액' })).toHaveValue('100,000');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+it('메모 저장 실패 시 초안을 유지하며 동일 요청으로 재시도한다', async () => {
+  (delegatedReceiptService.updateListField as jest.Mock).mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce({ ...base, memo: '보존할 메모' });
+  render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
+  const table = within(screen.getByRole('table'));
+  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 메모 등록' }));
+  fireEvent.change(table.getByRole('textbox', { name: '검증작업자 가 메모 내용' }), { target: { value: '보존할 메모' } });
+  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 메모 저장' }));
+  await table.findByText('저장 확인 실패');
+  expect(table.getByRole('textbox', { name: '검증작업자 가 메모 내용' })).toHaveValue('보존할 메모');
+  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 목록 변경 다시 저장' }));
+  await table.findByText('저장됨');
+  expect(table.queryByRole('textbox', { name: '검증작업자 가 메모 내용' })).not.toBeInTheDocument();
+  const calls = (delegatedReceiptService.updateListField as jest.Mock).mock.calls;
+  expect(calls[1]).toEqual(calls[0]);
+});
+
+it('읽기 전용 메모는 보이되 등록·수정·삭제를 노출하지 않는다', () => {
+  render(<DelegatedReceiptsWorkspace initialClaims={[{ ...base, memo: '기존 메모' }, { ...base, id: 'empty-memo', workerName: '검증작업자 나' }]} canWrite={false} />);
+  expect(within(screen.getByRole('table')).getByText('기존 메모')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /메모 (등록|수정|삭제)/ })).not.toBeInTheDocument();
 });

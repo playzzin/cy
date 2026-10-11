@@ -374,3 +374,41 @@ it.each([-1, 0.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])('잘못된 예정액
   await expect(delegatedReceiptService.updateListField('claim-a', { id: 'amount-a', recordedAt: confirmation().recordedAt, change: { field: 'expectedAmount', value: amount } })).rejects.toThrow('금액');
   expect(runTransaction).not.toHaveBeenCalled();
 });
+
+it('스티커 메모 등록·수정·삭제·복원은 원본과 금액·입금여부·계좌·팀을 보존한다', async () => {
+  const original = claim({ expectedAmount: 290100, grossAmount: 300000, taxRate: 3.3, taxAmount: 9900, receipts: [receipt()], confirmation: confirmation(), assignedTeamId: 'team-a', sourceStatus: '개인통장' });
+  records.set(original.id, original);
+  const edit = (id: string, value: string) => delegatedReceiptService.updateListField(original.id, { id, recordedAt: confirmation().recordedAt, change: { field: 'memo', value } });
+  const created = await edit('memo-create', '  정산 확인\n금요일 다시 확인  ');
+  expect(created.memo).toBe('정산 확인\n금요일 다시 확인');
+  const modified = await edit('memo-edit', '확인 완료');
+  expect(modified.confirmationHistory?.[1]).toMatchObject({ previousMemo: created.memo, note: '메모 수정' });
+  const deleted = await edit('memo-delete', '');
+  expect(deleted.memo).toBe('');
+  expect(deleted.confirmationHistory?.[2]).toMatchObject({ previousMemo: modified.memo, note: '메모 삭제' });
+  const restored = await edit('memo-restore', deleted.confirmationHistory![2].previousMemo!);
+  expect(restored.memo).toBe('확인 완료');
+  expect(restored).toMatchObject({ grossAmount: original.grossAmount, expectedAmount: original.expectedAmount, taxRate: original.taxRate, taxAmount: original.taxAmount, receipts: original.receipts, confirmation: original.confirmation, assignedTeamId: original.assignedTeamId, sourceStatus: original.sourceStatus, sourceLabel: original.sourceLabel });
+  (getDocs as jest.Mock).mockResolvedValue({ docs: [{ id: original.id, data: () => records.get(original.id) }] });
+  expect((await delegatedReceiptService.list(original.month))[0].confirmationHistory?.[2].previousMemo).toBe('확인 완료');
+});
+
+it('메모 삭제 재시도와 오래된 기준 정보 저장은 이후 메모를 덮어쓰지 않는다', async () => {
+  records.set('claim-a', claim({ memo: '기존 메모' }));
+  const deletion = { id: 'delete-memo', recordedAt: confirmation().recordedAt, change: { field: 'memo' as const, value: '' } };
+  await delegatedReceiptService.updateListField('claim-a', deletion);
+  await delegatedReceiptService.updateListField('claim-a', { ...deletion, id: 'new-memo', change: { field: 'memo', value: '새 메모' } });
+  await delegatedReceiptService.updateListField('claim-a', deletion);
+  await delegatedReceiptService.saveClaim(claim({ memo: '오래된 내용', expectedAmount: 1000 }));
+  expect(records.get('claim-a')).toMatchObject({ memo: '새 메모', expectedAmount: 1000 });
+  expect(records.get('claim-a')?.confirmationHistory).toHaveLength(2);
+  await expect(delegatedReceiptService.updateListField('claim-a', { ...deletion, change: { field: 'memo', value: '다른 내용' } })).rejects.toThrow('같은 확인 식별자');
+});
+
+it('메모는 2,000자까지 저장하고 초과 내용은 쓰기 전에 거부한다', async () => {
+  const edit = { id: 'memo-limit', recordedAt: confirmation().recordedAt, change: { field: 'memo' as const, value: '가'.repeat(2001) } };
+  await expect(delegatedReceiptService.updateListField('claim-a', edit)).rejects.toThrow('메모');
+  expect(runTransaction).not.toHaveBeenCalled();
+  records.set('claim-a', claim());
+  expect((await delegatedReceiptService.updateListField('claim-a', { ...edit, change: { field: 'memo', value: '가'.repeat(2000) } })).memo).toHaveLength(2000);
+});

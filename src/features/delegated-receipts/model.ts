@@ -7,7 +7,8 @@ export type ClaimListChange =
     | { field: 'delegation'; value: DelegationType }
     | { field: 'recipient'; value: RecipientKind }
     | { field: 'status'; value: DepositStatus }
-    | { field: 'expectedAmount'; value: number | null };
+    | { field: 'expectedAmount'; value: number | null }
+    | { field: 'memo'; value: string };
 export interface ClaimListEdit { id: string; recordedAt: string; change: ClaimListChange; }
 export interface DepositConfirmation {
     id: string;
@@ -17,6 +18,7 @@ export interface DepositConfirmation {
     recordedAt: string;
     actorId?: string;
     listChange?: ClaimListChange;
+    previousMemo?: string;
 }
 
 export interface Receipt {
