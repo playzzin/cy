@@ -9,7 +9,8 @@ export const receiptDirectoryService = {
         return {
             teams: teams.filter(team => team.id).map(team => ({ id: team.id!, name: team.name, leaderName: team.leaderName, color: team.color })),
             sites: sites.filter(site => site.id).map(site => ({ id: site.id!, name: site.name, responsibleTeamId: site.responsibleTeamId })),
-            workers: workers.filter(worker => worker.id).map(worker => ({ id: worker.id!, name: worker.name, color: worker.color, ...(worker.teamId ? { teamId: worker.teamId } : {}) })),
+            workers: workers.filter(worker => worker.id).map(worker => ({ id: worker.id!, name: worker.name, color: worker.color,
+                ...(worker.teamId ? { teamId: worker.teamId } : {}), ...(worker.teamName ? { teamName: worker.teamName } : {}) })),
         };
     },
 };

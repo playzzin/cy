@@ -1,11 +1,18 @@
 import type { DelegatedClaim, RecipientKind } from './model';
 export interface ReceiptTeam { id: string; name: string; leaderName?: string; color?: string; }
 export interface ReceiptSite { id: string; name: string; responsibleTeamId?: string; }
-export interface ReceiptWorker { id: string; name: string; color?: string; teamId?: string; }
+export interface ReceiptWorker { id: string; name: string; color?: string; teamId?: string; teamName?: string; }
 export interface ReceiptDirectory { teams: ReceiptTeam[]; sites: ReceiptSite[]; workers?: ReceiptWorker[]; }
 export const emptyDirectory: ReceiptDirectory = { teams: [], sites: [], workers: [] };
 const normalize = (value: string) => value.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
 export const validTeamColor = (value?: string) => value && /^#[0-9a-f]{6}$/i.test(value) ? value : '#94a3b8';
+
+export function getWorkerTeam(worker: ReceiptWorker, directory: ReceiptDirectory): ReceiptTeam | undefined {
+    if (worker.teamId) return directory.teams.find(team => team.id === worker.teamId);
+    if (!worker.teamName?.trim()) return undefined;
+    const matches = directory.teams.filter(team => normalize(team.name) === normalize(worker.teamName!));
+    return matches.length === 1 ? matches[0] : undefined;
+}
 
 export function getWorkerColor(claim: DelegatedClaim, directory: ReceiptDirectory): string {
     if (claim.workerId) return validTeamColor(directory.workers?.find(worker => worker.id === claim.workerId)?.color?.trim());

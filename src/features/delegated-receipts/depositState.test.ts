@@ -1,7 +1,15 @@
 import { DelegatedClaim, getClaimTotals } from './model';
 import { getDelegation, getDepositState, getDisplayRemaining, interpretSource } from './depositState';
-import { getSiteTeam, getWorkerColor, recipientDetail, validTeamColor, ReceiptDirectory } from './teamDirectory';
+import { getSiteTeam, getWorkerColor, getWorkerTeam, recipientDetail, validTeamColor, ReceiptDirectory } from './teamDirectory';
 const claim = (changes: Partial<DelegatedClaim> = {}): DelegatedClaim => ({ id: 'test', month: '2026-09', siteName: '가상 현장', workerName: '가상 작업자', delegationType: 'unknown', paymentMethod: 'unknown', grossAmount: 100000, expectedAmount: null, receipts: [], sourceStatus: '', sourceLabel: '', memo: '', updatedAt: '', ...changes });
+
+it('작업자의 팀 ID를 우선하고 이름만 있는 기존 자료는 하나의 팀과 일치할 때만 연결한다', () => {
+  const directory = { sites: [], teams: [{ id: 't1', name: '가상 팀' }, { id: 't2', name: '다른 팀' }] };
+  expect(getWorkerTeam({ id: 'w', name: '가상', teamId: 't2', teamName: '가상 팀' }, directory)?.id).toBe('t2');
+  expect(getWorkerTeam({ id: 'w', name: '가상', teamName: ' 가상팀 ' }, directory)?.id).toBe('t1');
+  expect(getWorkerTeam({ id: 'w', name: '가상', teamId: 'removed', teamName: '가상 팀' }, directory)).toBeUndefined();
+  expect(getWorkerTeam({ id: 'w', name: '가상', teamName: '가상 팀' }, { ...directory, teams: [...directory.teams, { id: 't3', name: '가상팀' }] })).toBeUndefined();
+});
 
 it('기존 병합 표시도 완료·계좌·위임을 해석하며 입금액과 잔액은 만들지 않는다', () => {
   const row = claim({ sourceStatus: '그룹 표시 G11:G15: 이재욱 위임 입금 완료 (개별 확인 필요)' });
