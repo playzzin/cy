@@ -1,24 +1,26 @@
 import React, { useRef, useState } from 'react';
-import { Check, ChevronRight, UserRound } from 'lucide-react';
+import { Building2, Check, ChevronRight, UserRound } from 'lucide-react';
 import type { ClaimListChange, ClaimListEdit, DelegatedClaim } from '../../features/delegated-receipts/model';
 import { getClaimTotals } from '../../features/delegated-receipts/model';
 import { depositLabels, getDelegation, getDepositState, recipientLabels } from '../../features/delegated-receipts/depositState';
-import { getSiteTeam, ReceiptDirectory, validTeamColor } from '../../features/delegated-receipts/teamDirectory';
+import { getSiteTeam, getWorkerColor, ReceiptDirectory, validTeamColor } from '../../features/delegated-receipts/teamDirectory';
 import DelegatedMemoSticker from './DelegatedMemoSticker';
 
 export function DepositBadge({ claim }: { claim: DelegatedClaim }) {
   const state = getDepositState(claim);
   return <span className={`dr-badge dr-deposit-${state.status}`}><span aria-hidden="true" />{depositLabels[state.status]}</span>;
 }
-export function SiteTeamLabel({ claim, directory }: { claim: DelegatedClaim; directory: ReceiptDirectory }) {
-  const team = getSiteTeam(claim, directory);
-  return <span className="dr-team-site" style={{ borderColor: validTeamColor(team?.color) }}>
-    <span className="dr-team-dot" style={{ backgroundColor: validTeamColor(team?.color) }} aria-hidden="true" />
-    <span>{claim.siteName}</span>
+export function SiteIdentity({ name, color }: { name: string; color?: string }) {
+  return <span className="dr-team-site" style={{ '--dr-site-color': validTeamColor(color) } as React.CSSProperties}>
+    <span className="dr-site-avatar" aria-hidden="true"><Building2 size={18} strokeWidth={2} /></span>
+    <span className="dr-site-name">{name}</span>
   </span>;
 }
+export function SiteTeamLabel({ claim, directory }: { claim: DelegatedClaim; directory: ReceiptDirectory }) {
+  return <SiteIdentity name={claim.siteName} color={getSiteTeam(claim, directory)?.color} />;
+}
 function WorkerIdentity({ claim, directory }: { claim: DelegatedClaim; directory: ReceiptDirectory }) {
-  const color = validTeamColor(getSiteTeam(claim, directory)?.color);
+  const color = getWorkerColor(claim, directory);
   return <span className="dr-worker-identity" style={{ '--dr-worker-color': color } as React.CSSProperties}>
     <span className="dr-worker-avatar" aria-hidden="true"><UserRound size={18} strokeWidth={2} /></span>
     <strong className="dr-worker-name">{claim.workerName}</strong>
@@ -120,8 +122,8 @@ export default function DelegatedWorkerLedger({ claims, directory, canWrite, sel
       })}
     </tbody></table></div>
     <div className="dr-mobile-list">{claims.map(claim => {
-      const state = getDepositState(claim); const total = getClaimTotals(claim); const team = getSiteTeam(claim, directory);
-      return <article className={`dr-worker-card ${selectedIds.includes(claim.id) ? 'dr-row-selected' : ''}`} key={claim.id} style={{ borderLeft: `4px solid ${validTeamColor(team?.color)}` }}>
+      const state = getDepositState(claim); const total = getClaimTotals(claim);
+      return <article className={`dr-worker-card ${selectedIds.includes(claim.id) ? 'dr-row-selected' : ''}`} key={claim.id}>
         <div className="dr-worker-heading"><div className="dr-worker-select">{canWrite && <input type="checkbox" aria-label={`${claim.workerName} 모바일 선택`} checked={selectedIds.includes(claim.id)} onChange={() => toggle(claim.id)} />}<WorkerIdentity claim={claim} directory={directory} /></div>{!canWrite && <DepositBadge claim={claim} />}</div>
         <SiteTeamLabel claim={claim} directory={directory} />
         {canWrite ? <div className="dr-inline-mobile">{control(claim, 'delegation', true)}{control(claim, 'status', true)}{control(claim, 'recipient', true)}</div> : <div className="dr-worker-meta"><b>{delegationLabels[getDelegation(claim)]}</b><span>·</span>{recipientLabels[state.recipient]}</div>}

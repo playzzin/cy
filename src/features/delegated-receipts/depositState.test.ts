@@ -1,6 +1,6 @@
 import { DelegatedClaim, getClaimTotals } from './model';
 import { getDelegation, getDepositState, getDisplayRemaining, interpretSource } from './depositState';
-import { getSiteTeam, recipientDetail, validTeamColor, ReceiptDirectory } from './teamDirectory';
+import { getSiteTeam, getWorkerColor, recipientDetail, validTeamColor, ReceiptDirectory } from './teamDirectory';
 const claim = (changes: Partial<DelegatedClaim> = {}): DelegatedClaim => ({ id: 'test', month: '2026-09', siteName: '가상 현장', workerName: '가상 작업자', delegationType: 'unknown', paymentMethod: 'unknown', grossAmount: 100000, expectedAmount: null, receipts: [], sourceStatus: '', sourceLabel: '', memo: '', updatedAt: '', ...changes });
 
 it('기존 병합 표시도 완료·계좌·위임을 해석하며 입금액과 잔액은 만들지 않는다', () => {
@@ -38,4 +38,19 @@ it('정확히 연결된 현장 팀의 색상과 계좌 주체를 사용하고 �
   expect(getSiteTeam(claim({ siteName: '비슷한 가상 현장' }), directory)).toBeUndefined();
   expect(getSiteTeam(claim(), { ...directory, sites: [...directory.sites, { ...directory.sites[0], id: 's2' }] })).toBeUndefined();
   expect(validTeamColor('url(unsafe)')).toBe('#94a3b8');
+});
+
+it('작업자 개인 색상은 현장 담당 팀이나 수동 팀 연결의 색상과 독립적이다', () => {
+  const people = { ...directory, workers: [{ id: 'worker-a', name: '가상작업자', color: '#123456' }] };
+  expect(getWorkerColor(claim(), people)).toBe('#123456');
+  expect(getWorkerColor(claim({ assignedTeamId: 'b' }), people)).toBe('#123456');
+  expect(getSiteTeam(claim(), people)?.color).toBe('#ff0000');
+});
+
+it('동명이인·미등록·색상 미설정 작업자는 현장 팀의 색상을 빌리지 않는다', () => {
+  const people = { ...directory, workers: [{ id: 'a', name: '가상 작업자', color: '#123456' }, { id: 'b', name: '가상작업자', color: '#654321' }] };
+  expect(getWorkerColor(claim(), people)).toBe('#94a3b8');
+  expect(getWorkerColor(claim(), directory)).toBe('#94a3b8');
+  expect(getWorkerColor(claim(), { ...directory, workers: [{ id: 'a', name: '가상 작업자' }] })).toBe('#94a3b8');
+  expect(getWorkerColor(claim(), { ...directory, workers: [{ id: 'a', name: '가상 작업자', color: 'url(unsafe)' }] })).toBe('#94a3b8');
 });

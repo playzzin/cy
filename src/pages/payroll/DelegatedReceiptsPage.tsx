@@ -9,9 +9,9 @@ import { parseDelegatedWorkbook } from '../../features/delegated-receipts/workbo
 import { workbookArchiveService, WorkbookArchive } from '../../features/delegated-receipts/workbookArchiveService';
 import WorkbookArchivePanel, { ArchiveService, SourceReviewRows } from './WorkbookArchivePanel';
 import { depositLabels, getDelegation, getDepositState, getDisplayRemaining, recipientLabels, sourceText } from '../../features/delegated-receipts/depositState';
-import { emptyDirectory, getSiteTeam, ReceiptDirectory, validTeamColor } from '../../features/delegated-receipts/teamDirectory';
+import { emptyDirectory, getSiteTeam, ReceiptDirectory } from '../../features/delegated-receipts/teamDirectory';
 import { receiptDirectoryService } from '../../features/delegated-receipts/directoryService';
-import DelegatedWorkerLedger, { DepositBadge as StatusBadge } from './DelegatedWorkerLedger';
+import DelegatedWorkerLedger, { DepositBadge as StatusBadge, SiteIdentity } from './DelegatedWorkerLedger';
 import DepositConfirmationForm from './DepositConfirmationForm';
 import './DelegatedReceiptsPage.css';
 
@@ -127,7 +127,7 @@ export function DelegatedReceiptsWorkspace({ initialClaims, initialDirectory, se
     if (initialDirectory || initialClaims) return;
     let cancelled = false;
     receiptDirectoryService.load().then(value => { if (!cancelled) { setDirectory(value); setDirectoryError(''); } })
-      .catch(() => { if (!cancelled) setDirectoryError('담당 팀 정보를 불러오지 못했습니다. 새로고침해 주세요.'); });
+      .catch(() => { if (!cancelled) setDirectoryError('작업자·담당 팀 정보를 불러오지 못했습니다. 새로고침해 주세요.'); });
     return () => { cancelled = true; };
   }, [initialDirectory, initialClaims, reload]);
   useEffect(() => { setSelectedIds([]); }, [month, siteName, worker, recipient, teamFilter, status, delegationType, reload]);
@@ -241,7 +241,7 @@ export function DelegatedReceiptsWorkspace({ initialClaims, initialDirectory, se
       <div className="dr-filter-bottom"><div className="dr-status-tabs" aria-label="입금여부 빠른 필터">{(['', 'pending', 'partial', 'complete', 'unknown'] as const).map(value => <button key={value} className={status === value ? 'dr-active' : ''} aria-pressed={status === value} aria-label={value ? depositLabels[value] : '전체 상태'} onClick={() => setStatus(value)}>{value ? depositLabels[value] : '전체'}</button>)}</div>{activeFilterCount > 0 && <button className="dr-text-button dr-reset-filters" onClick={resetFilters}><X size={13} />필터 초기화 <span>{activeFilterCount}</span></button>}</div>
     </section>
     <section className="dr-list-section" aria-label="작업자별 입금 내역"><div className="dr-section-title"><h2>작업자별 내역 <span className="dr-count">{filtered.length}</span></h2><button className="dr-text-button dr-sites-toggle" aria-expanded={showSites} aria-controls="dr-site-summary" onClick={() => setShowSites(!showSites)}><Building2 size={15} />현장별 요약<ChevronRight size={14} className={showSites ? 'dr-chevron-open' : ''} /></button></div>
-    {showSites && !loading && siteSummaries.length > 0 && <section id="dr-site-summary" className="dr-sites" aria-label="현장별 집계"><div className="dr-section-title"><h2>현장별 입금여부</h2><span>{siteSummaries.length}개 현장</span></div><div className="dr-site-grid">{siteSummaries.map(site => <button key={site.name} className="dr-site-card" style={{ borderLeft: `4px solid ${validTeamColor(site.team?.color)}` }} onClick={() => { setSiteName(site.name); setShowSites(false); }}><div className="dr-site-title"><span>{site.name}</span><ChevronRight size={16} /></div><div className="dr-site-values"><span>입금완료<strong>{site.complete} / {site.count}건</strong></span></div><div className="dr-progress" role="progressbar" aria-label={`${site.name} 입금완료 비율`} aria-valuenow={Math.round(site.complete / site.count * 100)} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${site.complete / site.count * 100}%` }} /></div></button>)}</div></section>}
+    {showSites && !loading && siteSummaries.length > 0 && <section id="dr-site-summary" className="dr-sites" aria-label="현장별 집계"><div className="dr-section-title"><h2>현장별 입금여부</h2><span>{siteSummaries.length}개 현장</span></div><div className="dr-site-grid">{siteSummaries.map(site => <button key={site.name} className="dr-site-card" onClick={() => { setSiteName(site.name); setShowSites(false); }}><div className="dr-site-title"><SiteIdentity name={site.name} color={site.team?.color} /><ChevronRight size={16} /></div><div className="dr-site-values"><span>입금완료<strong>{site.complete} / {site.count}건</strong></span></div><div className="dr-progress" role="progressbar" aria-label={`${site.name} 입금완료 비율`} aria-valuenow={Math.round(site.complete / site.count * 100)} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${site.complete / site.count * 100}%` }} /></div></button>)}</div></section>}
     {canWrite && selectedIds.length > 0 && <div className="dr-selection-bar"><strong>{selectedIds.length}건 선택</strong><button className="dr-button dr-button-primary" onClick={() => { setDialogError(''); setConfirming(filtered.filter(claim => selectedIds.includes(claim.id))); }}>선택 내역 입금여부 변경</button><button className="dr-text-button" onClick={() => setSelectedIds([])}>선택 해제</button></div>}
 
       {loading ? <div className="dr-empty" role="status"><RefreshCw className="dr-spin" size={25} /><h3>입금 내역을 불러오고 있습니다</h3></div> : filtered.length === 0 ? <div className="dr-empty"><div className="dr-empty-icon"><FileSpreadsheet size={29} /></div><h3>{claims.length ? '선택한 조건의 내역이 없습니다' : '이 달에 등록된 내역이 없습니다'}</h3><p>{claims.length ? '현장이나 입금 상태를 바꾸어 확인해 보세요.' : '노무 처리 확인 엑셀을 가져오거나 직접 내역을 추가해 주세요.'}</p><p className="dr-empty-hint">이전 자료는 해당 근무 귀속월을 선택해 조회할 수 있습니다.</p>{claims.length ? <button className="dr-button" onClick={resetFilters}>필터 초기화</button> : canWrite && <button className="dr-button dr-button-primary" onClick={() => fileInput.current?.click()} disabled={readingFile}><FileSpreadsheet size={16} />엑셀 가져오기</button>}</div> : <>
