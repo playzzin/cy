@@ -6,7 +6,8 @@ export type RecipientKind = 'unknown' | 'personal' | 'site_leader' | 'jaewook_le
 export type ClaimListChange =
     | { field: 'delegation'; value: DelegationType }
     | { field: 'recipient'; value: RecipientKind }
-    | { field: 'status'; value: DepositStatus };
+    | { field: 'status'; value: DepositStatus }
+    | { field: 'expectedAmount'; value: number | null };
 export interface ClaimListEdit { id: string; recordedAt: string; change: ClaimListChange; }
 export interface DepositConfirmation {
     id: string;
@@ -37,6 +38,7 @@ export interface DelegatedClaim {
     paymentMethod: PaymentMethod;
     grossAmount: number | null;
     expectedAmount: number | null;
+    originalExpectedAmount?: number | null;
     taxRate?: number | null;
     taxAmount?: number | null;
     receipts: Receipt[];

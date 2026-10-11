@@ -90,14 +90,15 @@ describe('위임금 입금 확인 화면', () => {
     expect(within(screen.getByRole('table')).queryByText('검증작업자 가')).not.toBeInTheDocument();
   });
 
-  it('입금여부 확인 필터와 접힌 상세 조건을 초기화하고 검색어만 따로 지울 수 있다', () => {
+  it('모든 필터를 바로 보여주고 조건 초기화와 검색어 지우기를 지원한다', () => {
     render(<DelegatedReceiptsWorkspace initialClaims={fixtures} />);
+    expect(screen.queryByRole('button', { name: /상세 필터/ })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: '입금 내역 필터' })).getByLabelText('받는 계좌', { exact: true })).toBeVisible();
+    expect(within(screen.getByRole('region', { name: '입금 내역 필터' })).getByLabelText('담당 팀', { exact: true })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '확인 필요' }));
     expect(within(screen.getByRole('table')).getByText('검증작업자 다')).toBeInTheDocument();
     expect(within(screen.getByRole('table')).queryByText('검증작업자 가')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /상세 필터/ }));
     fireEvent.change(within(screen.getByRole('region', { name: '입금 내역 필터' })).getByLabelText('받는 계좌', { exact: true }), { target: { value: 'personal' } });
-    fireEvent.click(screen.getByRole('button', { name: /상세 필터/ }));
     fireEvent.click(within(screen.getByRole('region', { name: '입금 내역 필터' })).getByRole('button', { name: /필터 초기화/ }));
     expect(screen.getAllByRole('row')).toHaveLength(4);
     fireEvent.change(screen.getByLabelText('작업자 검색'), { target: { value: '검증작업자 가' } });
@@ -241,6 +242,7 @@ describe('위임금 입금 확인 화면', () => {
   it('읽기 전용 화면에서는 추가·가져오기·입금저장을 노출하지 않는다', () => {
     render(<DelegatedReceiptsWorkspace initialClaims={[base]} canWrite={false} />);
     expect(within(screen.getByRole('table')).queryByRole('combobox')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('table')).queryByRole('textbox')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '자료 관리' }));
     expect(screen.queryByRole('button', { name: '직접 추가' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '엑셀 가져오기' })).not.toBeInTheDocument();
@@ -320,4 +322,36 @@ it('목록 저장 실패를 표시하고 같은 요청으로 다시 저장한다
   expect(method).toBeEnabled();
   const calls = (delegatedReceiptService.updateListField as jest.Mock).mock.calls;
   expect(calls[1]).toEqual(calls[0]);
+});
+
+it('예정 금액은 입력 후 저장하며 잘못된 금액은 거부하고 0원을 허용한다', async () => {
+  (delegatedReceiptService.updateListField as jest.Mock).mockResolvedValue({ ...base, expectedAmount: 0, originalExpectedAmount: base.expectedAmount });
+  render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
+  const table = within(screen.getByRole('table'));
+  const input = table.getByRole('textbox', { name: '검증작업자 가 받을 예정 금액' });
+  fireEvent.change(input, { target: { value: '1.5' } });
+  expect(table.getByRole('button', { name: '검증작업자 가 금액 저장' })).toBeDisabled();
+  expect(delegatedReceiptService.updateListField).not.toHaveBeenCalled();
+  fireEvent.change(input, { target: { value: '0' } });
+  fireEvent.click(table.getByRole('button', { name: '검증작업자 가 금액 저장' }));
+  await table.findByText('저장됨');
+  expect(delegatedReceiptService.updateListField).toHaveBeenCalledWith(base.id, expect.objectContaining({ change: { field: 'expectedAmount', value: 0 } }));
+  expect(input).toHaveValue('0');
+  expect(screen.getByRole('textbox', { name: '검증작업자 가 모바일 받을 예정 금액' })).toHaveValue('0');
+  expect(screen.getByRole('region', { name: '입금 요약' })).toHaveTextContent('40,000원');
+});
+
+it('모바일 예정 금액은 취소할 수 있고 비우면 미확정으로 저장한다', async () => {
+  (delegatedReceiptService.updateListField as jest.Mock).mockResolvedValue({ ...base, expectedAmount: null, originalExpectedAmount: base.expectedAmount });
+  render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
+  const input = screen.getByRole('textbox', { name: '검증작업자 가 모바일 받을 예정 금액' });
+  fireEvent.change(input, { target: { value: '120,000' } });
+  fireEvent.keyDown(input, { key: 'Escape' });
+  expect(input).toHaveValue('100,000');
+  expect(delegatedReceiptService.updateListField).not.toHaveBeenCalled();
+  fireEvent.change(input, { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: '검증작업자 가 모바일 금액 저장' }));
+  await waitFor(() => expect(delegatedReceiptService.updateListField).toHaveBeenCalledWith(base.id, expect.objectContaining({ change: { field: 'expectedAmount', value: null } })));
+  await waitFor(() => expect(input).toBeEnabled());
+  expect(input).toHaveValue('');
 });

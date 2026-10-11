@@ -82,6 +82,7 @@ const validateReceipts = (values: Receipt[]): Receipt[] => {
 };
 
 const validateListChange = (change: ClaimListChange): ClaimListChange => {
+  if (change?.field === 'expectedAmount') return { field: change.field, value: validateAmount(change.value, true) };
   const options = { delegation: ['delegate', 'direct', 'unknown'], recipient: ['unknown', 'personal', 'site_leader', 'jaewook_leader'], status: ['unknown', 'pending', 'partial', 'complete'] };
   if (!change || !Object.prototype.hasOwnProperty.call(options, change.field) || !options[change.field].includes(change.value)) throw new Error('변경할 입금 정보를 확인해 주세요.');
   return { field: change.field, value: change.value } as ClaimListChange;
@@ -127,6 +128,7 @@ const validateClaim = (claim: DelegatedClaim): DelegatedClaim => {
     delegationType: claim.delegationType, paymentMethod: validateMethod(claim.paymentMethod),
     ...(claim.delegationOverride !== undefined ? { delegationOverride: claim.delegationOverride } : {}),
     grossAmount, expectedAmount: validateAmount(claim.expectedAmount, true),
+    ...(claim.originalExpectedAmount !== undefined ? { originalExpectedAmount: validateAmount(claim.originalExpectedAmount, true) } : {}),
     ...(claim.taxRate !== undefined ? { taxRate: claim.taxRate } : {}),
     ...(taxAmount !== undefined ? { taxAmount } : {}),
     receipts: validateReceipts(claim.receipts),
@@ -238,7 +240,7 @@ export const delegatedReceiptService = {
       const receipts = current.exists() ? validateReceipts(current.data().receipts) : validated.receipts;
       // Financial edits cannot overwrite a newer account/status/team confirmation.
       const next: Partial<DelegatedClaim> = { ...validated };
-      if (current.exists()) { delete next.confirmation; delete next.confirmationHistory; delete next.assignedTeamId; delete next.delegationType; delete next.delegationOverride; }
+      if (current.exists()) { delete next.confirmation; delete next.confirmationHistory; delete next.assignedTeamId; delete next.delegationType; delete next.delegationOverride; delete next.originalExpectedAmount; }
       assertDocumentSize({ ...(current.exists() ? current.data() : {}), ...next, receipts });
       transaction.set(ref, { ...next, receipts, updatedAt: new Date().toISOString() }, { merge: true });
     });
@@ -264,9 +266,11 @@ export const delegatedReceiptService = {
       const confirmation: DepositConfirmation = { ...event,
         status: change.field === 'status' ? change.value : state.status,
         recipient: change.field === 'recipient' ? change.value : state.recipient,
-        note: change.field === 'delegation' ? `입금방법 변경: ${{ delegate: '위임', direct: '직불', unknown: '미확인' }[change.value]}`
+        note: change.field === 'expectedAmount' ? `받을 예정 금액 직접 입력: ${change.value === null ? '미확정' : `${change.value.toLocaleString('ko-KR')}원`}`
+          : change.field === 'delegation' ? `입금방법 변경: ${{ delegate: '위임', direct: '직불', unknown: '미확인' }[change.value]}`
           : change.field === 'recipient' ? `받는 계좌 변경: ${recipientLabels[change.value]}` : `입금여부 변경: ${depositLabels[change.value]}` };
-      const patch = { ...(change.field === 'delegation' ? { delegationOverride: change.value } : { confirmation }),
+      const patch = { ...(change.field === 'expectedAmount' ? { expectedAmount: change.value, originalExpectedAmount: current.originalExpectedAmount !== undefined ? current.originalExpectedAmount : current.expectedAmount, taxRate: null, taxAmount: null }
+        : change.field === 'delegation' ? { delegationOverride: change.value } : { confirmation }),
         confirmationHistory: validateHistory([...history, confirmation]), updatedAt: new Date().toISOString() };
       const next = validateClaim({ ...current, ...patch });
       transaction.update(ref, patch);

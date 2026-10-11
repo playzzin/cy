@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, ArrowDownLeft, ArrowLeft, ArrowRight, Building2, Check, ChevronRight, CircleAlert, FileSpreadsheet, Plus, RefreshCw, Search, SlidersHorizontal, Wallet, X } from 'lucide-react';
+import { Archive, ArrowDownLeft, ArrowLeft, ArrowRight, Building2, Check, ChevronRight, CircleAlert, FileSpreadsheet, Plus, RefreshCw, Search, Wallet, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { userService } from '../../services/userService';
 import { canAccessErpCollection } from '../../security/erpAccessPolicy';
@@ -74,7 +74,6 @@ export function DelegatedReceiptsWorkspace({ initialClaims, initialDirectory, se
   const [confirming, setConfirming] = useState<DelegatedClaim[] | null>(null);
   const [delegationType, setDelegationType] = useState<DelegationType | ''>('');
   const [status, setStatus] = useState<DepositStatus | ''>('');
-  const [showFilters, setShowFilters] = useState(false);
   const [showTools, setShowTools] = useState(false);
   const [showSites, setShowSites] = useState(false);
   const [selected, setSelected] = useState<DelegatedClaim | null>(null);
@@ -235,14 +234,11 @@ export function DelegatedReceiptsWorkspace({ initialClaims, initialDirectory, se
         <div className="dr-primary-filters">
           <label><span className="dr-sr-only">현장</span><select value={siteName} onChange={(event) => setSiteName(event.target.value)}><option value="">전체 현장</option>{sites.map((site) => <option key={site}>{site}</option>)}</select></label>
           <label><span className="dr-sr-only">입금방법</span><select value={delegationType} onChange={(event) => setDelegationType(event.target.value as DelegationType | '')}><option value="">위임·직불 전체</option>{Object.entries(delegationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label><span className="dr-sr-only">받는 계좌</span><select value={recipient} onChange={event => setRecipient(event.target.value as RecipientKind | '')}><option value="">전체 계좌</option>{Object.entries(recipientLabels).map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label><span className="dr-sr-only">담당 팀</span><select value={teamFilter} onChange={event => setTeamFilter(event.target.value)}><option value="">전체 팀</option><option value="unlinked">팀 연결 필요</option>{directory.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
         </div>
-        <button className={'dr-button dr-filter-toggle ' + (showFilters ? 'dr-selected' : '')} aria-expanded={showFilters} aria-controls="dr-extra-filters" onClick={() => setShowFilters(!showFilters)}><SlidersHorizontal size={16} />상세 필터{[recipient, teamFilter].filter(Boolean).length > 0 && <span>{[recipient, teamFilter].filter(Boolean).length}</span>}</button>
       </div>
       <div className="dr-filter-bottom"><div className="dr-status-tabs" aria-label="입금여부 빠른 필터">{(['', 'pending', 'partial', 'complete', 'unknown'] as const).map(value => <button key={value} className={status === value ? 'dr-active' : ''} aria-pressed={status === value} aria-label={value ? depositLabels[value] : '전체 상태'} onClick={() => setStatus(value)}>{value ? depositLabels[value] : '전체'}</button>)}</div>{activeFilterCount > 0 && <button className="dr-text-button dr-reset-filters" onClick={resetFilters}><X size={13} />필터 초기화 <span>{activeFilterCount}</span></button>}</div>
-      {showFilters && <div id="dr-extra-filters" className="dr-filter-fields">
-        <label>받는 계좌<select value={recipient} onChange={event => setRecipient(event.target.value as RecipientKind | '')}><option value="">전체 계좌</option>{Object.entries(recipientLabels).map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <label>담당 팀<select value={teamFilter} onChange={event => setTeamFilter(event.target.value)}><option value="">전체 팀</option><option value="unlinked">팀 연결 필요</option>{directory.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
-      </div>}
     </section>
     <section className="dr-list-section" aria-label="작업자별 입금 내역"><div className="dr-section-title"><h2>작업자별 내역 <span className="dr-count">{filtered.length}</span></h2><button className="dr-text-button dr-sites-toggle" aria-expanded={showSites} aria-controls="dr-site-summary" onClick={() => setShowSites(!showSites)}><Building2 size={15} />현장별 요약<ChevronRight size={14} className={showSites ? 'dr-chevron-open' : ''} /></button></div>
     {showSites && !loading && siteSummaries.length > 0 && <section id="dr-site-summary" className="dr-sites" aria-label="현장별 집계"><div className="dr-section-title"><h2>현장별 입금여부</h2><span>{siteSummaries.length}개 현장</span></div><div className="dr-site-grid">{siteSummaries.map(site => <button key={site.name} className="dr-site-card" style={{ borderLeft: `4px solid ${validTeamColor(site.team?.color)}` }} onClick={() => { setSiteName(site.name); setShowSites(false); }}><div className="dr-site-title"><span>{site.name}</span><ChevronRight size={16} /></div><div className="dr-site-values"><span>입금완료<strong>{site.complete} / {site.count}건</strong></span></div><div className="dr-progress" role="progressbar" aria-label={`${site.name} 입금완료 비율`} aria-valuenow={Math.round(site.complete / site.count * 100)} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${site.complete / site.count * 100}%` }} /></div></button>)}</div></section>}

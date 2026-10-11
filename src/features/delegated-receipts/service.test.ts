@@ -357,3 +357,20 @@ it('목록 수정은 잘못된 값과 누락 행을 저장하지 않는다', asy
   await expect(delegatedReceiptService.updateListField('claim-a', { ...edit, change: { field: 'status', value: 'invalid' as 'complete' } })).rejects.toThrow('변경할 입금 정보');
   expect(records.get('claim-a')?.confirmationHistory).toBeUndefined();
 });
+
+it.each([0, null, 290000])('예정액 %s 직접 입력은 세율 계산을 해제하고 원본과 최신 확인·실제 입금액을 보존한다', async amount => {
+  const original = claim({ grossAmount: 300000, expectedAmount: 290100, taxRate: 3.3, taxAmount: 9900, receipts: [receipt()], confirmation: confirmation(), confirmationHistory: [confirmation()], assignedTeamId: 'team-a' });
+  records.set('claim-a', original);
+  const updated = await delegatedReceiptService.updateListField('claim-a', { id: 'amount-a', recordedAt: confirmation().recordedAt, change: { field: 'expectedAmount', value: amount } });
+  expect(updated).toMatchObject({ expectedAmount: amount, originalExpectedAmount: 290100, grossAmount: 300000, taxRate: null, taxAmount: null, confirmation: original.confirmation, receipts: original.receipts, assignedTeamId: 'team-a', sourceLabel: original.sourceLabel });
+  const next = await delegatedReceiptService.updateListField('claim-a', { id: 'amount-b', recordedAt: confirmation().recordedAt, change: { field: 'expectedAmount', value: 280000 } });
+  expect(next.originalExpectedAmount).toBe(290100);
+  expect(next.confirmationHistory).toHaveLength(3);
+  await delegatedReceiptService.saveClaim(original);
+  expect(records.get('claim-a')?.originalExpectedAmount).toBe(290100);
+});
+
+it.each([-1, 0.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])('잘못된 예정액 %s를 목록에서 저장하지 않는다', async amount => {
+  await expect(delegatedReceiptService.updateListField('claim-a', { id: 'amount-a', recordedAt: confirmation().recordedAt, change: { field: 'expectedAmount', value: amount } })).rejects.toThrow('금액');
+  expect(runTransaction).not.toHaveBeenCalled();
+});
