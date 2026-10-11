@@ -71,6 +71,36 @@ describe('위임금 입금 확인 화면', () => {
     await screen.findByText('기준 정보가 저장되었습니다.');
   });
 
+  it('작업자 목록을 먼저 보여주고 현장 요약에서 선택하면 해당 작업자 목록으로 돌아온다', () => {
+    render(<DelegatedReceiptsWorkspace initialClaims={fixtures} />);
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '현장별 집계' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '자료 관리' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '현장별 요약' }));
+    const sites = screen.getByRole('region', { name: '현장별 집계' });
+    fireEvent.click(within(sites).getByRole('button', { name: /가상현장 B/ }));
+    expect(screen.queryByRole('region', { name: '현장별 집계' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('현장', { exact: true })).toHaveValue('가상현장 B');
+    expect(within(screen.getByRole('table')).getByText('검증작업자 나')).toBeInTheDocument();
+    expect(within(screen.getByRole('table')).queryByText('검증작업자 가')).not.toBeInTheDocument();
+  });
+
+  it('빠른 금액 확인 필터와 접힌 상세 조건을 초기화하고 검색어만 따로 지울 수 있다', () => {
+    render(<DelegatedReceiptsWorkspace initialClaims={fixtures} />);
+    fireEvent.click(screen.getByRole('button', { name: '금액 미확정', exact: true }));
+    expect(within(screen.getByRole('table')).getByText('검증작업자 다')).toBeInTheDocument();
+    expect(within(screen.getByRole('table')).queryByText('검증작업자 가')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /상세 필터/ }));
+    fireEvent.change(screen.getByLabelText('수령수단', { exact: true }), { target: { value: 'cash' } });
+    fireEvent.click(screen.getByRole('button', { name: /상세 필터/ }));
+    fireEvent.click(within(screen.getByRole('region', { name: '입금 내역 필터' })).getByRole('button', { name: /필터 초기화/ }));
+    expect(screen.getAllByRole('row')).toHaveLength(4);
+    fireEvent.change(screen.getByLabelText('작업자 검색'), { target: { value: '검증작업자 가' } });
+    expect(screen.getAllByRole('row')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: '작업자 검색 지우기' }));
+    expect(screen.getAllByRole('row')).toHaveLength(4);
+  });
+
   it('월 화살표로 이동하면 이전 달의 현장 필터를 해제한다', async () => {
     const next = { ...base, id: 'next-month', month: '2026-10', siteName: '다음 달 현장', workerName: '다음 달 작업자' };
     (delegatedReceiptService.list as jest.Mock).mockResolvedValue([next]);
@@ -85,13 +115,16 @@ describe('위임금 입금 확인 화면', () => {
     const paid = { ...base, expectedAmount: 100, receipts: [{ ...base.receipts[0], amount: 200 }] };
     const unpaid = { ...base, id: 'unpaid', workerName: '미입금 작업자', expectedAmount: 100, receipts: [] };
     const { rerender } = render(<DelegatedReceiptsWorkspace key="confirmed" initialClaims={[paid, unpaid]} />);
+    fireEvent.click(screen.getByRole('button', { name: '현장별 요약' }));
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
     rerender(<DelegatedReceiptsWorkspace key="unconfirmed" initialClaims={[unpaid, { ...paid, expectedAmount: null }]} />);
+    fireEvent.click(screen.getByRole('button', { name: '현장별 요약' }));
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
   });
 
   it('전부 금액 미확정인 현장을 0원 잔액 또는 완납률로 표시하지 않는다', () => {
     render(<DelegatedReceiptsWorkspace initialClaims={[fixtures[2]]} />);
+    fireEvent.click(screen.getByRole('button', { name: '현장별 요약' }));
     const site = screen.getByRole('region', { name: '현장별 집계' });
     expect(site).toHaveTextContent('확정분 잔액미확정');
     expect(site).toHaveTextContent('예정 미확정');
@@ -173,6 +206,7 @@ describe('위임금 입금 확인 화면', () => {
     (workbookArchiveService.listArchives as jest.Mock).mockResolvedValue([{ id: 'archive-test', recordType: 'source-workbook', fileName: '가상 보관.xlsx', sha256: 'synthetic', byteLength: 10, chunkCount: 1, claimCount: 3, reviewRowCount: 0, months: ['2025-03'], status: 'complete', createdAt: '2026-09-11T00:00:00Z', sheetSummaries: [], warnings: [] }]);
     render(<DelegatedReceiptsWorkspace initialClaims={[]} />);
     expect(workbookArchiveService.listArchives).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '자료 관리' }));
     fireEvent.click(screen.getByRole('button', { name: '원본 보관함' }));
     const button = await screen.findByRole('button', { name: '2025-03 저장 내역 보기' });
     fireEvent.click(button);
@@ -200,6 +234,7 @@ describe('위임금 입금 확인 화면', () => {
 
   it('읽기 전용 화면에서는 추가·가져오기·입금저장을 노출하지 않는다', () => {
     render(<DelegatedReceiptsWorkspace initialClaims={[base]} canWrite={false} />);
+    fireEvent.click(screen.getByRole('button', { name: '자료 관리' }));
     expect(screen.queryByRole('button', { name: '직접 추가' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '엑셀 가져오기' })).not.toBeInTheDocument();
     openFirst();
