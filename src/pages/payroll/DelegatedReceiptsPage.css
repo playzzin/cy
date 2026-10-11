@@ -175,7 +175,13 @@
 .dr-progress { width:100%; background:#eef2f5; height:5px; overflow:hidden; border-radius:5px; }
 .dr-progress span { display:block; height:100%; background:var(--dr-green); border-radius:5px; }
 .dr-site-card>p { color:var(--dr-muted); font-size:10px; margin:9px 0 0; display:flex; justify-content:space-between; gap:6px; flex-wrap:wrap; }
-.dr-list-section { border:1px solid var(--dr-line); background:white; border-radius:12px; overflow:hidden; }
+.dr-list-section { border:1px solid var(--dr-line); background:white; border-radius:12px; overflow:hidden; container-type:inline-size; container-name:dr-ledger; }
+@container dr-ledger (max-width:1050px) {
+  .dr-inline-payment { grid-template-columns:minmax(170px,1fr); }
+  .dr-inline-payment .dr-inline-delegation { max-width:90px; }
+  .dr-table .dr-worker-identity { min-width:125px; }
+  .dr-table .dr-cell-sub { white-space:normal; max-width:170px; }
+}
 .dr-list-section>.dr-section-title { padding:10px 16px; margin:0; min-height:52px; }
 .dr-count { display:inline-block; margin-left:5px; color:var(--dr-green); font-size:13px; background:#e9f5ef; padding:3px 8px; border-radius:6px; vertical-align:2px; }
 .dr-table-wrap { overflow-x:auto; }
