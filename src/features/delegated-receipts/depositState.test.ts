@@ -1,6 +1,6 @@
 import { DelegatedClaim, getClaimTotals } from './model';
 import { getDelegation, getDepositState, getDisplayRemaining, interpretSource } from './depositState';
-import { getSiteTeam, getWorkerColor, getWorkerTeam, recipientDetail, validTeamColor, ReceiptDirectory } from './teamDirectory';
+import { getSiteTeam, getWorkerColor, getWorkerTeam, getRecipientLabels, getBulkRecipientLabels, recipientDetail, validTeamColor, ReceiptDirectory } from './teamDirectory';
 const claim = (changes: Partial<DelegatedClaim> = {}): DelegatedClaim => ({ id: 'test', month: '2026-09', siteName: '가상 현장', workerName: '가상 작업자', delegationType: 'unknown', paymentMethod: 'unknown', grossAmount: 100000, expectedAmount: null, receipts: [], sourceStatus: '', sourceLabel: '', memo: '', updatedAt: '', ...changes });
 
 it('작업자의 팀 ID를 우선하고 이름만 있는 기존 자료는 하나의 팀과 일치할 때만 연결한다', () => {
@@ -38,6 +38,13 @@ it('원본 상태가 없으면 실제 기록과 기준액으로 분할·완료�
   expect(getDepositState(claim({ expectedAmount: 0 })).status).toBe('unknown');
 });
 const directory: ReceiptDirectory = { teams: [{ id: 'a', name: '가상 팀', color: '#ff0000', leaderName: '가상 팀장' }, { id: 'b', name: '이재욱팀', color: '#00ff00', leaderName: '이재욱' }], sites: [{ id: 's', name: '가상현장', responsibleTeamId: 'a' }] };
+it('현장 담당 팀에 맞춰 계좌명을 표시하고 다른 현장을 함께 고르면 각 현장 기준으로 안내한다', () => {
+  expect(getRecipientLabels(claim(), directory)).toMatchObject({ personal: '개인통장', site_leader: '가상 팀 팀장계좌', jaewook_leader: '이재욱 위임' });
+  expect(getRecipientLabels(claim({ assignedTeamId: 'b' }), directory).site_leader).toBe('이재욱팀 팀장계좌');
+  expect(getRecipientLabels(claim({ siteName: '미연결 현장' }), directory).site_leader).toBe('현장 담당 팀장계좌');
+  expect(getBulkRecipientLabels([claim(), claim({ id: 'two' })], directory).site_leader).toBe('가상 팀 팀장계좌');
+  expect(getBulkRecipientLabels([claim(), claim({ assignedTeamId: 'b' })], directory).site_leader).toBe('각 현장 담당 팀장계좌');
+});
 it('정확히 연결된 현장 팀의 색상과 계좌 주체를 사용하고 수동 연결을 우선한다', () => {
   expect(getSiteTeam(claim(), directory)?.color).toBe('#ff0000');
   expect(getSiteTeam(claim({ assignedTeamId: 'b' }), directory)?.color).toBe('#00ff00');

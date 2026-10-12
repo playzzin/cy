@@ -1,9 +1,11 @@
-import { calculateExpectedAmount, DelegatedClaim, DelegationType, DepositStatus, RecipientKind } from './model';
+import { calculateExpectedAmount, DelegatedClaim, DelegationType, DepositStatus, RecipientKind, EntryKind, entryKindLabels } from './model';
 import type { ReceiptDirectory } from './teamDirectory';
+import { validateRecipient } from './depositState';
 
 export interface BulkEntryRow {
   id: string; siteId: string; workerId: string; gross: string; expected: string; taxRate: string;
   delegation: DelegationType; recipient: RecipientKind; status: DepositStatus; memo: string;
+  entryKind?: EntryKind; entryName?: string;
 }
 export const newEntryId = () => typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 export function parseEntryMoney(value: string): number | null {
@@ -43,13 +45,18 @@ export function buildBulkClaims(rows: BulkEntryRow[], month: string, directory: 
     try {
       const site = directory.sites.find(site => site.id === row.siteId);
       const worker = directory.workers?.find(worker => worker.id === row.workerId);
-      if (!site || !worker) throw new Error('등록된 현장과 작업자를 선택해 주세요.');
-      const identity = JSON.stringify([site.id, worker.id]);
+      const kind = row.entryKind ?? 'worker';
+      if (!Object.prototype.hasOwnProperty.call(entryKindLabels, kind)) throw new Error('등록 종류를 확인해 주세요.');
+      if (!site || (kind === 'worker' && !worker)) throw new Error('등록된 현장과 작업자를 선택해 주세요.');
+      if (kind !== 'worker' && row.workerId) throw new Error('별도 금액에는 작업자를 연결할 수 없습니다.');
+      const name = kind === 'worker' ? worker!.name : row.entryName?.trim() || entryKindLabels[kind];
+      if (name.length > 120) throw new Error('항목명은 120자까지 입력할 수 있습니다.');
+      const identity = JSON.stringify([site.id, kind, kind === 'worker' ? worker!.id : row.id]);
       if (identities.has(identity)) throw new Error('같은 현장의 작업자가 중복되었습니다. 행을 합치거나 현장을 변경해 주세요.');
       identities.add(identity);
       if (row.memo.length > 2000) throw new Error('메모는 2,000자까지 입력할 수 있습니다.');
-      const confirmation = { id: `${row.id}-initial`, recordedAt, status: row.status, recipient: row.recipient, note: '직접 일괄 등록' };
-      return { id: row.id, manualBatchId: batchId, month, siteId: site.id, siteName: site.name, workerId: worker.id, workerName: worker.name,
+      const confirmation = { id: `${row.id}-initial`, recordedAt, status: row.status, recipient: validateRecipient(row.recipient), note: '직접 일괄 등록' };
+      return { id: row.id, entryKind: kind, manualBatchId: batchId, month, siteId: site.id, siteName: site.name, ...(kind === 'worker' ? { workerId: worker!.id } : {}), workerName: name,
         delegationType: row.delegation, paymentMethod: 'transfer', ...entryAmounts(row), receipts: [], sourceStatus: '', sourceLabel: '직접 일괄 입력',
         confirmation, confirmationHistory: [confirmation], memo: row.memo.trim(), updatedAt: recordedAt };
     } catch (error) { throw new Error(`${index + 1}행: ${error instanceof Error ? error.message : '입력값을 확인해 주세요.'}`); }

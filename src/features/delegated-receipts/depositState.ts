@@ -1,12 +1,23 @@
-import { DelegatedClaim, DelegationType, DepositStatus, RecipientKind, getClaimTotals } from './model';
+import { DelegatedClaim, DelegationType, DepositStatus, RecipientKind, StandardRecipientKind, getClaimTotals } from './model';
 
 export const depositLabels: Record<DepositStatus, string> = {
     unknown: '확인 필요', pending: '입금 전', partial: '일부 입금', complete: '입금완료',
 };
-export const recipientLabels: Record<RecipientKind, string> = {
+export const recipientLabels: Record<StandardRecipientKind, string> = {
     unknown: '받는 계좌 확인 필요', personal: '개인통장',
-    site_leader: '현장 팀장계좌', jaewook_leader: '이재욱팀 팀장계좌',
+    site_leader: '현장 담당 팀장계좌', jaewook_leader: '이재욱 위임',
 };
+export const isCustomRecipient = (value: string): value is `custom:${string}` => value.startsWith('custom:');
+export const recipientLabel = (value: RecipientKind, labels = recipientLabels): string => isCustomRecipient(value) ? value.slice(7) : labels[value];
+export function validateRecipient(value: string): RecipientKind {
+    if (isCustomRecipient(value)) {
+        const name = value.slice(7).trim();
+        if (!name || name.length > 120 || [...name].some(character => character.charCodeAt(0) < 32)) throw new Error('받는 계좌를 1~120자로 입력해 주세요.');
+        return `custom:${name}`;
+    }
+    if (!Object.prototype.hasOwnProperty.call(recipientLabels, value)) throw new Error('받는 계좌를 확인해 주세요.');
+    return value as StandardRecipientKind;
+}
 
 /** 이전 가져오기의 안내 접미사는 원본 문구가 아니다. 원본은 그대로 보존한다. */
 export function sourceText(value: string): string {

@@ -124,3 +124,7 @@
  .dr-site-accordion-header .dr-site-selection + h3 { flex-basis:calc(100% - 50px); }
  .dr-site-accordion-header:has(.dr-site-selection) > .dr-memo-add,.dr-site-accordion-header:has(.dr-site-selection) > .dr-memo-toggle { margin-left:50px; }
 }
+.dr-entry-kind { display:block; margin-top:4px; font-size:11px; font-weight:500; opacity:.8; }
+.dr-separate-heading { display:flex; align-items:center; gap:7px; padding:14px 9px 6px; font-size:14px; color:#536b7e; font-weight:600; }.dr-separate-heading>span { font-size:12px; font-weight:400; }
+.dr-site-settings-button { display:flex; align-items:center; justify-content:center; gap:5px; min-height:44px; flex-shrink:0; padding:8px; border:1px solid currentColor; color:inherit; background:transparent; border-radius:6px; cursor:pointer; font-size:12px; }
+@media(max-width:600px) { .dr-site-settings-button { margin-left:50px; }.dr-site-settings-button span { font-size:12px; } }

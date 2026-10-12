@@ -1,4 +1,5 @@
 import React from 'react';
+import { siteTaxService } from '../../features/delegated-receipts/siteTaxService';
 import { siteMemoService } from '../../features/delegated-receipts/siteMemoService';
 import * as teamDirectory from '../../features/delegated-receipts/teamDirectory';
 import '@testing-library/jest-dom';
@@ -12,6 +13,8 @@ import { workbookArchiveService } from '../../features/delegated-receipts/workbo
 import { receiptDirectoryService } from '../../features/delegated-receipts/directoryService';
 import { getDepositState } from '../../features/delegated-receipts/depositState';
 
+jest.mock('../../features/delegated-receipts/siteTaxService', () => ({ siteTaxService: { list: jest.fn(), save: jest.fn() } }));
+beforeEach(() => { (siteTaxService.list as jest.Mock).mockResolvedValue([]); });
 jest.mock('../../features/delegated-receipts/siteMemoService', () => ({ siteMemoService: { list: jest.fn(), save: jest.fn() }, SiteMemoConflictError: class extends Error {} }));
 beforeEach(() => { (siteMemoService.list as jest.Mock).mockImplementation(() => new Promise(() => {})); });
 const render = (ui: React.ReactElement) => {
@@ -43,6 +46,28 @@ const fixtures: DelegatedClaim[] = [
   { ...base, id: 'synthetic-2', workerName: '검증작업자 나', siteName: '가상현장 B', delegationType: 'direct', expectedAmount: 200000, receipts: [] },
   { ...base, id: 'synthetic-3', workerName: '검증작업자 다', delegationType: 'unknown', expectedAmount: null, receipts: [] },
 ];
+
+it('작업자와 별도 내역을 구분하고 현장 설정에서 선택 재계산한 값을 목록에 반영한다', async () => {
+  const invoice = { ...base, id: 'invoice', entryKind: 'invoice' as const, workerName: '가상 계산서', receipts: [] };
+  const directory = { teams: [], sites: [{ id: 's1', name: base.siteName }] };
+  const tax = { list: jest.fn(), save: jest.fn().mockResolvedValue({ setting: { key: '["id","s1"]', name: base.siteName, taxRate: 3.3, revision: 1, operationId: 'tax-op', updatedAt: base.updatedAt }, claims: [{ ...invoice, taxRate: 3.3, expectedAmount: 96700, taxAmount: 3300 }] }) };
+  render(<DelegatedReceiptsWorkspace initialClaims={[base, invoice]} initialDirectory={directory} taxService={tax} />);
+  expect(screen.getByRole('button', { name: base.siteName + ' 현장' })).toHaveTextContent('1명 · 별도 1건');
+  expect(screen.getByText('바이백·계산서')).toBeVisible();
+  expect(screen.getByRole('combobox', { name: '가상 계산서 받는 계좌' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: base.siteName + ' 현장 설정' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '현장 기본 세율' }), { target: { value: '3.3' } });
+  fireEvent.click(screen.getByRole('checkbox', { name: '가상 계산서 세율 재계산' }));
+  fireEvent.click(screen.getByRole('button', { name: '세율 저장 · 1건 재계산' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(tax.save).toHaveBeenCalledWith(expect.objectContaining({ selected: [{ id: 'invoice', updatedAt: base.updatedAt }] }));
+  fireEvent.click(screen.getByRole('button', { name: '가상 계산서 계산서' }));
+  expect(screen.getByRole('article', { name: '가상 계산서 내역' })).toHaveTextContent('96,700원');
+  fireEvent.click(screen.getByRole('button', { name: '직접 추가' }));
+  fireEvent.change(screen.getByRole('combobox', { name: '추가할 현장' }), { target: { value: 's1' } });
+  fireEvent.click(screen.getByRole('button', { name: '계산서 직접 입력' }));
+  expect(screen.getByRole('textbox', { name: '1행 세율' })).toHaveValue('3.3');
+});
 
 it('현장을 펼치면 작업자가 접혀 있어도 입금 항목을 바로 수정하고 초안을 유지한다', () => {
   const directory = { teams: [{ id: 't1', name: '가상팀', color: '#336699' }], sites: [{ id: 's1', name: base.siteName, responsibleTeamId: 't1' }] };
@@ -110,7 +135,7 @@ describe('위임금 입금 확인 화면', () => {
     const summary = screen.getByRole('region', { name: '입금 요약' });
     expect(summary).toHaveTextContent('40,000원');
     expect(summary).toHaveTextContent('입금여부 확인 필요2건');
-    fireEvent.change(within(screen.getByRole('region', { name: '입금 내역 필터' })).getByLabelText('입금방법', { exact: true }), { target: { value: 'direct' } });
+    fireEvent.click(within(screen.getByRole('region', { name: '입금 내역 필터' })).getByLabelText('입금방법', { exact: true })); fireEvent.click(screen.getByRole('option', { name: '직불' }));
     expect(within(table).queryByText('검증작업자 가')).not.toBeInTheDocument();
     expect(within(table).getByText('검증작업자 나')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('작업자 검색'), { target: { value: '없는이름' } });
@@ -139,7 +164,7 @@ describe('위임금 입금 확인 화면', () => {
     fireEvent.click(screen.getByRole('button', { name: '확인 필요' }));
     expect(within(screen.getByRole('region', { name: '현장별 작업자 내역' })).getByText('검증작업자 다')).toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: '현장별 작업자 내역' })).queryByText('검증작업자 가')).not.toBeInTheDocument();
-    fireEvent.change(within(screen.getByRole('region', { name: '입금 내역 필터' })).getByLabelText('받는 계좌', { exact: true }), { target: { value: 'personal' } });
+    fireEvent.click(within(screen.getByRole('region', { name: '입금 내역 필터' })).getByLabelText('받는 계좌', { exact: true })); fireEvent.click(screen.getByRole('option', { name: '개인통장' }));
     fireEvent.click(within(screen.getByRole('region', { name: '입금 내역 필터' })).getByRole('button', { name: /필터 초기화/ }));
     fireEvent.click(screen.getByRole('button', { name: '현장 모두 펼치기' }));
     expect(within(screen.getByRole('region', { name: '현장별 작업자 내역' })).getAllByRole('article')).toHaveLength(3);
@@ -195,7 +220,8 @@ describe('위임금 입금 확인 화면', () => {
     expect(workbookArchiveService.importWorkbook).not.toHaveBeenCalled();
     expect(dialog).toHaveTextContent('분류 대기 1건');
     fireEvent.change(within(dialog).getByLabelText('공통 세율 (%) · 선택'), { target: { value: '10' } });
-    fireEvent.change(within(dialog).getByLabelText('미확인 입금방법 설정'), { target: { value: 'delegate' } });
+    fireEvent.click(within(dialog).getByRole('combobox', { name: '미확인 입금방법 설정' }));
+    fireEvent.click(screen.getByRole('option', { name: '위임' }));
     fireEvent.click(within(dialog).getByRole('button', { name: '원본과 전체 3건 저장' }));
     await waitFor(() => expect(workbookArchiveService.importWorkbook).toHaveBeenCalledWith(new Uint8Array(4), '가상자료.xlsx', parsed, [
       expect.objectContaining({ id: 'synthetic-2', delegationType: 'direct', taxRate: 10, taxAmount: 10000, expectedAmount: 90000 }),
@@ -265,7 +291,7 @@ it('원본 공동 완료를 금액 미설정이어도 표시하고 계좌 수단
   render(<DelegatedReceiptsWorkspace initialClaims={[{ ...base, expectedAmount: null, receipts: [], sourceStatus: '그룹 표시 G11:G15: 이재욱 위임 입금 완료 (개별 확인 필요)' }]} />);
   const table = screen.getByRole('region', { name: '현장별 작업자 내역' });
   expect(within(table).getByRole('combobox', { name: '검증작업자 가 입금여부' })).toHaveValue('complete');
-  expect(within(table).getByText(/이재욱팀 팀장계좌/)).toBeInTheDocument();
+  expect(within(table).getByText(/이재욱 위임/)).toBeInTheDocument();
   expect(within(table).queryByText(/엑셀 공동 표시|금액 미기록/)).not.toBeInTheDocument();
   expect(screen.queryByText(/수령수단/)).not.toBeInTheDocument();
 });
@@ -325,8 +351,8 @@ it('입금방법 받는 계좌 입금여부를 한 번에 전달한다', async (
   fireEvent.click(screen.getByRole('checkbox', { name: base.siteName + ' 현장 전체 선택' }));
   fireEvent.click(screen.getByRole('button', { name: '선택 내역 일괄 수정' }));
   const dialog = within(screen.getByRole('dialog'));
-  fireEvent.change(dialog.getByRole('combobox', { name: '입금방법' }), { target: { value: 'direct' } });
-  fireEvent.change(dialog.getByRole('combobox', { name: '받는 계좌' }), { target: { value: 'personal' } });
+  fireEvent.click(dialog.getByRole('combobox', { name: '입금방법' })); fireEvent.click(screen.getByRole('option', { name: '직불' }));
+  fireEvent.click(dialog.getByRole('combobox', { name: '받는 계좌' })); fireEvent.click(screen.getByRole('option', { name: '개인통장' }));
   fireEvent.change(dialog.getByRole('combobox', { name: '입금여부' }), { target: { value: 'complete' } });
   fireEvent.click(dialog.getByRole('button', { name: '2건 일괄 수정' }));
   await waitFor(() => expect(delegatedReceiptService.updateListFields).toHaveBeenCalledWith([fixtures[0].id, fixtures[2].id], [
@@ -344,10 +370,10 @@ it('목록에서 세 항목을 바로 저장하고 PC·모바일 표시와 요�
     return saved;
   });
   render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
-  fireEvent.change(screen.getByRole('combobox', { name: '검증작업자 가 입금방법' }), { target: { value: 'direct' } });
-  await waitFor(() => expect(screen.getByRole('combobox', { name: '검증작업자 가 입금방법' })).toHaveValue('direct'));
-  fireEvent.change(screen.getByRole('combobox', { name: '검증작업자 가 받는 계좌' }), { target: { value: 'site_leader' } });
-  await waitFor(() => expect(screen.getByRole('combobox', { name: '검증작업자 가 받는 계좌' })).toHaveValue('site_leader'));
+  fireEvent.click(screen.getByRole('combobox', { name: '검증작업자 가 입금방법' })); fireEvent.click(screen.getByRole('option', { name: '직불' }));
+  await waitFor(() => expect(screen.getByRole('combobox', { name: '검증작업자 가 입금방법' })).toHaveTextContent('직불'));
+  fireEvent.click(screen.getByRole('combobox', { name: '검증작업자 가 받는 계좌' })); fireEvent.click(screen.getByRole('option', { name: '현장 담당 팀장계좌' }));
+  await waitFor(() => expect(screen.getByRole('combobox', { name: '검증작업자 가 받는 계좌' })).toHaveTextContent('현장 담당 팀장계좌'));
   fireEvent.change(screen.getByRole('combobox', { name: '검증작업자 가 입금여부' }), { target: { value: 'complete' } });
   await waitFor(() => expect(screen.getByRole('combobox', { name: '검증작업자 가 입금여부' })).toHaveValue('complete'));
   expect(delegatedReceiptService.updateListField).toHaveBeenCalledTimes(3);
@@ -363,10 +389,10 @@ it('목록 저장 실패를 표시하고 같은 요청으로 다시 저장한다
   render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
   const table = within(screen.getByRole('region', { name: '현장별 작업자 내역' }));
   const method = table.getByRole('combobox', { name: '검증작업자 가 입금방법' });
-  fireEvent.change(method, { target: { value: 'direct' } });
+  fireEvent.click(method); fireEvent.click(screen.getByRole('option', { name: '직불' }));
   await table.findByText('저장 확인 실패');
   expect(method).toBeDisabled();
-  expect(screen.getByRole('combobox', { name: '검증작업자 가 입금방법' })).toHaveValue('direct');
+  expect(screen.getByRole('combobox', { name: '검증작업자 가 입금방법' })).toHaveTextContent('직불');
   fireEvent.click(table.getByRole('button', { name: '검증작업자 가 목록 변경 다시 저장' }));
   await table.findByText('저장됨');
   expect(method).toBeEnabled();
@@ -556,7 +582,8 @@ it('상태별 세전·예정 합계를 표시하고 필터 변경과 미확정 �
   expect(total).toHaveTextContent('200,000원');
   expect(total).not.toHaveTextContent('300,000원');
   const recipient = within(screen.getByRole('region', { name: '현장별 작업자 내역' })).getByRole('combobox', { name: '대기 작업자 받는 계좌' });
-  expect(within(recipient).getByRole('option', { name: '개인통장' })).toBeInTheDocument();
+  fireEvent.click(recipient);
+  expect(screen.getByRole('option', { name: '개인통장' })).toBeInTheDocument();
   expect(screen.queryByRole('option', { name: '작업자 개인통장' })).not.toBeInTheDocument();
 });
 
@@ -590,13 +617,12 @@ it('현장과 팀 선택은 담당 팀 색상으로 표시하고 검색·키보�
 it('직접 추가에서 현장·작업자를 골라 여러 행을 등록한 후 선택한 월을 조회한다', async () => {
   (delegatedReceiptService.createClaims as jest.Mock).mockResolvedValue({ added: 2, skipped: 0 });
   (delegatedReceiptService.list as jest.Mock).mockResolvedValue([]);
-  render(<DelegatedReceiptsWorkspace initialClaims={fixtures} initialDirectory={{ teams: [], sites: [{ id: 's1', name: '선택 현장' }], workers: [{ id: 'w1', name: '선택 가' }, { id: 'w2', name: '선택 나' }] }} />);
+  render(<DelegatedReceiptsWorkspace initialClaims={fixtures} initialDirectory={{ teams: [{ id: 't1', name: '청연 소속 팀', isCheongyeon: true }], sites: [{ id: 's1', name: '선택 현장' }], workers: [{ id: 'w1', name: '선택 가', teamId: 't1' }, { id: 'w2', name: '선택 나', teamId: 't1' }] }} />);
   fireEvent.click(screen.getByRole('button', { name: '직접 추가' }));
   const dialog = screen.getByRole('dialog', { name: '직접 추가 · 일괄 등록' });
   fireEvent.change(within(dialog).getByLabelText('등록 귀속월'), { target: { value: '2026-11' } });
   fireEvent.change(within(dialog).getByRole('combobox', { name: '추가할 현장' }), { target: { value: 's1' } });
-  fireEvent.click(within(dialog).getByRole('button', { name: '검색 결과 전체 선택' }));
-  fireEvent.click(within(dialog).getByRole('button', { name: '선택한 2명 행 추가' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '검색 결과 전체 추가' }));
   fireEvent.click(within(dialog).getByRole('button', { name: '2행 한 번에 등록' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   expect(delegatedReceiptService.createClaims).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ month: '2026-11', siteId: 's1', workerId: 'w1' }), expect.objectContaining({ month: '2026-11', workerId: 'w2' })]));

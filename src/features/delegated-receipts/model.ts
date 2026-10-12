@@ -2,13 +2,18 @@ export type PaymentMethod = 'transfer' | 'cash' | 'other' | 'unknown';
 export type DelegationType = 'delegate' | 'direct' | 'unknown';
 export type ReceiptStatus = 'unconfirmed' | 'unpaid' | 'partial' | 'paid' | 'overpaid';
 export type DepositStatus = 'unknown' | 'pending' | 'partial' | 'complete';
-export type RecipientKind = 'unknown' | 'personal' | 'site_leader' | 'jaewook_leader';
+export type StandardRecipientKind = 'unknown' | 'personal' | 'site_leader' | 'jaewook_leader';
+export type RecipientKind = StandardRecipientKind | `custom:${string}`;
+export type EntryKind = 'worker' | 'buyback' | 'invoice';
+export const entryKindLabels: Record<EntryKind, string> = { worker: '작업자', buyback: '바이백', invoice: '계산서' };
+export const isSeparateEntry = (claim: Pick<DelegatedClaim, 'entryKind'>) => claim.entryKind === 'buyback' || claim.entryKind === 'invoice';
 export type ClaimListChange =
     | { field: 'delegation'; value: DelegationType }
     | { field: 'recipient'; value: RecipientKind }
     | { field: 'status'; value: DepositStatus }
     | { field: 'expectedAmount'; value: number | null }
     | { field: 'grossAmount'; value: number | null }
+    | { field: 'taxRate'; value: number | null }
     | { field: 'memo'; value: string };
 export interface ClaimListEdit { id: string; recordedAt: string; change: ClaimListChange; }
 export interface DepositConfirmation {
@@ -33,6 +38,7 @@ export interface Receipt {
 
 export interface DelegatedClaim {
     id: string;
+    entryKind?: EntryKind;
     month: string;
     siteName: string;
     workerName: string;

@@ -5,6 +5,15 @@ const directory = { teams: [], sites: [{ id: 's1', name: '가상 현장' }, { id
 const row = (patch: Partial<BulkEntryRow> = {}): BulkEntryRow => ({ id: 'r1', siteId: 's1', workerId: 'w1', gross: '', expected: '', taxRate: '', delegation: 'delegate', recipient: 'personal', status: 'unknown', memo: '', ...patch });
 const build = (rows: BulkEntryRow[]) => buildBulkClaims(rows, '2026-10', directory, 'batch-1', '2026-10-12T00:00:00Z');
 
+it('바이백·계산서는 작업자를 만들거나 연결하지 않고 같은 현장에 여러 별도 행을 등록한다', () => {
+  const saved = build([row(), row({ id: 'b1', entryKind: 'buyback', entryName: '공동 정산', workerId: '', gross: '1000000', taxRate: '3.3' }), row({ id: 'i1', entryKind: 'invoice', workerId: '', expected: '50000' }), row({ id: 'i2', entryKind: 'invoice', workerId: '' })]);
+  expect(saved[0].workerId).toBe('w1');
+  expect(saved[1]).toMatchObject({ entryKind: 'buyback', workerName: '공동 정산', expectedAmount: 967000 });
+  expect(saved[2]).toMatchObject({ entryKind: 'invoice', workerName: '계산서', expectedAmount: 50000 });
+  expect(saved.slice(1).every(claim => !Object.prototype.hasOwnProperty.call(claim, 'workerId'))).toBe(true);
+  expect(() => build([row({ entryKind: 'invoice' })])).toThrow('작업자를 연결');
+});
+
 it('엑셀의 금액 2열 붙여넣기는 여러 행을 한 번에 채우고 직접 예정액을 보존한다', () => {
   const rows = [row({ taxRate: '3.3' }), row({ id: 'r2', workerId: 'w2', taxRate: '3.3' })];
   const pasted = pasteEntryAmounts(rows, 0, 'gross', '1,000,000\t950,000\r\n0\t0\r\n');

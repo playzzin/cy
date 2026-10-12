@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import type { DelegatedClaim, DepositConfirmation, DepositStatus, RecipientKind } from '../../features/delegated-receipts/model';
 import { depositLabels, getDepositState, recipientLabels } from '../../features/delegated-receipts/depositState';
+import RecipientSelect from './RecipientSelect';
 
 export default function DepositConfirmationForm({ claims, busy, error, onSave }: {
   claims: DelegatedClaim[]; busy: boolean; error: string;
@@ -20,7 +21,7 @@ export default function DepositConfirmationForm({ claims, busy, error, onSave }:
     <h3>{bulk ? `선택한 ${claims.length}건 입금여부 확인` : '입금여부 확인'}</h3>
     <p className="dr-form-help">통장 입금 여부를 확인한 뒤 저장하세요. 입금액을 입력하지 않아도 입금완료로 표시할 수 있습니다.</p>
     <div className="dr-confirm-options" role="group" aria-label="입금여부 선택">{Object.entries(depositLabels).map(([value, label]) => <button type="button" key={value} aria-pressed={status === value} className={`dr-button ${status === value ? 'dr-button-primary' : ''}`} disabled={busy} onClick={() => setStatus(value as DepositStatus)}>{label}</button>)}</div>
-    <label>입금받는 계좌<select value={recipient} disabled={busy} onChange={event => setRecipient(event.target.value as RecipientKind | 'keep')}>{bulk && <option value="keep">각 작업자의 기존 계좌 구분 유지</option>}{Object.entries(recipientLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+    <label>입금받는 계좌<RecipientSelect label="입금받는 계좌" value={recipient} disabled={busy} onChange={setRecipient} allowKeep={bulk} /></label>
     <label>확인 메모<input maxLength={1000} value={note} disabled={busy} onChange={event => setNote(event.target.value)} placeholder="선택 입력 · 확인한 내용" /></label>
     {error && <p role="alert" className="dr-form-error">{error}</p>}
     <button type="submit" className="dr-button dr-button-primary dr-full-width" disabled={busy}>{busy ? '저장 중…' : `${bulk ? `${claims.length}건 ` : ''}${depositLabels[status]} 저장`}</button>

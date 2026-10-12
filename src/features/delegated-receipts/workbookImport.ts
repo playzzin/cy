@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { DelegatedClaim, DelegationType, PaymentMethod } from './model';
+import { sourceImportMemo } from './sourceMemo';
 
 const text = (value: unknown): string => value == null ? '' : String(value).replace(/\s+/g, ' ').trim();
 const compact = (value: unknown): string => text(value).replace(/\s+/g, '');
@@ -213,7 +214,7 @@ export function parseDelegatedWorkbook(workbook: XLSX.WorkBook): DelegatedWorkbo
                     receipts: [],
                     sourceStatus,
                     sourceLabel: `${sheetName}!${XLSX.utils.encode_cell({ r: row, c: block.col })}`,
-                    memo: '',
+                    memo: sourceImportMemo(sourceStatus),
                     updatedAt: now,
                 });
             }
@@ -259,7 +260,7 @@ export function parseDelegatedWorkbook(workbook: XLSX.WorkBook): DelegatedWorkbo
                         delegationType: classifyDelegation(status.individualStatus), paymentMethod: classifyPayment(status.individualStatus),
                         grossAmount: null, expectedAmount: amount, taxRate: null, taxAmount: null,
                         receipts: [], sourceStatus: status.status, sourceLabel,
-                        memo: '원본 금액 구분: 세후 금액. 원본 세후액을 받을 금액으로 가져왔습니다.', updatedAt: now,
+                        memo: ['원본 금액 구분: 세후 금액. 원본 세후액을 받을 금액으로 가져왔습니다.', sourceImportMemo(status.status)].filter(Boolean).join('\n'), updatedAt: now,
                     });
                     netClaimCount += 1;
                 } else {

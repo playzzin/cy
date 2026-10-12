@@ -1,8 +1,8 @@
 import { collection, doc, getDocs, query, runTransaction, where } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
 import type { ClaimListChange, ClaimListEdit, DelegatedClaim, DepositConfirmation, PaymentMethod, Receipt } from './model';
-import { calculateExpectedAmount } from './model';
-import { depositLabels, getDepositState, recipientLabels } from './depositState';
+import { calculateExpectedAmount, isSeparateEntry } from './model';
+import { depositLabels, getDepositState, recipientLabel, validateRecipient } from './depositState';
 
 export const DELEGATED_RECEIPTS_COLLECTION = 'delegated_receipt_claims';
 const IMPORT_CHUNK_SIZE = 100;
@@ -83,18 +83,23 @@ const validateReceipts = (values: Receipt[]): Receipt[] => {
 };
 
 const validateListChange = (change: ClaimListChange): ClaimListChange => {
+  if (change?.field === 'taxRate') {
+    if (change.value !== null && (typeof change.value !== 'number' || !Number.isFinite(change.value) || change.value < 0 || change.value > 100)) throw new Error('세율은 0~100%로 입력해 주세요.');
+    return { field: 'taxRate', value: change.value };
+  }
   if (change?.field === 'expectedAmount' || change?.field === 'grossAmount') return { field: change.field, value: validateAmount(change.value, true) };
   if (change?.field === 'memo') return { field: change.field, value: requireText(change.value, '메모', 2000) };
+  if (change?.field === 'recipient') return { field: 'recipient', value: validateRecipient(requireText(change.value, '받는 계좌', 127, true)) };
   const options = { delegation: ['delegate', 'direct', 'unknown'], recipient: ['unknown', 'personal', 'site_leader', 'jaewook_leader'], status: ['unknown', 'pending', 'partial', 'complete'] };
   if (!change || !Object.prototype.hasOwnProperty.call(options, change.field) || !options[change.field].includes(change.value)) throw new Error('변경할 입금 정보를 확인해 주세요.');
   return { field: change.field, value: change.value } as ClaimListChange;
 };
 const validateConfirmation = (value: DepositConfirmation): DepositConfirmation => {
   if (!value || !['unknown', 'pending', 'partial', 'complete'].includes(value.status)
-    || !['unknown', 'personal', 'site_leader', 'jaewook_leader'].includes(value.recipient)) throw new Error('입금여부와 받는 계좌를 확인해 주세요.');
+    || typeof value.recipient !== 'string') throw new Error('입금여부와 받는 계좌를 확인해 주세요.');
   const recordedAt = requireText(value.recordedAt, '확인 시각', 40, true);
   if (!Number.isFinite(Date.parse(recordedAt))) throw new Error('확인 시각을 확인해 주세요.');
-  return { id: validateId(value.id), status: value.status, recipient: value.recipient,
+  return { id: validateId(value.id), status: value.status, recipient: validateRecipient(value.recipient),
     note: requireText(value.note, '확인 메모', 1000), recordedAt,
     ...(value.actorId ? { actorId: validateId(value.actorId) } : {}),
     ...(value.listChange ? { listChange: validateListChange(value.listChange) } : {}),
@@ -111,8 +116,10 @@ const batchIds = (ids: string[]) => {
   return [...new Set(ids.map(validateId))];
 };
 
-const validateClaim = (claim: DelegatedClaim): DelegatedClaim => {
+export const validateClaim = (claim: DelegatedClaim): DelegatedClaim => {
   if (!claim || typeof claim !== 'object') throw new Error('위임금 내역을 확인해 주세요.');
+  if (claim.entryKind !== undefined && !['worker', 'buyback', 'invoice'].includes(claim.entryKind)) throw new Error('등록 종류를 확인해 주세요.');
+  if (isSeparateEntry(claim) && claim.workerId !== undefined) throw new Error('별도 금액에는 작업자를 연결할 수 없습니다.');
   if (!['delegate', 'direct', 'unknown'].includes(claim.delegationType)) throw new Error('위임 구분을 확인해 주세요.');
   if (claim.delegationOverride !== undefined && !['delegate', 'direct', 'unknown'].includes(claim.delegationOverride)) throw new Error('위임 구분을 확인해 주세요.');
   const grossAmount = validateAmount(claim.grossAmount, true);
@@ -126,6 +133,7 @@ const validateClaim = (claim: DelegatedClaim): DelegatedClaim => {
   }
   const validated: DelegatedClaim = {
     id: validateId(claim.id), month: validateMonth(claim.month),
+    ...(claim.entryKind !== undefined ? { entryKind: claim.entryKind } : {}),
     siteName: requireText(claim.siteName, '현장명', 200, true),
     workerName: requireText(claim.workerName, '작업자명', 120, true),
     ...(claim.siteId !== undefined ? { siteId: validateId(claim.siteId) } : {}),
@@ -185,9 +193,9 @@ export const delegatedReceiptService = {
     if (!Array.isArray(claims) || !claims.length || claims.length > 100) throw new Error('한 번에 1~100행을 등록해 주세요.');
     const validated = claims.map(validateClaim);
     if (new Set(validated.map(claim => claim.id)).size !== validated.length
-      || new Set(validated.map(claim => JSON.stringify([claim.month, claim.siteId, claim.workerId]))).size !== validated.length
+      || new Set(validated.map(claim => JSON.stringify([claim.month, claim.siteId, claim.entryKind ?? 'worker', isSeparateEntry(claim) ? claim.id : claim.workerId]))).size !== validated.length
       || new Set(validated.map(claim => claim.manualBatchId)).size !== 1
-      || validated.some(claim => !claim.manualBatchId || !claim.siteId || !claim.workerId || claim.receipts.length)) {
+      || validated.some(claim => !claim.manualBatchId || !claim.siteId || (!isSeparateEntry(claim) && !claim.workerId) || claim.receipts.length)) {
       throw new Error('등록할 현장·작업자와 중복 행을 확인해 주세요.');
     }
     if (new Blob([JSON.stringify(validated)]).size > MAX_IMPORT_CHUNK_JSON_BYTES) throw new Error('등록할 내역의 크기를 줄여 주세요.');
@@ -198,6 +206,7 @@ export const delegatedReceiptService = {
       snapshots.forEach((snapshot, index) => {
         if (snapshot.exists() && (snapshot.data().manualBatchId !== validated[index].manualBatchId
           || snapshot.data().workerId !== validated[index].workerId || snapshot.data().siteId !== validated[index].siteId
+          || (snapshot.data().entryKind ?? 'worker') !== (validated[index].entryKind ?? 'worker')
           || snapshot.data().month !== validated[index].month)) {
           throw new Error('기존 내역과 등록 식별자가 충돌했습니다. 기존 내역은 보존했습니다.');
         }
@@ -288,6 +297,7 @@ export const delegatedReceiptService = {
 
   async updateListField(claimId: string, edit: ClaimListEdit): Promise<DelegatedClaim> {
     const change = validateListChange(edit.change);
+    if (change.field === 'taxRate') throw new Error('세율은 현장 설정에서 변경해 주세요.');
     const event = validateConfirmation({ id: edit.id, recordedAt: edit.recordedAt, status: 'unknown', recipient: 'unknown', note: '', listChange: change,
       ...(auth?.currentUser ? { actorId: auth.currentUser.uid } : {}) });
     return runTransaction(db, async transaction => {
@@ -310,7 +320,7 @@ export const delegatedReceiptService = {
         note: change.field === 'memo' ? (change.value ? (current.memo ? '메모 수정' : '메모 등록') : '메모 삭제')
           : change.field === 'expectedAmount' || change.field === 'grossAmount' ? `${change.field === 'grossAmount' ? '세전 금액' : '받을 예정 금액'} 직접 입력: ${change.value === null ? '미확정' : `${change.value.toLocaleString('ko-KR')}원`}`
           : change.field === 'delegation' ? `입금방법 변경: ${{ delegate: '위임', direct: '직불', unknown: '미확인' }[change.value]}`
-          : change.field === 'recipient' ? `받는 계좌 변경: ${recipientLabels[change.value]}` : `입금여부 변경: ${depositLabels[change.value]}` };
+          : change.field === 'recipient' ? `받는 계좌 변경: ${recipientLabel(change.value)}` : `입금여부 변경: ${depositLabels[change.value]}` };
       const grossPatch = change.field === 'grossAmount' ? {
         grossAmount: change.value,
         originalGrossAmount: current.originalGrossAmount !== undefined ? current.originalGrossAmount : current.grossAmount,

@@ -1,0 +1,10 @@
+.dr-recipient-control { min-width:0; width:100%; }
+.dr-bulk-recipient-field { display:flex; flex-direction:column; gap:8px; min-width:0; color:#40536b; font-size:14px; font-weight:600; }
+.dr-recipient-control select { width:100%; text-overflow:ellipsis; }
+.dr-recipient-custom { display:grid; gap:6px; margin-top:6px; }
+.dr-recipient-control .dr-recipient-custom input { width:100%; min-width:0; box-sizing:border-box; height:44px; padding:8px; font:inherit; font-size:14px; border:1px solid #a8c7bc; border-radius:7px; color:#20374b; background:#fff; }
+.dr-recipient-actions { display:flex; justify-content:flex-end; gap:6px; }
+.dr-recipient-actions button { min-height:36px; padding:5px 10px; border:1px solid #ccdcd6; border-radius:6px; background:white; font:inherit; font-size:13px; color:#39594d; cursor:pointer; }
+.dr-recipient-actions button:last-child { background:#08775c; color:white; border-color:#08775c; }
+.dr-recipient-actions button:disabled { opacity:.5; cursor:default; }
+@media(max-width:600px) { .dr-recipient-control .dr-recipient-custom input { font-size:16px; }.dr-recipient-actions button { min-height:44px; } }

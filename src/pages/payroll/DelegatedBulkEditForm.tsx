@@ -1,10 +1,15 @@
 import React, { useRef, useState } from 'react';
 import type { ClaimListEdit, DelegatedClaim, DelegationType, DepositStatus, RecipientKind } from '../../features/delegated-receipts/model';
 import { depositLabels, recipientLabels } from '../../features/delegated-receipts/depositState';
+import { emptyDirectory, getBulkRecipientLabels, ReceiptDirectory } from '../../features/delegated-receipts/teamDirectory';
+import RecipientSelect from './RecipientSelect';
+import ReceiptChoiceSelect from './ReceiptChoiceSelect';
+import { delegationChoices, keepChoice } from './receiptChoiceOptions';
 
-export default function DelegatedBulkEditForm({ claims, busy, error, onSave }: {
-  claims: DelegatedClaim[]; busy: boolean; error: string; onSave: (edits: ClaimListEdit[]) => void;
+export default function DelegatedBulkEditForm({ claims, directory = emptyDirectory, busy, error, onSave }: {
+  claims: DelegatedClaim[]; directory?: ReceiptDirectory; busy: boolean; error: string; onSave: (edits: ClaimListEdit[]) => void;
 }) {
+  const accountLabels = getBulkRecipientLabels(claims, directory);
   const [delegation, setDelegation] = useState<DelegationType | 'keep'>('keep');
   const [recipient, setRecipient] = useState<RecipientKind | 'keep'>('keep');
   const [status, setStatus] = useState<DepositStatus | 'keep'>('keep');
@@ -27,8 +32,8 @@ export default function DelegatedBulkEditForm({ claims, busy, error, onSave }: {
   }}>
     <p className="dr-form-help">선택한 {claims.length}건에 적용합니다. 바꿀 항목만 선택하세요.</p>
     <div className="dr-bulk-edit-fields">
-      <label>입금방법<select value={delegation} disabled={busy} onChange={event => setDelegation(event.target.value as typeof delegation)}><option value="keep">기존 유지</option><option value="delegate">위임</option><option value="direct">직불</option><option value="unknown">미확인</option></select></label>
-      <label>받는 계좌<select value={recipient} disabled={busy} onChange={event => setRecipient(event.target.value as typeof recipient)}><option value="keep">기존 유지</option>{Object.entries(recipientLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      <div className="dr-bulk-recipient-field"><span>입금방법</span><ReceiptChoiceSelect label="입금방법" value={delegation} options={[keepChoice, ...delegationChoices]} disabled={busy} onChange={value => setDelegation(value as typeof delegation)} /></div>
+      <div className="dr-bulk-recipient-field"><span>받는 계좌</span><RecipientSelect label="받는 계좌" value={recipient} labels={accountLabels} disabled={busy} onChange={setRecipient} allowKeep /></div>
       <label>입금여부<select value={status} disabled={busy} onChange={event => setStatus(event.target.value as typeof status)}><option value="keep">기존 유지</option>{Object.entries(depositLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
     </div>
     {error && <p role="alert" className="dr-form-error">{error}</p>}

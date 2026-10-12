@@ -57,6 +57,38 @@ beforeEach(() => {
   });
 });
 
+it('직접 입력 계좌를 목록·일괄 수정으로 저장하고 상태 수정·재시도에서도 보존한다', async () => {
+  records.set('claim-a', claim({ receipts: [receipt()], memo: '유지 메모' }));
+  const edit = bulkEdit('recipient', 'custom:가상 수령인 계좌');
+  const saved = await delegatedReceiptService.updateListField('claim-a', edit);
+  expect(saved.confirmation?.recipient).toBe('custom:가상 수령인 계좌');
+  expect(saved.confirmation?.note).toContain('가상 수령인 계좌');
+  expect(saved).toMatchObject({ receipts: [receipt()], memo: '유지 메모' });
+  await delegatedReceiptService.updateListField('claim-a', edit);
+  expect(records.get('claim-a')?.confirmationHistory).toHaveLength(1);
+  await expect(delegatedReceiptService.updateListField('claim-a', { ...edit, change: { field: 'recipient', value: 'custom:다른 계좌' } })).rejects.toThrow('같은 확인 식별자');
+  await delegatedReceiptService.updateListFields(['claim-a'], [bulkEdit('status', 'complete')]);
+  expect(records.get('claim-a')?.confirmation).toMatchObject({ recipient: 'custom:가상 수령인 계좌', status: 'complete' });
+  await delegatedReceiptService.updateListFields(['claim-a'], [{ ...bulkEdit('recipient', 'custom:공통 계좌'), id: 'new-account' }]);
+  expect(records.get('claim-a')?.confirmation?.recipient).toBe('custom:공통 계좌');
+});
+
+it('별도 내역은 작업자 ID 없이 저장·재시도하고 종류를 보존하며 충돌을 거부한다', async () => {
+  const values = ['buyback', 'invoice', 'invoice'].map((entryKind, index) => claim({ id: `entry-${index}`, entryKind: entryKind as 'buyback' | 'invoice', workerName: '가상 별도 항목', siteId: 'site-a', manualBatchId: 'batch-a', receipts: [] }));
+  expect(await delegatedReceiptService.createClaims(values)).toEqual({ added: 3, skipped: 0 });
+  expect(await delegatedReceiptService.createClaims(values)).toEqual({ added: 0, skipped: 3 });
+  await delegatedReceiptService.updateListField('entry-0', { id: 'amount-change', recordedAt: '2026-10-12T00:00:00Z', change: { field: 'grossAmount', value: 1000 } });
+  expect(records.get('entry-0')).toMatchObject({ entryKind: 'buyback', grossAmount: 1000 });
+  await expect(delegatedReceiptService.createClaims([{ ...values[0], entryKind: 'invoice' }])).rejects.toThrow('충돌');
+  await expect(delegatedReceiptService.createClaims([{ ...values[0], workerId: 'person' }])).rejects.toThrow('작업자를 연결');
+});
+
+it.each(['custom:', 'custom:   ', `custom:${'가'.repeat(121)}`])('유효하지 않은 직접 입력 계좌 %s는 저장하지 않는다', async value => {
+  records.set('claim-a', claim());
+  await expect(delegatedReceiptService.updateListField('claim-a', bulkEdit('recipient', value))).rejects.toThrow('받는 계좌');
+  expect(records.get('claim-a')?.confirmationHistory).toBeUndefined();
+});
+
 it('일괄 수정은 세 항목을 원자적으로 저장하고 원본 금액 메모 입금 기록을 보존한다', async () => {
   const original = claim({ grossAmount: 300000, expectedAmount: 290100, memo: '보존 메모', receipts: [receipt()] });
   records.set('claim-a', original); records.set('claim-b', claim({ id: 'claim-b', sourceStatus: '개인통장' }));
