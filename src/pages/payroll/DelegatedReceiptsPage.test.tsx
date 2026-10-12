@@ -25,7 +25,7 @@ jest.mock('../../features/delegated-receipts/directoryService', () => ({ receipt
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'synthetic-user' }, loading: false }) }));
 jest.mock('../../services/userService', () => ({ userService: { getUser: jest.fn() } }));
 jest.mock('../../features/delegated-receipts/service', () => ({
-  delegatedReceiptService: { list: jest.fn(), createClaims: jest.fn(), importClaims: jest.fn(), saveClaim: jest.fn(), addReceipt: jest.fn(), confirmClaims: jest.fn(), assignSiteTeam: jest.fn(), updateListField: jest.fn() },
+  delegatedReceiptService: { list: jest.fn(), createClaims: jest.fn(), importClaims: jest.fn(), saveClaim: jest.fn(), addReceipt: jest.fn(), confirmClaims: jest.fn(), assignSiteTeam: jest.fn(), updateListField: jest.fn(), updateListFields: jest.fn() },
   DelegatedReceiptImportError: class extends Error {},
 }));
 jest.mock('../../features/delegated-receipts/workbookImport', () => ({ parseDelegatedWorkbook: jest.fn() }));
@@ -268,16 +268,71 @@ it('원본 공동 완료를 금액 미설정이어도 표시하고 계좌 수단
   expect(within(table).queryByText(/엑셀 공동 표시|금액 미기록/)).not.toBeInTheDocument();
   expect(screen.queryByText(/수령수단/)).not.toBeInTheDocument();
 });
-it('선택 내역의 입금여부를 한번에 저장하고 기존 계좌 구분을 보존한다', async () => {
-  (delegatedReceiptService.confirmClaims as jest.Mock).mockResolvedValue(undefined);
+it('현장 전체 선택은 접힌 상태에서도 동작하고 일부 선택 상태를 표시한다', () => {
+  rawRender(<DelegatedReceiptsWorkspace initialClaims={fixtures} />);
+  const site = screen.getByRole('checkbox', { name: base.siteName + ' 현장 전체 선택' });
+  fireEvent.click(site);
+  expect(site).toBeChecked();
+  expect(screen.getByText('2건 선택')).toBeVisible();
+  expect(screen.getByRole('button', { name: base.siteName + ' 현장' })).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(screen.getByRole('button', { name: base.siteName + ' 현장' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: base.workerName + ' 선택' }));
+  expect(site).toBePartiallyChecked();
+  expect(screen.getByRole('checkbox', { name: '현재 목록 선택' })).toBePartiallyChecked();
+  fireEvent.click(site);
+  expect(site).toBeChecked();
+  fireEvent.click(site);
+  expect(screen.queryByText('2건 선택')).not.toBeInTheDocument();
+});
+it('현장 선택은 검색된 작업자만 선택한다', () => {
+  render(<DelegatedReceiptsWorkspace initialClaims={fixtures} />);
+  fireEvent.change(screen.getByRole('textbox', { name: '작업자 검색' }), { target: { value: base.workerName } });
+  fireEvent.click(screen.getByRole('checkbox', { name: base.siteName + ' 현장 전체 선택' }));
+  expect(screen.getByText('1건 선택')).toBeVisible();
+});
+it('현장 전체 선택이 400건을 넘으면 일부만 선택하지 않고 안내한다', () => {
+  const rows = Array.from({ length: 401 }, (_, index) => ({ ...base, id: `limit-${index}`, workerName: `검증 ${index}` }));
+  rawRender(<DelegatedReceiptsWorkspace initialClaims={rows} />);
+  fireEvent.click(screen.getByRole('checkbox', { name: base.siteName + ' 현장 전체 선택' }));
+  expect(screen.getByRole('alert')).toHaveTextContent('최대 400건');
+  expect(screen.getByRole('checkbox', { name: base.siteName + ' 현장 전체 선택' })).not.toBeChecked();
+  expect(screen.queryByRole('button', { name: '선택 내역 일괄 수정' })).not.toBeInTheDocument();
+});
+it('일괄 수정은 변경한 항목만 저장하고 실패 시 같은 식별자로 재시도한다', async () => {
+  (delegatedReceiptService.updateListFields as jest.Mock).mockRejectedValueOnce(new Error('network')).mockResolvedValue(undefined);
   (delegatedReceiptService.list as jest.Mock).mockResolvedValue(fixtures);
   render(<DelegatedReceiptsWorkspace initialClaims={fixtures} />);
   fireEvent.click(screen.getByRole('checkbox', { name: '현재 목록 선택' }));
-  fireEvent.click(screen.getByRole('button', { name: '선택 내역 입금여부 변경' }));
+  fireEvent.click(screen.getByRole('button', { name: '선택 내역 일괄 수정' }));
   const dialog = screen.getByRole('dialog');
-  fireEvent.click(within(dialog).getByRole('button', { name: '3건 입금완료 저장' }));
-  await waitFor(() => expect(delegatedReceiptService.confirmClaims).toHaveBeenCalledWith(fixtures.map(row => row.id), expect.objectContaining({ status: 'complete' }), true));
-  await screen.findByText('3건의 입금여부를 저장했습니다.');
+  const save = within(dialog).getByRole('button', { name: '3건 일괄 수정' });
+  expect(save).toBeDisabled();
+  fireEvent.change(within(dialog).getByRole('combobox', { name: '입금여부' }), { target: { value: 'complete' } });
+  fireEvent.click(save);
+  await within(dialog).findByRole('alert');
+  expect(delegatedReceiptService.updateListFields).toHaveBeenCalledWith(fixtures.map(row => row.id), [expect.objectContaining({ change: { field: 'status', value: 'complete' } })]);
+  const first = (delegatedReceiptService.updateListFields as jest.Mock).mock.calls[0];
+  fireEvent.click(save);
+  await screen.findByText('3건을 일괄 수정했습니다.');
+  expect((delegatedReceiptService.updateListFields as jest.Mock).mock.calls[1]).toEqual(first);
+  expect(document.body.style.overflow).not.toBe('hidden');
+});
+it('입금방법 받는 계좌 입금여부를 한 번에 전달한다', async () => {
+  (delegatedReceiptService.updateListFields as jest.Mock).mockResolvedValue(undefined);
+  (delegatedReceiptService.list as jest.Mock).mockResolvedValue(fixtures);
+  render(<DelegatedReceiptsWorkspace initialClaims={fixtures} />);
+  fireEvent.click(screen.getByRole('checkbox', { name: base.siteName + ' 현장 전체 선택' }));
+  fireEvent.click(screen.getByRole('button', { name: '선택 내역 일괄 수정' }));
+  const dialog = within(screen.getByRole('dialog'));
+  fireEvent.change(dialog.getByRole('combobox', { name: '입금방법' }), { target: { value: 'direct' } });
+  fireEvent.change(dialog.getByRole('combobox', { name: '받는 계좌' }), { target: { value: 'personal' } });
+  fireEvent.change(dialog.getByRole('combobox', { name: '입금여부' }), { target: { value: 'complete' } });
+  fireEvent.click(dialog.getByRole('button', { name: '2건 일괄 수정' }));
+  await waitFor(() => expect(delegatedReceiptService.updateListFields).toHaveBeenCalledWith([fixtures[0].id, fixtures[2].id], [
+    expect.objectContaining({ change: { field: 'delegation', value: 'direct' } }),
+    expect.objectContaining({ change: { field: 'recipient', value: 'personal' } }),
+    expect.objectContaining({ change: { field: 'status', value: 'complete' } }),
+  ]));
 });
 it('목록에서 세 항목을 바로 저장하고 PC·모바일 표시와 요약을 함께 갱신한다', async () => {
   let saved = { ...base };

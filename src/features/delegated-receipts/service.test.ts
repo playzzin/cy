@@ -1,6 +1,6 @@
 import { collection, doc, getDocs, query, runTransaction, where } from 'firebase/firestore';
 import { delegatedReceiptService } from './service';
-import type { DelegatedClaim, DepositConfirmation, Receipt } from './model';
+import type { ClaimListEdit, DelegatedClaim, DepositConfirmation, Receipt } from './model';
 import { getDelegation, getDepositState } from './depositState';
 
 jest.mock('../../config/firebase', () => ({ db: {} }));
@@ -21,6 +21,7 @@ const claim = (overrides: Partial<DelegatedClaim> = {}): DelegatedClaim => ({
   receipts: [], sourceStatus: '', sourceLabel: '테스트', memo: '', updatedAt: '', ...overrides,
 });
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+const bulkEdit = (field: 'delegation' | 'recipient' | 'status', value: string): ClaimListEdit => ({ id: `bulk-${field}`, recordedAt: '2026-10-12T01:00:00.000Z', change: { field, value } as ClaimListEdit['change'] });
 const manual = (overrides: Partial<DelegatedClaim> = {}) => claim({ siteId: 's1', workerId: 'w1', manualBatchId: 'batch-1', paymentMethod: 'transfer', ...overrides });
 let records: Map<string, DelegatedClaim>;
 
@@ -54,6 +55,46 @@ beforeEach(() => {
     transaction.commit();
     return result;
   });
+});
+
+it('일괄 수정은 세 항목을 원자적으로 저장하고 원본 금액 메모 입금 기록을 보존한다', async () => {
+  const original = claim({ grossAmount: 300000, expectedAmount: 290100, memo: '보존 메모', receipts: [receipt()] });
+  records.set('claim-a', original); records.set('claim-b', claim({ id: 'claim-b', sourceStatus: '개인통장' }));
+  const edits = [bulkEdit('delegation', 'direct'), bulkEdit('recipient', 'site_leader'), bulkEdit('status', 'complete')];
+  await delegatedReceiptService.updateListFields(['claim-a', 'claim-b'], edits);
+  for (const row of records.values()) {
+    expect(getDelegation(row)).toBe('direct');
+    expect(getDepositState(row)).toMatchObject({ recipient: 'site_leader', status: 'complete' });
+    expect(row.confirmationHistory).toHaveLength(3);
+  }
+  expect(records.get('claim-a')).toMatchObject({ grossAmount: original.grossAmount, expectedAmount: original.expectedAmount, memo: original.memo, receipts: original.receipts, sourceStatus: original.sourceStatus });
+  await delegatedReceiptService.updateListField('claim-a', { ...bulkEdit('recipient', 'personal'), id: 'later-edit' });
+  await delegatedReceiptService.updateListFields(['claim-a', 'claim-b'], edits);
+  expect(getDepositState(records.get('claim-a')!).recipient).toBe('personal');
+  expect(records.get('claim-a')!.confirmationHistory).toHaveLength(4);
+});
+it('일괄 수정에서 선택하지 않은 항목은 최신 저장값을 유지한다', async () => {
+  records.set('claim-a', claim({ delegationOverride: 'direct', sourceStatus: '개인통장' }));
+  records.set('claim-b', claim({ id: 'claim-b', confirmation: { id: 'prior', recordedAt: '2026-10-11T00:00:00Z', status: 'pending', recipient: 'jaewook_leader', note: '' } }));
+  await delegatedReceiptService.updateListFields(['claim-a', 'claim-b'], [bulkEdit('status', 'complete')]);
+  expect(getDelegation(records.get('claim-a')!)).toBe('direct');
+  expect(getDepositState(records.get('claim-a')!).recipient).toBe('personal');
+  expect(getDepositState(records.get('claim-b')!).recipient).toBe('jaewook_leader');
+});
+it('일괄 수정의 일부 대상이 없거나 식별자가 충돌하면 아무것도 변경하지 않는다', async () => {
+  const original = claim(); records.set('claim-a', original);
+  await expect(delegatedReceiptService.updateListFields(['claim-a', 'missing'], [bulkEdit('status', 'complete')])).rejects.toThrow();
+  expect(records.get('claim-a')).toEqual(original);
+  records.set('claim-b', claim({ id: 'claim-b', confirmationHistory: [{ ...bulkEdit('status', 'pending'), status: 'pending', recipient: 'unknown', note: '', listChange: { field: 'status', value: 'pending' } }] }));
+  await expect(delegatedReceiptService.updateListFields(['claim-a', 'claim-b'], [bulkEdit('status', 'complete')])).rejects.toThrow();
+  expect(records.get('claim-a')).toEqual(original);
+});
+it('일괄 수정은 빈 항목, 중복 항목, 잘못된 값과 400건 초과를 거부한다', async () => {
+  await expect(delegatedReceiptService.updateListFields(['claim-a'], [])).rejects.toThrow();
+  await expect(delegatedReceiptService.updateListFields(['claim-a'], [bulkEdit('status', 'bad')])).rejects.toThrow();
+  await expect(delegatedReceiptService.updateListFields(['claim-a'], [bulkEdit('status', 'complete'), bulkEdit('status', 'pending')])).rejects.toThrow();
+  await expect(delegatedReceiptService.updateListFields(Array.from({ length: 401 }, (_, index) => `claim-${index}`), [bulkEdit('status', 'complete')])).rejects.toThrow();
+  expect(runTransaction).not.toHaveBeenCalled();
 });
 
 it('해당 월만 조회하고 금액 미확정과 0원을 구분한다', async () => {

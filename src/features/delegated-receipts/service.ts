@@ -329,6 +329,49 @@ export const delegatedReceiptService = {
     });
   },
 
+  async updateListFields(ids: string[], edits: ClaimListEdit[]): Promise<void> {
+    const refs = batchIds(ids).map(refFor);
+    if (!Array.isArray(edits) || !edits.length || edits.length > 3) throw new Error('변경할 항목을 선택해 주세요.');
+    const events = edits.map(edit => {
+      const change = validateListChange(edit.change);
+      if (!['delegation', 'recipient', 'status'].includes(change.field)) throw new Error('일괄 수정 항목을 확인해 주세요.');
+      return validateConfirmation({ id: edit.id, recordedAt: edit.recordedAt, status: 'unknown', recipient: 'unknown', note: '', listChange: change,
+        ...(auth?.currentUser ? { actorId: auth.currentUser.uid } : {}) });
+    });
+    if (new Set(events.map(event => event.id)).size !== events.length || new Set(events.map(event => event.listChange!.field)).size !== events.length) throw new Error('일괄 수정 항목이 중복되었습니다.');
+    await runTransaction(db, async transaction => {
+      // Read and validate every selected row before writing any of them.
+      const snapshots = await Promise.all(refs.map(ref => transaction.get(ref)));
+      const updates = snapshots.map((snapshot, index) => {
+        if (!snapshot.exists()) throw new Error('입금 내역을 찾을 수 없습니다. 새로고침해 주세요.');
+        const current = validateClaim({ ...snapshot.data(), id: refs[index].id } as DelegatedClaim);
+        let next = current;
+        for (const event of events) {
+          const change = event.listChange!;
+          const history = next.confirmationHistory || [];
+          const duplicate = history.find(item => item.id === event.id);
+          if (duplicate) {
+            if (duplicate.listChange?.field !== change.field || duplicate.listChange.value !== change.value) throw new Error('같은 확인 식별자로 다른 내용이 저장되었습니다.');
+            continue;
+          }
+          const state = getDepositState(next);
+          const confirmation: DepositConfirmation = { ...event,
+            status: change.field === 'status' ? change.value : state.status,
+            recipient: change.field === 'recipient' ? change.value : state.recipient,
+            note: '선택 내역 일괄 수정' };
+          next = validateClaim({ ...next,
+            ...(change.field === 'delegation' ? { delegationOverride: change.value } : { confirmation }),
+            confirmationHistory: validateHistory([...history, confirmation]), updatedAt: new Date().toISOString() });
+        }
+        if (next === current) return null;
+        return { ...(next.delegationOverride !== undefined ? { delegationOverride: next.delegationOverride } : {}),
+          ...(next.confirmation ? { confirmation: next.confirmation } : {}),
+          confirmationHistory: next.confirmationHistory!, updatedAt: next.updatedAt };
+      });
+      updates.forEach((update, index) => { if (update) transaction.update(refs[index], update); });
+    });
+  },
+
   async addReceipt(claimId: string, receipt: Receipt): Promise<void> {
     const validated = validateReceipt(receipt);
     await runTransaction(db, async transaction => {

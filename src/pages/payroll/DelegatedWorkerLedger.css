@@ -116,3 +116,11 @@
  .dr-memo-sheet { padding:12px; }
  .dr-memo-input-info { flex-wrap:wrap; }
 }
+
+.dr-site-selection { display:flex; align-items:center; justify-content:center; width:44px; min-height:44px; flex-shrink:0; margin-left:6px; cursor:pointer; }
+.dr-site-selection + h3 .dr-site-expand { padding-left:0; }
+.dr-page .dr-site-selection input { box-shadow:0 0 0 4px #fff; border-radius:2px; }
+@media(max-width:600px) {
+ .dr-site-accordion-header .dr-site-selection + h3 { flex-basis:calc(100% - 50px); }
+ .dr-site-accordion-header:has(.dr-site-selection) > .dr-memo-add,.dr-site-accordion-header:has(.dr-site-selection) > .dr-memo-toggle { margin-left:50px; }
+}

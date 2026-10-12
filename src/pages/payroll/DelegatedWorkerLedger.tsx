@@ -87,17 +87,25 @@ const WorkerAccordion = React.memo(function WorkerAccordion({ claim, directory, 
   </article>;
 });
 
-const SiteAccordion = React.memo(function SiteAccordion({ group, directory, canWrite, selectedIds, onSelect, onUpdate, onMemo, memo, memoDisabled, expandCommand }: {
+function SelectionCheckbox({ label, checked, partial, onChange }: { label: string; checked: boolean; partial: boolean; onChange: () => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (ref.current) ref.current.indeterminate = partial; }, [partial]);
+  return <input ref={ref} type="checkbox" aria-label={label} aria-checked={partial ? 'mixed' : checked} checked={checked} onChange={onChange} />;
+}
+
+const SiteAccordion = React.memo(function SiteAccordion({ group, directory, canWrite, selectedIds, onSelect, onSelectSite, onUpdate, onMemo, memo, memoDisabled, expandCommand }: {
   group: ReceiptSiteGroup; directory: ReceiptDirectory; canWrite: boolean; selectedIds: string[]; onSelect: (id: string) => void; onUpdate: Update; onMemo: (target: MemoTarget) => void;
+  onSelectSite: (ids: string[]) => void;
   memo: string; memoDisabled: boolean; expandCommand: { expanded: boolean; version: number };
 }) {
   const [open, setOpen] = useState(false);
   const [visited, setVisited] = useState(false);
   const panelId = useId();
+  const selectedCount = group.claims.filter(claim => selectedIds.includes(claim.id)).length;
   useEffect(() => { if (expandCommand.version) { setOpen(expandCommand.expanded); if (expandCommand.expanded) setVisited(true); } }, [expandCommand]);
   const totals = useMemo(() => ({ gross: summarizeClaimAmounts(group.claims).gross, complete: group.claims.filter(claim => getDepositState(claim).status === 'complete').length }), [group.claims]);
   return <section className="dr-site-accordion" aria-label={`${group.name} 내역`} style={{ '--dr-group-color': group.color, '--dr-group-text': getContrastingTextColor(group.color, '#ffffff', '#000000') } as React.CSSProperties}>
-    <div className="dr-site-accordion-header"><h3><button type="button" className="dr-site-expand" aria-label={`${group.name} 현장`} aria-expanded={open} aria-controls={panelId} onClick={() => { setOpen(value => !value); setVisited(true); }}>
+    <div className="dr-site-accordion-header">{canWrite && <label className="dr-site-selection"><SelectionCheckbox label={`${group.name} 현장 전체 선택`} checked={selectedCount === group.claims.length} partial={selectedCount > 0 && selectedCount < group.claims.length} onChange={() => onSelectSite(group.claims.map(claim => claim.id))} /><span className="dr-sr-only">현장 선택</span></label>}<h3><button type="button" className="dr-site-expand" aria-label={`${group.name} 현장`} aria-expanded={open} aria-controls={panelId} onClick={() => { setOpen(value => !value); setVisited(true); }}>
       <SiteIdentity name={group.name} color={group.color} /><span className="dr-site-accordion-totals"><span>{group.claims.length}명</span><span>입금완료 {totals.complete}/{group.claims.length}건</span><span>세전 합계 <b>{won(totals.gross.amount)}</b>{totals.gross.missing > 0 && <small>미확정 {totals.gross.missing}건</small>}</span></span><ChevronDown className={open ? 'dr-accordion-chevron-open' : ''} size={20} />
     </button></h3><MemoButton label={`${group.name} 현장`} memo={memo} canWrite={canWrite} disabled={memoDisabled} onClick={() => onMemo({ kind: 'site', key: group.key, month: group.claims[0].month, name: group.name })} /></div>
     {visited && <div id={panelId} hidden={!open} className="dr-site-workers"><div className="dr-worker-column-headings" aria-hidden="true"><span>작업자</span><span>입금방법</span><span>받는 계좌</span><span>입금여부</span><span>세전 금액 (원)</span><span>메모</span></div>{group.claims.map(claim => <WorkerAccordion key={claim.id} claim={claim} directory={directory} canWrite={canWrite} selected={selectedIds.includes(claim.id)} onSelect={onSelect} onUpdate={onUpdate} onMemo={onMemo} />)}</div>}
@@ -113,6 +121,7 @@ export default React.memo(function DelegatedWorkerLedger({ claims, directory, ca
   const [memoError, setMemoError] = useState(false);
   const [retry, setRetry] = useState(0);
   const [activeMemo, setActiveMemo] = useState<MemoTarget | null>(null);
+  const [selectionError, setSelectionError] = useState('');
   const month = claims[0]?.month;
   useEffect(() => {
     if (!month) return;
@@ -122,7 +131,14 @@ export default React.memo(function DelegatedWorkerLedger({ claims, directory, ca
     return () => { cancelled = true; };
   }, [month, memoService, retry]);
   const openMemo = useCallback((target: MemoTarget) => setActiveMemo(target), []);
-  const toggle = useCallback((id: string) => onSelect(selectedIds.includes(id) ? selectedIds.filter(value => value !== id) : [...selectedIds, id].slice(0, 400)), [selectedIds, onSelect]);
+  const toggleGroup = useCallback((ids: string[]) => {
+    const allSelected = ids.every(id => selectedIds.includes(id));
+    const next = allSelected ? selectedIds.filter(id => !ids.includes(id)) : [...new Set([...selectedIds, ...ids])];
+    if (next.length > 400) { setSelectionError('한 번에 최대 400건까지 수정할 수 있습니다. 일부 선택을 해제한 뒤 다시 선택해 주세요.'); return; }
+    setSelectionError(''); onSelect(next);
+  }, [selectedIds, onSelect]);
+  const toggle = useCallback((id: string) => toggleGroup([id]), [toggleGroup]);
+  const currentSelected = claims.filter(claim => selectedIds.includes(claim.id)).length;
   const currentWorker = activeMemo?.kind === 'worker' ? claims.find(claim => claim.id === activeMemo.id) : undefined;
   const memo = activeMemo?.kind === 'site' ? memos[activeMemo.key]?.memo ?? '' : currentWorker?.memo ?? '';
   const saveMemo = async (value: string, operationId: string) => {
@@ -135,9 +151,10 @@ export default React.memo(function DelegatedWorkerLedger({ claims, directory, ca
     }
   };
   return <div className="dr-worker-ledger" role="region" aria-label="현장별 작업자 내역">
-    <div className="dr-accordion-toolbar">{canWrite && <label className="dr-select-all"><input type="checkbox" aria-label="현재 목록 선택" checked={claims.length > 0 && claims.length <= 400 && claims.every(claim => selectedIds.includes(claim.id))} onChange={event => onSelect(event.target.checked ? claims.slice(0, 400).map(claim => claim.id) : [])} />현재 목록 선택 {claims.length > 400 && '(최대 400건)'}</label>}<div><button onClick={() => setExpandCommand(value => ({ expanded: true, version: value.version + 1 }))}>현장 모두 펼치기</button><button onClick={() => setExpandCommand(value => ({ expanded: false, version: value.version + 1 }))}>모두 접기</button></div></div>
+    <div className="dr-accordion-toolbar">{canWrite && <label className="dr-select-all"><SelectionCheckbox label="현재 목록 선택" checked={claims.length > 0 && currentSelected === claims.length} partial={currentSelected > 0 && currentSelected < claims.length} onChange={() => { setSelectionError(''); onSelect(currentSelected === Math.min(claims.length, 400) ? [] : claims.slice(0, 400).map(claim => claim.id)); }} />현재 목록 선택 {claims.length > 400 && '(앞 400건)'}</label>}<div><button onClick={() => setExpandCommand(value => ({ expanded: true, version: value.version + 1 }))}>현장 모두 펼치기</button><button onClick={() => setExpandCommand(value => ({ expanded: false, version: value.version + 1 }))}>모두 접기</button></div></div>
+    {selectionError && <p className="dr-site-memo-error" role="alert">{selectionError}</p>}
     {memoError && <p className="dr-site-memo-error" role="alert">현장 메모를 불러오지 못했습니다. <button onClick={() => setRetry(value => value + 1)}>현장 메모 다시 조회</button></p>}
-    <div className="dr-accordion-sites">{groups.map(group => <SiteAccordion key={group.key} group={group} directory={directory} canWrite={canWrite} selectedIds={selectedIds} onSelect={toggle} onUpdate={onUpdate} onMemo={openMemo} memo={memos[group.key]?.memo ?? ''} memoDisabled={memoLoading || memoError} expandCommand={expandCommand} />)}</div>
+    <div className="dr-accordion-sites">{groups.map(group => <SiteAccordion key={group.key} group={group} directory={directory} canWrite={canWrite} selectedIds={selectedIds} onSelect={toggle} onSelectSite={toggleGroup} onUpdate={onUpdate} onMemo={openMemo} memo={memos[group.key]?.memo ?? ''} memoDisabled={memoLoading || memoError} expandCommand={expandCommand} />)}</div>
     {activeMemo && <DelegatedMemoSticker label={activeMemo.kind === 'site' ? `${activeMemo.name} 현장` : currentWorker?.workerName ?? '작업자'} context={activeMemo.kind === 'site' ? `${month} · 현장 공통 메모` : `${month} · ${currentWorker?.siteName} · 작업자 메모`} memo={memo} canWrite={canWrite} onSave={saveMemo} onClose={() => setActiveMemo(null)} />}
   </div>;
 });
