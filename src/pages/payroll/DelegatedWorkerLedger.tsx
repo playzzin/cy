@@ -5,6 +5,7 @@ import { getClaimTotals, summarizeClaimAmounts } from '../../features/delegated-
 import { groupClaimsBySite, ReceiptSiteGroup } from '../../features/delegated-receipts/siteGroups';
 import { depositLabels, getDelegation, getDepositState, recipientLabels } from '../../features/delegated-receipts/depositState';
 import { getWorkerColor, ReceiptDirectory, validTeamColor } from '../../features/delegated-receipts/teamDirectory';
+import { getContrastingTextColor } from '../../utils/color';
 import DelegatedMemoSticker from './DelegatedMemoSticker';
 import './DelegatedWorkerLedger.css';
 
@@ -109,7 +110,7 @@ export default function DelegatedWorkerLedger({ claims, directory, canWrite, sel
   const toggle = (id: string) => onSelect(selectedIds.includes(id) ? selectedIds.filter(value => value !== id) : [...selectedIds, id].slice(0, 400));
   const allSelected = claims.length > 0 && claims.length <= 400 && claims.every(claim => selectedIds.includes(claim.id));
   const groups = useMemo(() => groupClaimsBySite(claims, directory), [claims, directory]);
-  const groupStyle = (group: ReceiptSiteGroup) => ({ '--dr-group-color': group.color } as React.CSSProperties);
+  const groupStyle = (group: ReceiptSiteGroup) => ({ '--dr-group-color': group.color, '--dr-group-text': getContrastingTextColor(group.color, '#ffffff', '#000000') } as React.CSSProperties);
   return <div className="dr-worker-ledger">
     {canWrite && <label className="dr-select-all"><input type="checkbox" checked={allSelected} onChange={event => onSelect(event.target.checked ? claims.slice(0, 400).map(claim => claim.id) : [])} />현재 목록 선택 {claims.length > 400 && '(최대 400건)'}</label>}
     <div className="dr-table-wrap"><table className="dr-table" aria-label="현장별 작업자 내역"><thead><tr>{canWrite && <th scope="col"><span className="dr-sr-only">선택</span></th>}<th scope="col">작업자</th><th scope="col">입금방법 / 받는 계좌</th><th scope="col" className="dr-align-right">세전 금액 (원)</th><th scope="col">입금여부</th><th scope="col">메모</th></tr></thead>{groups.map(group => <tbody key={group.key} className="dr-site-group" style={groupStyle(group)} aria-label={`${group.name} 내역`}>

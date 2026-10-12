@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { Pencil, Plus, StickyNote, Trash2 } from 'lucide-react';
+import React, { useEffect, useId, useRef, useState } from 'react';
+import { ChevronDown, Pencil, Plus, StickyNote, Trash2 } from 'lucide-react';
 
 interface Props {
   label: string; memo: string; draft?: string; canWrite: boolean; locked: boolean;
@@ -9,25 +9,35 @@ interface Props {
 
 export default function DelegatedMemoSticker({ label, memo, draft, canWrite, locked, onStart, onChange, onSave, onCancel, onDelete }: Props) {
   const editing = draft !== undefined;
+  const [expanded, setExpanded] = useState(false);
+  const open = editing || (Boolean(memo) && expanded);
+  const panelId = useId();
   const input = useRef<HTMLTextAreaElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const editTrigger = useRef<HTMLButtonElement>(null);
   const wasEditing = useRef(false);
   const hadMemo = useRef(Boolean(memo));
   useEffect(() => {
     if (locked) return;
-    const target = editing ? input.current : wasEditing.current || (hadMemo.current && !memo) ? trigger.current : null;
+    const target = editing ? input.current : wasEditing.current ? (open ? editTrigger.current : trigger.current) : hadMemo.current && !memo ? trigger.current : null;
     if (target?.getClientRects().length) target.focus();
+    if (!memo && !editing) setExpanded(false);
     wasEditing.current = editing;
     hadMemo.current = Boolean(memo);
-  }, [editing, memo, locked]);
+  }, [editing, memo, locked, open]);
+
+  const start = () => { setExpanded(true); onStart(); };
 
   if (!memo && !editing) return <div className="dr-memo-empty">
-    {canWrite ? <button type="button" ref={trigger} className="dr-memo-add" disabled={locked} onClick={onStart} aria-label={`${label} 새 메모`}><Plus size={16} />새 메모</button> : <span className="dr-memo-none">메모 없음</span>}
+    {canWrite ? <button type="button" ref={trigger} className="dr-memo-add" disabled={locked} onClick={start} aria-label={`${label} 새 메모`}><Plus size={16} />새 메모</button> : <span className="dr-memo-none">메모 없음</span>}
   </div>;
 
-  return <section className={`dr-memo-sticker ${editing ? 'dr-memo-editing' : ''}`} aria-label={`${label} 메모`}>
+  return <div className="dr-memo-disclosure">
+    {memo && <button type="button" ref={trigger} className="dr-memo-toggle" disabled={locked || editing} aria-label={`${label} 메모 있음`} aria-expanded={open} aria-controls={panelId} onClick={() => setExpanded(value => !value)}><StickyNote size={16} />메모 있음<ChevronDown size={14} /></button>}
+    {open && <section id={panelId} className={`dr-memo-sticker ${editing ? 'dr-memo-editing' : ''}`} aria-label={`${label} 메모`}
+      onKeyDown={event => { if (event.key === 'Escape' && !editing && !locked) { event.preventDefault(); setExpanded(false); trigger.current?.focus(); } }}>
     <header><span><StickyNote size={15} />{!memo && editing ? '새 메모' : '메모'}</span>{canWrite && !editing && <div>
-      <button ref={trigger} disabled={locked} onClick={onStart} aria-label={`${label} 메모 수정`} title="메모 수정"><Pencil size={15} /></button>
+      <button ref={editTrigger} disabled={locked} onClick={start} aria-label={`${label} 메모 수정`} title="메모 수정"><Pencil size={15} /></button>
       <button disabled={locked} onClick={onDelete} aria-label={`${label} 메모 삭제`} title="메모 삭제"><Trash2 size={15} /></button>
     </div>}</header>
     {editing ? <form onSubmit={event => { event.preventDefault(); if (draft.trim() && !locked) onSave(); }}>
@@ -35,5 +45,6 @@ export default function DelegatedMemoSticker({ label, memo, draft, canWrite, loc
         onKeyDown={event => { if (event.key === 'Escape' && !locked) { event.preventDefault(); onCancel(); } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && draft.trim() && !locked) { event.preventDefault(); onSave(); } }} />
       <div className="dr-memo-editor-footer"><small>{draft.length.toLocaleString()} / 2,000</small><div><button type="button" disabled={locked} onClick={onCancel}>취소</button><button type="submit" disabled={locked || !draft.trim()} aria-label={`${label} 메모 저장`}>저장</button></div></div>
     </form> : <p className="dr-memo-text">{memo}</p>}
-  </section>;
+    </section>}
+  </div>;
 }

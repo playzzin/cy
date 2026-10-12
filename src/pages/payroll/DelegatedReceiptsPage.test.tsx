@@ -53,17 +53,29 @@ it('현장명을 묶음 상단에 한 번만 표시하고 작업자 색상과 �
   expect(table.queryByRole('rowgroup', { name: '가상현장 B 내역' })).not.toBeInTheDocument();
 });
 
-it('PC·모바일 목록에서 내역 보기와 입금 근거 설명을 숨기고 기존 메모는 스티커로 표시한다', () => {
+it('기존 메모는 PC·모바일에서 메모 있음으로 표시하고 클릭·Escape로 스티커를 열고 닫는다', () => {
   render(<DelegatedReceiptsWorkspace initialClaims={[{ ...base, memo: '확인한 메모', sourceStatus: '공동 입금완료' }]} />);
   expect(screen.queryByRole('button', { name: /입금 및 내역|내역 보기/ })).not.toBeInTheDocument();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   const table = within(screen.getByRole('table'));
   expect(table.queryByText(/엑셀 표시|엑셀 공동 표시|금액 미기록/)).not.toBeInTheDocument();
+  const toggle = table.getByRole('button', { name: '검증작업자 가 메모 있음' });
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  expect(table.queryByRole('region', { name: '검증작업자 가 메모' })).not.toBeInTheDocument();
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
   expect(table.getByRole('region', { name: '검증작업자 가 메모' })).toHaveTextContent('확인한 메모');
+  fireEvent.keyDown(table.getByRole('button', { name: '검증작업자 가 메모 수정' }), { key: 'Escape' });
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  expect(toggle).toHaveFocus();
   expect(table.queryByRole('button', { name: '검증작업자 가 새 메모' })).not.toBeInTheDocument();
   const mobile = screen.getByRole('region', { name: `${base.siteName} 모바일 내역` });
   expect(within(mobile).queryByText(/엑셀 표시|엑셀 공동 표시|직접 확인/)).not.toBeInTheDocument();
+  expect(within(mobile).queryByRole('region', { name: '검증작업자 가 모바일 메모' })).not.toBeInTheDocument();
+  fireEvent.click(within(mobile).getByRole('button', { name: '검증작업자 가 모바일 메모 있음' }));
   expect(within(mobile).getByRole('region', { name: '검증작업자 가 모바일 메모' })).toHaveTextContent('확인한 메모');
+  fireEvent.click(within(mobile).getByRole('button', { name: '검증작업자 가 모바일 메모 있음' }));
+  expect(within(mobile).queryByRole('region', { name: '검증작업자 가 모바일 메모' })).not.toBeInTheDocument();
 });
 
 describe('위임금 입금 확인 화면', () => {
@@ -346,7 +358,10 @@ it('새 메모를 저장하면 스티커로 표시하고 수정·삭제 후 새 
   const sticker = await table.findByRole('region', { name: '검증작업자 가 메모' });
   await waitFor(() => expect(within(sticker).queryByRole('textbox')).not.toBeInTheDocument());
   expect(sticker).toHaveTextContent('정산 확인 금요일 다시 확인');
+  expect(table.getByRole('button', { name: '검증작업자 가 메모 있음' })).toHaveAttribute('aria-expanded', 'true');
+  fireEvent.click(screen.getByRole('button', { name: '검증작업자 가 모바일 메모 있음' }));
   fireEvent.click(screen.getByRole('button', { name: '검증작업자 가 모바일 메모 수정' }));
+  expect(screen.getByRole('button', { name: '검증작업자 가 모바일 메모 있음' })).toBeDisabled();
   fireEvent.change(screen.getByRole('textbox', { name: '검증작업자 가 모바일 메모 내용' }), { target: { value: '취소할 초안' } });
   fireEvent.keyDown(screen.getByRole('textbox', { name: '검증작업자 가 모바일 메모 내용' }), { key: 'Escape' });
   expect(delegatedReceiptService.updateListField).toHaveBeenCalledTimes(1);
@@ -380,8 +395,10 @@ it('메모 저장 실패 시 초안을 유지하며 동일 요청으로 재시�
   expect(calls[1]).toEqual(calls[0]);
 });
 
-it('읽기 전용 메모는 보이되 등록·수정·삭제를 노출하지 않는다', () => {
+it('읽기 전용에서도 메모 있음을 눌러 읽을 수 있고 등록·수정·삭제는 노출하지 않는다', () => {
   render(<DelegatedReceiptsWorkspace initialClaims={[{ ...base, memo: '기존 메모' }, { ...base, id: 'empty-memo', workerName: '검증작업자 나' }]} canWrite={false} />);
+  expect(within(screen.getByRole('table')).queryByText('기존 메모')).not.toBeInTheDocument();
+  fireEvent.click(within(screen.getByRole('table')).getByRole('button', { name: '검증작업자 가 메모 있음' }));
   expect(within(screen.getByRole('table')).getByText('기존 메모')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /새 메모|메모 (수정|삭제)/ })).not.toBeInTheDocument();
 });

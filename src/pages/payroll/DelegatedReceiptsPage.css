@@ -221,11 +221,16 @@
 .dr-memo-sticker>header { justify-content:space-between; gap:6px; margin-bottom:4px; font-size:12px; }
 .dr-memo-sticker button { display:inline-flex; align-items:center; justify-content:center; min-height:32px; min-width:32px; padding:5px; border:0; border-radius:5px; color:#755925; background:transparent; cursor:pointer; }
 .dr-memo-sticker button:hover { background:#f0e4b7; }
-.dr-memo-sticker button:disabled,.dr-memo-empty button:disabled { opacity:.5; cursor:default; }
+.dr-memo-sticker button:disabled,.dr-memo-empty button:disabled,.dr-memo-toggle:disabled { opacity:.5; cursor:default; }
 .dr-memo-text { margin:0; font-size:14px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; max-height:134px; overflow:auto; }
 .dr-memo-empty { display:flex; align-items:flex-start; flex-direction:column; gap:5px; }
-.dr-memo-add { display:inline-flex; align-items:center; justify-content:center; gap:3px; min-height:40px; border:1px dashed #dcca96; border-radius:6px; background:#fffdf4; color:#886d30; padding:8px 12px; cursor:pointer; font-size:13px; }
+.dr-memo-add,.dr-memo-toggle { display:inline-flex; align-items:center; justify-content:center; gap:3px; min-height:44px; border:1px dashed #dcca96; border-radius:6px; background:#fffdf4; color:#886d30; padding:8px 12px; cursor:pointer; font-size:13px; }
 .dr-memo-add:hover { background:#fff5cf; border-color:#bba162; }
+.dr-memo-disclosure { display:flex; flex-direction:column; align-items:stretch; gap:8px; }
+.dr-memo-toggle { align-self:flex-start; border-style:solid; background:#fff2b8; color:#665124; white-space:nowrap; }
+.dr-memo-toggle:hover:not(:disabled) { background:#ffe99b; border-color:#bba162; }
+.dr-memo-toggle[aria-expanded=true]>svg:last-child { transform:rotate(180deg); }
+.dr-memo-toggle:focus-visible,.dr-memo-add:focus-visible,.dr-memo-sticker button:focus-visible { outline:2px solid #8d6b1f; outline-offset:2px; }
 .dr-memo-none { color:#8b95a3; font-size:12px; }
 .dr-page .dr-memo-sticker textarea { display:block; box-sizing:border-box; width:100%; min-width:0; border:1px solid #d7c486; border-radius:4px; background:#fffef4; color:#4f4022; padding:8px; font:inherit; font-size:14px; line-height:1.6; resize:vertical; }
 .dr-memo-editor-footer { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:4px 8px; margin-top:6px; }
