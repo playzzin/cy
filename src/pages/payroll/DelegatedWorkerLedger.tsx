@@ -39,6 +39,7 @@ const WorkerAccordion = React.memo(function WorkerAccordion({ claim, directory, 
   const [saved, setSaved] = useState<RowSave>();
   const busy = useRef(false);
   const panelId = useId();
+  const amountFormId = useId();
   const locked = Boolean(saved && saved.phase !== 'saved');
   const state = getDepositState(claim);
   const total = getClaimTotals(claim);
@@ -64,21 +65,25 @@ const WorkerAccordion = React.memo(function WorkerAccordion({ claim, directory, 
   };
   return <article className={`dr-worker-accordion ${selected ? 'dr-row-selected' : ''}`} aria-label={`${claim.workerName} 내역`}>
     <div className="dr-worker-summary">
-      {canWrite && <input type="checkbox" aria-label={`${claim.workerName} 선택`} checked={selected} onChange={() => onSelect(claim.id)} />}
-      <button type="button" className="dr-worker-expand" aria-label={`${claim.workerName} 작업자`} aria-expanded={open} aria-controls={panelId} onClick={() => { setOpen(value => !value); setVisited(true); }}>
-        <WorkerIdentity claim={claim} directory={directory} /><span className="dr-worker-summary-amount">{won(claim.grossAmount)}{dirty && <small>수정 중</small>}</span><DepositBadge claim={claim} /><ChevronDown className={open ? 'dr-accordion-chevron-open' : ''} size={18} />
-      </button>
-      <MemoButton label={claim.workerName} memo={claim.memo} canWrite={canWrite} disabled={saved?.phase === 'saving'} onClick={() => onMemo({ kind: 'worker', id: claim.id })} />
-    </div>
-    {visited && <div id={panelId} hidden={!open} className="dr-worker-editor">
-      {canWrite ? <div className="dr-worker-fields">{control('delegation')}{control('recipient')}{control('status')}<div className="dr-accordion-amount"><span>세전 금액 (원)</span><form className="dr-inline-amount" onSubmit={event => { event.preventDefault(); if (dirty && valid && !locked) change({ field: 'grossAmount', value: amount }); }}>
+      <div className="dr-worker-person">{canWrite && <input type="checkbox" aria-label={`${claim.workerName} 선택`} checked={selected} onChange={() => onSelect(claim.id)} />}
+        <button type="button" className="dr-worker-expand" aria-label={`${claim.workerName} 작업자`} aria-expanded={open} aria-controls={panelId} onClick={() => { setOpen(value => !value); setVisited(true); }}>
+          <WorkerIdentity claim={claim} directory={directory} /><ChevronDown className={open ? 'dr-accordion-chevron-open' : ''} size={16} />
+        </button>
+      </div>
+      {canWrite ? <>{control('delegation')}{control('recipient')}{control('status')}<div className="dr-accordion-amount"><span>세전 금액 (원)</span><form id={amountFormId} className="dr-inline-amount" onSubmit={event => { event.preventDefault(); if (dirty && valid && !locked) change({ field: 'grossAmount', value: amount }); }}>
         <label className="dr-inline-money-input"><input aria-label={`${claim.workerName} 세전 금액`} inputMode="numeric" placeholder="미확정" disabled={locked} aria-invalid={!valid} value={draft ?? claim.grossAmount?.toLocaleString('ko-KR') ?? ''}
           onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape' && !locked) { event.preventDefault(); setDraft(undefined); } }} /></label>
-        {dirty && <><div className="dr-inline-amount-actions"><button type="button" disabled={locked} onClick={() => setDraft(undefined)}>취소</button><button type="submit" disabled={!valid || locked} aria-label={`${claim.workerName} 세전 금액 저장`}>저장</button></div>{!valid ? <small role="alert">0원 이상의 정수를 입력하세요.</small> : claim.taxRate !== undefined && claim.taxRate !== null && <small>설정 세율 {claim.taxRate}%로 세후 금액도 다시 계산합니다.</small>}</>}
-      </form></div></div> : <div className="dr-worker-readonly">{delegationLabels[getDelegation(claim)]} · {recipientLabels[state.recipient]}</div>}
-      {claim.receipts.length > 0 && <p className="dr-worker-received">기록된 입금액 <b>{won(total.received)}</b></p>}
-      {saved && <div className={`dr-inline-feedback dr-inline-${saved.phase}`} role={saved.phase === 'error' ? 'alert' : 'status'}>{saved.phase === 'saving' ? '저장 중…' : saved.phase === 'saved' ? <><Check size={14} />저장됨</> : <><span>저장 확인 실패</span><button onClick={() => void save(saved.edit)} aria-label={`${claim.workerName} 목록 변경 다시 저장`}>다시 저장</button></>}</div>}
-    </div>}
+      </form></div></> : <>
+        <div className="dr-inline-field dr-inline-delegation"><span>입금방법</span><span className="dr-worker-value">{delegationLabels[getDelegation(claim)]}</span></div>
+        <div className="dr-inline-field dr-inline-recipient"><span>받는 계좌</span><span className="dr-worker-value">{recipientLabels[state.recipient]}</span></div>
+        <div className="dr-inline-field dr-inline-status"><span>입금여부</span><DepositBadge claim={claim} /></div>
+        <div className="dr-accordion-amount"><span>세전 금액 (원)</span><span className="dr-worker-summary-amount">{won(claim.grossAmount)}</span></div>
+      </>}
+      <MemoButton label={claim.workerName} memo={claim.memo} canWrite={canWrite} disabled={saved?.phase === 'saving'} onClick={() => onMemo({ kind: 'worker', id: claim.id })} />
+    </div>
+    {dirty && <div className="dr-worker-amount-feedback">{!valid ? <small role="alert">0원 이상의 정수를 입력하세요.</small> : <small>{claim.taxRate !== undefined && claim.taxRate !== null ? `설정 세율 ${claim.taxRate}%로 세후 금액도 다시 계산합니다.` : '세전 금액 수정 중'}</small>}<div className="dr-inline-amount-actions"><button type="button" disabled={locked} onClick={() => setDraft(undefined)}>취소</button><button type="submit" form={amountFormId} disabled={!valid || locked} aria-label={`${claim.workerName} 세전 금액 저장`}>저장</button></div></div>}
+    {saved && <div className={`dr-inline-feedback dr-worker-save-feedback dr-inline-${saved.phase}`} role={saved.phase === 'error' ? 'alert' : 'status'}>{saved.phase === 'saving' ? '저장 중…' : saved.phase === 'saved' ? <><Check size={14} />저장됨</> : <><span>저장 확인 실패</span><button onClick={() => void save(saved.edit)} aria-label={`${claim.workerName} 목록 변경 다시 저장`}>다시 저장</button></>}</div>}
+    {visited && <div id={panelId} hidden={!open} className="dr-worker-editor"><p className="dr-worker-received">기록된 입금액 <b>{won(total.received)}</b></p></div>}
   </article>;
 });
 
@@ -95,7 +100,7 @@ const SiteAccordion = React.memo(function SiteAccordion({ group, directory, canW
     <div className="dr-site-accordion-header"><h3><button type="button" className="dr-site-expand" aria-label={`${group.name} 현장`} aria-expanded={open} aria-controls={panelId} onClick={() => { setOpen(value => !value); setVisited(true); }}>
       <SiteIdentity name={group.name} color={group.color} /><span className="dr-site-accordion-totals"><span>{group.claims.length}명</span><span>입금완료 {totals.complete}/{group.claims.length}건</span><span>세전 합계 <b>{won(totals.gross.amount)}</b>{totals.gross.missing > 0 && <small>미확정 {totals.gross.missing}건</small>}</span></span><ChevronDown className={open ? 'dr-accordion-chevron-open' : ''} size={20} />
     </button></h3><MemoButton label={`${group.name} 현장`} memo={memo} canWrite={canWrite} disabled={memoDisabled} onClick={() => onMemo({ kind: 'site', key: group.key, month: group.claims[0].month, name: group.name })} /></div>
-    {visited && <div id={panelId} hidden={!open} className="dr-site-workers">{group.claims.map(claim => <WorkerAccordion key={claim.id} claim={claim} directory={directory} canWrite={canWrite} selected={selectedIds.includes(claim.id)} onSelect={onSelect} onUpdate={onUpdate} onMemo={onMemo} />)}</div>}
+    {visited && <div id={panelId} hidden={!open} className="dr-site-workers"><div className="dr-worker-column-headings" aria-hidden="true"><span>작업자</span><span>입금방법</span><span>받는 계좌</span><span>입금여부</span><span>세전 금액 (원)</span><span>메모</span></div>{group.claims.map(claim => <WorkerAccordion key={claim.id} claim={claim} directory={directory} canWrite={canWrite} selected={selectedIds.includes(claim.id)} onSelect={onSelect} onUpdate={onUpdate} onMemo={onMemo} />)}</div>}
   </section>;
 });
 

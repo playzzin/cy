@@ -18,7 +18,6 @@ const render = (ui: React.ReactElement) => {
   const view = rawRender(ui);
   const expand = screen.queryByRole('button', { name: '현장 모두 펼치기' });
   if (expand) fireEvent.click(expand);
-  screen.queryAllByRole('button', { name: / 작업자$/ }).forEach(button => fireEvent.click(button));
   return view;
 };
 
@@ -45,7 +44,7 @@ const fixtures: DelegatedClaim[] = [
   { ...base, id: 'synthetic-3', workerName: '검증작업자 다', delegationType: 'unknown', expectedAmount: null, receipts: [] },
 ];
 
-it('현장과 작업자는 각각 접힌 상태로 시작하고 열린 적 없는 편집창은 만들지 않는다', () => {
+it('현장을 펼치면 작업자가 접혀 있어도 입금 항목을 바로 수정하고 초안을 유지한다', () => {
   const directory = { teams: [{ id: 't1', name: '가상팀', color: '#336699' }], sites: [{ id: 's1', name: base.siteName, responsibleTeamId: 't1' }] };
   rawRender(<DelegatedReceiptsWorkspace initialClaims={fixtures} initialDirectory={directory} />);
   const ledger = within(screen.getByRole('region', { name: '현장별 작업자 내역' }));
@@ -55,12 +54,18 @@ it('현장과 작업자는 각각 접힌 상태로 시작하고 열린 적 없�
   fireEvent.click(site);
   const worker = ledger.getByRole('button', { name: base.workerName + ' 작업자' });
   expect(worker).toHaveAttribute('aria-expanded', 'false');
-  expect(ledger.queryByRole('textbox')).not.toBeInTheDocument();
-  fireEvent.click(worker);
   const amount = ledger.getByRole('textbox', { name: base.workerName + ' 세전 금액' });
+  expect(amount).toBeVisible();
+  ['입금방법', '받는 계좌', '입금여부'].forEach(field => expect(ledger.getByRole('combobox', { name: `${base.workerName} ${field}` })).toBeVisible());
   fireEvent.change(amount, { target: { value: '250000' } });
-  fireEvent.click(worker); fireEvent.click(site); fireEvent.click(site); fireEvent.click(worker);
+  fireEvent.click(worker);
+  expect(amount).toBeVisible();
+  fireEvent.click(worker);
+  expect(amount).toBeVisible();
+  expect(worker).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(site); fireEvent.click(site);
   expect(amount).toHaveValue('250000');
+  expect(amount).toBeVisible();
   expect(ledger.getByRole('region', { name: base.siteName + ' 내역' })).toHaveStyle({ '--dr-group-color': '#336699' });
   fireEvent.click(screen.getByRole('button', { name: '모두 접기' }));
   expect(site).toHaveAttribute('aria-expanded', 'false');
