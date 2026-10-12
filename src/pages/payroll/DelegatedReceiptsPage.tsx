@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, ArrowDownLeft, ArrowLeft, ArrowRight, Building2, Check, ChevronRight, CircleAlert, FileSpreadsheet, Plus, RefreshCw, Search, Wallet, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { userService } from '../../services/userService';
@@ -71,6 +71,7 @@ export function DelegatedReceiptsWorkspace({ initialClaims, initialDirectory, se
   const [reload, setReload] = useState(0);
   const [siteName, setSiteName] = useState('');
   const [worker, setWorker] = useState('');
+  const deferredWorker = useDeferredValue(worker);
   const [recipient, setRecipient] = useState<RecipientKind | ''>('');
   const [directory, setDirectory] = useState<ReceiptDirectory>(initialDirectory || emptyDirectory);
   const [directoryError, setDirectoryError] = useState('');
@@ -126,14 +127,14 @@ export function DelegatedReceiptsWorkspace({ initialClaims, initialDirectory, se
       .catch(() => { if (!cancelled) setDirectoryError('작업자·담당 팀 정보를 불러오지 못했습니다. 새로고침해 주세요.'); });
     return () => { cancelled = true; };
   }, [initialDirectory, initialClaims, reload]);
-  useEffect(() => { setSelectedIds([]); }, [month, siteName, worker, recipient, teamFilter, status, delegationType, reload]);
+  useEffect(() => { setSelectedIds(previous => previous.length ? [] : previous); }, [month, siteName, worker, recipient, teamFilter, status, delegationType, reload]);
 
-  const filtered = useMemo(() => filterClaims(claims, { month, siteName, worker }).filter(claim =>
+  const filtered = useMemo(() => filterClaims(claims, { month, siteName, worker: deferredWorker }).filter(claim =>
     (!delegationType || getDelegation(claim) === delegationType)
     && (!status || getDepositState(claim).status === status)
     && (!recipient || getDepositState(claim).recipient === recipient)
     && (!teamFilter || (teamFilter === 'unlinked' ? !getSiteTeam(claim, directory) : getSiteTeam(claim, directory)?.id === teamFilter))
-  ), [claims, month, siteName, worker, delegationType, status, recipient, teamFilter, directory]);
+  ), [claims, month, siteName, deferredWorker, delegationType, status, recipient, teamFilter, directory]);
   const summary = useMemo(() => summarizeClaims(filtered), [filtered]);
   const statusCounts = useMemo(() => filtered.reduce((counts, claim) => { counts[getDepositState(claim).status]++; return counts; }, { complete: 0, pending: 0, partial: 0, unknown: 0 }), [filtered]);
   const sites = useMemo(() => Array.from(new Set(claims.filter(claim => claim.month === month).map(claim => claim.siteName))).sort((a,b) => a.localeCompare(b, 'ko')), [claims, month]);
@@ -154,12 +155,12 @@ export function DelegatedReceiptsWorkspace({ initialClaims, initialDirectory, se
     });
   }, [preview, importTax, importDelegation]);
 
-  const updateListField = async (id: string, edit: ClaimListEdit) => {
+  const updateListField = useCallback(async (id: string, edit: ClaimListEdit) => {
     if (!canWrite) throw new Error('수정 권한이 없습니다.');
     const updated = await service.updateListField(id, edit);
     setClaims(previous => previous.map(claim => claim.id === id ? updated : claim));
     setSelectedIds(previous => previous.filter(value => value !== id));
-  };
+  }, [canWrite, service]);
   const closeDialog = () => { if (!savingRef.current) { setConfirming(null); setSelectedIds([]); setPreview(null); setPreviewBytes(null); setDialogError(''); } };
   const runSave = async (operation: () => Promise<void | string>, success: string) => {
     if (savingRef.current || !canWrite) return;

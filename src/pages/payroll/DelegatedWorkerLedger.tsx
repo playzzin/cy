@@ -1,30 +1,23 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { Building2, Check, UserRound } from 'lucide-react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Building2, Check, ChevronDown, UserRound } from 'lucide-react';
 import type { ClaimListChange, ClaimListEdit, DelegatedClaim } from '../../features/delegated-receipts/model';
 import { getClaimTotals, summarizeClaimAmounts } from '../../features/delegated-receipts/model';
 import { groupClaimsBySite, ReceiptSiteGroup } from '../../features/delegated-receipts/siteGroups';
 import { depositLabels, getDelegation, getDepositState, recipientLabels } from '../../features/delegated-receipts/depositState';
 import { getWorkerColor, ReceiptDirectory, validTeamColor } from '../../features/delegated-receipts/teamDirectory';
+import { siteMemoService, SiteMemo, SiteMemoTarget } from '../../features/delegated-receipts/siteMemoService';
 import { getContrastingTextColor } from '../../utils/color';
-import DelegatedMemoSticker from './DelegatedMemoSticker';
+import DelegatedMemoSticker, { MemoButton } from './DelegatedMemoSticker';
 import './DelegatedWorkerLedger.css';
 
 export function DepositBadge({ claim }: { claim: DelegatedClaim }) {
-  const state = getDepositState(claim);
-  return <span className={`dr-badge dr-deposit-${state.status}`}><span aria-hidden="true" />{depositLabels[state.status]}</span>;
+  return <span className={`dr-badge dr-deposit-${getDepositState(claim).status}`}>{depositLabels[getDepositState(claim).status]}</span>;
 }
 export function SiteIdentity({ name, color }: { name: string; color?: string }) {
-  return <span className="dr-team-site" style={{ '--dr-site-color': validTeamColor(color) } as React.CSSProperties}>
-    <span className="dr-site-avatar" aria-hidden="true"><Building2 size={18} strokeWidth={2} /></span>
-    <span className="dr-site-name">{name}</span>
-  </span>;
+  return <span className="dr-team-site" style={{ '--dr-site-color': validTeamColor(color) } as React.CSSProperties}><span className="dr-site-avatar" aria-hidden="true"><Building2 size={18} /></span><span className="dr-site-name">{name}</span></span>;
 }
 function WorkerIdentity({ claim, directory }: { claim: DelegatedClaim; directory: ReceiptDirectory }) {
-  const color = getWorkerColor(claim, directory);
-  return <span className="dr-worker-identity" style={{ '--dr-worker-color': color } as React.CSSProperties}>
-    <span className="dr-worker-avatar" aria-hidden="true"><UserRound size={18} strokeWidth={2} /></span>
-    <strong className="dr-worker-name">{claim.workerName}</strong>
-  </span>;
+  return <span className="dr-worker-identity" style={{ '--dr-worker-color': getWorkerColor(claim, directory) } as React.CSSProperties}><span className="dr-worker-avatar" aria-hidden="true"><UserRound size={18} /></span><strong className="dr-worker-name">{claim.workerName}</strong></span>;
 }
 const won = (value: number | null) => value === null ? '금액 미설정' : `${value.toLocaleString('ko-KR')}원`;
 const delegationLabels = { delegate: '위임', direct: '직불', unknown: '미확인' };
@@ -32,109 +25,114 @@ const fieldLabels = { delegation: '입금방법', recipient: '받는 계좌', st
 const fieldOptions = { delegation: delegationLabels, recipient: recipientLabels, status: depositLabels };
 type SelectField = 'delegation' | 'recipient' | 'status';
 type RowSave = { phase: 'saving' | 'saved' | 'error'; edit: ClaimListEdit };
+type MemoTarget = { kind: 'worker'; id: string } | ({ kind: 'site' } & SiteMemoTarget);
+type Update = (id: string, edit: ClaimListEdit) => Promise<void>;
+const editFor = (change: ClaimListChange): ClaimListEdit => ({ id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `list-${Date.now()}-${Math.random().toString(36).slice(2)}`, recordedAt: new Date().toISOString(), change });
 
-function SiteGroupHeading({ group }: { group: ReceiptSiteGroup }) {
-  const gross = summarizeClaimAmounts(group.claims).gross;
-  const complete = group.claims.filter(claim => getDepositState(claim).status === 'complete').length;
-  return <div className="dr-site-group-heading"><h3><SiteIdentity name={group.name} color={group.color} /></h3><div className="dr-site-group-totals"><span><b>{group.claims.length}건</b></span><span>입금완료 <b>{complete}/{group.claims.length}건</b></span><span>세전 합계 <b>{won(gross.amount)}</b>{gross.amount !== null && gross.missing > 0 && <small>미확정 {gross.missing}건 제외</small>}</span></div></div>;
-}
-
-export default function DelegatedWorkerLedger({ claims, directory, canWrite, selectedIds, onSelect, onUpdate }: {
-  claims: DelegatedClaim[]; directory: ReceiptDirectory; canWrite: boolean; selectedIds: string[];
-  onSelect: (ids: string[]) => void;
-  onUpdate: (id: string, edit: ClaimListEdit) => Promise<void>;
+const WorkerAccordion = React.memo(function WorkerAccordion({ claim, directory, selected, canWrite, onSelect, onUpdate, onMemo }: {
+  claim: DelegatedClaim; directory: ReceiptDirectory; selected: boolean; canWrite: boolean;
+  onSelect: (id: string) => void; onUpdate: Update; onMemo: (target: MemoTarget) => void;
 }) {
-  const [rowSaves, setRowSaves] = useState<Record<string, RowSave>>({});
-  const [amountDrafts, setAmountDrafts] = useState<Record<string, string>>({});
-  const [memoDrafts, setMemoDrafts] = useState<Record<string, string>>({});
-  const clearAmount = (id: string) => setAmountDrafts(previous => { const next = { ...previous }; delete next[id]; return next; });
-  const clearMemo = (id: string) => setMemoDrafts(previous => { const next = { ...previous }; delete next[id]; return next; });
-  const busyRows = useRef(new Set<string>());
-  const save = async (id: string, edit: ClaimListEdit) => {
-    if (!canWrite || busyRows.current.has(id)) return;
-    busyRows.current.add(id);
-    setRowSaves(previous => ({ ...previous, [id]: { phase: 'saving', edit } }));
-    try {
-      await onUpdate(id, edit);
-      if (edit.change.field === 'grossAmount') clearAmount(id);
-      if (edit.change.field === 'memo') clearMemo(id);
-      setRowSaves(previous => ({ ...previous, [id]: { phase: 'saved', edit } }));
-    } catch {
-      setRowSaves(previous => ({ ...previous, [id]: { phase: 'error', edit } }));
-    } finally { busyRows.current.delete(id); }
+  const [open, setOpen] = useState(false);
+  const [visited, setVisited] = useState(false);
+  const [draft, setDraft] = useState<string>();
+  const [saved, setSaved] = useState<RowSave>();
+  const busy = useRef(false);
+  const panelId = useId();
+  const locked = Boolean(saved && saved.phase !== 'saved');
+  const state = getDepositState(claim);
+  const total = getClaimTotals(claim);
+  const save = async (edit: ClaimListEdit) => {
+    if (!canWrite || busy.current) return;
+    busy.current = true; setSaved({ phase: 'saving', edit });
+    try { await onUpdate(claim.id, edit); if (edit.change.field === 'grossAmount') setDraft(undefined); setSaved({ phase: 'saved', edit }); }
+    catch { setSaved({ phase: 'error', edit }); }
+    finally { busy.current = false; }
   };
-  const change = (id: string, value: ClaimListChange) => {
-    const edit = { id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `list-${Date.now()}-${Math.random().toString(36).slice(2)}`, recordedAt: new Date().toISOString(), change: value };
-    void save(id, edit);
-  };
-  const control = (claim: DelegatedClaim, field: SelectField, mobile = false) => {
-    const saved = rowSaves[claim.id];
-    const current = field === 'delegation' ? getDelegation(claim) : getDepositState(claim)[field];
+  const change = (value: ClaimListChange) => void save(editFor(value));
+  const clean = (draft ?? String(claim.grossAmount ?? '')).replace(/,/g, '').trim();
+  const amount = clean === '' ? null : Number(clean);
+  const valid = clean === '' || (/^\d+$/.test(clean) && Number.isSafeInteger(amount));
+  const dirty = draft !== undefined && (!valid || amount !== claim.grossAmount);
+  const control = (field: SelectField) => {
+    const current = field === 'delegation' ? getDelegation(claim) : state[field];
     const value = saved && saved.phase !== 'saved' && saved.edit.change.field === field ? saved.edit.change.value : current;
-    return <label className={`dr-inline-field dr-inline-${field}`}><span>{fieldLabels[field]}</span>
-      <select aria-label={`${claim.workerName}${mobile ? ' 모바일' : ''} ${fieldLabels[field]}`} className={field === 'status' ? `dr-deposit-${value}` : ''}
-        value={value} disabled={Boolean(saved && saved.phase !== 'saved')} onChange={event => change(claim.id, { field, value: event.target.value } as ClaimListChange)}>
-        {Object.entries(fieldOptions[field]).map(([option, label]) => <option key={option} value={option}>{label}</option>)}
-      </select></label>;
+    return <label className={`dr-inline-field dr-inline-${field}`}><span>{fieldLabels[field]}</span><select aria-label={`${claim.workerName} ${fieldLabels[field]}`} value={value} disabled={locked}
+      className={field === 'status' ? `dr-deposit-${value}` : ''} onChange={event => change({ field, value: event.target.value } as ClaimListChange)}>
+      {Object.entries(fieldOptions[field]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+    </select></label>;
   };
-  const amountControl = (claim: DelegatedClaim, mobile = false) => {
-    const draft = amountDrafts[claim.id];
-    const clean = (draft ?? String(claim.grossAmount ?? '')).replace(/,/g, '').trim();
-    const amount = clean === '' ? null : Number(clean);
-    const valid = clean === '' || (/^\d+$/.test(clean) && Number.isSafeInteger(amount));
-    const dirty = draft !== undefined && (!valid || amount !== claim.grossAmount);
-    const locked = Boolean(rowSaves[claim.id] && rowSaves[claim.id].phase !== 'saved');
-    return <form className="dr-inline-amount" onSubmit={event => { event.preventDefault(); if (dirty && valid && !locked) change(claim.id, { field: 'grossAmount', value: amount }); }}>
-      <label className="dr-inline-money-input"><input aria-label={`${claim.workerName}${mobile ? ' 모바일' : ''} 세전 금액`} inputMode="numeric" placeholder="미확정" disabled={locked} aria-invalid={!valid}
-        value={draft ?? claim.grossAmount?.toLocaleString('ko-KR') ?? ''} onChange={event => setAmountDrafts(previous => ({ ...previous, [claim.id]: event.target.value }))}
-        onKeyDown={event => { if (event.key === 'Escape' && !locked) { event.preventDefault(); clearAmount(claim.id); } }} /></label>
-      {dirty && <><div className="dr-inline-amount-actions"><button type="button" disabled={locked} onClick={() => clearAmount(claim.id)}>취소</button><button type="submit" disabled={!valid || locked} aria-label={`${claim.workerName}${mobile ? ' 모바일' : ''} 세전 금액 저장`}>저장</button></div>
-        {!valid ? <small role="alert">0원 이상의 정수를 입력하세요.</small> : claim.taxRate !== undefined && claim.taxRate !== null && <small>설정 세율 {claim.taxRate}%로 세후 금액도 다시 계산합니다.</small>}</>}
-    </form>;
-  };
-  const feedback = (claim: DelegatedClaim) => {
-    const saved = rowSaves[claim.id];
-    if (!saved) return null;
-    return <div className={`dr-inline-feedback dr-inline-${saved.phase}`} role={saved.phase === 'error' ? 'alert' : 'status'}>
-      {saved.phase === 'saving' ? '저장 중…' : saved.phase === 'saved' ? <><Check size={14} />저장됨</> : <><span>저장 확인 실패</span><button onClick={() => void save(claim.id, saved.edit)} aria-label={`${claim.workerName} 목록 변경 다시 저장`}>다시 저장</button></>}
-    </div>;
-  };
-  const memoSticker = (claim: DelegatedClaim, mobile = false) => {
-    return <DelegatedMemoSticker label={`${claim.workerName}${mobile ? ' 모바일' : ''}`} memo={claim.memo} draft={memoDrafts[claim.id]}
-      canWrite={canWrite} locked={Boolean(rowSaves[claim.id] && rowSaves[claim.id].phase !== 'saved')}
-      onStart={() => setMemoDrafts(previous => ({ ...previous, [claim.id]: claim.memo }))}
-      onChange={value => setMemoDrafts(previous => ({ ...previous, [claim.id]: value }))}
-      onSave={() => change(claim.id, { field: 'memo', value: memoDrafts[claim.id] })} onCancel={() => clearMemo(claim.id)}
-      onDelete={() => change(claim.id, { field: 'memo', value: '' })} />;
-  };
-  const toggle = (id: string) => onSelect(selectedIds.includes(id) ? selectedIds.filter(value => value !== id) : [...selectedIds, id].slice(0, 400));
-  const allSelected = claims.length > 0 && claims.length <= 400 && claims.every(claim => selectedIds.includes(claim.id));
+  return <article className={`dr-worker-accordion ${selected ? 'dr-row-selected' : ''}`} aria-label={`${claim.workerName} 내역`}>
+    <div className="dr-worker-summary">
+      {canWrite && <input type="checkbox" aria-label={`${claim.workerName} 선택`} checked={selected} onChange={() => onSelect(claim.id)} />}
+      <button type="button" className="dr-worker-expand" aria-label={`${claim.workerName} 작업자`} aria-expanded={open} aria-controls={panelId} onClick={() => { setOpen(value => !value); setVisited(true); }}>
+        <WorkerIdentity claim={claim} directory={directory} /><span className="dr-worker-summary-amount">{won(claim.grossAmount)}{dirty && <small>수정 중</small>}</span><DepositBadge claim={claim} /><ChevronDown className={open ? 'dr-accordion-chevron-open' : ''} size={18} />
+      </button>
+      <MemoButton label={claim.workerName} memo={claim.memo} canWrite={canWrite} disabled={saved?.phase === 'saving'} onClick={() => onMemo({ kind: 'worker', id: claim.id })} />
+    </div>
+    {visited && <div id={panelId} hidden={!open} className="dr-worker-editor">
+      {canWrite ? <div className="dr-worker-fields">{control('delegation')}{control('recipient')}{control('status')}<div className="dr-accordion-amount"><span>세전 금액 (원)</span><form className="dr-inline-amount" onSubmit={event => { event.preventDefault(); if (dirty && valid && !locked) change({ field: 'grossAmount', value: amount }); }}>
+        <label className="dr-inline-money-input"><input aria-label={`${claim.workerName} 세전 금액`} inputMode="numeric" placeholder="미확정" disabled={locked} aria-invalid={!valid} value={draft ?? claim.grossAmount?.toLocaleString('ko-KR') ?? ''}
+          onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape' && !locked) { event.preventDefault(); setDraft(undefined); } }} /></label>
+        {dirty && <><div className="dr-inline-amount-actions"><button type="button" disabled={locked} onClick={() => setDraft(undefined)}>취소</button><button type="submit" disabled={!valid || locked} aria-label={`${claim.workerName} 세전 금액 저장`}>저장</button></div>{!valid ? <small role="alert">0원 이상의 정수를 입력하세요.</small> : claim.taxRate !== undefined && claim.taxRate !== null && <small>설정 세율 {claim.taxRate}%로 세후 금액도 다시 계산합니다.</small>}</>}
+      </form></div></div> : <div className="dr-worker-readonly">{delegationLabels[getDelegation(claim)]} · {recipientLabels[state.recipient]}</div>}
+      {claim.receipts.length > 0 && <p className="dr-worker-received">기록된 입금액 <b>{won(total.received)}</b></p>}
+      {saved && <div className={`dr-inline-feedback dr-inline-${saved.phase}`} role={saved.phase === 'error' ? 'alert' : 'status'}>{saved.phase === 'saving' ? '저장 중…' : saved.phase === 'saved' ? <><Check size={14} />저장됨</> : <><span>저장 확인 실패</span><button onClick={() => void save(saved.edit)} aria-label={`${claim.workerName} 목록 변경 다시 저장`}>다시 저장</button></>}</div>}
+    </div>}
+  </article>;
+});
+
+const SiteAccordion = React.memo(function SiteAccordion({ group, directory, canWrite, selectedIds, onSelect, onUpdate, onMemo, memo, memoDisabled, expandCommand }: {
+  group: ReceiptSiteGroup; directory: ReceiptDirectory; canWrite: boolean; selectedIds: string[]; onSelect: (id: string) => void; onUpdate: Update; onMemo: (target: MemoTarget) => void;
+  memo: string; memoDisabled: boolean; expandCommand: { expanded: boolean; version: number };
+}) {
+  const [open, setOpen] = useState(false);
+  const [visited, setVisited] = useState(false);
+  const panelId = useId();
+  useEffect(() => { if (expandCommand.version) { setOpen(expandCommand.expanded); if (expandCommand.expanded) setVisited(true); } }, [expandCommand]);
+  const totals = useMemo(() => ({ gross: summarizeClaimAmounts(group.claims).gross, complete: group.claims.filter(claim => getDepositState(claim).status === 'complete').length }), [group.claims]);
+  return <section className="dr-site-accordion" aria-label={`${group.name} 내역`} style={{ '--dr-group-color': group.color, '--dr-group-text': getContrastingTextColor(group.color, '#ffffff', '#000000') } as React.CSSProperties}>
+    <div className="dr-site-accordion-header"><h3><button type="button" className="dr-site-expand" aria-label={`${group.name} 현장`} aria-expanded={open} aria-controls={panelId} onClick={() => { setOpen(value => !value); setVisited(true); }}>
+      <SiteIdentity name={group.name} color={group.color} /><span className="dr-site-accordion-totals"><span>{group.claims.length}명</span><span>입금완료 {totals.complete}/{group.claims.length}건</span><span>세전 합계 <b>{won(totals.gross.amount)}</b>{totals.gross.missing > 0 && <small>미확정 {totals.gross.missing}건</small>}</span></span><ChevronDown className={open ? 'dr-accordion-chevron-open' : ''} size={20} />
+    </button></h3><MemoButton label={`${group.name} 현장`} memo={memo} canWrite={canWrite} disabled={memoDisabled} onClick={() => onMemo({ kind: 'site', key: group.key, month: group.claims[0].month, name: group.name })} /></div>
+    {visited && <div id={panelId} hidden={!open} className="dr-site-workers">{group.claims.map(claim => <WorkerAccordion key={claim.id} claim={claim} directory={directory} canWrite={canWrite} selected={selectedIds.includes(claim.id)} onSelect={onSelect} onUpdate={onUpdate} onMemo={onMemo} />)}</div>}
+  </section>;
+});
+
+interface Props { claims: DelegatedClaim[]; directory: ReceiptDirectory; canWrite: boolean; selectedIds: string[]; onSelect: (ids: string[]) => void; onUpdate: Update; memoService?: typeof siteMemoService; }
+export default React.memo(function DelegatedWorkerLedger({ claims, directory, canWrite, selectedIds, onSelect, onUpdate, memoService = siteMemoService }: Props) {
   const groups = useMemo(() => groupClaimsBySite(claims, directory), [claims, directory]);
-  const groupStyle = (group: ReceiptSiteGroup) => ({ '--dr-group-color': group.color, '--dr-group-text': getContrastingTextColor(group.color, '#ffffff', '#000000') } as React.CSSProperties);
-  return <div className="dr-worker-ledger">
-    {canWrite && <label className="dr-select-all"><input type="checkbox" checked={allSelected} onChange={event => onSelect(event.target.checked ? claims.slice(0, 400).map(claim => claim.id) : [])} />현재 목록 선택 {claims.length > 400 && '(최대 400건)'}</label>}
-    <div className="dr-table-wrap"><table className="dr-table" aria-label="현장별 작업자 내역"><thead><tr>{canWrite && <th scope="col"><span className="dr-sr-only">선택</span></th>}<th scope="col">작업자</th><th scope="col">입금방법 / 받는 계좌</th><th scope="col" className="dr-align-right">세전 금액 (원)</th><th scope="col">입금여부</th><th scope="col">메모</th></tr></thead>{groups.map(group => <tbody key={group.key} className="dr-site-group" style={groupStyle(group)} aria-label={`${group.name} 내역`}>
-      <tr className="dr-site-group-head"><th scope="rowgroup" colSpan={canWrite ? 6 : 5}><SiteGroupHeading group={group} /></th></tr>
-      {group.claims.map(claim => {
-        const state = getDepositState(claim);
-        return <tr key={claim.id} className={selectedIds.includes(claim.id) ? 'dr-row-selected' : ''}>
-          {canWrite && <td className="dr-checkbox-cell"><input type="checkbox" aria-label={`${claim.workerName} 선택`} checked={selectedIds.includes(claim.id)} onChange={() => toggle(claim.id)} /></td>}
-          <td><WorkerIdentity claim={claim} directory={directory} />{feedback(claim)}</td>
-          <td>{canWrite ? <div className="dr-inline-payment">{control(claim, 'delegation')}{control(claim, 'recipient')}</div> : <><span className="dr-delegation-label">{delegationLabels[getDelegation(claim)]}</span> {recipientLabels[state.recipient]}</>}</td>
-          <td className="dr-align-right dr-number">{canWrite ? amountControl(claim) : won(claim.grossAmount)}</td>
-          <td>{canWrite ? control(claim, 'status') : <DepositBadge claim={claim} />}</td>
-          <td className="dr-memo-cell">{memoSticker(claim)}</td>
-        </tr>;
-      })}
-    </tbody>)}</table></div>
-    <div className="dr-mobile-list">{groups.map(group => <section className="dr-mobile-site-group" key={group.key} style={groupStyle(group)} aria-label={`${group.name} 모바일 내역`}><SiteGroupHeading group={group} /><div className="dr-site-group-workers">{group.claims.map(claim => {
-      const state = getDepositState(claim); const total = getClaimTotals(claim);
-      return <article className={`dr-worker-card ${selectedIds.includes(claim.id) ? 'dr-row-selected' : ''}`} key={claim.id}>
-        <div className="dr-worker-heading"><div className="dr-worker-select">{canWrite && <input type="checkbox" aria-label={`${claim.workerName} 모바일 선택`} checked={selectedIds.includes(claim.id)} onChange={() => toggle(claim.id)} />}<WorkerIdentity claim={claim} directory={directory} /></div>{!canWrite && <DepositBadge claim={claim} />}</div>
-        {canWrite ? <div className="dr-inline-mobile">{control(claim, 'delegation', true)}{control(claim, 'status', true)}{control(claim, 'recipient', true)}</div> : <div className="dr-worker-meta"><b>{delegationLabels[getDelegation(claim)]}</b><span>·</span>{recipientLabels[state.recipient]}</div>}
-        <dl className="dr-worker-amounts"><div><dt>세전 금액 (원)</dt><dd>{canWrite ? amountControl(claim, true) : won(claim.grossAmount)}</dd></div><div><dt>기록된 입금액</dt><dd>{claim.receipts.length ? won(total.received) : '미기록'}</dd></div></dl>
-        {feedback(claim)}<div className="dr-mobile-memo">{memoSticker(claim, true)}</div>
-      </article>;
-    })}</div></section>)}</div>
+  const [expandCommand, setExpandCommand] = useState({ expanded: false, version: 0 });
+  const [memos, setMemos] = useState<Record<string, SiteMemo>>({});
+  const [memoLoading, setMemoLoading] = useState(true);
+  const [memoError, setMemoError] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const [activeMemo, setActiveMemo] = useState<MemoTarget | null>(null);
+  const month = claims[0]?.month;
+  useEffect(() => {
+    if (!month) return;
+    let cancelled = false; setMemoLoading(true); setMemoError(false);
+    memoService.list(month).then(values => { if (!cancelled) setMemos(Object.fromEntries(values.map(value => [value.key, value]))); })
+      .catch(() => { if (!cancelled) setMemoError(true); }).finally(() => { if (!cancelled) setMemoLoading(false); });
+    return () => { cancelled = true; };
+  }, [month, memoService, retry]);
+  const openMemo = useCallback((target: MemoTarget) => setActiveMemo(target), []);
+  const toggle = useCallback((id: string) => onSelect(selectedIds.includes(id) ? selectedIds.filter(value => value !== id) : [...selectedIds, id].slice(0, 400)), [selectedIds, onSelect]);
+  const currentWorker = activeMemo?.kind === 'worker' ? claims.find(claim => claim.id === activeMemo.id) : undefined;
+  const memo = activeMemo?.kind === 'site' ? memos[activeMemo.key]?.memo ?? '' : currentWorker?.memo ?? '';
+  const saveMemo = async (value: string, operationId: string) => {
+    if (!canWrite || !activeMemo) throw new Error('수정 권한을 확인해 주세요.');
+    if (activeMemo.kind === 'worker') await onUpdate(activeMemo.id, { id: operationId, recordedAt: new Date().toISOString(), change: { field: 'memo', value } });
+    else {
+      const { kind, ...target } = activeMemo;
+      const saved = await memoService.save(target, value, memos[target.key]?.revision ?? 0, operationId);
+      setMemos(previous => ({ ...previous, [saved.key]: saved }));
+    }
+  };
+  return <div className="dr-worker-ledger" role="region" aria-label="현장별 작업자 내역">
+    <div className="dr-accordion-toolbar">{canWrite && <label className="dr-select-all"><input type="checkbox" aria-label="현재 목록 선택" checked={claims.length > 0 && claims.length <= 400 && claims.every(claim => selectedIds.includes(claim.id))} onChange={event => onSelect(event.target.checked ? claims.slice(0, 400).map(claim => claim.id) : [])} />현재 목록 선택 {claims.length > 400 && '(최대 400건)'}</label>}<div><button onClick={() => setExpandCommand(value => ({ expanded: true, version: value.version + 1 }))}>현장 모두 펼치기</button><button onClick={() => setExpandCommand(value => ({ expanded: false, version: value.version + 1 }))}>모두 접기</button></div></div>
+    {memoError && <p className="dr-site-memo-error" role="alert">현장 메모를 불러오지 못했습니다. <button onClick={() => setRetry(value => value + 1)}>현장 메모 다시 조회</button></p>}
+    <div className="dr-accordion-sites">{groups.map(group => <SiteAccordion key={group.key} group={group} directory={directory} canWrite={canWrite} selectedIds={selectedIds} onSelect={toggle} onUpdate={onUpdate} onMemo={openMemo} memo={memos[group.key]?.memo ?? ''} memoDisabled={memoLoading || memoError} expandCommand={expandCommand} />)}</div>
+    {activeMemo && <DelegatedMemoSticker label={activeMemo.kind === 'site' ? `${activeMemo.name} 현장` : currentWorker?.workerName ?? '작업자'} context={activeMemo.kind === 'site' ? `${month} · 현장 공통 메모` : `${month} · ${currentWorker?.siteName} · 작업자 메모`} memo={memo} canWrite={canWrite} onSave={saveMemo} onClose={() => setActiveMemo(null)} />}
   </div>;
-}
+});
