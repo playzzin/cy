@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx-js-style';
+import DeductionAllocationButton from './DeductionAllocationButton';
 import {
     AdvanceItemLabelsConfig,
     DEFAULT_ADVANCE_ITEM_LABELS
@@ -434,7 +435,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     }, [advanceItemLabels]);
     const totalColumnCount = 10 + (showUtilities ? 5 : 0) + (showAdvances ? 5 : 0) + (showTaxes ? 7 : 0);
     const tableMinWidth =
-        848
+        800
         + (showUtilities ? 624 : 0)
         + (showAdvances ? 674 : 0)
         + (showTaxes ? 712 : 0);
@@ -1962,7 +1963,8 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 )}
             </div>
 
-            <div className="relative isolate flex-1 min-h-0 overflow-auto bg-white custom-scrollbar">
+            {groupedRows.length > 0 && <p className="monthly-payroll-scroll-hint">좌우로 밀어 공제·지급 항목을 확인하세요. 이름은 고정됩니다.</p>}
+            <div className="monthly-payroll-table-scroll relative isolate flex-1 min-h-0 overflow-auto bg-white custom-scrollbar" role="region" aria-label="가불대장 가로 스크롤" tabIndex={0}>
                 {groupedRows.length === 0 ? (
                     <div className="flex h-full min-h-[240px] items-center justify-center px-6 text-center">
                         <div>
@@ -1980,10 +1982,10 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                             <th rowSpan={2} className="sticky top-0 left-0 z-[60] w-10 min-w-10 max-w-10 bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">No</th>
                             <th rowSpan={2} className="sticky top-0 left-[40px] z-[60] w-20 min-w-20 max-w-20 bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">이름</th>
                             <th rowSpan={2} className="sticky top-0 left-[120px] z-[60] w-14 min-w-14 max-w-14 bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">구분</th>
-                            <th rowSpan={2} className="sticky top-0 left-[176px] z-[60] w-[112px] min-w-[112px] max-w-[112px] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">공제 분류</th>
-                            <th rowSpan={2} className="sticky top-0 left-[288px] z-[60] w-16 min-w-16 max-w-16 bg-sky-100 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">공수</th>
-                            <th rowSpan={2} className="sticky top-0 left-[352px] z-[60] w-[80px] min-w-[80px] max-w-[80px] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">단가</th>
-                            <th rowSpan={2} className="sticky top-0 left-[432px] z-[60] w-[92px] min-w-[92px] max-w-[92px] bg-yellow-100 border-b border-r border-slate-500 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[2px_0_0_rgba(15,23,42,0.25),inset_0_-1px_0_rgba(0,0,0,0.1)]">세전 금액</th>
+                            <th rowSpan={2} className="sticky top-0 left-[176px] z-[60] w-16 min-w-16 max-w-16 bg-slate-200 border-b border-r border-slate-400 px-1 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">공제분류</th>
+                            <th rowSpan={2} className="sticky top-0 left-[240px] z-[60] w-16 min-w-16 max-w-16 bg-sky-100 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">공수</th>
+                            <th rowSpan={2} className="sticky top-0 left-[304px] z-[60] w-[80px] min-w-[80px] max-w-[80px] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">단가</th>
+                            <th rowSpan={2} className="sticky top-0 left-[384px] z-[60] w-[92px] min-w-[92px] max-w-[92px] bg-yellow-100 border-b border-r border-slate-500 px-1.5 py-1.5 whitespace-nowrap align-middle shadow-[2px_0_0_rgba(15,23,42,0.25),inset_0_-1px_0_rgba(0,0,0,0.1)]">세전 금액</th>
                             {showUtilities && (
                                 <th colSpan={5} className="sticky top-0 z-[50] bg-slate-300 border-b border-r border-slate-400 px-2 py-1 text-center text-[11px] font-bold tracking-wide shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                     공과금 공제 <span className="font-normal text-slate-600">(위: 법인 · 아래: 노무)</span>
@@ -2111,31 +2113,17 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                     </span>
                                                 </td>
                                                 <td rowSpan={2} className={`sticky left-[120px] z-30 w-14 min-w-14 max-w-14 whitespace-nowrap border-b border-r border-slate-300 px-1 text-center font-semibold shadow-[1px_0_0_rgba(0,0,0,0.1)] ${getSalaryModelLabelClassName(row.salaryModel)}`}>{row.salaryModel || '월급제'}</td>
-                                                <td rowSpan={2} className="sticky left-[176px] z-30 w-[112px] min-w-[112px] max-w-[112px] border-b border-r border-slate-300 bg-slate-50 px-1.5 py-1 text-center align-middle shadow-[1px_0_0_rgba(0,0,0,0.1)]">
-                                                    <select
+                                                <td rowSpan={2} className="sticky left-[176px] z-30 w-16 min-w-16 max-w-16 border-b border-r border-slate-300 bg-slate-50 px-1.5 py-1 text-center align-middle shadow-[1px_0_0_rgba(0,0,0,0.1)]">
+                                                    <DeductionAllocationButton
+                                                        workerName={row.workerName}
                                                         disabled={Boolean(row.finalizedAmounts)}
-                                                        aria-label={`${row.workerName} 공제 분류`}
                                                         value={row.allocationMode}
-                                                        onChange={(event) => updateAllocationMode(
-                                                            row.rowKey,
-                                                            event.target.value as MonthlyAdvanceAllocationMode
-                                                        )}
-                                                        className={`h-8 w-full rounded-md border px-1 text-[11px] font-bold outline-none transition-colors ${
-                                                            row.allocationMode === 'corporate'
-                                                                ? 'border-blue-300 bg-blue-50 text-blue-800'
-                                                                : row.allocationMode === 'labor'
-                                                                    ? 'border-amber-300 bg-amber-50 text-amber-800'
-                                                                    : 'border-slate-300 bg-white text-slate-700'
-                                                        }`}
-                                                    >
-                                                        <option value="split">법인·노무 분리</option>
-                                                        <option value="corporate">전체 법인</option>
-                                                        <option value="labor">전체 노무</option>
-                                                    </select>
+                                                        onChange={(value) => updateAllocationMode(row.rowKey, value)}
+                                                    />
                                                 </td>
-                                                <td className="sticky left-[288px] z-30 w-16 min-w-16 max-w-16 border border-slate-300 bg-blue-100 px-2 text-right font-bold text-blue-900">{formatManDay(row.invoiceManDay)}</td>
-                                                <td rowSpan={2} className="sticky left-[352px] z-30 w-[80px] min-w-[80px] max-w-[80px] border border-slate-300 bg-white px-2 text-right font-mono">{formatAmount(row.unitPrice)}</td>
-                                                <td className="sticky left-[432px] z-30 w-[92px] min-w-[92px] max-w-[92px] border border-slate-400 bg-blue-50 px-2 text-right font-bold text-blue-900 shadow-[2px_0_0_rgba(15,23,42,0.18)]">{formatAmount(row.invoiceGrossAmount)}</td>
+                                                <td className="sticky left-[240px] z-30 w-16 min-w-16 max-w-16 border border-slate-300 bg-blue-100 px-2 text-right font-bold text-blue-900">{formatManDay(row.invoiceManDay)}</td>
+                                                <td rowSpan={2} className="sticky left-[304px] z-30 w-[80px] min-w-[80px] max-w-[80px] border border-slate-300 bg-white px-2 text-right font-mono">{formatAmount(row.unitPrice)}</td>
+                                                <td className="sticky left-[384px] z-30 w-[92px] min-w-[92px] max-w-[92px] border border-slate-400 bg-blue-50 px-2 text-right font-bold text-blue-900 shadow-[2px_0_0_rgba(15,23,42,0.18)]">{formatAmount(row.invoiceGrossAmount)}</td>
                                                 {showUtilities && (
                                                     <>
                                                         <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-blue-100">
@@ -2240,8 +2228,8 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                             </tr>
                                             {/* 아랫칸(노무) 행: 초록색 계열 배경 + 하단/좌/우 굵은 검정 테두리 */}
                                             <tr className="odd:bg-white even:bg-slate-50/60 border-b-2 border-l-2 border-r-2 border-black">
-                                                <td className="sticky left-[288px] z-30 w-16 min-w-16 max-w-16 border border-slate-300 bg-amber-100 px-2 text-right font-bold text-amber-900">{formatManDay(row.laborManDay)}</td>
-                                                <td className="sticky left-[432px] z-30 w-[92px] min-w-[92px] max-w-[92px] border border-slate-400 bg-amber-50 px-2 text-right font-bold text-amber-900 shadow-[2px_0_0_rgba(15,23,42,0.18)]">{formatAmount(row.laborGrossAmount)}</td>
+                                                <td className="sticky left-[240px] z-30 w-16 min-w-16 max-w-16 border border-slate-300 bg-amber-100 px-2 text-right font-bold text-amber-900">{formatManDay(row.laborManDay)}</td>
+                                                <td className="sticky left-[384px] z-30 w-[92px] min-w-[92px] max-w-[92px] border border-slate-400 bg-amber-50 px-2 text-right font-bold text-amber-900 shadow-[2px_0_0_rgba(15,23,42,0.18)]">{formatAmount(row.laborGrossAmount)}</td>
                                                 {showUtilities && (
                                                     <>
                                                         <td className="w-[128px] min-w-[128px] border border-slate-300 px-1 bg-emerald-100">
@@ -2339,16 +2327,16 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                     <tfoot>
                         <tr className="bg-blue-100 font-bold text-slate-900">
                             <td colSpan={4} className="sticky left-0 z-30 bg-blue-100 border border-slate-400 px-2 py-2 text-center text-base">합 계</td>
-                            <td className="sticky left-[288px] z-30 w-16 min-w-16 max-w-16 border border-slate-400 bg-blue-100 px-2 py-2 text-right">
+                            <td className="sticky left-[240px] z-30 w-16 min-w-16 max-w-16 border border-slate-400 bg-blue-100 px-2 py-2 text-right">
                                 <div className="text-sky-700">{totals.invoiceManDay.toFixed(1)}</div>
                                 <div className="text-amber-700">{totals.laborManDay.toFixed(1)}</div>
                             </td>
-                            <td className="sticky left-[352px] z-30 w-[80px] min-w-[80px] max-w-[80px] border border-slate-400 bg-blue-100 px-2 py-2 text-right font-mono">
+                            <td className="sticky left-[304px] z-30 w-[80px] min-w-[80px] max-w-[80px] border border-slate-400 bg-blue-100 px-2 py-2 text-right font-mono">
                                 {totals.workerCount > 0
                                     ? formatAmount(Math.round((totals.invoiceGrossAmount + totals.laborGrossAmount) / Math.max(1, totals.invoiceManDay + totals.laborManDay)))
                                     : '-'}
                             </td>
-                            <td className="sticky left-[432px] z-30 w-[92px] min-w-[92px] max-w-[92px] border border-slate-500 bg-blue-100 px-2 py-2 text-right text-red-600 shadow-[2px_0_0_rgba(15,23,42,0.2)]">{formatAmount(totals.invoiceGrossAmount + totals.laborGrossAmount)}</td>
+                            <td className="sticky left-[384px] z-30 w-[92px] min-w-[92px] max-w-[92px] border border-slate-500 bg-blue-100 px-2 py-2 text-right text-red-600 shadow-[2px_0_0_rgba(15,23,42,0.2)]">{formatAmount(totals.invoiceGrossAmount + totals.laborGrossAmount)}</td>
                             {showUtilities && (
                                 <>
                                     <td className="border border-slate-400 px-2 py-2 text-right">

@@ -49,6 +49,7 @@ import type {
     MonthlyAdvanceLedgerHandle,
 } from './components/MonthlyAdvanceLedger';
 import { PayrollToolbar } from './components/SimplePayrollToolbar';
+import './styles/MonthlyWageResponsive.css';
 import {
     appendPayslipWorkbooksToZip,
     buildPayslipWorkbook,
@@ -1447,6 +1448,13 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const advanceLabelSet = useMemo(() => buildAdvanceLabelSet(payrollConfig), [payrollConfig]);
     const [showInsuranceSettings, setShowInsuranceSettings] = useState<boolean>(false);
     const [insuranceConfigSaving, setInsuranceConfigSaving] = useState<boolean>(false);
+    const insuranceDialogRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!showInsuranceSettings) return;
+        const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        insuranceDialogRef.current?.focus({ preventScroll: true });
+        return () => previousFocus?.focus({ preventScroll: true });
+    }, [showInsuranceSettings]);
 
     const [insuranceThresholdManDayInput, setInsuranceThresholdManDayInput] = useState<string>('');
     const [pensionRatePercentInput, setPensionRatePercentInput] = useState<string>('');
@@ -2604,7 +2612,6 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             mounted = false;
         };
     }, []);
-
 
     useEffect(() => {
         let mounted = true;
@@ -5317,7 +5324,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
 
     return (
-        <div className="relative h-full flex flex-col p-2 w-full overflow-hidden">
+        <div className="monthly-wage-page relative h-full flex flex-col p-2 w-full overflow-hidden">
             <style>{`
                 #monthly-payslip-print-root[data-print-measuring="true"] {
                     display: block !important;
@@ -5526,9 +5533,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             )}
 
 
-            <div className="mb-4"><PagePrimaryAccountCard state={pagePrimaryAccount} /></div>
-            {!hideHeader && (
                 <PayrollToolbar
+                    primaryAccountSettings={<PagePrimaryAccountCard state={pagePrimaryAccount} />}
                     hideHeader={!!hideHeader}
                     rangeLabel={rangeLabel}
                     targetCount={pageViewMode === 'ledger' ? filteredLedgerRows.length : filteredPaymentData.length}
@@ -5613,15 +5619,13 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     }
                     actionsDisabled={payrollDataBlocked}
                 />
-            )}
-
             {(loadError || payrollSettlementLoadError || payrollConfigLoadError) && (
                 <div role="alert" className="my-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
                     {loadError || payrollSettlementLoadError || payrollConfigLoadError}
                     <button type="button" onClick={fetchData} className="ml-3 underline">다시 조회</button>
                 </div>
             )}
-            {!hideHeader && <PayrollReviewCenter
+            <PayrollReviewCenter
                 rows={payrollReviewRows}
                 rangeLabel={rangeLabel}
                 busy={loading || payrollSettlementLoading || deductionApplyInProgress}
@@ -5633,7 +5637,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                         document.getElementById(`payroll-review-${issue.rowId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
                     });
                 }}
-            />}
+            />
 
             {/* Hidden Batch Rendering Container - 다운로드 시에만 렌더링 (평소 불필요한 재렌더링 방지) */}
             {batchDownloading && (
@@ -5664,8 +5668,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             )}
 
             {pageViewMode === 'standard' && (
-                <div className="flex-1 min-h-0 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-                <div className="p-2.5 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                <div className="monthly-payroll-standard flex-1 min-h-0 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                    <div className="monthly-payroll-standard-heading p-2.5 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
                     <div className="flex items-center gap-2.5">
                         <h2 className="font-semibold text-lg text-slate-700">지급 대상자 목록</h2>
                         <div className="flex items-center gap-2">
@@ -5721,9 +5725,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     </div>
                 </div>
 
-                <div className="flex-1 min-h-0 overflow-auto">
+                    {filteredPaymentData.length > 0 && !loading && <p className="monthly-payroll-scroll-hint">좌우로 밀어 급여 항목을 확인하세요.</p>}
+                    <div className="monthly-payroll-table-scroll flex-1 min-h-0 overflow-auto" role="region" aria-label="급여표 가로 스크롤" tabIndex={0}>
                     <table
-                        className="w-full table-fixed text-[13px] text-left border-separate border-spacing-0"
+                        className={`${loading || filteredPaymentData.length === 0 ? 'monthly-payroll-empty-table' : ''} w-full table-fixed text-[13px] text-left border-separate border-spacing-0`}
                     >
                         <thead className="text-slate-500 font-medium sticky top-0 z-40">
                             <tr className="border-b border-slate-200">
@@ -6366,7 +6371,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             )}
 
             {pageViewMode === 'ledger' && (
-                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                <div className="monthly-payroll-ledger-panel flex-1 min-h-0 flex flex-col overflow-hidden">
                     <fieldset disabled={payrollDataBlocked} className="m-0 flex min-h-0 min-w-0 flex-1 flex-col border-0 p-0">
                     <MonthlyAdvanceLedger
                         ref={advanceLedgerRef}
@@ -6974,18 +6979,36 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 </div>
             )}
 
-            {showInsuranceSettings && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            {showInsuranceSettings && createPortal(
+                <div className="monthly-payroll-insurance-overlay fixed inset-0 bg-black/50 flex items-center justify-center z-[10000] p-4">
+                    <div ref={insuranceDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="monthly-payroll-insurance-title" className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col outline-none"
+                        onKeyDown={(event) => {
+                            if (event.key === 'Escape' && !insuranceConfigSaving) {
+                                event.stopPropagation();
+                                setShowInsuranceSettings(false);
+                            }
+                            if (event.key === 'Tab') {
+                                const controls = insuranceDialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)');
+                                const first = controls?.[0];
+                                const last = controls?.[controls.length - 1];
+                                if (event.shiftKey && (document.activeElement === first || document.activeElement === insuranceDialogRef.current)) {
+                                    event.preventDefault(); last?.focus();
+                                } else if (!event.shiftKey && document.activeElement === last) {
+                                    event.preventDefault(); first?.focus();
+                                }
+                            }
+                        }}
+                    >
                         <div className="p-4 border-b border-slate-200 flex items-center justify-between">
                             <div>
-                                <h3 className="text-lg font-bold text-slate-800">4대보험/세율 설정</h3>
+                                <h3 id="monthly-payroll-insurance-title" className="text-lg font-bold text-slate-800">4대보험/세율 설정</h3>
                                 <p className="text-xs text-slate-500 mt-1">적용 기준(공수), 요율(%), 일급제 수수료 공수당(원)을 저장합니다.</p>
                             </div>
                             <button
                                 type="button"
                                 onClick={() => setShowInsuranceSettings(false)}
-                                className="text-slate-400 hover:text-slate-600 text-2xl"
+                                aria-label="요율 설정 닫기"
+                                className="h-11 w-11 shrink-0 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 text-2xl"
                             >
                                 ×
                             </button>
@@ -7155,7 +7178,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                             </button>
                         </div>
                     </div>
-                </div>
+                </div>, document.body
             )}
         </div>
     );
