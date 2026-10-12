@@ -382,3 +382,23 @@
 .dr-bulk-edit-fields { display:grid; gap:16px; }
 .dr-bulk-edit-fields select { min-height:44px; width:100%; font-size:16px; }
 .dr-modal button:disabled { opacity:.45; cursor:not-allowed; }
+
+/* Keep entry and worker search together at the right edge of the filters. */
+.dr-filter-section { container-type:inline-size; container-name:dr-filters; }
+.dr-filter-top { display:grid; grid-template-columns:minmax(440px,1fr) minmax(280px,300px); align-items:center; gap:12px; }
+.dr-primary-filters { min-width:0; width:100%; order:0; grid-template-columns:minmax(0,1.25fr) minmax(0,.8fr) minmax(0,1fr) minmax(0,1.25fr); }
+.dr-primary-filters select { height:44px; }
+.dr-filter-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; min-width:0; width:100%; }
+.dr-filter-actions .dr-direct-add { height:44px; flex-shrink:0; }
+.dr-filter-actions .dr-search { flex:1; min-width:0; max-width:none; height:44px; }
+.dr-filter-actions .dr-search>svg { flex-shrink:0; }
+.dr-filter-actions .dr-search input { height:42px; }
+@container dr-filters (max-width:860px) {
+ .dr-filter-top { grid-template-columns:minmax(0,1fr); }
+ .dr-filter-actions { justify-self:end; width:min(100%,360px); }
+}
+@media(max-width:600px) {
+ .dr-filter-actions { order:-1; width:100%; }
+ .dr-primary-filters { order:0; grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .dr-filter-actions .dr-direct-add { padding:8px 10px; }
+}

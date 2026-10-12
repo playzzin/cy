@@ -15,6 +15,7 @@ import DelegatedWorkerLedger, { SiteIdentity } from './DelegatedWorkerLedger';
 import DelegatedBulkEditForm from './DelegatedBulkEditForm';
 import { createPortal } from 'react-dom';
 import DelegatedBulkEntry from './DelegatedBulkEntry';
+import ReceiptColorFilter from './ReceiptColorFilter';
 import './DelegatedReceiptsPage.css';
 
 const delegationLabels: Record<DelegationType, string> = { delegate: '위임', direct: '직불', unknown: '미확인' };
@@ -139,6 +140,11 @@ export function DelegatedReceiptsWorkspace({ initialClaims, initialDirectory, se
   const summary = useMemo(() => summarizeClaims(filtered), [filtered]);
   const statusCounts = useMemo(() => filtered.reduce((counts, claim) => { counts[getDepositState(claim).status]++; return counts; }, { complete: 0, pending: 0, partial: 0, unknown: 0 }), [filtered]);
   const sites = useMemo(() => Array.from(new Set(claims.filter(claim => claim.month === month).map(claim => claim.siteName))).sort((a,b) => a.localeCompare(b, 'ko')), [claims, month]);
+  const siteFilterOptions = useMemo(() => [{ value: '', label: '전체 현장' }, ...sites.map(name => {
+    const teams = new Map(claims.filter(claim => claim.month === month && claim.siteName === name).map(claim => getSiteTeam(claim, directory)).filter(team => team !== undefined).map(team => [team.id, team]));
+    return { value: name, label: name, color: teams.size === 1 ? [...teams.values()][0].color : undefined };
+  })], [sites, claims, month, directory]);
+  const teamFilterOptions = useMemo(() => [{ value: '', label: '전체 팀' }, { value: 'unlinked', label: '팀 연결 필요' }, ...directory.teams.map(team => ({ value: team.id, label: team.name, color: team.color }))], [directory.teams]);
   const siteSummaries = useMemo(() => Array.from(new Set(filtered.map(claim => claim.siteName))).map(name => {
     const rows = filtered.filter(claim => claim.siteName === name);
     return { name, count: rows.length, complete: rows.filter(claim => getDepositState(claim).status === 'complete').length, team: getSiteTeam(rows[0], directory) };
@@ -186,7 +192,7 @@ export function DelegatedReceiptsWorkspace({ initialClaims, initialDirectory, se
       <div className="dr-header-actions"><button className="dr-icon-button" onClick={() => setReload((value) => value + 1)} disabled={loading} aria-label="새로고침" title="새로고침"><RefreshCw size={17} className={loading ? 'dr-spin' : ''} /></button><button className="dr-button" aria-expanded={showTools} aria-controls="dr-data-tools" onClick={() => setShowTools(!showTools)}><Archive size={16} />자료 관리<ChevronRight size={14} className={showTools ? 'dr-chevron-open' : ''} /></button></div>
     </header>
     {showTools && <section id="dr-data-tools" className="dr-data-tools" aria-label="자료 관리">
-      <div className="dr-data-actions">{canWrite && <><button className="dr-button" onClick={() => setBulkOpen(true)}><Plus size={16} />직접 추가</button><button className="dr-button dr-button-primary" disabled={readingFile} onClick={() => fileInput.current?.click()}><FileSpreadsheet size={17} />{readingFile ? '파일 읽는 중' : '엑셀 가져오기'}</button></>}<button className="dr-button" onClick={openArchive}><Archive size={16} />원본 보관함{archives.length > 0 && <span>{archives.length}</span>}</button></div>
+      <div className="dr-data-actions">{canWrite && <button className="dr-button dr-button-primary" disabled={readingFile} onClick={() => fileInput.current?.click()}><FileSpreadsheet size={17} />{readingFile ? '파일 읽는 중' : '엑셀 가져오기'}</button>}<button className="dr-button" onClick={openArchive}><Archive size={16} />원본 보관함{archives.length > 0 && <span>{archives.length}</span>}</button></div>
       {savedMonths.length > 0 && <label className="dr-saved-month">저장된 귀속월<select aria-label="저장된 귀속월 바로가기" value="" onChange={(event) => { if (event.target.value) { selectArchivedMonth(event.target.value); setShowTools(false); } }}><option value="">선택하여 조회</option>{savedMonths.map((savedMonth) => <option key={savedMonth} value={savedMonth}>{savedMonth}</option>)}</select></label>}
     </section>}
     <input ref={fileInput} type="file" accept=".xlsx,.xls" aria-label="입금 확인 엑셀 파일" hidden onChange={readFile} />
@@ -202,13 +208,13 @@ export function DelegatedReceiptsWorkspace({ initialClaims, initialDirectory, se
     </section>
     <section className="dr-filter-section" aria-label="입금 내역 필터">
       <div className="dr-filter-top">
-        <label className="dr-search"><Search size={17} /><input aria-label="작업자 검색" placeholder="작업자 이름 검색" value={worker} onChange={(event) => setWorker(event.target.value)} />{worker && <button className="dr-icon-button" aria-label="작업자 검색 지우기" onClick={() => setWorker('')}><X size={16} /></button>}</label>
         <div className="dr-primary-filters">
-          <label><span className="dr-sr-only">현장</span><select value={siteName} onChange={(event) => setSiteName(event.target.value)}><option value="">전체 현장</option>{sites.map((site) => <option key={site}>{site}</option>)}</select></label>
+          <ReceiptColorFilter label="현장" kind="site" value={siteName} options={siteFilterOptions} onChange={setSiteName} />
           <label><span className="dr-sr-only">입금방법</span><select value={delegationType} onChange={(event) => setDelegationType(event.target.value as DelegationType | '')}><option value="">위임·직불 전체</option>{Object.entries(delegationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label><span className="dr-sr-only">받는 계좌</span><select value={recipient} onChange={event => setRecipient(event.target.value as RecipientKind | '')}><option value="">전체 계좌</option>{Object.entries(recipientLabels).map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-          <label><span className="dr-sr-only">담당 팀</span><select value={teamFilter} onChange={event => setTeamFilter(event.target.value)}><option value="">전체 팀</option><option value="unlinked">팀 연결 필요</option>{directory.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
+          <ReceiptColorFilter label="담당 팀" kind="team" value={teamFilter} options={teamFilterOptions} onChange={setTeamFilter} />
         </div>
+        <div className="dr-filter-actions">{canWrite && <button className="dr-button dr-button-primary dr-direct-add" onClick={() => setBulkOpen(true)}><Plus size={16} />직접 추가</button>}<label className="dr-search"><Search size={17} /><input aria-label="작업자 검색" placeholder="작업자 이름 검색" value={worker} onChange={(event) => setWorker(event.target.value)} />{worker && <button className="dr-icon-button" aria-label="작업자 검색 지우기" onClick={() => setWorker('')}><X size={16} /></button>}</label></div>
       </div>
       <div className="dr-filter-bottom"><div className="dr-status-tabs" aria-label="입금여부 빠른 필터">{(['', 'pending', 'partial', 'complete', 'unknown'] as const).map(value => <button key={value} className={status === value ? 'dr-active' : ''} aria-pressed={status === value} aria-label={value ? depositLabels[value] : '전체 상태'} onClick={() => setStatus(value)}>{value ? depositLabels[value] : '전체'}</button>)}</div>{activeFilterCount > 0 && <button className="dr-text-button dr-reset-filters" onClick={resetFilters}><X size={13} />필터 초기화 <span>{activeFilterCount}</span></button>}</div>
     </section>
