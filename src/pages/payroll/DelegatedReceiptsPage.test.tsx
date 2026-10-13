@@ -47,6 +47,142 @@ const fixtures: DelegatedClaim[] = [
   { ...base, id: 'synthetic-3', workerName: '검증작업자 다', delegationType: 'unknown', expectedAmount: null, receipts: [] },
 ];
 
+describe('기본 목록과 엑셀형 보기 연결', () => {
+  beforeEach(() => { (delegatedReceiptService.updateListField as jest.Mock).mockReset(); });
+
+  it('작업자를 펼쳐 입금방법·계좌를 수정하고 접기와 보기 전환에도 직접 입력 초안을 유지한다', async () => {
+    let saved = { ...base };
+    (delegatedReceiptService.updateListField as jest.Mock).mockImplementation(async (_id, edit) => {
+      const change = edit.change;
+      saved = change.field === 'delegation' ? { ...saved, delegationOverride: change.value }
+        : { ...saved, confirmation: { ...getDepositState(saved), id: edit.id, recordedAt: edit.recordedAt, note: '', [change.field]: change.value } };
+      return saved;
+    });
+    render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
+    const information = within(screen.getByRole('group', { name: `${base.workerName} 입금 정보` }));
+    const expand = information.getByRole('button', { name: `${base.workerName} 작업자` });
+    expect(expand).toHaveAttribute('aria-expanded', 'false');
+    expect(information.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: `${base.workerName} 세전 금액` })).toBeVisible();
+    expect(screen.getByRole('combobox', { name: `${base.workerName} 입금여부` })).toBeVisible();
+    expect(screen.getByRole('button', { name: `${base.workerName} 새 메모` })).toBeVisible();
+    fireEvent.click(expand);
+    expect(expand).toHaveAttribute('aria-expanded', 'true');
+    expect(information.getAllByRole('combobox')).toHaveLength(2);
+    fireEvent.click(information.getByRole('combobox', { name: `${base.workerName} 입금방법` }));
+    fireEvent.click(screen.getByRole('option', { name: '직불' }));
+    await waitFor(() => expect(information.getByRole('combobox', { name: `${base.workerName} 입금방법` })).toHaveTextContent('직불'));
+    await waitFor(() => expect(information.getByRole('combobox', { name: `${base.workerName} 받는 계좌` })).toBeEnabled());
+    fireEvent.click(information.getByRole('combobox', { name: `${base.workerName} 받는 계좌` }));
+    fireEvent.click(screen.getByRole('option', { name: '직접 입력…' }));
+    const draft = information.getByRole('textbox', { name: `${base.workerName} 받는 계좌 직접 입력` });
+    fireEvent.change(draft, { target: { value: '검증 팀장 별도계좌' } });
+    fireEvent.click(expand);
+    expect(draft).not.toBeVisible();
+    expect(information.queryByRole('combobox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '기본 목록' }));
+    expect(screen.getByRole('textbox', { name: `${base.workerName} 받는 계좌 직접 입력` })).toBe(draft);
+    expect(draft).toBeVisible();
+    expect(draft).toHaveValue('검증 팀장 별도계좌');
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
+    expect(draft).not.toBeVisible();
+    fireEvent.click(expand);
+    expect(information.getByRole('textbox', { name: `${base.workerName} 받는 계좌 직접 입력` })).toBe(draft);
+    expect(draft).toHaveValue('검증 팀장 별도계좌');
+    fireEvent.keyDown(draft, { key: 'Enter' });
+    await waitFor(() => expect(information.getByRole('combobox', { name: `${base.workerName} 받는 계좌` })).toHaveTextContent('검증 팀장 별도계좌'));
+    expect(delegatedReceiptService.updateListField).toHaveBeenNthCalledWith(1, base.id, expect.objectContaining({ change: { field: 'delegation', value: 'direct' } }));
+    expect(delegatedReceiptService.updateListField).toHaveBeenNthCalledWith(2, base.id, expect.objectContaining({ change: { field: 'recipient', value: 'custom:검증 팀장 별도계좌' } }));
+    fireEvent.click(screen.getByRole('button', { name: `${base.workerName} 새 메모` }));
+    expect(screen.getByRole('dialog', { name: `${base.workerName} 메모` })).toBeVisible();
+  });
+
+  it('읽기 전용에서도 작업자를 펼칠 때만 입금방법·받는 계좌를 보여준다', () => {
+    rawRender(<DelegatedReceiptsWorkspace initialClaims={[{ ...base, delegationType: 'direct', sourceStatus: '개인통장' }]} canWrite={false} />);
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
+    const information = within(screen.getByRole('group', { name: `${base.workerName} 입금 정보` }));
+    const expand = information.getByRole('button', { name: `${base.workerName} 작업자` });
+    expect(expand).toHaveAttribute('aria-expanded', 'false');
+    expect(information.getByText('직불')).not.toBeVisible();
+    expect(information.getByText('개인통장')).not.toBeVisible();
+    fireEvent.click(expand);
+    expect(information.getByText('직불')).toBeVisible();
+    expect(information.getByText('개인통장')).toBeVisible();
+    expect(information.queryByRole('combobox')).not.toBeInTheDocument();
+    fireEvent.click(expand);
+    expect(information.getByText('직불')).not.toBeVisible();
+    expect(information.getByText('개인통장')).not.toBeVisible();
+  });
+
+  it('기본 목록을 유지하고 엑셀형에서 네 현장을 넘는 모든 현장과 별도 항목을 표시한다', () => {
+    const claims = Array.from({ length: 7 }, (_, index) => ({ ...base, id: `site-${index}`, siteName: `검증현장 ${index + 1}`, workerName: `검증인원 ${index + 1}` }));
+    claims.push({ ...claims[0], id: 'invoice-grid', workerName: '검증 계산서', entryKind: 'invoice' } as DelegatedClaim);
+    rawRender(<DelegatedReceiptsWorkspace initialClaims={claims} />);
+    expect(screen.getByRole('button', { name: '기본 목록' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('article', { name: / 내역$/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
+    const grid = within(screen.getByRole('region', { name: '현장 4개씩 가로 목록' }));
+    expect(grid.getAllByRole('region')).toHaveLength(7);
+    expect(grid.getAllByRole('article')).toHaveLength(8);
+    expect(grid.getByRole('button', { name: '검증 계산서 계산서' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '기본 목록' }));
+    expect(screen.queryByRole('article', { name: / 내역$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '검증현장 1 현장' })).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '작업자 검색' }), { target: { value: '검증인원 7' } });
+    expect(screen.getAllByRole('article', { name: / 내역$/ })).toHaveLength(1);
+    fireEvent.change(screen.getByRole('textbox', { name: '작업자 검색' }), { target: { value: '검색 결과 없음' } });
+    expect(screen.getByText('선택한 조건의 내역이 없습니다')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '작업자 검색 지우기' }));
+    expect(screen.getByRole('button', { name: '엑셀형 · 4개씩' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getAllByRole('article', { name: / 내역$/ })).toHaveLength(8);
+  });
+
+  it('보기 전환에 금액 초안과 현장 선택을 유지하고 저장 결과를 같은 목록과 합계에 반영한다', async () => {
+    (delegatedReceiptService.updateListField as jest.Mock).mockResolvedValue({ ...base, grossAmount: 250000 });
+    render(<DelegatedReceiptsWorkspace initialClaims={fixtures} />);
+    const amount = screen.getByRole('textbox', { name: `${base.workerName} 세전 금액` });
+    fireEvent.change(amount, { target: { value: '250000' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: `${base.siteName} 현장 전체 선택` }));
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
+    expect(screen.getByRole('textbox', { name: `${base.workerName} 세전 금액` })).toBe(amount);
+    expect(amount).toHaveValue('250000');
+    expect(screen.getByRole('checkbox', { name: `${base.siteName} 현장 전체 선택` })).toBeChecked();
+    expect(screen.getByRole('button', { name: '선택 내역 일괄 수정' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: `${base.workerName} 세전 금액 저장` }));
+    await waitFor(() => expect(amount).toHaveValue('250,000'));
+    expect(delegatedReceiptService.updateListField).toHaveBeenCalledWith(base.id, expect.objectContaining({ change: { field: 'grossAmount', value: 250000 } }));
+    fireEvent.click(screen.getByRole('button', { name: '기본 목록' }));
+    expect(screen.getByRole('textbox', { name: `${base.workerName} 세전 금액` })).toBe(amount);
+    expect(screen.getByRole('button', { name: `${base.siteName} 현장` })).toHaveTextContent('350,000원');
+  });
+
+  it('엑셀형 입금여부 저장 실패도 보기 전환 뒤 같은 요청으로 재시도하고 조회 권한을 지킨다', async () => {
+    const updated = { ...base, confirmation: { ...getDepositState(base), status: 'pending', id: 'grid-edit', recordedAt: base.updatedAt, note: '' } } as DelegatedClaim;
+    (delegatedReceiptService.updateListField as jest.Mock).mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce(updated);
+    const { unmount } = rawRender(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
+    fireEvent.change(screen.getByRole('combobox', { name: `${base.workerName} 입금여부` }), { target: { value: 'pending' } });
+    await screen.findByText('저장 확인 실패');
+    fireEvent.click(screen.getByRole('button', { name: '기본 목록' }));
+    fireEvent.click(screen.getByRole('button', { name: `${base.siteName} 현장` }));
+    fireEvent.click(screen.getByRole('button', { name: `${base.workerName} 목록 변경 다시 저장` }));
+    await screen.findByText('저장됨');
+    const calls = (delegatedReceiptService.updateListField as jest.Mock).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toEqual(calls[0]);
+    expect(screen.getByRole('combobox', { name: `${base.workerName} 입금여부` })).toHaveValue('pending');
+    unmount();
+    rawRender(<DelegatedReceiptsWorkspace initialClaims={[updated]} canWrite={false} />);
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
+    const grid = within(screen.getByRole('region', { name: '현장 4개씩 가로 목록' }));
+    expect(grid.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(grid.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(grid.getByText('입금 전')).toBeVisible();
+  });
+});
+
 it('작업자와 별도 내역을 구분하고 현장 설정에서 선택 재계산한 값을 목록에 반영한다', async () => {
   const invoice = { ...base, id: 'invoice', entryKind: 'invoice' as const, workerName: '가상 계산서', receipts: [] };
   const directory = { teams: [], sites: [{ id: 's1', name: base.siteName }] };

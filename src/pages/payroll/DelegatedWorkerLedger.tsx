@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Building2, Check, ChevronDown, FileText, RotateCcw, Settings2, UserRound } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Building2, Check, ChevronDown, FileText, RotateCcw, Settings2, UserRound } from 'lucide-react';
 import type { ClaimListChange, ClaimListEdit, DelegatedClaim } from '../../features/delegated-receipts/model';
 import { entryKindLabels, isSeparateEntry, getClaimTotals, summarizeClaimAmounts } from '../../features/delegated-receipts/model';
 import { groupClaimsBySite, ReceiptSiteGroup } from '../../features/delegated-receipts/siteGroups';
@@ -34,9 +34,10 @@ type MemoTarget = { kind: 'worker'; id: string } | ({ kind: 'site' } & SiteMemoT
 type Update = (id: string, edit: ClaimListEdit) => Promise<void>;
 const editFor = (change: ClaimListChange): ClaimListEdit => ({ id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `list-${Date.now()}-${Math.random().toString(36).slice(2)}`, recordedAt: new Date().toISOString(), change });
 
-const WorkerAccordion = React.memo(function WorkerAccordion({ claim, directory, selected, canWrite, onSelect, onUpdate, onMemo }: {
+const WorkerAccordion = React.memo(function WorkerAccordion({ claim, directory, selected, canWrite, onSelect, onUpdate, onMemo, excel }: {
   claim: DelegatedClaim; directory: ReceiptDirectory; selected: boolean; canWrite: boolean;
   onSelect: (id: string) => void; onUpdate: Update; onMemo: (target: MemoTarget) => void;
+  excel: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [visited, setVisited] = useState(false);
@@ -44,6 +45,7 @@ const WorkerAccordion = React.memo(function WorkerAccordion({ claim, directory, 
   const [saved, setSaved] = useState<RowSave>();
   const busy = useRef(false);
   const panelId = useId();
+  const paymentPanelId = useId();
   const amountFormId = useId();
   const locked = Boolean(saved && saved.phase !== 'saved');
   const state = getDepositState(claim);
@@ -62,6 +64,7 @@ const WorkerAccordion = React.memo(function WorkerAccordion({ claim, directory, 
   const valid = clean === '' || (/^\d+$/.test(clean) && Number.isSafeInteger(amount));
   const dirty = draft !== undefined && (!valid || amount !== claim.grossAmount);
   const control = (field: SelectField) => {
+    if (!canWrite) return <div className={`dr-inline-field dr-inline-${field}`}><span>{fieldLabels[field]}</span>{field === 'status' ? <DepositBadge claim={claim} /> : <span className="dr-worker-value">{field === 'delegation' ? delegationLabels[getDelegation(claim)] : recipientLabel(state.recipient, accountLabels)}</span>}</div>;
     const current = field === 'delegation' ? getDelegation(claim) : state[field];
     const value = saved && saved.phase !== 'saved' && saved.edit.change.field === field ? saved.edit.change.value : current;
     if (field === 'recipient') return <div className="dr-inline-field dr-inline-recipient"><span>받는 계좌</span><RecipientSelect label={`${claim.workerName} 받는 계좌`} value={value as typeof state.recipient} labels={accountLabels} disabled={locked} saveCustom onChange={value => { if (value !== 'keep') change({ field: 'recipient', value }); }} /></div>;
@@ -71,22 +74,25 @@ const WorkerAccordion = React.memo(function WorkerAccordion({ claim, directory, 
       {Object.entries(fieldOptions[field]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
     </select></label>;
   };
-  return <article className={`dr-worker-accordion ${selected ? 'dr-row-selected' : ''}`} aria-label={`${claim.workerName} 내역`}>
+  const amountControl = <div className="dr-accordion-amount"><span>세전 금액 (원)</span>{canWrite ? <form id={amountFormId} className="dr-inline-amount" onSubmit={event => { event.preventDefault(); if (dirty && valid && !locked) change({ field: 'grossAmount', value: amount }); }}>
+    <label className="dr-inline-money-input"><input aria-label={`${claim.workerName} 세전 금액`} title={won(claim.grossAmount)} inputMode="numeric" placeholder="미확정" disabled={locked} aria-invalid={!valid} value={draft ?? claim.grossAmount?.toLocaleString('ko-KR') ?? ''}
+      onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape' && !locked) { event.preventDefault(); setDraft(undefined); } }} /></label>
+  </form> : <span className="dr-worker-summary-amount">{won(claim.grossAmount)}</span>}</div>;
+  const columnOrder: ('status' | 'amount')[] = excel ? ['amount', 'status'] : ['status', 'amount'];
+  return <article className={`dr-worker-accordion ${selected ? 'dr-row-selected' : ''} ${open ? 'dr-worker-open' : ''}`} aria-label={`${claim.workerName} 내역`}>
     <div className="dr-worker-summary">
-      <div className="dr-worker-person">{canWrite && <input type="checkbox" aria-label={`${claim.workerName} 선택`} checked={selected} onChange={() => onSelect(claim.id)} />}
-        <button type="button" className="dr-worker-expand" aria-label={`${claim.workerName} ${isSeparateEntry(claim) ? entryKindLabels[claim.entryKind!] : '작업자'}`} aria-expanded={open} aria-controls={panelId} onClick={() => { setOpen(value => !value); setVisited(true); }}>
-          <WorkerIdentity claim={claim} directory={directory} /><ChevronDown className={open ? 'dr-accordion-chevron-open' : ''} size={16} />
-        </button>
+      <div className="dr-worker-information" role="group" aria-label={`${claim.workerName} 입금 정보`}>
+        <div className="dr-worker-person">{canWrite && <input type="checkbox" aria-label={`${claim.workerName} 선택`} checked={selected} onChange={() => onSelect(claim.id)} />}
+          <button type="button" className="dr-worker-expand" title={excel ? `${claim.workerName} · 입금방법·받는 계좌 ${open ? '접기' : '펼치기'}` : claim.workerName} aria-label={`${claim.workerName} ${isSeparateEntry(claim) ? entryKindLabels[claim.entryKind!] : '작업자'}`} aria-expanded={open} aria-controls={excel ? `${paymentPanelId} ${panelId}` : panelId} onClick={() => { setOpen(value => !value); setVisited(true); }}>
+            <WorkerIdentity claim={claim} directory={directory} /><ChevronDown className={open ? 'dr-accordion-chevron-open' : ''} size={16} />
+          </button>
+        </div>
+        <div id={paymentPanelId} className="dr-worker-payment-details" hidden={excel && !open}>
+          {control('delegation')}
+          {control('recipient')}
+        </div>
       </div>
-      {canWrite ? <>{control('delegation')}{control('recipient')}{control('status')}<div className="dr-accordion-amount"><span>세전 금액 (원)</span><form id={amountFormId} className="dr-inline-amount" onSubmit={event => { event.preventDefault(); if (dirty && valid && !locked) change({ field: 'grossAmount', value: amount }); }}>
-        <label className="dr-inline-money-input"><input aria-label={`${claim.workerName} 세전 금액`} inputMode="numeric" placeholder="미확정" disabled={locked} aria-invalid={!valid} value={draft ?? claim.grossAmount?.toLocaleString('ko-KR') ?? ''}
-          onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape' && !locked) { event.preventDefault(); setDraft(undefined); } }} /></label>
-      </form></div></> : <>
-        <div className="dr-inline-field dr-inline-delegation"><span>입금방법</span><span className="dr-worker-value">{delegationLabels[getDelegation(claim)]}</span></div>
-        <div className="dr-inline-field dr-inline-recipient"><span>받는 계좌</span><span className="dr-worker-value">{recipientLabel(state.recipient, accountLabels)}</span></div>
-        <div className="dr-inline-field dr-inline-status"><span>입금여부</span><DepositBadge claim={claim} /></div>
-        <div className="dr-accordion-amount"><span>세전 금액 (원)</span><span className="dr-worker-summary-amount">{won(claim.grossAmount)}</span></div>
-      </>}
+      {columnOrder.map(field => <React.Fragment key={field}>{field === 'amount' ? amountControl : control(field)}</React.Fragment>)}
       <MemoButton label={claim.workerName} memo={claim.memo} canWrite={canWrite} disabled={saved?.phase === 'saving'} onClick={() => onMemo({ kind: 'worker', id: claim.id })} />
     </div>
     {dirty && <div className="dr-worker-amount-feedback">{!valid ? <small role="alert">0원 이상의 정수를 입력하세요.</small> : <small>{claim.taxRate !== undefined && claim.taxRate !== null ? `설정 세율 ${claim.taxRate}%로 세후 금액도 다시 계산합니다.` : '세전 금액 수정 중'}</small>}<div className="dr-inline-amount-actions"><button type="button" disabled={locked} onClick={() => setDraft(undefined)}>취소</button><button type="submit" form={amountFormId} disabled={!valid || locked} aria-label={`${claim.workerName} 세전 금액 저장`}>저장</button></div></div>}
@@ -101,32 +107,45 @@ function SelectionCheckbox({ label, checked, partial, onChange }: { label: strin
   return <input ref={ref} type="checkbox" aria-label={label} aria-checked={partial ? 'mixed' : checked} checked={checked} onChange={onChange} />;
 }
 
-const SiteAccordion = React.memo(function SiteAccordion({ group, directory, canWrite, selectedIds, onSelect, onSelectSite, onUpdate, onMemo, memo, memoDisabled, expandCommand, onSiteSettings }: {
+const SiteAccordion = React.memo(function SiteAccordion({ group, directory, canWrite, selectedIds, onSelect, onSelectSite, onUpdate, onMemo, memo, memoDisabled, expandCommand, onSiteSettings, excel }: {
   group: ReceiptSiteGroup; directory: ReceiptDirectory; canWrite: boolean; selectedIds: string[]; onSelect: (id: string) => void; onUpdate: Update; onMemo: (target: MemoTarget) => void;
   onSelectSite: (ids: string[]) => void;
-  memo: string; memoDisabled: boolean; expandCommand: { expanded: boolean; version: number };
+  memo: string; memoDisabled: boolean; expandCommand: { expanded: boolean; version: number; excel: boolean };
   onSiteSettings?: (claim: DelegatedClaim) => void;
+  excel: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
+  const [excelOpen, setExcelOpen] = useState(true);
+  const open = excel ? excelOpen : listOpen;
+  const setOpen = excel ? setExcelOpen : setListOpen;
   const [visited, setVisited] = useState(false);
   const panelId = useId();
   const selectedCount = group.claims.filter(claim => selectedIds.includes(claim.id)).length;
   const workers = group.claims.filter(claim => !isSeparateEntry(claim));
   const separate = group.claims.filter(isSeparateEntry);
-  useEffect(() => { if (expandCommand.version) { setOpen(expandCommand.expanded); if (expandCommand.expanded) setVisited(true); } }, [expandCommand]);
+  useEffect(() => { if (excel) setVisited(true); }, [excel]);
+  useEffect(() => {
+    if (expandCommand.version) {
+      (expandCommand.excel ? setExcelOpen : setListOpen)(expandCommand.expanded);
+      if (expandCommand.expanded) setVisited(true);
+    }
+  }, [expandCommand]);
   const totals = useMemo(() => ({ gross: summarizeClaimAmounts(group.claims).gross, complete: group.claims.filter(claim => getDepositState(claim).status === 'complete').length }), [group.claims]);
   return <section className="dr-site-accordion" aria-label={`${group.name} 내역`} style={{ '--dr-group-color': group.color, '--dr-group-text': getContrastingTextColor(group.color, '#ffffff', '#000000') } as React.CSSProperties}>
     <div className="dr-site-accordion-header">{canWrite && <label className="dr-site-selection"><SelectionCheckbox label={`${group.name} 현장 전체 선택`} checked={selectedCount === group.claims.length} partial={selectedCount > 0 && selectedCount < group.claims.length} onChange={() => onSelectSite(group.claims.map(claim => claim.id))} /><span className="dr-sr-only">현장 선택</span></label>}<h3><button type="button" className="dr-site-expand" aria-label={`${group.name} 현장`} aria-expanded={open} aria-controls={panelId} onClick={() => { setOpen(value => !value); setVisited(true); }}>
       <SiteIdentity name={group.name} color={group.color} /><span className="dr-site-accordion-totals"><span>{workers.length}명{separate.length > 0 && ` · 별도 ${separate.length}건`}</span><span>입금완료 {totals.complete}/{group.claims.length}건</span><span>세전 합계 <b>{won(totals.gross.amount)}</b>{totals.gross.missing > 0 && <small>미확정 {totals.gross.missing}건</small>}</span></span><ChevronDown className={open ? 'dr-accordion-chevron-open' : ''} size={20} />
     </button></h3>{onSiteSettings && <button className="dr-site-settings-button" type="button" aria-label={`${group.name} 현장 설정`} onClick={() => onSiteSettings(group.claims[0])}><Settings2 size={16} /><span>현장 설정</span></button>}<MemoButton label={`${group.name} 현장`} memo={memo} canWrite={canWrite} disabled={memoDisabled} onClick={() => onMemo({ kind: 'site', key: group.key, month: group.claims[0].month, name: group.name })} /></div>
-    {visited && <div id={panelId} hidden={!open} className="dr-site-workers"><div className="dr-worker-column-headings" aria-hidden="true"><span>작업자</span><span>입금방법</span><span>받는 계좌</span><span>입금여부</span><span>세전 금액 (원)</span><span>메모</span></div>{[workers, separate].map((entries, index) => entries.length > 0 && <React.Fragment key={index}>{index === 1 && <div className="dr-separate-heading"><FileText size={16} />바이백·계산서 <span>{entries.length}건</span></div>}{entries.map(claim => <WorkerAccordion key={claim.id} claim={claim} directory={directory} canWrite={canWrite} selected={selectedIds.includes(claim.id)} onSelect={onSelect} onUpdate={onUpdate} onMemo={onMemo} />)}</React.Fragment>)}</div>}
+    {(visited || excel) && <div id={panelId} hidden={!open} className="dr-site-workers"><div className="dr-worker-column-headings" aria-hidden="true">{excel ? <><span>이름</span><span>세전 금액 (원)</span><span>입금여부</span><span>메모</span></> : <><span>작업자</span><span>입금방법</span><span>받는 계좌</span><span>입금여부</span><span>세전 금액 (원)</span><span>메모</span></>}</div>{[workers, separate].map((entries, index) => entries.length > 0 && <React.Fragment key={index}>{index === 1 && <div className="dr-separate-heading"><FileText size={16} />바이백·계산서 <span>{entries.length}건</span></div>}{entries.map(claim => <WorkerAccordion key={claim.id} claim={claim} directory={directory} canWrite={canWrite} selected={selectedIds.includes(claim.id)} onSelect={onSelect} onUpdate={onUpdate} onMemo={onMemo} excel={excel} />)}</React.Fragment>)}</div>}
   </section>;
 });
 
-interface Props { claims: DelegatedClaim[]; directory: ReceiptDirectory; canWrite: boolean; selectedIds: string[]; onSelect: (ids: string[]) => void; onUpdate: Update; memoService?: typeof siteMemoService; onSiteSettings?: (claim: DelegatedClaim) => void; }
-export default React.memo(function DelegatedWorkerLedger({ claims, directory, canWrite, selectedIds, onSelect, onUpdate, memoService = siteMemoService, onSiteSettings }: Props) {
+interface Props { claims: DelegatedClaim[]; directory: ReceiptDirectory; canWrite: boolean; selectedIds: string[]; onSelect: (ids: string[]) => void; onUpdate: Update; memoService?: typeof siteMemoService; onSiteSettings?: (claim: DelegatedClaim) => void; view?: 'list' | 'excel'; }
+export default React.memo(function DelegatedWorkerLedger({ claims, directory, canWrite, selectedIds, onSelect, onUpdate, memoService = siteMemoService, onSiteSettings, view = 'list' }: Props) {
+  const excel = view === 'excel';
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [scrollEdges, setScrollEdges] = useState({ left: false, right: false });
   const groups = useMemo(() => groupClaimsBySite(claims, directory), [claims, directory]);
-  const [expandCommand, setExpandCommand] = useState({ expanded: false, version: 0 });
+  const [expandCommand, setExpandCommand] = useState({ expanded: false, version: 0, excel: false });
   const [memos, setMemos] = useState<Record<string, SiteMemo>>({});
   const [memoLoading, setMemoLoading] = useState(true);
   const [memoError, setMemoError] = useState(false);
@@ -134,6 +153,21 @@ export default React.memo(function DelegatedWorkerLedger({ claims, directory, ca
   const [activeMemo, setActiveMemo] = useState<MemoTarget | null>(null);
   const [selectionError, setSelectionError] = useState('');
   const month = claims[0]?.month;
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!excel || !grid) return;
+    const measure = () => {
+      const left = grid.scrollLeft > 1;
+      const right = grid.scrollLeft + grid.clientWidth < grid.scrollWidth - 1;
+      setScrollEdges(previous => previous.left === left && previous.right === right ? previous : { left, right });
+    };
+    measure();
+    grid.addEventListener('scroll', measure, { passive: true });
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
+    observer?.observe(grid);
+    if (grid.firstElementChild) observer?.observe(grid.firstElementChild);
+    return () => { grid.removeEventListener('scroll', measure); observer?.disconnect(); };
+  }, [excel, groups.length]);
   useEffect(() => {
     if (!month) return;
     let cancelled = false; setMemoLoading(true); setMemoError(false);
@@ -161,11 +195,18 @@ export default React.memo(function DelegatedWorkerLedger({ claims, directory, ca
       setMemos(previous => ({ ...previous, [saved.key]: saved }));
     }
   };
-  return <div className="dr-worker-ledger" role="region" aria-label="현장별 작업자 내역">
-    <div className="dr-accordion-toolbar">{canWrite && <label className="dr-select-all"><SelectionCheckbox label="현재 목록 선택" checked={claims.length > 0 && currentSelected === claims.length} partial={currentSelected > 0 && currentSelected < claims.length} onChange={() => { setSelectionError(''); onSelect(currentSelected === Math.min(claims.length, 400) ? [] : claims.slice(0, 400).map(claim => claim.id)); }} />현재 목록 선택 {claims.length > 400 && '(앞 400건)'}</label>}<div><button onClick={() => setExpandCommand(value => ({ expanded: true, version: value.version + 1 }))}>현장 모두 펼치기</button><button onClick={() => setExpandCommand(value => ({ expanded: false, version: value.version + 1 }))}>모두 접기</button></div></div>
+  const scrollSites = (direction: number) => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const site = grid.querySelector('.dr-site-accordion');
+    grid.scrollBy({ left: direction * ((site?.getBoundingClientRect().width ?? 300) + 10), behavior: 'smooth' });
+  };
+  return <div className={`dr-worker-ledger${excel ? ' dr-ledger-excel' : ''}`} role="region" aria-label="현장별 작업자 내역">
+    {excel && <div className="dr-excel-guide"><div><strong>{groups.length}개 현장 · 한 줄에 4개씩</strong><span>작업자 이름을 눌러 입금방법·받는 계좌 {canWrite ? '확인 및 수정' : '확인'}</span></div>{(scrollEdges.left || scrollEdges.right) && <div className="dr-excel-scroll-actions"><span>좌우로 보기</span><button type="button" aria-label="현장 목록 왼쪽으로" disabled={!scrollEdges.left} onClick={() => scrollSites(-1)}><ArrowLeft size={16} /></button><button type="button" aria-label="현장 목록 오른쪽으로" disabled={!scrollEdges.right} onClick={() => scrollSites(1)}><ArrowRight size={16} /></button></div>}</div>}
+    <div className="dr-accordion-toolbar">{canWrite && <label className="dr-select-all"><SelectionCheckbox label="현재 목록 선택" checked={claims.length > 0 && currentSelected === claims.length} partial={currentSelected > 0 && currentSelected < claims.length} onChange={() => { setSelectionError(''); onSelect(currentSelected === Math.min(claims.length, 400) ? [] : claims.slice(0, 400).map(claim => claim.id)); }} />현재 목록 선택 {claims.length > 400 && '(앞 400건)'}</label>}<div><button onClick={() => setExpandCommand(value => ({ expanded: true, version: value.version + 1, excel }))}>현장 모두 펼치기</button><button onClick={() => setExpandCommand(value => ({ expanded: false, version: value.version + 1, excel }))}>모두 접기</button></div></div>
     {selectionError && <p className="dr-site-memo-error" role="alert">{selectionError}</p>}
     {memoError && <p className="dr-site-memo-error" role="alert">현장 메모를 불러오지 못했습니다. <button onClick={() => setRetry(value => value + 1)}>현장 메모 다시 조회</button></p>}
-    <div className="dr-accordion-sites">{groups.map(group => <SiteAccordion key={group.key} group={group} directory={directory} canWrite={canWrite} selectedIds={selectedIds} onSelect={toggle} onSelectSite={toggleGroup} onUpdate={onUpdate} onMemo={openMemo} memo={memos[group.key]?.memo ?? ''} memoDisabled={memoLoading || memoError} expandCommand={expandCommand} onSiteSettings={onSiteSettings} />)}</div>
+    <div ref={gridRef} className="dr-ledger-viewport" role={excel ? 'region' : undefined} aria-label={excel ? '현장 4개씩 가로 목록' : undefined} tabIndex={excel ? 0 : undefined}><div className="dr-accordion-sites" style={excel ? { '--dr-excel-columns': Math.min(4, Math.max(1, groups.length)) } as React.CSSProperties : undefined}>{groups.map(group => <SiteAccordion key={group.key} group={group} directory={directory} canWrite={canWrite} selectedIds={selectedIds} onSelect={toggle} onSelectSite={toggleGroup} onUpdate={onUpdate} onMemo={openMemo} memo={memos[group.key]?.memo ?? ''} memoDisabled={memoLoading || memoError} expandCommand={expandCommand} onSiteSettings={onSiteSettings} excel={excel} />)}</div></div>
     {activeMemo && <DelegatedMemoSticker label={activeMemo.kind === 'site' ? `${activeMemo.name} 현장` : currentWorker?.workerName ?? '작업자'} context={activeMemo.kind === 'site' ? `${month} · 현장 공통 메모` : `${month} · ${currentWorker?.siteName} · ${currentWorker && isSeparateEntry(currentWorker) ? '별도 내역' : '작업자'} 메모`} memo={memo} canWrite={canWrite} onSave={saveMemo} onClose={() => setActiveMemo(null)} />}
   </div>;
 });
