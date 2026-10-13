@@ -934,7 +934,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       : ['지급구분'];
 
     const daySplitPoint = isSplitView ? getLaborStatementSplitPoint(lastDay) : lastDay;
-    const dayColCount = daySplitPoint;
+    const dayColCount = isSplitView ? Math.max(daySplitPoint, lastDay - daySplitPoint) : lastDay;
     const totalColumns = fixedInfoColumnCount + dayColCount + 3 + trailingHeaders.length;
     const summaryStartCol = fixedInfoColumnCount + dayColCount + 1;
     const toExcelColumnName = (columnNumber: number) => {
@@ -1027,6 +1027,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         const dow = getDayOfWeek(month, d);
         h1.push(`${String(d).padStart(2, '0')}\n(${dow})`);
       }
+      while (h1.length < fixedInfoColumnCount + dayColCount) h1.push('');
       h1.push('공수', '단가', '총액', ...trailingHeaders);
 
       const h2: any[] = ['', '', '전화번호', ''];
@@ -1050,7 +1051,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
       hr1.eachCell((cell, colNum) => {
         let isSundayCell = false;
-        if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
+        if (colNum >= dayStartColumn && colNum < dayStartColumn + daySplitPoint) {
           const day = colNum - fixedInfoColumnCount;
           const weekend = isWeekend(day);
           isSundayCell = weekend === 'sun';
@@ -1132,6 +1133,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
           if (Number.isFinite(val)) dailyTotals[d] = roundManDay(dailyTotals[d] + val);
           d1.push(Number.isFinite(val) ? val : '');
         }
+        while (d1.length < fixedInfoColumnCount + dayColCount) d1.push('');
         d1.push(totalDaysVal, unitPriceVal, totalAmountVal, ...bankCells);
 
         const d2: any[] = ['', '', r.workerPhone, ''];
@@ -1192,7 +1194,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
           });
         });
 
-        applyLaborStatementDayPeriodFills(row1, dayStartColumn, 1, dayColCount, lastDay);
+        applyLaborStatementDayPeriodFills(row1, dayStartColumn, 1, daySplitPoint, lastDay);
         applyLaborStatementDayPeriodFills(
           row2,
           dayStartColumn,
@@ -1258,6 +1260,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     // --- Footer Row ---
     const f1: any[] = ['날짜별 공수합계', ...Array.from({ length: fixedInfoColumnCount - 1 }, () => '')];
     for (let d = 0; d < daySplitPoint; d++) f1.push(dailyTotals[d]);
+    while (f1.length < fixedInfoColumnCount + dayColCount) f1.push('');
     f1.push(grandTotalDays, '', grandTotalAmount, ...trailingHeaders.map(() => ''));
 
     if (isSplitView) {
@@ -1467,6 +1470,9 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   }, [isSplitView, primaryDayNumbers.length, statementLastDay]);
 
   const hasSplitSpacerColumn = isSplitView && secondaryDayNumbers.length > primaryDayNumbers.length;
+  const secondarySpacerColumns = isSplitView
+    ? Array.from({ length: Math.max(primaryDayNumbers.length - secondaryDayNumbers.length, 0) }, (_, idx) => idx)
+    : [];
 
   const splitRowSectionClass = isSplitView ? 'h-[30px] min-h-[30px]' : 'h-[30px] min-h-[30px]';
   const spanningCellHeightClass = isSplitView ? 'min-h-[60px]' : 'min-h-[30px]';
@@ -1501,13 +1507,13 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   }, [showBankColumn]);
 
   const previewSurfaceMinWidth = useMemo(() => {
-    const visibleDayCount = isSplitView ? primaryDayNumbers.length : statementLastDay;
+    const visibleDayCount = isSplitView ? Math.max(primaryDayNumbers.length, secondaryDayNumbers.length) : statementLastDay;
     const fixedWidth = showBankColumn
       ? (45 + 60 + 105 + 300 + 42 + 80 + 120 + 220)
       : (45 + 85 + 120 + 360 + 60 + 100 + 140);
     const dayWidth = showBankColumn ? 25 : 34;
     return fixedWidth + visibleDayCount * dayWidth;
-  }, [isSplitView, primaryDayNumbers.length, showBankColumn, statementLastDay]);
+  }, [isSplitView, primaryDayNumbers.length, secondaryDayNumbers.length, showBankColumn, statementLastDay]);
 
   const previewContentHeight = useMemo(() => {
     const pageHeaderHeight = 132;
@@ -1793,7 +1799,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
               <div className="w-px h-3 bg-slate-200"></div>
               <label className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity select-none">
                 <input type="checkbox" checked={isSplitView} onChange={(e) => setIsSplitView(e.target.checked)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-gray-300" />
-                <span className="text-sm font-bold text-slate-700">2줄 보기 (1~16 / 17~말일)</span>
+                <span className="text-sm font-bold text-slate-700">2줄 보기 (1~15 / 16~말일)</span>
               </label>
               <div className="w-px h-3 bg-slate-200"></div>
               <label className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity select-none">
@@ -1945,6 +1951,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                     {secondaryDayNumbers.map((dayNumber) => (
                       <th key={dayNumber} className={`${getStatementDayHeaderClass(dayNumber)} ${widthClassByColumn.day}`}>{String(dayNumber).padStart(2, '0')}</th>
                     ))}
+                    {secondarySpacerColumns.map(idx => <th key={`blank-${idx}`} className={`border border-black bg-slate-50 ${widthClassByColumn.day}`} />)}
                   </tr>
                 )}
               </thead>
@@ -2052,6 +2059,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                             </td>
                           );
                         })}
+                        {secondarySpacerColumns.map(idx => <td key={`blank-${idx}`} className="border-r border-black bg-slate-50" />)}
                       </tr>
                     )}
                   </React.Fragment>
@@ -2094,6 +2102,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                         </div>
                       </td>
                     ))}
+                    {secondarySpacerColumns.map(idx => <td key={`blank-${idx}`} className="border border-black bg-[#fca5a5]" />)}
                   </tr>
                 )}
               </tfoot>

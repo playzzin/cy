@@ -39,6 +39,25 @@ beforeEach(() => {
 
 afterEach(() => jest.restoreAllMocks());
 
+it('재직증명서 기본 직위·업무를 선택과 취소 시 적용하고 수정값을 인쇄한다', async () => {
+    render(<EmploymentCertificatePage />);
+    const position = screen.getByRole('textbox', { name: '직위 (Rank)' });
+    const duties = screen.getByRole('textbox', { name: '담당업무 (Duties)' });
+    expect(position).toHaveValue('팀원');
+    expect(duties).toHaveValue('비계공');
+    fireEvent.click(await screen.findByText(/테스트근로자 \(/));
+    expect(position).toHaveValue('팀원');
+    expect(duties).toHaveValue('비계공');
+    fireEvent.change(position, { target: { value: '팀장' } });
+    fireEvent.change(duties, { target: { value: '현장관리' } });
+    fireEvent.click(screen.getByRole('button', { name: '재직증명서 인쇄 / PDF 저장' }));
+    expect(printedDocuments[0]).toHaveTextContent('팀장');
+    expect(printedDocuments[0]).toHaveTextContent('현장관리');
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+    expect(position).toHaveValue('팀원');
+    expect(duties).toHaveValue('비계공');
+});
+
 describe.each([
     ['재직증명서', EmploymentCertificatePage],
     ['해촉증명서', TerminationCertificatePage],

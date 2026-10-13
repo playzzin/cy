@@ -357,8 +357,8 @@ const EmploymentCertificatePage: React.FC = () => {
     // Certificate Data
     const [purpose, setPurpose] = useState('금융기관 제출용');
     const [issueDate, setIssueDate] = useState<Date>(new Date());
-    const [position, setPosition] = useState('');
-    const [duties, setDuties] = useState('');
+    const [position, setPosition] = useState('팀원');
+    const [duties, setDuties] = useState('비계공');
     const [joinDate, setJoinDate] = useState<Date | null>(null);
     const [endDate, setEndDate] = useState<Date | null>(null);
     const [isServing, setIsServing] = useState(true);
@@ -524,9 +524,8 @@ const EmploymentCertificatePage: React.FC = () => {
                                             onClick={() => {
                                                 setSelectedWorker(worker);
                                                 setSearchWorkerName(worker.name);
-                                                // Auto-fill position and duties (Requested: Position empty, Duties: '현장직')
-                                                setPosition('');
-                                                setDuties('현장직');
+                                                setPosition('팀원');
+                                                setDuties('비계공');
 
                                                 // Auto-fill dates
                                                 const createdAt = worker.createdAt?.toDate ? worker.createdAt.toDate() : (worker.createdAt as any);
@@ -553,8 +552,8 @@ const EmploymentCertificatePage: React.FC = () => {
                                         onClick={() => {
                                             setSelectedWorker(null);
                                             setSearchWorkerName('');
-                                            setPosition('');
-                                            setDuties('');
+                                            setPosition('팀원');
+                                            setDuties('비계공');
                                             setJoinDate(null);
                                             setEndDate(null);
                                             setIsServing(true);
@@ -568,8 +567,9 @@ const EmploymentCertificatePage: React.FC = () => {
                     </FormGroup>
 
                     <FormGroup>
-                        <Label>직위 (Rank)</Label>
+                        <Label htmlFor="employment-position">직위 (Rank)</Label>
                         <Input
+                            id="employment-position"
                             type="text"
                             value={position}
                             onChange={(e) => setPosition(e.target.value)}
@@ -578,8 +578,9 @@ const EmploymentCertificatePage: React.FC = () => {
                     </FormGroup>
 
                     <FormGroup>
-                        <Label>담당업무 (Duties)</Label>
+                        <Label htmlFor="employment-duties">담당업무 (Duties)</Label>
                         <Input
+                            id="employment-duties"
                             type="text"
                             value={duties}
                             onChange={(e) => setDuties(e.target.value)}
