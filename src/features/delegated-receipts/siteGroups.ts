@@ -5,6 +5,7 @@ export interface ReceiptSiteGroup {
     key: string;
     name: string;
     color: string;
+    teamName?: string;
     claims: DelegatedClaim[];
 }
 const normalize = (value: string) => value.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
@@ -26,7 +27,8 @@ export function groupClaimsBySite(claims: DelegatedClaim[], directory: ReceiptDi
     return [...groups.values()].map(group => {
         const teams = new Map(group.claims.map(claim => getSiteTeam(claim, directory)).filter(team => team !== undefined).map(team => [team.id, team]));
         // Conflicting team assignments must not borrow an arbitrary team's color.
-        const color = teams.size === 1 ? validTeamColor([...teams.values()][0].color) : validTeamColor();
-        return { ...group, color, claims: [...group.claims].sort((a, b) => a.workerName.localeCompare(b.workerName, 'ko') || a.id.localeCompare(b.id)) };
+        const team = teams.size === 1 ? [...teams.values()][0] : undefined;
+        const color = validTeamColor(team?.color);
+        return { ...group, color, teamName: team?.name, claims: [...group.claims].sort((a, b) => a.workerName.localeCompare(b.workerName, 'ko') || a.id.localeCompare(b.id)) };
     }).sort((a, b) => a.name.localeCompare(b.name, 'ko') || a.key.localeCompare(b.key));
 }

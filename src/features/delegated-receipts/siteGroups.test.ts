@@ -9,7 +9,7 @@ it('식별자가 있는 등록과 현장명이 유일한 엑셀 내역을 함께
     const rows = [base, { ...base, id: 'c2', siteId: 's1', workerName: '작업자 가' }, { ...base, id: 'c3', siteName: '가상현장', workerName: '작업자 가' }];
     const grouped = groupClaimsBySite(rows, directory);
     expect(grouped).toHaveLength(1);
-    expect(grouped[0]).toMatchObject({ name: '가상 현장', color: '#336699' });
+    expect(grouped[0]).toMatchObject({ name: '가상 현장', color: '#336699', teamName: '가상팀' });
     expect(grouped[0].claims.map(row => row.id)).toEqual(['c2', 'c3', 'c1']);
     expect(rows.map(row => row.id)).toEqual(['c1', 'c2', 'c3']);
 });
@@ -22,4 +22,5 @@ it('이름이 같은 다른 현장 ID, 모호한 엑셀 현장, 다른 귀속월
 it('서로 충돌하는 팀 연결은 특정 팀 색으로 추정하지 않는다', () => {
     const grouped = groupClaimsBySite([base, { ...base, id: 'c2', assignedTeamId: 't2' }], directory);
     expect(grouped[0].color).toBe('#94a3b8');
+    expect(grouped[0].teamName).toBeUndefined();
 });
