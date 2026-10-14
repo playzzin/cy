@@ -1,0 +1,64 @@
+.repair-ledger { --repair-ink: #172b42; --repair-blue: #175cd3; color: var(--repair-ink); background: #fff; border: 1px solid #dde5ef; border-radius: 16px; padding: 24px; min-width: 0; }
+.repair-heading { display: flex; justify-content: space-between; gap: 20px; align-items: center; flex-wrap: wrap; margin-bottom: 24px; }
+.repair-eyebrow { color: #58738b; display: flex; align-items: center; gap: 7px; font-size: 10px; letter-spacing: .12em; font-weight: 700; margin-bottom: 6px; }
+.repair-heading h2 { font-size: 25px; font-weight: 800; letter-spacing: -.05em; margin: 0 0 6px; }
+.repair-heading p, .repair-help { color: #64748b; font-size: 12px; line-height: 1.6; }
+.repair-actions, .repair-dialog-actions, .repair-row-actions { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+.repair-ledger button, .repair-dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #d9e2ed; border-radius: 8px; padding: 9px 12px; background: white; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.repair-ledger button:hover, .repair-dialog button:hover { background: #f0f5fc; }
+.repair-ledger button:disabled, .repair-dialog button:disabled { opacity: .45; cursor: not-allowed; }
+.repair-ledger button:focus-visible, .repair-dialog button:focus-visible { outline: 2px solid #175cd3; outline-offset: 3px; }
+.repair-ledger .repair-primary, .repair-dialog .repair-primary { background: #175cd3; color: white; border-color: #175cd3; }
+.repair-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+.repair-stats > div { background: #f7f9fc; border: 1px solid #e7edf5; border-radius: 12px; padding: 17px 18px; min-width: 0; }
+.repair-stats span { color: #62738a; font-size: 12px; font-weight: 600; }
+.repair-stats strong { display: block; font-size: clamp(18px, 1.6vw, 27px); font-weight: 800; letter-spacing: -.04em; margin: 6px 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.repair-stats small { font-size: 12px; font-weight: 500; margin-left: 5px; }
+.repair-stats p { color: #7c8b9f; font-size: 11px; }
+.repair-stats .repair-stat-total { background: #edf4ff; border-color: #cdddff; color: #175cd3; }
+.repair-filters { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; background: #f8fafc; border: 1px solid #e8edf3; border-radius: 10px; padding: 14px; margin-bottom: 16px; }
+.repair-filters label, .repair-form-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 11px; font-weight: 700; color: #53657d; }
+.repair-filters select, .repair-filters input, .repair-form-grid input, .repair-form-grid textarea { width: 100%; min-height: 37px; border: 1px solid #d7e0ec; border-radius: 7px; padding: 8px 10px; background: white; font-size: 12px; font-weight: 500; color: #172b42; }
+.repair-filters select { min-width: 100px; }
+.repair-filters input:focus, .repair-filters select:focus, .repair-form-grid input:focus, .repair-form-grid textarea:focus { outline: 2px solid #bbd4ff; border-color: #175cd3; }
+.repair-search { flex: 1; min-width: 200px; }
+.repair-table-wrap { width: 100%; overflow: auto; max-height: 650px; border: 1px solid #e1e7ef; border-radius: 10px; }
+.repair-ledger table, .repair-dialog table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
+.repair-ledger table { min-width: 1090px; }
+.repair-ledger th, .repair-dialog th { background: #f1f5fa; color: #53657d; font-weight: 700; padding: 12px; white-space: nowrap; }
+.repair-ledger thead th { position: sticky; top: 0; z-index: 1; }
+.repair-ledger td, .repair-dialog td { padding: 13px 12px; border-bottom: 1px solid #edf1f6; vertical-align: top; }
+.repair-ledger tbody tr:hover { background: #f9fbff; }
+.repair-ledger td small { display: block; color: #8795a6; font-size: 10px; margin-top: 5px; }
+.repair-number { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.repair-row-total { font-weight: 700; color: #175cd3; }
+.repair-description { min-width: 190px; max-width: 330px; white-space: normal; overflow-wrap: anywhere; }
+.repair-driver { max-width: 140px; overflow-wrap: anywhere; }
+.repair-date { white-space: nowrap; }
+.repair-review { display: block; width: fit-content; background: #fff3db; color: #96601a; border-radius: 4px; padding: 3px 5px; margin-top: 5px; font-size: 10px; }
+.repair-row-actions { flex-wrap: nowrap; }
+.repair-row-actions button { font-size: 11px; padding: 5px 7px; }
+.repair-ledger tfoot { background: #f1f5fa; font-weight: 700; }
+.repair-ledger .repair-empty { text-align: center; color: #7b8b9f; padding: 65px 20px; }
+.repair-footer { display: flex; justify-content: space-between; gap: 16px; align-items: center; flex-wrap: wrap; padding-top: 15px; }
+.repair-footer p { font-size: 11px; line-height: 1.6; color: #76869a; }
+.repair-footer > div { display: flex; gap: 12px; align-items: center; font-size: 12px; }
+.repair-error, .repair-notice { border-radius: 8px; padding: 12px; margin: 10px 0; font-size: 12px; line-height: 1.6; }
+.repair-error { background: #fff1f2; color: #a5223e; }
+.repair-notice { background: #effaf5; color: #167253; }
+.repair-overlay { position: fixed; inset: 0; background: rgba(15, 29, 48, .48); z-index: 10000; }
+.repair-dialog { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(680px, calc(100vw - 24px)); max-height: 90vh; overflow-y: auto; z-index: 10001; background: white; border-radius: 16px; padding: 26px; color: #172b42; box-shadow: 0 24px 80px #10243d33; }
+.repair-dialog h2 { font-size: 21px; font-weight: 800; }
+.repair-dialog [id$='description'] { color: #64748b; font-size: 12px; line-height: 1.6; margin: 10px 0 20px; }
+.repair-dialog-heading { display: flex; justify-content: space-between; align-items: center; }
+.repair-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.repair-form-wide { grid-column: 1 / -1; }
+.repair-form-total { background: #edf4ff; padding: 14px; border-radius: 8px; text-align: right; margin: 16px 0; font-size: 13px; }
+.repair-form-total strong { font-size: 19px; margin-left: 10px; }
+.repair-dialog-actions { justify-content: flex-end; margin-top: 22px; }
+.repair-import-summary { display: flex; flex-wrap: wrap; gap: 12px; padding: 14px; border-radius: 8px; background: #edf4ff; font-size: 13px; margin-bottom: 16px; }
+.repair-import-dialog > p { font-size: 12px; margin: 10px 0; }
+.repair-import-preview { margin-top: 16px; max-height: 250px; overflow: auto; border: 1px solid #e4eaf2; border-radius: 8px; }
+.repair-import-issues { background: #fff8e9; color: #8e611f; font-size: 12px; padding: 10px; margin-top: 10px; max-height: 100px; overflow: auto; }
+@media (max-width: 800px) { .repair-ledger { padding: 15px; } .repair-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .repair-stats strong { font-size: 21px; } .repair-heading { gap: 12px; } .repair-actions { width: 100%; } .repair-actions button { flex-grow: 1; } }
+@media (max-width: 480px) { .repair-stats > div { padding: 12px; } .repair-stats strong { font-size: 17px; } .repair-filters { gap: 8px; padding: 10px; } .repair-filters label { flex: 1 1 42%; } .repair-filters .repair-search { flex-basis: 100%; } .repair-form-grid { grid-template-columns: 1fr; } .repair-dialog { padding: 18px; } }
