@@ -30,6 +30,7 @@ interface VehicleManagerPageProps {
     embedded?: boolean;
     initialTab?: VehicleTabId;
     onTabChange?: (tab: VehicleTabId) => void;
+    onBeforeRepairLeaveChange?: (guard: (() => boolean) | null) => void;
 }
 
 type VehicleTabId = 'status' | 'ledger' | 'history';
@@ -47,11 +48,15 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
     embedded = false,
     initialTab = 'status',
     onTabChange,
+    onBeforeRepairLeaveChange,
 }) => {
     const navigate = useNavigate();
     const location = useLocation();
     const repairView = activeRepairView(location.search);
+    const repairLeaveGuard = React.useRef<(() => boolean) | null>(null);
+    const registerRepairLeaveGuard = React.useCallback((guard: (() => boolean) | null) => { repairLeaveGuard.current = guard; onBeforeRepairLeaveChange?.(guard); }, [onBeforeRepairLeaveChange]);
     const changeLedgerView = (repair: boolean) => {
+        if (repairView !== repair && repairLeaveGuard.current && !repairLeaveGuard.current()) return;
         const params = new URLSearchParams(location.search);
         params.set('view', 'ledger');
         if (repair) params.set('ledger', 'repairs');
@@ -84,6 +89,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
     }, [initialTab]);
 
     const handleTabChange = (tab: VehicleTabId) => {
+        if (tab !== activeTab && repairLeaveGuard.current && !repairLeaveGuard.current()) return;
         setActiveTab(tab);
         onTabChange?.(tab);
     };
@@ -281,6 +287,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
 
     // 핸들러 함수들
     const handleRefresh = () => {
+        if (repairLeaveGuard.current && !repairLeaveGuard.current()) return;
         setRefreshKey(prev => prev + 1);
     };
     const handleEdit = (vehicle: Vehicle) => {
@@ -582,9 +589,9 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                     <>
                     <div role="group" aria-label="차량 대장 종류" className="mb-3 flex gap-2">
                         <button type="button" aria-pressed={!repairView} onClick={() => changeLedgerView(false)} className={`rounded-lg border px-4 py-2 text-sm font-bold ${!repairView ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>월별 경비대장</button>
-                        <button type="button" aria-pressed={repairView} onClick={() => changeLedgerView(true)} className={`rounded-lg border px-4 py-2 text-sm font-bold ${repairView ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>정비내역 관리</button>
+                        <button type="button" aria-pressed={repairView} onClick={() => changeLedgerView(true)} className={`rounded-lg border px-4 py-2 text-sm font-bold ${repairView ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>정비내역 관리</button>
                     </div>
-                    {repairView ? <React.Suspense fallback={<p className="p-8 text-center text-slate-500">정비내역 화면을 여는 중입니다.</p>}><VehicleRepairLedger vehicles={vehicles} /></React.Suspense> : <VehicleMonthlyLedger
+                    {repairView ? <React.Suspense fallback={<p className="p-8 text-center text-slate-500">정비내역 화면을 여는 중입니다.</p>}><VehicleRepairLedger vehicles={vehicles} onBeforeLeaveChange={registerRepairLeaveGuard} /></React.Suspense> : <VehicleMonthlyLedger
                         key={refreshKey}
                         vehicles={vehicles}
                         fineImportVehicles={vehicles}

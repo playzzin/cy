@@ -32,6 +32,8 @@ const SupportManagerPage: React.FC = () => {
   const [activeView, setActiveView] = useState<SupportManagementView>(initialView);
   const [yearMonth, setYearMonth] = useState(getSupportManagementYearMonth);
   const [claimFormDirty, setClaimFormDirty] = useState(false);
+  const repairLeaveGuard = React.useRef<(() => boolean) | null>(null);
+  const registerRepairLeaveGuard = React.useCallback((guard: (() => boolean) | null) => { repairLeaveGuard.current = guard; }, []);
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -50,6 +52,7 @@ const SupportManagerPage: React.FC = () => {
   };
 
   const handleTabChange = (tabId: SupportTabId) => {
+    if (tabId !== activeTab && repairLeaveGuard.current && !repairLeaveGuard.current()) return;
     if (
       activeTab === 'claim'
       && tabId !== 'claim'
@@ -69,6 +72,7 @@ const SupportManagerPage: React.FC = () => {
   };
 
   const handleYearMonthChange = (nextYearMonth: string) => {
+    if (nextYearMonth !== yearMonth && repairLeaveGuard.current && !repairLeaveGuard.current()) return;
     if (
       activeTab === 'claim'
       && claimFormDirty
@@ -92,7 +96,7 @@ const SupportManagerPage: React.FC = () => {
         />
 
         <div className="w-full min-w-0">
-          {activeTab === 'vehicle' && <VehicleManagerPage embedded initialTab={activeView} onTabChange={handleViewChange} />}
+          {activeTab === 'vehicle' && <VehicleManagerPage embedded initialTab={activeView} onTabChange={handleViewChange} onBeforeRepairLeaveChange={registerRepairLeaveGuard} />}
           {activeTab === 'card' && <CardManagerPage embedded initialTab={activeView} onTabChange={handleViewChange} />}
           {activeTab === 'accommodation' && <AccommodationManager embedded initialTab={activeView} onTabChange={handleViewChange} />}
           {activeTab === 'expense' && <ExpenseLedgerPage embedded />}

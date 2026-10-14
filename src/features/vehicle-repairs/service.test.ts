@@ -50,3 +50,25 @@ test('읽기 실패를 빈 목록으로 숨기지 않는다', async () => {
   (getDocs as jest.Mock).mockRejectedValue(new Error('permission-denied'));
   await expect(vehicleRepairService.list()).rejects.toThrow('permission-denied');
 });
+
+test('여러 행 저장은 모든 충돌 검사를 통과한 뒤 한 트랜잭션에서 처리한다', async () => {
+  const events: string[] = [];
+  transaction.get.mockImplementation(async id => { events.push(`read:${id}`); return { exists: () => id !== 'new', data: () => ({ data: record(id) }) }; });
+  transaction.set.mockImplementation(id => events.push(`write:${id}`));
+  await vehicleRepairService.saveRows([record('old'), { ...record('new'), revision: 0, costs: { ...emptyCosts(), personal: 0, cheongyeon: 100.7 } }]);
+  expect(runTransaction).toHaveBeenCalledTimes(1);
+  expect(events).toEqual(['read:old', 'read:new', 'write:old', 'write:new']);
+  expect(transaction.set.mock.calls[1][1].data).toMatchObject({ revision: 1, costs: { ...emptyCosts(), personal: 0, cheongyeon: 100.7 } });
+});
+
+test('여러 행 중 마지막 행의 충돌도 전체 저장을 차단한다', async () => {
+  transaction.get.mockImplementation(async id => ({ exists: () => true, data: () => ({ data: { ...record(id), revision: id === 'conflict' ? 2 : 1 } }) }));
+  await expect(vehicleRepairService.saveRows([record('valid'), record('conflict')])).rejects.toThrow('다른 사용자가 수정');
+  expect(transaction.set).not.toHaveBeenCalled();
+});
+
+test('잘못된 행과 중복 ID는 서버 저장 전에 차단한다', async () => {
+  await expect(vehicleRepairService.saveRows([record(), { ...record('invalid'), date: '2026-02-29' }])).rejects.toThrow('날짜 확인 필요');
+  await expect(vehicleRepairService.saveRows([record(), record()])).rejects.toThrow('중복된');
+  expect(runTransaction).not.toHaveBeenCalled();
+});

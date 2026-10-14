@@ -1,50 +1,142 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import VehicleRepairLedger from './VehicleRepairLedger';
 import { vehicleRepairService } from './service';
 import { emptyCosts, RepairRecord } from './model';
 
-jest.mock('./service', () => ({ vehicleRepairService: { list: jest.fn(), save: jest.fn(), archive: jest.fn(), importRecords: jest.fn() } }));
+jest.mock('./service', () => ({ vehicleRepairService: { list: jest.fn(), saveRows: jest.fn(), archive: jest.fn(), importRecords: jest.fn() } }));
 const row = (id: string, date: string, amount: number): RepairRecord => ({ id, date, yearMonth: date.slice(0, 7), originalDate: '', vehiclePlate: '12가3456', vehicleId: '', description: `테스트 수리 ${id}`, driver: '', vendor: '정비업체', costs: { ...emptyCosts(), cheongyeon: amount }, memo: '', issues: [], archived: false, revision: 1 });
-beforeEach(() => { jest.clearAllMocks(); (vehicleRepairService.list as jest.Mock).mockResolvedValue([row('one', '2025-03-01', 110000), row('two', '2026-04-01', 220000)]); });
+const renderLedger = (onBeforeLeaveChange?: (guard: (() => boolean) | null) => void) => render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><Link to="/other">다른 화면</Link><Routes><Route path="/" element={<VehicleRepairLedger vehicles={[]} onBeforeLeaveChange={onBeforeLeaveChange} />} /><Route path="/other" element={<p>이동 완료</p>} /></Routes></MemoryRouter>);
+let counter = 0;
+beforeEach(() => {
+  jest.clearAllMocks();
+  window.sessionStorage.setItem('cy.support-management.year-month', '2026-04');
+  Object.defineProperty(window, 'crypto', { configurable: true, value: { randomUUID: () => `test-${++counter}` } });
+  (vehicleRepairService.list as jest.Mock).mockResolvedValue([row('one', '2025-03-01', 110000), row('two', '2026-04-01', 220000)]);
+  (vehicleRepairService.saveRows as jest.Mock).mockResolvedValue(undefined);
+});
+afterEach(() => jest.restoreAllMocks());
 
-test('연도 필터가 목록과 금액에 함께 적용되고 검색 초기화가 복원한다', async () => {
-  render(<VehicleRepairLedger vehicles={[]} />);
-  await screen.findByText('테스트 수리 one');
-  fireEvent.change(screen.getByLabelText('정비 연도'), { target: { value: '2026' } });
-  expect(screen.queryByText('테스트 수리 one')).not.toBeInTheDocument();
-  expect(screen.getByText('테스트 수리 two')).toBeInTheDocument();
+test('월별 목록과 합계를 보여 주며 전체 기간에서 과거 내역을 조회한다', async () => {
+  renderLedger();
+  await screen.findByDisplayValue('테스트 수리 two');
+  expect(screen.queryByDisplayValue('테스트 수리 one')).not.toBeInTheDocument();
   expect(screen.getByText('조회 내역 합계 (1건)')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '초기화' }));
-  expect(screen.getByText('테스트 수리 one')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '전체 기간' }));
+  expect(screen.getByDisplayValue('테스트 수리 one')).toBeInTheDocument();
+  expect(screen.getByText('조회 내역 합계 (2건)')).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('정비 조회 월'), { target: { value: '2025-03' } });
+  expect(screen.queryByDisplayValue('테스트 수리 two')).not.toBeInTheDocument();
 });
 
-test('수정 실패 시 입력 내용과 오류를 유지한다', async () => {
-  (vehicleRepairService.save as jest.Mock).mockRejectedValue(new Error('다른 사용자가 수정했습니다.'));
-  render(<VehicleRepairLedger vehicles={[]} />);
-  await screen.findByText('테스트 수리 two');
-  fireEvent.click(screen.getAllByRole('button', { name: '수정' })[0]);
-  const dialog = screen.getByRole('dialog');
-  fireEvent.change(within(dialog).getByLabelText('정비내용'), { target: { value: '새 수리 내용' } });
-  fireEvent.click(within(dialog).getByRole('button', { name: '정비내역 저장' }));
-  expect(await within(dialog).findByRole('alert')).toHaveTextContent('다른 사용자가 수정');
-  expect(within(dialog).getByLabelText('정비내용')).toHaveValue('새 수리 내용');
+test('기존 행의 금액을 바로 수정하고 저장 전까지 서버에 쓰지 않는다', async () => {
+  renderLedger();
+  await screen.findByDisplayValue('테스트 수리 two');
+  const amount = screen.getByLabelText('1행 청연 금액');
+  fireEvent.focus(amount);
+  fireEvent.change(amount, { target: { value: '1234.70' } });
+  fireEvent.blur(amount);
+  expect(amount).toHaveValue('1,234.7');
+  expect(screen.getByText('수정사항 1건')).toBeInTheDocument();
+  expect(vehicleRepairService.saveRows).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '저장' }));
+  await screen.findByText('1건의 정비내역을 저장했습니다.');
+  expect(vehicleRepairService.saveRows).toHaveBeenCalledWith([expect.objectContaining({ id: 'two', revision: 1, costs: { ...emptyCosts(), cheongyeon: 1234.7 } })]);
+});
+
+test('새 행과 기존 행을 한 번에 저장하고 0원과 빈 비용을 구분한다', async () => {
+  renderLedger();
+  await screen.findByDisplayValue('테스트 수리 two');
+  fireEvent.change(screen.getByLabelText('1행 운전자'), { target: { value: '운전자 수정' } });
+  fireEvent.click(screen.getByRole('button', { name: '행 추가' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('1행 정비일')).toHaveValue('2026-04-01');
+  fireEvent.change(screen.getByLabelText('1행 차량번호'), { target: { value: '34나5678' } });
+  fireEvent.change(screen.getByLabelText('1행 정비내용'), { target: { value: '무상 점검' } });
+  fireEvent.change(screen.getByLabelText('1행 개인 금액'), { target: { value: '0' } });
+  fireEvent.click(screen.getByRole('button', { name: '저장' }));
+  await screen.findByText('2건의 정비내역을 저장했습니다.');
+  const saved = (vehicleRepairService.saveRows as jest.Mock).mock.calls[0][0];
+  expect(saved).toHaveLength(2);
+  expect(saved.find((item: RepairRecord) => item.description === '무상 점검')).toMatchObject({ revision: 0, costs: { ...emptyCosts(), personal: 0 } });
+  expect(screen.getByRole('button', { name: '저장' })).toBeDisabled();
+});
+
+test('빈 신규 행은 저장을 차단하고 표 안에 확인할 항목을 표시한다', async () => {
+  renderLedger();
+  await screen.findByDisplayValue('테스트 수리 two');
+  fireEvent.click(screen.getByRole('button', { name: '행 추가' }));
+  fireEvent.click(screen.getByRole('button', { name: '저장' }));
+  expect(vehicleRepairService.saveRows).not.toHaveBeenCalled();
+  expect(screen.getAllByRole('alert').map(el => el.textContent).join(' ')).toContain('차량번호 확인 필요');
+  fireEvent.click(screen.getByRole('button', { name: '행 취소' }));
+  expect(screen.getByRole('button', { name: '저장' })).toBeDisabled();
+});
+
+test('저장 실패 시 여러 행의 입력과 오류를 유지해 재시도할 수 있다', async () => {
+  (vehicleRepairService.saveRows as jest.Mock).mockRejectedValueOnce(new Error('다른 사용자가 수정했습니다.'));
+  renderLedger();
+  await screen.findByDisplayValue('테스트 수리 two');
+  fireEvent.change(screen.getByLabelText('1행 정비내용'), { target: { value: '새 수리 내용' } });
+  fireEvent.click(screen.getByRole('button', { name: '저장' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('다른 사용자가 수정');
+  expect(screen.getByLabelText('1행 정비내용')).toHaveValue('새 수리 내용');
+  fireEvent.click(screen.getByRole('button', { name: '저장' }));
+  await screen.findByText('1건의 정비내역을 저장했습니다.');
+});
+
+test('저장 중에는 셀과 이동 및 반복 저장이 잠긴다', async () => {
+  let finish!: () => void;
+  (vehicleRepairService.saveRows as jest.Mock).mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
+  renderLedger();
+  await screen.findByDisplayValue('테스트 수리 two');
+  fireEvent.change(screen.getByLabelText('1행 정비내용'), { target: { value: '변경 내용' } });
+  fireEvent.click(screen.getByRole('button', { name: '저장' }));
+  expect(screen.getByLabelText('1행 정비내용')).toBeDisabled();
+  expect(screen.getByRole('button', { name: '저장 중…' })).toBeDisabled();
+  finish();
+  await screen.findByText('1건의 정비내역을 저장했습니다.');
+});
+
+test('미저장 상태에서 월 이동과 다른 화면 이동을 취소하면 입력을 보존한다', async () => {
+  const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+  renderLedger();
+  await screen.findByDisplayValue('테스트 수리 two');
+  fireEvent.change(screen.getByLabelText('1행 정비내용'), { target: { value: '입력 유지' } });
+  fireEvent.click(screen.getByRole('button', { name: '정비 다음 달' }));
+  expect(screen.getByLabelText('정비 조회 월')).toHaveValue('2026-04');
+  fireEvent.click(screen.getByRole('link', { name: '다른 화면' }));
+  expect(screen.getByLabelText('1행 정비내용')).toHaveValue('입력 유지');
+  expect(screen.queryByText('이동 완료')).not.toBeInTheDocument();
+  confirm.mockReturnValue(true);
+  fireEvent.click(screen.getByRole('link', { name: '다른 화면' }));
+  expect(await screen.findByText('이동 완료')).toBeInTheDocument();
+});
+
+test('새로고침과 엑셀 가져오기는 미저장 편집이 있으면 잠긴다', async () => {
+  renderLedger();
+  await screen.findByDisplayValue('테스트 수리 two');
+  fireEvent.change(screen.getByLabelText('1행 운전자'), { target: { value: '변경' } });
+  expect(screen.getByRole('button', { name: '정비내역 새로고침' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '엑셀 가져오기' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '되돌리기' }));
+  expect(screen.getByRole('button', { name: '엑셀 가져오기' })).toBeEnabled();
 });
 
 test('보관 확인을 취소하면 서버 상태를 바꾸지 않는다', async () => {
-  const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
-  render(<VehicleRepairLedger vehicles={[]} />);
-  await screen.findByText('테스트 수리 one');
-  fireEvent.click(screen.getAllByRole('button', { name: '보관' })[0]);
+  jest.spyOn(window, 'confirm').mockReturnValue(false);
+  renderLedger();
+  await screen.findByDisplayValue('테스트 수리 two');
+  fireEvent.click(screen.getByRole('button', { name: '보관' }));
   expect(vehicleRepairService.archive).not.toHaveBeenCalled();
-  confirm.mockRestore();
 });
 
 test('조회 실패를 표시하고 다시 조회할 수 있다', async () => {
   (vehicleRepairService.list as jest.Mock).mockRejectedValueOnce(new Error('서버 연결 실패'));
-  render(<VehicleRepairLedger vehicles={[]} />);
+  renderLedger();
   expect(await screen.findByRole('alert')).toHaveTextContent('서버 연결 실패');
   fireEvent.click(screen.getByRole('button', { name: '다시 조회' }));
-  expect(await screen.findByText('테스트 수리 one')).toBeInTheDocument();
+  expect(await screen.findByDisplayValue('테스트 수리 two')).toBeInTheDocument();
 });

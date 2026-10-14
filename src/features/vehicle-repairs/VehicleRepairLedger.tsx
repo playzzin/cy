@@ -1,16 +1,18 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { Download, FileSpreadsheet, Plus, RefreshCw, Wrench, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, FileSpreadsheet, Plus, RefreshCw, Save, Wrench } from 'lucide-react';
 import type { Vehicle } from '../../types/vehicle';
+import { getSupportManagementYearMonth, rememberSupportManagementYearMonth, subscribeSupportManagementYearMonth } from '../../utils/supportManagementState';
+import { useIssueNavigationGuard } from '../../pages/taxinvoice/useIssueNavigationGuard';
 import { vehicleRepairService } from './service';
-import { classifyRepairImport, COST_KEYS, COST_LABELS, CostKey, emptyCosts, formatRepairAmount, matchRepairVehicles, normalizePlate, parseRepairWorkbook, RepairRecord, repairIssues, repairTotal } from './model';
+import { classifyRepairImport, COST_KEYS, COST_LABELS, CostKey, emptyCosts, formatRepairAmount, matchRepairVehicles, parseRepairWorkbook, RepairRecord, repairIssues, repairTotal } from './model';
 import './VehicleRepairLedger.css';
 
 const errorText = (error: unknown) => String((error as { code?: string })?.code ?? '').includes('permission-denied')
   ? '정비내역에 접근할 권한이 없습니다. 지원업무 권한을 확인해 주세요.'
   : error instanceof Error ? error.message : '처리하지 못했습니다. 다시 시도해 주세요.';
 const today = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
-const blankRecord = (): RepairRecord => ({ id: `vehicle_repair_${crypto.randomUUID()}`, date: today(), yearMonth: today().slice(0, 7), originalDate: '', vehicleId: '', vehiclePlate: '', description: '', driver: '', vendor: '신대지자동차', costs: emptyCosts(), memo: '', issues: [], archived: false, revision: 0 });
+const blankRecord = (period: string): RepairRecord => ({ id: `vehicle_repair_${crypto.randomUUID()}`, date: period === today().slice(0, 7) ? today() : `${period}-01`, yearMonth: period, originalDate: '', vehicleId: '', vehiclePlate: '', description: '', driver: '', vendor: '신대지자동차', costs: emptyCosts(), memo: '', issues: [], archived: false, revision: 0 });
 
 function exportCsv(rows: RepairRecord[]) {
   const escape = (value: unknown) => {
@@ -25,25 +27,51 @@ function exportCsv(rows: RepairRecord[]) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export default function VehicleRepairLedger({ vehicles }: { vehicles: Vehicle[] }) {
+function AmountInput({ value, label, disabled, onChange }: { value: number | null; label: string; disabled: boolean; onChange: (value: number | null) => void }) {
+  const [text, setText] = useState(value === null ? '' : formatRepairAmount(value));
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setText(value === null ? '' : formatRepairAmount(value)); }, [value]);
+  return <input type="text" inputMode="decimal" aria-label={label} disabled={disabled} value={text} placeholder="—"
+    onFocus={event => { focused.current = true; setText(value === null ? '' : String(value)); event.target.select(); }}
+    onChange={event => { const raw = event.target.value; const cleaned = raw.replace(/,/g, '').trim(); setText(raw); onChange(cleaned === '' ? null : /^\d+(\.\d{0,2})?$/.test(cleaned) ? Number(cleaned) : NaN); }}
+    onBlur={() => { focused.current = false; if (value === null || Number.isFinite(value)) setText(value === null ? '' : formatRepairAmount(value)); }} />;
+}
+
+type Props = { vehicles: Vehicle[]; onBeforeLeaveChange?: (guard: (() => boolean) | null) => void };
+export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: Props) {
   const [records, setRecords] = useState<RepairRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [year, setYear] = useState('');
-  const [month, setMonth] = useState('');
+  const [yearMonth, setYearMonth] = useState(getSupportManagementYearMonth);
+  const [allPeriods, setAllPeriods] = useState(false);
   const [cost, setCost] = useState('');
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('active');
   const [page, setPage] = useState(1);
-  const [editing, setEditing] = useState<RepairRecord | null>(null);
-  const [editError, setEditError] = useState('');
+  const [sticky, setSticky] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, RepairRecord>>({});
+  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  const [focusId, setFocusId] = useState('');
   const [preview, setPreview] = useState<RepairRecord[] | null>(null);
   const [progress, setProgress] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
   const lock = useRef(false);
   const loadSequence = useRef(0);
+  const draftCount = Object.keys(drafts).length;
+  const pending = useRef({ dirty: false, busy: false });
+  pending.current = { dirty: draftCount > 0, busy };
+
+  const canLeave = useCallback(() => {
+    if (pending.current.busy) { window.alert('저장이 끝난 후 이동해 주세요.'); return false; }
+    if (pending.current.dirty && !window.confirm('저장하지 않은 정비내역이 있습니다. 변경사항을 취소하고 이동할까요?')) return false;
+    pending.current.dirty = false;
+    setDrafts({}); setRowErrors({});
+    return true;
+  }, []);
+  useIssueNavigationGuard(draftCount > 0 || busy, canLeave);
+  useEffect(() => { onBeforeLeaveChange?.(canLeave); return () => onBeforeLeaveChange?.(null); }, [onBeforeLeaveChange, canLeave]);
 
   const refresh = async () => {
     const sequence = ++loadSequence.current;
@@ -53,38 +81,86 @@ export default function VehicleRepairLedger({ vehicles }: { vehicles: Vehicle[] 
     finally { if (sequence === loadSequence.current) setLoading(false); }
   };
   useEffect(() => { void refresh(); return () => { loadSequence.current++; }; }, []);
-  useEffect(() => { setPage(1); }, [year, month, cost, search, status]);
+  useEffect(() => { setPage(1); }, [yearMonth, allPeriods, cost, search, status]);
+  useEffect(() => subscribeSupportManagementYearMonth(next => {
+    if (next === yearMonth) return;
+    if (canLeave()) { setYearMonth(next); setAllPeriods(false); }
+    else rememberSupportManagementYearMonth(yearMonth);
+  }), [yearMonth, canLeave]);
+  useEffect(() => { if (focusId) document.getElementById(`repair-date-${focusId}`)?.focus(); }, [focusId]);
 
-  const years = useMemo(() => Array.from(new Set(records.map(row => row.yearMonth.slice(0, 4)).filter(Boolean))).sort().reverse(), [records]);
-  const filtered = useMemo(() => records.filter(row => {
-    if (status === 'archived' ? !row.archived : row.archived) return false;
-    if (status === 'review' && !row.issues.length) return false;
-    if (year && !row.yearMonth.startsWith(year)) return false;
-    if (month && row.yearMonth.slice(5, 7) !== month) return false;
-    if (cost && row.costs[cost as CostKey] === null) return false;
-    const query = search.replace(/\s/g, '').toLowerCase();
-    return !query || [row.vehiclePlate, row.description, row.driver, row.vendor, row.memo].some(value => value.replace(/\s/g, '').toLowerCase().includes(query));
-  }).sort((a, b) => (b.date || b.yearMonth).localeCompare(a.date || a.yearMonth) || a.id.localeCompare(b.id)), [records, year, month, cost, search, status]);
-  const totals = useMemo(() => COST_KEYS.reduce((result, key) => ({ ...result, [key]: Math.round(filtered.reduce((sum, row) => sum + (row.costs[key] ?? 0), 0) * 100) / 100 }), {} as Record<CostKey, number>), [filtered]);
+  const changeMonth = (next: string) => {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(next) || !canLeave()) return;
+    setYearMonth(next); setAllPeriods(false); rememberSupportManagementYearMonth(next);
+  };
+  const stepMonth = (offset: number) => {
+    const [year, month] = yearMonth.split('-').map(Number);
+    const date = new Date(year, month - 1 + offset, 1);
+    changeMonth(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`);
+  };
+  const filtered = useMemo(() => {
+    const order = new Map(records.slice().sort((a, b) => (b.date || b.yearMonth).localeCompare(a.date || a.yearMonth) || a.id.localeCompare(b.id)).map((row, index) => [row.id, index]));
+    Object.values(drafts).filter(row => row.revision === 0).forEach((row, index) => order.set(row.id, -index - 1));
+    const rows = [...records.map(row => drafts[row.id] ?? row), ...Object.values(drafts).filter(row => row.revision === 0)];
+    return rows.filter(row => {
+      if (drafts[row.id]) return true; // Keep unsaved rows visible while their date or search fields change.
+      if (status === 'archived' ? !row.archived : row.archived) return false;
+      if (status === 'review' && !row.issues.length) return false;
+      if (!allPeriods && row.yearMonth !== yearMonth) return false;
+      if (cost && row.costs[cost as CostKey] === null) return false;
+      const query = search.replace(/\s/g, '').toLowerCase();
+      return !query || [row.vehiclePlate, row.description, row.driver, row.vendor, row.memo].some(value => value.replace(/\s/g, '').toLowerCase().includes(query));
+    }).sort((a, b) => order.get(a.id)! - order.get(b.id)!);
+  }, [records, drafts, yearMonth, allPeriods, cost, search, status]);
+  const totals = useMemo(() => COST_KEYS.reduce((result, key) => ({ ...result, [key]: Math.round(filtered.reduce((sum, row) => sum + (Number.isFinite(row.costs[key]) ? row.costs[key]! : 0), 0) * 100) / 100 }), {} as Record<CostKey, number>), [filtered]);
   const total = Math.round(COST_KEYS.reduce((sum, key) => sum + totals[key], 0) * 100) / 100;
   const pages = Math.max(1, Math.ceil(filtered.length / 50));
   const currentPage = Math.min(page, pages);
   const visible = filtered.slice((currentPage - 1) * 50, currentPage * 50);
   const importPlan = useMemo(() => preview ? classifyRepairImport(preview, records) : null, [preview, records]);
 
+  const updateRow = (row: RepairRecord, patch: Partial<RepairRecord>) => {
+    if (lock.current) return;
+    if (!drafts[row.id] && draftCount >= 100) { setError('한 번에 100건까지 편집할 수 있습니다. 먼저 저장해 주세요.'); return; }
+    setDrafts(current => ({ ...current, [row.id]: { ...(current[row.id] ?? row), ...patch } }));
+    setRowErrors(current => { const next = { ...current }; delete next[row.id]; return next; });
+    setNotice('');
+  };
+  const addRow = () => {
+    if (lock.current || draftCount >= 100) return;
+    const row = blankRecord(yearMonth);
+    setDrafts(current => ({ ...current, [row.id]: row })); setPage(1); setFocusId(row.id); setNotice('');
+  };
+  const undoRow = (id: string) => {
+    setDrafts(current => { const next = { ...current }; delete next[id]; return next; });
+    setRowErrors(current => { const next = { ...current }; delete next[id]; return next; });
+  };
+  const save = async () => {
+    if (lock.current || !draftCount) return;
+    const next = matchRepairVehicles(Object.values(drafts).map(row => ({ ...row, yearMonth: row.date.slice(0, 7) })), vehicles);
+    const errors = Object.fromEntries(next.map(row => [row.id, repairIssues(row).join(' · ')]).filter(([, value]) => value));
+    setRowErrors(errors);
+    if (Object.keys(errors).length) { const index = filtered.findIndex(row => errors[row.id]); setPage(Math.floor(Math.max(0, index) / 50) + 1); setError('표에 표시된 입력 항목을 확인해 주세요. 아직 저장되지 않았습니다.'); return; }
+    lock.current = true; setBusy(true); setError('');
+    try {
+      await vehicleRepairService.saveRows(next);
+      const saved = new Map(next.map(row => [row.id, { ...row, issues: [], revision: row.revision + 1 }]));
+      setRecords(current => [...current.map(row => saved.get(row.id) ?? row), ...next.filter(row => row.revision === 0).map(row => saved.get(row.id)!)]);
+      setDrafts({}); setRowErrors({}); setNotice(`${next.length}건의 정비내역을 저장했습니다.`);
+    } catch (error) { setError(errorText(error)); }
+    finally { lock.current = false; setBusy(false); }
+  };
   const readFile = async (file?: File) => {
-    if (!file || lock.current) return;
+    if (!file || lock.current || draftCount) return;
     lock.current = true; setBusy(true); setError(''); setNotice('');
     try {
       if (file.size > 15 * 1024 * 1024) throw new Error('15MB 이하 엑셀 파일을 선택해 주세요.');
       const XLSX = await import('xlsx');
       const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-      setPreview(matchRepairVehicles(parseRepairWorkbook(workbook, file.name), vehicles));
-      setProgress(0);
+      setPreview(matchRepairVehicles(parseRepairWorkbook(workbook, file.name), vehicles)); setProgress(0);
     } catch (error) { setError(errorText(error)); }
     finally { lock.current = false; setBusy(false); if (fileInput.current) fileInput.current.value = ''; }
   };
-
   const commitImport = async () => {
     if (!preview || lock.current) return;
     lock.current = true; setBusy(true); setError('');
@@ -92,74 +168,70 @@ export default function VehicleRepairLedger({ vehicles }: { vehicles: Vehicle[] 
       const result = await vehicleRepairService.importRecords(preview, setProgress);
       setNotice(`${result.added}건을 가져왔습니다. 기존 ${result.skipped}건과 원본 변경 ${result.conflicts}건은 유지했습니다.`);
       setPreview(null); await refresh();
-    } catch (error) {
-      await refresh();
-      setError(`${errorText(error)} 완료된 기록은 보존됩니다. 다시 가져오면 이미 저장된 기록을 건너뜁니다.`);
-    } finally { lock.current = false; setBusy(false); }
-  };
-
-  const save = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!editing || lock.current) return;
-    const next = matchRepairVehicles([{ ...editing, yearMonth: editing.date.slice(0, 7) }], vehicles)[0];
-    const issues = repairIssues(next);
-    if (issues.length) { setEditError(issues.join(' · ')); return; }
-    lock.current = true; setBusy(true); setEditError('');
-    try { await vehicleRepairService.save(next); setEditing(null); setNotice('정비내역을 저장했습니다.'); await refresh(); }
-    catch (error) { setEditError(errorText(error)); }
+    } catch (error) { await refresh(); setError(`${errorText(error)} 완료된 기록은 보존됩니다. 다시 가져오면 이미 저장된 기록을 건너뜁니다.`); }
     finally { lock.current = false; setBusy(false); }
   };
-
   const archive = async (row: RepairRecord) => {
-    if (lock.current || !window.confirm(row.archived ? '이 정비내역을 복원할까요?' : '이 정비내역을 보관할까요? 보관함에서 다시 복원할 수 있습니다.')) return;
+    if (lock.current || draftCount || !window.confirm(row.archived ? '이 정비내역을 복원할까요?' : '이 정비내역을 보관할까요? 보관함에서 다시 복원할 수 있습니다.')) return;
     lock.current = true; setBusy(true); setError('');
     try { await vehicleRepairService.archive(row); setNotice(row.archived ? '정비내역을 복원했습니다.' : '정비내역을 보관했습니다.'); await refresh(); }
     catch (error) { setError(errorText(error)); }
     finally { lock.current = false; setBusy(false); }
   };
 
-  return <section className="repair-ledger" aria-label="차량 정비내역 관리">
-    <div className="repair-heading">
-      <div><div className="repair-eyebrow"><Wrench size={15} /> VEHICLE MAINTENANCE</div><h2>차량 정비내역</h2><p>차량별 수리 이력과 개인·회사 부담금을 한곳에서 관리합니다.</p></div>
+  return <section className="repair-ledger" aria-label="차량 정비내역 관리" aria-busy={busy}>
+    <div className="repair-toolbar">
+      <div className="repair-toolbar-title">
+        <div className="repair-month-nav"><button type="button" aria-label="정비 이전 달" disabled={busy} onClick={() => stepMonth(-1)}><ChevronLeft size={18} /></button><input type="month" aria-label="정비 조회 월" value={yearMonth} disabled={busy} onChange={event => changeMonth(event.target.value)} /><button type="button" aria-label="정비 다음 달" disabled={busy} onClick={() => stepMonth(1)}><ChevronRight size={18} /></button></div>
+        <h2><Wrench size={21} /> 월별 정비내역 대장</h2>
+        {draftCount > 0 && <span className="repair-dirty">수정사항 {draftCount}건</span>}
+      </div>
       <div className="repair-actions">
-        <button type="button" onClick={() => void refresh()} disabled={busy || loading} aria-label="정비내역 새로고침"><RefreshCw size={16} /></button>
-        <button type="button" onClick={() => exportCsv(filtered)} disabled={busy || loading || !filtered.length}><Download size={16} /> 엑셀용 CSV</button>
-        <button type="button" onClick={() => fileInput.current?.click()} disabled={busy || loading || Boolean(error)}><FileSpreadsheet size={16} /> 엑셀 가져오기</button>
-        <button type="button" className="repair-primary" onClick={() => { setEditing(blankRecord()); setEditError(''); }} disabled={busy || loading}><Plus size={16} /> 정비 등록</button>
+        <div className="repair-toolbar-total"><span>{draftCount ? '입력 포함 합계' : '총 합계'}</span><strong>{formatRepairAmount(total)}<small>원</small></strong></div>
+        <button type="button" onClick={() => void refresh()} disabled={busy || loading || draftCount > 0} aria-label="정비내역 새로고침"><RefreshCw size={16} /></button>
+        <label className="repair-sticky-toggle"><input type="checkbox" checked={sticky} onChange={event => setSticky(event.target.checked)} /> 목록 고정</label>
+        <button type="button" className="repair-export" onClick={() => exportCsv(filtered)} disabled={busy || loading || !filtered.length || draftCount > 0}><Download size={16} /> 엑셀용 CSV</button>
+        <button type="button" onClick={() => fileInput.current?.click()} disabled={busy || loading || draftCount > 0 || Boolean(error)}><FileSpreadsheet size={16} /> 엑셀 가져오기</button>
+        <button type="button" onClick={addRow} disabled={busy || loading || status === 'archived' || draftCount >= 100}><Plus size={16} /> 행 추가</button>
+        <button type="button" className="repair-primary" onClick={() => void save()} disabled={busy || loading || !draftCount}><Save size={16} /> {busy ? '저장 중…' : '저장'}</button>
         <input ref={fileInput} type="file" accept=".xlsx,.xls" aria-label="정비 엑셀 파일" hidden onChange={event => void readFile(event.target.files?.[0])} />
       </div>
     </div>
-    {error && <div role="alert" className="repair-error">{error} <button type="button" onClick={() => void refresh()}>다시 조회</button></div>}
+    {error && <div role="alert" className="repair-error">{error} {!draftCount && <button type="button" disabled={busy} onClick={() => void refresh()}>다시 조회</button>}</div>}
     {notice && <div role="status" className="repair-notice">{notice}</div>}
-    <div className="repair-stats">
-      <div><span>조회 정비내역</span><strong>{filtered.length.toLocaleString()}<small>건</small></strong><p>{new Set(filtered.map(row => normalizePlate(row.vehiclePlate))).size}대의 차량</p></div>
-      <div className="repair-stat-total"><span>정비비 합계</span><strong>{formatRepairAmount(total)}<small>원</small></strong><p>선택한 조회 조건 기준</p></div>
-      <div><span>개인 부담</span><strong>{formatRepairAmount(totals.personal)}<small>원</small></strong><p>엑셀의 개인 비용 구분</p></div>
-      <div><span>회사 부담</span><strong>{formatRepairAmount(Math.round((total - totals.personal) * 100) / 100)}<small>원</small></strong><p>청연 · 조은 · 법인 미구분</p></div>
-    </div>
     <div className="repair-filters">
-      <label>연도<select aria-label="정비 연도" value={year} onChange={event => setYear(event.target.value)}><option value="">전체 연도</option>{years.map(value => <option key={value} value={value}>{value}년</option>)}</select></label>
-      <label>월<select aria-label="정비 월" value={month} onChange={event => setMonth(event.target.value)}><option value="">전체 월</option>{Array.from({ length: 12 }, (_, i) => <option key={i} value={String(i + 1).padStart(2, '0')}>{i + 1}월</option>)}</select></label>
-      <label>비용 구분<select value={cost} onChange={event => setCost(event.target.value)}><option value="">전체 구분</option>{COST_KEYS.map(key => <option key={key} value={key}>{COST_LABELS[key]}</option>)}</select></label>
-      <label>상태<select value={status} onChange={event => setStatus(event.target.value)}><option value="active">전체 내역</option><option value="review">확인 필요</option><option value="archived">보관함</option></select></label>
+      <button type="button" className={allPeriods ? 'repair-period-active' : ''} aria-pressed={allPeriods} disabled={busy} onClick={() => { if (canLeave()) setAllPeriods(!allPeriods); }}>전체 기간</button>
+      <label>비용 구분<select aria-label="정비 비용 구분" value={cost} onChange={event => setCost(event.target.value)}><option value="">전체 구분</option>{COST_KEYS.map(key => <option key={key} value={key}>{COST_LABELS[key]}</option>)}</select></label>
+      <label>상태<select aria-label="정비 상태" value={status} disabled={busy || draftCount > 0} onChange={event => setStatus(event.target.value)}><option value="active">전체 내역</option><option value="review">확인 필요</option><option value="archived">보관함</option></select></label>
       <label className="repair-search">검색<input value={search} onChange={event => setSearch(event.target.value)} placeholder="차량번호, 정비내용, 운전자, 업체" /></label>
-      <button type="button" onClick={() => { setYear(''); setMonth(''); setCost(''); setStatus('active'); setSearch(''); }}>초기화</button>
+      <button type="button" onClick={() => { setCost(''); setStatus('active'); setSearch(''); }}>초기화</button>
+      <span className="repair-count">{allPeriods ? '전체 기간' : yearMonth} · {filtered.length}건</span>
+      {draftCount > 0 && <button type="button" disabled={busy} onClick={() => { if (window.confirm('저장하지 않은 변경사항을 모두 취소할까요?')) { setDrafts({}); setRowErrors({}); setError(''); } }}>변경 취소</button>}
     </div>
-    <div className="repair-table-wrap">
-      <table><caption className="sr-only">차량 정비 이력과 비용 구분별 금액</caption><thead><tr><th>정비일</th><th>차량번호</th><th>정비내용 / 업체</th><th>운전자</th>{COST_KEYS.map(key => <th className="repair-number" key={key}>{COST_LABELS[key]}</th>)}<th className="repair-number">합계</th><th>관리</th></tr></thead>
-        <tbody>{loading ? <tr><td colSpan={10} className="repair-empty">정비내역을 불러오는 중입니다.</td></tr> : !visible.length ? <tr><td colSpan={10} className="repair-empty">{records.length ? '조회 조건에 맞는 정비내역이 없습니다.' : '엑셀을 가져오거나 첫 정비내역을 등록해 주세요.'}</td></tr> : visible.map(row => <tr key={row.id}>
-          <td><span className="repair-date">{row.date || `${row.yearMonth} · ${row.originalDate || '미입력'}`}</span>{row.issues.length > 0 && <span className="repair-review" title={row.issues.join(' · ')}>확인 필요</span>}</td>
-          <td><strong>{row.vehiclePlate || '미입력'}</strong>{!row.vehicleId && <small>과거 / 미연결 차량</small>}</td>
-          <td className="repair-description"><span>{row.description}</span><small>{row.vendor}{row.memo ? ` · ${row.memo}` : ''}</small>{row.source && <small className="repair-source">{row.source.sheet} · {row.source.cell}</small>}</td>
-          <td className="repair-driver">{row.driver || '—'}</td>
-          {COST_KEYS.map(key => <td className="repair-number" key={key}>{formatRepairAmount(row.costs[key])}</td>)}
-          <td className="repair-number repair-row-total">{formatRepairAmount(repairTotal(row))}</td>
-          <td><div className="repair-row-actions"><button type="button" disabled={busy} onClick={() => { setEditing({ ...row, costs: { ...row.costs } }); setEditError(''); }}>수정</button><button type="button" disabled={busy} onClick={() => void archive(row)}>{row.archived ? '복원' : '보관'}</button></div></td>
-        </tr>)}</tbody>
-        <tfoot><tr><th colSpan={4}>조회 내역 합계 ({filtered.length}건)</th>{COST_KEYS.map(key => <td className="repair-number" key={key}>{formatRepairAmount(totals[key])}</td>)}<td className="repair-number">{formatRepairAmount(total)}</td><td /></tr></tfoot>
+    <datalist id="repair-vehicle-options">{vehicles.map(vehicle => <option key={vehicle.id} value={vehicle.licensePlate}>{vehicle.model}</option>)}</datalist>
+    <div className={`repair-table-wrap${sticky ? ' repair-table-fixed' : ''}`}>
+      <table><caption className="sr-only">차량 정비내역 입력 대장</caption><colgroup><col style={{ width: 140 }} /><col style={{ width: 130 }} /><col style={{ width: 200 }} /><col style={{ width: 110 }} /><col style={{ width: 125 }} />{COST_KEYS.map(key => <col key={key} style={{ width: 110 }} />)}<col style={{ width: 120 }} /><col style={{ width: 160 }} /><col style={{ width: 90 }} /></colgroup>
+        <thead><tr><th>정비일</th><th>차량번호</th><th>정비내용</th><th>운전자</th><th>정비업체</th>{COST_KEYS.map(key => <th className="repair-number" key={key}>{COST_LABELS[key]}{key === 'cheongyeon' && <small>VAT포함</small>}</th>)}<th className="repair-number">합계</th><th>비고</th><th>관리</th></tr></thead>
+        <tbody>{loading ? <tr><td colSpan={12} className="repair-empty">정비내역을 불러오는 중입니다.</td></tr> : !visible.length ? <tr><td colSpan={12} className="repair-empty">{status === 'archived' ? '보관한 정비내역이 없습니다.' : '조회 조건에 맞는 정비내역이 없습니다. 행 추가로 입력하거나 전체 기간을 확인해 주세요.'}</td></tr> : visible.map((row, index) => {
+          const label = `${(currentPage - 1) * 50 + index + 1}행`;
+          const disabled = busy || row.archived || (draftCount >= 100 && !drafts[row.id]);
+          return <tr key={row.id} className={`${drafts[row.id] ? 'repair-row-dirty' : ''} ${rowErrors[row.id] ? 'repair-row-error' : ''}`}>
+            <td><input id={`repair-date-${row.id}`} aria-label={`${label} 정비일`} type="date" value={row.date} disabled={disabled} onChange={event => updateRow(row, { date: event.target.value })} />{!row.date && row.originalDate && <small>원본: {row.originalDate}</small>}{row.issues.length > 0 && <span className="repair-review" title={row.issues.join(' · ')}>확인 필요</span>}{row.revision === 0 && <span className="repair-new">신규</span>}{rowErrors[row.id] && <span role="alert" className="repair-cell-error">{rowErrors[row.id]}</span>}</td>
+            <td><input aria-label={`${label} 차량번호`} list="repair-vehicle-options" value={row.vehiclePlate} disabled={disabled} placeholder="차량번호 입력" onChange={event => updateRow(row, { vehiclePlate: event.target.value })} />{!row.vehicleId && row.revision > 0 && <small>과거 / 미연결 차량</small>}</td>
+            <td><input aria-label={`${label} 정비내용`} value={row.description} title={row.description} disabled={disabled} placeholder="정비내용 입력" onChange={event => updateRow(row, { description: event.target.value })} />{row.source && <small>{row.source.sheet} · {row.source.cell}</small>}</td>
+            <td><input aria-label={`${label} 운전자`} value={row.driver} disabled={disabled} placeholder="—" onChange={event => updateRow(row, { driver: event.target.value })} /></td>
+            <td><input aria-label={`${label} 정비업체`} value={row.vendor} disabled={disabled} placeholder="업체 입력" onChange={event => updateRow(row, { vendor: event.target.value })} /></td>
+            {COST_KEYS.map(key => <td className="repair-number repair-cost-cell" key={key}><AmountInput value={row.costs[key]} label={`${label} ${COST_LABELS[key]} 금액`} disabled={disabled} onChange={value => updateRow(row, { costs: { ...row.costs, [key]: value } })} /></td>)}
+            <td className="repair-number repair-row-total">{Number.isFinite(repairTotal(row)) ? formatRepairAmount(repairTotal(row)) : '확인 필요'}</td>
+            <td><input aria-label={`${label} 비고`} value={row.memo} title={row.memo} disabled={disabled} placeholder="—" onChange={event => updateRow(row, { memo: event.target.value })} /></td>
+            <td>{drafts[row.id] ? <button type="button" disabled={busy} onClick={() => undoRow(row.id)}>{row.revision === 0 ? '행 취소' : '되돌리기'}</button> : <button type="button" disabled={busy || draftCount > 0} onClick={() => void archive(row)}>{row.archived ? '복원' : '보관'}</button>}</td>
+          </tr>;
+        })}</tbody>
+        <tfoot><tr><th colSpan={5}>조회 내역 합계 ({filtered.length}건)</th>{COST_KEYS.map(key => <td className="repair-number" key={key}>{formatRepairAmount(totals[key])}</td>)}<td className="repair-number repair-total-cell">{formatRepairAmount(total)}</td><td colSpan={2}>{draftCount > 0 ? '저장 전 입력 포함' : '저장된 내역'}</td></tr></tfoot>
       </table>
     </div>
-    <div className="repair-footer"><p>청연(VAT포함) 금액은 원본 그대로 보존합니다. 정비 이력 저장은 월별 청구 금액에 자동 합산되지 않습니다.</p><div><button type="button" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>이전</button><span>{currentPage} / {pages}</span><button type="button" disabled={currentPage >= pages} onClick={() => setPage(currentPage + 1)}>다음</button></div></div>
+    <div className="repair-footer"><span>표에서 바로 입력 · Tab 키로 다음 칸 이동</span><div><button type="button" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>이전</button><span>{currentPage} / {pages}</span><button type="button" disabled={currentPage >= pages} onClick={() => setPage(currentPage + 1)}>다음</button></div></div>
+    <div className="repair-guide"><strong>입력 가이드</strong><p><b>행 추가</b>로 정비일·차량번호·정비내용·비용을 입력한 뒤 상단 <b>저장</b>을 누르세요. 기존 내역도 표에서 바로 수정할 수 있습니다. 빈 비용은 미입력, 0은 0원으로 저장됩니다.</p><p>청연(VAT포함) 금액은 원본 그대로 보존합니다. 정비내역 저장은 월별 청구 금액에 자동 합산되지 않습니다.</p></div>
 
     <Dialog.Root open={Boolean(preview)} onOpenChange={open => { if (!open && !busy) setPreview(null); }}><Dialog.Portal><Dialog.Overlay className="repair-overlay" /><Dialog.Content className="repair-dialog repair-import-dialog" onInteractOutside={event => { if (busy) event.preventDefault(); }}>
       <Dialog.Title>엑셀 정비내역 가져오기</Dialog.Title><Dialog.Description>월별 합계 행을 제외하고 개별 정비 이력만 가져옵니다. 기존 기록은 덮어쓰지 않습니다.</Dialog.Description>
@@ -173,22 +245,6 @@ export default function VehicleRepairLedger({ vehicles }: { vehicles: Vehicle[] 
         <div className="repair-dialog-actions"><button type="button" disabled={busy} onClick={() => setPreview(null)}>닫기</button><button type="button" className="repair-primary" disabled={busy || !importPlan.added.length} onClick={() => void commitImport()}>{busy ? `가져오는 중 ${progress} / ${preview.length}` : `${importPlan.added.length}건 가져오기`}</button></div></>}
     </Dialog.Content></Dialog.Portal></Dialog.Root>
 
-    <Dialog.Root open={Boolean(editing)} onOpenChange={open => { if (!open && !busy) setEditing(null); }}><Dialog.Portal><Dialog.Overlay className="repair-overlay" /><Dialog.Content className="repair-dialog" onInteractOutside={event => event.preventDefault()}>
-      <div className="repair-dialog-heading"><Dialog.Title>{editing?.revision ? '정비내역 수정' : '정비내역 등록'}</Dialog.Title><button type="button" onClick={() => setEditing(null)} disabled={busy} aria-label="정비 편집 닫기"><X size={20} /></button></div>
-      <Dialog.Description>정비일, 차량번호, 정비내용과 비용을 입력해 주세요.</Dialog.Description>
-      {editing && <form onSubmit={save}><div className="repair-form-grid">
-        <label>정비일<input type="date" required value={editing.date} onChange={event => setEditing({ ...editing, date: event.target.value })} />{!editing.date && editing.originalDate && <small>원본: {editing.originalDate}</small>}</label>
-        <label>차량번호<input required list="repair-vehicle-options" value={editing.vehiclePlate} onChange={event => setEditing({ ...editing, vehiclePlate: event.target.value })} placeholder="직접 입력 또는 등록 차량 선택" /><datalist id="repair-vehicle-options">{vehicles.map(vehicle => <option key={vehicle.id} value={vehicle.licensePlate}>{vehicle.model}</option>)}</datalist></label>
-        <label className="repair-form-wide">정비내용<textarea required rows={2} value={editing.description} onChange={event => setEditing({ ...editing, description: event.target.value })} /></label>
-        <label>운전자<input value={editing.driver} onChange={event => setEditing({ ...editing, driver: event.target.value })} /></label>
-        <label>정비업체<input value={editing.vendor} onChange={event => setEditing({ ...editing, vendor: event.target.value })} /></label>
-        {COST_KEYS.map(key => <label key={key}>{COST_LABELS[key]} 금액 (원)<input type="number" min="0" step="0.01" value={editing.costs[key] ?? ''} placeholder="해당 없으면 비워두세요" onChange={event => setEditing({ ...editing, costs: { ...editing.costs, [key]: event.target.value === '' ? null : Number(event.target.value) } })} /></label>)}
-        <label className="repair-form-wide">비고<textarea rows={2} value={editing.memo} onChange={event => setEditing({ ...editing, memo: event.target.value })} /></label>
-      </div><p className="repair-form-total">합계 <strong>{formatRepairAmount(repairTotal(editing))}원</strong></p>
-        {editing.source && <p className="repair-help">원본: {editing.source.fileName} / {editing.source.sheet} / {editing.source.cell}</p>}
-        {editError && <div role="alert" className="repair-error">{editError}</div>}
-        <div className="repair-dialog-actions"><button type="button" disabled={busy} onClick={() => setEditing(null)}>취소</button><button type="submit" className="repair-primary" disabled={busy}>{busy ? '저장 중…' : '정비내역 저장'}</button></div>
-      </form>}
-    </Dialog.Content></Dialog.Portal></Dialog.Root>
+
   </section>;
 }
