@@ -80,6 +80,98 @@ function getAdjustmentRow(category: string) {
   return screen.getAllByRole('row').find(row => within(row).queryByDisplayValue(category))!;
 }
 
+it('누락된 카드와 주고받는 경비를 알리고 조회만으로 저장 금액을 바꾸지 않는다', async () => {
+  const saved = document();
+  saved.purchases = [];
+  const original = JSON.stringify(saved);
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  require('../../services/cardBillingService').cardBillingService.getBillingsByMonth.mockResolvedValue([{
+    id: 'missing-card', yearMonth: '2026-08', cardId: 'card', cardLabel: '검증 카드', teamId: '조회팀', status: 'DRAFT',
+    issuedToType: 'team', lineItems: [{ label: '사용액', amount: 1000, sourceType: 'card_ledger' }]
+  }, {
+    id: 'other-team-card', yearMonth: '2026-08', cardId: 'other-card', cardLabel: '다른 카드', teamId: 'other-team', teamName: '조회팀', status: 'DRAFT',
+    issuedToType: 'team', lineItems: [{ label: '사용액', amount: 2000, sourceType: 'card_ledger' }]
+  }]);
+  require('../../services/teamExpenseLedgerService').teamExpenseLedgerService.getClaimsByMonth.mockResolvedValue([
+    { id: 'out', yearMonth: '2026-08', status: 'charged', claimType: 'teamCharge', payerTeamId: 'other', chargeToTeamId: 'own', amount: 500, category: 'meal' },
+    { id: 'in', yearMonth: '2026-08', status: 'charged', claimType: 'teamCharge', payerTeamId: 'own', chargeToTeamId: 'other', amount: 500, category: 'meal' }
+  ]);
+  render(<TeamSettlementPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '8월' }));
+  const status = within(await screen.findByRole('status', { name: '경비 원본 검증' }));
+  await waitFor(() => expect(status.getByText('카드비 낼 금액 1건이 저장 정산에 없습니다.')).toBeVisible());
+  expect(status.getByText('경비 낼 금액 1건이 저장 정산에 없습니다.')).toBeVisible();
+  expect(status.getByText('경비 받을 금액 1건이 저장 정산에 없습니다.')).toBeVisible();
+  expect(JSON.stringify(saved)).toBe(original);
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+});
+
+it('경비 조회 실패를 0원으로 처리하지 않고 재조회로 복구한다', async () => {
+  const read = require('../../services/cardBillingService').cardBillingService.getBillingsByMonth;
+  read.mockRejectedValue(new Error('unavailable'));
+  render(<TeamSettlementPage />);
+  const status = within(await screen.findByRole('status', { name: '경비 원본 검증' }));
+  await waitFor(() => expect(status.getByText(/경비 원본 조회 또는 금액 검증에 실패/)).toBeVisible());
+  expect(status.queryByText(/내역이 일치/)).not.toBeInTheDocument();
+  read.mockResolvedValue([]);
+  fireEvent.click(status.getByRole('button', { name: '경비 원본 다시 조회' }));
+  await waitFor(() => expect(status.getByText('경비 원본과 저장 내역이 일치합니다.')).toBeVisible());
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+});
+
+it('같은 차량의 청구 두 건을 상세에서 한 번씩만 합산해 차량 전체 금액과 일치시킨다', async () => {
+  const saved = document();
+  saved.purchases = [];
+  const billings = [1000000, 623380].map((amount, index) => ({
+    id: `2026-08_car-a__row_${index}`, yearMonth: '2026-08',
+    vehicleId: 'car-a', vehiclePlate: '검증차량', teamId: 'own', teamName: '조회팀',
+    issuedToType: 'team', status: 'CONFIRMED', fixedCost: amount, variableCost: 0, totalAmount: amount,
+    lineItems: [{ id: `cost-${index}`, label: `차량 비용 ${index + 1}`, amount, type: 'FIXED', sourceType: 'vehicle_ledger' }]
+  }));
+  saved.deductions = billings.map(billing => ({
+    id: `vehicle_billing:2026-08:${billing.id}`, source: 'auto', origin: 'vehicle_billing',
+    category: '차량비 (검증차량)', amount: billing.totalAmount
+  }));
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  require('../../services/vehicleBillingService').vehicleBillingService.getBillingsByMonth.mockResolvedValue(billings);
+  render(<TeamSettlementPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '8월' }));
+  await waitFor(() => expect(within(screen.getByRole('status', { name: '경비 원본 검증' })).getByText('경비 원본과 저장 내역이 일치합니다.')).toBeVisible());
+  await screen.findByRole('group', { name: '경비 합계' });
+  const row = getAdjustmentRow('차량 전체');
+  expect(within(row).getByDisplayValue('1,623,380')).toBeVisible();
+  fireEvent.click(within(row).getByRole('button', { name: '상세' }));
+  const detail = within(await screen.findByRole('region', { name: '경비 상세' }));
+  await waitFor(() => expect(detail.getByText('1,623,380원')).toBeVisible());
+  fireEvent.click(detail.getByRole('button', { name: '더상세' }));
+  expect(detail.getAllByText('차량 비용 1')).toHaveLength(1);
+  expect(detail.getAllByText('차량 비용 2')).toHaveLength(1);
+  expect(detail.queryByText('3,246,760원')).not.toBeInTheDocument();
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+  expect(teamSettlementService.recalculateAndSaveTeamSettlement).not.toHaveBeenCalled();
+});
+
+it('배정 기간별 차량 정산액을 현재 차량의 월 전체 비용으로 바꾸지 않는다', async () => {
+  const saved = document();
+  saved.purchases = [];
+  saved.deductions = [{ id: 'vehicle_billing:2026-08:car-a:ledger:assignment-a', source: 'auto',
+    origin: 'vehicle_billing', category: '차량비 (검증차량)', amount: 300000,
+    memo: '월별 차량 대장 배정일 자동배분 (10일)' }];
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  require('../../services/vehicleService').vehicleService.getVehicles.mockResolvedValue([
+    { id: 'car-a', licensePlate: '검증차량', type: 'RENT', contract: { monthlyFee: 900000 },
+      currentAssigneeType: 'TEAM', currentAssigneeId: 'own' }
+  ]);
+  render(<TeamSettlementPage />);
+  await screen.findByRole('group', { name: '경비 합계' });
+  fireEvent.click(within(getAdjustmentRow('차량 전체')).getByRole('button', { name: '상세' }));
+  const detail = within(await screen.findByRole('region', { name: '경비 상세' }));
+  await waitFor(() => expect(detail.getByText('300,000원')).toBeVisible());
+  expect(detail.queryByText('900,000원')).not.toBeInTheDocument();
+  expect(detail.getByText(/당시 세부 내역을 확인할 수 없어/)).toBeVisible();
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+});
+
 it('팀장도 기존 인력교류 상세의 현장별 표와 작업자별 표에서 방문팀을 본다', async () => {
   render(<TeamSettlementPage />);
   await expandOriginalDetails('담당 현장');

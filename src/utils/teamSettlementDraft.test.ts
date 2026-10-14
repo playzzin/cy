@@ -19,6 +19,13 @@ const buildDocument = (): TeamSettlementDocument => ({
 });
 
 describe('teamSettlementDraft', () => {
+  test('중복된 공제나 추가 항목은 확정 전에 알린다', () => {
+    const doc = buildDocument();
+    const row = { id: 'same', source: 'manual' as const, origin: 'manual' as const, category: '경비', amount: 1000 };
+    doc.deductions = [row, row];
+    doc.additions = [row, row];
+    expect(getTeamSettlementConfirmationIssues(doc).filter(issue => issue.code.startsWith('duplicate:'))).toHaveLength(2);
+  });
   test('메모를 저장 형식에 보존하고 작성·삭제를 미저장 변경으로 인식한다', () => {
     const original = buildDocument();
     const edited = TeamSettlementDocumentSchema.parse({ ...original, transactionMemo: '확인할 내용\n전달사항' });

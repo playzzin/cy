@@ -45,6 +45,19 @@ export const getTeamSettlementConfirmationIssues = (
 
   const issues: TeamSettlementConfirmationIssue[] = [];
 
+  for (const [key, label, rows, targetId] of [
+    ['sales', '매출', doc.sales, 'settlement-transactions'],
+    ['purchases', '매입', doc.purchases, 'settlement-transactions'],
+    ['deductions', '공제', doc.deductions, 'settlement-deductions'],
+    ['additions', '추가', doc.additions ?? [], 'settlement-additions']
+  ] as const) {
+    const seen = new Set<string>();
+    rows.forEach(row => {
+      if (seen.has(row.id)) issues.push({ code: `duplicate:${key}:${row.id}`, message: `${label}에 동일한 항목이 중복되어 있습니다. 재집계하거나 수기 내역을 확인해 주세요.`, severity: 'error', targetId });
+      seen.add(row.id);
+    });
+  }
+
   doc.sales.forEach((line) => {
     if (safeAmount(line.manDay) <= 0 || safeAmount(line.amount) > 0) return;
     issues.push({

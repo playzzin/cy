@@ -10,27 +10,18 @@ import {
   TeamSettlementWorkspaceHeader,
   type TeamSettlementSaveState
 } from '../../components/payroll/TeamSettlementWorkspaceHeader';
-import { accommodationAssignmentService } from '../../services/accommodationAssignmentService';
 import { accommodationBillingService } from '../../services/accommodationBillingService';
-import { accommodationService } from '../../services/accommodationService';
 import { cardBillingService } from '../../services/cardBillingService';
-import { cardService } from '../../services/cardService';
 import { companyService } from '../../services/companyService';
 import { dailyReportService, type DailyReportWorkerRow } from '../../services/dailyReportService';
 import { laborExchangeService, type LaborExchangeItem, type TeamExchangeSummary } from '../../services/laborExchangeService';
-import { manpowerService, type Worker as ManpowerWorker } from '../../services/manpowerService';
 import { teamExpenseLedgerService } from '../../services/teamExpenseLedgerService';
 import { teamService, type Team } from '../../services/teamService';
 import { teamSettlementService, type TeamSettlementSupportDetailRow } from '../../services/teamSettlementService';
 import { vehicleBillingService } from '../../services/vehicleBillingService';
-import { vehicleService } from '../../services/vehicleService';
 import { officeService } from '../../services/officeService';
 import { supportRateService, type SupportRate } from '../../services/supportRateService';
 import { toast } from '../../utils/swal';
-import {
-  getSettlementBillingRowScopeKey,
-  selectPreferredSettlementBillings
-} from '../../utils/supportSettlementBilling';
 import {
   createTeamSettlementDraftFingerprint,
   getTeamSettlementConfirmationIssues
@@ -45,10 +36,8 @@ import {
 } from '../../utils/teamSettlementTransactionSummary';
 import { DEFAULT_SUPPORT_UNIT_PRICE } from '../../utils/teamSettlementSupportRateOverrides';
 import { formatTeamSettlementMemo } from '../../utils/teamSettlementMemo';
-import type { UtilityRecord } from '../../types/accommodation';
-import type { AccommodationAssignment } from '../../types/accommodationAssignment';
+import { buildTeamSettlementExpenseEntries, compareTeamSettlementExpenses, getTeamSettlementExpenseDetail } from '../../utils/teamSettlementExpenses';
 import type { AccommodationBillingDocument } from '../../types/accommodationBilling';
-import type { Card, CardTransaction } from '../../types/card';
 import type { CardBillingDocument } from '../../types/cardBilling';
 import type {
   TeamSettlementAdditionItem,
@@ -58,9 +47,8 @@ import type {
   TeamSettlementSalesItem,
   TeamSettlementWorkKind
 } from '../../types/teamSettlement';
-import type { Vehicle, VehicleExpenseRecord } from '../../types/vehicle';
 import type { VehicleBillingDocument } from '../../types/vehicleBilling';
-import type { TeamExpenseClaim, TeamExpenseClaimCategory } from '../../types/teamExpenseLedger';
+import type { TeamExpenseClaim } from '../../types/teamExpenseLedger';
 
 type LoadState =
   | { status: 'idle' }
@@ -198,176 +186,6 @@ const normalizeRateLookupKey = (value: unknown): string =>
     .trim()
     .replace(/\s+/g, '')
     .toLowerCase();
-
-const teamExpenseCategoryLabels: Record<TeamExpenseClaimCategory, string> = {
-  meal: '식대',
-  parking: '주차',
-  fuel: '유류',
-  toll: '통행료',
-  material: '자재',
-  tool: '공구',
-  deposit: '보증금',
-  marking: '마킹',
-  fieldGoods: '현장물품',
-  equipment: '장비비',
-  etc: '기타'
-};
-
-const getTeamExpenseCategoryLabel = (category: TeamExpenseClaimCategory): string => {
-  return teamExpenseCategoryLabels[category] ?? String(category || '기타');
-};
-
-const parseYmdDate = (value: string): Date | null => {
-  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').trim());
-  if (!matched) return null;
-
-  const year = Number(matched[1]);
-  const month = Number(matched[2]);
-  const day = Number(matched[3]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
-
-  const date = new Date(year, month - 1, day);
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
-  return date;
-};
-
-const calculateOverlapDays = (params: {
-  monthStart: Date;
-  monthEnd: Date;
-  startDate: Date;
-  endDate?: Date | null;
-}): number => {
-  const actualStart = params.startDate.getTime() > params.monthStart.getTime() ? params.startDate : params.monthStart;
-  const rawEnd = params.endDate && Number.isFinite(params.endDate.getTime()) ? params.endDate : params.monthEnd;
-  const actualEnd = rawEnd.getTime() < params.monthEnd.getTime() ? rawEnd : params.monthEnd;
-  if (actualEnd.getTime() < actualStart.getTime()) return 0;
-
-  const oneDayMs = 24 * 60 * 60 * 1000;
-  return Math.floor((actualEnd.getTime() - actualStart.getTime()) / oneDayMs) + 1;
-};
-
-const selectPreferredTeamBillings = <T extends { status?: unknown }>(
-  docs: T[],
-  additionalPosted?: (doc: T) => boolean,
-  getGroupKey?: (doc: T) => unknown,
-  getScopeKey?: (doc: T) => unknown
-): T[] => selectPreferredSettlementBillings(docs, additionalPosted, getGroupKey, getScopeKey);
-
-const normalizeBillingIdentityPart = (value: unknown): string => (
-  String(value ?? '').trim().toLowerCase().replace(/\s+/g, '')
-);
-
-const firstBillingIdentityPart = (...values: unknown[]): string => {
-  for (const value of values) {
-    const normalized = normalizeBillingIdentityPart(value);
-    if (normalized) return normalized;
-  }
-  return '';
-};
-
-const getBillingRecipientIdentity = (doc: {
-  teamId?: unknown;
-  assignedTeamId?: unknown;
-  teamName?: unknown;
-  assignedTeamName?: unknown;
-  issuedToType?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): string => [
-  firstBillingIdentityPart(doc.teamName, doc.assignedTeamName, doc.teamId, doc.assignedTeamId),
-  normalizeBillingIdentityPart(doc.issuedToType),
-  firstBillingIdentityPart(doc.issuedToWorkerName, doc.issuedToWorkerId)
-].join('|');
-
-const getAccommodationSettlementBillingGroupKey = (doc: {
-  teamId?: unknown;
-  teamName?: unknown;
-  issuedToType?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): string => `accommodation|${getBillingRecipientIdentity(doc)}`;
-
-const getVehicleSettlementBillingGroupKey = (doc: {
-  vehicleId?: unknown;
-  vehiclePlate?: unknown;
-  teamId?: unknown;
-  assignedTeamId?: unknown;
-  teamName?: unknown;
-  assignedTeamName?: unknown;
-  issuedToType?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): string => [
-  'vehicle',
-  firstBillingIdentityPart(doc.vehiclePlate, doc.vehicleId),
-  getBillingRecipientIdentity(doc)
-].join('|');
-
-const getCardSettlementBillingGroupKey = (doc: {
-  cardId?: unknown;
-  cardLabel?: unknown;
-  teamId?: unknown;
-  assignedTeamId?: unknown;
-  teamName?: unknown;
-  assignedTeamName?: unknown;
-  issuedToType?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): string => [
-  'card',
-  firstBillingIdentityPart(doc.cardLabel, doc.cardId),
-  getBillingRecipientIdentity(doc)
-].join('|');
-
-const hasBillingLineSource = (
-  doc: { lineItems?: Array<{ sourceType?: unknown }> },
-  sourceType: string
-): boolean => (
-  (doc.lineItems ?? []).some((item) => String(item.sourceType ?? '') === sourceType)
-);
-
-const isTeamIssuedTo = (value: unknown): boolean => {
-  const raw = String(value ?? '').trim().toLowerCase();
-  return raw === 'team' || raw === 'team_leader';
-};
-
-const isTeamBillingTarget = (params: {
-  issuedToType?: unknown;
-  teamId?: unknown;
-  teamName?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): boolean => {
-  if (isTeamIssuedTo(params.issuedToType)) return true;
-
-  const issuedType = String(params.issuedToType ?? '').trim().toLowerCase();
-  if (issuedType === 'worker') return false;
-
-  const workerId = String(params.issuedToWorkerId ?? '').trim();
-  if (workerId) return false;
-
-  const workerName = String(params.issuedToWorkerName ?? '').trim();
-  const teamName = String(params.teamName ?? '').trim();
-  if (workerName && teamName && workerName !== teamName) return false;
-
-  return (
-    String(params.teamId ?? '').trim().length > 0 ||
-    String(params.teamName ?? '').trim().length > 0
-  );
-};
-
-const mapAccommodationTargetFieldLabel = (field: string): string => {
-  if (field === 'accommodation') return '숙소비';
-  if (field === 'privateRoom') return '개인실';
-  if (field === 'electricity') return '전기';
-  if (field === 'gas') return '가스';
-  if (field === 'internet') return '인터넷';
-  if (field === 'water') return '수도';
-  if (field === 'fines') return '공과금';
-  if (field === 'deposit') return '보증금';
-  if (field === 'gloves') return '장갑비';
-  return field;
-};
 
 const stripSupportOriginalLines = (doc: TeamSettlementDocument): TeamSettlementDocument => {
   return {
@@ -802,30 +620,12 @@ type SourceDataValidationIssue = {
 
 type DeductionSourceData = {
   accommodationDocs: AccommodationBillingDocument[];
-  accommodationAssignments: AccommodationAssignment[];
-  utilityRecords: UtilityRecord[];
   vehicleDocs: VehicleBillingDocument[];
-  vehicles: Vehicle[];
-  vehicleExpenses: VehicleExpenseRecord[];
   cardDocs: CardBillingDocument[];
-  cards: Card[];
-  cardTransactions: CardTransaction[];
   teamExpenseClaims: TeamExpenseClaim[];
-  workers: ManpowerWorker[];
 };
-
 const createEmptyDeductionSourceData = (): DeductionSourceData => ({
-  accommodationDocs: [],
-  accommodationAssignments: [],
-  utilityRecords: [],
-  vehicleDocs: [],
-  vehicles: [],
-  vehicleExpenses: [],
-  cardDocs: [],
-  cards: [],
-  cardTransactions: [],
-  teamExpenseClaims: [],
-  workers: []
+  accommodationDocs: [], vehicleDocs: [], cardDocs: [], teamExpenseClaims: []
 });
 
 const buildMonthRange = (yearMonth: string): { startDate: string; endDate: string } => {
@@ -895,6 +695,8 @@ export const TeamSettlementPage: React.FC = () => {
   const [expandedDeductionIds, setExpandedDeductionIds] = useState<Set<string>>(() => new Set());
   const [expandedExpenseDetailKeys, setExpandedExpenseDetailKeys] = useState<Set<string>>(() => new Set());
   const [deductionSourceData, setDeductionSourceData] = useState<DeductionSourceData>(() => createEmptyDeductionSourceData());
+  const [expenseSourceLoad, setExpenseSourceLoad] = useState<{ scope: string; status: 'loading' | 'ready' | 'error' }>({ scope: '', status: 'loading' });
+  const [expenseSourceRevision, setExpenseSourceRevision] = useState(0);
   const [supportRates, setSupportRates] = useState<SupportRate[]>([]);
   const [supportRatesLoaded, setSupportRatesLoaded] = useState<boolean>(false);
   const [bulkSupportRateInput, setBulkSupportRateInput] = useState<string>(() => formatCurrency(DEFAULT_SUPPORT_UNIT_PRICE));
@@ -1107,65 +909,29 @@ export const TeamSettlementPage: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
 
+    const scope = selectedTeamId + ':' + yearMonth;
     const loadDeductionSources = async () => {
-      if (!selectedTeamId || !yearMonth) {
-        setDeductionSourceData(createEmptyDeductionSourceData());
-        return;
-      }
-
+      setExpenseSourceLoad({ scope, status: 'loading' });
+      if (!selectedTeamId || !yearMonth) return;
       try {
-        const [
-          accommodationDocs,
-          accommodationAssignments,
-          utilityRecords,
-          vehicleDocs,
-          vehicles,
-          vehicleExpenses,
-          cardDocs,
-          cards,
-          cardTransactions,
-          teamExpenseClaims,
-          workers
-        ] = await Promise.all([
-          accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth }),
-          accommodationAssignmentService.getAllAssignments(),
-          accommodationService.getMonthlyLedger(yearMonth),
-          vehicleBillingService.getBillingsByMonth(yearMonth),
-          vehicleService.getVehicles(),
-          vehicleService.getExpensesByMonth(yearMonth),
+        const [accommodationDocs, vehicleDocs, cardDocs, teamExpenseClaims] = await Promise.all([
+          accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth, strict: true }),
+          vehicleBillingService.getBillingsByMonth(yearMonth, { throwOnError: true }),
           cardBillingService.getBillingsByMonth(yearMonth),
-          cardService.getCards(),
-          cardService.getTransactionsByMonth(yearMonth),
-          teamExpenseLedgerService.getClaimsByMonth(yearMonth),
-          manpowerService.getWorkers()
+          teamExpenseLedgerService.getClaimsByMonth(yearMonth)
         ]);
-
         if (cancelled) return;
-        setDeductionSourceData({
-          accommodationDocs,
-          accommodationAssignments,
-          utilityRecords,
-          vehicleDocs,
-          vehicles,
-          vehicleExpenses,
-          cardDocs,
-          cards,
-          cardTransactions,
-          teamExpenseClaims,
-          workers
-        });
-      } catch (error) {
-        console.error(error);
+        setDeductionSourceData({ accommodationDocs, vehicleDocs, cardDocs, teamExpenseClaims });
+        setExpenseSourceLoad({ scope, status: 'ready' });
+      } catch {
         if (cancelled) return;
         setDeductionSourceData(createEmptyDeductionSourceData());
+        setExpenseSourceLoad({ scope, status: 'error' });
       }
     };
-
     void loadDeductionSources();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedTeamId, yearMonth]);
+    return () => { cancelled = true; };
+  }, [selectedTeamId, yearMonth, doc?.updatedAt, expenseSourceRevision]);
 
   const settlementLoadGeneration = useRef(0);
   const settlementScope = useRef('');
@@ -1235,15 +1001,46 @@ export const TeamSettlementPage: React.FC = () => {
   const matchesTeamByIdOrName = useCallback(
     (id: unknown, name: unknown): boolean => {
       const idText = typeof id === 'string' ? id.trim() : '';
-      if (idText && matchesTeam(idText)) return true;
+      const normalize = (value: string) => value.replace(/\(.*?\)/g, '').replace(/\s+/g, '').trim();
+      // An explicit ID takes precedence over a stale or duplicate display name.
+      if (idText) return [...teamIdVariants, ...teamNameVariants].some(value => normalize(value) === normalize(idText));
 
       const nameText = typeof name === 'string' ? name.trim() : '';
-      if (nameText && teamNameVariants.has(nameText)) return true;
+      if (nameText && [...teamNameVariants].some(value => normalize(value) === normalize(nameText))) return true;
 
       return false;
     },
-    [matchesTeam, teamNameVariants]
+    [teamIdVariants, teamNameVariants]
   );
+
+  const expenseSourceResult = useMemo(() => {
+    if (expenseSourceLoad.scope !== selectedTeamId + ':' + yearMonth || expenseSourceLoad.status !== 'ready') {
+      return { entries: [], status: expenseSourceLoad.scope === selectedTeamId + ':' + yearMonth ? expenseSourceLoad.status : 'loading' };
+    }
+    try {
+      return { entries: buildTeamSettlementExpenseEntries({ yearMonth, matchesTeam: matchesTeamByIdOrName, ...deductionSourceData }), status: 'ready' };
+    } catch {
+      return { entries: [], status: 'error' };
+    }
+  }, [deductionSourceData, expenseSourceLoad, matchesTeamByIdOrName, selectedTeamId, yearMonth]);
+  const expenseValidationMessages = useMemo(() => {
+    if (expenseSourceResult.status === 'loading') return ['경비 원본을 확인하고 있습니다.'];
+    if (expenseSourceResult.status === 'error') return ['경비 원본 조회 또는 금액 검증에 실패했습니다. 다시 조회해 주세요.'];
+    if (!doc) return [];
+    const result = compareTeamSettlementExpenses(doc, expenseSourceResult.entries);
+    const messages: string[] = [];
+    const labels = { accommodation_billing: '숙소비', vehicle_billing: '차량비', card_billing: '카드비', team_expense_claim: '경비' };
+    for (const direction of ['deduction', 'addition'] as const) {
+      for (const [origin, label] of Object.entries(labels)) {
+        const count = result.missing.filter(entry => entry.direction === direction && entry.item.origin === origin).length;
+        if (count) messages.push(label + ' ' + (direction === 'deduction' ? '낼 금액' : '받을 금액') + ' ' + count + '건이 저장 정산에 없습니다.');
+      }
+    }
+    if (result.changed.length) messages.push('원본과 금액이 다른 경비 ' + result.changed.length + '건');
+    if (result.unexpected.length) messages.push('현재 유효한 원본을 찾을 수 없는 경비 ' + result.unexpected.length + '건');
+    if (result.duplicate.length) messages.push('중복 반영된 경비 ' + result.duplicate.length + '건');
+    return messages;
+  }, [doc, expenseSourceResult]);
 
   const transactionSectionTotals = useMemo(() => {
     const summarize = (lines: Array<{ amount: number; manDay: number }>) => lines.reduce(
@@ -1572,7 +1369,7 @@ export const TeamSettlementPage: React.FC = () => {
       targetId: 'settlement-rate-validation'
     }));
     const byCode = new Map<string, SourceDataValidationIssue>();
-    [...documentConfirmationIssues, ...sourceDataValidationIssues, ...supportIssues].forEach((issue) => {
+    [...documentConfirmationIssues, ...sourceDataValidationIssues, ...supportIssues, ...expenseValidationMessages.map((message, index) => ({ code: 'expense-source:' + index, message, severity: 'error' as const, targetId: 'settlement-deductions' }))].forEach((issue) => {
       byCode.set(issue.code, {
         ...issue,
         severity: issue.severity ?? 'error',
@@ -1580,7 +1377,7 @@ export const TeamSettlementPage: React.FC = () => {
       });
     });
     return Array.from(byCode.values());
-  }, [documentConfirmationIssues, sourceDataValidationIssues, supportRateMissingRows]);
+  }, [documentConfirmationIssues, sourceDataValidationIssues, supportRateMissingRows, expenseValidationMessages]);
 
   const handleValidationIssueClick = useCallback((targetId?: string) => {
     if (!targetId) return;
@@ -1753,6 +1550,7 @@ export const TeamSettlementPage: React.FC = () => {
 
   const handleRefresh = useCallback(async () => {
     if (!(await confirmBeforeDiscard('새로고침'))) return;
+    setExpenseSourceRevision(value => value + 1);
     await loadSettlement();
   }, [confirmBeforeDiscard, loadSettlement]);
 
@@ -2114,409 +1912,32 @@ export const TeamSettlementPage: React.FC = () => {
       | null => {
       if (!doc) return null;
 
-      const deductionCategory = String(item.category ?? '').trim();
-      const itemIdText = String(item.id ?? '');
-      const isAggregateDetailItem = itemIdText.startsWith('deduction-aggregate:');
-      const isExpenseAggregateItem = itemIdText === EXPENSE_GROUP_AGGREGATE_ALL_ID;
-      const isExpenseOriginAggregateItem = itemIdText.startsWith(EXPENSE_GROUP_AGGREGATE_PREFIX) && !isExpenseAggregateItem;
-      const extractBracketValue = (value: string, prefix: string): string => {
-        const regex = new RegExp(`^${prefix}\\s*\\((.+)\\)$`);
-        const matched = regex.exec(String(value ?? '').trim());
-        return matched ? matched[1].trim() : '';
-      };
-      const extractParenthesizedText = (value: string): string => {
-        const matched = /\((.+)\)/.exec(String(value ?? '').trim());
-        return matched ? matched[1].trim() : '';
-      };
-      const splitMemoParts = (memo?: string): string[] =>
-        String(memo ?? '')
-          .split('/')
-          .map((part) => part.trim())
-          .filter(Boolean);
-
-      if (isExpenseAggregateItem || isExpenseOriginAggregateItem) {
-        type ChildWithSubject = ExpenseAggregateDetailChildRow & { subject: string };
-
-        const buildWorkerTeamMaps = () => {
-          const workerTeamByAnyId = new Map<string, { teamId?: string; teamName?: string }>();
-          const workerTeamByName = new Map<string, { teamId?: string; teamName?: string }>();
-          deductionSourceData.workers.forEach((w) => {
-            const info = { teamId: w.teamId, teamName: w.teamName };
-            const id = String(w.id ?? '').trim();
-            const legacyId = String(w.legacyId ?? '').trim();
-            const name = String(w.name ?? '').trim();
-            if (id) workerTeamByAnyId.set(id, info);
-            if (legacyId) workerTeamByAnyId.set(legacyId, info);
-            if (name) workerTeamByName.set(name, info);
-          });
-          return { workerTeamByAnyId, workerTeamByName };
-        };
-
-        const buildGenericExpenseRow = (
-          deduction: TeamSettlementDeductionItem,
-          originLabel = getDeductionSourceSummaryLabel(deduction.origin),
-          subject = extractParenthesizedText(String(deduction.category ?? '')) || '-',
-          category = String(deduction.category ?? '').trim() || getDeductionSourceSummaryLabel(deduction.origin)
-        ): ExpenseAggregateDetailRow => {
-          const memoParts = splitMemoParts(formatTeamSettlementMemo(deduction));
-          const date = memoParts.find((part) => /^\d{4}-\d{2}-\d{2}/.test(part));
-          const memo = memoParts.filter((part) => part !== date).join(' / ');
-          return {
-            key: `expense-detail:${deduction.origin}:${String(deduction.id ?? '')}:${subject}:${category}`,
-            origin: deduction.origin,
-            originLabel,
-            subject,
-            category,
-            amount: safeNumber(deduction.amount),
-            memo: memo || undefined,
-            details: []
-          };
-        };
-
-        const groupChildrenBySubject = (
-          deduction: TeamSettlementDeductionItem,
-          originLabel: string,
-          category: string,
-          fallbackSubject: string,
-          children: ChildWithSubject[]
-        ): ExpenseAggregateDetailRow[] => {
-          const bySubject = new Map<string, ChildWithSubject[]>();
-          children
-            .filter((child) => safeNumber(child.amount) > 0)
-            .forEach((child) => {
-              const subject = String(child.subject ?? '').trim() || fallbackSubject || '-';
-              const list = bySubject.get(subject) ?? [];
-              list.push({ ...child, subject });
-              bySubject.set(subject, list);
-            });
-
-          return Array.from(bySubject.entries()).map(([subject, detailRows]) => ({
-            key: `expense-detail:${deduction.origin}:${String(deduction.id ?? '')}:${subject}:${category}`,
-            origin: deduction.origin,
-            originLabel,
-            subject,
-            category,
-            amount: detailRows.reduce((sum, row) => sum + safeNumber(row.amount), 0),
-            memo: formatTeamSettlementMemo(deduction),
-            details: detailRows.map(({ subject: _subject, ...detail }) => detail)
-          }));
-        };
-
-        const buildVehicleExpenseRows = (deduction: TeamSettlementDeductionItem): ExpenseAggregateDetailRow[] => {
-          const category = String(deduction.category ?? '').trim();
-          const deductionIdText = String(deduction.id ?? '');
-          const targetPlate = extractBracketValue(category, '차량비') || extractParenthesizedText(category);
-          const originLabel = '차량';
-          const summaryCategory = '차량별 경비';
-
-          const selectedDocs = selectPreferredTeamBillings(
-            deductionSourceData.vehicleDocs.filter((row) =>
-              isTeamBillingTarget({
-                issuedToType: row.issuedToType,
-                teamId: row.teamId ?? row.assignedTeamId,
-                teamName: row.teamName ?? row.assignedTeamName,
-                issuedToWorkerId: row.issuedToWorkerId,
-                issuedToWorkerName: row.issuedToWorkerName
-              }) &&
-              matchesTeamByIdOrName(row.teamId ?? row.assignedTeamId, row.teamName ?? row.assignedTeamName)
-            ),
-            (doc) => hasBillingLineSource(doc, 'vehicle_ledger'),
-            getVehicleSettlementBillingGroupKey,
-            getSettlementBillingRowScopeKey
-          );
-          const isLedgerVehicleItem = deductionIdText.endsWith(':ledger');
-          const matchedDocs = selectedDocs.filter((row) => {
-            if (isLedgerVehicleItem) return false;
-            const plate = String(row.vehiclePlate ?? '').trim();
-            const id = String(row.vehicleId ?? '').trim();
-            if (targetPlate && plate === targetPlate) return true;
-            if (id && deductionIdText.includes(id)) return true;
-            if (plate && deductionIdText.includes(plate)) return true;
-            return false;
-          });
-
-          const docChildren: ChildWithSubject[] = matchedDocs
-            .flatMap((billing) => {
-              const plate = String(billing.vehiclePlate ?? '').trim() || String(billing.vehicleId ?? '').trim() || targetPlate || '-';
-              if ((billing.lineItems ?? []).length === 0) {
-                return [
-                  { subject: plate, label: '고정비', amount: safeNumber(billing.fixedCost), note: 'FIXED' },
-                  { subject: plate, label: '변동비', amount: safeNumber(billing.variableCost), note: 'VARIABLE' }
-                ];
-              }
-              return (billing.lineItems ?? []).map((li) => ({
-                subject: plate,
-                label: String(li.label ?? '').trim() || '차량비',
-                amount: safeNumber(li.amount),
-                note: String(li.category ?? li.type ?? '').trim() || undefined
-              }));
-            })
-            .filter((row) => row.amount > 0);
-
-          if (docChildren.length > 0) {
-            return groupChildrenBySubject(deduction, originLabel, summaryCategory, targetPlate || '-', docChildren);
-          }
-
-          const { workerTeamByAnyId, workerTeamByName } = buildWorkerTeamMaps();
-          const expenseByVehicleId = new Map<string, VehicleExpenseRecord[]>();
-          deductionSourceData.vehicleExpenses.forEach((expense) => {
-            const vehicleId = String(expense.vehicleId ?? '').trim();
-            if (!vehicleId) return;
-            const list = expenseByVehicleId.get(vehicleId) ?? [];
-            list.push(expense);
-            expenseByVehicleId.set(vehicleId, list);
-          });
-
-          const ledgerChildren: ChildWithSubject[] = deductionSourceData.vehicles
-            .flatMap((vehicle) => {
-              const plate = String(vehicle.licensePlate ?? '').trim();
-              const vehicleId = String(vehicle.id ?? '').trim();
-              if (targetPlate && plate !== targetPlate) return [] as ChildWithSubject[];
-              if (!targetPlate && vehicleId && !deductionIdText.includes(vehicleId) && plate && !deductionIdText.includes(plate)) return [] as ChildWithSubject[];
-
-              let isAssignedTeam = false;
-              if (vehicle.currentAssigneeType === 'TEAM') {
-                isAssignedTeam = matchesTeamByIdOrName(vehicle.currentAssigneeId, vehicle.currentAssigneeName);
-              } else if (vehicle.currentAssigneeType === 'WORKER') {
-                const workerId = String(vehicle.currentAssigneeId ?? '').trim();
-                const workerName = String(vehicle.currentAssigneeName ?? '').trim();
-                const info = (workerId ? workerTeamByAnyId.get(workerId) : undefined) ?? (workerName ? workerTeamByName.get(workerName) : undefined);
-                isAssignedTeam = info ? matchesTeamByIdOrName(info.teamId, info.teamName) : false;
-              }
-              if (!isAssignedTeam) return [] as ChildWithSubject[];
-
-              const subject = plate || vehicleId || targetPlate || '-';
-              const rows: ChildWithSubject[] = [];
-              const fixedCost =
-                vehicle.type === 'RENT' || vehicle.type === 'LEASE'
-                  ? safeNumber(vehicle.contract?.monthlyFee)
-                  : 0;
-              if (fixedCost > 0) {
-                rows.push({ subject, label: '월 고정비', amount: fixedCost, note: 'FIXED' });
-              }
-
-              const expenses = [...(expenseByVehicleId.get(vehicleId) ?? [])].sort((a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')));
-              expenses.forEach((expense) => {
-                rows.push({
-                  subject,
-                  label: String(expense.type ?? '').trim() || '변동비',
-                  amount: safeNumber(expense.amount),
-                  date: String(expense.date ?? '').trim() || undefined,
-                  note: 'VARIABLE'
-                });
-              });
-              return rows;
-            })
-            .filter((row) => row.amount > 0);
-
-          if (ledgerChildren.length > 0) {
-            return groupChildrenBySubject(deduction, originLabel, summaryCategory, targetPlate || '-', ledgerChildren);
-          }
-
-          return [buildGenericExpenseRow(deduction, originLabel, targetPlate || '-', summaryCategory)];
-        };
-
-        const buildAccommodationExpenseRows = (deduction: TeamSettlementDeductionItem): ExpenseAggregateDetailRow[] => {
-          const category = String(deduction.category ?? '').trim();
-          const deductionIdText = String(deduction.id ?? '');
-          const itemIdParts = deductionIdText.split(':');
-          const rawKey = itemIdParts.length >= 3 ? itemIdParts.slice(2).join(':') : '';
-          const isLedgerItem = rawKey.startsWith('ledger:');
-          const targetDocId = !isLedgerItem && rawKey ? rawKey : '';
-          const fallbackSubject = extractParenthesizedText(category) || '-';
-          const originLabel = '숙소';
-          const summaryCategory = '숙소별 경비';
-
-          const accommodationNameById = new Map<string, string>();
-          const accommodationNameByUtilityRecordId = new Map<string, string>();
-          deductionSourceData.utilityRecords.forEach((record) => {
-            const accommodationId = String(record.accommodationId ?? '').trim();
-            const accommodationName = String(record.accommodationName ?? '').trim();
-            const recordId = String(record.id ?? '').trim();
-            if (accommodationId && accommodationName) accommodationNameById.set(accommodationId, accommodationName);
-            if (recordId && accommodationName) accommodationNameByUtilityRecordId.set(recordId, accommodationName);
-          });
-
-          const selectedDocs = selectPreferredTeamBillings(
-            deductionSourceData.accommodationDocs.filter((row) =>
-              isTeamBillingTarget({
-                issuedToType: row.issuedToType,
-                teamId: row.teamId,
-                teamName: row.teamName,
-                issuedToWorkerId: row.issuedToWorkerId,
-                issuedToWorkerName: row.issuedToWorkerName
-              }) && matchesTeamByIdOrName(row.teamId, row.teamName)
-            ),
-            (doc) => hasBillingLineSource(doc, 'utility_ledger'),
-            getAccommodationSettlementBillingGroupKey
-          );
-
-          const docChildren: ChildWithSubject[] = selectedDocs
-            .filter((billing) => {
-              if (isLedgerItem) return false;
-              if (!targetDocId) return true;
-              return String(billing.id ?? '') === targetDocId;
-            })
-            .flatMap((billing) => {
-              const billedTo = billing.teamName ? String(billing.teamName) : selectedTeamName || '팀';
-              return (billing.lineItems ?? []).map((li) => ({
-                subject:
-                  (li.sourceUtilityRecordId ? accommodationNameByUtilityRecordId.get(String(li.sourceUtilityRecordId).trim()) : undefined) ||
-                  (li.sourceAccommodationId ? accommodationNameById.get(String(li.sourceAccommodationId).trim()) : undefined) ||
-                  String(li.sourceAccommodationId ?? '').trim() ||
-                  billedTo,
-                label: String(li.label ?? '').trim() || mapAccommodationTargetFieldLabel(String(li.targetField ?? '')),
-                amount: safeNumber(li.amount)
-              }));
-            })
-            .filter((row) => row.amount > 0);
-
-          if (docChildren.length > 0) {
-            return groupChildrenBySubject(deduction, originLabel, summaryCategory, fallbackSubject, docChildren);
-          }
-
-          const range = buildMonthRange(yearMonth);
-          const monthStart = parseYmdDate(range.startDate);
-          const monthEnd = parseYmdDate(range.endDate);
-          if (!monthStart || !monthEnd) return [buildGenericExpenseRow(deduction, originLabel, fallbackSubject, summaryCategory)];
-
-          const targetAccommodationId = isLedgerItem ? rawKey.replace(/^ledger:/, '').trim() : '';
-          const teamDaysByAccommodation = new Map<string, number>();
-          const totalDaysByAccommodation = new Map<string, number>();
-          const { workerTeamByAnyId, workerTeamByName } = buildWorkerTeamMaps();
-
-          deductionSourceData.accommodationAssignments.forEach((assignment) => {
-            const accommodationId = String(assignment.accommodationId ?? '').trim();
-            if (!accommodationId) return;
-
-            const startDate = parseYmdDate(String(assignment.startDate ?? '').trim());
-            if (!startDate) return;
-            const endDate = assignment.endDate ? parseYmdDate(String(assignment.endDate).trim()) : null;
-            const overlapDays = calculateOverlapDays({ monthStart, monthEnd, startDate, endDate });
-            if (overlapDays <= 0) return;
-
-            totalDaysByAccommodation.set(accommodationId, (totalDaysByAccommodation.get(accommodationId) ?? 0) + overlapDays);
-
-            let teamMatched = matchesTeamByIdOrName(assignment.teamId, assignment.teamName);
-            if (!teamMatched) {
-              const workerId = String(assignment.workerId ?? '').trim();
-              const workerName = String(assignment.workerName ?? '').trim();
-              const workerTeam =
-                (workerId ? workerTeamByAnyId.get(workerId) : undefined) ??
-                (workerName ? workerTeamByName.get(workerName) : undefined);
-              if (workerTeam) {
-                teamMatched = matchesTeamByIdOrName(workerTeam.teamId, workerTeam.teamName);
-              }
-            }
-
-            if (teamMatched) {
-              teamDaysByAccommodation.set(accommodationId, (teamDaysByAccommodation.get(accommodationId) ?? 0) + overlapDays);
-            }
-          });
-
-          const ledgerChildren: ChildWithSubject[] = deductionSourceData.utilityRecords
-            .flatMap((record) => {
-              const accommodationId = String(record.accommodationId ?? '').trim();
-              if (!accommodationId) return [] as ChildWithSubject[];
-              if (targetAccommodationId && accommodationId !== targetAccommodationId) return [] as ChildWithSubject[];
-
-              const teamDays = teamDaysByAccommodation.get(accommodationId) ?? 0;
-              const totalDays = totalDaysByAccommodation.get(accommodationId) ?? 0;
-              if (teamDays <= 0 || totalDays <= 0) return [] as ChildWithSubject[];
-
-              const ratio = teamDays / totalDays;
-              const subject = String(record.accommodationName ?? '').trim() || accommodationId;
-              const allocation = `${safeNumber(teamDays)}/${safeNumber(totalDays)}`;
-
-              return [
-                { label: '월세', amount: Math.round(safeNumber(record.costs?.rent) * ratio) },
-                { label: '전기', amount: Math.round(safeNumber(record.costs?.electricity) * ratio) },
-                { label: '가스', amount: Math.round(safeNumber(record.costs?.gas) * ratio) },
-                { label: '수도', amount: Math.round(safeNumber(record.costs?.water) * ratio) },
-                { label: '인터넷', amount: Math.round(safeNumber(record.costs?.internet) * ratio) },
-                { label: '관리비', amount: Math.round(safeNumber(record.costs?.maintenance) * ratio) },
-                { label: '기타', amount: Math.round(safeNumber(record.costs?.other) * ratio) }
-              ]
-                .filter((row) => row.amount > 0)
-                .map((row) => ({
-                  subject,
-                  label: row.label,
-                  amount: row.amount,
-                  allocation
-                }));
-            })
-            .filter((row) => row.amount > 0);
-
-          if (ledgerChildren.length > 0) {
-            return groupChildrenBySubject(deduction, originLabel, summaryCategory, fallbackSubject, ledgerChildren);
-          }
-
-          return [buildGenericExpenseRow(deduction, originLabel, fallbackSubject, summaryCategory)];
-        };
-
-        const rawRows = (doc.deductions ?? [])
-          .filter((deduction) => EXPENSE_DEDUCTION_ORIGINS.includes(deduction.origin))
-          .flatMap((deduction): ExpenseAggregateDetailRow[] => {
-            if (deduction.origin === 'vehicle_billing') return buildVehicleExpenseRows(deduction);
-            if (deduction.origin === 'accommodation_billing') return buildAccommodationExpenseRows(deduction);
-            return [buildGenericExpenseRow(deduction)];
-          })
-          .filter((row) => row.amount > 0);
-
-        const grouped = new Map<string, ExpenseAggregateDetailRow>();
-        rawRows.forEach((row) => {
-          const key = `${row.origin}:${row.subject}:${row.category}`;
-          const prev = grouped.get(key);
-          if (!prev) {
-            grouped.set(key, { ...row, key, details: [...row.details] });
-            return;
-          }
-          grouped.set(key, {
-            ...prev,
-            amount: prev.amount + row.amount,
-            memo: [prev.memo, row.memo].filter(Boolean).join(' / ') || undefined,
-            details: [...prev.details, ...row.details]
-          });
-        });
-
-        const resourceRows = Array.from(grouped.values()).sort((a, b) => {
-          const order = (EXPENSE_DEDUCTION_ORIGIN_ORDER[a.origin] ?? 99) - (EXPENSE_DEDUCTION_ORIGIN_ORDER[b.origin] ?? 99);
-          if (order !== 0) return order;
-          return a.subject.localeCompare(b.subject, 'ko');
-        });
-        if (isExpenseOriginAggregateItem) {
-          const rows = resourceRows.filter((row) => row.origin === item.origin);
-          const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0);
-          return { kind: 'expense_aggregate', rows, totalAmount };
-        }
-
-        const rows = EXPENSE_DEDUCTION_ORIGINS
-          .map((origin): ExpenseAggregateDetailRow | null => {
-            const originRows = resourceRows.filter((row) => row.origin === origin);
-            if (originRows.length === 0) return null;
-
-            const originLabel = formatDeductionOrigin(origin);
+      const isAggregateDetailItem = String(item.id).startsWith('deduction-aggregate:');
+      if (String(item.id).startsWith(EXPENSE_GROUP_AGGREGATE_PREFIX)) {
+        const rows: ExpenseAggregateDetailRow[] = doc.deductions
+          .filter(deduction => EXPENSE_DEDUCTION_ORIGINS.includes(deduction.origin) && (item.id === EXPENSE_GROUP_AGGREGATE_ALL_ID || deduction.origin === item.origin))
+          .map(deduction => {
+            const detail = getTeamSettlementExpenseDetail(deduction, expenseSourceResult.entries);
             return {
-              key: `expense-origin:${origin}`,
-              origin,
-              originLabel,
-              subject: '전체',
-              category: `${originLabel} 전체`,
-              amount: originRows.reduce((sum, row) => sum + safeNumber(row.amount), 0),
-              memo: `${originRows.length}건`,
-              details: originRows.map((row) => ({
-                subject: row.subject,
-                label: row.subject,
-                category: row.category,
-                amount: row.amount,
-                note: row.memo,
-                allocation: row.details.length > 0 ? `${row.details.length}건` : undefined
-              }))
+              key: 'expense-detail:' + deduction.id,
+              origin: deduction.origin,
+              originLabel: getDeductionSourceSummaryLabel(deduction.origin),
+              subject: detail.rows[0]?.subject || '-',
+              category: deduction.category,
+              amount: detail.amount,
+              memo: detail.memo,
+              details: detail.rows.map(row => ({ ...row, category: row.label }))
             };
-          })
-          .filter((row): row is ExpenseAggregateDetailRow => Boolean(row));
-        const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0);
-        return { kind: 'expense_aggregate', rows, totalAmount };
+          });
+        const grouped = new Map<string, ExpenseAggregateDetailRow>();
+        rows.forEach(row => {
+          const key = row.origin + ':' + row.subject + ':' + row.category;
+          const prior = grouped.get(key);
+          if (prior) grouped.set(key, { ...prior, amount: prior.amount + row.amount,
+            memo: [prior.memo, row.memo].filter(Boolean).join(' / '), details: [...prior.details, ...row.details] });
+          else grouped.set(key, { ...row, key });
+        });
+        return { kind: 'expense_aggregate', rows: [...grouped.values()], totalAmount: rows.reduce((sum, row) => sum + row.amount, 0) };
       }
 
       if (item.origin === 'office_expense') {
@@ -2595,416 +2016,17 @@ export const TeamSettlementPage: React.FC = () => {
         return { kind: 'payroll', rows, totalManDay, totalAmount };
       }
 
-      if (item.origin === 'accommodation_billing') {
-        const selectedDocs = selectPreferredTeamBillings(
-          deductionSourceData.accommodationDocs.filter((row) =>
-            isTeamBillingTarget({
-              issuedToType: row.issuedToType,
-              teamId: row.teamId,
-              teamName: row.teamName,
-              issuedToWorkerId: row.issuedToWorkerId,
-              issuedToWorkerName: row.issuedToWorkerName
-            }) && matchesTeamByIdOrName(row.teamId, row.teamName)
-          ),
-          (doc) => hasBillingLineSource(doc, 'utility_ledger'),
-          getAccommodationSettlementBillingGroupKey
-        );
-
-        const itemIdParts = itemIdText.split(':');
-        const rawKey = isAggregateDetailItem ? '' : (itemIdParts.length >= 3 ? itemIdParts.slice(2).join(':') : '');
-        const isLedgerItem = rawKey.startsWith('ledger:');
-        const targetDocId = !isLedgerItem && rawKey ? rawKey : '';
-        const accommodationNameById = new Map<string, string>();
-        const accommodationNameByUtilityRecordId = new Map<string, string>();
-        deductionSourceData.utilityRecords.forEach((record) => {
-          const accommodationId = String(record.accommodationId ?? '').trim();
-          const accommodationName = String(record.accommodationName ?? '').trim();
-          const recordId = String(record.id ?? '').trim();
-          if (accommodationId && accommodationName) accommodationNameById.set(accommodationId, accommodationName);
-          if (recordId && accommodationName) accommodationNameByUtilityRecordId.set(recordId, accommodationName);
-        });
-
-        const docRows = selectedDocs
-          .filter((billing) => {
-            if (isLedgerItem) return false;
-            if (!targetDocId) return true;
-            return String(billing.id ?? '') === targetDocId;
-          })
-          .flatMap((billing) => {
-            const billedTo = billing.teamName ? String(billing.teamName) : selectedTeamName || '팀';
-            return (billing.lineItems ?? []).map((li) => ({
-              subject:
-                (li.sourceUtilityRecordId ? accommodationNameByUtilityRecordId.get(String(li.sourceUtilityRecordId).trim()) : undefined) ||
-                (li.sourceAccommodationId ? accommodationNameById.get(String(li.sourceAccommodationId).trim()) : undefined) ||
-                String(li.sourceAccommodationId ?? '').trim() ||
-                billedTo,
-              label: String(li.label ?? '').trim() || mapAccommodationTargetFieldLabel(String(li.targetField ?? '')),
-              amount: safeNumber(li.amount)
-            }));
-          })
-          .filter((row) => row.amount > 0);
-
-        if (docRows.length > 0) {
-          const totalAmount = docRows.reduce((sum, row) => sum + row.amount, 0);
-          return { kind: 'accommodation_billing', mode: 'document', rows: docRows, totalAmount };
-        }
-
-        const range = buildMonthRange(yearMonth);
-        const monthStart = parseYmdDate(range.startDate);
-        const monthEnd = parseYmdDate(range.endDate);
-        if (!monthStart || !monthEnd) return { kind: 'accommodation_billing', mode: 'ledger', rows: [], totalAmount: 0 };
-
-        const targetAccommodationId = isLedgerItem ? rawKey.replace(/^ledger:/, '').trim() : '';
-
-        const teamDaysByAccommodation = new Map<string, number>();
-        const totalDaysByAccommodation = new Map<string, number>();
-        const workerTeamByAnyId = new Map<string, { teamId?: string; teamName?: string }>();
-        const workerTeamByName = new Map<string, { teamId?: string; teamName?: string }>();
-        deductionSourceData.workers.forEach((w) => {
-          const info = { teamId: w.teamId, teamName: w.teamName };
-          const id = String(w.id ?? '').trim();
-          const legacyId = String(w.legacyId ?? '').trim();
-          const name = String(w.name ?? '').trim();
-          if (id) workerTeamByAnyId.set(id, info);
-          if (legacyId) workerTeamByAnyId.set(legacyId, info);
-          if (name) workerTeamByName.set(name, info);
-        });
-
-        deductionSourceData.accommodationAssignments.forEach((assignment) => {
-
-          const accommodationId = String(assignment.accommodationId ?? '').trim();
-          if (!accommodationId) return;
-
-          const startDate = parseYmdDate(String(assignment.startDate ?? '').trim());
-          if (!startDate) return;
-          const endDate = assignment.endDate ? parseYmdDate(String(assignment.endDate).trim()) : null;
-          const overlapDays = calculateOverlapDays({ monthStart, monthEnd, startDate, endDate });
-          if (overlapDays <= 0) return;
-
-          totalDaysByAccommodation.set(accommodationId, (totalDaysByAccommodation.get(accommodationId) ?? 0) + overlapDays);
-
-          let teamMatched = matchesTeamByIdOrName(assignment.teamId, assignment.teamName);
-          if (!teamMatched) {
-            const workerId = String(assignment.workerId ?? '').trim();
-            const workerName = String(assignment.workerName ?? '').trim();
-            const workerTeam =
-              (workerId ? workerTeamByAnyId.get(workerId) : undefined) ??
-              (workerName ? workerTeamByName.get(workerName) : undefined);
-            if (workerTeam) {
-              teamMatched = matchesTeamByIdOrName(workerTeam.teamId, workerTeam.teamName);
-            }
-          }
-
-          if (teamMatched) {
-            teamDaysByAccommodation.set(accommodationId, (teamDaysByAccommodation.get(accommodationId) ?? 0) + overlapDays);
-          }
-        });
-
-        const ledgerRows = deductionSourceData.utilityRecords
-          .map((record) => {
-            const accommodationId = String(record.accommodationId ?? '').trim();
-            if (!accommodationId) return [] as Array<{ subject: string; label: string; amount: number; teamDays: number; totalDays: number }>;
-            if (targetAccommodationId && accommodationId !== targetAccommodationId) return [] as Array<{ subject: string; label: string; amount: number; teamDays: number; totalDays: number }>;
-
-            const teamDays = teamDaysByAccommodation.get(accommodationId) ?? 0;
-            const totalDays = totalDaysByAccommodation.get(accommodationId) ?? 0;
-            if (teamDays <= 0 || totalDays <= 0) return [] as Array<{ subject: string; label: string; amount: number; teamDays: number; totalDays: number }>;
-
-            const ratio = teamDays / totalDays;
-            const subject = String(record.accommodationName ?? '').trim() || accommodationId;
-
-            const rows = [
-              { label: '월세', amount: Math.round(safeNumber(record.costs?.rent) * ratio) },
-              { label: '전기', amount: Math.round(safeNumber(record.costs?.electricity) * ratio) },
-              { label: '가스', amount: Math.round(safeNumber(record.costs?.gas) * ratio) },
-              { label: '수도', amount: Math.round(safeNumber(record.costs?.water) * ratio) },
-              { label: '인터넷', amount: Math.round(safeNumber(record.costs?.internet) * ratio) },
-              { label: '관리비', amount: Math.round(safeNumber(record.costs?.maintenance) * ratio) },
-              { label: '기타', amount: Math.round(safeNumber(record.costs?.other) * ratio) }
-            ]
-              .filter((row) => row.amount > 0)
-              .map((row) => ({
-                subject,
-                label: row.label,
-                amount: row.amount,
-                teamDays,
-                totalDays
-              }));
-
-            return rows;
-          })
-          .flat()
-          .sort((a, b) => b.amount - a.amount);
-
-        const totalAmount = ledgerRows.reduce((sum, row) => sum + row.amount, 0);
-        return { kind: 'accommodation_billing', mode: 'ledger', rows: ledgerRows, totalAmount };
-      }
-
-      if (item.origin === 'vehicle_billing') {
-        const selectedDocs = selectPreferredTeamBillings(
-          deductionSourceData.vehicleDocs.filter((row) =>
-            isTeamBillingTarget({
-              issuedToType: row.issuedToType,
-              teamId: row.teamId ?? row.assignedTeamId,
-              teamName: row.teamName ?? row.assignedTeamName,
-              issuedToWorkerId: row.issuedToWorkerId,
-              issuedToWorkerName: row.issuedToWorkerName
-            }) &&
-            matchesTeamByIdOrName(row.teamId ?? row.assignedTeamId, row.teamName ?? row.assignedTeamName)
-          ),
-          (doc) => hasBillingLineSource(doc, 'vehicle_ledger'),
-          getVehicleSettlementBillingGroupKey,
-          getSettlementBillingRowScopeKey
-        );
-        const isLedgerVehicleItem = !isAggregateDetailItem && itemIdText.endsWith(':ledger');
-        const targetPlate = extractBracketValue(deductionCategory, '차량비');
-
-        const matchedDocs = selectedDocs.filter((row) => {
-          if (isAggregateDetailItem) return true;
-          if (isLedgerVehicleItem) return false;
-          const plate = String(row.vehiclePlate ?? '').trim();
-          const id = String(row.vehicleId ?? '').trim();
-          if (targetPlate && plate === targetPlate) return true;
-          if (id && itemIdText.includes(id)) return true;
-          if (plate && itemIdText.includes(plate)) return true;
-          return false;
-        });
-
-        const docRows = matchedDocs
-          .flatMap((billing) => {
-            const plate = String(billing.vehiclePlate ?? '').trim() || String(billing.vehicleId ?? '').trim();
-            if ((billing.lineItems ?? []).length === 0) {
-              return [
-                { subject: plate, label: '고정비', amount: safeNumber(billing.fixedCost), note: 'FIXED' },
-                { subject: plate, label: '변동비', amount: safeNumber(billing.variableCost), note: 'VARIABLE' }
-              ];
-            }
-            return (billing.lineItems ?? []).map((li) => ({
-              subject: plate,
-              label: String(li.label ?? '').trim() || '차량비',
-              amount: safeNumber(li.amount),
-              note: String(li.category ?? li.type ?? '').trim() || undefined
-            }));
-          })
-          .filter((row) => row.amount > 0);
-
-        if (docRows.length > 0) {
-          const totalAmount = docRows.reduce((sum, row) => sum + row.amount, 0);
-          return { kind: 'vehicle_billing', mode: 'document', rows: docRows, totalAmount };
-        }
-
-        const workerTeamByAnyId = new Map<string, { teamId?: string; teamName?: string }>();
-        const workerTeamByName = new Map<string, { teamId?: string; teamName?: string }>();
-        deductionSourceData.workers.forEach((w) => {
-          const info = { teamId: w.teamId, teamName: w.teamName };
-          const id = String(w.id ?? '').trim();
-          const legacyId = String(w.legacyId ?? '').trim();
-          const name = String(w.name ?? '').trim();
-          if (id) workerTeamByAnyId.set(id, info);
-          if (legacyId) workerTeamByAnyId.set(legacyId, info);
-          if (name) workerTeamByName.set(name, info);
-        });
-
-        const expenseByVehicleId = new Map<string, VehicleExpenseRecord[]>();
-        deductionSourceData.vehicleExpenses.forEach((expense) => {
-          const vehicleId = String(expense.vehicleId ?? '').trim();
-          if (!vehicleId) return;
-          const list = expenseByVehicleId.get(vehicleId) ?? [];
-          list.push(expense);
-          expenseByVehicleId.set(vehicleId, list);
-        });
-
-        const ledgerRows = deductionSourceData.vehicles
-          .flatMap((vehicle) => {
-            const plate = String(vehicle.licensePlate ?? '').trim();
-            const vehicleId = String(vehicle.id ?? '').trim();
-            if (targetPlate && plate !== targetPlate) return [];
-            if (!isAggregateDetailItem && !targetPlate && vehicleId && !itemIdText.includes(vehicleId) && plate && !itemIdText.includes(plate)) return [];
-
-            let isAssignedTeam = false;
-            if (vehicle.currentAssigneeType === 'TEAM') {
-              isAssignedTeam = matchesTeamByIdOrName(vehicle.currentAssigneeId, vehicle.currentAssigneeName);
-            } else if (vehicle.currentAssigneeType === 'WORKER') {
-              const workerId = String(vehicle.currentAssigneeId ?? '').trim();
-              const workerName = String(vehicle.currentAssigneeName ?? '').trim();
-              const info = (workerId ? workerTeamByAnyId.get(workerId) : undefined) ?? (workerName ? workerTeamByName.get(workerName) : undefined);
-              isAssignedTeam = info ? matchesTeamByIdOrName(info.teamId, info.teamName) : false;
-            }
-
-            if (!isAssignedTeam) return [];
-
-            const rows: Array<{ subject: string; label: string; amount: number; date?: string; note?: string }> = [];
-            const fixedCost =
-              vehicle.type === 'RENT' || vehicle.type === 'LEASE'
-                ? safeNumber(vehicle.contract?.monthlyFee)
-                : 0;
-            if (fixedCost > 0) {
-              rows.push({
-                subject: plate || vehicleId,
-                label: '월 고정비',
-                amount: fixedCost,
-                note: 'FIXED'
-              });
-            }
-
-            const expenses = [...(expenseByVehicleId.get(vehicleId) ?? [])].sort((a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')));
-            expenses.forEach((expense) => {
-              rows.push({
-                subject: plate || vehicleId,
-                label: String(expense.type ?? '').trim() || '변동비',
-                amount: safeNumber(expense.amount),
-                date: String(expense.date ?? '').trim() || undefined,
-                note: 'VARIABLE'
-              });
-            });
-            return rows;
-          })
-          .filter((row) => row.amount > 0);
-
-        const totalAmount = ledgerRows.reduce((sum, row) => sum + row.amount, 0);
-        return { kind: 'vehicle_billing', mode: 'ledger', rows: ledgerRows, totalAmount };
-      }
-
-      if (item.origin === 'card_billing') {
-        const selectedDocs = selectPreferredTeamBillings(
-          deductionSourceData.cardDocs.filter((row) =>
-            isTeamBillingTarget({
-              issuedToType: row.issuedToType,
-              teamId: row.teamId ?? row.assignedTeamId,
-              teamName: row.teamName ?? row.assignedTeamName,
-              issuedToWorkerId: row.issuedToWorkerId,
-              issuedToWorkerName: row.issuedToWorkerName
-            }) &&
-            matchesTeamByIdOrName(row.teamId ?? row.assignedTeamId, row.teamName ?? row.assignedTeamName)
-          ),
-          (doc) => hasBillingLineSource(doc, 'card_ledger'),
-          getCardSettlementBillingGroupKey,
-          getSettlementBillingRowScopeKey
-        );
-        const isLedgerCardItem = !isAggregateDetailItem && itemIdText.endsWith(':ledger');
-        const targetCardLabel = extractBracketValue(deductionCategory, '카드비');
-
-        const matchedDocs = selectedDocs.filter((row) => {
-          if (isAggregateDetailItem) return true;
-          if (isLedgerCardItem) return false;
-          const cardId = String(row.cardId ?? '').trim();
-          const cardLabel = String(row.cardLabel ?? '').trim();
-          if (targetCardLabel && cardLabel === targetCardLabel) return true;
-          if (cardId && itemIdText.includes(cardId)) return true;
-          if (cardLabel && itemIdText.includes(cardLabel)) return true;
-          return false;
-        });
-
-        const docRows = matchedDocs
-          .flatMap((billing) => {
-            const label = String(billing.cardLabel ?? '').trim() || String(billing.cardId ?? '').trim();
-            return (billing.lineItems ?? []).map((li) => ({
-              subject: label,
-              label: String(li.label ?? '').trim() || '카드비',
-              amount: safeNumber(li.amount),
-              note: String(li.category ?? '').trim() || undefined
-            }));
-          })
-          .filter((row) => row.amount > 0);
-
-        if (docRows.length > 0) {
-          const totalAmount = docRows.reduce((sum, row) => sum + row.amount, 0);
-          return { kind: 'card_billing', mode: 'document', rows: docRows, totalAmount };
-        }
-
-        const workerTeamByAnyId = new Map<string, { teamId?: string; teamName?: string }>();
-        const workerTeamByName = new Map<string, { teamId?: string; teamName?: string }>();
-        deductionSourceData.workers.forEach((w) => {
-          const info = { teamId: w.teamId, teamName: w.teamName };
-          const id = String(w.id ?? '').trim();
-          const legacyId = String(w.legacyId ?? '').trim();
-          const name = String(w.name ?? '').trim();
-          if (id) workerTeamByAnyId.set(id, info);
-          if (legacyId) workerTeamByAnyId.set(legacyId, info);
-          if (name) workerTeamByName.set(name, info);
-        });
-
-        const txByCardId = new Map<string, CardTransaction[]>();
-        deductionSourceData.cardTransactions.forEach((tx) => {
-          const cardId = String(tx.cardId ?? '').trim();
-          if (!cardId) return;
-          const list = txByCardId.get(cardId) ?? [];
-          list.push(tx);
-          txByCardId.set(cardId, list);
-        });
-
-        const ledgerRows = deductionSourceData.cards
-          .flatMap((card) => {
-            const cardId = String(card.id ?? '').trim();
-            const cardLabel = `${String(card.name ?? '').trim()} (${String(card.last4 ?? '').trim()})`.trim();
-
-            if (targetCardLabel && cardLabel !== targetCardLabel) return [];
-            if (!isAggregateDetailItem && !targetCardLabel && cardId && !itemIdText.includes(cardId) && cardLabel && !itemIdText.includes(cardLabel)) return [];
-
-            let isAssignedTeam = false;
-            if (card.currentAssigneeType === 'TEAM') {
-              isAssignedTeam = matchesTeamByIdOrName(card.currentAssigneeId, card.currentAssigneeName);
-            } else if (card.currentAssigneeType === 'WORKER') {
-              const workerId = String(card.currentAssigneeId ?? '').trim();
-              const workerName = String(card.currentAssigneeName ?? '').trim();
-              const info = (workerId ? workerTeamByAnyId.get(workerId) : undefined) ?? (workerName ? workerTeamByName.get(workerName) : undefined);
-              isAssignedTeam = info ? matchesTeamByIdOrName(info.teamId, info.teamName) : false;
-            }
-            if (!isAssignedTeam) return [];
-
-            const txs = [...(txByCardId.get(cardId) ?? [])].sort((a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')));
-            return txs.map((tx) => ({
-              subject: cardLabel,
-              label: String(tx.merchant ?? '').trim() || '카드 사용',
-              amount: safeNumber(tx.amount),
-              date: String(tx.date ?? '').trim() || undefined,
-              note: String(tx.category ?? '').trim() || undefined
-            }));
-          })
-          .filter((row) => row.amount > 0);
-
-        const totalAmount = ledgerRows.reduce((sum, row) => sum + row.amount, 0);
-        return { kind: 'card_billing', mode: 'ledger', rows: ledgerRows, totalAmount };
-      }
-
-      if (item.origin === 'team_expense_claim') {
-        const itemIdParts = itemIdText.split(':');
-        const targetClaimId = itemIdParts.length >= 3 ? itemIdParts[2] : '';
-        const rows = deductionSourceData.teamExpenseClaims
-          .filter((claim) => claim.status === 'charged' || claim.status === 'settled')
-          .filter((claim) => !targetClaimId || String(claim.id ?? '') === targetClaimId)
-          .filter((claim) => {
-            const isOtherExpense = claim.claimType !== 'teamCharge' || !String(claim.chargeToTeamId ?? '').trim();
-            if (isOtherExpense) return matchesTeamByIdOrName(claim.payerTeamId, claim.payerTeamName);
-            return matchesTeamByIdOrName(claim.chargeToTeamId, claim.chargeToTeamName);
-          })
-          .map((claim) => {
-            const isOtherExpense = claim.claimType !== 'teamCharge' || !String(claim.chargeToTeamId ?? '').trim();
-            const subject = isOtherExpense
-              ? (claim.payerTeamName || selectedTeamName || '-')
-              : (claim.payerTeamName || '-');
-            const description = String(claim.description ?? '').trim();
-            return {
-              date: String(claim.date ?? '').trim(),
-              subject,
-              label: `${getTeamExpenseCategoryLabel(claim.category)}${description ? ` - ${description}` : ''}`,
-              amount: safeNumber(claim.amount),
-              note: [
-                isOtherExpense ? (claim.claimType === 'officeExpense' ? '사무실경비' : '기타청구') : '내야 할 후청구',
-                String(claim.siteName ?? '').trim(),
-                String(claim.cardLabel ?? '').trim()
-              ].filter(Boolean).join(' / ')
-            };
-          })
-          .filter((row) => row.amount > 0);
-
-        const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0);
-        return { kind: 'team_expense_claim', rows, totalAmount };
+      if (item.origin === 'accommodation_billing' || item.origin === 'vehicle_billing' || item.origin === 'card_billing' || item.origin === 'team_expense_claim') {
+        const saved = isAggregateDetailItem ? doc.deductions.filter(row => row.origin === item.origin) : [item];
+        const rows = saved.flatMap(row => getTeamSettlementExpenseDetail(row, expenseSourceResult.entries).rows);
+        const totalAmount = saved.reduce((sum, row) => sum + row.amount, 0);
+        if (item.origin === 'team_expense_claim') return { kind: item.origin, rows: rows.map(row => ({ ...row, date: row.date || '' })), totalAmount };
+        return { kind: item.origin, mode: 'document', rows, totalAmount };
       }
 
       return null;
     },
-    [deductionSourceData, detailRows, doc, matchesTeam, matchesTeamByIdOrName, selectedTeamName, yearMonth]
+    [expenseSourceResult.entries, detailRows, doc, matchesTeam]
   );
 
   const getLineDetailRows = useCallback(
@@ -4196,7 +3218,7 @@ export const TeamSettlementPage: React.FC = () => {
                       <div>
                         <div className="text-sm font-semibold text-slate-800">차량 공제 상세</div>
                         <div className="text-xs text-slate-500 mt-1">
-                          {detail.mode === 'document' ? '차량 청구서 기준' : '월별 차량 대장 자동집계 기준'}
+                          정산에 반영된 차량 금액 기준
                         </div>
 
                         <div className="mt-3 overflow-auto">
@@ -4291,7 +3313,7 @@ export const TeamSettlementPage: React.FC = () => {
                     )}
 
                     {detail.kind === 'expense_aggregate' && (
-                      <div>
+                      <div role="region" aria-label="경비 상세">
                         <div className="text-sm font-semibold text-slate-800">경비 상세</div>
                         <div className="text-xs text-slate-500 mt-1">
                           차량·숙소·카드·경비 청구 공제 항목 합계 기준
@@ -5080,6 +4102,17 @@ export const TeamSettlementPage: React.FC = () => {
               <button type="button" className={addButtonClassName} onClick={handleAddManualDeduction} disabled={!canEdit}>
                 + 수기 공제
               </button>
+            </div>
+
+            <div role="status" aria-label="경비 원본 검증" className="mt-4 rounded-lg border p-3 text-xs">
+              {expenseValidationMessages.length ? (
+                <>
+                  <div className="font-bold text-rose-700">경비 확인 필요</div>
+                  <ul className="mt-1 list-inside list-disc">{expenseValidationMessages.map(message => <li key={message}>{message}</li>)}</ul>
+                  {expenseSourceResult.status === 'ready' && <p className="mt-2">저장 금액을 유지하고 있습니다. 원본과 수기 항목을 확인한 뒤 재집계해 주세요.</p>}
+                </>
+              ) : <span className="text-emerald-700">경비 원본과 저장 내역이 일치합니다.</span>}
+              <button type="button" className="mt-2 font-bold text-blue-700" onClick={() => setExpenseSourceRevision(value => value + 1)}>경비 원본 다시 조회</button>
             </div>
 
             <div className="mt-4 space-y-5">
