@@ -178,7 +178,7 @@ it('팀장도 기존 인력교류 상세의 현장별 표와 작업자별 표에
   expect(screen.getByText('방문 작업자 A')).toBeVisible();
   expect(screen.getByText('방문 작업자 B')).toBeVisible();
   expect(screen.getAllByText('지원 방문팀').length).toBeGreaterThanOrEqual(2);
-  const workerRow = screen.getByRole('row', { name: /^2026-08-03 방문 작업자 A / });
+  const workerRow = screen.getByRole('row', { name: /^26-08-03 방문 작업자 A / });
   expect(within(workerRow).getByText('1.5')).toBeVisible();
   expect(within(workerRow).getByText(/270,000/)).toBeVisible();
   expect(within(workerRow).getByText(/405,000/)).toBeVisible();
@@ -201,7 +201,7 @@ it('우리 팀이 상대 현장에 지원 간 공수도 같은 기존 작업자 
   ]);
   render(<TeamSettlementPage />);
   await expandOriginalDetails('상대팀 현장');
-  const row = screen.getByRole('row', { name: /^2026-08-05 우리 작업자 / });
+  const row = screen.getByRole('row', { name: /^26-08-05 우리 작업자 / });
   expect(within(row).getByText('3.0')).toBeVisible();
   expect(within(row).getByText(/270,000/)).toBeVisible();
   expect(within(row).getByText(/810,000/)).toBeVisible();
@@ -229,8 +229,8 @@ it.each(['sales', 'purchase'] as const)('%s 작업자 상세는 날짜별로 분
   expect(table.getAllByRole('columnheader').map(cell => cell.textContent).slice(0, 2)).toEqual(['날짜', '작업자']);
   const rows = table.getAllByRole('row').slice(1);
   expect(rows.map(row => within(row).getAllByRole('cell').map(cell => cell.textContent))).toEqual([
-    ['2026-08-03', '날짜 검증자', '지원 방문팀', '1.5', '270,000원', '405,000'],
-    ['2026-08-05', '날짜 검증자', '지원 방문팀', '1.5', '270,000원', '405,000']
+    ['26-08-03', '날짜 검증자', '지원 방문팀', '1.5', '270,000원', '405,000'],
+    ['26-08-05', '날짜 검증자', '지원 방문팀', '1.5', '270,000원', '405,000']
   ]);
   const siteRow = screen.getAllByRole('row').find(row => within(row).queryAllByRole('cell')[0]?.textContent === '담당 현장')!;
   expect(within(siteRow).getByRole('cell', { name: '1' })).toBeVisible();

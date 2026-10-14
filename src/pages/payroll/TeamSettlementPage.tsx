@@ -2937,7 +2937,7 @@ export const TeamSettlementPage: React.FC = () => {
                                                   const avgUnit = safeAverage(w.amount, w.manDay);
                                                   return (
                                                     <tr key={JSON.stringify([siteKey, w.date, w.workerName, w.workerTeamName])} className="bg-white">
-                                                      <td data-label="날짜" className="px-2 py-2 border">{w.date || '-'}</td>
+                                                      <td data-label="날짜" className="px-2 py-2 border">{w.date.replace(/^\d{2}(\d{2}-\d{2}-\d{2})$/, '$1') || '-'}</td>
                                                       <td data-label="작업자" className="px-2 py-2 border">{w.workerName}</td>
                                                       <td data-label="소속팀" className="px-2 py-2 border">{w.workerTeamName}</td>
                                                       <td data-label="공수" className="px-2 py-2 border text-right">{formatManDay1(w.manDay)}</td>
