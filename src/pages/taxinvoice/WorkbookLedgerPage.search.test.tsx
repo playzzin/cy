@@ -125,3 +125,86 @@ describe.each(['ledger', 'summary'] as const)('%s combined search', (tab) => {
         expect(screen.getByText('조회 결과가 없습니다.')).toBeInTheDocument();
     });
 });
+
+describe.each(['cheongyeon', 'dawon'] as const)('%s ledger transaction type switch', (tenantKey) => {
+    const purchaseEntries = entries.map((entry) => ({
+        ...entry,
+        id: `purchase-${entry.id}`,
+        description: `purchase-${entry.id}`,
+        transactionType: '매입' as const,
+        supplyAmount: 200000,
+        taxAmount: 20000,
+        totalAmount: 220000,
+    }));
+    const paymentEntries = [entries[0], purchaseEntries[0]].map((entry) => ({
+        ...entry,
+        id: `payment-${entry.id}`,
+        description: `payment-${entry.id}`,
+        date: '2026-09-02',
+        supplyAmount: 0,
+        taxAmount: 0,
+        totalAmount: 0,
+        paymentAmount: entry.transactionType === '매출' ? 20000 : 40000,
+        matchedEntryId: entry.id,
+    }));
+
+    beforeEach(() => {
+        window.sessionStorage.clear();
+        window.sessionStorage.setItem(`workbook-ledger:${tenantKey}:active-tab`, 'ledger');
+        mockGetEntries.mockReset().mockImplementation(async (options) => (
+            [...entries, ...purchaseEntries, ...paymentEntries].filter((entry) => (
+                entry.transactionType === options.transactionType
+                && entry.date >= options.startDate
+                && entry.date <= options.endDate
+            ))
+        ));
+    });
+
+    it.each(['기간별', '월별'])('immediately switches rows, amounts, and query type while preserving %s filters', async (dateMode) => {
+        render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+            <WorkbookLedgerPage tenantKey={tenantKey} />
+        </MemoryRouter>);
+        setSearch('검색시작일', '2026-09-01');
+        setSearch('검색종료일', '2026-09-30');
+        setSearch('거래처 검색', '테스트건설 A');
+        setSearch('현장명 검색', '광명');
+        setSearch('팀명 검색', '검증 1팀');
+        if (dateMode === '월별') {
+            fireEvent.click(screen.getByRole('tab', { name: '월별' }));
+            setSearch('거래장 조회월', '2026-09');
+        }
+        submit();
+        await waitFor(() => expect(resultCells('a-gwangmyeong')).toHaveLength(1));
+
+        // Unsubmitted text remains a draft; switching type preserves the displayed search.
+        setSearch('현장명 검색', '서울');
+        const typeButtons = within(screen.getByRole('group', { name: '조회 구분' }));
+        for (const transactionType of ['매입', '매출'] as const) {
+            mockGetEntries.mockClear();
+            fireEvent.click(typeButtons.getByRole('button', { name: transactionType }));
+            await waitFor(() => expect(mockGetEntries).toHaveBeenLastCalledWith(expect.objectContaining({
+                startDate: '2026-09-01', endDate: '2026-09-30', transactionType,
+            })));
+
+            const isPurchase = transactionType === '매입';
+            const description = isPurchase ? 'purchase-a-gwangmyeong' : 'a-gwangmyeong';
+            await waitFor(() => expect(resultCells(description)).toHaveLength(1));
+            expect(resultCells(isPurchase ? 'a-gwangmyeong' : 'purchase-a-gwangmyeong')).toHaveLength(0);
+            expect(resultCells('광명 현장')).toHaveLength(2);
+            expect(resultCells('서울 현장')).toHaveLength(0);
+            expect(resultCells('테스트건설 B')).toHaveLength(0);
+            expect(resultCells('검증 2팀')).toHaveLength(0);
+            expect(screen.getByRole('columnheader', { name: `${transactionType}금액` })).toBeInTheDocument();
+            expect(screen.getByRole('columnheader', { name: isPurchase ? '지급금액' : '입금금액' })).toBeInTheDocument();
+            const totals = within(screen.getByRole('row', { name: /합계/ }));
+            expect(totals.getByRole('cell', { name: isPurchase ? '220,000' : '110,000' })).toBeInTheDocument();
+            expect(totals.getByRole('cell', { name: isPurchase ? '40,000' : '20,000' })).toBeInTheDocument();
+            expect(totals.getByRole('cell', { name: isPurchase ? '180,000' : '90,000' })).toBeInTheDocument();
+            expect(typeButtons.getByRole('button', { name: transactionType })).toHaveAttribute('aria-pressed', 'true');
+            expect(typeButtons.getByRole('button', { name: isPurchase ? '매출' : '매입' })).toHaveAttribute('aria-pressed', 'false');
+            expect(screen.getByLabelText('거래처 검색')).toHaveValue('테스트건설 A');
+            expect(screen.getByLabelText('현장명 검색')).toHaveValue('서울');
+            expect(screen.getByLabelText('팀명 검색')).toHaveValue('검증 1팀');
+        }
+    });
+});

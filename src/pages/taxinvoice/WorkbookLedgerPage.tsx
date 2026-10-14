@@ -5648,7 +5648,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                         key={transactionType}
                                         type="button"
                                         aria-pressed={ledgerDraft.transactionType === transactionType}
-                                        onClick={() => setLedgerDraft((prev) => ({ ...prev, transactionType }))}
+                                        onClick={() => {
+                                            setLedgerDraft((prev) => ({ ...prev, transactionType }));
+                                            setLedgerFilter((prev) => ({ ...prev, transactionType }));
+                                        }}
                                     >
                                         {transactionType}
                                     </button>

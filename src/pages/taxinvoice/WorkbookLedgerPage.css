@@ -1231,7 +1231,27 @@
 }
 
 .workbook-query-types {
+    display: flex;
+    gap: 4px;
     min-height: 36px;
+}
+
+.workbook-query-types > button {
+    flex: 1;
+    border: 1px solid #cbd5e1;
+    border-radius: 7px;
+    padding: 5px 10px;
+    background: #ffffff;
+    color: #475569;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.workbook-query-types > button[aria-pressed="true"] {
+    border-color: #1d4ed8;
+    background: #1d4ed8;
+    color: #ffffff;
 }
 
 .workbook-query-panel {
