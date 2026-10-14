@@ -178,7 +178,7 @@ it('팀장도 기존 인력교류 상세의 현장별 표와 작업자별 표에
   expect(screen.getByText('방문 작업자 A')).toBeVisible();
   expect(screen.getByText('방문 작업자 B')).toBeVisible();
   expect(screen.getAllByText('지원 방문팀').length).toBeGreaterThanOrEqual(2);
-  const workerRow = screen.getByRole('row', { name: /^방문 작업자 A / });
+  const workerRow = screen.getByRole('row', { name: /^2026-08-03 방문 작업자 A / });
   expect(within(workerRow).getByText('1.5')).toBeVisible();
   expect(within(workerRow).getByText(/270,000/)).toBeVisible();
   expect(within(workerRow).getByText(/405,000/)).toBeVisible();
@@ -201,10 +201,42 @@ it('우리 팀이 상대 현장에 지원 간 공수도 같은 기존 작업자 
   ]);
   render(<TeamSettlementPage />);
   await expandOriginalDetails('상대팀 현장');
-  const row = screen.getByRole('row', { name: /^우리 작업자 / });
+  const row = screen.getByRole('row', { name: /^2026-08-05 우리 작업자 / });
   expect(within(row).getByText('3.0')).toBeVisible();
   expect(within(row).getByText(/270,000/)).toBeVisible();
   expect(within(row).getByText(/810,000/)).toBeVisible();
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+});
+
+it.each(['sales', 'purchase'] as const)('%s 작업자 상세는 날짜별로 분리하고 날짜순으로 표시하며 현장 합계를 유지한다', async direction => {
+  const saved = document();
+  const supportDirection = direction === 'sales' ? '내부지원간곳' : '내부지원온곳';
+  const line = { ...saved.purchases[0], manDay: 3, amount: 810000 };
+  saved.sales = direction === 'sales' ? [{ ...line, origin: '내부지원간곳' }] : [];
+  saved.purchases = direction === 'purchase' ? [{ ...line, origin: '내부지원온곳' }] : [];
+  saved.sourceSnapshot!.supportDetails = [
+    { id: 'later', date: '2026-08-05', manDay: 1.5 },
+    { id: 'earlier', date: '2026-08-03', manDay: 1 },
+    { id: 'same-day', date: '2026-08-03', manDay: 0.5 }
+  ].map(row => ({ ...row, direction: supportDirection, siteId: 'site', siteName: '담당 현장',
+    counterTeamId: 'visitor', counterTeamName: '지원 방문팀', workerId: 'worker-a', workerName: '날짜 검증자',
+    workerTeamName: '지원 방문팀', unitPrice: 270000, amount: row.manDay * 270000 }));
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  const original = JSON.stringify(saved);
+  render(<TeamSettlementPage />);
+  await expandOriginalDetails('담당 현장');
+  const table = within(screen.getByRole('table', { name: '작업자 상세 (담당 현장)' }));
+  expect(table.getAllByRole('columnheader').map(cell => cell.textContent).slice(0, 2)).toEqual(['날짜', '작업자']);
+  const rows = table.getAllByRole('row').slice(1);
+  expect(rows.map(row => within(row).getAllByRole('cell').map(cell => cell.textContent))).toEqual([
+    ['2026-08-03', '날짜 검증자', '지원 방문팀', '1.5', '270,000원', '405,000'],
+    ['2026-08-05', '날짜 검증자', '지원 방문팀', '1.5', '270,000원', '405,000']
+  ]);
+  const siteRow = screen.getAllByRole('row').find(row => within(row).queryAllByRole('cell')[0]?.textContent === '담당 현장')!;
+  expect(within(siteRow).getByRole('cell', { name: '1' })).toBeVisible();
+  expect(within(siteRow).getByRole('cell', { name: '3.0' })).toBeVisible();
+  expect(within(siteRow).getByRole('cell', { name: '810,000' })).toBeVisible();
+  expect(JSON.stringify(saved)).toBe(original);
   expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
 });
 

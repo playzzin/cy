@@ -2828,7 +2828,7 @@ export const TeamSettlementPage: React.FC = () => {
                   {detail.length > 0 && (
                     <div className="mt-3 space-y-3">
                       <div className="overflow-auto">
-                        <table className="w-full text-sm border-collapse">
+                        <table className="team-settlement-page__site-detail w-full text-sm border-collapse">
                           <thead>
                             <tr className="bg-slate-50 text-slate-600">
                               <th scope="col" className="text-left px-2 py-2 border">현장</th>
@@ -2850,15 +2850,17 @@ export const TeamSettlementPage: React.FC = () => {
                               const workerSummaries = (() => {
                                 const grouped = new Map<
                                   string,
-                                  { workerName: string; workerTeamName: string; manDay: number; amount: number }
+                                  { date: string; workerName: string; workerTeamName: string; manDay: number; amount: number }
                                 >();
 
                                 site.rows.forEach((r) => {
+                                  const date = String(r.date ?? '').trim();
                                   const workerName = String(r.workerName ?? '').trim() || '-';
                                   const workerTeamName = String(r.workerTeamName ?? '').trim() || '-';
-                                  const key = `${workerName}__${workerTeamName}`;
-                                  const prev = grouped.get(key) ?? { workerName, workerTeamName, manDay: 0, amount: 0 };
+                                  const key = JSON.stringify([date, workerName, workerTeamName]);
+                                  const prev = grouped.get(key) ?? { date, workerName, workerTeamName, manDay: 0, amount: 0 };
                                   grouped.set(key, {
+                                    date,
                                     workerName,
                                     workerTeamName,
                                     manDay: prev.manDay + safeNumber(r.manDay),
@@ -2866,7 +2868,7 @@ export const TeamSettlementPage: React.FC = () => {
                                   });
                                 });
 
-                                return Array.from(grouped.values()).sort((a, b) => b.amount - a.amount);
+                                return Array.from(grouped.values()).sort((a, b) => a.date.localeCompare(b.date) || b.amount - a.amount);
                               })();
 
                               return (
@@ -2919,9 +2921,10 @@ export const TeamSettlementPage: React.FC = () => {
                                         <div className="rounded-lg border bg-slate-50 p-3">
                                           <div className="text-sm font-semibold text-slate-700">작업자 상세 ({site.siteName})</div>
                                           <div className="mt-2 overflow-auto">
-                                            <table className="w-full text-sm border-collapse">
+                                            <table className="team-settlement-page__worker-detail w-full text-sm border-collapse" aria-label={`작업자 상세 (${site.siteName})`}>
                                               <thead>
                                                 <tr className="bg-white text-slate-600">
+                                                  <th scope="col" className="text-left px-2 py-2 border">날짜</th>
                                                   <th scope="col" className="text-left px-2 py-2 border">작업자</th>
                                                   <th scope="col" className="text-left px-2 py-2 border">소속팀</th>
                                                   <th scope="col" className="text-right px-2 py-2 border">공수</th>
@@ -2933,7 +2936,8 @@ export const TeamSettlementPage: React.FC = () => {
                                                 {workerSummaries.map((w) => {
                                                   const avgUnit = safeAverage(w.amount, w.manDay);
                                                   return (
-                                                    <tr key={`${siteKey}__${w.workerName}__${w.workerTeamName}`} className="bg-white">
+                                                    <tr key={JSON.stringify([siteKey, w.date, w.workerName, w.workerTeamName])} className="bg-white">
+                                                      <td data-label="날짜" className="px-2 py-2 border">{w.date || '-'}</td>
                                                       <td data-label="작업자" className="px-2 py-2 border">{w.workerName}</td>
                                                       <td data-label="소속팀" className="px-2 py-2 border">{w.workerTeamName}</td>
                                                       <td data-label="공수" className="px-2 py-2 border text-right">{formatManDay1(w.manDay)}</td>
