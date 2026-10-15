@@ -10,6 +10,7 @@ import 'react-datepicker/dist/react-datepicker.css';
 import { companyService, Company } from '../../services/companyService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { TerminationCertificateTemplate } from '../../components/hr';
+import CertificatePreview, { CertificateMobileTabs } from '../../components/hr/CertificatePreview';
 
 const PageContainer = styled.div`
   display: flex;
@@ -39,18 +40,6 @@ const Sidebar = styled.div`
     width: 100%;
     flex: 0 0 auto;
   }
-`;
-
-const PreviewArea = styled.div`
-  flex: 1;
-  padding: 40px;
-  overflow-y: auto;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  background-color: #525659;
-  border-radius: 16px;
-  min-width: 0;
 `;
 
 const HeaderCard = styled.div`
@@ -364,6 +353,7 @@ const TerminationCertificatePage: React.FC = () => {
   const [serviceDescription, setServiceDescription] = useState('건설현장 시스템비계 및 해체');
   const [purpose, setPurpose] = useState('퇴직용');
   const [includeStamp, setIncludeStamp] = useState(true);
+  const [mobilePreview, setMobilePreview] = useState(false);
 
   const componentRef = useRef<HTMLDivElement>(null);
 
@@ -462,8 +452,8 @@ const TerminationCertificatePage: React.FC = () => {
   };
 
   return (
-    <PageContainer>
-      <Sidebar>
+    <PageContainer className="certificate-workspace" data-mobile-preview={mobilePreview}>
+      <Sidebar className="certificate-sidebar">
         <HeaderCard>
           <HeaderContent>
             <HeaderIcon>
@@ -474,9 +464,10 @@ const TerminationCertificatePage: React.FC = () => {
               <HeaderSubtitle>Termination Certificate</HeaderSubtitle>
             </div>
           </HeaderContent>
+          <CertificateMobileTabs preview={mobilePreview} onChange={setMobilePreview} />
         </HeaderCard>
 
-        <SettingsCard>
+        <SettingsCard className="certificate-settings">
           <SectionHeader>발급 설정</SectionHeader>
 
           <FormGroup>
@@ -621,8 +612,12 @@ const TerminationCertificatePage: React.FC = () => {
         </SettingsCard>
       </Sidebar>
 
-      <PreviewArea>
-        <div style={{ boxShadow: '0 0 20px rgba(0,0,0,0.3)' }}>
+      <CertificatePreview
+        targetRef={componentRef}
+        disabled={!selectedWorker || !currentCompany || loading}
+        title={`해촉증명서_${sanitizeCertificateName(selectedWorker?.name) || '미지정'}_${format(issueDate, 'yyyyMMdd')}`}
+        documentKey={JSON.stringify([currentCompany, selectedWorker, issueDate, serviceStartDate, serviceEndDate, serviceDescription, purpose, includeStamp])}
+      >
           <TerminationCertificateTemplate
             ref={componentRef}
             company={currentCompany}
@@ -634,8 +629,7 @@ const TerminationCertificatePage: React.FC = () => {
             purpose={purpose}
             includeStamp={includeStamp}
           />
-        </div>
-      </PreviewArea>
+      </CertificatePreview>
     </PageContainer>
   );
 };

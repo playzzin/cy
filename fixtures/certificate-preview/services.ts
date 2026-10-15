@@ -1,0 +1,4 @@
+// Synthetic browser fixtures only. No Firebase connection or personal data.
+export const companyService = { getCompanies: async () => [{ id: 'fixture-company', name: '청연 테스트', type: '시공사', ceoName: '테스트대표', address: '테스트 주소', businessNumber: '000-00-00000', phone: '000-0000-0000', email: 'fixture@example.invalid' }] };
+export const manpowerService = { getWorkers: async () => [{ id: 'fixture-worker', name: '가상근로자', companyId: 'fixture-company', address: '검증용 주소', teamName: '검증팀', createdAt: new Date('2025-01-01') }] };
+export const useDocumentStamp = () => `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><circle cx="40" cy="40" r="36" fill="none" stroke="red" stroke-width="3"/><text x="40" y="45" text-anchor="middle" fill="red" font-size="16">검증</text></svg>')}`;
