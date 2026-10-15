@@ -1,11 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { ChevronLeft, ChevronRight, Download, FileSpreadsheet, Plus, RefreshCw, Save, Wrench } from 'lucide-react';
 import type { Vehicle } from '../../types/vehicle';
 import { getSupportManagementYearMonth, rememberSupportManagementYearMonth, subscribeSupportManagementYearMonth } from '../../utils/supportManagementState';
 import { useIssueNavigationGuard } from '../../pages/taxinvoice/useIssueNavigationGuard';
 import { vehicleRepairService } from './service';
-import { classifyRepairImport, COST_KEYS, COST_LABELS, CostKey, emptyCosts, formatRepairAmount, matchRepairVehicles, parseRepairWorkbook, RepairRecord, repairIssues, repairTotal } from './model';
+import { classifyRepairImport, COST_KEYS, COST_LABELS, CostKey, emptyCosts, formatRepairAmount, matchRepairVehicles, parseRepairWorkbook, RepairRecord, repairReviewNotes, repairTotal, savedRepairRecord } from './model';
+import { changeDraftAmount, createRepairDraft, hasRepairDraftChanges, invalidDraftAmounts, parseRepairAmountInput, RepairDraft, repairDraftIssues } from './draft';
 import './VehicleRepairLedger.css';
 
 const errorText = (error: unknown) => String((error as { code?: string })?.code ?? '').includes('permission-denied')
@@ -27,14 +28,15 @@ function exportCsv(rows: RepairRecord[]) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function AmountInput({ value, label, disabled, onChange }: { value: number | null; label: string; disabled: boolean; onChange: (value: number | null) => void }) {
-  const [text, setText] = useState(value === null ? '' : formatRepairAmount(value));
-  const focused = useRef(false);
-  useEffect(() => { if (!focused.current) setText(value === null ? '' : formatRepairAmount(value)); }, [value]);
-  return <input type="text" inputMode="decimal" aria-label={label} disabled={disabled} value={text} placeholder="—"
-    onFocus={event => { focused.current = true; setText(value === null ? '' : String(value)); event.target.select(); }}
-    onChange={event => { const raw = event.target.value; const cleaned = raw.replace(/,/g, '').trim(); setText(raw); onChange(cleaned === '' ? null : /^\d+(\.\d{0,2})?$/.test(cleaned) ? Number(cleaned) : NaN); }}
-    onBlur={() => { focused.current = false; if (value === null || Number.isFinite(value)) setText(value === null ? '' : formatRepairAmount(value)); }} />;
+function AmountInput({ value, raw, label, disabled, onChange }: { value: number | null; raw?: string; label: string; disabled: boolean; onChange: (value: string) => void }) {
+  const [focused, setFocused] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => { if (focused) inputRef.current?.select(); }, [focused]);
+  const invalid = raw !== undefined && !parseRepairAmountInput(raw).valid;
+  const text = invalid ? raw : focused ? raw ?? (value === null ? '' : String(value)) : value === null ? '' : formatRepairAmount(value);
+  return <input ref={inputRef} type="text" inputMode="decimal" aria-label={label} aria-invalid={invalid} disabled={disabled} value={text} placeholder="—"
+    onFocus={() => setFocused(true)}
+    onChange={event => onChange(event.target.value)} onBlur={() => setFocused(false)} />;
 }
 
 type Props = { vehicles: Vehicle[]; onBeforeLeaveChange?: (guard: (() => boolean) | null) => void };
@@ -51,7 +53,7 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
   const [status, setStatus] = useState('active');
   const [page, setPage] = useState(1);
   const [sticky, setSticky] = useState(false);
-  const [drafts, setDrafts] = useState<Record<string, RepairRecord>>({});
+  const [drafts, setDrafts] = useState<Record<string, RepairDraft>>({});
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [focusId, setFocusId] = useState('');
   const [preview, setPreview] = useState<RepairRecord[] | null>(null);
@@ -59,7 +61,9 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
   const fileInput = useRef<HTMLInputElement>(null);
   const lock = useRef(false);
   const loadSequence = useRef(0);
-  const draftCount = Object.keys(drafts).length;
+  const changedDrafts = useMemo(() => Object.values(drafts).filter(hasRepairDraftChanges), [drafts]);
+  const changedIds = useMemo(() => new Set(changedDrafts.map(draft => draft.record.id)), [changedDrafts]);
+  const draftCount = changedDrafts.length;
   const pending = useRef({ dirty: false, busy: false });
   pending.current = { dirty: draftCount > 0, busy };
 
@@ -67,15 +71,16 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
     if (pending.current.busy) { window.alert('저장이 끝난 후 이동해 주세요.'); return false; }
     if (pending.current.dirty && !window.confirm('저장하지 않은 정비내역이 있습니다. 변경사항을 취소하고 이동할까요?')) return false;
     pending.current.dirty = false;
-    setDrafts({}); setRowErrors({});
+    setDrafts({}); setRowErrors({}); setError('');
     return true;
   }, []);
   useIssueNavigationGuard(draftCount > 0 || busy, canLeave);
   useEffect(() => { onBeforeLeaveChange?.(canLeave); return () => onBeforeLeaveChange?.(null); }, [onBeforeLeaveChange, canLeave]);
 
   const refresh = async () => {
+    if (pending.current.dirty) return;
     const sequence = ++loadSequence.current;
-    setLoading(true); setError('');
+    setLoading(true); setError(''); setDrafts({}); setRowErrors({});
     try { const next = await vehicleRepairService.list(); if (sequence === loadSequence.current) setRecords(next); }
     catch (error) { if (sequence === loadSequence.current) setError(errorText(error)); }
     finally { if (sequence === loadSequence.current) setLoading(false); }
@@ -100,10 +105,11 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
   };
   const filtered = useMemo(() => {
     const order = new Map(records.slice().sort((a, b) => (b.date || b.yearMonth).localeCompare(a.date || a.yearMonth) || a.id.localeCompare(b.id)).map((row, index) => [row.id, index]));
-    Object.values(drafts).filter(row => row.revision === 0).forEach((row, index) => order.set(row.id, -index - 1));
-    const rows = [...records.map(row => drafts[row.id] ?? row), ...Object.values(drafts).filter(row => row.revision === 0)];
+    const added = Object.values(drafts).map(draft => draft.record).filter(row => row.revision === 0);
+    added.forEach((row, index) => order.set(row.id, -index - 1));
+    const rows = [...records.map(row => drafts[row.id]?.record ?? row), ...added];
     return rows.filter(row => {
-      if (drafts[row.id]) return true; // Keep unsaved rows visible while their date or search fields change.
+      if (changedIds.has(row.id)) return true; // Keep unsaved rows visible while their date or search fields change.
       if (status === 'archived' ? !row.archived : row.archived) return false;
       if (status === 'review' && !row.issues.length) return false;
       if (!allPeriods && row.yearMonth !== yearMonth) return false;
@@ -111,7 +117,9 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
       const query = search.replace(/\s/g, '').toLowerCase();
       return !query || [row.vehiclePlate, row.description, row.driver, row.vendor, row.memo].some(value => value.replace(/\s/g, '').toLowerCase().includes(query));
     }).sort((a, b) => order.get(a.id)! - order.get(b.id)!);
-  }, [records, drafts, yearMonth, allPeriods, cost, search, status]);
+  }, [records, drafts, changedIds, yearMonth, allPeriods, cost, search, status]);
+  const invalidAmounts = useMemo(() => new Set(changedDrafts.filter(draft => invalidDraftAmounts(draft).length).map(draft => draft.record.id)), [changedDrafts]);
+  const hasInvalidAmounts = filtered.some(row => invalidAmounts.has(row.id));
   const totals = useMemo(() => COST_KEYS.reduce((result, key) => ({ ...result, [key]: Math.round(filtered.reduce((sum, row) => sum + (Number.isFinite(row.costs[key]) ? row.costs[key]! : 0), 0) * 100) / 100 }), {} as Record<CostKey, number>), [filtered]);
   const total = Math.round(COST_KEYS.reduce((sum, key) => sum + totals[key], 0) * 100) / 100;
   const pages = Math.max(1, Math.ceil(filtered.length / 50));
@@ -121,30 +129,40 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
 
   const updateRow = (row: RepairRecord, patch: Partial<RepairRecord>) => {
     if (lock.current) return;
-    if (!drafts[row.id] && draftCount >= 100) { setError('한 번에 100건까지 편집할 수 있습니다. 먼저 저장해 주세요.'); return; }
-    setDrafts(current => ({ ...current, [row.id]: { ...(current[row.id] ?? row), ...patch } }));
+    if (!changedIds.has(row.id) && draftCount >= 100) { setError('한 번에 100건까지 편집할 수 있습니다. 먼저 저장해 주세요.'); return; }
+    setDrafts(current => {
+      const draft = current[row.id] ?? createRepairDraft(row);
+      return { ...current, [row.id]: { ...draft, record: { ...draft.record, ...patch } } };
+    });
+    setRowErrors(current => { const next = { ...current }; delete next[row.id]; return next; });
+    setNotice('');
+  };
+  const updateAmount = (row: RepairRecord, key: CostKey, text: string) => {
+    if (lock.current || (!changedIds.has(row.id) && draftCount >= 100)) return;
+    setDrafts(current => ({ ...current, [row.id]: changeDraftAmount(current[row.id] ?? createRepairDraft(row), key, text) }));
     setRowErrors(current => { const next = { ...current }; delete next[row.id]; return next; });
     setNotice('');
   };
   const addRow = () => {
     if (lock.current || draftCount >= 100) return;
     const row = blankRecord(yearMonth);
-    setDrafts(current => ({ ...current, [row.id]: row })); setPage(1); setFocusId(row.id); setNotice('');
+    setDrafts(current => ({ ...current, [row.id]: createRepairDraft(row) })); setPage(1); setFocusId(row.id); setNotice('');
   };
   const undoRow = (id: string) => {
     setDrafts(current => { const next = { ...current }; delete next[id]; return next; });
     setRowErrors(current => { const next = { ...current }; delete next[id]; return next; });
+    setError('');
   };
   const save = async () => {
     if (lock.current || !draftCount) return;
-    const next = matchRepairVehicles(Object.values(drafts).map(row => ({ ...row, yearMonth: row.date.slice(0, 7) })), vehicles);
-    const errors = Object.fromEntries(next.map(row => [row.id, repairIssues(row).join(' · ')]).filter(([, value]) => value));
+    const next = matchRepairVehicles(changedDrafts.map(({ record }) => ({ ...record, yearMonth: record.date.slice(0, 7) })), vehicles);
+    const errors = Object.fromEntries(changedDrafts.map(draft => [draft.record.id, repairDraftIssues(draft).join(' · ')]).filter(([, value]) => value));
     setRowErrors(errors);
     if (Object.keys(errors).length) { const index = filtered.findIndex(row => errors[row.id]); setPage(Math.floor(Math.max(0, index) / 50) + 1); setError('표에 표시된 입력 항목을 확인해 주세요. 아직 저장되지 않았습니다.'); return; }
     lock.current = true; setBusy(true); setError('');
     try {
       await vehicleRepairService.saveRows(next);
-      const saved = new Map(next.map(row => [row.id, { ...row, issues: [], revision: row.revision + 1 }]));
+      const saved = new Map(next.map(row => [row.id, savedRepairRecord(row)]));
       setRecords(current => [...current.map(row => saved.get(row.id) ?? row), ...next.filter(row => row.revision === 0).map(row => saved.get(row.id)!)]);
       setDrafts({}); setRowErrors({}); setNotice(`${next.length}건의 정비내역을 저장했습니다.`);
     } catch (error) { setError(errorText(error)); }
@@ -187,7 +205,7 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
         {draftCount > 0 && <span className="repair-dirty">수정사항 {draftCount}건</span>}
       </div>
       <div className="repair-actions">
-        <div className="repair-toolbar-total"><span>{draftCount ? '입력 포함 합계' : '총 합계'}</span><strong>{formatRepairAmount(total)}<small>원</small></strong></div>
+        <div className="repair-toolbar-total"><span>{draftCount ? '입력 포함 합계' : '총 합계'}</span><strong>{hasInvalidAmounts ? '금액 확인 필요' : formatRepairAmount(total)}{!hasInvalidAmounts && <small>원</small>}</strong></div>
         <button type="button" onClick={() => void refresh()} disabled={busy || loading || draftCount > 0} aria-label="정비내역 새로고침"><RefreshCw size={16} /></button>
         <label className="repair-sticky-toggle"><input type="checkbox" checked={sticky} onChange={event => setSticky(event.target.checked)} /> 목록 고정</label>
         <button type="button" className="repair-export" onClick={() => exportCsv(filtered)} disabled={busy || loading || !filtered.length || draftCount > 0}><Download size={16} /> 엑셀용 CSV</button>
@@ -214,20 +232,20 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
         <thead><tr><th>정비일</th><th>차량번호</th><th>정비내용</th><th>운전자</th><th>정비업체</th>{COST_KEYS.map(key => <th className="repair-number" key={key}>{COST_LABELS[key]}{key === 'cheongyeon' && <small>VAT포함</small>}</th>)}<th className="repair-number">합계</th><th>비고</th><th>관리</th></tr></thead>
         <tbody>{loading ? <tr><td colSpan={12} className="repair-empty">정비내역을 불러오는 중입니다.</td></tr> : !visible.length ? <tr><td colSpan={12} className="repair-empty">{status === 'archived' ? '보관한 정비내역이 없습니다.' : '조회 조건에 맞는 정비내역이 없습니다. 행 추가로 입력하거나 전체 기간을 확인해 주세요.'}</td></tr> : visible.map((row, index) => {
           const label = `${(currentPage - 1) * 50 + index + 1}행`;
-          const disabled = busy || row.archived || (draftCount >= 100 && !drafts[row.id]);
-          return <tr key={row.id} className={`${drafts[row.id] ? 'repair-row-dirty' : ''} ${rowErrors[row.id] ? 'repair-row-error' : ''}`}>
+          const disabled = busy || row.archived || (draftCount >= 100 && !changedIds.has(row.id));
+          return <tr key={row.id} className={`${changedIds.has(row.id) ? 'repair-row-dirty' : ''} ${rowErrors[row.id] || invalidAmounts.has(row.id) ? 'repair-row-error' : ''}`}>
             <td><input id={`repair-date-${row.id}`} aria-label={`${label} 정비일`} type="date" value={row.date} disabled={disabled} onChange={event => updateRow(row, { date: event.target.value })} />{!row.date && row.originalDate && <small>원본: {row.originalDate}</small>}{row.issues.length > 0 && <span className="repair-review" title={row.issues.join(' · ')}>확인 필요</span>}{row.revision === 0 && <span className="repair-new">신규</span>}{rowErrors[row.id] && <span role="alert" className="repair-cell-error">{rowErrors[row.id]}</span>}</td>
             <td><input aria-label={`${label} 차량번호`} list="repair-vehicle-options" value={row.vehiclePlate} disabled={disabled} placeholder="차량번호 입력" onChange={event => updateRow(row, { vehiclePlate: event.target.value })} />{!row.vehicleId && row.revision > 0 && <small>과거 / 미연결 차량</small>}</td>
             <td><input aria-label={`${label} 정비내용`} value={row.description} title={row.description} disabled={disabled} placeholder="정비내용 입력" onChange={event => updateRow(row, { description: event.target.value })} />{row.source && <small>{row.source.sheet} · {row.source.cell}</small>}</td>
             <td><input aria-label={`${label} 운전자`} value={row.driver} disabled={disabled} placeholder="—" onChange={event => updateRow(row, { driver: event.target.value })} /></td>
             <td><input aria-label={`${label} 정비업체`} value={row.vendor} disabled={disabled} placeholder="업체 입력" onChange={event => updateRow(row, { vendor: event.target.value })} /></td>
-            {COST_KEYS.map(key => <td className="repair-number repair-cost-cell" key={key}><AmountInput value={row.costs[key]} label={`${label} ${COST_LABELS[key]} 금액`} disabled={disabled} onChange={value => updateRow(row, { costs: { ...row.costs, [key]: value } })} /></td>)}
-            <td className="repair-number repair-row-total">{Number.isFinite(repairTotal(row)) ? formatRepairAmount(repairTotal(row)) : '확인 필요'}</td>
-            <td><input aria-label={`${label} 비고`} value={row.memo} title={row.memo} disabled={disabled} placeholder="—" onChange={event => updateRow(row, { memo: event.target.value })} /></td>
-            <td>{drafts[row.id] ? <button type="button" disabled={busy} onClick={() => undoRow(row.id)}>{row.revision === 0 ? '행 취소' : '되돌리기'}</button> : <button type="button" disabled={busy || draftCount > 0} onClick={() => void archive(row)}>{row.archived ? '복원' : '보관'}</button>}</td>
+            {COST_KEYS.map(key => <td className="repair-number repair-cost-cell" key={key}><AmountInput value={row.costs[key]} raw={drafts[row.id]?.amountInputs[key]} label={`${label} ${COST_LABELS[key]} 금액`} disabled={disabled} onChange={text => updateAmount(row, key, text)} /></td>)}
+            <td className="repair-number repair-row-total">{invalidAmounts.has(row.id) ? '확인 필요' : formatRepairAmount(repairTotal(row))}</td>
+            <td><input aria-label={`${label} 비고`} value={row.memo} title={row.memo} disabled={disabled} placeholder="—" onChange={event => updateRow(row, { memo: event.target.value })} />{repairReviewNotes(drafts[row.id]?.original ?? row).length > 0 && <label className="repair-review-check"><input type="checkbox" aria-label={`${label} 비용 메모 확인 완료`} disabled={disabled} checked={repairReviewNotes(row).length === 0} onChange={event => updateRow(row, { issues: event.target.checked ? row.issues.filter(issue => !repairReviewNotes(row).includes(issue)) : Array.from(new Set([...row.issues, ...repairReviewNotes(drafts[row.id]?.original ?? row)])) })} />비용 메모 확인 완료</label>}</td>
+            <td>{changedIds.has(row.id) ? <button type="button" disabled={busy} onClick={() => undoRow(row.id)}>{row.revision === 0 ? '행 취소' : '되돌리기'}</button> : <button type="button" disabled={busy || draftCount > 0} onClick={() => void archive(row)}>{row.archived ? '복원' : '보관'}</button>}</td>
           </tr>;
         })}</tbody>
-        <tfoot><tr><th colSpan={5}>조회 내역 합계 ({filtered.length}건)</th>{COST_KEYS.map(key => <td className="repair-number" key={key}>{formatRepairAmount(totals[key])}</td>)}<td className="repair-number repair-total-cell">{formatRepairAmount(total)}</td><td colSpan={2}>{draftCount > 0 ? '저장 전 입력 포함' : '저장된 내역'}</td></tr></tfoot>
+        <tfoot><tr><th colSpan={5}>조회 내역 합계 ({filtered.length}건)</th>{COST_KEYS.map(key => <td className="repair-number" key={key}>{filtered.some(row => drafts[row.id] && invalidDraftAmounts(drafts[row.id]).includes(key)) ? '확인 필요' : formatRepairAmount(totals[key])}</td>)}<td className="repair-number repair-total-cell">{hasInvalidAmounts ? '확인 필요' : formatRepairAmount(total)}</td><td colSpan={2}>{draftCount > 0 ? '저장 전 입력 포함' : '저장된 내역'}</td></tr></tfoot>
       </table>
     </div>
     <div className="repair-footer"><span>표에서 바로 입력 · Tab 키로 다음 칸 이동</span><div><button type="button" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>이전</button><span>{currentPage} / {pages}</span><button type="button" disabled={currentPage >= pages} onClick={() => setPage(currentPage + 1)}>다음</button></div></div>

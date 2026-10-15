@@ -72,3 +72,22 @@ test('잘못된 행과 중복 ID는 서버 저장 전에 차단한다', async ()
   await expect(vehicleRepairService.saveRows([record(), record()])).rejects.toThrow('중복된');
   expect(runTransaction).not.toHaveBeenCalled();
 });
+
+test('운전자 수정으로 비용 메모의 확인 필요 표시가 사라지지 않는다', async () => {
+  const note = '개인 비용란 메모 확인';
+  const current = { ...record(), issues: [note] };
+  transaction.get.mockResolvedValue({ exists: () => true, data: () => ({ data: current }) });
+  await vehicleRepairService.save({ ...current, driver: '수정된 운전자' });
+  expect(transaction.set.mock.calls[0][1].data.issues).toContain(note);
+});
+
+test('저장 경계에서 소수 셋째 자리 금액을 거부한다', async () => {
+  transaction.get.mockResolvedValue({ exists: () => true, data: () => ({ data: record() }) });
+  await expect(vehicleRepairService.save({ ...record(), costs: { ...emptyCosts(), personal: 10.001 } })).rejects.toThrow('금액');
+  expect(transaction.set).not.toHaveBeenCalled();
+});
+
+test('잘못된 저장 데이터 형식은 화면 계산 오류 대신 조회 오류로 알린다', async () => {
+  (getDocs as jest.Mock).mockResolvedValue({ docs: [{ id: 'bad-data', data: () => ({ data: { ...record(), costs: { ...emptyCosts(), personal: '100원' } } }) }] });
+  await expect(vehicleRepairService.list()).rejects.toThrow('데이터 형식');
+});

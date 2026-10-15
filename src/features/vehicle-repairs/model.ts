@@ -26,6 +26,22 @@ export const emptyCosts = (): RepairCosts => ({ personal: null, joeun: null, che
 export const normalizePlate = (value: string) => value.replace(/[\s-]/g, '').toUpperCase();
 export const repairTotal = (row: Pick<RepairRecord, 'costs'>) => Math.round(COST_KEYS.reduce((total, key) => total + (row.costs[key] ?? 0), 0) * 100) / 100;
 export const formatRepairAmount = (amount: number | null) => amount === null ? '—' : amount.toLocaleString('ko-KR', { maximumFractionDigits: 2 });
+export const isValidRepairAmount = (amount: number) => Number.isFinite(amount) && amount >= 0
+  && Number.isSafeInteger(Math.round(amount * 100)) && Math.round(amount * 100) / 100 === amount;
+export const repairReviewNotes = (row: Pick<RepairRecord, 'issues'>) => row.issues.filter(issue => issue.endsWith('비용란 메모 확인'));
+export const savedRepairRecord = (row: RepairRecord): RepairRecord => ({ ...row, yearMonth: row.date.slice(0, 7), issues: repairReviewNotes(row), revision: row.revision + 1 });
+
+export function readRepairRecord(value: unknown, id: string): RepairRecord {
+  const row = value as RepairRecord | undefined;
+  const strings = ['date', 'yearMonth', 'originalDate', 'vehiclePlate', 'vehicleId', 'description', 'driver', 'vendor', 'memo'] as const;
+  const valid = row && strings.every(key => typeof row[key] === 'string')
+    && row.costs && COST_KEYS.every(key => row.costs[key] === null || (typeof row.costs[key] === 'number' && Number.isFinite(row.costs[key])))
+    && typeof row.archived === 'boolean' && Number.isSafeInteger(row.revision) && row.revision >= 0
+    && Array.isArray(row.issues) && row.issues.every(issue => typeof issue === 'string')
+    && (!row.source || (['fileName', 'sheet', 'cell', 'signature'] as const).every(key => typeof row.source![key] === 'string'));
+  if (!valid) throw new Error('저장된 정비내역의 데이터 형식을 확인해야 합니다. 다시 조회해도 계속되면 관리자에게 문의해 주세요.');
+  return { ...row, id };
+}
 const text = (value: unknown) => String(value ?? '').trim();
 export const isValidRepairDate = (value: string) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -40,7 +56,7 @@ export const repairIssues = (row: Pick<RepairRecord, 'date' | 'vehiclePlate' | '
   if (!row.vehiclePlate.trim()) issues.push('차량번호 확인 필요');
   if (!row.description.trim()) issues.push('정비내용 확인 필요');
   if (COST_KEYS.every(key => row.costs[key] === null)) issues.push('금액 확인 필요');
-  if (COST_KEYS.some(key => row.costs[key] !== null && (!Number.isFinite(row.costs[key]) || row.costs[key]! < 0))) issues.push('금액 형식 확인 필요');
+  if (COST_KEYS.some(key => row.costs[key] !== null && !isValidRepairAmount(row.costs[key]!))) issues.push('금액 형식 확인 필요 (0원 이상, 소수 둘째 자리까지)');
   return issues;
 };
 

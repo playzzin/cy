@@ -26,7 +26,7 @@
 .repair-filters label { display: flex; flex-direction: column; gap: 5px; font-size: 10px; font-weight: 700; color: #64748b; }
 .repair-filters select, .repair-filters input { width: 100%; min-height: 36px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 7px 9px; background: #f8fafc; color: #334155; font-size: 12px; }
 .repair-filters select { min-width: 100px; }
-.repair-filters .repair-period-active { color: #fff; background: #1e293b; border-color: #1e293b; }
+.repair-filters .repair-period-active, .repair-filters .repair-period-active:hover { color: #fff; background: #1e293b; border-color: #1e293b; }
 .repair-search { flex: 1; min-width: 200px; }
 .repair-count { color: #64748b; font-size: 11px; padding-bottom: 11px; white-space: nowrap; }
 .repair-table-wrap { width: 100%; overflow-x: auto; border: 1px solid #e0e7ff; border-radius: 16px; background: #fff; box-shadow: 0 8px 24px #4f46e508; }
@@ -83,3 +83,6 @@
 .repair-import-issues { background: #fffbeb; color: #92400e; font-size: 12px; padding: 10px; margin-top: 10px; max-height: 100px; overflow: auto; }
 @media (max-width: 800px) { .repair-toolbar { padding: 16px; } .repair-toolbar-title { gap: 12px; } .repair-toolbar h2 { font-size: 18px; } .repair-toolbar-total { flex-basis: 100%; } .repair-actions button { flex-grow: 1; } .repair-filters { padding: 12px; } }
 @media (max-width: 480px) { .repair-ledger { gap: 12px; } .repair-toolbar-title { align-items: flex-start; flex-direction: column; } .repair-filters label { flex: 1 1 35%; } .repair-filters .repair-search { flex-basis: 100%; } .repair-count { flex-basis: 100%; padding: 0; } .repair-dialog { padding: 18px; } }
+.repair-ledger tbody input[aria-invalid='true'] { border-color: #e11d48; background: #fff1f2; color: #9f1239; }
+.repair-review-check { display: flex; gap: 4px; align-items: center; margin: 5px; color: #92400e; font-size: 10px; line-height: 1.4; }
+.repair-ledger tbody .repair-review-check input { width: 14px; height: 14px; flex: 0 0 14px; padding: 0; accent-color: #4f46e5; }

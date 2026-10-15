@@ -1,6 +1,6 @@
 import { collection, doc, getDocs, query, runTransaction, serverTimestamp, where } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
-import { RepairRecord, repairIssues } from './model';
+import { readRepairRecord, RepairRecord, repairIssues, savedRepairRecord } from './model';
 
 // Uses the existing support write permission. Repairs are history, not billing mutations.
 const COLLECTION = 'support_shared_data';
@@ -25,7 +25,7 @@ async function saveRows(records: RepairRecord[]): Promise<void> {
       if (!current.exists() && row.revision !== 0) throw new Error('기록을 찾을 수 없습니다. 새로고침해 주세요.');
     });
     records.forEach(row => {
-      const data = { ...row, yearMonth: row.date.slice(0, 7), issues: [], revision: row.revision + 1 };
+      const data = savedRepairRecord(row);
       transaction.set(refFor(row.id), { kind: KIND, schemaVersion: 1, data, ...audit() });
     });
   });
@@ -34,7 +34,7 @@ async function saveRows(records: RepairRecord[]): Promise<void> {
 export const vehicleRepairService = {
   async list(): Promise<RepairRecord[]> {
     const snapshot = await getDocs(query(collection(db, COLLECTION), where('kind', '==', KIND)));
-    return snapshot.docs.map(snapshot => ({ ...snapshot.data().data, id: snapshot.id } as RepairRecord));
+    return snapshot.docs.map(snapshot => readRepairRecord(snapshot.data().data, snapshot.id));
   },
 
   save: (record: RepairRecord) => saveRows([record]),
