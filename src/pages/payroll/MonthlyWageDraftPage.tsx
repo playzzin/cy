@@ -1,37 +1,24 @@
 import { calculateWorkEntryTaxBreakdown, BUSINESS_INCOME_TAX_RATE, BUSINESS_RESIDENT_TAX_RATE } from './utils/workEntryTax';
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import styled from 'styled-components';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService, Company } from '../../services/companyService';
 import { siteService, Site } from '../../services/siteService';
-import { type PrimaryAccountSetting } from '../../services/primaryAccountService';
 import { usePagePrimaryAccount, ensurePagePrimaryAccountReady } from '../../hooks/usePagePrimaryAccount';
 import PagePrimaryAccountCard from '../../components/accounts/PagePrimaryAccountCard';
-
-import { AdvancePayment } from '../../services/advancePaymentService';
 import { statementOutputService } from '../../services/statementOutputService';
 import type { StatementOutputRecord } from '../../types/statementOutput';
 import { useAuth } from '../../contexts/AuthContext';
+import { buildPayrollPreviewCandidates } from '../../features/bank-transfer/payrollTransferSource';
+import { buildPayrollTransferDetail } from '../../features/bank-transfer/payrollTransferDetail';
+import { storeTransferHandoff } from '../../features/bank-transfer/transferHandoff';
+import type { TransferLoadResult } from '../../features/bank-transfer/types';
 import { PayrollReviewCenter } from './components/PayrollReviewCenter';
 import { reviewPayroll, reviewTransferTotals, type PayrollReviewRow } from './utils/payrollReview';
 import { resolveKBSalaryFilterFromPaymentId } from './utils/kbTransferExport';
-import {
-    isFinalizedMonthlyPayrollRun,
-    monthlyPayrollSettlementService,
-    type MonthlyPayrollSavedManualInput,
-    type MonthlyPayrollSettlement,
-    type MonthlyPayrollSettlementSaveInput,
-    type MonthlyPayrollRunStatus,
-} from '../../services/monthlyPayrollSettlementService';
-import {
-    payrollConfigService,
-    PayrollConfig,
-    PayrollDeductionItem,
-    PayrollInsuranceConfig,
-    DEFAULT_ADVANCE_ITEM_LABELS,
-} from '../../services/payrollConfigService';
+import { isFinalizedMonthlyPayrollRun, monthlyPayrollSettlementService, type MonthlyPayrollSavedManualInput, type MonthlyPayrollSettlement, type MonthlyPayrollSettlementSaveInput, type MonthlyPayrollRunStatus } from '../../services/monthlyPayrollSettlementService';
+import { payrollConfigService, PayrollConfig, PayrollInsuranceConfig, DEFAULT_ADVANCE_ITEM_LABELS } from '../../services/payrollConfigService';
 import * as XLSX from 'xlsx-js-style';
 import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -40,392 +27,28 @@ import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 import { PayslipTemplate } from './components/PayslipTemplate';
 import MonthlyAdvanceLedger from './components/MonthlyAdvanceLedger';
-import {
-    SimplePayrollClosingTable,
-    type SimplePayrollClosingRow,
-} from './components/SimplePayrollClosingTable';
-import type {
-    MonthlyAdvanceLedgerComputedAmount,
-    MonthlyAdvanceLedgerHandle,
-} from './components/MonthlyAdvanceLedger';
+import { SimplePayrollClosingTable, type SimplePayrollClosingRow } from './components/SimplePayrollClosingTable';
+import type { MonthlyAdvanceLedgerComputedAmount, MonthlyAdvanceLedgerHandle } from './components/MonthlyAdvanceLedger';
 import { PayrollToolbar } from './components/SimplePayrollToolbar';
 import './styles/MonthlyWageResponsive.css';
-import {
-    appendPayslipWorkbooksToZip,
-    buildPayslipWorkbook,
-    getPayslipWorkbookFileName,
-} from './utils/payslipWorkbook';
-import {
-    filterKBPaymentRows,
-    formatKBTransferMemo,
-    getKBAmountTypeLabel,
-    getKBSalaryModelFilterLabel,
-    getKBValidationErrorLabel,
-    summarizeKBTransferRows,
-    validateKBTransferRow,
-    type KBAmountType,
-    type KBSalaryModelFilter,
-    type KBTransferValidationError,
-} from './utils/kbTransferExport';
-import {
-    PAYSLIP_ISSUE_RULE_VERSION,
-    buildMonthlyPayslipSnapshot,
-    getPayslipIssueLabel,
-    validateMonthlyPayslipRows,
-    type PayslipIssueSummary,
-} from './utils/payslipIssue';
+import { appendPayslipWorkbooksToZip, buildPayslipWorkbook, getPayslipWorkbookFileName } from './utils/payslipWorkbook';
+import { filterKBPaymentRows, formatKBTransferMemo, getKBAmountTypeLabel, getKBSalaryModelFilterLabel, getKBValidationErrorLabel, summarizeKBTransferRows, validateKBTransferRow, type KBAmountType, type KBSalaryModelFilter } from './utils/kbTransferExport';
+import { PAYSLIP_ISSUE_RULE_VERSION, buildMonthlyPayslipSnapshot, getPayslipIssueLabel, validateMonthlyPayslipRows, type PayslipIssueSummary } from './utils/payslipIssue';
 import { filterRowsByWorkerName } from './utils/workerNameSearch';
 import { calculatePayslipPrintScale } from './utils/payslipPrintLayout';
-import {
-    makePayrollCalculationOptionsSignature,
-    resolveSavedPayrollCalculationOptions,
-} from './utils/payrollCalculationOptions';
-import {
-    filterPayslipRowsBySalaryModel,
-    resolvePayslipCalculationPolicy,
-    resolvePayslipSalaryModel,
-    type PayslipSalaryModelFilter,
-} from './utils/payslipSalaryModel';
+import { makePayrollCalculationOptionsSignature, resolveSavedPayrollCalculationOptions } from './utils/payrollCalculationOptions';
+import { filterPayslipRowsBySalaryModel, resolvePayslipCalculationPolicy, resolvePayslipSalaryModel, type PayslipSalaryModelFilter } from './utils/payslipSalaryModel';
 import { normalizePayrollBankKey, resolvePayrollBankCode } from './utils/payrollBankCode';
-
 import { usePayrollData } from './hooks/usePayrollData';
-import { PaymentData, MonthlyAdvanceLedgerRow, MonthlyAdvanceLedgerWorkEntry, LedgerManualInput, DeductionBreakdown, WorkerWorkEntry, DeductionLine, TaxRateSnapshot, LedgerUtilityInputLike, InsuranceAppliedSummary, InsuranceAppliedSiteSummary, InsuranceAppliedReason, WithholdingAppliedSummary, WithholdingAppliedSiteSummary, BusinessIncomeAppliedSummary, BusinessIncomeAppliedSiteSummary } from './types/payroll';
+import { PaymentData, MonthlyAdvanceLedgerRow, MonthlyAdvanceLedgerWorkEntry, LedgerManualInput, DeductionBreakdown, WorkerWorkEntry, DeductionLine, LedgerUtilityInputLike, InsuranceAppliedSiteSummary, WithholdingAppliedSiteSummary, BusinessIncomeAppliedSiteSummary } from './types/payroll';
 import { isLedgerManualInputUnchanged, resolveInitialLedgerManualInput } from './utils/advanceLedgerInput';
-import { BANK_CODES, STANDARD_DEDUCTION_FIELDS, WITHHOLDING_MAX_MAN_DAY } from './constants/payroll.constants';
+import { BANK_CODES, WITHHOLDING_MAX_MAN_DAY } from './constants/payroll.constants';
+import { ActionButton, ActionCluster, FieldCard, FieldLabel, KBPreviewCloseButton, KBPreviewControlsGrid, KBPreviewDescription, KBPreviewPanel, KBPreviewFieldCard, KBPreviewFieldLabel, KBPreviewFieldHint, KBPreviewFooter, KBPreviewHeader, KBPreviewInput, KBPreviewSelect, KBPreviewSummary, KBPreviewTable, KBPreviewTableArea, KBPreviewTitle, KBPreviewTitleBlock, KBPreviewTitleRow, MonthButton, MonthGrid, QuickRangeButton, QuickRangeGroup, SearchField, SegmentedButton, SegmentedGroup, SelectField, ToggleChipButton, ToggleChipGroup, ToolbarBadge, ToolbarCard, ToolbarCardBody, ToolbarCardDescription, ToolbarCardHeader, ToolbarCardTitle, ToolbarContainer, ToolbarGrid, ToolbarInline, ToolbarLead, ToolbarLeadMeta, ToolbarSectionDivider, YearButton, YearNavigator, YearText } from './MonthlyWageStyles';
+import { CUSTOM_PAYSLIP_CONTRACTOR_VALUE, DEFAULT_PAYSLIP_CONTRACTOR_NAME, DEFAULT_PAYSLIP_CONTRACTOR_OPTIONS, buildAdvanceLabelSet, buildDailyFeeDeductionLines, buildDeductionBreakdownFromRecords, buildDeductionLabelMapFromConfig, buildStandardDeductionLabelMap, buildUtilityDeductionLines, buildVisibleUtilityDeductionLines, buildWorkEntriesForLedgerRow, createEmptyDeductionBreakdown, ensureAdvanceLinesInBreakdown, extractLedgerTaxAmountsFromItem, floorWon, formatKBPrimaryAccountLabel, getTaxLinesForItem, isAppliedUtilityOrFeeLabel, isBusinessSectionTaxLabel, isInsuranceSectionTaxLabel, isWithholdingSectionTaxLabel, mergeDeductionBreakdownWithLines, normalizeLineLabel, rebuildDeductionBreakdown, resolveTaxLineRateText, resolveWithholdingDetailText, stripTemporaryDeductionLines, stripTemporaryTaxLines, sumBusinessSectionTax, sumInsuranceSectionTax, sumWithholdingSectionTax, toNumber } from './MonthlyWageModel';
+import type { KBExcludedTransferRow, KBPreviewSnapshot, KBPreviewSourceRow, KBTransferRow } from './MonthlyWageModel';
+export * from './MonthlyWageStyles';
+export * from './MonthlyWageModel';
 
-// --- Premium UI Styled Components ---
-const ToolbarContainer = styled.section`
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-bottom: 8px;
-    padding: 7px;
-    border-radius: 14px;
-    border: 1px solid #e2e8f0;
-    background:
-        radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 26%),
-        radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.12), transparent 30%),
-        linear-gradient(135deg, #f8fbff 0%, #f8fafc 52%, #ffffff 100%);
-    box-shadow: 0 18px 32px -24px rgba(15, 23, 42, 0.22);
-    overflow: hidden;
-
-    &::before {
-        content: '';
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        background: linear-gradient(120deg, rgba(255, 255, 255, 0.8), transparent 42%);
-    }
-`;
-
-const ToolbarLead = styled.div`
-    position: relative;
-    z-index: 1;
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: wrap;
-`;
-
-const ToolbarLeadMeta = styled.div`
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-    flex-wrap: wrap;
-`;
-
-const ToolbarBadge = styled.span`
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    min-height: 28px;
-    padding: 0 9px;
-    border-radius: 999px;
-    border: 1px solid #dbe4f0;
-    background: rgba(255, 255, 255, 0.96);
-    font-size: 14px;
-    font-weight: 700;
-    color: #334155;
-    backdrop-filter: blur(8px);
-`;
-
-const ToolbarGrid = styled.div`
-    position: relative;
-    z-index: 1;
-    display: grid;
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: 5px;
-
-    @media (max-width: 1280px) {
-        grid-template-columns: repeat(6, minmax(0, 1fr));
-    }
-
-    @media (max-width: 768px) {
-        grid-template-columns: repeat(1, minmax(0, 1fr));
-    }
-`;
-
-const ToolbarCard = styled.section<{ $span?: number }>`
-    position: relative;
-    grid-column: span ${props => props.$span ?? 4};
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    min-height: 100%;
-    padding: 7px;
-    border-radius: 9px;
-    border: 1px solid #e2e8f0;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.96) 100%);
-    box-shadow: 0 14px 30px -24px rgba(15, 23, 42, 0.2);
-    backdrop-filter: blur(14px);
-
-    @media (max-width: 1280px) {
-        grid-column: span 3;
-    }
-
-    @media (max-width: 768px) {
-        grid-column: span 1;
-    }
-`;
-
-const ToolbarCardHeader = styled.div`
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 6px;
-`;
-
-const ToolbarCardTitle = styled.h3`
-    margin: 0;
-    font-size: 15px;
-    font-weight: 800;
-    color: #0f172a;
-`;
-
-const ToolbarCardDescription = styled.p`
-    margin: 2px 0 0;
-    font-size: 12px;
-    line-height: 1.5;
-    color: #94a3b8;
-    display: none;
-`;
-
-const ToolbarCardBody = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-`;
-
-const ToolbarInline = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    flex-wrap: wrap;
-`;
-
-const ToolbarSectionDivider = styled.div`
-    width: 1px;
-    align-self: stretch;
-    background: linear-gradient(180deg, rgba(148, 163, 184, 0), rgba(148, 163, 184, 0.2), rgba(148, 163, 184, 0));
-`;
-
-const YearNavigator = styled.div`
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 2px;
-    border-radius: 10px;
-    background: #f8fafc;
-    border: 1px solid #dbe4f0;
-`;
-
-const YearButton = styled.button`
-    width: 22px;
-    height: 22px;
-    border: none;
-    border-radius: 7px;
-    background: transparent;
-    color: #475569;
-    cursor: pointer;
-    transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
-
-    &:hover {
-        background: #ffffff;
-        color: #0f172a;
-        transform: translateY(-1px);
-    }
-`;
-
-const YearText = styled.span`
-    min-width: 56px;
-    padding: 0 4px;
-    text-align: center;
-    font-size: 14px;
-    font-weight: 800;
-    color: #0f172a;
-`;
-
-const MonthGrid = styled.div`
-    display: grid;
-    grid-template-columns: repeat(12, minmax(36px, 1fr));
-    gap: 3px;
-    width: 100%;
-`;
-
-const MonthButton = styled.button<{ $active: boolean; $inRange: boolean }>`
-    height: 26px;
-    border: 1px solid ${props => (props.$active ? 'transparent' : props.$inRange ? '#bfdbfe' : '#e2e8f0')};
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 700;
-    color: ${props => (props.$active ? '#ffffff' : props.$inRange ? '#1e3a8a' : '#64748b')};
-    background: ${props => (props.$active
-        ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'
-        : props.$inRange
-            ? '#eff6ff'
-            : '#ffffff')};
-    box-shadow: ${props => (props.$active ? '0 12px 24px -16px rgba(37, 99, 235, 0.7)' : 'none')};
-    cursor: pointer;
-    transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
-
-    &:hover {
-        transform: translateY(-1px);
-        border-color: #93c5fd;
-    }
-`;
-
-const QuickRangeGroup = styled.div`
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px;
-    border-radius: 9px;
-    background: #fff7ed;
-    border: 1px solid rgba(251, 191, 36, 0.36);
-`;
-
-const QuickRangeButton = styled.button`
-    min-height: 28px;
-    padding: 0 8px;
-    border: none;
-    border-radius: 7px;
-    background: transparent;
-    font-size: 13px;
-    font-weight: 800;
-    color: #9a3412;
-    cursor: pointer;
-    transition: background 0.2s ease, color 0.2s ease;
-
-    &:hover {
-        background: rgba(255, 255, 255, 0.88);
-        color: #7c2d12;
-    }
-`;
-
-const SegmentedGroup = styled.div`
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 3px;
-    border-radius: 10px;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    flex-wrap: wrap;
-`;
-
-const SegmentedButton = styled.button<{ $active: boolean }>`
-    min-height: 32px;
-    padding: 0 10px;
-    border: 1px solid transparent;
-    border-radius: 7px;
-    background: ${props => (props.$active ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' : 'transparent')};
-    color: ${props => (props.$active ? '#ffffff' : '#64748b')};
-    font-size: 15px;
-    font-weight: 800;
-    cursor: pointer;
-    transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
-
-    &:hover {
-        transform: translateY(-1px);
-        color: ${props => (props.$active ? '#ffffff' : '#0f172a')};
-    }
-`;
-
-const SelectField = styled.select`
-    min-width: 120px;
-    min-height: 30px;
-    padding: 0 8px;
-    border-radius: 8px;
-    border: 1px solid #dbe3ee;
-    background: rgba(255, 255, 255, 0.95);
-    color: #0f172a;
-    font-size: 14px;
-    font-weight: 700;
-    outline: none;
-    cursor: pointer;
-`;
-
-const SearchField = styled.input`
-    min-width: 100px;
-    min-height: 30px;
-    padding: 0 8px;
-    border-radius: 8px;
-    border: 1px solid #dbe3ee;
-    background: rgba(255, 255, 255, 0.95);
-    color: #0f172a;
-    font-size: 14px;
-    font-weight: 600;
-    outline: none;
-
-    &::placeholder {
-        color: #94a3b8;
-    }
-`;
-
-const FieldCard = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 7px;
-    border-radius: 9px;
-    border: 1px solid rgba(226, 232, 240, 0.95);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.94) 100%);
-`;
-
-const FieldLabel = styled.span`
-    font-size: 12px;
-    font-weight: 800;
-    letter-spacing: 0.10em;
-    text-transform: uppercase;
-    color: #94a3b8;
-`;
-
-const ToggleChipGroup = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-`;
-
-const ToggleChipButton = styled.button<{ $active: boolean }>`
-    min-height: 32px;
-    padding: 0 8px;
-    border-radius: 999px;
-    border: 1px solid ${props => (props.$active ? 'rgba(37, 99, 235, 0.3)' : 'rgba(203, 213, 225, 0.95)')};
-    background: ${props => (props.$active ? 'rgba(59, 130, 246, 0.12)' : 'rgba(255, 255, 255, 0.92)')};
-    color: ${props => (props.$active ? '#1d4ed8' : '#475569')};
-    font-size: 15px;
-    font-weight: 800;
-    cursor: pointer;
-    transition: all 0.2s ease;
-
-    &:hover {
-        transform: translateY(-1px);
-    }
-`;
 void [
     ToolbarContainer,
     ToolbarLead,
@@ -456,944 +79,26 @@ void [
     ToggleChipButton,
 ];
 
-const ActionCluster = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    flex-wrap: wrap;
-`;
-
-const ActionButton = styled.button<{ $variant?: 'primary' | 'secondary' | 'danger' | 'success' | 'warning' | 'accent' | 'outline' }>`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    min-height: 36px;
-    padding: 0 10px;
-    border-radius: 8px;
-    border: 1px solid transparent;
-    font-size: 15px;
-    font-weight: 800;
-    cursor: pointer;
-    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease;
-
-    ${props => props.$variant === 'primary' && `
-        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-        color: white;
-        box-shadow: 0 16px 30px -22px rgba(37, 99, 235, 0.6);
-    `}
-    ${props => props.$variant === 'secondary' && `
-        background: linear-gradient(135deg, #334155 0%, #475569 100%);
-        color: white;
-        box-shadow: 0 16px 28px -22px rgba(15, 23, 42, 0.7);
-    `}
-    ${props => props.$variant === 'danger' && `
-        background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
-        color: white;
-    `}
-    ${props => props.$variant === 'success' && `
-        background: linear-gradient(135deg, #059669 0%, #047857 100%);
-        color: white;
-        box-shadow: 0 16px 30px -22px rgba(5, 150, 105, 0.7);
-    `}
-    ${props => props.$variant === 'warning' && `
-        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-        color: white;
-        box-shadow: 0 16px 30px -22px rgba(245, 158, 11, 0.72);
-    `}
-    ${props => props.$variant === 'accent' && `
-        background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
-        color: white;
-        box-shadow: 0 16px 30px -22px rgba(249, 115, 22, 0.72);
-    `}
-    ${props => props.$variant === 'outline' && `
-        background: rgba(255, 255, 255, 0.96);
-        border-color: rgba(203, 213, 225, 0.95);
-        color: #334155;
-    `}
-
-    &:hover:not(:disabled) {
-        transform: translateY(-1px);
-        box-shadow: 0 16px 36px -24px rgba(15, 23, 42, 0.35);
-    }
-
-    &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-        box-shadow: none;
-    }
-`;
-
-const KBPreviewOverlay = styled.div`
-    position: fixed;
-    inset: 0;
-    z-index: 50;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 16px;
-    background: rgba(2, 6, 23, 0.68);
-    backdrop-filter: blur(8px);
-`;
-
-const KBPreviewDialog = styled.div`
-    width: 100%;
-    max-width: 1180px;
-    max-height: 88vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    border-radius: 28px;
-    border: 1px solid rgba(71, 85, 105, 0.68);
-    background: linear-gradient(180deg, #020617 0%, #111827 100%);
-    box-shadow: 0 36px 80px -34px rgba(2, 6, 23, 0.92);
-`;
-
-const KBPreviewHeader = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-    padding: 22px;
-    border-bottom: 1px solid rgba(71, 85, 105, 0.42);
-    background:
-        radial-gradient(circle at top right, rgba(245, 158, 11, 0.16), transparent 24%),
-        linear-gradient(135deg, rgba(15, 23, 42, 0.98) 0%, rgba(17, 24, 39, 0.94) 100%);
-`;
-
-const KBPreviewTitleRow = styled.div`
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-`;
-
-const KBPreviewTitleBlock = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-`;
-
-const KBPreviewEyebrow = styled.span`
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: #f59e0b;
-`;
-
-const KBPreviewTitle = styled.h3`
-    margin: 0;
-    font-size: 22px;
-    font-weight: 800;
-    color: #f8fafc;
-`;
-
-const KBPreviewDescription = styled.p`
-    margin: 0;
-    font-size: 13px;
-    color: #94a3b8;
-`;
-
-const KBPreviewCloseButton = styled.button`
-    width: 42px;
-    height: 42px;
-    border: 1px solid rgba(71, 85, 105, 0.82);
-    border-radius: 14px;
-    background: rgba(15, 23, 42, 0.92);
-    color: #cbd5e1;
-    font-size: 24px;
-    cursor: pointer;
-    transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
-
-    &:hover {
-        background: rgba(30, 41, 59, 0.96);
-        color: #ffffff;
-        transform: translateY(-1px);
-    }
-`;
-
-const KBPreviewControlsGrid = styled.div`
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
-
-    @media (max-width: 960px) {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    @media (max-width: 640px) {
-        grid-template-columns: repeat(1, minmax(0, 1fr));
-    }
-`;
-
-const KBPreviewFieldCard = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 16px;
-    border-radius: 20px;
-    border: 1px solid rgba(51, 65, 85, 0.86);
-    background: linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(30, 41, 59, 0.92) 100%);
-`;
-
-const KBPreviewFieldLabel = styled.label`
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: #64748b;
-`;
-
-const KBPreviewFieldHint = styled.span`
-    font-size: 12px;
-    line-height: 1.45;
-    color: #94a3b8;
-`;
-
-const KBPreviewInput = styled.input`
-    width: 100%;
-    min-height: 46px;
-    padding: 0 14px;
-    border-radius: 14px;
-    border: 1px solid rgba(71, 85, 105, 0.88);
-    background: rgba(2, 6, 23, 0.72);
-    color: #f8fafc;
-    font-size: 14px;
-    font-weight: 700;
-    outline: none;
-
-    &::placeholder {
-        color: #64748b;
-    }
-`;
-
-const KBPreviewSelect = styled.select`
-    width: 100%;
-    min-height: 46px;
-    padding: 0 14px;
-    border-radius: 14px;
-    border: 1px solid rgba(71, 85, 105, 0.88);
-    background: rgba(2, 6, 23, 0.72);
-    color: #f8fafc;
-    font-size: 14px;
-    font-weight: 700;
-    outline: none;
-`;
-
-const KBPreviewTableArea = styled.div`
-    flex: 1;
-    overflow: auto;
-    padding: 20px 22px;
-    background: rgba(15, 23, 42, 0.78);
-`;
-
-const KBPreviewTable = styled.table`
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 14px;
-    color: #e2e8f0;
-`;
-
-const KBPreviewFooter = styled.div`
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-    padding: 18px 22px 22px;
-    border-top: 1px solid rgba(71, 85, 105, 0.42);
-    background: linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.96) 100%);
-`;
-
-const KBPreviewSummary = styled.span`
-    font-size: 14px;
-    color: #cbd5e1;
-`;
-
-const buildStandardDeductionLabelMap = (): Record<string, string> =>
-    STANDARD_DEDUCTION_FIELDS.reduce<Record<string, string>>((acc, { key, label }) => {
-        acc[key] = label;
-        return acc;
-    }, {});
-
-const buildDeductionLabelMapFromConfig = (items?: PayrollDeductionItem[]): Record<string, string> => {
-    const base = buildStandardDeductionLabelMap();
-    (items ?? []).forEach((item) => {
-        const safeId = item.id?.trim();
-        if (!safeId) return;
-        const safeLabel = item.label?.trim();
-        base[safeId] = safeLabel && safeLabel.length > 0 ? safeLabel : safeId;
-    });
-    return base;
-};
-
-const normalizeLineLabel = (value: string): string => String(value ?? '').replace(/\s+/g, '').trim();
-
-const buildAdvanceLabelSet = (config?: PayrollConfig | null): Set<string> => {
-    const labels = {
-        ...DEFAULT_ADVANCE_ITEM_LABELS,
-        ...(config?.advanceItemLabels ?? {}),
-    };
-
-    const set = new Set<string>([
-        normalizeLineLabel(labels.corporateAdvance1),
-        normalizeLineLabel(labels.corporateAdvance2),
-        normalizeLineLabel(labels.corporateAdvance3),
-        normalizeLineLabel(labels.corporateAdvance4),
-        normalizeLineLabel(labels.laborAdvance1),
-        normalizeLineLabel(labels.laborAdvance2),
-        normalizeLineLabel(labels.laborAdvance3),
-        normalizeLineLabel(labels.laborAdvance4),
-        'corporateAdvance1',
-        'corporateAdvance2',
-        'corporateAdvance3',
-        'corporateAdvance4',
-        'laborAdvance1',
-        'laborAdvance2',
-        'laborAdvance3',
-        'laborAdvance4',
-        'carrySecond',
-        'currentAdvance',
-        'currentAdvanceSecond',
-    ]);
-
-    set.delete('');
-    return set;
-};
-
-const createEmptyDeductionBreakdown = (): DeductionBreakdown => ({
-    standardLines: [],
-    additionalLines: [],
-    totalStandard: 0,
-    totalAdditional: 0,
-    total: 0,
-    hasData: false,
-});
-
-const rebuildDeductionBreakdown = (params: { standardLines: DeductionLine[]; additionalLines: DeductionLine[] }): DeductionBreakdown => {
-    const totalStandard = (params.standardLines ?? []).reduce((sum, line) => sum + toNumber(line?.amount), 0);
-    const totalAdditional = (params.additionalLines ?? []).reduce((sum, line) => sum + toNumber(line?.amount), 0);
-    const total = totalStandard + totalAdditional;
-    return {
-        standardLines: params.standardLines ?? [],
-        additionalLines: params.additionalLines ?? [],
-        totalStandard,
-        totalAdditional,
-        total,
-        hasData: (params.standardLines ?? []).length > 0 || (params.additionalLines ?? []).length > 0,
-    };
-};
-
-const TEMP_INSURANCE_PREFIX = '[4대보험]';
-const TEMP_BUSINESS_PREFIX = '[3.3%]';
-const TEMP_TAX_PREFIX = '[원천세]';
-const LEGACY_TAX_PREFIX = '[세금]';
-const TEMP_DAILY_FEE_PREFIX = '[수수료]';
-const DAILY_FEE_LABEL = `${TEMP_DAILY_FEE_PREFIX} 일급제 공수당`;
-
-const stripTemporaryDeductionLines = (breakdown: DeductionBreakdown): DeductionBreakdown => {
-    const safe = breakdown ?? createEmptyDeductionBreakdown();
-    const shouldKeepLine = (line: DeductionLine): boolean => {
-        const label = (line?.label ?? '').trim();
-        if (!label) return false;
-        return !(
-            label.startsWith(TEMP_INSURANCE_PREFIX)
-            || label.startsWith(TEMP_BUSINESS_PREFIX)
-            || label.startsWith(TEMP_TAX_PREFIX)
-            || label.startsWith(LEGACY_TAX_PREFIX)
-            || label.startsWith(TEMP_DAILY_FEE_PREFIX)
-            || label.startsWith('[3.0%]')
-            || label.startsWith('[0.3%]')
-        );
-    };
-    const standardLines = (safe.standardLines ?? []).filter(shouldKeepLine);
-    const additionalLines = (safe.additionalLines ?? []).filter(shouldKeepLine);
-    return rebuildDeductionBreakdown({ standardLines, additionalLines });
-};
-
-const stripTemporaryTaxLines = (breakdown: DeductionBreakdown | undefined): DeductionBreakdown => {
-    const safe = breakdown ?? createEmptyDeductionBreakdown();
-    const additionalLines = (safe.additionalLines ?? []).filter((line: DeductionLine) => {
-        const label = (line?.label ?? '').trim();
-        if (!label) return false;
-        return !(label.startsWith(TEMP_TAX_PREFIX) || label.startsWith(LEGACY_TAX_PREFIX) || label.startsWith(TEMP_BUSINESS_PREFIX) || label.startsWith(TEMP_INSURANCE_PREFIX) || label.startsWith('[3.0%]') || label.startsWith('[0.3%]'));
-    });
-    return rebuildDeductionBreakdown({ standardLines: [], additionalLines });
-};
-
-const floorWon = (value: number): number => Math.floor(toNumber(value));
-
-const toNumber = (value: unknown): number => {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string') {
-        const normalized = value.replace(/,/g, '').trim();
-        if (!normalized) return 0;
-        const parsed = Number(normalized);
-        return Number.isFinite(parsed) ? parsed : 0;
-    }
-    return 0;
-};
-
-const APPLIED_UTILITY_FIELDS: Array<{ key: keyof LedgerUtilityInputLike['invoice']; label: string }> = [
-    { key: 'lodging', label: '숙소비' },
-    { key: 'electricity', label: '전기세' },
-    { key: 'gas', label: '도시가스' },
-    { key: 'water', label: '수도세' },
-    { key: 'internet', label: '인터넷' },
-    { key: 'management', label: '관리비' },
-    { key: 'fine', label: '과태료' },
-    { key: 'other', label: '기타' },
-];
-
-// These are standard fields in 가불 및 공제 관리, but the integrated-payroll
-// ledger has no individual columns for them.  They are loaded into the ledger's
-// "기타" bucket, so remove the original source lines when applying ledger
-// deductions to prevent the same amount from being counted twice.
-const LEDGER_OTHER_SOURCE_LABELS = new Set(['개인방', '장갑', '보증금']);
-
-const LEDGER_DEFAULT_ASSIGNMENT: 'corporate' | 'labor' = 'corporate';
-
-const APPLIED_UTILITY_LABEL_SET = new Set(APPLIED_UTILITY_FIELDS.map((field) => field.label));
-
-const isAppliedUtilityOrFeeLabel = (labelRaw: string): boolean => {
-    const label = String(labelRaw ?? '').trim();
-    if (!label) return false;
-    return APPLIED_UTILITY_LABEL_SET.has(label)
-        || LEDGER_OTHER_SOURCE_LABELS.has(label)
-        || label.startsWith(TEMP_DAILY_FEE_PREFIX);
-};
-
-const isDailyWagePaymentItem = (item: Pick<PaymentData, 'id'>): boolean => String(item.id ?? '').endsWith('__일급제');
-
-const buildDailyFeeDeductionLines = (params: {
-    item: Pick<PaymentData, 'id' | 'totalManDay'>;
-    applyDailyFee: boolean;
-    dailyFeePerManDay: number;
-}): DeductionLine[] => {
-    if (!params.applyDailyFee) return [];
-    if (!isDailyWagePaymentItem(params.item)) return [];
-
-    const feePerManDay = Math.max(0, Math.floor(toNumber(params.dailyFeePerManDay)));
-    if (feePerManDay <= 0) return [];
-
-    const totalManDay = Math.max(0, toNumber(params.item.totalManDay));
-    if (totalManDay <= 0) return [];
-
-    return [{
-        label: DAILY_FEE_LABEL,
-        amount: floorWon(totalManDay * feePerManDay),
-    }];
-};
-
-const buildUtilityDeductionLines = (manual?: LedgerUtilityInputLike): DeductionLine[] => {
-    if (!manual) return [];
-
-    return APPLIED_UTILITY_FIELDS.reduce<DeductionLine[]>((acc, field) => {
-        const assignmentType = manual.assignmentType || LEDGER_DEFAULT_ASSIGNMENT;
-        const itemAssignments = manual.itemAssignments || {};
-
-        // 개별 항목 분류가 있으면 우선 적용하고, 없으면 행 기본 분류를 따른다.
-        const resolvedAssignment = itemAssignments[field.key] ?? assignmentType;
-        const shouldInclude = resolvedAssignment === 'labor';
-
-        if (!shouldInclude) return acc;
-
-        const amount = toNumber(manual?.invoice?.[field.key]) + toNumber(manual?.labor?.[field.key]);
-        if (amount === 0) return acc;
-        
-        acc.push({ label: field.label, amount });
-        return acc;
-    }, []);
-};
-
-const buildVisibleUtilityDeductionLines = (manual?: LedgerUtilityInputLike): DeductionLine[] => {
-    if (!manual) return [];
-
-    return APPLIED_UTILITY_FIELDS.reduce<DeductionLine[]>((acc, field) => {
-        const amount = toNumber(manual?.invoice?.[field.key]) + toNumber(manual?.labor?.[field.key]);
-        if (amount === 0) return acc;
-
-        acc.push({ label: field.label, amount });
-        return acc;
-    }, []);
-};
-
-const mergeDeductionBreakdownWithLines = (
-    breakdown: DeductionBreakdown | undefined,
-    lines: DeductionLine[]
-): DeductionBreakdown => {
-    const safe = breakdown ?? createEmptyDeductionBreakdown();
-    const standardLines = [...(safe.standardLines ?? [])].map((line) => ({
-        label: String(line.label ?? '').trim(),
-        amount: toNumber(line.amount),
-    }));
-    const additionalLines = [...(safe.additionalLines ?? [])].map((line) => ({
-        label: String(line.label ?? '').trim(),
-        amount: toNumber(line.amount),
-    }));
-
-    lines.forEach((line) => {
-        const label = String(line.label ?? '').trim();
-        const amount = toNumber(line.amount);
-        if (!label || amount === 0) return;
-
-        const standardIndex = standardLines.findIndex((existing) => existing.label === label);
-        if (standardIndex >= 0) {
-            standardLines[standardIndex] = {
-                ...standardLines[standardIndex],
-                amount: standardLines[standardIndex].amount + amount,
-            };
-            return;
-        }
-
-        const additionalIndex = additionalLines.findIndex((existing) => existing.label === label);
-        if (additionalIndex >= 0) {
-            additionalLines[additionalIndex] = {
-                ...additionalLines[additionalIndex],
-                amount: additionalLines[additionalIndex].amount + amount,
-            };
-            return;
-        }
-
-        standardLines.push({ label, amount });
-    });
-
-    return rebuildDeductionBreakdown({ standardLines, additionalLines });
-};
-
-const buildAdvanceDeductionLines = (
-    manual: LedgerUtilityInputLike | undefined,
-    config?: PayrollConfig | null
-): DeductionLine[] => {
-    if (!manual) return [];
-
-    const labels = {
-        ...DEFAULT_ADVANCE_ITEM_LABELS,
-        ...(config?.advanceItemLabels ?? {}),
-    };
-
-    const mapped: Array<{ label: string; amount: number }> = [
-        { label: labels.corporateAdvance1, amount: toNumber(manual.invoice?.carry) },
-        { label: labels.corporateAdvance2, amount: toNumber(manual.invoice?.carrySecond) },
-        { label: labels.corporateAdvance3, amount: toNumber(manual.invoice?.currentAdvance) },
-        { label: labels.corporateAdvance4, amount: toNumber(manual.invoice?.currentAdvanceSecond) },
-        { label: labels.laborAdvance1, amount: toNumber(manual.labor?.carry) },
-        { label: labels.laborAdvance2, amount: toNumber(manual.labor?.carrySecond) },
-        { label: labels.laborAdvance3, amount: toNumber(manual.labor?.currentAdvance) },
-        { label: labels.laborAdvance4, amount: toNumber(manual.labor?.currentAdvanceSecond) },
-    ];
-
-    return mapped
-        .filter((item) => String(item.label ?? '').trim().length > 0 && item.amount > 0)
-        .map((item) => ({ label: String(item.label).trim(), amount: item.amount }));
-};
-
-const ensureAdvanceLinesInBreakdown = (
-    breakdown: DeductionBreakdown,
-    manual: LedgerUtilityInputLike | undefined,
-    config?: PayrollConfig | null
-): DeductionBreakdown => {
-    const source = breakdown ?? createEmptyDeductionBreakdown();
-    const sourceLines = [
-        ...(source.standardLines ?? []),
-        ...(source.additionalLines ?? []),
-    ];
-    const advanceLabelSet = buildAdvanceLabelSet(config);
-    const hasAdvanceLines = sourceLines.some((line) => advanceLabelSet.has(normalizeLineLabel(String(line?.label ?? ''))));
-    if (hasAdvanceLines) return source;
-
-    const manualAdvanceLines = buildAdvanceDeductionLines(manual, config);
-    if (manualAdvanceLines.length === 0) return source;
-
-    return mergeDeductionBreakdownWithLines(source, manualAdvanceLines);
-};
-
-const TAX_LINE_BUSINESS_INCOME_PREFIX = '[3.0%]';
-const TAX_LINE_BUSINESS_RESIDENT_PREFIX = '[0.3%]';
-
-
-
-const formatRatePercent = (rate: number, maxFractionDigits: number = 3): string => {
-    if (!Number.isFinite(rate)) return '-';
-    const percent = rate * 100;
-    const text = percent.toLocaleString('ko-KR', {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: maxFractionDigits,
-    });
-    return `${text}%`;
-};
-
-const resolveTaxLineRateText = (lineLabel: string, snapshot?: TaxRateSnapshot): string => {
-    const label = String(lineLabel ?? '').trim();
-    if (!label) return '-';
-
-    const prefixed = label.match(/^\[(\d+(?:\.\d+)?)%\]/);
-    if (prefixed) return `${prefixed[1]}%`;
-
-    if (!snapshot) return '-';
-
-    if (label.startsWith(TEMP_INSURANCE_PREFIX)) {
-        if (label.includes('국민연금')) return formatRatePercent(snapshot.pensionRate, 2);
-        if (label.includes('건강보험')) return formatRatePercent(snapshot.healthRate, 3);
-        if (label.includes('장기요양')) return formatRatePercent(snapshot.careRateOfHealth ?? 0, 2);
-        if (label.includes('고용보험')) return formatRatePercent(snapshot.employmentRate, 3);
-    }
-
-    if (label.startsWith(TEMP_TAX_PREFIX) || label.startsWith(LEGACY_TAX_PREFIX)) {
-        const incomeRate = formatRatePercent(snapshot.incomeTaxRate, 2);
-        const residentRate = formatRatePercent(snapshot.residentTaxRate, 2);
-        if (label.includes('근로소득세') || label.includes('갑근세')) {
-            return incomeRate;
-        }
-        if (label.includes('지방소득세') || label.includes('지방세')) {
-            return residentRate;
-        }
-    }
-
-    if (label.includes('사업소득세')) return formatRatePercent(snapshot.businessIncomeTaxRate ?? BUSINESS_INCOME_TAX_RATE, 1);
-    if (label.includes('소득세')) return formatRatePercent(snapshot.businessResidentTaxRate ?? BUSINESS_RESIDENT_TAX_RATE, 1);
-
-    return '-';
-};
-
-const resolveWithholdingDetailText = (snapshot?: TaxRateSnapshot): string => {
-    const deduction = Math.max(0, Math.floor(toNumber(snapshot?.withholdingBaseDeduction ?? 150000))).toLocaleString('ko-KR');
-    const incomeRate = formatRatePercent(toNumber(snapshot?.incomeTaxRate ?? 0.06), 2);
-    const taxCredit = formatRatePercent(toNumber(snapshot?.withholdingIncomeBaseMultiplier ?? 0.55), 2);
-    const residentRate = formatRatePercent(toNumber(snapshot?.residentTaxRate ?? 0.1), 2);
-    return `상세: (단가-${deduction})×${incomeRate}×(1-${taxCredit}), 지방세=갑근세×${residentRate}`;
-};
-
-const getTaxLinesForItem = (item: PaymentData): DeductionLine[] => [
-    ...(item.taxBreakdown?.standardLines ?? []),
-    ...(item.taxBreakdown?.additionalLines ?? []),
-];
-
-const isInsuranceSectionTaxLabel = (labelRaw: string): boolean => {
-    const label = String(labelRaw ?? '').trim();
-    if (!label) return false;
-    return label.startsWith(TEMP_INSURANCE_PREFIX);
-};
-
-const isWithholdingSectionTaxLabel = (labelRaw: string): boolean => {
-    const label = String(labelRaw ?? '').trim();
-    if (!label) return false;
-    return label.startsWith(TEMP_TAX_PREFIX) || label.startsWith(LEGACY_TAX_PREFIX);
-};
-
-const isBusinessSectionTaxLabel = (labelRaw: string): boolean => {
-    const label = String(labelRaw ?? '').trim();
-    if (!label) return false;
-    return label.startsWith(TAX_LINE_BUSINESS_INCOME_PREFIX) || label.startsWith(TAX_LINE_BUSINESS_RESIDENT_PREFIX);
-};
-
-const sumInsuranceSectionTax = (item: PaymentData): number => {
-    const lines = getTaxLinesForItem(item);
-    return lines.reduce((sum, line) => {
-        return sum + (isInsuranceSectionTaxLabel(line.label) ? toNumber(line.amount) : 0);
-    }, 0);
-};
-
-const sumWithholdingSectionTax = (item: PaymentData): number => {
-    const lines = getTaxLinesForItem(item);
-    return lines.reduce((sum, line) => {
-        return sum + (isWithholdingSectionTaxLabel(line.label) ? toNumber(line.amount) : 0);
-    }, 0);
-};
-
-const sumBusinessSectionTax = (item: PaymentData): number => {
-    const lines = getTaxLinesForItem(item);
-    return lines.reduce((sum, line) => {
-        return sum + (isBusinessSectionTaxLabel(line.label) ? toNumber(line.amount) : 0);
-    }, 0);
-};
-
-const extractLedgerTaxAmountsFromItem = (
-    item: PaymentData
-): NonNullable<MonthlyAdvanceLedgerRow['statementTaxAmounts']> => {
-    const lines = getTaxLinesForItem(item);
-    const deductionLines: DeductionLine[] = [
-        ...(item.deductionBreakdown?.standardLines ?? []),
-        ...(item.deductionBreakdown?.additionalLines ?? []),
-    ];
-
-    let pension = 0;
-    let health = 0;
-    let care = 0;
-    let employment = 0;
-    let incomeTax = 0;
-    let residentTax = 0;
-    let businessIncomeTax = 0;
-    let businessResidentTax = 0;
-    let dailyFee = 0;
-
-    lines.forEach((line) => {
-        const label = String(line.label ?? '').trim();
-        const amount = toNumber(line.amount);
-        if (amount <= 0) return;
-
-        if (isInsuranceSectionTaxLabel(label)) {
-            if (label.includes('국민연금')) pension += amount;
-            else if (label.includes('건강보험')) health += amount;
-            else if (label.includes('장기요양')) care += amount;
-            else if (label.includes('고용보험')) employment += amount;
-            return;
-        }
-
-        if (isWithholdingSectionTaxLabel(label)) {
-            if (label.includes('지방세') || label.includes('지방소득세')) residentTax += amount;
-            else incomeTax += amount;
-            return;
-        }
-
-        if (isBusinessSectionTaxLabel(label)) {
-            if (label.includes('사업소득세')) businessIncomeTax += amount;
-            else businessResidentTax += amount;
-        }
-    });
-
-    deductionLines.forEach((line) => {
-        const label = String(line.label ?? '').trim();
-        if (!label.startsWith(TEMP_DAILY_FEE_PREFIX)) return;
-        dailyFee += toNumber(line.amount);
-    });
-
-    return {
-        pension,
-        health,
-        care,
-        employment,
-        incomeTax,
-        residentTax,
-        businessIncomeTax,
-        businessResidentTax,
-        dailyFee,
-        isWithholdingTarget:
-            (item.withholdingAppliedSummary?.appliedAmount ?? 0) > 0 || incomeTax + residentTax > 0,
-    };
-};
-
-const buildWorkEntriesForLedgerRow = (row: MonthlyAdvanceLedgerRow): WorkerWorkEntry[] => {
-    const normalizedEntries = (row.workEntries ?? [])
-        .map((entry: MonthlyAdvanceLedgerWorkEntry) => ({
-            date: (entry.date ?? row.month).trim() || row.month,
-            siteName: (entry.siteName ?? '').trim() || '-',
-            siteId: entry.siteId,
-            clientCompanyId: entry.clientCompanyId,
-            isLaborSite: Boolean(entry.isLaborSite),
-            manDay: toNumber(entry.manDay),
-            unitPrice: toNumber(entry.unitPrice),
-            paymentMethod: entry.paymentMethod,
-            amount:
-                toNumber(entry.amount) > 0
-                    ? toNumber(entry.amount)
-                    : floorWon(toNumber(entry.manDay) * toNumber(entry.unitPrice)),
-        }))
-        .filter((entry: WorkerWorkEntry) => toNumber(entry.manDay) > 0 || toNumber(entry.amount) > 0);
-
-    if (normalizedEntries.length > 0) return normalizedEntries;
-
-    const fallbackEntries: WorkerWorkEntry[] = [];
-    if (toNumber(row.invoiceManDay) > 0 || toNumber(row.invoiceGrossAmount) > 0) {
-        fallbackEntries.push({
-            date: row.month,
-            siteName: '계산서',
-            siteId: '__invoice',
-            clientCompanyId: '',
-            isLaborSite: false,
-            manDay: toNumber(row.invoiceManDay),
-            unitPrice: toNumber(row.unitPrice),
-            paymentMethod: '계산서',
-            amount: floorWon(toNumber(row.invoiceGrossAmount)),
-        });
-    }
-    if (toNumber(row.laborManDay) > 0 || toNumber(row.laborGrossAmount) > 0) {
-        fallbackEntries.push({
-            date: row.month,
-            siteName: '노무',
-            siteId: '__labor',
-            clientCompanyId: '',
-            isLaborSite: true,
-            manDay: toNumber(row.laborManDay),
-            unitPrice: toNumber(row.unitPrice),
-            paymentMethod: '노무',
-            amount: floorWon(toNumber(row.laborGrossAmount)),
-        });
-    }
-
-    return fallbackEntries;
-};
-
-const deduplicateAdvanceRecords = (records: AdvancePayment[]): AdvancePayment[] => {
-    const map = new Map<string, AdvancePayment>();
-    records.forEach((record) => {
-        const teamKey = (record.teamId ?? '').trim() || '__no_team__';
-        const currentScore = toNumber(record.totalDeduction);
-        const prev = map.get(teamKey);
-        const prevScore = toNumber(prev?.totalDeduction);
-        if (!prev || currentScore >= prevScore) {
-            map.set(teamKey, record);
-        }
-    });
-    return Array.from(map.values());
-};
-
-const buildDeductionBreakdownFromRecords = (
-    records: AdvancePayment[],
-    deductionLabelMap: Record<string, string> = {}
-): DeductionBreakdown => {
-    if (!records || records.length === 0) {
-        return createEmptyDeductionBreakdown();
-    }
-
-    const deduped = deduplicateAdvanceRecords(records);
-
-    const standardLines: DeductionLine[] = [];
-    STANDARD_DEDUCTION_FIELDS.forEach(({ key, label }) => {
-        const sum = deduped.reduce((acc, record) => acc + toNumber(record[key]), 0);
-        if (sum !== 0) {
-            standardLines.push({ label, amount: sum });
-        }
-    });
-
-    const additionalTotals = new Map<string, number>();
-    deduped.forEach((record) => {
-        Object.entries(record.items ?? {}).forEach(([itemLabel, rawAmount]) => {
-            const amount = toNumber(rawAmount);
-            if (amount === 0) return;
-            additionalTotals.set(itemLabel, (additionalTotals.get(itemLabel) ?? 0) + amount);
-        });
-    });
-
-    const additionalLines: DeductionLine[] = Array.from(additionalTotals.entries())
-        .map(([labelKey, amount]) => {
-            const friendlyLabel = deductionLabelMap[labelKey] ?? labelKey;
-            return { label: friendlyLabel, amount };
-        })
-        .sort((a, b) => b.amount - a.amount);
-
-    const totalStandard = standardLines.reduce((sum, line) => sum + line.amount, 0);
-    const totalAdditional = additionalLines.reduce((sum, line) => sum + line.amount, 0);
-    const total = totalStandard + totalAdditional;
-
-    return {
-        standardLines,
-        additionalLines,
-        totalStandard,
-        totalAdditional,
-        total,
-        hasData: standardLines.length > 0 || additionalLines.length > 0,
-    };
-};
-
 interface Props {
     hideHeader?: boolean;
+    transferPicker?: {
+        period: string;
+        onLoad: (result: TransferLoadResult) => void;
+        onInvalidate: () => void;
+        batchJob?: { teamId: string; salaryFilter: KBSalaryModelFilter; amountType: KBAmountType };
+        onError?: (message: string) => void;
+    };
 }
 
-type KBPreviewSourceRow = {
-    sourceRowId: string;
-    month: string;
-    teamName: string;
-    workerName: string;
-    salaryLabel: string;
-    bankCode: string;
-    bankName: string;
-    accountNumber: string;
-    accountHolder: string;
-    totalAmount: number;
-    invoiceNetAmount: number;
-    laborNetAmount: number;
-    invoiceAdvance: number;
-    laborAdvance: number;
-    corporateAdvance1: number;
-    corporateAdvance2: number;
-    corporateAdvance3: number;
-    corporateAdvance4: number;
-    laborAdvance1: number;
-    laborAdvance2: number;
-    laborAdvance3: number;
-    laborAdvance4: number;
-};
-
-type KBTransferRow = {
-    sourceRowId: string;
-    month: string;
-    teamName: string;
-    workerName: string;
-    salaryLabel: string;
-    bankCode: string;
-    bankCodeDisplay: string;
-    bankCodeUnmapped: boolean;
-    bankCodeNeedsFix: boolean;
-    bankCodeReason: string;
-    bankCodeCandidates: string;
-    bankName: string;
-    accountNumber: string;
-    accountHolder: string;
-    amount: number;
-    receiverDisplay: string;
-    senderMemo: string;
-    usesPrimaryAccount: boolean;
-    validationErrors: KBTransferValidationError[];
-};
-
-type KBExcludedTransferRow = {
-    sourceRowId: string;
-    month: string;
-    teamName: string;
-    workerName: string;
-    salaryLabel: string;
-    amount: number;
-    reason: string;
-};
-
-type KBPreviewCriteria = {
-    generatedAt: string;
-    rangeLabel: string;
-    teamLabel: string;
-    targetLabel: string;
-    salaryFilterLabel: string;
-    deductionStatusLabel: string;
-    amountTypeLabel: string;
-    sourceCount: number;
-    exportCount: number;
-    excludedCount: number;
-    totalAmount: number;
-};
-
-type KBPreviewSnapshot = {
-    createdAtIso: string;
-    primaryAccount: PrimaryAccountSetting | null;
-    sourceRows: KBPreviewSourceRow[];
-    rows: KBTransferRow[];
-    excludedRows: KBExcludedTransferRow[];
-    criteria: KBPreviewCriteria;
-};
-
-const formatKBPrimaryAccountLabel = (account: PrimaryAccountSetting): string => (
-    [
-        account.sourceName,
-        account.bankName,
-        account.accountNumber,
-        account.accountHolder ? `(${account.accountHolder})` : '',
-    ].filter(Boolean).join(' · ')
-);
-
-const DEFAULT_PAYSLIP_CONTRACTOR_NAME = '(주)청연이엔지';
-const DEFAULT_PAYSLIP_CONTRACTOR_OPTIONS = [
-    DEFAULT_PAYSLIP_CONTRACTOR_NAME,
-    '(주)다원',
-] as const;
-const CUSTOM_PAYSLIP_CONTRACTOR_VALUE = '__custom_contractor__';
-
-const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
+const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker }) => {
+    const transferPickerMode = Boolean(transferPicker);
     const { currentUser } = useAuth();
-    const [startMonth, setStartMonth] = useState<string>(new Date().toISOString().slice(0, 7)); // YYYY-MM
-    const [endMonth, setEndMonth] = useState<string>(new Date().toISOString().slice(0, 7)); // YYYY-MM
+    const [startMonth, setStartMonth] = useState<string>(transferPicker?.period ?? new Date().toISOString().slice(0, 7)); // YYYY-MM
+    const [endMonth, setEndMonth] = useState<string>(transferPicker?.period ?? new Date().toISOString().slice(0, 7)); // YYYY-MM
     const [yearCursor, setYearCursor] = useState<string>(new Date().toISOString().slice(0, 7)); // YYYY-MM
     const [monthSelectionMode, setMonthSelectionMode] = useState<'single' | 'range'>('single');
     const [rangeAnchorMonth, setRangeAnchorMonth] = useState<string>('');
-    const [selectedTeamId, setSelectedTeamId] = useState<string>('');
+    const [selectedTeamId, setSelectedTeamId] = useState<string>(transferPicker?.batchJob?.teamId ?? '');
     const [teamDropdownOpen, setTeamDropdownOpen] = useState<boolean>(false);
     const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
     
@@ -1414,6 +119,17 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
     const [bulkDisplayContent, setBulkDisplayContent] = useState<string>('월급');
     const [showKBPreview, setShowKBPreview] = useState<boolean>(false); // 국민은행용 미리보기
+    const kbPreviewTitleRef = useRef<HTMLHeadingElement>(null);
+    useEffect(() => {
+        if (!showKBPreview) return;
+        const previousFocus = document.activeElement as HTMLElement | null;
+        kbPreviewTitleRef.current?.focus({ preventScroll: true });
+        return () => {
+            requestAnimationFrame(() => {
+                if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+            });
+        };
+    }, [showKBPreview]);
     const [showPayslipModal, setShowPayslipModal] = useState<boolean>(false);
     const [selectedPayslipRowKey, setSelectedPayslipRowKey] = useState<string>(''); // 
     const [payslipSalaryModelFilter, setPayslipSalaryModelFilter] = useState<PayslipSalaryModelFilter>('all');
@@ -1432,7 +148,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [workerSearchText, setWorkerSearchText] = useState<string>('');
     const [filterMode, setFilterMode] = useState<'team' | 'worker'>('team');
     const [pageViewMode, setPageViewMode] = useState<'simple' | 'standard' | 'ledger'>('ledger');
-    const [ledgerSalaryModelFilter, setLedgerSalaryModelFilter] = useState<KBSalaryModelFilter>('all');
+    const [ledgerSalaryModelFilter, setLedgerSalaryModelFilter] = useState<KBSalaryModelFilter>(transferPicker?.batchJob?.salaryFilter ?? 'all');
     const [toolbarExpanded, setToolbarExpanded] = useState<boolean>(false);
     const [ledgerVisibleSections, setLedgerVisibleSections] = useState({
         utilities: false,
@@ -1440,7 +156,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         taxes: false,
     });
 
-    const [, setFiltersReady] = useState<boolean>(false);
+    const [filtersReady, setFiltersReady] = useState<boolean>(false);
+    const [filtersLoadError, setFiltersLoadError] = useState<string>('');
     const [, setDeductionLabelMap] = useState<Record<string, string>>(buildStandardDeductionLabelMap());
     const [payrollConfig, setPayrollConfig] = useState<PayrollConfig | null>(null);
     const [payrollConfigLoadError, setPayrollConfigLoadError] = useState<string | null>(null);
@@ -1470,6 +187,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [employmentApplyBelowThresholdInput, setEmploymentApplyBelowThresholdInput] = useState<boolean>(true);
 
     const [deductionApplyInProgress, setDeductionApplyInProgress] = useState(false);
+    const [deductionApplyError, setDeductionApplyError] = useState('');
+    const [completedCalculationSequence, setCompletedCalculationSequence] = useState(0);
 
     const [insuranceApplied, setInsuranceApplied] = useState<boolean>(false);
     const [insuranceTeamSiteOnly, setInsuranceTeamSiteOnly] = useState<boolean>(false);
@@ -1491,17 +210,32 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     }, [refetchPayrollData]);
     const [payrollSettlementFeedback, setPayrollSettlementFeedback] = useState<string>('');
     const payrollDataBlocked = loading || Boolean(loadError) || payrollSettlementLoading
-        || Boolean(payrollSettlementLoadError) || payrollConfigLoading || Boolean(payrollConfigLoadError) || !payrollConfig || deductionApplyInProgress;
+        || Boolean(payrollSettlementLoadError) || payrollConfigLoading || Boolean(payrollConfigLoadError) || !payrollConfig || deductionApplyInProgress
+        || (transferPickerMode && (!filtersReady || Boolean(filtersLoadError)));
     const ensurePayrollReady = useCallback(() => {
         if (!payrollDataBlocked) return true;
-        alert(loadError || payrollSettlementLoadError || payrollConfigLoadError || '급여 조회와 계산이 완료된 뒤 다시 시도해 주세요.');
+        alert(loadError || payrollSettlementLoadError || payrollConfigLoadError || filtersLoadError || '급여 조회와 계산이 완료된 뒤 다시 시도해 주세요.');
         return false;
-    }, [loadError, payrollConfigLoadError, payrollDataBlocked, payrollSettlementLoadError]);
+    }, [filtersLoadError, loadError, payrollConfigLoadError, payrollDataBlocked, payrollSettlementLoadError]);
     const advanceLedgerRef = useRef<MonthlyAdvanceLedgerHandle>(null);
     const [kbReceiverDisplay, setKbReceiverDisplay] = useState<string>('㈜다원');
     const [kbMemoSuffix, setKbMemoSuffix] = useState<string>('{이름} 가불');
-    const [kbAmountType, setKbAmountType] = useState<KBAmountType>('totalAmount');
+    const [kbAmountType, setKbAmountType] = useState<KBAmountType>(transferPicker?.batchJob?.amountType ?? 'totalAmount');
+    const [transferBatch, setTransferBatch] = useState<{ id: number; teams: Array<{ id: string; name: string }>; warnings: string[] } | null>(null);
+    const [transferBatchError, setTransferBatchError] = useState('');
+    const transferBatchSequence = useRef(0);
     const [kbPreviewSnapshot, setKbPreviewSnapshot] = useState<KBPreviewSnapshot | null>(null);
+    const [kbTransferError, setKbTransferError] = useState<string>('');
+    const transferInvalidateRef = useRef(transferPicker?.onInvalidate);
+    transferInvalidateRef.current = transferPicker?.onInvalidate;
+    useEffect(() => {
+        if (!transferPickerMode) return;
+        transferBatchSequence.current += 1;
+        setTransferBatch(null);
+        setTransferBatchError('');
+        transferInvalidateRef.current?.();
+    }, [transferPickerMode, startMonth, endMonth, selectedTeamId, ledgerSalaryModelFilter, kbAmountType,
+        insuranceApplied, insuranceTeamSiteOnly, businessIncomeApplied, utilitiesApplied, dailyFeeApplied, payrollReloadKey]);
     const [kbSelectedTransferRowIds, setKbSelectedTransferRowIds] = useState<Set<string>>(new Set());
     const [kbPrimaryAccountAppliedRowIds, setKbPrimaryAccountAppliedRowIds] = useState<Set<string>>(new Set());
     const [payslipOutputIds, setPayslipOutputIds] = useState<Record<string, string>>({});
@@ -1650,6 +384,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
     // Full-bleed: remove #main-content padding and lock overflow for internal scrolling
     useEffect(() => {
+        if (transferPickerMode) return;
         const mainContent = document.getElementById('main-content');
         if (mainContent) {
             const originalOverflow = mainContent.style.overflow;
@@ -1660,7 +395,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 mainContent.classList.remove('page-full-bleed');
             };
         }
-    }, []);
+    }, [transferPickerMode]);
     const printRef = useRef<HTMLDivElement>(null);
     const [payslipPrintRows, setPayslipPrintRows] = useState<PaymentData[]>([]);
     const [preparingPayslipPrint, setPreparingPayslipPrint] = useState<boolean>(false);
@@ -1908,6 +643,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
     useEffect(() => {
         let alive = true;
+        if (transferPickerMode) return;
         if (monthRange.length === 0) {
             setPayslipOutputIds({});
             return;
@@ -1932,7 +668,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         return () => {
             alive = false;
         };
-    }, [monthRange]);
+    }, [monthRange, transferPickerMode]);
 
     const rangeLabel = useMemo(() => {
         if (!startMonth || !endMonth) return '';
@@ -2278,6 +1014,15 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         return next;
     }, [loadedLedgerInputsFromAdvance, savedPayrollSettlements]);
 
+    // A result is ready only after the read-only ledger reports amounts for these exact inputs.
+    const transferLedgerToken = useMemo(() => ({}), [ledgerRows, payrollConfig, initialLedgerInputs,
+        insuranceApplied, insuranceTeamSiteOnly, businessIncomeApplied, utilitiesApplied, dailyFeeApplied, ledgerInputs]);
+    const [transferLedgerReadyToken, setTransferLedgerReadyToken] = useState<object | null>(null);
+    const handleTransferLedgerComputed = useCallback((rows: MonthlyAdvanceLedgerComputedAmount[]) => {
+        setLedgerComputedAmounts(rows);
+        setTransferLedgerReadyToken(transferLedgerToken);
+    }, [transferLedgerToken]);
+
     const activeLedgerRowKeySet = useMemo<Set<string>>(() => {
         const set = new Set<string>();
         ledgerRows.forEach((row) => {
@@ -2579,6 +1324,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     useEffect(() => {
         let mounted = true;
         const fetchInitialData = async () => {
+            setFiltersReady(false);
+            setFiltersLoadError('');
             try {
                 const [
                     fetchedTeams,
@@ -2599,7 +1346,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             } catch (error) {
                 if (!mounted) return;
                 console.error('Failed to load initial data:', error);
-                alert('초기 데이터를 불러오는 중 오류가 발생했습니다.');
+                setFiltersLoadError('급여 팀·작업자 정보를 불러오지 못했습니다. 다시 조회해 주세요.');
+                if (!transferPickerMode) alert('초기 데이터를 불러오는 중 오류가 발생했습니다.');
             } finally {
                 if (mounted) {
                     setFiltersReady(true);
@@ -2611,7 +1359,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         return () => {
             mounted = false;
         };
-    }, []);
+    }, [payrollReloadKey, transferPickerMode]);
 
     useEffect(() => {
         let mounted = true;
@@ -2694,12 +1442,14 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     }, []);
 
     const markApplyStarted = useCallback((seq: number) => {
+        setDeductionApplyError('');
         setDeductionApplyInProgress(true);
         clearApplyWatchdog();
         // 비정상 루프가 생겨도 오버레이가 영구 고정되지 않도록 최대 표시시간을 둔다.
         applyWatchdogRef.current = setTimeout(() => {
             if (applyRunSeqRef.current === seq) {
                 setDeductionApplyInProgress(false);
+                setDeductionApplyError('급여 공제 계산이 지연되고 있습니다. 다시 조회해 주세요.');
             }
             applyWatchdogRef.current = null;
         }, 15000);
@@ -2708,6 +1458,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const markApplyFinished = useCallback((seq: number) => {
         if (applyRunSeqRef.current !== seq) return;
         clearApplyWatchdog();
+        setCompletedCalculationSequence(seq);
         setDeductionApplyInProgress(false);
     }, [clearApplyWatchdog]);
 
@@ -2965,6 +1716,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 });
             } catch (error) {
                 console.error('Failed to apply calculated deductions:', error);
+                setDeductionApplyError('급여 공제 계산에 실패했습니다. 다시 조회해 주세요.');
                 markApplyFinished(runSeq);
             }
         }, delay);
@@ -2976,11 +1728,16 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         setPaymentData,
     ]);
 
-    const savedCalculationOptions = useMemo(() => resolveSavedPayrollCalculationOptions(
-        savedPayrollSettlements,
-        monthRangeSet,
-        selectedTeamId || undefined
-    ), [monthRangeSet, savedPayrollSettlements, selectedTeamId]);
+    const batchTeamId = transferPicker?.batchJob?.teamId;
+    const savedCalculationOptions = useMemo(() => {
+        const settlements = transferPickerMode ? savedPayrollSettlements.map(settlement => ({
+            ...settlement, teamId: resolveCanonicalTeamId(settlement.teamId) || settlement.teamId,
+        })) : savedPayrollSettlements;
+        return resolveSavedPayrollCalculationOptions(
+            batchTeamId === undefined ? settlements : settlements.filter(settlement => settlement.teamId === batchTeamId),
+            monthRangeSet, selectedTeamId || undefined,
+        );
+    }, [monthRangeSet, savedPayrollSettlements, selectedTeamId, batchTeamId, resolveCanonicalTeamId, transferPickerMode]);
 
     const appliedCalculationSourceRef = useRef<{
         data: typeof basePaymentData;
@@ -3559,10 +2316,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
         setTeams(filtered);
 
-        if (selectedTeamId && !filtered.some((t) => t.id === selectedTeamId)) {
+        if (batchTeamId === undefined && selectedTeamId && !filtered.some((t) => t.id === selectedTeamId)) {
             setSelectedTeamId('');
         }
-    }, [allTeams, companies, constructionCompanyIds, normalizeTeamName, selectedTeamId]);
+    }, [allTeams, companies, constructionCompanyIds, normalizeTeamName, selectedTeamId, batchTeamId]);
 
     useEffect(() => {
         if (filterMode !== 'team') return;
@@ -4198,6 +2955,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             const finalized = finalizedSnapshotByPaymentId.get(item.id);
             const advances = resolveKBAdvanceAmounts(item);
             const ledgerAmount = resolveLedgerComputedAmountForPaymentItem(item);
+            const display = rowDisplayCache.get(item.id);
             const salaryLabel = item.id.endsWith('__일급제')
                 ? '일급제'
                 : item.id.endsWith('__용역팀')
@@ -4215,6 +2973,13 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 accountNumber: item.accountNumber,
                 accountHolder: item.accountHolder,
                 totalAmount: resolveDisplayTotalAmount(item),
+                payrollDetail: buildPayrollTransferDetail({
+                    ...item,
+                    totalAmount: resolveDisplayTotalAmount(item),
+                    totalDeduction: display?.totalDeductionForDisplay ?? item.totalDeduction,
+                    deductionBreakdown: display?.deductionBreakdownForDisplay ?? item.deductionBreakdown,
+                    taxBreakdown: display ? { standardLines: display.taxLinesForItem, additionalLines: [] } : item.taxBreakdown,
+                }, { salaryLabel, amountBasis: '현재 화면 실지급액', originalAmount: resolveDisplayTotalAmount(item), isFinalized: Boolean(finalized) }),
                 invoiceNetAmount: finalized
                     ? toNumber(finalized.row.invoiceNetAmount)
                     : ledgerAmount
@@ -4353,6 +3118,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 senderMemo: formatKBTransferMemo(memoSuffix, sourceRow.workerName),
                 usesPrimaryAccount,
                 validationErrors,
+                payrollDetail: sourceRow.payrollDetail ? { ...sourceRow.payrollDetail, amountBasis: getKBAmountTypeDisplayLabel(amountType), originalAmount: amount } : undefined,
             });
         });
 
@@ -4704,6 +3470,28 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         && kbPreviewRows.every((row) => kbSelectedTransferRowIds.has(row.sourceRowId));
     const kbAppliedPrimaryAccountCount = kbPreviewRows.filter((row) => row.usesPrimaryAccount).length;
     const canDownloadKBExcel = !payrollDataBlocked && Boolean(kbPreviewSnapshot && kbPreviewValidRows.length > 0);
+
+    const handleAddKBPreviewToTransfer = () => {
+        setKbTransferError('');
+        const userId = currentUser?.uid;
+        if (!userId) {
+            setKbTransferError('로그인 후 송금 목록에 담아 주세요.');
+            return;
+        }
+        if (!ensurePayrollReady() || !kbPreviewSnapshot || kbPreviewRows.length === 0) return;
+        if (kbPreviewRows.some(row => row.usesPrimaryAccount) && !ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
+        try {
+            storeTransferHandoff(userId, buildPayrollPreviewCandidates(
+                kbPreviewRows,
+                kbAmountType,
+                kbPreviewSnapshot.criteria.amountTypeLabel,
+            ));
+        } catch (error) {
+            setKbTransferError(error instanceof Error ? error.message : '송금 목록에 담지 못했습니다. 다시 시도해 주세요.');
+            return;
+        }
+        window.location.assign('/payroll/bank-transfer?import=payroll');
+    };
 
     const toggleKBPreviewRowSelection = (sourceRowId: string) => {
         setKbSelectedTransferRowIds((current) => {
@@ -5322,6 +4110,126 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     ) / 100;
     const dailyWorkerFeePerManDayView = Math.max(0, Math.floor(toNumber(insuranceConfigView?.dailyWorkerFeePerManDay ?? 0)));
 
+    if (transferPicker) {
+        const scopedSaved = savedPayrollSettlements.filter(settlement => monthRangeSet.has(settlement.yearMonth));
+        const mixedCalculationOptions = !transferPicker.batchJob && !selectedTeamId && new Set(scopedSaved.filter(settlement => settlement.runStatus !== 'paid').map(settlement => (
+            makePayrollCalculationOptionsSignature(resolveSavedPayrollCalculationOptions([settlement], monthRangeSet)!)
+        ))).size > 1;
+        const scopeKeyFor = (month: string, teamId: string) => `${month}::${resolveCanonicalTeamId(teamId) || teamId}`;
+        const paidScopes = new Set(scopedSaved.filter(settlement => settlement.runStatus === 'paid')
+            .map(settlement => scopeKeyFor(settlement.yearMonth, settlement.teamId)));
+        const paidIds = new Set(kbSourcePaymentData.filter(item => paidScopes.has(scopeKeyFor(item.month, item.teamId))).map(item => item.id));
+        const currentCalculationApplied = appliedCalculationSourceRef.current?.data === basePaymentData
+            && appliedCalculationSourceRef.current?.config === payrollConfig
+            && appliedCalculationSourceRef.current?.calculate === applyCalculatedDeductions
+            && completedCalculationSequence > 0 && completedCalculationSequence === applyRunSeqRef.current;
+        const transferError = loadError || payrollSettlementLoadError || payrollConfigLoadError || filtersLoadError || deductionApplyError;
+        const transferReady = !payrollDataBlocked && !transferError && currentCalculationApplied
+            && transferLedgerReadyToken === transferLedgerToken && ledgerComputedAmounts.length === ledgerRows.length
+            && startMonth === transferPicker.period && endMonth === transferPicker.period;
+        const availableCount = kbSourcePaymentData.length - paidIds.size;
+        const changeDeductions = (changes: Partial<Parameters<typeof applyCalculatedDeductions>[0]>) => {
+            applyCalculatedDeductions({
+                applyInsurance: insuranceApplied, applyInsuranceTeamSiteOnly: insuranceTeamSiteOnly,
+                applyBusinessIncome: businessIncomeApplied, applyUtilities: true, applyDailyFee: dailyFeeApplied,
+                ...changes, immediate: true,
+            });
+        };
+        const collectTransferPayroll = (): TransferLoadResult => {
+            const scopedIds = transferPicker.batchJob ? new Set(kbSourcePaymentData
+                .filter(item => (resolveCanonicalTeamId(item.teamId) || item.teamId || '') === transferPicker.batchJob!.teamId)
+                .map(item => item.id)) : null;
+            const sourceRows = buildKBPreviewSourceRows().filter(row => !paidIds.has(row.sourceRowId) && (!scopedIds || scopedIds.has(row.sourceRowId)));
+            const { rows, excludedRows } = buildKBTransferRowsFromSources(sourceRows, kbAmountType, '', '', new Set());
+            const warnings: string[] = [];
+            if (paidIds.size > 0) warnings.push(`지급완료된 급여 ${paidIds.size}건은 송금 대상에서 제외했습니다.`);
+            if (excludedRows.length > 0) warnings.push(`선택한 금액 기준에서 0원 이하인 ${excludedRows.length}건은 제외했습니다.`);
+            if (sourceRows.length === 0 && paidIds.size === 0) warnings.push('선택한 월·팀·급여 구분의 급여 내역이 없습니다.');
+            if (rows.some(row => row.validationErrors.length > 0)) warnings.push('계좌 정보가 누락된 급여는 송금 목록에 담은 뒤 계좌를 선택해 주세요.');
+            const candidates = buildPayrollPreviewCandidates(rows, kbAmountType, getKBAmountTypeDisplayLabel(kbAmountType)).map(candidate => {
+                const { receiverDisplay, senderMemo, ...withoutMemo } = candidate;
+                return withoutMemo;
+            });
+            return { candidates, warnings };
+        };
+        const loadTransferPayroll = () => {
+            if (!transferReady || transferBatch) return;
+            setTransferBatchError('');
+            if (mixedCalculationOptions) {
+                const targetTeams = new Map<string, string>();
+                kbSourcePaymentData.filter(item => !paidIds.has(item.id)).forEach(item => {
+                    const id = resolveCanonicalTeamId(item.teamId) || item.teamId || '';
+                    targetTeams.set(id, item.teamName || '소속 미지정');
+                });
+                if (targetTeams.size) {
+                    transferPicker.onInvalidate();
+                    setTransferBatch({ id: ++transferBatchSequence.current, teams: [...targetTeams].map(([id, name]) => ({ id, name })),
+                        warnings: paidIds.size ? [`지급완료된 급여 ${paidIds.size}건은 송금 대상에서 제외했습니다.`] : [] });
+                    return;
+                }
+            }
+            transferPicker.onLoad(collectTransferPayroll());
+        };
+        const ledgerCalculator = <MonthlyAdvanceLedger
+            computeOnly rows={ledgerRows} payrollConfig={payrollConfig} advanceItemLabels={payrollConfig?.advanceItemLabels}
+            withholdingThreshold={WITHHOLDING_MAX_MAN_DAY} applyUtilities={utilitiesApplied} applyInsurance={insuranceApplied}
+            applyBusinessIncome={businessIncomeApplied} applyDailyFee={dailyFeeApplied} insuranceTeamSiteOnly={insuranceTeamSiteOnly}
+            isInsuranceEligibleEntry={isLedgerInsuranceEligibleEntry} clientCompanyNameById={companyNameById}
+            onInputsChange={setLedgerInputs} onComputedAmountsChange={handleTransferLedgerComputed} initialInputs={initialLedgerInputs}
+        />;
+        if (transferPicker.batchJob) return <>
+            <TransferJobReporter ready={transferReady} error={transferError} collect={collectTransferPayroll} onLoad={transferPicker.onLoad} onError={transferPicker.onError!} />
+            {ledgerCalculator}
+        </>;
+        return (
+            <section className="bt-payroll-picker" aria-label="급여 직접 불러오기">
+                <p className="bt-payroll-status">{transferPicker.period} 급여 · {mixedCalculationOptions ? '각 팀에 저장된 공제 기준으로 불러옵니다.' : '현재 공제 기준으로 계산합니다.'}</p>
+                <div className="bt-payroll-fields">
+                    <label>팀
+                        <select aria-label="급여 조회 팀" value={selectedTeamId} onChange={event => setSelectedTeamId(event.target.value)} disabled={!filtersReady}>
+                            <option value="">전체 팀</option>
+                            {teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}
+                        </select>
+                    </label>
+                    <label>급여 구분
+                        <select aria-label="급여 구분" value={ledgerSalaryModelFilter} onChange={event => setLedgerSalaryModelFilter(event.target.value as KBSalaryModelFilter)}>
+                            <option value="all">전체</option><option value="monthly">월급제</option><option value="daily">일급제</option><option value="service">용역팀</option>
+                        </select>
+                    </label>
+                </div>
+                <label className="bt-payroll-amount">이체금액 기준
+                    <select aria-label="급여 이체금액 기준" value={kbAmountType} onChange={event => setKbAmountType(event.target.value as KBAmountType)}>
+                        {(['totalAmount', 'invoiceNet', 'laborNet', 'invoiceAdvance', 'laborAdvance', 'corporateAdvance1', 'corporateAdvance2', 'corporateAdvance3', 'corporateAdvance4', 'laborAdvance1', 'laborAdvance2', 'laborAdvance3', 'laborAdvance4'] as KBAmountType[])
+                            .map(type => <option key={type} value={type}>{getKBAmountTypeDisplayLabel(type)}</option>)}
+                    </select>
+                </label>
+                <details className="bt-payroll-options">
+                    <summary>공제 설정</summary>
+                    {mixedCalculationOptions ? <p>팀마다 저장된 설정을 각각 적용합니다. 공제 설정을 바꾸려면 해당 팀을 선택하세요.</p> : <>
+                    <label><input type="checkbox" checked={insuranceApplied} onChange={event => changeDeductions({ applyInsurance: event.target.checked })} />4대보험</label>
+                    <label><input type="checkbox" checked={insuranceTeamSiteOnly} onChange={event => changeDeductions({ applyInsuranceTeamSiteOnly: event.target.checked })} />해당 팀 현장만</label>
+                    <label><input type="checkbox" checked={businessIncomeApplied} onChange={event => changeDeductions({ applyBusinessIncome: event.target.checked })} />사업소득세</label>
+                    <label><input type="checkbox" checked={dailyFeeApplied} onChange={event => changeDeductions({ applyDailyFee: event.target.checked })} />일급 수수료</label>
+                    <p>가불·공과금은 저장된 입력을 반영합니다. 확정 급여는 확정 당시 금액을 유지합니다.</p>
+                    </>}
+                </details>
+                {transferError && <div role="alert" className="bt-payroll-status">{transferError}<button type="button" onClick={fetchData}>다시 조회</button></div>}
+                {transferBatchError && <p role="alert" className="bt-payroll-status">{transferBatchError} 다시 급여 불러오기를 눌러 주세요.</p>}
+                <p role="status" className="bt-payroll-status">{transferError ? '조회 조건을 확인해 주세요.' : transferBatch ? '팀별 급여를 한 목록으로 모으고 있습니다.' : transferReady ? `급여 ${availableCount}건 준비${paidIds.size > 0 ? ` · 지급완료 ${paidIds.size}건 제외` : ''}` : '급여와 가불·공제 내역을 계산하고 있습니다.'}</p>
+                <button type="button" aria-label="급여 불러오기" className="bt-payroll-load" disabled={!transferReady || !!transferBatch} onClick={loadTransferPayroll}>{transferBatch ? '전체 팀 불러오는 중…' : '급여 불러오기'}</button>
+                {transferBatch && <TransferBatchRunner key={transferBatch.id} teams={transferBatch.teams} period={transferPicker.period} salaryFilter={ledgerSalaryModelFilter} amountType={kbAmountType}
+                    onLoad={result => {
+                        if (transferBatchSequence.current !== transferBatch.id) return;
+                        setTransferBatch(null);
+                        transferPicker.onLoad({ candidates: result.candidates, warnings: [...transferBatch.warnings, ...result.warnings] });
+                    }} onError={message => {
+                        if (transferBatchSequence.current !== transferBatch.id) return;
+                        setTransferBatch(null); setTransferBatchError(message);
+                    }} />}
+                {ledgerCalculator}
+            </section>
+        );
+    }
 
     return (
         <div className="monthly-wage-page relative h-full flex flex-col p-2 w-full overflow-hidden">
@@ -5533,6 +4441,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             )}
 
 
+            {/* Keep the ledger mounted so returning from preview preserves its inputs and scroll position. */}
+            <div className="monthly-payroll-workspace" hidden={showKBPreview} style={{ display: showKBPreview ? 'none' : 'contents' }}>
                 <PayrollToolbar
                     primaryAccountSettings={<PagePrimaryAccountCard state={pagePrimaryAccount} />}
                     hideHeader={!!hideHeader}
@@ -6395,50 +5305,53 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 </div>
             )}
 
+            </div>
+
             {showKBPreview && (
-                <KBPreviewOverlay>
-                    <KBPreviewDialog>
+                    <KBPreviewPanel aria-labelledby="kb-preview-title">
                         <KBPreviewHeader>
                             <KBPreviewTitleRow>
                                 <KBPreviewTitleBlock>
-                                    <KBPreviewEyebrow>KB Transfer Preview</KBPreviewEyebrow>
-                                    <KBPreviewTitle>국민은행용 엑셀 미리보기</KBPreviewTitle>
-                                    <KBPreviewDescription>현재 조회 조건과 공제 적용 상태를 기준으로 확정된 출력 스냅샷입니다.</KBPreviewDescription>
+                                    <KBPreviewTitle id="kb-preview-title" ref={kbPreviewTitleRef} tabIndex={-1}>국민은행용 엑셀 미리보기</KBPreviewTitle>
+                                    <KBPreviewDescription>현재 조회·공제 기준</KBPreviewDescription>
                                 </KBPreviewTitleBlock>
-                                <KBPreviewCloseButton onClick={() => handleKBPreviewVisibilityChange(false)}>
-                                    ×
+                                <KBPreviewCloseButton type="button" onClick={() => handleKBPreviewVisibilityChange(false)}>
+                                    ← 급여 화면으로
                                 </KBPreviewCloseButton>
                             </KBPreviewTitleRow>
 
-                            <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-amber-400/40 bg-amber-400/10 p-4 lg:flex-row lg:items-center lg:justify-between">
-                                <div>
-                                    <div className="text-xs font-black uppercase tracking-[0.12em] text-amber-300">작업자 입금계좌 변경</div>
-                                    <PagePrimaryAccountCard state={pagePrimaryAccount} />
-                                    <div className="mt-1 text-xs text-slate-300">
-                                        아래 작업자를 선택한 뒤 대표계좌 적용을 누르면 해당 작업자의 국민은행 이체 계좌만 변경됩니다.
-                                    </div>
+                            <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-2 py-1.5">
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                <span className="shrink-0 text-xs font-bold text-amber-300">작업자 입금계좌 변경</span>
+                                <div className="min-w-0 flex-[1_1_300px]">
+                                    <PagePrimaryAccountCard state={pagePrimaryAccount} inline />
                                 </div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <span className="rounded-full border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-xs font-bold text-slate-200">
-                                        선택 {kbSelectedTransferRowIds.size}명 · 대표계좌 적용 {kbAppliedPrimaryAccountCount}명
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className="whitespace-nowrap text-xs font-bold text-slate-200">
+                                        선택 {kbSelectedTransferRowIds.size}명 · 적용 {kbAppliedPrimaryAccountCount}명
                                     </span>
                                     <button
                                         type="button"
                                         onClick={handleApplyPrimaryAccountToSelectedRows}
                                         disabled={!primaryAccount || kbSelectedTransferRowIds.size === 0}
-                                        className="min-h-[40px] rounded-xl border border-amber-300 bg-amber-400 px-4 text-xs font-black text-slate-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-slate-600 disabled:bg-slate-700 disabled:text-slate-400"
+                                        title="선택한 작업자의 이체용 계좌만 대표계좌로 변경합니다."
+                                        aria-describedby="kb-account-hint"
+                                        className="min-h-[28px] whitespace-nowrap rounded-md border border-amber-300 bg-amber-400 px-2 text-xs font-bold text-slate-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-slate-600 disabled:bg-slate-700 disabled:text-slate-400"
                                     >
-                                        선택 작업자 → 대표계좌
+                                        선택 → 대표계좌
                                     </button>
                                     <button
                                         type="button"
                                         onClick={handleRestoreSelectedWorkerAccounts}
                                         disabled={kbSelectedTransferRowIds.size === 0}
-                                        className="min-h-[40px] rounded-xl border border-slate-600 bg-slate-800 px-4 text-xs font-bold text-slate-100 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                        title="선택한 작업자의 원래 입금계좌로 되돌립니다."
+                                        className="min-h-[28px] whitespace-nowrap rounded-md border border-slate-600 bg-slate-800 px-2 text-xs font-bold text-slate-100 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
                                     >
-                                        선택 작업자 원계좌 복원
+                                        원계좌 복원
                                     </button>
                                 </div>
+                                </div>
+                                <p id="kb-account-hint" className="mt-1 text-[11px] leading-snug text-slate-300">아래 작업자를 선택한 뒤 대표계좌를 적용하면 해당 작업자의 국민은행 이체 계좌만 변경됩니다.</p>
                             </div>
 
                             <KBPreviewControlsGrid>
@@ -6454,8 +5367,9 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                             updateKBPreviewSnapshotFromControls({ receiverDisplay: value });
                                         }}
                                         placeholder="㈜다원"
+                                        aria-describedby="kb-receiver-display-hint"
                                     />
-                                    <KBPreviewFieldHint>은행 업로드 파일의 D열에 동일하게 들어갑니다.</KBPreviewFieldHint>
+                                    <KBPreviewFieldHint id="kb-receiver-display-hint">은행 업로드 파일의 D열에 동일하게 들어갑니다.</KBPreviewFieldHint>
                                 </KBPreviewFieldCard>
 
                                 <KBPreviewFieldCard>
@@ -6470,14 +5384,16 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                             updateKBPreviewSnapshotFromControls({ memoSuffix: value });
                                         }}
                                         placeholder="{이름} 가불"
+                                        aria-describedby="kb-memo-suffix-hint"
                                     />
-                                    <KBPreviewFieldHint>{'{이름}'} 치환자를 쓰면 작업자 이름 뒤에 자동으로 붙습니다.</KBPreviewFieldHint>
+                                    <KBPreviewFieldHint id="kb-memo-suffix-hint">{'{이름}'} 치환자를 쓰면 작업자 이름 뒤에 자동으로 붙습니다.</KBPreviewFieldHint>
                                 </KBPreviewFieldCard>
 
                                 <KBPreviewFieldCard>
                                     <KBPreviewFieldLabel htmlFor="kb-amount-type">이체금액 적용 기준</KBPreviewFieldLabel>
                                     <KBPreviewSelect
                                         id="kb-amount-type"
+                                        aria-describedby="kb-amount-type-hint"
                                         value={kbAmountType}
                                         onChange={(e) => {
                                             const value = e.target.value as KBAmountType;
@@ -6508,37 +5424,23 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                             );
                                         })()}
                                     </KBPreviewSelect>
-                                    <KBPreviewFieldHint>선택한 기준으로 C열 이체금액이 계산됩니다.</KBPreviewFieldHint>
+                                    <KBPreviewFieldHint id="kb-amount-type-hint">선택한 기준으로 C열 이체금액이 계산됩니다.</KBPreviewFieldHint>
                                 </KBPreviewFieldCard>
                             </KBPreviewControlsGrid>
 
                             {kbPreviewSnapshot && (
-                                <div className="mt-3 space-y-2">
-                                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-200 md:grid-cols-4">
-                                        <div className="rounded border border-slate-700 bg-slate-900/70 px-3 py-2">
-                                            <div className="text-slate-400">기간</div>
-                                            <div className="font-bold">{kbPreviewSnapshot.criteria.rangeLabel}</div>
-                                        </div>
-                                        <div className="rounded border border-slate-700 bg-slate-900/70 px-3 py-2">
-                                            <div className="text-slate-400">대상</div>
-                                            <div className="font-bold">{kbPreviewSnapshot.criteria.targetLabel}</div>
-                                        </div>
-                                        <div className="rounded border border-slate-700 bg-slate-900/70 px-3 py-2">
-                                            <div className="text-slate-400">구분</div>
-                                            <div className="font-bold">{kbPreviewSnapshot.criteria.salaryFilterLabel}</div>
-                                        </div>
-                                        <div className="rounded border border-slate-700 bg-slate-900/70 px-3 py-2">
-                                            <div className="text-slate-400">금액 기준</div>
-                                            <div className="font-bold">{kbPreviewSnapshot.criteria.amountTypeLabel}</div>
-                                        </div>
+                                <div className="space-y-1.5">
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-300">
+                                        <span>기간 <strong className="text-slate-100">{kbPreviewSnapshot.criteria.rangeLabel}</strong></span>
+                                        <span>대상 <strong className="text-slate-100">{kbPreviewSnapshot.criteria.targetLabel}</strong></span>
+                                        <span>구분 <strong className="text-slate-100">{kbPreviewSnapshot.criteria.salaryFilterLabel}</strong></span>
+                                        <span>금액 기준 <strong className="text-slate-100">{kbPreviewSnapshot.criteria.amountTypeLabel}</strong></span>
+                                        <span>{kbPreviewSnapshot.criteria.deductionStatusLabel}</span>
                                     </div>
-                                    <div className="rounded border border-slate-700 bg-slate-900/70 px-3 py-2 text-xs text-slate-300">
-                                        {kbPreviewSnapshot.criteria.deductionStatusLabel}
-                                    </div>
-                                    {kbTransferReview && <div className={`mt-2 rounded-lg p-3 text-sm ${kbTransferReview.matches ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
+                                    {kbTransferReview && <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-2 py-1.5 text-xs ${kbTransferReview.matches ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
                                         <strong>이체 금액 대조 · {kbTransferReview.matches ? '일치' : '확인 필요'}</strong>
-                                        <p className="mt-1">선택한 금액 기준의 양수 합계 {kbTransferReview.expected.toLocaleString()}원 · 다운로드 합계 {kbTransferReview.downloadable.toLocaleString()}원 · 차이 {kbTransferReview.difference.toLocaleString()}원</p>
-                                        <p className="mt-1">{kbTransferReview.matches ? '현재 선택 기준과 내려받을 파일의 대상·금액이 일치합니다.' : '계좌 오류로 제외된 대상과 아래 목록을 확인해 주세요. 같은 총액이어도 지급 대상이 다르면 확인이 필요합니다.'}</p>
+                                        <span>선택 기준 합계 {kbTransferReview.expected.toLocaleString()}원 · 다운로드 {kbTransferReview.downloadable.toLocaleString()}원 · 차이 {kbTransferReview.difference.toLocaleString()}원</span>
+                                        {!kbTransferReview.matches && <span>계좌 오류로 제외된 대상과 아래 목록을 확인해 주세요. 같은 총액이어도 지급 대상이 다르면 확인이 필요합니다.</span>}
                                     </div>}
                                     {(kbPreviewInvalidRows.length > 0 || kbPreviewExcludedRows.length > 0) && (
                                         <div className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
@@ -6627,6 +5529,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                 </tbody>
                             </KBPreviewTable>
                         </KBPreviewTableArea>
+                        {kbTransferError && <p role="alert" className="px-3 py-2 text-sm text-rose-300">{kbTransferError}</p>}
                         <KBPreviewFooter>
                             <KBPreviewSummary>
                                 다운로드 가능 {kbPreviewValidRows.length}명 · 이체금액 {kbPreviewValidAmount.toLocaleString()}원 · 제외 {kbPreviewInvalidRows.length + (kbPreviewSnapshot?.criteria.excludedCount ?? 0)}건
@@ -6637,7 +5540,16 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                     $variant="outline"
                                     onClick={() => handleKBPreviewVisibilityChange(false)}
                                 >
-                                    닫기
+                                    급여 화면으로
+                                </ActionButton>
+                                <ActionButton
+                                    type="button"
+                                    $variant="outline"
+                                    onClick={handleAddKBPreviewToTransfer}
+                                    disabled={payrollDataBlocked || kbPreviewRows.length === 0}
+                                    title="미리보기의 모든 행을 현재 계좌·금액·메모 그대로 송금 목록에 담습니다."
+                                >
+                                    송금 목록에 담기
                                 </ActionButton>
                                 <ActionButton
                                     type="button"
@@ -6651,8 +5563,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                 </ActionButton>
                             </ActionCluster>
                         </KBPreviewFooter>
-                    </KBPreviewDialog>
-                </KBPreviewOverlay>
+                    </KBPreviewPanel>
             )}
 
             {showBankCodes && (
@@ -7183,5 +6094,60 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         </div>
     );
 };
+
+const ignoreTransferInvalidation = () => undefined;
+
+/** A team job uses the same calculator and readiness checks as a manual team query. */
+function TransferJobReporter({ ready, error, collect, onLoad, onError }: {
+    ready: boolean;
+    error: string | null;
+    collect: () => TransferLoadResult;
+    onLoad: (result: TransferLoadResult) => void;
+    onError: (message: string) => void;
+}) {
+    const delivered = useRef(false);
+    useEffect(() => {
+        if (delivered.current || (!ready && !error)) return;
+        delivered.current = true;
+        if (error) { onError(error); return; }
+        try { onLoad(collect()); }
+        catch { onError('급여 내역을 만들지 못했습니다.'); }
+    }, [ready, error, collect, onLoad, onError]);
+    return null;
+}
+
+/** Keep one read-only team calculator mounted at a time; publish only the complete batch. */
+function TransferBatchRunner({ teams, period, salaryFilter, amountType, onLoad, onError }: {
+    teams: Array<{ id: string; name: string }>;
+    period: string;
+    salaryFilter: KBSalaryModelFilter;
+    amountType: KBAmountType;
+    onLoad: (result: TransferLoadResult) => void;
+    onError: (message: string) => void;
+}) {
+    const [results, setResults] = useState<TransferLoadResult[]>([]);
+    const finished = useRef(false);
+    const current = teams[results.length];
+    useEffect(() => {
+        if (current || finished.current) return;
+        finished.current = true;
+        const candidates = results.flatMap(result => result.candidates);
+        if (new Set(candidates.map(row => row.id)).size !== candidates.length) {
+            onError('팀별 급여에 중복된 원본이 있어 전체 결과를 가져오지 않았습니다.');
+            return;
+        }
+        onLoad({ candidates, warnings: [...new Set(results.flatMap(result => result.warnings))] });
+    }, [current, results, onLoad, onError]);
+    if (!current) return null;
+    return <>
+        <p className="bt-payroll-status" role="status">{results.length + 1}/{teams.length}팀 · {current.name} 계산 중</p>
+        <MonthlyWagePaymentPage key={current.id} transferPicker={{
+            period, batchJob: { teamId: current.id, salaryFilter, amountType },
+            onInvalidate: ignoreTransferInvalidation,
+            onLoad: result => setResults(previous => previous.length === results.length ? [...previous, result] : previous),
+            onError: message => onError(`${current.name}: ${message} 전체 결과를 가져오지 않았습니다.`),
+        }} />
+    </>;
+}
 
 export default MonthlyWagePaymentPage;

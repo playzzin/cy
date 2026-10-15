@@ -1,18 +1,21 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import MonthlyWageDraftPage from './MonthlyWageDraftPage';
 import { dailyReportService } from '../../services/dailyReportService';
 import { monthlyPayrollSettlementService } from '../../services/monthlyPayrollSettlementService';
 import { manpowerService } from '../../services/manpowerService';
 import * as XLSX from 'xlsx-js-style';
 import { saveAs } from 'file-saver';
+import { useAuth } from '../../contexts/AuthContext';
+import { usePagePrimaryAccount } from '../../hooks/usePagePrimaryAccount';
+import { readTransferHandoff } from '../../features/bank-transfer/transferHandoff';
 
 jest.mock('xlsx-js-style', () => ({ ...jest.requireActual('xlsx-js-style'), writeFile: jest.fn() }));
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
-jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: null }) }));
-jest.mock('../../hooks/usePagePrimaryAccount', () => ({ usePagePrimaryAccount: () => ({ account: null }) }));
+jest.mock('../../contexts/AuthContext', () => ({ useAuth: jest.fn(() => ({ currentUser: null })) }));
+jest.mock('../../hooks/usePagePrimaryAccount', () => ({ usePagePrimaryAccount: jest.fn(() => ({ account: null })), ensurePagePrimaryAccountReady: () => true }));
 jest.mock('../../components/accounts/PagePrimaryAccountCard', () => () => null);
 jest.mock('../../services/companyService', () => ({ companyService: { getCompanies: async () => [] } }));
 jest.mock('../../services/siteService', () => ({ siteService: { getSites: async () => [] } }));
@@ -60,6 +63,7 @@ jest.mock('./components/SimplePayrollToolbar', () => ({ PayrollToolbar: (props: 
         <button onClick={() => props.setPageViewMode('ledger')}>가불대장</button>
         <button disabled={props.payrollSettlementDisabled || props.payrollSettlementSaving || props.payrollSettlementLoading} onClick={props.handleSavePayrollSettlement}>초안 저장</button>
         <button disabled={props.actionsDisabled} onClick={props.openPayslipPreview}>명세서</button>
+        <button disabled={props.actionsDisabled} onClick={() => props.setShowKBPreview(true)}>은행 이체</button>
         <button aria-pressed={props.businessIncomeApplied} onClick={() => props.applyCalculatedDeductions({
             applyInsurance: props.insuranceApplied, applyInsuranceTeamSiteOnly: props.insuranceTeamSiteOnly,
             applyBusinessIncome: !props.businessIncomeApplied, applyUtilities: true, applyDailyFee: props.dailyFeeApplied,
@@ -91,8 +95,50 @@ const ready = async () => {
     await waitFor(() => expect(screen.queryByText('급여 계산을 적용하고 있습니다...')).not.toBeInTheDocument());
 };
 
+it('페이지 안에서 이체 설정을 파일에 반영하고 원래 급여 화면 상태로 돌아온다', async () => {
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue(
+        ['월급제', '일급제', '용역팀'].map((payType, index) => ({
+            id: `worker-${index}`, name: `검증${index}`, teamId: 'team', teamName: '검증팀', payType,
+            bankName: '국민은행', accountNumber: '123456789012', accountHolder: `검증${index}`,
+        }))
+    );
+    render(<MonthlyWageDraftPage />);
+    await ready();
+    const ledgerRow = screen.getByTestId('worker-0');
+    const openButton = screen.getByRole('button', { name: '은행 이체' });
+    await waitFor(() => expect(openButton).toBeEnabled());
+    openButton.focus();
+    fireEvent.click(openButton);
+
+    const preview = screen.getByRole('region', { name: '국민은행용 엑셀 미리보기' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(ledgerRow).not.toBeVisible();
+    expect(within(preview).getByRole('heading')).toHaveFocus();
+    fireEvent.change(within(preview).getByLabelText('받는분통장표시'), { target: { value: '검증급여' } });
+    fireEvent.change(within(preview).getByLabelText('내통장메모 규칙'), { target: { value: '{이름} 정산' } });
+    fireEvent.change(within(preview).getByLabelText('이체금액 적용 기준'), { target: { value: 'invoiceAdvance' } });
+    expect(within(preview).getByText('다운로드할 이체금액 데이터가 없습니다.')).toBeInTheDocument();
+    expect(within(preview).getByRole('button', { name: '국민은행용 다운로드' })).toBeDisabled();
+    fireEvent.change(within(preview).getByLabelText('이체금액 적용 기준'), { target: { value: 'totalAmount' } });
+    await waitFor(() => expect(within(preview).getByRole('button', { name: '국민은행용 다운로드' })).toBeEnabled());
+    fireEvent.click(within(preview).getByRole('button', { name: '국민은행용 다운로드' }));
+    const workbook = (XLSX.writeFile as jest.Mock).mock.calls[0][0];
+    expect(workbook.Sheets['국민은행용'].C2.v).toBe(1105000);
+    expect(workbook.Sheets['국민은행용'].D2.v).toBe('검증급여');
+    expect(workbook.Sheets['국민은행용'].E2.v).toBe('검증0 정산');
+
+    fireEvent.click(within(preview).getByRole('button', { name: '← 급여 화면으로' }));
+    expect(screen.queryByRole('region', { name: '국민은행용 엑셀 미리보기' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('worker-0')).toBe(ledgerRow);
+    expect(ledgerRow).toBeVisible();
+    await waitFor(() => expect(openButton).toHaveFocus());
+});
+
 beforeEach(() => {
     jest.clearAllMocks();
+    (useAuth as jest.Mock).mockReturnValue({ currentUser: null });
+    (usePagePrimaryAccount as jest.Mock).mockReturnValue({ account: null });
+    sessionStorage.clear();
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue(
         ['월급제', '일급제', '용역팀'].map((payType, index) => ({
             id: `worker-${index}`, name: `검증${index}`, teamId: 'team', teamName: '검증팀', payType,
@@ -101,6 +147,55 @@ beforeEach(() => {
     );
     (dailyReportService.getReportsByRange as jest.Mock).mockResolvedValue(reports());
     (monthlyPayrollSettlementService.getSettlementsByYear as jest.Mock).mockResolvedValue([]);
+});
+
+it('로그인하지 않은 상태에서는 미리보기 송금 목록 전달을 막는다', async () => {
+    render(<MonthlyWageDraftPage />);
+    await ready();
+    await waitFor(() => expect(screen.getByRole('button', { name: '은행 이체' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '은행 이체' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '송금 목록에 담기' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '송금 목록에 담기' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('로그인 후 송금 목록에 담아 주세요.');
+    expect(sessionStorage.length).toBe(0);
+});
+
+it('현재 세후 미리보기의 대표계좌와 원계좌·표시문구를 같은 로그인 계정 송금 목록으로 전달한다', async () => {
+    (useAuth as jest.Mock).mockReturnValue({ currentUser: { uid: 'fixture-user' } });
+    (usePagePrimaryAccount as jest.Mock).mockReturnValue({
+        account: { bankName: '신한은행', accountNumber: '000987654321', accountHolder: '검증대표계좌' },
+    });
+    const originalLocation = window.location;
+    const assign = jest.fn();
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...originalLocation, assign } });
+    try {
+        render(<MonthlyWageDraftPage />);
+        await ready();
+        fireEvent.click(screen.getByRole('button', { name: '사업소득' }));
+        await expectTaxes(33150, 3315);
+        await waitFor(() => expect(screen.getByRole('button', { name: '은행 이체' })).toBeEnabled());
+        fireEvent.click(screen.getByRole('button', { name: '은행 이체' }));
+        const preview = screen.getByRole('region', { name: '국민은행용 엑셀 미리보기' });
+        fireEvent.change(within(preview).getByLabelText('받는분통장표시'), { target: { value: '검증급여' } });
+        fireEvent.change(within(preview).getByLabelText('내통장메모 규칙'), { target: { value: '{이름} 정산' } });
+        fireEvent.click(within(preview).getByRole('checkbox', { name: /검증0/ }));
+        fireEvent.click(within(preview).getByRole('button', { name: '선택 → 대표계좌' }));
+        await waitFor(() => expect(within(preview).getByRole('button', { name: '송금 목록에 담기' })).toBeEnabled());
+        fireEvent.click(within(preview).getByRole('button', { name: '송금 목록에 담기' }));
+        const rows = readTransferHandoff('fixture-user');
+        expect(rows).toHaveLength(3);
+        expect(rows?.find(row => row.name === '검증0')).toMatchObject({
+            amount: 1068535, bankCode: '088', accountNumber: '000987654321', accountHolder: '검증대표계좌',
+            receiverDisplay: '검증급여', senderMemo: '검증0 정산',
+        });
+        expect(rows?.find(row => row.name === '검증1')).toMatchObject({
+            amount: 1068535, bankCode: '004', accountNumber: 'fixture-account', accountHolder: '검증1',
+        });
+        expect(assign).toHaveBeenCalledWith('/payroll/bank-transfer?import=payroll');
+        expect(monthlyPayrollSettlementService.saveSettlements).not.toHaveBeenCalled();
+    } finally {
+        Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
+    }
 });
 
 it('재조회와 작업자 변경 후에도 선택한 세금을 모든 급여 유형에 다시 계산한다', async () => {

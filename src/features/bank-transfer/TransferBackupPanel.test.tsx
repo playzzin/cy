@@ -1,0 +1,40 @@
+import React from 'react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import '@testing-library/jest-dom';
+import { saveAs } from 'file-saver';
+import TransferBackupPanel from './TransferBackupPanel';
+import { createTransferBackup, parseTransferBackup } from './transferBackup';
+import { loadTransferDrafts, saveTransferDraft } from './transferDraftStorage';
+import type { TransferDraft } from './types';
+jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
+const current: TransferDraft = { version: 1, id: 'current', title: '현재 수정 목록', period: '2026-10', receiverDisplay: '', memoRule: '', updatedAt: '2026-10-15T00:00:00Z', rows: [] };
+beforeEach(() => { localStorage.clear(); jest.clearAllMocks(); });
+const openPanel = (onRestored = jest.fn()) => { render(<TransferBackupPanel userId="qa" current={current} onRestored={onRestored} />); fireEvent.click(screen.getByText('백업·다른 PC에서 이어하기')); return onRestored; };
+it('복원 내용을 먼저 보여주며 선택한 목록만 저장하고 기존 목록을 보존한다', async () => {
+    saveTransferDraft('qa', current); const onRestored = openPanel();
+    const drafts = [{ ...current, id: 'backup-one', title: '검증 백업1' }, { ...current, id: 'backup-two', title: '검증 백업2' }];
+    const file = new File([createTransferBackup(drafts)], 'backup.json', { type: 'application/json' });
+    fireEvent.change(screen.getByLabelText('송금 백업 파일 선택'), { target: { files: [file] } });
+    await screen.findByLabelText('검증 백업1 복원 선택');
+    expect(loadTransferDrafts('qa')).toEqual([current]);
+    fireEvent.click(screen.getByLabelText('검증 백업2 복원 선택'));
+    fireEvent.click(screen.getByRole('button', { name: '선택 1개 복원' }));
+    expect(loadTransferDrafts('qa').map(item => item.title)).toEqual(expect.arrayContaining(['현재 수정 목록', '검증 백업1']));
+    expect(loadTransferDrafts('qa')).toHaveLength(2); expect(onRestored).toHaveBeenCalledTimes(1);
+});
+it('손상 파일을 거부하고 같은 파일을 다시 선택해 복원할 수 있다', async () => {
+    openPanel(); const input = screen.getByLabelText('송금 백업 파일 선택');
+    fireEvent.change(input, { target: { files: [new File(['broken'], 'backup.json')] } });
+    await screen.findByRole('alert'); expect(loadTransferDrafts('qa')).toEqual([]);
+    fireEvent.change(input, { target: { files: [new File([createTransferBackup([current])], 'backup.json')] } });
+    await screen.findByRole('button', { name: '선택 1개 복원' }); expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+it('현재 목록 백업에 저장 전 수정이 포함되며 저장소는 건드리지 않는다', async () => {
+    saveTransferDraft('qa', { ...current, title: '기존 저장 제목' }); openPanel();
+    fireEvent.click(screen.getByRole('button', { name: '현재 목록 백업' }));
+    const blob = (saveAs as unknown as jest.Mock).mock.calls[0][0] as Blob;
+    const raw = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob); });
+    expect(parseTransferBackup(raw).drafts[0].title).toBe('현재 수정 목록');
+    expect(loadTransferDrafts('qa')[0].title).toBe('기존 저장 제목');
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('백업 파일'));
+});

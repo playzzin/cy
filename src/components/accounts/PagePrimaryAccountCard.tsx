@@ -11,11 +11,12 @@ const field = 'mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2
 const emptyAccount: PrimaryAccountSetting = { sourceType: 'custom', sourceId: '', sourceName: '', bankName: '', accountHolder: '', accountNumber: '' };
 const sourceLabels = { company: '회사', team: '팀', worker: '작업자', custom: '기타' };
 
-export default function PagePrimaryAccountCard({ state, fallbackAccount, showPageLink = false, compact = false }: {
+export default function PagePrimaryAccountCard({ state, fallbackAccount, showPageLink = false, compact = false, inline = false }: {
     state: PagePrimaryAccountState;
     fallbackAccount?: Pick<PrimaryAccountSetting, 'bankName' | 'accountHolder' | 'accountNumber'>;
     showPageLink?: boolean;
     compact?: boolean;
+    inline?: boolean;
 }) {
     const { currentUser } = useAuth();
     const [canEdit, setCanEdit] = useState(false);
@@ -88,16 +89,16 @@ export default function PagePrimaryAccountCard({ state, fallbackAccount, showPag
     const filtered = (options ?? []).filter(account => `${account.sourceName} ${account.bankName} ${account.accountHolder} ${account.accountNumber}`.replace(/\s/g, '').toLocaleLowerCase().includes(query.replace(/\s/g, '').toLocaleLowerCase()));
     const change = (key: 'bankName' | 'accountHolder' | 'accountNumber', value: string) => setDraft(current => ({ ...current, [key]: value }));
 
-    return <section aria-label={`${title} 대표계좌`} className={`min-w-0 rounded-xl border border-indigo-200 bg-indigo-50/70 ${compact ? 'px-3 py-1.5' : 'p-3'} text-slate-900 print:hidden`}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className={compact ? 'flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1' : 'min-w-0'}>
-                <div className="text-xs font-bold text-indigo-800">{showPageLink ? title : state.scope === 'common' ? title : `이 페이지 대표계좌 · ${state.scope === 'monthly-wage' ? '국민은행 이체용' : '노임명세서 위임용'}`}</div>
-                <div className={`${compact ? '' : 'mt-1'} break-all text-sm font-semibold`}>{state.loading ? '불러오는 중…' : state.error ? '확인 필요' : shown ? `${shown.bankName} ${shown.accountNumber} · ${shown.accountHolder}` : '등록된 계좌 없음'}</div>
-                {!compact && !state.loading && !state.error && <div className="mt-1 text-xs text-slate-500">{state.scope === 'common' ? '별도 계좌가 없는 기존 연결 페이지의 기본값' : state.pageAccount ? '페이지 전용 · 계좌 관리에서도 수정 가능' : state.usesCommon ? '현재 공통계좌 사용 중 · 따로 등록하면 이 페이지에만 적용' : shown ? '기존 위임계좌 사용 중 · 등록하면 다른 기기에서도 사용' : '이 페이지에서 사용할 계좌를 등록해 주세요.'}</div>}
+    return <section aria-label={`${title} 대표계좌`} className={inline ? 'min-w-0 text-slate-100 print:hidden' : `min-w-0 rounded-xl border border-indigo-200 bg-indigo-50/70 ${compact ? 'px-3 py-1.5' : 'p-3'} text-slate-900 print:hidden`}>
+        <div className={`flex flex-wrap items-center justify-between ${inline ? 'gap-1.5' : 'gap-2'}`}>
+            <div className={compact || inline ? `flex min-w-0 flex-1 flex-wrap items-center ${inline ? 'gap-x-2' : 'gap-x-3'} gap-y-1` : 'min-w-0'}>
+                <div className={`shrink-0 text-xs font-bold ${inline ? 'text-slate-300' : 'text-indigo-800'}`}>{inline ? '대표계좌' : showPageLink ? title : state.scope === 'common' ? title : `이 페이지 대표계좌 · ${state.scope === 'monthly-wage' ? '국민은행 이체용' : '노임명세서 위임용'}`}</div>
+                <div className={`${compact || inline ? '' : 'mt-1'} break-all font-semibold ${inline ? 'text-xs leading-5' : 'text-sm'}`}>{state.loading ? '불러오는 중…' : state.error ? '확인 필요' : shown ? `${shown.bankName} ${shown.accountNumber} · ${shown.accountHolder}` : '등록된 계좌 없음'}</div>
+                {!compact && !inline && !state.loading && !state.error && <div className="mt-1 text-xs text-slate-500">{state.scope === 'common' ? '별도 계좌가 없는 기존 연결 페이지의 기본값' : state.pageAccount ? '페이지 전용 · 계좌 관리에서도 수정 가능' : state.usesCommon ? '현재 공통계좌 사용 중 · 따로 등록하면 이 페이지에만 적용' : shown ? '기존 위임계좌 사용 중 · 등록하면 다른 기기에서도 사용' : '이 페이지에서 사용할 계좌를 등록해 주세요.'}</div>}
             </div>
             <div className="flex shrink-0 gap-2">
                 {showPageLink && page && <a href={page.path} className={button}>페이지 열기</a>}
-                {canEdit && <button type="button" onClick={openEditor} disabled={disabled} className={compact ? `${button} !py-1` : button}>{state.pageAccount ? '변경' : '계좌 등록'}</button>}
+                {canEdit && <button type="button" onClick={openEditor} disabled={disabled} className={inline ? 'min-h-[28px] whitespace-nowrap rounded-md border border-slate-500 bg-slate-800 px-2 py-0.5 text-xs font-semibold text-slate-100 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50' : compact ? `${button} !py-1` : button}>{state.pageAccount ? '변경' : '계좌 등록'}</button>}
             </div>
         </div>
         {!canEdit && !state.loading && <p className="mt-2 text-xs text-slate-500">대표계좌 등록·변경은 관리자에게 요청해 주세요.</p>}

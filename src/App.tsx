@@ -205,6 +205,7 @@ const DrawingAiEstimatePage = React.lazy(() => import('./pages/estimate/DrawingA
 const TransactionManagePage = React.lazy(() => import('./pages/estimate/TransactionManagePage'));
 const EstimateRequestPage = React.lazy(() => import('./pages/estimate/EstimateRequestPage'));
 const AccountManagementPage = React.lazy(() => import('./pages/database/AccountManagementPage'));
+const BankTransferPage = React.lazy(() => import('./features/bank-transfer/BankTransferPage'));
 const ConstructionCompanyDatabase = React.lazy(() => import('./pages/database/ConstructionCompanyDatabase'));
 const WorkerDatabaseInput = React.lazy(() => import('./pages/database/WorkerDatabaseInput'));
 const OfficeStaffDatabase = React.lazy(() => import('./pages/database/OfficeStaffDatabase'));
@@ -409,6 +410,7 @@ const App: React.FC = () => {
               <Route path="daily-wage-statement" element={<DailyWageStatementPage />} />
               <Route path="daily-advance-workbook" element={<DailyAdvanceWorkbookPage />} />
               <Route path="monthly-wage" element={<MonthlyWageDraftPage />} />
+              <Route path="bank-transfer" element={<BankTransferPage />} />
               <Route path="office-staff-payroll" element={<OfficeStaffPayrollPage />} />
               <Route path="statistics" element={<PayrollStatisticsPage />} />
               <Route path="support-team" element={<SupportTeamPaymentPage />} />
