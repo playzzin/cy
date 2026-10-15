@@ -55,6 +55,26 @@ beforeEach(() => {
     (XLSX.writeFile as jest.Mock).mockReset();
 });
 
+it('설명서의 예시·검색·닫기는 편집 중인 송금액이나 저장본을 변경하지 않는다', async () => {
+    render(view());
+    await addWorker();
+    fireEvent.change(screen.getByLabelText('가상작업자 이체금액'), { target: { value: '123456' } });
+    const beforeStorage = localStorage.getItem('cy:bank-transfer:drafts:qa-user');
+    fireEvent.click(screen.getByRole('button', { name: /사용설명서/ }));
+    fireEvent.click(screen.getByRole('button', { name: /06 엑셀 확인·생성/ }));
+    fireEvent.click(screen.getByRole('button', { name: '직접 해보기' }));
+    fireEvent.click(screen.getByRole('button', { name: '내용 확인 후 검토 완료' }));
+    fireEvent.click(screen.getByRole('button', { name: '국민은행용 엑셀 다운로드' }));
+    expect(screen.getByText(/연습 파일 생성 완료/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /막혔을 때/ }));
+    fireEvent.change(screen.getByLabelText('설명서 질문 검색'), { target: { value: '송금 완료' } });
+    fireEvent.click(screen.getByRole('button', { name: '사용설명서 닫기' }));
+    expect(screen.getByLabelText('가상작업자 이체금액')).toHaveValue(123456);
+    expect(screen.getByText('저장하지 않은 변경')).toBeVisible();
+    expect(localStorage.getItem('cy:bank-transfer:drafts:qa-user')).toBe(beforeStorage);
+    expect(XLSX.writeFile).not.toHaveBeenCalled();
+});
+
 it('퇴사자 숨김은 검색·전체선택에 적용하고 다른 분류와 상태 미확인 작업자를 유지한다', async () => {
     const retired = candidate({ id: 'account:worker:retired', sourceId: 'retired', name: '퇴사 검증자' });
     const unknown = candidate({ id: 'account:worker:unknown', sourceId: 'unknown', name: '상태없는 검증자' });

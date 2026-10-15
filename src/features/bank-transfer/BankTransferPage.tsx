@@ -34,6 +34,7 @@ import type { TransferResult } from './types';
 import type { WorkerEmployment } from './types';
 import { getWorkerEmployment } from './workerEmployment';
 import WorkerEmploymentBadge from './WorkerEmploymentBadge';
+import TransferGuide from './TransferGuide';
 
 const PayrollTransferPicker = lazy(() => import('../../pages/payroll/MonthlyWageDraftPage'));
 
@@ -55,6 +56,8 @@ const normalizeSearch = (value: string) => value.replace(/[\s-]/g, '').toLocaleL
 const workerTeamKey = (row: TransferCandidate) => row.accountTeamKey || `name:${row.groupName || '미배정'}`;
 const dateTime = (value: string) => new Date(value).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
+// @guide-sync 기능 변경 시 transferGuideContent.ts 상단의 단계별 매핑을 따라
+// 안내문·FAQ·transferGuideSimulation.ts·TransferGuideSimulator.tsx도 같은 변경에서 갱신한다.
 export default function BankTransferPage() {
     const { currentUser } = useAuth();
     const userId = currentUser?.uid ?? '';
@@ -165,6 +168,7 @@ export default function BankTransferPage() {
     }, [userId, initializedUser]);
     const storageChanged = storedDraft !== null && JSON.stringify(drafts.find(item => item.id === storedDraft.id) ?? null) !== JSON.stringify(storedDraft);
 
+    // @guide-sync 01·02: 조회/새로고침/상세 복원 정책은 대상 찾기·급여·월세·지원비 안내와 시연에 반영한다.
     const loadSource = useCallback(async (force = false) => {
         const sequence = ++requestSequence.current;
         setLoading(false);
@@ -229,6 +233,7 @@ export default function BankTransferPage() {
     }, [source, payrollGeneration]);
     const payrollPicker = useMemo(() => ({ period: draft.period, onLoad: receivePayroll, onInvalidate: invalidatePayroll }), [draft.period, receivePayroll, invalidatePayroll]);
 
+    // @guide-sync 01: 팀·재직 필터와 선택 범위 변경 시 demoCandidates 및 숨김/송금 제외 안내도 맞춘다.
     const workerTeamFilter = source === 'account' && category === 'worker';
     const categoryCandidates = useMemo(() => candidates.filter(row => (category === 'all' || row.category === category)
         && (source !== 'account' || category !== 'team' || teamAffiliation === 'all' || row.teamAffiliation === teamAffiliation)), [candidates, category, source, teamAffiliation]);
@@ -270,6 +275,7 @@ export default function BankTransferPage() {
         element?.scrollIntoView?.({ block: 'center', behavior: 'smooth' }); element?.focus(); setFocusRow('');
     }, [focusRow, preview]);
     const fixRow = (row: TransferRow) => { setPreview(false); setReviewMode(true); setListFilters({ ...emptyListFilters, query: row.name }); setFocusRow(row.rowId); };
+    // @guide-sync 03·06: 계좌/금액 수정 범위와 재검토 조건은 시연의 updateRows 및 오류 해결 장면에도 적용한다.
     const editRow = (id: string, change: Partial<TransferRow>) => setDraft(previous => ({ ...previous, rows: previous.rows.map(row => row.rowId === id ? { ...row, ...change } : row) }));
     const add = (items: TransferCandidate[]) => {
         if (!items.length) return;
@@ -293,6 +299,7 @@ export default function BankTransferPage() {
         rows.splice(toIndex, 0, rows.splice(fromIndex, 1)[0]);
         return { ...previous, rows };
     });
+    // @guide-sync 05: 저장/사본/불러오기 동작 변경 시 저장 위치 FAQ와 저장본 복원 연습을 함께 수정한다.
     const save = (asCopy = false) => {
         setActionError(''); setNotice('');
         try {
@@ -328,6 +335,7 @@ export default function BankTransferPage() {
             try { setDrafts(loadTransferDrafts(userId)); } catch { /* Preserve the failure message. */ }
         }
     };
+    // @guide-sync 06: 출력 대상·검토·생성 이력·저장 실패 처리는 Preview 연습과 엑셀 안내에 함께 반영한다.
     const exportExcel = () => {
         setActionError(''); setNotice('');
         try {
@@ -357,11 +365,13 @@ export default function BankTransferPage() {
         if (/^\d{4}-(0[1-9]|1[0-2])$/.test(row.period)) setDraft(previous => ({ ...previous, period: row.period }));
         setNotice('급여에서 기존 항목과 같은 월·금액 기준으로 불러오세요. 일치하는 항목은 상세만 연결하고 기존 송금액과 계좌는 유지합니다.');
     };
+    // @guide-sync 04: 선택 행 적용 범위와 이름 치환 변경 시 D/E열 설명 및 applyMemo 연습도 갱신한다.
     const updateMemoForRows = () => {
         if (!selectedRows.length) return;
         setDraft(previous => ({ ...previous, rows: previous.rows.map(row => rowSelection.has(row.rowId) ? { ...row, receiverDisplay: previous.receiverDisplay, senderMemo: applyMemoRule(previous.memoRule, row.name) } : row) }));
         setNotice(`선택한 ${selectedRows.length}건에 통장 표시와 메모를 적용했습니다.`);
     };
+    // @guide-sync 07: 결과 저장/실패 재처리 변경 시 원본 지급 상태 영향과 성공 건 재송금 방지 안내도 갱신한다.
     const applyResults = (id: string, results: TransferResult[], fileName?: string) => {
         setActionError(''); setNotice('');
         const record = draft.exportHistory?.find(item => item.id === id);
@@ -417,7 +427,7 @@ export default function BankTransferPage() {
     return <div className={`bank-transfer-page ${preview ? 'is-preview' : ''}`}>
         <header className="bt-page-header">
             <div className="bt-title"><span className="bt-logo"><Landmark size={22} /></span><div><h1>국민은행 송금</h1><p>급여·월세·외부지원비를 한 목록에서 준비합니다.</p></div></div>
-            <div className="bt-header-actions"><Link to="/database/account-management">등록 계좌 관리 <ArrowRight size={14} /></Link></div>
+            <div className="bt-header-actions"><Link to="/database/account-management">등록 계좌 관리 <ArrowRight size={14} /></Link><TransferGuide initialChapter={preview ? 5 : reviewMode ? 2 : 0} /></div>
         </header>
         <nav className="bt-stage-nav" aria-label="송금 파일 준비 순서"><button aria-current={!preview && !reviewMode ? 'step' : undefined} onClick={() => { setPreview(false); setReviewMode(false); }}>① 대상 가져오기</button><button aria-current={!preview && reviewMode ? 'step' : undefined} onClick={() => { setPreview(false); setReviewMode(true); }}>② 금액·계좌 검토</button><button aria-label="엑셀 미리보기" disabled={!draft.rows.length} aria-current={preview ? 'step' : undefined} onClick={() => setPreview(true)}>③ 엑셀 미리보기</button><span className="bt-work-state">{workflow.label}</span></nav>
         {(workflow.needsReview || workflow.changedSinceExport) && <p className="bt-check-warning">{workflow.changedSinceExport ? '최근 파일 생성 이후 목록이 변경되었습니다. 이전 파일은 생성 당시 내역으로 보관됩니다.' : '검토 이후 송금 내용이 변경되었습니다.'} 현재 내용을 다시 검토해 주세요.</p>}

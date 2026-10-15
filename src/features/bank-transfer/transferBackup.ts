@@ -2,6 +2,8 @@ import { saveAs } from 'file-saver';
 import { isTransferDraft, MAX_STORAGE_CHARACTERS, MAX_TRANSFER_DRAFTS } from './transferDraftStorage';
 import type { TransferDraft } from './types';
 
+// @guide-sync 05: 백업 형식/복원 범위 변경 시 transferGuideContent.ts의 다른 PC·복원 안내와
+// transferGuideSimulation.ts의 backup/restoreBackup 연습도 갱신한다. 연습 파일은 실제로 생성하지 않는다.
 export const MAX_BACKUP_BYTES = MAX_STORAGE_CHARACTERS * 3;
 const FORMAT = 'cy-bank-transfer-backup';
 export interface TransferBackup { format: typeof FORMAT; version: 1; exportedAt: string; drafts: TransferDraft[] }

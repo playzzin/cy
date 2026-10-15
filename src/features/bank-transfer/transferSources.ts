@@ -39,6 +39,8 @@ const withWarning = (candidate: TransferCandidate, warnings: string[] = []): Tra
     ...candidate, warning: [...warnings, accountWarning(candidate)].filter(Boolean).join(' · ') || undefined,
 });
 
+// @guide-sync 01·02: 계좌 분류/팀/월세/지원비 조회·금액 산식·누락 처리 변경은
+// transferGuideContent.ts의 해당 안내·주의사항과 시연 가상 상세 금액에도 반영한다.
 /** Read the same four directories used by AccountManagementPage without changing their source records. */
 export const loadAccountTransferCandidates = async (): Promise<TransferLoadResult> => {
     const results = await Promise.allSettled([

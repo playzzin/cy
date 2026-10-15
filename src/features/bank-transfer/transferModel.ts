@@ -4,6 +4,8 @@ import { formatKBTransferMemo } from '../../pages/payroll/utils/kbTransferExport
 import type { AccountCategory, TransferCandidate, TransferRow, TransferSource } from './types';
 import { MAX_TRANSFER_ROWS } from './transferLimits';
 
+// @guide-sync 03·04·06: 검증·메모·A~E열 변경은 transferGuideContent.ts의 같은 단계와
+// TransferGuideSimulator.tsx의 Preview, transferGuideSimulation.ts의 가상 결과에도 반영한다.
 export const SOURCE_LABELS: Record<TransferSource, string> = {
     account: '등록 계좌', payroll: '급여', rent: '월세', support: '외부지원비',
 };

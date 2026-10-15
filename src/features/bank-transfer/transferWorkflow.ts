@@ -1,6 +1,8 @@
 import { getTransferExportCells, validateTransferRow } from './transferModel';
 import type { TransferCandidate, TransferDraft, TransferExportRecord, TransferRow } from './types';
 
+// @guide-sync 03·06: 검토 해제/파일 생성 이력/변경 비교 기준은 transferGuideContent.ts 안내와
+// transferGuideSimulation.ts의 updateRows·review·export 장면을 함께 갱신한다.
 export const originalTransferAmount = (row: TransferCandidate) => row.payrollDetail?.originalAmount
     ?? row.supportDetail?.originalAmount ?? row.rentDetail?.originalAmount ?? row.originalAmount;
 

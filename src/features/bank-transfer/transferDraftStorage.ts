@@ -4,6 +4,8 @@ import { isPayrollTransferDetail } from './payrollTransferDetail';
 import { isSupportTransferDetail } from './supportTransferDetail';
 import { MAX_TRANSFER_ROWS } from './transferLimits';
 
+// @guide-sync 05: 저장 위치/계정 범위/용량/충돌 정책 변경 시 transferGuideContent.ts의
+// 저장·다른 PC·오류 FAQ와 저장/복원 연습도 수정한다. 연습에 실제 저장소를 연결하지 않는다.
 export const MAX_TRANSFER_DRAFTS = 20;
 export const MAX_TRANSFER_DRAFT_ROWS = MAX_TRANSFER_ROWS;
 export const MAX_STORAGE_CHARACTERS = 4_000_000;

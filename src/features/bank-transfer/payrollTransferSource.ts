@@ -10,6 +10,8 @@ const payrollCandidateId = (sourceId: string, amountType: KBAmountType): string 
 const previewGuide = '급여 페이지에서 미리보기를 연 뒤 “송금 목록에 담기”로 현재 계산 결과를 가져올 수 있습니다.';
 
 /** The preview has already applied taxes, allocation and per-worker account overrides. */
+// @guide-sync 02: 급여 금액 기준/확정·지급완료 제외/상세 항목 변경 시 transferGuideContent.ts의
+// 급여 안내와 TransferGuideSimulator.tsx의 Detail 및 시연 지급액·공제 예시를 함께 맞춘다.
 export const buildPayrollPreviewCandidates = (
     rows: KBTransferRow[],
     amountType: KBAmountType,

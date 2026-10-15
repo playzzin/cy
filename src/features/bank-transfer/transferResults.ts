@@ -2,6 +2,8 @@ import * as XLSX from 'xlsx-js-style';
 import type { TransferExportRecord, TransferResult, TransferRow } from './types';
 import { BANK_CODES } from '../../pages/payroll/constants/payroll.constants';
 
+// @guide-sync 07: 결과 열·연결 기준·성공/실패 판정을 바꾸면 transferGuideContent.ts의 결과 안내와
+// TransferGuideSimulator.tsx의 Results, transferGuideSimulation.ts의 결과 반영·재처리 연습도 수정한다.
 export type ResultColumns = { bank: number; account: number; amount: number; status: number; note: number };
 export type ResultMatch = { line: number; account: string; amount: string; rawStatus: string; result?: TransferResult; message: string };
 const cleanAccount = (value: string) => value.trim().replace(/[ -]/g, '');
