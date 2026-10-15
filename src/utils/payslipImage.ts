@@ -1,4 +1,5 @@
 import html2canvas from 'html2canvas';
+import type { Options } from 'html2canvas/dist/types';
 
 export const payslipImageFilename = (workerName: string, month: string) =>
     Array.from(`급여명세서_${workerName}_${month}.png`)
@@ -6,7 +7,7 @@ export const payslipImageFilename = (workerName: string, month: string) =>
 
 export const capturePayslipImage = async (element: HTMLDivElement): Promise<Blob> => {
     await document.fonts?.ready;
-    const canvas = await html2canvas(element, {
+    const options: Partial<Options> = {
         scale: 2,
         backgroundColor: '#ffffff',
         useCORS: true,
@@ -25,7 +26,8 @@ export const capturePayslipImage = async (element: HTMLDivElement): Promise<Blob
                 position: 'absolute', left: '0', top: '0', transform: 'none',
             });
         },
-    });
+    };
+    const canvas = await html2canvas(element, options);
     return new Promise<Blob>((resolve, reject) => {
         canvas.toBlob(blob => {
             if (blob?.size) resolve(blob);
