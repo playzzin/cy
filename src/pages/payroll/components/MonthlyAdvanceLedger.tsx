@@ -139,6 +139,8 @@ interface ComputedLedgerRow extends MonthlyAdvanceLedgerRow {
 }
 
 interface Props {
+    /** Read saved inputs and publish computed amounts without mounting editing controls. */
+    computeOnly?: boolean;
     rows: MonthlyAdvanceLedgerRow[];
     payrollConfig: any | null;
     advanceItemLabels?: Partial<AdvanceItemLabelsConfig>;
@@ -399,6 +401,7 @@ const sumSideAdvances = (side: LedgerSideInput): number =>
     side.carry + side.carrySecond + side.currentAdvance + side.currentAdvanceSecond;
 
 const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
+    computeOnly = false,
     rows,
     payrollConfig,
     advanceItemLabels,
@@ -871,7 +874,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
 
         return rows
             .map((row) => {
-                const baseManual = (row.finalizedAmounts
+                const baseManual = (row.finalizedAmounts || computeOnly
                     ? normalizeManualInput(initialInputs?.[row.rowKey], resolveDefaultMonthlyAdvanceAssignment(row))
                     : inputsByRowKey[row.rowKey])
                     ?? createEmptyManualInput(resolveDefaultMonthlyAdvanceAssignment(row));
@@ -1190,6 +1193,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 return (a.workerName || '').localeCompare(b.workerName || '', 'ko');
             });
     }, [
+        computeOnly,
         applyBusinessIncome,
         applyDailyFee,
         applyUtilities,
@@ -1868,6 +1872,8 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
         && computedRows.every((row) => row.allocationMode === 'corporate');
     const allAssignedToLabor = computedRows.length > 0
         && computedRows.every((row) => row.allocationMode === 'labor');
+
+    if (computeOnly) return null;
 
     return (
         <div className="monthly-advance-ledger-font flex-1 min-h-0 bg-white rounded-2xl border border-slate-300 shadow-sm flex flex-col overflow-hidden">
