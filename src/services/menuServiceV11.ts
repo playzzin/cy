@@ -16,6 +16,7 @@ import {
 import { isOperationManagementMenuPath, isOperationManagementMenuText } from '../utils/operationMenuAccess';
 import { permissionAuditService } from './permissionAuditService';
 import { mergeMenuConfigChanges } from '../utils/menuConfigChanges';
+import { ensureTeamPersonnelMenu } from '../utils/teamPersonnelMenu';
 
 export type { MenuItem, SiteDataType };
 
@@ -1191,6 +1192,7 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
     removeRetiredHardcodedMenuSeeds(final);
     ensureRequiredLogManagementItems(final);
     removeWorkbookLedgerUpgradeMenus(final);
+    ensureTeamPersonnelMenu(final);
 
     return final;
 };

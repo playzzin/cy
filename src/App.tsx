@@ -344,7 +344,9 @@ const App: React.FC = () => {
               <Route path="smart-team-registration" element={<SmartTeamRegistrationPage />} />
               <Route path="smart-site-registration" element={<SmartSiteRegistrationPage />} />
               <Route path="summary" element={<WorkerSummaryPage />} />
-              <Route path="team-worker-detail" element={<TeamWorkerDetailPage />} />
+              <Route path="team-worker-detail" element={<TeamWorkerDetailPage key="profile" view="profile" />} />
+              <Route path="team-worker-payslip" element={<TeamWorkerDetailPage key="payslip" view="payslip" />} />
+              <Route path="team-worker-daily-report" element={<TeamWorkerDetailPage key="dailyReport" view="dailyReport" />} />
               <Route path="team-worker-requests" element={<TeamWorkerRequestPage />} />
               <Route path="site-responsible-detail" element={<SiteResponsibleDetailPage />} />
               <Route path="site-manager-detail" element={<SiteResponsibleDetailPage />} />

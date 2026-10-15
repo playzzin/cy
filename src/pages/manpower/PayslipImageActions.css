@@ -1,0 +1,52 @@
+.payslip-image-actions {
+    padding: 14px;
+    margin-bottom: 14px;
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+    background: #eff6ff;
+    color: #1e293b;
+}
+.tw-payslip-template-wrap > .payslip-image-actions { margin-bottom: 14px; }
+.payslip-image-actions__toolbar,
+.payslip-image-actions__buttons,
+.payslip-image-actions__preview-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.payslip-image-actions__toolbar > strong,
+.payslip-image-actions__preview-heading > strong {
+    flex: 1;
+    min-width: 140px;
+    font-size: 14px;
+}
+.payslip-image-actions button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: white;
+    font-size: 13px;
+    font-weight: 700;
+}
+.payslip-image-actions button:disabled { opacity: .55; cursor: wait; }
+.payslip-image-actions button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.payslip-image-actions .payslip-image-actions__share { background: #fee500; color: #191919; border-color: #e0c900; }
+.payslip-image-actions p { margin: 8px 0 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.payslip-image-actions p:empty { display: none; }
+.payslip-image-actions__hint { color: #475569; }
+.payslip-image-actions__error { color: #b91c1c; }
+.payslip-image-actions__preview { margin-top: 12px; padding: 12px; background: white; border-radius: 8px; border: 1px solid #cbd5e1; }
+.payslip-image-actions__preview img { display: block; max-width: 100%; width: auto; height: 240px; object-fit: contain; margin: 12px auto; }
+.payslip-image-actions__buttons { margin-top: 12px; }
+@media (max-width: 600px) {
+    .payslip-image-actions__toolbar > strong { flex-basis: 100%; }
+    .payslip-image-actions__toolbar > button,
+    .payslip-image-actions__buttons > button { flex: 1; white-space: nowrap; }
+}
+@media print { .payslip-image-actions { display: none !important; } }

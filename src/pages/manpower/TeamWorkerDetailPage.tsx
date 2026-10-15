@@ -1,5 +1,5 @@
 import SecureSignature from '../../components/SecureSignature';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMobileDetailNavigation } from '../../hooks/useMobileScroll';
 import {
     AlertCircle,
@@ -38,6 +38,7 @@ import MonthNavigator from '../../components/common/MonthNavigator';
 import { storage } from '../../config/firebase';
 import { PayslipTemplate } from '../payroll/components/PayslipTemplate';
 import type { PaymentData } from '../payroll/components/PayslipTemplate';
+import PayslipImageActions from './PayslipImageActions';
 import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyReportService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
@@ -53,6 +54,12 @@ import './TeamWorkerDetailPage.css';
 
 type StatusFilter = 'all' | 'active' | 'inactive';
 type DetailView = 'profile' | 'payslip' | 'dailyReport';
+
+const VIEW_TITLES: Record<DetailView, string> = {
+    profile: '작업자정보',
+    payslip: '급여명세서',
+    dailyReport: '출력일보',
+};
 type MobileView = 'list' | 'detail';
 type DailyReportDisplayMode = 'calendar' | 'list';
 
@@ -380,7 +387,9 @@ const DetailField: React.FC<{ label: string; value?: React.ReactNode; wide?: boo
     </div>
 );
 
-const TeamWorkerDetailPage: React.FC = () => {
+const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailView = 'profile' }) => {
+    const isDocumentView = detailView !== 'profile';
+    const payslipRef = useRef<HTMLDivElement>(null);
     const [teams, setTeams] = useState<Team[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [outputRows, setOutputRows] = useState<DailyReportWorkerRow[]>([]);
@@ -390,7 +399,6 @@ const TeamWorkerDetailPage: React.FC = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
-    const [detailView, setDetailView] = useState<DetailView>('profile');
     const [dailyReportDisplayMode, setDailyReportDisplayMode] = useState<DailyReportDisplayMode>('calendar');
     const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('list');
     const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
@@ -560,13 +568,14 @@ const TeamWorkerDetailPage: React.FC = () => {
 
         const hasSelectedWorker = filteredWorkers.some(worker => String(worker.id ?? '') === selectedWorkerId);
         if (!hasSelectedWorker) {
-            setSelectedWorkerId(String(filteredWorkers[0].id ?? ''));
+            setSelectedWorkerId(isDocumentView ? '' : String(filteredWorkers[0].id ?? ''));
+            setMobileView('list');
         }
-    }, [filteredWorkers, selectedWorkerId]);
+    }, [filteredWorkers, isDocumentView, selectedWorkerId]);
 
     const selectedWorker = useMemo(
-        () => workers.find(worker => String(worker.id ?? '') === selectedWorkerId) ?? null,
-        [workers, selectedWorkerId]
+        () => filteredWorkers.find(worker => String(worker.id ?? '') === selectedWorkerId) ?? null,
+        [filteredWorkers, selectedWorkerId]
     );
 
     const selectedTeamWorkerIds = useMemo(
@@ -593,7 +602,7 @@ const TeamWorkerDetailPage: React.FC = () => {
         return scopedOutputRows
             .filter(row => {
                 const rowWorkerId = String(row.workerId ?? '').trim();
-                if (workerId && rowWorkerId === workerId) return true;
+                if (rowWorkerId) return [workerId, String(selectedWorker.legacyId ?? '').trim()].includes(rowWorkerId);
                 return workerName.length > 0 && normalizeText(row.workerName) === workerName;
             })
             .sort((left, right) => String(right.date ?? '').localeCompare(String(left.date ?? '')));
@@ -818,6 +827,7 @@ const TeamWorkerDetailPage: React.FC = () => {
         const loadIdCard = async () => {
             setIdCardUrl('');
             setIdCardError('');
+            if (isDocumentView) return;
 
             const rawPath = String(selectedWorker?.fileNameSaved ?? '').trim();
             if (!rawPath) return;
@@ -857,7 +867,7 @@ const TeamWorkerDetailPage: React.FC = () => {
         return () => {
             mounted = false;
         };
-    }, [selectedWorker?.fileNameSaved]);
+    }, [isDocumentView, selectedWorker?.fileNameSaved]);
 
     const handleCopyIdCard = async () => {
         if (!idCardUrl || idCardCopying) return;
@@ -1047,9 +1057,9 @@ const TeamWorkerDetailPage: React.FC = () => {
                 <div>
                     <div className="tw-page__eyebrow">
                         <Users size={16} />
-                        팀별 작업자 통합 조회
+                        인원관리
                     </div>
-                    <h1>팀별 작업자 상세출력정보</h1>
+                    <h1>{VIEW_TITLES[detailView]}</h1>
                 </div>
 
                 <div className="tw-header-actions">
@@ -1057,11 +1067,11 @@ const TeamWorkerDetailPage: React.FC = () => {
                         {showSensitive ? <EyeOff size={18} /> : <Eye size={18} />}
                         <span>{showSensitive ? '숨김' : '표시'}</span>
                     </button>
-                    <button type="button" className="tw-icon-button" onClick={handleCsvDownload} title="CSV 내보내기" aria-label="CSV 내보내기">
+                    <button type="button" className="tw-icon-button" onClick={handleCsvDownload} title="CSV 내보내기" aria-label="CSV 내보내기" disabled={isDocumentView && (!selectedWorker || loadingOutput || !!outputError)}>
                         <Download size={18} />
                         <span>CSV</span>
                     </button>
-                    <button type="button" className="tw-icon-button" onClick={() => window.print()} title="인쇄" aria-label="인쇄">
+                    <button type="button" className="tw-icon-button" onClick={() => window.print()} title="인쇄" aria-label="인쇄" disabled={isDocumentView && (!selectedWorker || loadingOutput || !!outputError)}>
                         <Printer size={18} />
                         <span>인쇄</span>
                     </button>
@@ -1078,7 +1088,7 @@ const TeamWorkerDetailPage: React.FC = () => {
                     <input
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
-                        placeholder="이름 · 연락처 · 팀으로 검색"
+                        placeholder={isDocumentView ? '작업자 이름 검색' : '이름 · 연락처 · 팀으로 검색'}
                         aria-label="작업자 빠른 검색"
                     />
                     {searchQuery && (
@@ -1116,7 +1126,8 @@ const TeamWorkerDetailPage: React.FC = () => {
                         <input
                             value={searchQuery}
                             onChange={(event) => setSearchQuery(event.target.value)}
-                            placeholder="이름, 연락처, 팀, 계좌"
+                            placeholder={isDocumentView ? '작업자 이름 검색' : '이름, 연락처, 팀, 계좌'}
+                            aria-label="작업자 검색"
                         />
                     </div>
                 </label>
@@ -1313,6 +1324,7 @@ const TeamWorkerDetailPage: React.FC = () => {
                         <div className="tw-empty-detail">
                             <UserRound size={44} />
                             <strong>작업자를 선택하세요.</strong>
+                            {isDocumentView && <p>이름을 검색하고 작업자를 선택하면 {VIEW_TITLES[detailView]}를 확인할 수 있습니다.</p>}
                         </div>
                     ) : (
                         <>
@@ -1339,7 +1351,7 @@ const TeamWorkerDetailPage: React.FC = () => {
                                         <span><CalendarDays size={15} />최근 {workerStats.latestDate || '-'}</span>
                                     </div>
                                 </div>
-                                <div className="tw-worker-hero__actions">
+                                {!isDocumentView && <div className="tw-worker-hero__actions">
                                     <button
                                         type="button"
                                         className="tw-secondary-button tw-worker-hero__action"
@@ -1360,7 +1372,7 @@ const TeamWorkerDetailPage: React.FC = () => {
                                         <PenLine size={17} />
                                         {selectedWorker.signatureUrl ? '서명 수정' : '서명 등록'}
                                     </button>
-                                </div>
+                                </div>}
                             </div>
 
                             <div className="tw-worker-stat-grid">
@@ -1376,30 +1388,6 @@ const TeamWorkerDetailPage: React.FC = () => {
                                     <span>현장</span>
                                     <strong>{workerStats.siteCount.toLocaleString('ko-KR')}</strong>
                                 </div>
-                            </div>
-
-                            <div className="tw-view-tabs" role="tablist" aria-label="월별 작업자 문서">
-                                <button
-                                    type="button"
-                                    className={detailView === 'profile' ? 'tw-view-tab tw-view-tab--active' : 'tw-view-tab'}
-                                    onClick={() => setDetailView('profile')}
-                                >
-                                    작업자 정보
-                                </button>
-                                <button
-                                    type="button"
-                                    className={detailView === 'payslip' ? 'tw-view-tab tw-view-tab--active' : 'tw-view-tab'}
-                                    onClick={() => setDetailView('payslip')}
-                                >
-                                    급여명세서
-                                </button>
-                                <button
-                                    type="button"
-                                    className={detailView === 'dailyReport' ? 'tw-view-tab tw-view-tab--active' : 'tw-view-tab'}
-                                    onClick={() => setDetailView('dailyReport')}
-                                >
-                                    출력일보
-                                </button>
                             </div>
 
                             {detailView === 'profile' && (
@@ -1516,11 +1504,24 @@ const TeamWorkerDetailPage: React.FC = () => {
 
                             {detailView === 'payslip' && (
                             <section className="tw-payslip-template-wrap" aria-label="월별 노임명세서">
-                                {payslipData && (
-                                    <PayslipTemplate
+                                {loadingOutput ? (
+                                    <div className="tw-empty-state">급여명세서를 불러오는 중입니다.</div>
+                                ) : outputError ? (
+                                    <div className="tw-empty-state tw-empty-state--error">급여명세서를 표시할 수 없습니다. 새로고침해 주세요.</div>
+                                ) : payslipData && !loadingMaster && !accessScope.loading && !masterError && (
+                                    <>
+                                    <PayslipImageActions
+                                        key={`${selectedWorkerId}:${selectedMonth}:${showSensitive}`}
+                                        targetRef={payslipRef}
                                         data={payslipData}
                                         month={selectedMonth}
                                     />
+                                    <PayslipTemplate
+                                        ref={payslipRef}
+                                        data={payslipData}
+                                        month={selectedMonth}
+                                    />
+                                    </>
                                 )}
                             </section>
                             )}
