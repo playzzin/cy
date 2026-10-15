@@ -252,18 +252,11 @@ const getCustomAccountKey = (entry: Pick<AccountDirectory, 'id' | 'name' | 'cate
     return `custom:${normalizedId || `${entry.category}:${normalizeText(entry.name) || '__unknown__'}`}`;
 };
 
+// 종료 상태는 배지에만 표시하며 계좌 조회에서 자동으로 제외하지 않는다.
 const isEndedAccountStatus = (value: unknown) => {
     const normalized = normalizeText(value).toLowerCase();
-    if (!normalized) return false;
-
-    return (
-        normalized === 'inactive' ||
-        normalized === 'archived' ||
-        normalized === 'closed' ||
-        normalized === 'ended' ||
-        normalized.includes('\uC885\uB8CC') ||
-        normalized.includes('\uBCF4\uAD00')
-    );
+    return ['inactive', 'archived', 'closed', 'ended'].includes(normalized)
+        || normalized.includes('종료') || normalized.includes('보관');
 };
 
 const parseAccountTab = (value: string | null): AccountTab => {
@@ -328,7 +321,7 @@ const getCompanyTypeBadgeClass = (type?: string | null) => {
 const getWorkerEmploymentStatus = (worker: Pick<Worker, 'status' | 'isActive'>): WorkerEmploymentFilter => {
     const normalizedStatus = normalizeText(worker.status).toLowerCase();
     if (worker.isActive === false) return 'retired';
-    if (normalizedStatus.includes('\uD1F4\uC0AC') || normalizedStatus === 'inactive') return 'retired';
+    if (normalizedStatus.includes('\uD1F4\uC0AC') || ['inactive', 'resigned', 'retired'].includes(normalizedStatus)) return 'retired';
     return 'active';
 };
 
@@ -406,6 +399,7 @@ const SummaryCard = ({
 
 const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded = false }) => {
     const [loading, setLoading] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [searchParams] = useSearchParams();
     const requestedTabParam = searchParams.get('tab');
     const requestedTab = useMemo(() => parseAccountTab(requestedTabParam), [requestedTabParam]);
@@ -504,6 +498,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
 
     const loadData = useCallback(async () => {
         setLoading(true);
+        setLoadError(null);
         try {
             const [workerRows, teamRows, companyRows, customRows, savedPrimaryAccount] = await Promise.all([
                 manpowerService.getWorkers(true),
@@ -525,6 +520,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
             setRowSnapshots({});
         } catch (error) {
             console.error('Failed to load account management data:', error);
+            setLoadError('계좌 데이터를 불러오지 못했습니다. 새로고침을 눌러 다시 시도해 주세요.');
         } finally {
             setLoading(false);
         }
@@ -585,7 +581,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
 
     const getWorkerTeamMeta = useCallback((worker: Worker) => {
         const team = teamById.get(worker.teamId || '');
-        const company = companyById.get(team?.companyId || '');
+        const company = companyById.get(team?.companyId || worker.companyId || '');
         const resolvedTeamName = normalizeText(team?.name) || normalizeText(worker.teamName);
         const teamKey = normalizeText(worker.teamId) || (resolvedTeamName ? `name:${resolvedTeamName}` : '__unassigned__');
         const teamType = normalizeText(team?.type) || normalizeText(worker.teamType) || '미지정';
@@ -593,7 +589,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
             normalizeText(team?.companyName) ||
             normalizeText(company?.name) ||
             normalizeText(worker.companyName);
-        const companyKey = normalizeText(company?.id) || normalizeText(team?.companyId) || (companyName ? `name:${companyName}` : '__unassigned__');
+        const companyKey = normalizeText(company?.id) || normalizeText(team?.companyId) || normalizeText(worker.companyId) || (companyName ? `name:${companyName}` : '__unassigned__');
 
         return {
             teamKey,
@@ -601,38 +597,34 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
             teamType,
             companyName,
             companyKey,
-            teamStatus: normalizeText(team?.status),
-            companyStatus: normalizeText(company?.status),
         };
     }, [companyById, teamById]);
 
     const isTeamAccountHidden = useCallback(
-        (team: Pick<Team, 'id' | 'name' | 'status'>) => isEndedAccountStatus(team.status) || isAccountKeyHidden(getTeamAccountKey(team)),
+        (team: Pick<Team, 'id' | 'name'>) => isAccountKeyHidden(getTeamAccountKey(team)),
         [isAccountKeyHidden]
     );
 
     const isCompanyAccountHidden = useCallback(
-        (company: Pick<Company, 'id' | 'name' | 'status'>) => isEndedAccountStatus(company.status) || isAccountKeyHidden(getCompanyAccountKey(company)),
+        (company: Pick<Company, 'id' | 'name'>) => isAccountKeyHidden(getCompanyAccountKey(company)),
         [isAccountKeyHidden]
     );
 
     const isCustomAccountHidden = useCallback(
-        (entry: Pick<AccountDirectory, 'id' | 'name' | 'category' | 'status'>) => isEndedAccountStatus(entry.status) || isAccountKeyHidden(getCustomAccountKey(entry)),
+        (entry: Pick<AccountDirectory, 'id' | 'name' | 'category'>) => isAccountKeyHidden(getCustomAccountKey(entry)),
         [isAccountKeyHidden]
     );
 
     const isWorkerAccountHidden = useCallback(
-        (worker: Pick<Worker, 'id' | 'name' | 'status' | 'isActive'>) => getWorkerEmploymentStatus(worker) === 'retired' || isAccountKeyHidden(getWorkerAccountKey(worker)),
+        (worker: Pick<Worker, 'id' | 'name'>) => isAccountKeyHidden(getWorkerAccountKey(worker)),
         [isAccountKeyHidden]
     );
 
     const isWorkerHiddenByAccountScope = useCallback(
         (worker: Worker) => {
-            const { teamKey, companyKey, teamStatus, companyStatus } = getWorkerTeamMeta(worker);
+            const { teamKey, companyKey } = getWorkerTeamMeta(worker);
             return (
                 isWorkerAccountHidden(worker) ||
-                isEndedAccountStatus(teamStatus) ||
-                isEndedAccountStatus(companyStatus) ||
                 isAccountKeyHidden(`team:${teamKey}`) ||
                 isAccountKeyHidden(`company:${companyKey}`)
             );
@@ -643,7 +635,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const cheongyeonWorkers = useMemo(() => {
         return workers.filter((worker) => {
             const { teamKey, companyName } = getWorkerTeamMeta(worker);
-            if (teamKey === '__unassigned__') return false;
+            if (teamKey === '__unassigned__' && getWorkerEmploymentStatus(worker) !== 'retired') return false;
             return isCheongyeonText(companyName);
         });
     }, [getWorkerTeamMeta, workers]);
@@ -808,8 +800,8 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     );
 
     const visibleWorkerCount = useMemo(
-        () => filteredWorkers.length,
-        [filteredWorkers]
+        () => visibleWorkerRows.length,
+        [visibleWorkerRows]
     );
 
     const filteredTeams = useMemo(() => {
@@ -1845,16 +1837,18 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                             계좌 미등록만 보기
                         </label>
 
-                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-                            <input
-                                type="checkbox"
-                                checked={showHiddenAccounts}
-                                onChange={(event) => setShowHiddenAccounts(event.target.checked)}
-                                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                            />
-                            {'\uC228\uAE40/\uC885\uB8CC \uD3EC\uD568'}
-                            <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-bold text-slate-600">{hiddenAccountCount}</span>
-                        </label>
+                        {(hiddenAccountCount > 0 || showHiddenAccounts) && (
+                            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                                <input
+                                    type="checkbox"
+                                    checked={showHiddenAccounts}
+                                    onChange={(event) => setShowHiddenAccounts(event.target.checked)}
+                                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                                숨긴 계좌 보기
+                                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-bold text-slate-600">{hiddenAccountCount}</span>
+                            </label>
+                        )}
 
                         <button
                             type="button"
@@ -2122,6 +2116,10 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 <div className="rounded-2xl border border-slate-200 bg-white px-6 py-16 text-center text-sm text-slate-500 shadow-sm">
                     계좌 데이터를 불러오는 중입니다...
                 </div>
+            ) : loadError ? (
+                <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-6 py-8 text-sm text-rose-700">
+                    {loadError}
+                </div>
             ) : (
                 <>
                     {activeTab === 'overview' && (
@@ -2266,10 +2264,10 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                 <div className="flex flex-col gap-4">
                                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                                         <div>
-                                            <div className="text-sm font-semibold text-slate-900">청연 소속 팀 작업자 계좌만 표시합니다.</div>
+                                            <div className="text-sm font-semibold text-slate-900">청연 소속 작업자 계좌를 표시합니다.</div>
                                             <div className="mt-1 text-sm text-slate-500">
                                                 청연 소속 전체 {visibleCheongyeonWorkersForStats.length}명 중 현재 {visibleWorkerCount}명을 보고 있습니다.
-                                                기본값은 현재 작업자만 표시하며, 퇴사자는 필요할 때만 열어볼 수 있습니다.
+                                                퇴사자에는 종료된 팀과 미배정 퇴사자도 포함됩니다.
                                             </div>
                                         </div>
                                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -2303,6 +2301,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         key={option.key}
                                                         type="button"
                                                         onClick={() => setWorkerEmploymentFilter(option.key)}
+                                                        aria-pressed={workerEmploymentFilter === option.key}
                                                         className={getWorkerFilterButtonClass(workerEmploymentFilter === option.key)}
                                                     >
                                                         <span>{option.label}</span>
@@ -2324,6 +2323,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         key={option.key}
                                                         type="button"
                                                         onClick={() => setWorkerSalaryFilter(option.key)}
+                                                        aria-pressed={workerSalaryFilter === option.key}
                                                         className={getWorkerFilterButtonClass(workerSalaryFilter === option.key)}
                                                     >
                                                         <span>{option.label}</span>
@@ -2592,7 +2592,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         const accountKey = getTeamAccountKey(team);
                                                         const isManuallyHidden = isAccountKeyHidden(accountKey);
                                                         const isEndedStatus = isEndedAccountStatus(team.status);
-                                                        const isHiddenRow = isManuallyHidden || isEndedStatus;
+                                                        const isHiddenRow = isManuallyHidden;
                                                         return (
                                                             <tr key={team.id} className={`align-top ${isHiddenRow ? 'bg-slate-50 text-slate-500' : ''}`}>
                                                                 <td className="px-4 py-3">
@@ -2748,7 +2748,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         const accountKey = getCompanyAccountKey(company);
                                                         const isManuallyHidden = isAccountKeyHidden(accountKey);
                                                         const isEndedStatus = isEndedAccountStatus(company.status);
-                                                        const isHiddenRow = isManuallyHidden || isEndedStatus;
+                                                        const isHiddenRow = isManuallyHidden;
                                                         return (
                                                             <tr key={company.id} className={`align-top ${isHiddenRow ? 'bg-slate-50 text-slate-500' : ''}`}>
                                                                 <td className="px-4 py-3">
@@ -2933,8 +2933,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                     const isEditing = !!editingKeys[rowKey];
                                                                     const accountKey = getCustomAccountKey(entry);
                                                                     const isManuallyHidden = isAccountKeyHidden(accountKey);
-                                                                    const isEndedStatus = isEndedAccountStatus(entry.status);
-                                                                    const isHiddenRow = isManuallyHidden || isEndedStatus;
+                                                                    const isHiddenRow = isManuallyHidden;
                                                                     return (
                                                                         <tr key={entry.id} className={`align-top ${isHiddenRow ? 'bg-slate-50 text-slate-500' : ''}`}>
                                                                             <td className="px-4 py-3">
