@@ -58,8 +58,10 @@ import MenuDivider from './MenuDivider';
 import { isMenuDivider } from '../../utils/menuDivider';
 import { getLinkedMenuRef } from '../../utils/linkedPositionMenus';
 import SidebarMenuBranch from './SidebarMenuBranch';
+import type { SidebarSide } from '../../utils/sidebarSide';
 
 interface SidebarProps {
+    side?: SidebarSide;
     currentSite: string;
     currentSiteData: any;
     closeAll: () => void;
@@ -213,6 +215,7 @@ const inferMenuIconName = (text: string, path?: string, explicitIcon?: string): 
 };
 
 const Sidebar: React.FC<SidebarProps> = ({
+    side = 'left',
     currentSite,
     currentSiteData,
     closeAll,
@@ -536,7 +539,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             title="메뉴 접기"
                             aria-label="메뉴 접기"
                         >
-                            <FontAwesomeIcon icon={faChevronLeft} />
+                            <FontAwesomeIcon icon={side === 'right' ? faChevronRight : faChevronLeft} />
                         </button>
                     )}
                     <button id="mobile-close-btn" onClick={closeAll} aria-label="메뉴 닫기" title="메뉴 닫기" style={isCheongyeon ? { color: 'white' } : {}}>
@@ -677,15 +680,16 @@ const Sidebar: React.FC<SidebarProps> = ({
             {/* Hover Submenu Panel for Collapsed Mode (Portal to body) */}
             {isSidebarCollapsed && !isMobile && liveHoveredMenuItem && createPortal(
                 <div
-                    className={`submenu-panel ${liveHoveredMenuItem ? 'open' : ''}`}
+                    className={`submenu-panel ${side === 'right' ? 'submenu-panel--right' : ''} ${liveHoveredMenuItem ? 'open' : ''}`}
                     onMouseEnter={handlePanelMouseEnter}
                     onMouseLeave={handlePanelMouseLeave}
                     style={{
                         position: 'fixed',
                         zIndex: 9999,
                         top: Math.min(hoveredItemTop, window.innerHeight - 300) + 'px',
-                        left: '60px',
-                        transformOrigin: 'left top',
+                        left: side === 'left' ? 'var(--sidebar-collapsed-width, 60px)' : 'auto',
+                        right: side === 'right' ? 'var(--sidebar-collapsed-width, 60px)' : 'auto',
+                        transformOrigin: side === 'right' ? 'right top' : 'left top',
                         borderColor: liveHoveredMenuItem.activeColor // Optional border color?
                     }}
                 >

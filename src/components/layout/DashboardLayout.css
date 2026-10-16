@@ -2211,3 +2211,55 @@ body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-
 body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-[#eef0f6]"] {
     border-color: #2b3854 !important;
 }
+
+/* Field and partner position menus open from the right edge. */
+.app.sidebar-right #sidebar {
+    left: auto;
+    right: 0;
+    box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
+}
+
+.app.sidebar-right #main-content {
+    margin-left: 0;
+    margin-right: var(--sidebar-width);
+    transition: margin-right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.app.sidebar-right #main-header {
+    padding-left: 10px;
+    padding-right: calc(var(--sidebar-width) + 15px);
+    transition: padding-right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.app.sidebar-right .header-left-group { order: 2; }
+.app.sidebar-right .header-right-group { order: 1; margin-left: auto; }
+.submenu-panel--right { box-shadow: -4px 0 12px rgba(0, 0, 0, 0.2); }
+
+@media (min-width: 769px) {
+    .app.sidebar-right.sidebar-collapsed #main-content {
+        margin-left: 0;
+        margin-right: var(--sidebar-collapsed-width);
+    }
+    .app.sidebar-right.sidebar-collapsed #main-header {
+        padding-left: 10px;
+        padding-right: calc(var(--sidebar-collapsed-width) + 15px);
+    }
+    .app.sidebar-right.sidebar-collapsed .menu-item:hover::after { left: auto; right: 70px; }
+    .app.sidebar-right.sidebar-collapsed .menu-item:hover::before {
+        left: auto;
+        right: 64px;
+        border-right-color: transparent;
+        border-left-color: #34495e;
+    }
+}
+
+@media (max-width: 768px) {
+    .app.sidebar-right #sidebar {
+        transform: translateX(100%);
+        visibility: hidden;
+    }
+    .app.sidebar-right.mobile-open #sidebar { transform: translateX(0); visibility: visible; }
+    .app.sidebar-right #main-content { margin-right: 0; }
+    .app.sidebar-right #main-header { padding: 0 10px 0 15px; }
+    .app.sidebar-right .header-left-group { margin-left: 8px; }
+}

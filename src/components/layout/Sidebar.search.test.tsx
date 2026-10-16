@@ -175,3 +175,15 @@ it('검색 결과에서도 새 탭 메뉴 설정을 유지한다', async () => {
     open.mockRestore();
     await waitFor(() => expect(screen.getByRole('searchbox')).toHaveValue(''));
 });
+
+it('오른쪽 접힌 메뉴의 하위 패널은 화면 안쪽으로 열리고 링크 이동 후 닫힌다', async () => {
+    render(app({ isSidebarCollapsed: true, side: 'right' }));
+    fireEvent.click(screen.getByRole('button', { name: '현장 관리' }));
+    // The portal container, rather than a child control, owns its edge positioning.
+    // eslint-disable-next-line testing-library/no-node-access
+    const panel = screen.getByRole('button', { name: '하위 메뉴 닫기' }).closest('.submenu-panel');
+    expect(panel).toHaveStyle({ left: 'auto', right: 'var(--sidebar-collapsed-width, 60px)', transformOrigin: 'right top' });
+    fireEvent.click(within(panel as HTMLElement).getByRole('link', { name: '급여 관리' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('/payroll?tab=monthly');
+    await waitFor(() => expect(screen.queryByRole('button', { name: '하위 메뉴 닫기' })).not.toBeInTheDocument());
+});

@@ -30,6 +30,7 @@ import {
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 import { getMenuModeStorageKey } from '../../utils/menuModeStorage';
 import { getPositionMenuView } from '../../utils/linkedPositionMenus';
+import { getSidebarSide } from '../../utils/sidebarSide';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { filterTeamWorkflowMenu } from '../../utils/teamWorkflowPolicy';
 
@@ -453,7 +454,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
 
     const POSITION_SITE_MAP = getPositionSiteMap();
 
-    // Use position-based site for left menu
+    // Use the selected position menu and its layout side
     // 'full' position uses currentSite (full admin menu)
     const availableSiteKeys = siteData
         ? Object.keys(siteData).filter((siteKey) => Boolean(siteData[siteKey]?.menu))
@@ -466,6 +467,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     const effectiveSite = (isSiteLayerMode || currentPosition === 'full' || !positionSite)
         ? baseSite
         : (siteData?.[positionSite]?.menu ? positionSite : baseSite);
+    const sidebarSide = getSidebarSide(effectiveSite, siteData);
     const sourceSiteData = siteData
         ? (siteData[effectiveSite] || siteData[fallbackSite] || null)
         : null;
@@ -683,6 +685,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
                     {/* Same Sidebar as Admin ERP (Left Side) */}
                     <RuntimeErrorBoundary>
                         <Sidebar
+                            side={sidebarSide}
                             currentSite={effectiveSite}
                             currentSiteData={currentSiteData}
                             closeAll={closeAll}
@@ -741,7 +744,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
 
     return (
         <SiteModeProvider {...siteModeValue}>
-            <div className={`app ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
+            <div className={`app ${sidebarSide === 'right' ? 'sidebar-right' : ''} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
                 <div className="backdrop" id="backdrop" onClick={closeAll}></div>
 
                 <Header
@@ -765,6 +768,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
 
                 <RuntimeErrorBoundary>
                     <Sidebar
+                        side={sidebarSide}
                         currentSite={effectiveSite}
                         currentSiteData={currentSiteData}
                         closeAll={closeAll}
