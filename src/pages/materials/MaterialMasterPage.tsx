@@ -7,6 +7,13 @@ import { getMaterialGroupKey, sortMaterialDisplayRows, MaterialGroupKey } from '
 
 const formatWon = (value?: number) => value ? `${value.toLocaleString('ko-KR')}원` : '-';
 
+const getMaterialErrorMessage = (error: unknown, fallback: string): string => {
+    if ((error as { code?: string })?.code === 'permission-denied') {
+        return '자재를 변경할 권한이 없습니다. 로그인 계정의 권한을 확인해 주세요.';
+    }
+    return error instanceof Error ? error.message : fallback;
+};
+
 const MaterialMasterPage: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [materials, setMaterials] = useState<Material[]>([]);
@@ -140,7 +147,7 @@ const MaterialMasterPage: React.FC = () => {
             await loadData();
         } catch (error) {
             console.error('Failed to save material:', error);
-            alert('저장에 실패했습니다.');
+            alert(getMaterialErrorMessage(error, '저장에 실패했습니다.'));
         } finally {
             setLoading(false);
         }
@@ -156,7 +163,7 @@ const MaterialMasterPage: React.FC = () => {
             await loadData();
         } catch (error) {
             console.error('Failed to delete material:', error);
-            alert('삭제에 실패했습니다.');
+            alert(getMaterialErrorMessage(error, '삭제에 실패했습니다.'));
         } finally {
             setLoading(false);
         }

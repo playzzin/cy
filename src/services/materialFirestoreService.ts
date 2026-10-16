@@ -63,6 +63,21 @@ export const materialFirestoreService = {
         invalidateTeamScopedCache();
     },
 
+    saveMaterialsBatch: async (materials: MaterialZod[]) => {
+        if (materials.length === 0) return;
+        // Do not split a logical edit/delete into partially successful commits.
+        if (materials.length > MAX_BATCH_WRITES) {
+            throw new Error('동일 자재의 중복 데이터가 너무 많아 한 번에 처리할 수 없습니다.');
+        }
+        const batch = writeBatch(db);
+        materials.forEach(material => {
+            const ref = doc(db, MASTER_COLLECTION, material.id).withConverter(createConverter(MaterialSchema));
+            batch.set(ref, material, { merge: true });
+        });
+        await batch.commit();
+        invalidateTeamScopedCache();
+    },
+
     // --- Inbound Transactions ---
     getInbound: async (id: string) => {
         const ref = doc(db, INBOUND_COLLECTION, id).withConverter(createConverter(MaterialInboundSchema));

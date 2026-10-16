@@ -140,11 +140,11 @@ const getMaterialQualityScore = (material: Partial<Material>): number => {
 };
 
 const compareMaterialPreference = (candidate: Material, current: Material): number => {
-    const qualityDiff = getMaterialQualityScore(candidate) - getMaterialQualityScore(current);
-    if (qualityDiff !== 0) return qualityDiff;
-
     const updatedDiff = toComparableMillis(candidate.updatedAt) - toComparableMillis(current.updatedAt);
     if (updatedDiff !== 0) return updatedDiff;
+
+    const qualityDiff = getMaterialQualityScore(candidate) - getMaterialQualityScore(current);
+    if (qualityDiff !== 0) return qualityDiff;
 
     const createdDiff = toComparableMillis(candidate.createdAt) - toComparableMillis(current.createdAt);
     if (createdDiff !== 0) return createdDiff;
@@ -223,7 +223,7 @@ const mergeMaterialsForSelection = (rows: Material[]): Material[] => {
                 deduped.set(key, row);
                 return;
             }
-            if (existing.isCatalogDefault === row.isCatalogDefault && compareMaterialPreference(row, existing) > 0) {
+            if ((existing.isCatalogDefault === true) === (row.isCatalogDefault === true) && compareMaterialPreference(row, existing) > 0) {
                 deduped.set(key, row);
             }
         });
@@ -380,6 +380,8 @@ export const updateMaterial = async (
         throw new Error('수정할 자재를 찾을 수 없습니다.');
     }
 
+    const allRows = await materialFirestoreService.getAllMaterials({ includeInactive: true }) as Material[];
+    const previousKey = getMaterialKey(current as Material);
     const data: MaterialZod = {
         ...current,
         ...updates as any,
@@ -396,9 +398,42 @@ export const updateMaterial = async (
         hiddenCatalogDefault: isCatalogMaterial(current as any) ? false : (updates as any).hiddenCatalogDefault ?? (current as any).hiddenCatalogDefault,
         updatedAt: new Date()
     };
-    await materialFirestoreService.saveMaterial(id, data);
+    if (data.materialKey !== previousKey && allRows.some(row => (
+        row.id !== id && row.isActive !== false && row.hiddenCatalogDefault !== true &&
+        getMaterialKey(row) === data.materialKey
+    ))) {
+        throw new Error(`이미 등록된 자재입니다: ${data.category} / ${data.itemName} (${data.spec})`);
+    }
+
+    // A displayed row represents every document with this business key. Keep
+    // their IDs for historical transactions, but retire stale duplicates.
+    const writes: MaterialZod[] = [data, ...allRows
+        .filter(row => row.id !== id && getMaterialKey(row) === previousKey && row.isActive !== false)
+        .map(row => createInactiveMaterial(row))];
+    if (data.materialKey !== previousKey) {
+        const catalog = createCatalogMaterials().find(row => getMaterialKey(row) === previousKey);
+        if (catalog && catalog.id !== id && !writes.some(row => row.id === catalog.id)) {
+            // A custom row may have suppressed this default without ever
+            // persisting it. Remember the old key so a rename cannot reseed it.
+            writes.push(createInactiveMaterial(allRows.find(row => row.id === catalog.id) ?? catalog));
+        }
+    }
+    await materialFirestoreService.saveMaterialsBatch(writes);
     clearMaterialSelectionCache();
     await logMaterialChange('updated', 'material', current as any, data as any);
+};
+
+const createInactiveMaterial = (material: Material): MaterialZod => {
+    const normalized = normalizeMaterialForSelection(material);
+    return {
+        ...normalized,
+        materialKey: getMaterialKey(normalized),
+        unitPrice: normalized.unitPrice ?? 0,
+        isActive: false,
+        hiddenCatalogDefault: isCatalogMaterial(normalized) || normalized.hiddenCatalogDefault === true,
+        createdAt: normalized.createdAt ?? new Date(),
+        updatedAt: new Date(),
+    };
 };
 
 export const deleteMaterial = async (materialOrId: string | Material): Promise<void> => {
@@ -410,7 +445,6 @@ export const deleteMaterial = async (materialOrId: string | Material): Promise<v
         throw new Error('삭제할 자재를 찾을 수 없습니다.');
     }
 
-    const now = new Date();
     const normalized = normalizeMaterialForSelection(target as Material);
     const materialKey = getMaterialKey(normalized);
     const fallbackId = id || getCatalogDocumentId(materialKey);
@@ -418,27 +452,13 @@ export const deleteMaterial = async (materialOrId: string | Material): Promise<v
     const rowsToHide = allRows.filter((row) => {
         if (row.id === fallbackId) return false;
         if (getMaterialKey(row) !== materialKey) return false;
-        return isCatalogMaterial(row);
+        return row.isActive !== false;
     });
-    const deletedSnapshot = {
-        ...normalized,
-        id: fallbackId,
-        materialKey,
-        unitPrice: normalized.unitPrice ?? 0,
-        isActive: false,
-        hiddenCatalogDefault: isCatalogMaterial(normalized) || normalized.hiddenCatalogDefault === true,
-        createdAt: normalized.createdAt ?? now,
-        updatedAt: now,
-    };
+    const deletedSnapshot = createInactiveMaterial({ ...normalized, id: fallbackId });
 
-    await Promise.all([
-        materialFirestoreService.saveMaterial(fallbackId, deletedSnapshot as any),
-        ...rowsToHide.map((row) => materialFirestoreService.saveMaterial(row.id, {
-            ...row,
-            isActive: false,
-            hiddenCatalogDefault: true,
-            updatedAt: now,
-        } as any)),
+    await materialFirestoreService.saveMaterialsBatch([
+        deletedSnapshot,
+        ...rowsToHide.map(createInactiveMaterial),
     ]);
     clearMaterialSelectionCache();
     await logMaterialChange('deleted', 'material', target as any, deletedSnapshot as any);
