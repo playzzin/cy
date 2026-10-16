@@ -13,7 +13,7 @@ export interface CardStatementUsageDialogProps {
   cardId: string;
   cardLast4: string;
   cardName: string;
-  ledgerTotal: number;
+  ledgerTotal?: number;
   paths: string[];
   onClose: () => void;
 }
