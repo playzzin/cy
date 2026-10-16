@@ -8,6 +8,8 @@ import { teamSettlementService } from '../../services/teamSettlementService';
 import { getTeamScopedRows } from '../../services/teamScopedReadService';
 
 let mockUid = 'admin';
+let mockCompaniesMissing = false;
+let mockMasterLoading = false;
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: mockUid } }) }));
 jest.mock('../../services/teamScopedReadService', () => ({ getTeamScopedRows: jest.fn() }));
 
@@ -27,11 +29,24 @@ jest.mock('../../contexts/MasterDataContext', () => {
             { id: 'site-b', name: '두 번째 현장', companyId: 'company', responsibleTeamId: 'b', status: 'active' }
         ]
     };
-    return { useMasterData: () => master };
+    return { useMasterData: () => ({ ...master, loading: mockMasterLoading, companies: mockCompaniesMissing ? [] : master.companies }) };
+});
+
+const originalElementScrollTo = HTMLElement.prototype.scrollTo;
+beforeAll(() => {
+    jest.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    HTMLElement.prototype.scrollTo = jest.fn();
+});
+afterAll(() => {
+    jest.restoreAllMocks();
+    if (originalElementScrollTo) HTMLElement.prototype.scrollTo = originalElementScrollTo;
+    else delete (HTMLElement.prototype as Partial<HTMLElement>).scrollTo;
 });
 
 beforeEach(() => {
     mockUid = 'admin';
+    mockCompaniesMissing = false;
+    mockMasterLoading = false;
     (getTeamScopedRows as jest.Mock).mockReset().mockResolvedValue(null);
     sessionStorage.clear();
     localStorage.clear();
@@ -79,14 +94,14 @@ const teamReports = [
         { workerId: 'other-worker', name: '다른 작업자', manDay: 97, unitPrice: 100, teamId: 'a' },
     ] },
     { id: 'other-site', date: '2026-10-01', siteId: 'site-b', siteName: '두 번째 현장', teamId: 'a', teamName: '가팀', workers: [
-        { workerId: 'own-worker', name: '우리 작업자', manDay: 7, unitPrice: 100 },
+        { workerId: 'other-worker', name: '다른 작업자', manDay: 7, unitPrice: 100 },
     ] },
 ];
 const allowOwnTeam = () => {
     mockUid = 'leader';
     (getTeamScopedRows as jest.Mock).mockImplementation(async collection => ({
         teams: [ownTeam],
-        sites: [ownSite, { id: 'site-b', name: '두 번째 현장', responsibleTeamId: 'b' }],
+        sites: [ownSite],
         workers: [{ id: 'own-worker', name: '우리 작업자', teamId: 'legacy-a' }],
         daily_reports: teamReports,
     }[collection as string]));
@@ -139,4 +154,58 @@ test('팀장 일보 조회가 실패하면 전체 조회로 전환하지 않는�
         expect(screen.queryByRole('heading', { name: '첫 번째 현장' })).not.toBeInTheDocument();
         expect(dailyReportService.getReportsByRange).not.toHaveBeenCalled();
     } finally { errorLog.mockRestore(); }
+});
+
+test.each(['site', 'team'])('팀장의 %s 보기에서 회사 목록이 비어 있어도 허용된 참여 공수를 집계한다', async view => {
+    allowOwnTeam();
+    mockCompaniesMissing = true;
+    renderPage(`view=${view}`);
+    await screen.findByRole('heading', { name: view === 'site' ? '첫 번째 현장' : '가팀' });
+    expect(screen.getAllByText('2.0').length).toBeGreaterThan(0);
+    expect(dailyReportService.getReportsByRange).not.toHaveBeenCalled();
+});
+
+test('팀 권한 확인이 끝나면 공용 마스터 로딩에 막히지 않고 참여 현황을 표시한다', async () => {
+    allowOwnTeam();
+    mockMasterLoading = true;
+    renderPage('view=site');
+    await screen.findByRole('heading', { name: '첫 번째 현장' });
+    expect(screen.queryByText('조회 권한을 확인하는 중입니다.')).not.toBeInTheDocument();
+});
+
+test('팀장 테스트 계정처럼 현장과 일보가 없으면 참여 현황 안내를 표시한다', async () => {
+    allowOwnTeam();
+    const read = (getTeamScopedRows as jest.Mock).getMockImplementation()!;
+    (getTeamScopedRows as jest.Mock).mockImplementation(collection => ['sites', 'daily_reports'].includes(collection) ? Promise.resolve([]) : read(collection));
+    renderPage('view=site');
+    await screen.findByText('선택한 조건에 해당하는 내 팀 참여 현황이 없습니다.');
+    expect(screen.queryByText(/현장 관리 메뉴에서/)).not.toBeInTheDocument();
+});
+
+test('담당 현장 목록에 없는 지원 현장도 소속 작업자의 참여 내역만 표시한다', async () => {
+    allowOwnTeam();
+    const read = (getTeamScopedRows as jest.Mock).getMockImplementation()!;
+    (getTeamScopedRows as jest.Mock).mockImplementation(collection => {
+        if (collection === 'sites') return Promise.resolve([ownSite]);
+        if (collection === 'daily_reports') return Promise.resolve([...teamReports, {
+            id: 'support', date: '2026-10-02', siteId: 'support-site', siteName: '지원 참여 현장',
+            responsibleTeamId: 'b', responsibleTeamName: '나팀', companyId: 'other-company',
+            teamId: 'b', teamName: '나팀', totalManDay: 99,
+            workers: [
+                { workerId: 'own-worker', name: '우리 작업자', teamId: 'b', manDay: 3, unitPrice: 100 },
+                { workerId: 'other-worker', name: '다른 작업자', teamId: 'a', manDay: 96, unitPrice: 900 },
+            ],
+        }]);
+        return read(collection);
+    });
+    renderPage('view=site&teamId=b');
+    const heading = await screen.findByRole('heading', { name: '지원 참여 현장' });
+    fireEvent.click(heading);
+    await screen.findByRole('heading', { name: '참여 팀 현황' });
+    expect(screen.getByText('상세 목록 (1건)')).toBeInTheDocument();
+    expect(screen.getAllByText('3.0').length).toBeGreaterThan(0);
+    expect(screen.queryByText('96.0')).not.toBeInTheDocument();
+    expect(screen.queryByText('다른 작업자')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '두 번째 현장' })).not.toBeInTheDocument();
+    expect(dailyReportService.getReportsByRange).not.toHaveBeenCalled();
 });

@@ -281,7 +281,7 @@ const WhiteboardAccessGate: React.FC<{ signedIn: boolean }> = ({ signedIn }) => 
             {signedIn && <button className="ml-3 text-indigo-600" onClick={() => setRetry(value => value + 1)}>다시 시도</button>}
         </div>
     );
-    if (access === undefined || master.loading) return <div className="p-6" role="status">조회 권한을 확인하는 중입니다.</div>;
+    if (access === undefined || (!access && master.loading)) return <div className="p-6" role="status">조회 권한을 확인하는 중입니다.</div>;
 
     const teams = access?.teams ?? master.teams;
     const sites = access?.sites ?? master.sites;
@@ -841,6 +841,9 @@ const WhiteboardStatusContent: React.FC<{
         const itemMap = new Map<string, BoardItem>();
 
         const isWithinCompanyScope = (teamCompanyId?: string | null, siteCompanyId?: string | null) => {
+            // These reports already contain only server-authorized own workers.
+            // An optional company catalog must not erase their participation.
+            if (teamAccess) return true;
             const normalizedTeamCompanyId = String(teamCompanyId ?? '').trim();
             const normalizedSiteCompanyId = String(siteCompanyId ?? '').trim();
 
@@ -948,12 +951,13 @@ const WhiteboardStatusContent: React.FC<{
             sites
                 .filter((site) => site.status === 'active')
                 .filter((site) => {
+                    if (teamAccess) return true;
                     const companyId = String(site.companyId ?? '').trim();
                     if (selectedCompanyId) return companyId === selectedCompanyId;
                     return companyId ? visibleCompanyIdSet.has(companyId) : false;
                 })
                 .filter((site) => {
-                    if (!selectedTeamId) return true;
+                    if (teamAccess || !selectedTeamId) return true;
                     const reportResponsibleTeam = getReportResponsibleTeamForSite(site);
                     return matchesSelectedDashboardTeam(
                         reportResponsibleTeam?.id ?? site.responsibleTeamId,
@@ -1001,7 +1005,7 @@ const WhiteboardStatusContent: React.FC<{
                 const siteResponsibleId = responsibleTeam.id;
                 const siteResponsibleName = responsibleTeam.name;
 
-                if (selectedTeamId && !matchesSelectedDashboardTeam(siteResponsibleId, siteResponsibleName)) {
+                if (!teamAccess && selectedTeamId && !matchesSelectedDashboardTeam(siteResponsibleId, siteResponsibleName)) {
                     return;
                 }
 
@@ -1245,6 +1249,7 @@ const WhiteboardStatusContent: React.FC<{
         selectedTeamId,
         sites,
         sortBy,
+        teamAccess,
         teams,
         viewMode,
         visibleCompanyIdSet
@@ -1460,7 +1465,7 @@ const WhiteboardStatusContent: React.FC<{
 
                 {teamAccess ? (
                     <p className="text-sm font-semibold text-indigo-700" role="status">
-                        {teams.map(team => team.name).join(', ')} · 내 팀 담당 현장만 조회할 수 있습니다.
+                        {teams.map(team => team.name).join(', ')} · 담당 현장과 지원 현장의 내 팀 참여 내역입니다.
                     </p>
                 ) : <WhiteboardTeamSelector
                     compact
@@ -1525,10 +1530,10 @@ const WhiteboardStatusContent: React.FC<{
                     <p className="text-slate-600 text-sm font-medium">
                         <span className="font-bold mr-2 inline-flex items-center gap-1" style={{ color: accentText }}>
                                     <FontAwesomeIcon icon={faBuilding} className="text-slate-400" />
-                                    {companies.find(c => c.id === selectedCompanyId)?.name || '청연 · 다원'}
+                                    {teamAccess ? '내 소속팀' : companies.find(c => c.id === selectedCompanyId)?.name || '청연 · 다원'}
                         </span>
                         {teamAccess ? (
-                            <span>내 팀 담당 현장의 팀원 공수와 상세 내역입니다.</span>
+                            <span>담당·지원 현장에 참여한 내 팀원의 공수와 상세 내역입니다.</span>
                         ) : selectedTeamId ? (
                             <>
                                 <span className="font-bold text-slate-800 inline-flex items-center gap-1 mr-1">
@@ -1789,7 +1794,7 @@ const WhiteboardStatusContent: React.FC<{
                                                     <div>
                                                         <div className="flex items-center gap-2 mb-2">
                                                             <span className="px-2 py-1 bg-indigo-50 text-indigo-600 text-xs font-bold rounded whitespace-nowrap">
-                                                                {companies.find(c => c.id === selectedCompanyId)?.name || '전체 회사'}
+                                                                {teamAccess ? '내 소속팀' : companies.find(c => c.id === selectedCompanyId)?.name || '전체 회사'}
                                                             </span>
                                                             <h2 className="text-xl md:text-2xl font-bold text-slate-800 whitespace-nowrap">
                                                                 {viewMode === 'site' ? '참여 팀 현황' : '진행 현장 현황'}
@@ -1797,14 +1802,16 @@ const WhiteboardStatusContent: React.FC<{
                                                         </div>
                                                         <p className="text-slate-500 mb-2 text-sm line-clamp-2 md:line-clamp-none">
                                                             <span className="font-bold text-slate-800">{item.name}</span>
-                                                            {viewMode === 'site' ? ' 현장에 투입된 팀들의 상세 공수 내역입니다.' : ' 팀이 수행한 현장별 상세 공수 내역입니다.'}
+                                                            {viewMode === 'site'
+                                                                ? (teamAccess ? ' 현장에 참여한 내 팀원의 상세 공수 내역입니다.' : ' 현장에 투입된 팀들의 상세 공수 내역입니다.')
+                                                                : ' 팀이 수행한 현장별 상세 공수 내역입니다.'}
                                                         </p>
                                                         {/* Level 1 Formula Explanation */}
                                                         <div className="flex items-start gap-2 bg-indigo-50/50 p-2 rounded-lg border border-indigo-100/50 text-xs text-indigo-800 max-w-lg">
                                                             <FontAwesomeIcon icon={faInfoCircle} className="mt-0.5 text-indigo-400 flex-shrink-0" />
                                                             <div>
                                                                 <span className="font-bold mr-1">산출 공식:</span>
-                                                                {viewMode === 'site'
+                                                                {teamAccess ? '해당 기간 내 팀원의 작업 공수 합계' : viewMode === 'site'
                                                                     ? '해당 기간 동안 이 현장에 투입된 모든 팀의 작업 공수 합계 (Teams Sum)'
                                                                     : '해당 기간 동안 이 팀이 수행한 모든 현장의 작업 공수 합계 (Sites Sum)'
                                                                 }
@@ -2064,10 +2071,10 @@ const WhiteboardStatusContent: React.FC<{
                     <div className="flex flex-col items-center justify-center h-full text-slate-400">
                         <FontAwesomeIcon icon={faChartBar} size="3x" className="mb-4 opacity-20" />
                         <p className="font-medium text-lg">
-                            {viewMode === 'site' ? '진행 중인 현장이 없습니다.' : '등록된 팀이 없습니다.'}
+                            {teamAccess ? '선택한 조건에 해당하는 내 팀 참여 현황이 없습니다.' : viewMode === 'site' ? '진행 중인 현장이 없습니다.' : '등록된 팀이 없습니다.'}
                         </p>
                         <p className="text-sm mt-2">
-                            {viewMode === 'site'
+                            {teamAccess ? '조회 월과 검색어를 확인해 주세요. 해당 월에 팀원의 참여 일보가 등록되면 표시됩니다.' : viewMode === 'site'
                                 ? "현장 관리 메뉴에서 현장 상태를 '진행중'으로 변경해주세요."
                                 : "팀 관리 메뉴에서 팀을 등록해주세요."}
                         </p>
