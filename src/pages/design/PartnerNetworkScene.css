@@ -1,0 +1,53 @@
+.cy-partner-scene { --network-duration: var(--film-duration,9000ms); }
+.cy-network-member { animation: cy-network-member var(--network-duration) ease-out both; animation-delay: calc(var(--member-index) * 45ms); }
+.cy-network-connection { animation: cy-network-connection var(--network-duration) ease-out both; }
+.cy-network-response { animation: cy-network-response var(--network-duration) ease-out both; }
+.cy-chat-message { animation: cy-chat-message .42s cubic-bezier(.2,.7,.3,1) both; animation-delay: var(--message-delay); }
+.cy-chat-scroll { transform: translateY(-240px); animation: cy-chat-scroll var(--network-duration) ease-in-out both; animation-delay: var(--channel-delay); }
+.cy-chat-activity { animation: cy-chat-activity var(--network-duration) linear both; }
+.cy-chat-typing { opacity: 0; animation: cy-chat-typing var(--network-duration) linear both; }
+.cy-support-team-out { animation: cy-support-out var(--network-duration) cubic-bezier(.4,0,.2,1) both; }
+.cy-support-team-in { animation: cy-support-in var(--network-duration) cubic-bezier(.4,0,.2,1) both; }
+.cy-support-route-out { animation: cy-support-route-out var(--network-duration) linear both; }
+.cy-support-route-in { animation: cy-support-route-in var(--network-duration) linear both; }
+.cy-support-arrival-out { animation: cy-support-arrival-out var(--network-duration) ease-out both; }
+.cy-support-arrival-in { animation: cy-support-arrival-in var(--network-duration) ease-out both; }
+@keyframes cy-network-member { 0% { opacity: .1; } 35%,100% { opacity: 1; } }
+@keyframes cy-network-connection { 0%,14% { stroke-dashoffset: 1; } 58%,100% { stroke-dashoffset: 0; } }
+@keyframes cy-network-response { 0%,65% { opacity: 0; } 82%,100% { opacity: 1; } }
+@keyframes cy-chat-message { from { opacity: 0; transform: translate(10px,14px); } to { opacity: 1; transform: none; } }
+/* Four visible messages; new arrivals gently push the conversation upward. */
+@keyframes cy-chat-scroll {
+    0%,43.5% { transform: translateY(0); }
+    48%,53.7% { transform: translateY(-60px); }
+    58.5%,63.9% { transform: translateY(-120px); }
+    68.7%,74% { transform: translateY(-180px); }
+    78.8%,100% { transform: translateY(-240px); }
+}
+@keyframes cy-chat-activity { 0%,20%,40%,60%,80%,100% { opacity: 1; } 10%,30%,50%,70% { opacity: .35; } }
+@keyframes cy-chat-typing { 0%,7%,25%,43%,61% { opacity: .25; } 15%,33%,51%,69%,77% { opacity: .9; } 85%,100% { opacity: 0; } }
+/* Each final position is its destination; reduced motion therefore shows arrived teams. */
+@keyframes cy-support-out { 0%,19% { transform: translateX(-530px); } 74%,100% { transform: none; } }
+@keyframes cy-support-in { 0%,27% { transform: translateX(530px); } 82%,100% { transform: none; } }
+@keyframes cy-support-route-out { 0%,10% { stroke-dashoffset: 1; } 72%,100% { stroke-dashoffset: 0; } }
+@keyframes cy-support-route-in { 0%,18% { stroke-dashoffset: 1; } 80%,100% { stroke-dashoffset: 0; } }
+@keyframes cy-support-arrival-out { 0%,74% { opacity: 0; } 84%,100% { opacity: 1; } }
+@keyframes cy-support-arrival-in { 0%,82% { opacity: 0; } 92%,100% { opacity: 1; } }
+.cy-partner-summary { margin-top: 16px; }
+.cy-partner-channels { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin-bottom: 12px; }
+.cy-story .cy-partner-channels p { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 11px; background: #102b3e; border: 1px solid #2a4b61; border-radius: 5px; font-size: 10px; color: #a7c3d4; }
+.cy-partner-channels strong { font-size: 13px; font-weight: 700; word-break: keep-all; }
+.cy-story .cy-partner-summary > p { margin: 6px 0; font-size: 11px; color: #abc6d7; line-height: 1.7; }
+.cy-partner-out-label { color: #f0cf93; }.cy-partner-in-label { color: #a6e6cf; }
+.cy-partner-chat-transcript { margin-top: 15px; padding: 0 12px; background: #0b2132; border: 1px solid #315169; border-radius: 8px; }
+.cy-partner-chat-transcript summary { cursor: pointer; min-height: 44px; align-content: center; color: #c6e4f1; font-size: 12px; }
+.cy-partner-chat-transcript summary:focus-visible { outline: 2px solid #92c7f1; outline-offset: 4px; }
+.cy-story .cy-partner-chat-transcript > p { font-size: 11px; margin: 4px 0 15px; color: #97b5c8; }
+.cy-partner-chat-transcript section { padding-bottom: 16px; }
+.cy-partner-chat-transcript h5 { font-size: 14px; margin: 0 0 10px; }
+.cy-partner-chat-transcript ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 7px; }
+.cy-partner-chat-transcript li { padding: 10px 12px; background: #132f42; border-radius: 7px; }
+.cy-partner-chat-transcript li > span { font-size: 10px; }
+.cy-story .cy-partner-chat-transcript li p { margin: 5px 0 0; color: #d8e8f2; font-size: 12px; line-height: 1.65; }
+@media (max-width: 600px) { .cy-partner-channels { grid-template-columns: 1fr; } .cy-story .cy-partner-channels p { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; } }
+@media (prefers-reduced-motion: reduce) { .cy-partner-scene * { animation: none !important; } .cy-chat-typing { display: none; } }

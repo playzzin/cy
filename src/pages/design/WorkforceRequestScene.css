@@ -1,0 +1,27 @@
+.cy-request-scene { --request-duration: var(--film-duration, 9000ms); }
+.cy-call-request { animation: cy-call-request var(--request-duration) ease-out both; }
+.cy-call-connection { animation: cy-call-connection var(--request-duration) linear both; }
+.cy-call-signal { animation: cy-call-signal var(--request-duration) linear both; }
+.cy-call-answer-arm { animation: cy-call-answer var(--request-duration) ease-in-out both; }
+.cy-call-received { animation: cy-call-received var(--request-duration) ease-out both; }
+.cy-match-route { animation: cy-match-route var(--request-duration) ease-out both; }
+.cy-match-candidate { animation: cy-match-candidate var(--request-duration) ease-out both; }
+.cy-match-candidate.is-other { opacity: .45; animation-name: cy-match-other; }
+.cy-match-candidate.is-selected .cy-match-card { fill: #123f43; animation: cy-match-highlight var(--request-duration) linear both; }
+.cy-match-confirmed { animation: cy-match-confirmed var(--request-duration) ease-out both; }
+.cy-match-result { animation: cy-match-result var(--request-duration) ease-out both; }
+@keyframes cy-call-request { 0%,4% { opacity: 0; transform: translateY(10px); } 20%,100% { opacity: 1; transform: none; } }
+@keyframes cy-call-connection { 0%,12% { stroke-dashoffset: 1; } 43%,100% { stroke-dashoffset: 0; } }
+@keyframes cy-call-signal { 0%,14% { opacity: 0; } 21%,29%,37%,100% { opacity: 1; } 25%,33% { opacity: .25; } }
+@keyframes cy-call-answer { 0%,28% { transform: rotate(-135deg); } 48%,100% { transform: none; } }
+@keyframes cy-call-received { 0%,53% { opacity: 0; transform: translateY(10px); } 72%,100% { opacity: 1; transform: none; } }
+@keyframes cy-match-route { 0%,31% { stroke-dashoffset: 1; opacity: .3; } 61%,100% { stroke-dashoffset: 0; opacity: 1; } }
+@keyframes cy-match-candidate { 0% { opacity: .25; } 25%,100% { opacity: 1; } }
+@keyframes cy-match-other { 0% { opacity: .25; } 25%,43% { opacity: 1; } 62%,100% { opacity: .45; } }
+@keyframes cy-match-highlight { 0%,42% { fill: #102c41; stroke: #3c6178; } 65%,100% { fill: #123f43; stroke: #91e5c6; } }
+@keyframes cy-match-confirmed { 0%,58% { opacity: 0; } 73%,100% { opacity: 1; } }
+@keyframes cy-match-result { 0%,72% { opacity: 0; } 86%,100% { opacity: 1; } }
+.cy-request-summary { margin-top: 16px; padding: 12px; border-left: 2px solid #83d5d3; background: #102b3b; border-radius: 4px; }
+.cy-request-summary > span { color: #84b6c8; font-size: 10px; }
+.cy-story .cy-request-summary p { margin: 7px 0 0; color: #b5d6e3; font-size: 12px; line-height: 1.8; }
+@media (prefers-reduced-motion: reduce) { .cy-request-scene * { animation: none !important; } }
