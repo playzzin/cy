@@ -18,9 +18,16 @@ export function previewMenuContainsPath(items: (MenuItem | string)[], path: stri
         return Boolean(item.sub && previewMenuContainsPath(item.sub, path));
     });
 }
+// Registration screens open the shared editor through their 수정 button, even without a menu tab.
+export function previewMenuAllowsPath(items: (MenuItem | string)[], path: string): boolean {
+    if (previewMenuContainsPath(items, path)) return true;
+    const pathname = new URL(path, 'https://preview.invalid').pathname.replace(/\/$/, '');
+    return pathname === '/materials/transactions'
+        && ['/materials/inbound', '/materials/outbound'].some(route => previewMenuContainsPath(items, route));
+}
 export default function DevPreviewRouteGuard({ siteData, positionId, children }: { siteData: SiteDataType; positionId: string; children: React.ReactNode }) {
     const location = useLocation(), navigate = useNavigate();
-    const allowed = ['/dashboard', '/profile'].includes(location.pathname) || previewMenuContainsPath(siteData[positionSiteKey(positionId)]?.menu || [], location.pathname + location.search);
+    const allowed = ['/dashboard', '/profile'].includes(location.pathname) || previewMenuAllowsPath(siteData[positionSiteKey(positionId)]?.menu || [], location.pathname + location.search);
     if (!allowed) return <div className="p-6" role="status"><h1 className="text-xl font-bold">이 직책에 제공되지 않는 페이지입니다</h1><p className="my-3">현재 페이지를 유지했습니다. 다른 직책으로 비교하거나 사용자 홈으로 이동할 수 있습니다.</p><button className="rounded border px-4 py-2" onClick={() => navigate('/dashboard')}>사용자 홈으로</button></div>;
     return <>{children}</>;
 }

@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import DevUserPreview, { choosePreviewAccount, type PreviewAccount } from './DevUserPreview';
-import { previewMenuContainsPath } from './DevPreviewRouteGuard';
+import { previewMenuAllowsPath, previewMenuContainsPath } from './DevPreviewRouteGuard';
 const mockCall = jest.fn();
 jest.mock('firebase/functions', () => ({ httpsCallable: (_functions: unknown, name: string) => (data: unknown) => mockCall(name, data) }));
 jest.mock('../../config/firebase', () => ({ functions: {} }));
@@ -37,4 +37,20 @@ it('checks the menu path and required tab without granting hidden pages', () => 
     expect(previewMenuContainsPath(menu, '/work?tab=mine&month=2026-10')).toBe(true);
     expect(previewMenuContainsPath(menu, '/work?tab=all')).toBe(false);
     expect(previewMenuContainsPath(menu, '/secret')).toBe(false);
+});
+
+it('keeps the material editor reachable from registration without exposing other removed pages', () => {
+    for (const route of ['/materials/inbound', '/materials/outbound']) {
+        const menu = [{ text: '등록', path: route }];
+        expect(previewMenuContainsPath(menu, '/materials/transactions')).toBe(false);
+        expect(previewMenuAllowsPath(menu, '/materials/transactions/')).toBe(true);
+        for (const removed of ['/materials/transactions-by-site-date', '/materials/inventory', '/materials/inventory-by-site', '/materials/logs']) {
+            expect(previewMenuAllowsPath(menu, removed)).toBe(false);
+        }
+    }
+});
+it('does not grant the material editor from a hidden registration menu or unrelated menu', () => {
+    expect(previewMenuAllowsPath([{ text: '입고', path: '/materials/inbound', hide: true }], '/materials/transactions')).toBe(false);
+    expect(previewMenuAllowsPath([{ text: '자재', path: '/materials/master' }], '/materials/transactions')).toBe(false);
+    expect(previewMenuAllowsPath([], '/materials/transactions')).toBe(false);
 });
