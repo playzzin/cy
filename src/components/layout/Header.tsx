@@ -346,9 +346,15 @@ const Header: React.FC<HeaderProps> = ({
 
     // `test` and `nation` share the SITE-style top navigation shell.
     const isSiteLayerMode = currentSite === 'test' || currentSite === 'nation';
-    const isTeamLeaderMenu = !isSiteLayerMode && currentPosition !== 'full'
+    const hidesCalculator = !isSiteLayerMode && currentPosition !== 'full'
         && [currentPosition, resolvePositionLabel(currentPosition, positions), safeCurrentSiteData.name]
-            .some(value => ['팀장', 'leader', 'teamlead', 'teamleader'].includes(normalizePositionValue(value)));
+            .some(value => [
+                '팀장', 'leader', 'teamlead', 'teamleader',
+                '반장', 'foreman', '작업자', 'worker',
+                '임대사', 'rental', 'rentalcompany',
+                '발주사', '건설', '건설사', '원청', 'client', 'clientcompany', 'constructioncompany',
+                '소개소', '소개자', 'referral', 'recruiting', 'agency',
+            ].includes(normalizePositionValue(value)));
     const siteLandingPath = currentSite === 'nation' ? '/dashboard3' : '/dashboard2';
     const headerStyle = isSiteLayerMode
         ? isDarkMode
@@ -462,7 +468,7 @@ const Header: React.FC<HeaderProps> = ({
     }, [baseConfiguredHeaderActions, isPrivilegedHeaderUser]);
 
     const hasHeaderActionAccess = (item: MenuItem): boolean => {
-        if (item.hide || (isTeamLeaderMenu && String(item.action || '').trim() === 'calculator')) return false;
+        if (item.hide || (hidesCalculator && String(item.action || '').trim() === 'calculator')) return false;
         if (isPrivilegedHeaderUser) return true;
 
         const allowedRoles = Array.isArray(item.roles)
