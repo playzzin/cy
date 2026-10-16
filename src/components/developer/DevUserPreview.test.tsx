@@ -22,7 +22,7 @@ it('removes the previous frame immediately and ignores a stale session response'
     mockCall.mockImplementation((name, data) => name === 'getDevPreviewAccounts' ? Promise.resolve({ data: { accounts } })
         : data.targetUid === 'a' ? new Promise(resolve => { resolveA = resolve; })
             : Promise.resolve({ data: { token: 'fixture', expiresAt: Date.now() / 1000 + 600, target: { uid: 'b', displayName: '검증 팀장 B' } } }));
-    render(<DevUserPreview actorUid="dev" positionId="lead" path="/dashboard" positions={[{ id: 'lead', name: '팀장', color: '', icon: '' }]} siteData={{ pos_lead: { name: '팀장', icon: '', menu: [] } }} onPosition={() => undefined} onPath={() => undefined} onExit={() => undefined} />);
+    render(<DevUserPreview actorUid="dev" positionId="lead" path="/dashboard" positions={[{ id: 'lead', name: '팀장', color: '', icon: '' }]} onPosition={() => undefined} onPath={() => undefined} onExit={() => undefined} />);
     await screen.findByRole('option', { name: '검증 팀장 A · A팀' });
     fireEvent.change(screen.getByLabelText('보기 기준'), { target: { value: 'a' } });
     fireEvent.change(screen.getByLabelText('보기 기준'), { target: { value: 'b' } });

@@ -31,7 +31,7 @@ try {
     await Promise.all(['dev-fixture','leader-a','leader-b','worker-a'].map(async uid => {
         try { await adminAuth.createUser({ uid, email:`${uid}@example.test`, password:'Preview-demo-2026!' }); } catch(error) { if(error.code!=='auth/uid-already-exists') throw error; }
     }));
-    const positionConfig = [{id:'dev',name:'DEV',icon:'fa-code',color:'blue'},{id:'lead',name:'팀장',icon:'fa-users',color:'teal'},{id:'worker',name:'작업자',icon:'fa-user',color:'gray'}];
+    const positionConfig = [{id:'dev',name:'DEV',icon:'fa-code',color:'blue'},{id:'lead',name:'팀장',icon:'fa-users',color:'teal'},{id:'worker',name:'작업자',icon:'fa-user',color:'gray'},{id:'empty',name:'미연결 직책',icon:'fa-user',color:'gray'}];
     const menu = [{id:'dashboard',text:'홈',path:'/dashboard'},{id:'work',text:'근무내역',path:'/manpower/team-worker-detail?section=work'}];
     const fixtures = {
         'users/dev-fixture':{status:'active',role:'admin',position:'DEV',displayName:'검증 DEV',accountType:'office'},
@@ -48,7 +48,7 @@ try {
         'daily_reports/mixed':{date:'2026-10-17',teamId:'ta',siteId:'sa',memo:'not-for-worker',workers:[{workerId:'wa',manDay:1,unitPrice:500},{workerId:'wc',manDay:1,unitPrice:100}]},
         'advance_requests/own':{workerId:'wc',yearMonth:'2026-10',requestedAmount:10},
         'advance_requests/other':{workerId:'wa',yearMonth:'2026-10',requestedAmount:20},
-        'settings/menus_v12':{admin:{name:'관리',icon:'',menu,positionConfig},pos_dev:{name:'DEV',icon:'',menu:[{id:'settings',text:'메뉴 관리',path:'/admin/menu-manager'}]},pos_lead:{name:'팀장',icon:'',menu},pos_worker:{name:'작업자',icon:'',menu:[{id:'worker_home',text:'작업자 홈',path:'/worker/home'}]}},
+        'settings/menus_v12':{admin:{name:'관리',icon:'',menu,positionConfig},pos_dev:{name:'DEV',icon:'',menu:[{id:'settings',text:'메뉴 관리',path:'/admin/menu-manager'}]},pos_lead:{name:'팀장',icon:'',menu},pos_worker:{name:'작업자',icon:'',menu:[{id:'worker_home',text:'작업자 홈',path:'/worker/home'}]},pos_empty:{name:'미연결 직책',icon:'',menu:[]}},
         'settings/system_config':{},
     };
     for (const [path,data] of Object.entries(fixtures)) await db.doc(path).set(data);
