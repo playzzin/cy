@@ -47,8 +47,8 @@ interface BoardItem {
         responsibleTeamId?: string;
         companyId?: string;
         color?: string;
-        summaryOnly?: boolean;
         workers?: {
+            workerKey: string;
             workerName: string;
             manDay: number;
             amount: number; // New
@@ -951,17 +951,27 @@ const WhiteboardStatusContent: React.FC<{
             workerName: string,
             date: string,
             manDay: number,
-            amount: number
+            amount: number,
+            workerId?: string
         ) => {
             if (!detail.workers) detail.workers = [];
-            let workerEntry = detail.workers.find((entry) => entry.workerName === workerName);
+            const workerKey = workerId ? `id:${workerId}` : `name:${workerName}`;
+            let workerEntry = detail.workers.find((entry) => entry.workerKey === workerKey);
             if (!workerEntry) {
-                workerEntry = { workerName, manDay: 0, amount: 0, dailyLogs: [] };
+                workerEntry = { workerKey, workerName, manDay: 0, amount: 0, dailyLogs: [] };
                 detail.workers.push(workerEntry);
             }
             workerEntry.manDay += manDay;
             workerEntry.amount += amount;
-            workerEntry.dailyLogs.push({ date, manDay, amount });
+            const day = workerEntry.dailyLogs.find(log => log.date === date);
+            if (day) { day.manDay += manDay; day.amount += amount; }
+            else workerEntry.dailyLogs.push({ date, manDay, amount });
+        };
+
+        const appendParticipationLogs = (detail: NonNullable<BoardItem['workDetails']>[number], report: WhiteboardReport) => {
+            report.participationDetails?.forEach(entry => {
+                appendWorkerLog(detail, entry.workerName, entry.date, entry.manDay, 0, entry.workerId);
+            });
         };
 
         if (viewMode === 'site') {
@@ -1103,7 +1113,6 @@ const WhiteboardStatusContent: React.FC<{
                     if (!isWithinCompanyScope(detailCompanyId, siteCompanyId)) return;
 
                     const detail = getOrCreateDetail(siteItem, detailId, detailName, detailCompanyId, detailId);
-                    detail.summaryOnly = report.participationSummary;
                     detail.color = report.teamColor;
 
                     const reportManDay = Number(report.totalManDay ?? 0);
@@ -1120,7 +1129,8 @@ const WhiteboardStatusContent: React.FC<{
                     siteItem.totalAmount = (siteItem.totalAmount || 0) + reportAmount;
                     siteItem.workerCount = (siteItem.workerCount || 0) + (reportManDay > 0 ? 1 : 0);
 
-                    if (!report.participationSummary) appendWorkerLog(detail, '작업자 정보 없음', report.date, reportManDay, reportAmount);
+                    if (report.participationSummary) appendParticipationLogs(detail, report);
+                    else appendWorkerLog(detail, '작업자 정보 없음', report.date, reportManDay, reportAmount);
 
                     const isResponsibleTeam = detailId === siteItem.responsibleTeamId;
                     if (detailCompanyId && siteItem.companyId && detailCompanyId !== siteItem.companyId) {
@@ -1173,7 +1183,6 @@ const WhiteboardStatusContent: React.FC<{
                     siteCompanyId || undefined,
                     responsibleTeam.id
                 );
-                detail.summaryOnly = report.participationSummary;
                 teamItem.color = report.teamColor;
 
                 detail.manDay += manDay;
@@ -1184,7 +1193,8 @@ const WhiteboardStatusContent: React.FC<{
                 teamItem.totalAmount = (teamItem.totalAmount || 0) + amount;
                 teamItem.workerCount = (teamItem.workerCount || 0) + 1;
 
-                if (!report.participationSummary) appendWorkerLog(detail, workerName, report.date, manDay, amount);
+                if (report.participationSummary) appendParticipationLogs(detail, report);
+                else appendWorkerLog(detail, workerName, report.date, manDay, amount);
             };
 
             if (workers.length > 0) {
@@ -1900,9 +1910,14 @@ const WhiteboardStatusContent: React.FC<{
                                                                     >
                                                                         {/* Summary Header (Always Visible) */}
                                                                         <div
-                                                                            onClick={(e) => { e.stopPropagation(); if (!detail.summaryOnly) toggleDetail(item.id, detail.targetId, e); }}
+                                                                            role="button"
+                                                                            tabIndex={0}
+                                                                            aria-label={`${detail.targetName} 작업자별 공수 상세`}
+                                                                            aria-expanded={isDetailSelected}
+                                                                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); e.currentTarget.click(); } }}
+                                                                            onClick={(e) => toggleDetail(item.id, detail.targetId, e)}
                                                                             className={`
-                                                                        ${detail.summaryOnly ? 'cursor-default' : 'cursor-pointer'} text-center flex flex-col items-center justify-center transition-colors relative
+                                                                        cursor-pointer text-center flex flex-col items-center justify-center transition-colors relative
                                                                         ${isDetailSelected ? 'p-4 border-b border-indigo-100 bg-white' : 'p-2 min-h-[80px] hover:bg-slate-50'}
                                                                     `}
                                                                         >
@@ -1963,7 +1978,7 @@ const WhiteboardStatusContent: React.FC<{
                                                                         </div>
 
                                                                         {/* EXPANDED CONTENT: Worker List (Level 3) */}
-                                                                        <BoardDisclosure open={isDetailSelected && !detail.summaryOnly} reducedMotion={reducedMotion} className="p-4 bg-slate-50/50">
+                                                                        <BoardDisclosure open={isDetailSelected} reducedMotion={reducedMotion} className="p-4 bg-slate-50/50">
                                                                             {() => (<>
                                                                                 <div className="flex justify-between items-center mb-4">
                                                                                     <h4 className="text-sm font-bold text-slate-600 flex items-center gap-2 whitespace-nowrap">
@@ -1987,10 +2002,10 @@ const WhiteboardStatusContent: React.FC<{
                                                                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 auto-rows-min grid-flow-row-dense">
                                                                                     {detail.workers && detail.workers.length > 0 ? (
                                                                                         detail.workers.map((worker, wIdx) => {
-                                                                                            const isWorkerExpanded = expandedWorkers.has(`${item.id}-${detail.targetId}-${worker.workerName}`);
+                                                                                            const isWorkerExpanded = expandedWorkers.has(`${item.id}-${detail.targetId}-${worker.workerKey}`);
                                                                                             return (
                                                                                                 <motion.div
-                                                                                                    key={worker.workerName}
+                                                                                                    key={worker.workerKey}
                                                                                                     {...getCardRevealMotion(wIdx, reducedMotion)}
                                                                                                     layout={reducedMotion ? false : 'position'}
                                                                                                     transition={{ layout: layoutTransition }}
@@ -2004,7 +2019,12 @@ const WhiteboardStatusContent: React.FC<{
                                                                                                 >
                                                                                                     <div
                                                                                                         className={`p-3 flex justify-between items-center cursor-pointer hover:bg-slate-50 transition-colors ${isWorkerExpanded ? 'border-b border-indigo-50 p-4 bg-indigo-50/10' : ''}`}
-                                                                                                        onClick={(e) => toggleWorker(`${item.id}-${detail.targetId}`, worker.workerName, e)}
+                                                                                                        role="button"
+                                                                                                        tabIndex={0}
+                                                                                                        aria-label={`${worker.workerName} 날짜별 공수 상세`}
+                                                                                                        aria-expanded={isWorkerExpanded}
+                                                                                                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); e.currentTarget.click(); } }}
+                                                                                                        onClick={(e) => toggleWorker(`${item.id}-${detail.targetId}`, worker.workerKey, e)}
                                                                                                     >
                                                                                                         <div className="flex items-center gap-2 min-w-0">
                                                                                                             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors flex-shrink-0 ${isWorkerExpanded ? 'bg-indigo-100 text-indigo-600 scale-110' : 'bg-slate-100 text-slate-500'}`}>

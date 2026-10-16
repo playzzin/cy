@@ -12,8 +12,8 @@ const positive = (value: unknown) => {
 };
 const responsibleId = (site: TeamRow) => text(site.responsibleTeamId ?? site.responsibleTeam?.id);
 
-// A site owner's board needs all participating teams, but not their personnel
-// records or wage rates. Return an explicit site/team/man-day projection only.
+// Site owners may drill into participants' names, work dates and man-days.
+// Project only those fields, never personnel records, contact details or wages.
 export function buildWhiteboardParticipation(authorizedTeams: TeamRow[], sites: TeamRow[], teams: TeamRow[], reports: TeamRow[]) {
     const ownTeamIds = new Set(ids(authorizedTeams));
     const siteById = indexById(sites.filter(site => ownTeamIds.has(responsibleId(site))));
@@ -22,6 +22,7 @@ export function buildWhiteboardParticipation(authorizedTeams: TeamRow[], sites: 
         id: string; date: string; siteId: string; siteName: string; companyId: string;
         responsibleTeamId: string; responsibleTeamName: string;
         teamId: string; teamName: string; teamCompanyId: string; teamColor: string; totalManDay: number;
+        participationDetails: { workerId: string; workerName: string; date: string; manDay: number }[];
     }>();
     for (const report of reports) {
         // Never use report.teamId, a URL filter or a report's ownership label
@@ -29,7 +30,7 @@ export function buildWhiteboardParticipation(authorizedTeams: TeamRow[], sites: 
         const site = siteById.get(text(report.siteId));
         if (!site) continue;
         const owner = teamById.get(responsibleId(site));
-        const add = (teamIdValue: unknown, teamNameValue: unknown, manDayValue: unknown) => {
+        const add = (teamIdValue: unknown, teamNameValue: unknown, manDayValue: unknown, worker?: any) => {
             const manDay = positive(manDayValue);
             if (!manDay) return;
             const team = teamById.get(text(teamIdValue));
@@ -42,15 +43,20 @@ export function buildWhiteboardParticipation(authorizedTeams: TeamRow[], sites: 
                     id: key, date: text(report.date), siteId: site.id, siteName: text(site.name),
                     companyId: text(site.companyId), responsibleTeamId: owner?.id || responsibleId(site),
                     responsibleTeamName: text(owner?.name) || text(site.responsibleTeamName),
-                    teamId, teamName, teamCompanyId: text(team?.companyId), teamColor: text(team?.color), totalManDay: 0,
+                    teamId, teamName, teamCompanyId: text(team?.companyId), teamColor: text(team?.color), totalManDay: 0, participationDetails: [],
                 };
                 totals.set(key, row);
             }
             row.totalManDay += manDay;
+            row.participationDetails.push({
+                workerId: text(worker?.workerId),
+                workerName: worker ? text(worker.name) || '이름 미기록' : '작업자 미기록 (일보 합계)',
+                date: text(report.date), manDay,
+            });
         };
         const workers = list(report.workers);
         if (workers.length) workers.forEach(worker => add(worker.teamId || report.teamId,
-            worker.workerTeamName || (!worker.teamId || worker.teamId === report.teamId ? report.teamName : ''), worker.manDay));
+            worker.workerTeamName || (!worker.teamId || worker.teamId === report.teamId ? report.teamName : ''), worker.manDay, worker));
         else add(report.teamId, report.teamName, report.totalManDay);
     }
     return [...totals.values()].map(row => ({ ...row, totalManDay: Math.round(row.totalManDay * 10000) / 10000 }));

@@ -186,7 +186,12 @@ test('개인 공수 조회에서 현장과 일보가 없으면 참여 현황 안
 const participantReports = [
     { id: 'own', date: '2026-10-01', siteId: 'site-a', siteName: '첫 번째 현장', responsibleTeamId: 'a', responsibleTeamName: '가팀', teamId: 'a', teamName: '가팀', teamCompanyId: 'company', totalManDay: 2 },
     { id: 'support', date: '2026-10-01', siteId: 'site-a', siteName: '첫 번째 현장', responsibleTeamId: 'a', responsibleTeamName: '가팀', teamId: 'b', teamName: '나팀', teamCompanyId: 'company', totalManDay: 3.5 },
-    { id: 'external', date: '2026-10-01', siteId: 'site-a', siteName: '첫 번째 현장', responsibleTeamId: 'a', responsibleTeamName: '가팀', teamId: 'external', teamName: '외부 참여팀', teamCompanyId: 'external-company', totalManDay: 4 },
+    { id: 'external', date: '2026-10-01', siteId: 'site-a', siteName: '첫 번째 현장', responsibleTeamId: 'a', responsibleTeamName: '가팀', teamId: 'external', teamName: '외부 참여팀', teamCompanyId: 'external-company', totalManDay: 4, participationDetails: [
+        { workerId: 'support-one', workerName: '지원 작업자', date: '2026-10-01', manDay: 1 },
+        { workerId: 'support-one', workerName: '지원 작업자', date: '2026-10-02', manDay: 0.5 },
+        { workerId: 'support-one', workerName: '지원 작업자', date: '2026-10-02', manDay: 0.5 },
+        { workerId: 'support-two', workerName: '지원 작업자', date: '2026-10-03', manDay: 2 },
+    ] },
 ];
 const allowResponsibleSites = (reports = participantReports) => {
     allowOwnTeam();
@@ -209,7 +214,7 @@ test('팀장은 내 담당 현장에 투입된 모든 팀의 공수를 보고 �
     expect(screen.getByText('3.5')).toBeInTheDocument();
     expect(screen.getByText('4.0')).toBeInTheDocument();
     fireEvent.click(screen.getByText('외부 참여팀'));
-    expect(screen.queryByText('작업자 상세 내역')).not.toBeInTheDocument();
+    expect(await screen.findByText('작업자 상세 내역')).toBeInTheDocument();
     expect(getTeamScopedRows).toHaveBeenCalledWith('whiteboard_participation', { yearMonth: '2026-10' });
     expect((getTeamScopedRows as jest.Mock).mock.calls.some(([name]) => name === 'daily_reports')).toBe(false);
     expect(dailyReportService.getReportsByRange).not.toHaveBeenCalled();
@@ -221,6 +226,33 @@ test('팀별 보기에서도 내 담당 현장에 지원 온 팀들의 공수가
     await screen.findByRole('heading', { name: '외부 참여팀' });
     expect(screen.getByRole('heading', { name: '나팀' })).toBeInTheDocument();
     expect(screen.getAllByText('9.5').length).toBeGreaterThan(0);
+});
+
+test.each(['site', 'team'])('담당 현장의 %s 보기에서 팀·작업자·날짜별 공수를 끝까지 펼친다', async view => {
+    allowResponsibleSites();
+    renderPage(`view=${view}`);
+    fireEvent.click(await screen.findByRole('heading', { name: view === 'site' ? '첫 번째 현장' : '외부 참여팀' }));
+    fireEvent.click(await screen.findByRole('button', { name: `${view === 'site' ? '외부 참여팀' : '첫 번째 현장'} 작업자별 공수 상세` }));
+    const workers = await screen.findAllByRole('button', { name: '지원 작업자 날짜별 공수 상세' });
+    expect(workers).toHaveLength(2); // 동명이인을 작업자 ID로 구분한다.
+    fireEvent.click(workers[0]);
+    expect(await screen.findByText('2026-10-01')).toBeInTheDocument();
+    expect(screen.getAllByText('2026-10-02')).toHaveLength(1); // 같은 날 일보는 합산한다.
+    expect(screen.getByText('2일 출역')).toBeInTheDocument();
+    fireEvent.click(workers[1]);
+    expect(await screen.findByText('2026-10-03')).toBeInTheDocument();
+    expect(screen.getAllByText('9.5').length).toBeGreaterThan(0);
+});
+
+test('작업자 미기록 일보도 실제 날짜와 공수를 명시하여 펼친다', async () => {
+    allowResponsibleSites([{ ...participantReports[2], participationDetails: [
+        { workerId: '', workerName: '작업자 미기록 (일보 합계)', date: '2026-10-04', manDay: 4 },
+    ] }]);
+    renderPage('view=site');
+    fireEvent.click(await screen.findByRole('heading', { name: '첫 번째 현장' }));
+    fireEvent.click(await screen.findByRole('button', { name: '외부 참여팀 작업자별 공수 상세' }));
+    fireEvent.click(await screen.findByRole('button', { name: '작업자 미기록 (일보 합계) 날짜별 공수 상세' }));
+    expect(await screen.findByText('2026-10-04')).toBeInTheDocument();
 });
 
 test('담당 현장 참여 조회가 실패하면 소속 팀원만의 합계를 정상 결과로 대체하지 않는다', async () => {
