@@ -14,7 +14,7 @@ import { Company } from '../../services/companyService';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { getTeamScopedRows } from '../../services/teamScopedReadService';
-import { loadWhiteboardTeamAccess, scopeWhiteboardReports, type WhiteboardTeamAccess } from './whiteboardAccess';
+import { loadWhiteboardTeamAccess, scopeWhiteboardReports, type WhiteboardTeamAccess, type WhiteboardReport, type WhiteboardParticipationResult } from './whiteboardAccess';
 import OutputManagementTabs from '../../components/common/OutputManagementTabs';
 import MonthNavigator from '../../components/common/MonthNavigator';
 import WhiteboardTeamSelector, { type WhiteboardTeamOption } from './WhiteboardTeamSelector';
@@ -46,6 +46,8 @@ interface BoardItem {
         workerCount: number; // New
         responsibleTeamId?: string;
         companyId?: string;
+        color?: string;
+        summaryOnly?: boolean;
         workers?: {
             workerName: string;
             manDay: number;
@@ -338,7 +340,8 @@ const WhiteboardStatusContent: React.FC<{
     const selectedTeamId = teamAccess ? (teams.length === 1 ? teams[0].id || '' : '') : requestedTeamId;
     const [mainCompanyId, setMainCompanyId] = useState<string>(persistedViewState.mainCompanyId);
 
-    const [rawReports, setRawReports] = useState<DailyReport[]>([]);
+    const [rawReports, setRawReports] = useState<WhiteboardReport[]>([]);
+    const [responsibleSiteView, setResponsibleSiteView] = useState(false);
     const reportRequestRef = useRef(0);
     const [loading, setLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState('');
@@ -786,11 +789,25 @@ const WhiteboardStatusContent: React.FC<{
         const requestId = ++reportRequestRef.current;
         setLoading(true);
         setRawReports([]);
+        setResponsibleSiteView(false);
         setErrorMessage('');
         try {
             const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
             const lastDay = new Date(year, month, 0).getDate();
             const endDate = `${year}-${String(month).padStart(2, '0')}-${lastDay}`;
+            if (teamAccess) {
+                const results = await getTeamScopedRows<WhiteboardParticipationResult>('whiteboard_participation', {
+                    yearMonth: `${year}-${String(month).padStart(2, '0')}`,
+                });
+                if (reportRequestRef.current !== requestId) return;
+                const result = results?.[0];
+                if (result?.mode === 'responsible-sites' && Array.isArray(result.reports)) {
+                    setResponsibleSiteView(true);
+                    setRawReports(result.reports.map(report => ({ ...report, workers: [], participationSummary: true })));
+                    return;
+                }
+                if (result?.mode !== 'own-workers') throw new Error('참여 현황 조회 응답을 확인해 주세요.');
+            }
             const reports = teamAccess
                 ? await getTeamScopedRows<DailyReport>('daily_reports', { startDate, endDate })
                 : await dailyReportService.getReportsByRange(startDate, endDate);
@@ -1082,10 +1099,12 @@ const WhiteboardStatusContent: React.FC<{
                     const detailName = reportWriterTeam?.name ?? report.teamName ?? 'Unknown Team';
                     if (!detailId || !detailName) return;
 
-                    const detailCompanyId = String(reportWriterTeam?.companyId ?? '').trim() || undefined;
+                    const detailCompanyId = String(reportWriterTeam?.companyId ?? report.teamCompanyId ?? '').trim() || undefined;
                     if (!isWithinCompanyScope(detailCompanyId, siteCompanyId)) return;
 
                     const detail = getOrCreateDetail(siteItem, detailId, detailName, detailCompanyId, detailId);
+                    detail.summaryOnly = report.participationSummary;
+                    detail.color = report.teamColor;
 
                     const reportManDay = Number(report.totalManDay ?? 0);
                     const reportAmount = Number(report.totalAmount ?? 0);
@@ -1101,7 +1120,7 @@ const WhiteboardStatusContent: React.FC<{
                     siteItem.totalAmount = (siteItem.totalAmount || 0) + reportAmount;
                     siteItem.workerCount = (siteItem.workerCount || 0) + (reportManDay > 0 ? 1 : 0);
 
-                    appendWorkerLog(detail, '작업자 정보 없음', report.date, reportManDay, reportAmount);
+                    if (!report.participationSummary) appendWorkerLog(detail, '작업자 정보 없음', report.date, reportManDay, reportAmount);
 
                     const isResponsibleTeam = detailId === siteItem.responsibleTeamId;
                     if (detailCompanyId && siteItem.companyId && detailCompanyId !== siteItem.companyId) {
@@ -1126,7 +1145,7 @@ const WhiteboardStatusContent: React.FC<{
                 const nextItemId = teamIdValue || `team:${normalizeName(teamNameValue)}`;
                 if (!nextItemId || !teamNameValue) return;
                 if (!isWithinCompanyScope(teamCompanyIdValue, siteCompanyId)) return;
-                if (selectedTeamId && !matchesSelectedDashboardTeam(teamIdValue ?? nextItemId, teamNameValue)) return;
+                if (!report.participationSummary && selectedTeamId && !matchesSelectedDashboardTeam(teamIdValue ?? nextItemId, teamNameValue)) return;
 
                 const teamItem = getOrCreateItem({
                     id: nextItemId,
@@ -1154,6 +1173,8 @@ const WhiteboardStatusContent: React.FC<{
                     siteCompanyId || undefined,
                     responsibleTeam.id
                 );
+                detail.summaryOnly = report.participationSummary;
+                teamItem.color = report.teamColor;
 
                 detail.manDay += manDay;
                 detail.amount += amount;
@@ -1163,7 +1184,7 @@ const WhiteboardStatusContent: React.FC<{
                 teamItem.totalAmount = (teamItem.totalAmount || 0) + amount;
                 teamItem.workerCount = (teamItem.workerCount || 0) + 1;
 
-                appendWorkerLog(detail, workerName, report.date, manDay, amount);
+                if (!report.participationSummary) appendWorkerLog(detail, workerName, report.date, manDay, amount);
             };
 
             if (workers.length > 0) {
@@ -1190,7 +1211,7 @@ const WhiteboardStatusContent: React.FC<{
             } else {
                 const reportTeamId = String(reportWriterTeam?.id ?? report.teamId ?? '').trim() || undefined;
                 const reportTeamName = reportWriterTeam?.name ?? report.teamName ?? 'Unknown Team';
-                const reportTeamCompanyId = String(reportWriterTeam?.companyId ?? '').trim() || undefined;
+                const reportTeamCompanyId = String(reportWriterTeam?.companyId ?? report.teamCompanyId ?? '').trim() || undefined;
                 const reportManDay = Number(report.totalManDay ?? 0);
                 const reportAmount = Number(report.totalAmount ?? 0);
 
@@ -1465,7 +1486,7 @@ const WhiteboardStatusContent: React.FC<{
 
                 {teamAccess ? (
                     <p className="text-sm font-semibold text-indigo-700" role="status">
-                        {teams.map(team => team.name).join(', ')} · 담당 현장과 지원 현장의 내 팀 참여 내역입니다.
+                        {teams.map(team => team.name).join(', ')} · {responsibleSiteView ? '내 팀 담당 현장에 참여한 모든 팀의 공수입니다.' : '담당 현장과 지원 현장의 내 팀 참여 내역입니다.'}
                     </p>
                 ) : <WhiteboardTeamSelector
                     compact
@@ -1533,7 +1554,7 @@ const WhiteboardStatusContent: React.FC<{
                                     {teamAccess ? '내 소속팀' : companies.find(c => c.id === selectedCompanyId)?.name || '청연 · 다원'}
                         </span>
                         {teamAccess ? (
-                            <span>담당·지원 현장에 참여한 내 팀원의 공수와 상세 내역입니다.</span>
+                            <span>{responsibleSiteView ? '내 팀 담당 현장에 투입된 소속팀·내부지원팀·외부지원팀의 공수를 합산합니다.' : '담당·지원 현장에 참여한 내 팀원의 공수와 상세 내역입니다.'}</span>
                         ) : selectedTeamId ? (
                             <>
                                 <span className="font-bold text-slate-800 inline-flex items-center gap-1 mr-1">
@@ -1632,7 +1653,7 @@ const WhiteboardStatusContent: React.FC<{
                             const displayedResponsibleTeamColor = responsibleTeamColor || (item.responsibleTeamName ? '#8b5cf6' : undefined);
                             const headerColor = item.type === 'site'
                                 ? displayedResponsibleTeamColor
-                                : normalizeHexColor(resolveDashboardTeam(item.id, item.name)?.color) || '#8b5cf6';
+                                : normalizeHexColor(resolveDashboardTeam(item.id, item.name)?.color || item.color) || '#8b5cf6';
                             const headerTextColor = headerColor ? getContrastingTextColor(headerColor) : undefined;
                             const externalSiteTeamColor = item.type === 'site' && isOtherCompany
                                 ? displayedResponsibleTeamColor
@@ -1794,7 +1815,7 @@ const WhiteboardStatusContent: React.FC<{
                                                     <div>
                                                         <div className="flex items-center gap-2 mb-2">
                                                             <span className="px-2 py-1 bg-indigo-50 text-indigo-600 text-xs font-bold rounded whitespace-nowrap">
-                                                                {teamAccess ? '내 소속팀' : companies.find(c => c.id === selectedCompanyId)?.name || '전체 회사'}
+                                                                {responsibleSiteView ? '내 팀 담당 현장' : teamAccess ? '내 소속팀' : companies.find(c => c.id === selectedCompanyId)?.name || '전체 회사'}
                                                             </span>
                                                             <h2 className="text-xl md:text-2xl font-bold text-slate-800 whitespace-nowrap">
                                                                 {viewMode === 'site' ? '참여 팀 현황' : '진행 현장 현황'}
@@ -1803,15 +1824,15 @@ const WhiteboardStatusContent: React.FC<{
                                                         <p className="text-slate-500 mb-2 text-sm line-clamp-2 md:line-clamp-none">
                                                             <span className="font-bold text-slate-800">{item.name}</span>
                                                             {viewMode === 'site'
-                                                                ? (teamAccess ? ' 현장에 참여한 내 팀원의 상세 공수 내역입니다.' : ' 현장에 투입된 팀들의 상세 공수 내역입니다.')
-                                                                : ' 팀이 수행한 현장별 상세 공수 내역입니다.'}
+                                                                ? (teamAccess && !responsibleSiteView ? ' 현장에 참여한 내 팀원의 상세 공수 내역입니다.' : ' 현장에 투입된 팀들의 상세 공수 내역입니다.')
+                                                                : (responsibleSiteView ? ' 팀이 내 담당 현장에 투입한 공수 내역입니다.' : ' 팀이 수행한 현장별 상세 공수 내역입니다.')}
                                                         </p>
                                                         {/* Level 1 Formula Explanation */}
                                                         <div className="flex items-start gap-2 bg-indigo-50/50 p-2 rounded-lg border border-indigo-100/50 text-xs text-indigo-800 max-w-lg">
                                                             <FontAwesomeIcon icon={faInfoCircle} className="mt-0.5 text-indigo-400 flex-shrink-0" />
                                                             <div>
                                                                 <span className="font-bold mr-1">산출 공식:</span>
-                                                                {teamAccess ? '해당 기간 내 팀원의 작업 공수 합계' : viewMode === 'site'
+                                                                {responsibleSiteView ? '해당 기간 내 팀 담당 현장에 참여한 모든 팀의 작업 공수 합계' : teamAccess ? '해당 기간 내 팀원의 작업 공수 합계' : viewMode === 'site'
                                                                     ? '해당 기간 동안 이 현장에 투입된 모든 팀의 작업 공수 합계 (Teams Sum)'
                                                                     : '해당 기간 동안 이 팀이 수행한 모든 현장의 작업 공수 합계 (Sites Sum)'
                                                                 }
@@ -1851,7 +1872,7 @@ const WhiteboardStatusContent: React.FC<{
                                                                 const detailTeam = viewMode === 'site'
                                                                     ? resolveDashboardTeam(detail.targetId, detail.targetName)
                                                                     : undefined;
-                                                                const detailTeamColor = normalizeHexColor(detailTeam?.color) || '#8b5cf6';
+                                                                const detailTeamColor = normalizeHexColor(detailTeam?.color || detail.color) || '#8b5cf6';
                                                                 const detailTeamTextColor = getContrastingTextColor(detailTeamColor);
                                                                 const detailManDayColor = isExternalSupport ? getReadableColorOnWhite(detailTeamColor) : '#4f46e5';
                                                                 const externalSupportBadgeStyle = getSolidColorBadgeStyle(detailTeamColor);
@@ -1879,9 +1900,9 @@ const WhiteboardStatusContent: React.FC<{
                                                                     >
                                                                         {/* Summary Header (Always Visible) */}
                                                                         <div
-                                                                            onClick={(e) => toggleDetail(item.id, detail.targetId, e)}
+                                                                            onClick={(e) => { e.stopPropagation(); if (!detail.summaryOnly) toggleDetail(item.id, detail.targetId, e); }}
                                                                             className={`
-                                                                        cursor-pointer text-center flex flex-col items-center justify-center transition-colors relative
+                                                                        ${detail.summaryOnly ? 'cursor-default' : 'cursor-pointer'} text-center flex flex-col items-center justify-center transition-colors relative
                                                                         ${isDetailSelected ? 'p-4 border-b border-indigo-100 bg-white' : 'p-2 min-h-[80px] hover:bg-slate-50'}
                                                                     `}
                                                                         >
@@ -1942,7 +1963,7 @@ const WhiteboardStatusContent: React.FC<{
                                                                         </div>
 
                                                                         {/* EXPANDED CONTENT: Worker List (Level 3) */}
-                                                                        <BoardDisclosure open={isDetailSelected} reducedMotion={reducedMotion} className="p-4 bg-slate-50/50">
+                                                                        <BoardDisclosure open={isDetailSelected && !detail.summaryOnly} reducedMotion={reducedMotion} className="p-4 bg-slate-50/50">
                                                                             {() => (<>
                                                                                 <div className="flex justify-between items-center mb-4">
                                                                                     <h4 className="text-sm font-bold text-slate-600 flex items-center gap-2 whitespace-nowrap">
@@ -2071,10 +2092,10 @@ const WhiteboardStatusContent: React.FC<{
                     <div className="flex flex-col items-center justify-center h-full text-slate-400">
                         <FontAwesomeIcon icon={faChartBar} size="3x" className="mb-4 opacity-20" />
                         <p className="font-medium text-lg">
-                            {teamAccess ? '선택한 조건에 해당하는 내 팀 참여 현황이 없습니다.' : viewMode === 'site' ? '진행 중인 현장이 없습니다.' : '등록된 팀이 없습니다.'}
+                            {responsibleSiteView ? '선택한 조건에 해당하는 담당 현장의 참여 공수가 없습니다.' : teamAccess ? '선택한 조건에 해당하는 내 팀 참여 현황이 없습니다.' : viewMode === 'site' ? '진행 중인 현장이 없습니다.' : '등록된 팀이 없습니다.'}
                         </p>
                         <p className="text-sm mt-2">
-                            {teamAccess ? '조회 월과 검색어를 확인해 주세요. 해당 월에 팀원의 참여 일보가 등록되면 표시됩니다.' : viewMode === 'site'
+                            {responsibleSiteView ? '조회 월·검색어와 현장의 담당팀 설정을 확인해 주세요. 다른 팀이 작성한 참여 일보도 함께 집계됩니다.' : teamAccess ? '조회 월과 검색어를 확인해 주세요. 해당 월에 팀원의 참여 일보가 등록되면 표시됩니다.' : viewMode === 'site'
                                 ? "현장 관리 메뉴에서 현장 상태를 '진행중'으로 변경해주세요."
                                 : "팀 관리 메뉴에서 팀을 등록해주세요."}
                         </p>

@@ -9,8 +9,10 @@ import { mergeTeamQueryRows, queryByIds, queryRows, queryTeamCandidates } from '
 import { readTeamCatalog } from './teamCatalogCache';
 import { readTeamSettlementSupportDetails } from './teamSettlementSupportRead';
 import { readTeamSettlementIncoming } from './teamSettlementRead';
+import { readWhiteboardParticipation } from './whiteboardParticipation';
 
 const COLLECTIONS = new Set([
+    'whiteboard_participation',
     'workers', 'teams', 'sites', 'companies', 'daily_reports', 'daily_dispatches', 'team_settlement_incoming', 'team_settlement_support_details',
     'schedule_confirmation_boards', 'field_schedule_requests',
     'accommodations', 'accommodationAssignments', 'accommodationUtilityRecords', 'accommodation_billing_documents', 'accommodation_billing_line_items', 'accommodation_billing_targets',
@@ -144,7 +146,7 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
     if (teamIds.length > 30) throw new functions.https.HttpsError('failed-precondition', '팀 연결 수를 확인해 주세요.');
     resolvedTeamIds = teamIds;
     scope.teamIds = teamIds;
-    const needsWorkers = requests.some(request => !['teams', 'materials'].includes(text(request.collection)));
+    const needsWorkers = requests.some(request => !['teams', 'materials', 'whiteboard_participation'].includes(text(request.collection)));
     const requiresSites = (request: any) => ['sites', 'companies', 'materialInbounds', 'materialOutbounds'].includes(text(request.collection))
         || (request.collection === 'system_configs' && (!text(request.filters?.configId) || request.filters.configId === 'support_site_rates'));
     const needsSites = requests.some(requiresSites);
@@ -160,6 +162,9 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
     const resolveRows = async (request: any) => {
         const collection = text(request.collection);
         const filters = request.filters || {};
+        if (collection === 'whiteboard_participation') {
+            return { rows: serialize([await readWhiteboardParticipation(db, teams, filters, metrics)]) };
+        }
         if (collection === 'team_settlement_support_details') {
             return { rows: serialize(await readTeamSettlementSupportDetails(db, teams, filters, metrics)) };
         }

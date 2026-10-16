@@ -98,16 +98,17 @@ const teamReports = [
     ] },
 ];
 const allowOwnTeam = () => {
-    mockUid = 'leader';
+    mockUid = 'worker';
     (getTeamScopedRows as jest.Mock).mockImplementation(async collection => ({
         teams: [ownTeam],
         sites: [ownSite],
         workers: [{ id: 'own-worker', name: '우리 작업자', teamId: 'legacy-a' }],
         daily_reports: teamReports,
+        whiteboard_participation: [{ mode: 'own-workers' }],
     }[collection as string]));
 };
 
-test.each(['site', 'team'])('팀장은 %s 보기에서도 URL과 저장된 타 팀 선택을 무시하고 자기 팀만 본다', async view => {
+test.each(['site', 'team'])('개인 공수 조회는 %s 보기에서도 URL과 저장된 타 팀 선택을 무시한다', async view => {
     allowOwnTeam();
     sessionStorage.setItem('output-management:whiteboard-status:v1', JSON.stringify({ selectedTeamId: 'b', selectedCompanyId: 'other-company' }));
     renderPage(`view=${view}&teamId=b`);
@@ -142,7 +143,7 @@ test('권한 확인 중에는 이전 계정이나 마스터 데이터의 현황�
     expect(dailyReportService.getReportsByRange).not.toHaveBeenCalled();
 });
 
-test('팀장 일보 조회가 실패하면 전체 조회로 전환하지 않는다', async () => {
+test('개인 일보 조회가 실패하면 전체 조회로 전환하지 않는다', async () => {
     allowOwnTeam();
     const read = (getTeamScopedRows as jest.Mock).getMockImplementation()!;
     (getTeamScopedRows as jest.Mock).mockImplementation(collection => collection === 'daily_reports'
@@ -156,7 +157,7 @@ test('팀장 일보 조회가 실패하면 전체 조회로 전환하지 않는�
     } finally { errorLog.mockRestore(); }
 });
 
-test.each(['site', 'team'])('팀장의 %s 보기에서 회사 목록이 비어 있어도 허용된 참여 공수를 집계한다', async view => {
+test.each(['site', 'team'])('개인 공수의 %s 보기에서 회사 목록이 비어 있어도 허용된 공수를 집계한다', async view => {
     allowOwnTeam();
     mockCompaniesMissing = true;
     renderPage(`view=${view}`);
@@ -173,13 +174,71 @@ test('팀 권한 확인이 끝나면 공용 마스터 로딩에 막히지 않고
     expect(screen.queryByText('조회 권한을 확인하는 중입니다.')).not.toBeInTheDocument();
 });
 
-test('팀장 테스트 계정처럼 현장과 일보가 없으면 참여 현황 안내를 표시한다', async () => {
+test('개인 공수 조회에서 현장과 일보가 없으면 참여 현황 안내를 표시한다', async () => {
     allowOwnTeam();
     const read = (getTeamScopedRows as jest.Mock).getMockImplementation()!;
     (getTeamScopedRows as jest.Mock).mockImplementation(collection => ['sites', 'daily_reports'].includes(collection) ? Promise.resolve([]) : read(collection));
     renderPage('view=site');
     await screen.findByText('선택한 조건에 해당하는 내 팀 참여 현황이 없습니다.');
     expect(screen.queryByText(/현장 관리 메뉴에서/)).not.toBeInTheDocument();
+});
+
+const participantReports = [
+    { id: 'own', date: '2026-10-01', siteId: 'site-a', siteName: '첫 번째 현장', responsibleTeamId: 'a', responsibleTeamName: '가팀', teamId: 'a', teamName: '가팀', teamCompanyId: 'company', totalManDay: 2 },
+    { id: 'support', date: '2026-10-01', siteId: 'site-a', siteName: '첫 번째 현장', responsibleTeamId: 'a', responsibleTeamName: '가팀', teamId: 'b', teamName: '나팀', teamCompanyId: 'company', totalManDay: 3.5 },
+    { id: 'external', date: '2026-10-01', siteId: 'site-a', siteName: '첫 번째 현장', responsibleTeamId: 'a', responsibleTeamName: '가팀', teamId: 'external', teamName: '외부 참여팀', teamCompanyId: 'external-company', totalManDay: 4 },
+];
+const allowResponsibleSites = (reports = participantReports) => {
+    allowOwnTeam();
+    mockUid = 'leader';
+    const read = (getTeamScopedRows as jest.Mock).getMockImplementation()!;
+    (getTeamScopedRows as jest.Mock).mockImplementation(collection => collection === 'whiteboard_participation'
+        ? Promise.resolve([{ mode: 'responsible-sites', reports }]) : read(collection));
+};
+
+test('팀장은 내 담당 현장에 투입된 모든 팀의 공수를 보고 개인 일보 필터를 적용하지 않는다', async () => {
+    allowResponsibleSites();
+    mockCompaniesMissing = true;
+    renderPage('view=site&teamId=b');
+    fireEvent.click(await screen.findByRole('heading', { name: '첫 번째 현장' }));
+    await screen.findByRole('heading', { name: '참여 팀 현황' });
+    expect(screen.getByText('상세 목록 (3건)')).toBeInTheDocument();
+    expect(screen.getAllByText('9.5').length).toBeGreaterThan(0);
+    expect(screen.getByText('나팀')).toBeInTheDocument();
+    expect(screen.getByText('외부 참여팀')).toBeInTheDocument();
+    expect(screen.getByText('3.5')).toBeInTheDocument();
+    expect(screen.getByText('4.0')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('외부 참여팀'));
+    expect(screen.queryByText('작업자 상세 내역')).not.toBeInTheDocument();
+    expect(getTeamScopedRows).toHaveBeenCalledWith('whiteboard_participation', { yearMonth: '2026-10' });
+    expect((getTeamScopedRows as jest.Mock).mock.calls.some(([name]) => name === 'daily_reports')).toBe(false);
+    expect(dailyReportService.getReportsByRange).not.toHaveBeenCalled();
+});
+
+test('팀별 보기에서도 내 담당 현장에 지원 온 팀들의 공수가 유지된다', async () => {
+    allowResponsibleSites();
+    renderPage('view=team');
+    await screen.findByRole('heading', { name: '외부 참여팀' });
+    expect(screen.getByRole('heading', { name: '나팀' })).toBeInTheDocument();
+    expect(screen.getAllByText('9.5').length).toBeGreaterThan(0);
+});
+
+test('담당 현장 참여 조회가 실패하면 소속 팀원만의 합계를 정상 결과로 대체하지 않는다', async () => {
+    allowResponsibleSites();
+    const read = (getTeamScopedRows as jest.Mock).getMockImplementation()!;
+    (getTeamScopedRows as jest.Mock).mockImplementation(collection => collection === 'whiteboard_participation' ? Promise.reject(new Error('unavailable')) : read(collection));
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+        renderPage('view=site');
+        await screen.findByText(/현황 데이터를 불러오지 못했습니다/);
+        expect((getTeamScopedRows as jest.Mock).mock.calls.some(([name]) => name === 'daily_reports')).toBe(false);
+    } finally { log.mockRestore(); }
+});
+
+test('담당 현장에 일보가 없으면 담당팀 설정과 참여 일보 안내를 표시한다', async () => {
+    allowResponsibleSites([]);
+    renderPage('view=site');
+    await screen.findByText('선택한 조건에 해당하는 담당 현장의 참여 공수가 없습니다.');
 });
 
 test('담당 현장 목록에 없는 지원 현장도 소속 작업자의 참여 내역만 표시한다', async () => {

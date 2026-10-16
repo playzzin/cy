@@ -10,6 +10,16 @@ export interface WhiteboardTeamAccess {
     workers: Worker[];
 }
 
+export type WhiteboardReport = DailyReport & {
+    participationSummary?: boolean;
+    teamCompanyId?: string;
+    teamColor?: string;
+};
+
+export type WhiteboardParticipationResult =
+    | { mode: 'responsible-sites'; reports: Array<Omit<WhiteboardReport, 'workers'>> }
+    | { mode: 'own-workers' };
+
 const idText = (value: unknown) => String(value ?? '').trim();
 const indexById = <T extends { id?: string; legacyId?: string | null }>(rows: T[]) => {
     const index = new Map<string, T>();

@@ -4,7 +4,7 @@ import { FieldPath } from 'firebase-admin/firestore';
 import { filterTeamRows, list, TeamRow, text } from './teamReadPolicy';
 import { mergeTeamQueryRows, queryByIds, queryRows } from './teamScopedQuery';
 
-const permitted = new Set(['workers', 'teams', 'sites', 'companies', 'daily_reports', 'daily_dispatches',
+const permitted = new Set(['whiteboard_participation', 'workers', 'teams', 'sites', 'companies', 'daily_reports', 'daily_dispatches',
     'schedule_confirmation_boards', 'field_schedule_requests', 'advance_payments', 'advance_requests']);
 const pick = (row: TeamRow, fields: string[]): TeamRow => Object.fromEntries(['id', ...fields]
     .filter(key => row[key] !== undefined).map(key => [key, row[key]])) as TeamRow;
@@ -59,6 +59,9 @@ export async function readWorkerScopedData(db: admin.firestore.Firestore, uid: s
     const resolve = async (request: any) => {
         const name = text(request.collection), filters = request.filters || {};
         if (!permitted.has(name)) throw new functions.https.HttpsError('permission-denied', '작업자 계정에서 조회할 수 없는 업무입니다.');
+        // Ordinary workers retain their own-worker board; site-wide team
+        // summaries are available only through the team-leader branch.
+        if (name === 'whiteboard_participation') return { rows: [{ mode: 'own-workers' }] };
         let rows: TeamRow[];
         if (name === 'workers') rows = anchors;
         else if (name === 'teams') rows = (await teams()).map(row => workerCatalogRow(name, row));
