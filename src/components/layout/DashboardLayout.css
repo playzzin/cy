@@ -2233,9 +2233,13 @@ body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-
 
 .app.sidebar-right .header-left-group { order: 2; }
 .app.sidebar-right .header-right-group { order: 1; margin-left: auto; }
+.app.sidebar-right #position-panel { max-width: calc(100vw - 32px); }
 .submenu-panel--right { box-shadow: -4px 0 12px rgba(0, 0, 0, 0.2); }
 
 @media (min-width: 769px) {
+    /* Keep the header popover clear of the higher sidebar stacking layer. */
+    .app.sidebar-right #position-panel { right: calc(var(--sidebar-width) + 16px); }
+    .app.sidebar-right.sidebar-collapsed #position-panel { right: calc(var(--sidebar-collapsed-width) + 16px); }
     .app.sidebar-right.sidebar-collapsed #main-content {
         margin-left: 0;
         margin-right: var(--sidebar-collapsed-width);
