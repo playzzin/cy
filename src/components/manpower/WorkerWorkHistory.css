@@ -1,0 +1,26 @@
+.worker-history { margin-top: 12px; padding: 14px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; color: #0f172a; min-width: 0; }
+.worker-history__header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.worker-history__header h3 { margin: 0; font-size: 16px; font-weight: 800; }
+.worker-history__header p, .worker-history__hint { margin: 8px 0; font-size: 13px; color: #475569; }
+.worker-history__tabs { display: flex; gap: 4px; padding: 4px; margin: 8px 0; border-radius: 9px; background: #f1f5f9; }
+.worker-history__tabs button { flex: 1; min-height: 44px; border: 0; border-radius: 7px; background: transparent; color: #475569; font-size: 14px; font-weight: 700; }
+.worker-history__tabs button[aria-selected=true] { background: #2563eb; color: white; }
+.worker-history__calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.worker-history__weekday { padding: 8px 0; text-align: center; font-size: 12px; color: #64748b; }
+.worker-history__day { min-width: 0; min-height: 82px; padding: 6px 2px; display: flex; flex-direction: column; align-items: center; gap: 4px; border: 1px solid #e2e8f0; border-radius: 6px; color: #475569; background: #fff; font-size: 12px; }
+.worker-history__day--worked { background: #eff6ff; border-color: #bfdbfe; }
+.worker-history__day strong { font-size: 16px; color: #1d4ed8; }
+.worker-history__day small { display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+.worker-history__row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: 10px 4px; background: white; color: #334155; border: 0; border-bottom: 1px solid #e2e8f0; text-align: left; }
+.worker-history__row > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 13px; }
+.worker-history__row > span:last-child { flex-shrink: 0; text-align: right; }
+.worker-history__row strong { font-size: 14px; }
+.worker-history__row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.worker-history__detail { border-bottom: 1px solid #e2e8f0; padding: 0 0 16px; margin-bottom: 16px; }
+.worker-history__detail h4 { font-size: 16px; font-weight: 800; overflow-wrap: anywhere; margin: 0 0 12px; }
+.worker-history__detail dl { display: grid; gap: 8px; margin: 0; }
+.worker-history__detail dl > div { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 12px; font-size: 14px; }
+.worker-history__detail dt { color: #64748b; }
+.worker-history__detail dd { margin: 0; overflow-wrap: anywhere; }
+.worker-history button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+@media (max-width: 640px) { .worker-history { padding: 10px; } }

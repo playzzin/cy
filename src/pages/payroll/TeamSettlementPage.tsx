@@ -3508,7 +3508,7 @@ export const TeamSettlementPage: React.FC = () => {
 
         .team-settlement-page__workspace-bar {
           border-color: var(--team-settlement-accent-border);
-          background: linear-gradient(90deg, var(--team-settlement-accent-soft-strong), rgba(255, 255, 255, 0.96));
+          background: linear-gradient(90deg, var(--team-settlement-accent-soft-strong), rgba(255, 255, 255, 0.96)), #ffffff;
         }
 
         .team-settlement-page__current-team {
@@ -3548,7 +3548,8 @@ export const TeamSettlementPage: React.FC = () => {
 
         @media (max-width: 767px) {
           .team-settlement-page__workspace-bar {
-            position: static;
+            position: sticky;
+            top: var(--header-height, 60px);
             backdrop-filter: none;
             box-shadow: none;
           }
@@ -3582,6 +3583,12 @@ export const TeamSettlementPage: React.FC = () => {
         onSave={handleSave}
         onConfirm={handleConfirm}
         onUnconfirm={handleUnconfirm}
+        onMonthChange={nextMonth => {
+          void (async () => {
+            if (nextMonth === yearMonth || !(await confirmBeforeDiscard('정산월 이동'))) return;
+            setYearMonth(nextMonth);
+          })();
+        }}
       />
 
       <div className="mt-4 grid grid-cols-1 gap-3 sm:mt-6 sm:gap-4">

@@ -153,6 +153,7 @@ export { teamExpenseRequests } from './teamExpenseRequests';
 export { teamWorkerRequests } from './teamWorkerRequests';
 
 export { teamAdvanceRequests } from './teamAdvanceRequests';
+export { teamAccountApprovals } from './teamAccountApprovals';
 export { teamOffDutyRequests } from './teamOffDutyRequests';
 
 export { workerSignatures } from './workerSignatures';

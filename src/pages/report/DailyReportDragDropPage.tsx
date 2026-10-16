@@ -1483,8 +1483,8 @@ const DailyReportDragDropPage = () => {
     return (
         <div className="flex flex-col h-full bg-[#f8fafc] font-['Pretendard']">
             {/* Header / Top Bar (Global Controls like Date, Save) */}
-            <div className="bg-white border-b border-slate-200 px-4 py-3 shadow-sm z-30 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-4">
+            <div className="bg-white border-b border-slate-200 px-4 py-3 shadow-sm z-30 flex flex-wrap gap-3 items-center justify-between shrink-0">
+                <div className="flex flex-wrap items-center gap-4">
                     <h1 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                         <span>일보 배차판</span>
                         <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">Allocator Dashboard</span>
@@ -1517,7 +1517,7 @@ const DailyReportDragDropPage = () => {
 
 
                 {/* VISIBILITY FILTERS (New Header Section - Layer Mode) */}
-                <div className="flex items-center gap-2 mx-4 flex-1 justify-center relative">
+                <div className="flex flex-wrap items-center gap-2 md:mx-4 flex-1 justify-center relative">
                     {/* Company Selector */}
                     <select
                         value={selectedCompany || ''}
@@ -1685,9 +1685,9 @@ const DailyReportDragDropPage = () => {
                 onDragOver={handleDragOver}
                 onDragEnd={handleDragEnd}
             >
-                <div className="flex-1 overflow-hidden flex flex-row">
+                <div className="flex-1 overflow-y-auto lg:overflow-hidden flex flex-col lg:flex-row">
                     {/* LEFT PANE: SOURCE (Manpower Pool) */}
-                    <div className="w-[420px] flex flex-col bg-white border-r border-slate-200 shadow-[4px_0_24px_-12px_rgba(0,0,0,0.1)] z-20">
+                    <div className="w-full lg:w-[420px] shrink-0 flex flex-col bg-white border-r border-slate-200 shadow-[4px_0_24px_-12px_rgba(0,0,0,0.1)] z-20">
 
 
                         {/* Quick Assign Toolbar (Target Site Selector) */}
@@ -1814,10 +1814,10 @@ const DailyReportDragDropPage = () => {
                     </div>
 
                     {/* RIGHT PANE: TARGET (Sites) */}
-                    <div className="flex-1 flex flex-col bg-[#f1f5f9] overflow-hidden relative">
+                    <div className="min-w-0 min-h-[360px] lg:min-h-0 flex-none lg:flex-1 flex flex-col bg-[#f1f5f9] overflow-hidden relative">
                         {/* Right Pane Header (Stats & Filters) */}
-                        <div className="p-3 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm z-10 shrink-0">
-                            <div className="flex items-center gap-4">
+                        <div className="p-3 bg-white border-b border-slate-200 flex flex-wrap gap-3 items-center justify-between shadow-sm z-10 shrink-0">
+                            <div className="flex flex-wrap items-center gap-4">
                                 <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2">
                                     <FontAwesomeIcon icon={faBuilding} className="text-blue-500" />
                                     현장 목록 ({rightPaneSites.length}개)

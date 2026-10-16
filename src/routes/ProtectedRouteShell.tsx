@@ -1,5 +1,5 @@
 import React from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { doc, onSnapshot } from 'firebase/firestore';
 import DashboardLayout from '../components/layout/DashboardLayout';
 import AppIntroScreen from '../components/common/AppIntroScreen';
@@ -12,6 +12,7 @@ import type { UserData } from '../services/userService';
 import { db } from '../config/firebase';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { resolveAccountOnboardingMode } from '../utils/accountOnboardingState';
+import TeamWorkflowGate from './TeamWorkflowGate';
 
 const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { status, result } = useWorkerTeamIdMigration();
@@ -149,17 +150,25 @@ const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({ childr
     );
   }
 
-  return <>{children}</>;
+  return <TeamWorkflowGate profile={profile}>{children}</TeamWorkflowGate>;
 };
 
-const ProtectedRouteShell: React.FC = () => (
-  <AccountOnboardingGate>
-    <MigrationRunner>
-      <MasterDataProvider>
-        <DashboardLayoutWrapper />
-      </MasterDataProvider>
-    </MigrationRunner>
-  </AccountOnboardingGate>
-);
+const ProtectedRouteShell: React.FC = () => {
+  const { pathname } = useLocation();
+  const hasSelfContainedRequestData = [
+    '/manpower/team-worker-requests',
+    '/manpower/team-account-approvals',
+    '/support/team-expense-requests',
+  ].includes(pathname.replace(/\/+$/, ''));
+  return (
+    <AccountOnboardingGate>
+      <MigrationRunner>
+        <MasterDataProvider autoLoad={!hasSelfContainedRequestData}>
+          <DashboardLayoutWrapper />
+        </MasterDataProvider>
+      </MigrationRunner>
+    </AccountOnboardingGate>
+  );
+};
 
 export default ProtectedRouteShell;

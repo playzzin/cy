@@ -1115,7 +1115,7 @@ const FreelancerPage: React.FC = () => {
                     />
                 </div>
 
-                <div className="flex justify-end gap-3 mt-4">
+                <div className="flex flex-wrap justify-end gap-3 mt-4">
                     <select
                         value={taxExcelMonth}
                         onChange={(event) => setTaxExcelMonth(Number(event.target.value))}

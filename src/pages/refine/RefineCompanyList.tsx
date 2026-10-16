@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { AgGridReact } from "ag-grid-react";
 import {
+    AllCommunityModule,
     ColDef,
     ICellRendererParams,
     ValueFormatterParams} from "ag-grid-community";
@@ -24,6 +25,7 @@ const ConsoleContainer = styled.div`
 `;
 
 const Header = styled.div`
+    @media (max-width: 640px) { && { flex-wrap: wrap; gap: 1rem; padding: 1rem; } }
     background: white;
     padding: 1.5rem;
     border-bottom: 1px solid #e2e8f0;
@@ -54,11 +56,13 @@ const Subtitle = styled.p`
 `;
 
 const StatsGrid = styled.div`
+    @media (max-width: 640px) { && { width: 100%; gap: 0.5rem; } }
     display: flex;
     gap: 1.5rem;
 `;
 
 const StatCard = styled.div`
+    @media (max-width: 640px) { && { flex: 1; min-width: 0; padding: 0.75rem; } }
     background: white;
     padding: 1rem 1.5rem;
     border-radius: 0.75rem;
@@ -85,6 +89,7 @@ const StatCard = styled.div`
 `;
 
 const Toolbar = styled.div`
+    flex-wrap: wrap;
     padding: 1rem 1.5rem;
     display: flex;
     gap: 1rem;
@@ -94,6 +99,8 @@ const Toolbar = styled.div`
 `;
 
 const SmartSearchInput = styled.div`
+    min-width: 0;
+    @media (max-width: 640px) { flex-basis: 100%; }
     position: relative;
     flex: 1;
     max-width: 500px;
@@ -342,6 +349,7 @@ export const RefineCompanyList: React.FC = () => {
             <GridWrapper>
                 <div className="ag-theme-quartz">
                     <AgGridReact
+                        modules={[AllCommunityModule]}
                         rowData={companies}
                         columnDefs={columnDefs}
                         onGridReady={(p) => setGridApi(p.api)}

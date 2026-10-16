@@ -48,7 +48,7 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
     const linked = linkedIds.length ? await db.getAll(...linkedIds.map((id: string) => db.collection('workers').doc(id))) : [];
     const anchors = linked.filter(doc => doc.exists && doc.data()?.isActive !== false && !['퇴사', 'inactive', 'retired', 'archived'].includes(text(doc.data()?.status))).map(doc => ({ ...doc.data(), id: doc.id } as TeamRow));
     const menu = (await db.doc('settings/menus_v12').get()).data();
-    if (!anchors.length || !([...resolvedRoleNames(user, menu), ...anchors.map(row => row.role)].some(isTeamLeader))) {
+    if (!anchors.length || !resolvedRoleNames(user, menu).some(isTeamLeader)) {
         throw new functions.https.HttpsError('permission-denied', '팀장 계정의 작업자 연결을 확인해 주세요.');
     }
     const anchorTeamIds: string[] = Array.from(new Set(anchors.map(row => text(row.teamId)).filter(Boolean)));
@@ -228,8 +228,17 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
         collectionDocuments: metrics.documents,
         durationMs: Date.now() - startedAt,
     });
+    const confirmScopeUnchanged = async () => {
+        const current = (await db.doc(`users/${auth.uid}`).get()).data();
+        const currentAnchors = linkedIds.length ? await db.getAll(...linkedIds.map((id: string) => db.collection('workers').doc(id))) : [];
+        const signature = (row: any) => JSON.stringify([row?.status, row?.isActive, row?.teamId, row?.role, row?.uid]);
+        if (JSON.stringify(current) !== JSON.stringify(user) || currentAnchors.some((doc, index) => signature(doc.data()) !== signature(linked[index].data()))) {
+            throw new functions.https.HttpsError('permission-denied', '조회 중 권한 또는 소속이 변경되었습니다. 다시 조회해 주세요.');
+        }
+    };
     if (!batch) {
         const result = await resolveRows(requests[0]);
+        await confirmScopeUnchanged();
         logPerformance();
         return result;
     }
@@ -242,6 +251,7 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
                 : { code: 'internal', message: '팀 데이터를 불러오지 못했습니다.' } };
         }
     }));
+    await confirmScopeUnchanged();
     logPerformance();
     return { results };
 };

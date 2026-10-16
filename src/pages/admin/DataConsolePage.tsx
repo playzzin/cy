@@ -100,8 +100,8 @@ const DataConsolePage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#0f172a] text-white">
-      <div className="mx-auto flex max-w-[1800px]">
-        <aside className="w-[280px] border-r border-white/10 bg-slate-950/60 p-6">
+      <div className="mx-auto flex flex-col lg:flex-row max-w-[1800px]">
+        <aside className="w-full lg:w-[280px] shrink-0 border-r border-white/10 bg-slate-950/60 p-6">
           <div className="mb-8">
             <div className="mb-3 flex items-center gap-3 text-xl font-black"><FontAwesomeIcon icon={faDatabase} className="text-indigo-400" /><span>Data console</span></div>
             <p className="text-sm text-slate-400">Firestore read-only viewer.</p>
@@ -126,13 +126,13 @@ const DataConsolePage: React.FC = () => {
           </div>
         </aside>
 
-        <main className="flex-1 p-8">
+        <main className="min-w-0 flex-1 p-4 sm:p-8">
           <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
             <div>
               <div className="mb-3 flex items-center gap-3"><h1 className="text-3xl font-black">{currentCollection.name}</h1><span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs font-mono text-emerald-200">Read-only</span></div>
               <p className="max-w-2xl text-sm text-slate-400">{currentCollection.description}</p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <div className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-center"><div className="mb-1 text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Total</div><div className="text-2xl font-black">{stats.totalDocs.toLocaleString()}</div></div>
               <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 px-5 py-3 text-center"><div className="mb-1 text-[10px] font-bold uppercase tracking-[0.24em] text-indigo-200">Active</div><div className="text-2xl font-black text-indigo-300">{stats.activeDocs.toLocaleString()}</div></div>
               <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-5 py-3 text-center"><div className="mb-1 text-[10px] font-bold uppercase tracking-[0.24em] text-emerald-200">Recent 24h</div><div className="text-2xl font-black text-emerald-300">{stats.recentDocs.toLocaleString()}</div></div>

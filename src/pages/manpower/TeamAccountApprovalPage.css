@@ -1,0 +1,18 @@
+.team-account-page { max-width: 960px; margin: 0 auto; padding: 20px; color: #172033; }
+.team-account-page h1 { font-size: 22px; font-weight: 750; margin: 0 0 6px; }
+.team-account-page header, .team-account-selection, .team-account-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 16px; }
+.team-account-page header { justify-content: space-between; }
+.team-account-page button, .team-account-page input:not([type=checkbox]), .team-account-page select { min-height: 44px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 12px; background: white; font: inherit; }
+.team-account-page button:disabled { opacity: .5; cursor: not-allowed; }
+.team-account-page button.primary { background: #2563eb; border-color: #2563eb; color: white; }
+.team-account-filters label { display: flex; flex: 1; min-width: 180px; flex-direction: column; gap: 5px; font-size: 13px; }
+.team-account-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid #e2e8f0; }
+.team-account-list li { display: flex; gap: 12px; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding: 12px 0; }
+.team-account-list label { display: flex; gap: 10px; align-items: center; min-width: 0; min-height: 44px; flex: 1; }
+.team-account-list input { width: 20px; height: 20px; flex-shrink: 0; }
+.team-account-list strong, .team-account-list small { display: block; overflow-wrap: anywhere; }
+.team-account-list small, .team-account-help { color: #64748b; font-size: 12px; }
+.account-status { border-radius: 6px; padding: 5px 8px; white-space: nowrap; background: #fff7ed; color: #9a3412; font-size: 12px; }
+.account-status.active { background: #ecfdf5; color: #065f46; }
+.team-account-page [role=alert] { color: #b91c1c; }
+@media(max-width:640px) { .team-account-page { padding: 12px; }.team-account-page h1 { font-size: 20px; }.team-account-selection { gap: 8px; }.team-account-selection .primary { flex: 1 0 100%; } }

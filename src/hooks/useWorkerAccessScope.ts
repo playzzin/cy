@@ -221,7 +221,7 @@ export const useWorkerAccessScope = (workers: Worker[], teams: Team[] = []): Wor
 
             setLoadingProfile(true);
             try {
-                const nextProfile = await userService.getUser(currentUser.uid);
+                const nextProfile = await userService.getUser(currentUser.uid, true);
                 if (mounted) setProfile(nextProfile);
             } catch (error) {
                 console.error('[useWorkerAccessScope] failed to load user profile', error);

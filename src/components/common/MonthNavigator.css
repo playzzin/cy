@@ -61,7 +61,7 @@
 @media (max-width: 720px) {
     .month-navigator {
         height: 44px;
-        grid-template-columns: 38px minmax(0, 1fr) 38px;
+        grid-template-columns: 44px minmax(0, 1fr) 44px;
     }
 
     .month-navigator__value {

@@ -1559,6 +1559,11 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   return (
     <div className="labor-statement-page flex flex-col h-full bg-[#f8fafc] text-slate-800 font-sans">
       <style>{`
+        @media screen {
+          .labor-statement-toolbar > div { height: auto; min-height: 56px; flex-wrap: wrap; padding-block: 12px; }
+          .labor-statement-toolbar > div > div,
+          .labor-statement-toolbar > div > div > div { min-width: 0; max-width: 100%; flex-wrap: wrap; }
+        }
         @media print {
           @page {
             size: A4 landscape;
@@ -1646,16 +1651,16 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         }
       `}</style>
       <div className="labor-statement-toolbar bg-white border-b border-slate-200 shadow-sm z-20 flex-shrink-0">
-        <div className="h-16 px-6 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-6">
+        <div className="min-h-16 px-4 py-3 sm:px-6 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-6">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-200">
                 <FileText className="w-6 h-6" />
               </div>
               <h1 className="text-xl font-extrabold text-slate-900 tracking-tight whitespace-nowrap">명세서 생성기</h1>
             </div>
-            <div className="h-6 w-px bg-slate-200 mx-2"></div>
-            <div className="flex items-center gap-3">
+            <div className="hidden sm:block h-6 w-px bg-slate-200 mx-2"></div>
+            <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 shadow-sm transition-colors hover:border-indigo-300">
                 <button
                   type="button"

@@ -2181,7 +2181,7 @@ const ClientSiteLaborPage: React.FC = () => {
 
                 <div className="mt-4"><PagePrimaryAccountCard state={pagePrimaryAccount} fallbackAccount={{ bankName: delegateBankName, accountHolder: delegateAccountHolder, accountNumber: delegateAccountNumber }} /></div>
 
-                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[220px_minmax(130px,1fr)_minmax(130px,1fr)_minmax(130px,1fr)_120px_120px_minmax(210px,1.1fr)]">
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-[220px_minmax(130px,1fr)_minmax(130px,1fr)_minmax(130px,1fr)_120px_120px_minmax(210px,1.1fr)] [&>*]:min-w-0">
                     <label className="flex flex-col gap-1 text-xs font-bold text-slate-500">
                         년/월
                         <span className="grid grid-cols-[1fr_88px] gap-2">

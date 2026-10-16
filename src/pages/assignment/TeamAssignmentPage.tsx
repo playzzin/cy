@@ -383,7 +383,7 @@ const TeamAssignmentPage: React.FC = () => {
                         <p className="text-gray-600 mt-1">드래그 앤 드롭으로 작업자를 팀에 배정하세요.</p>
                     </div>
 
-                    <div className="flex items-center gap-3 w-full md:w-auto">
+                    <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
                         <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200">
                             <FontAwesomeIcon icon={faBuilding} className="text-gray-400" />
                             <select

@@ -91,11 +91,13 @@ export async function handleTeamWorkerRequest(input: any, context: functions.htt
                 const workerRef = db.collection('workers').doc(workerId);
                 const duplicateRef = db.doc(`server_settings/worker-registration-${hash(`${fields.name}:${fields.contact}`)}`);
                 const accountRef = fields.accountNumber ? db.doc(`server_settings/worker-registration-account-${hash(`${fields.name}:${fields.accountNumber}`)}`) : null;
-                const [team, company, existing, duplicate, sameNames, duplicateAccount] = await Promise.all([
-                    transaction.get(db.collection('teams').doc(row.teamId)), transaction.get(db.collection('companies').doc(row.companyId)),
-                    transaction.get(workerRef), transaction.get(duplicateRef), transaction.get(db.collection('workers').where('name', '==', fields.name).limit(101)),
-                    accountRef ? transaction.get(accountRef) : Promise.resolve(null),
-                ]);
+                // Keep the query stream after document locks: concurrent reads on
+                // an aborted transaction can surface INVALID_ARGUMENT instead of a retry.
+                const [team, company, existing, duplicate, duplicateAccount] = await transaction.getAll(
+                    db.collection('teams').doc(row.teamId), db.collection('companies').doc(row.companyId),
+                    workerRef, duplicateRef, ...(accountRef ? [accountRef] : []),
+                );
+                const sameNames = await transaction.get(db.collection('workers').where('name', '==', fields.name).limit(101));
                 if (!team.exists || team.data()?.isActive === false || !company.exists || company.data()?.isActive === false || !isCompanyName(company.data()?.name) || ['inactive', 'archived'].includes(company.data()?.status)) fail('failed-precondition', '신청한 팀 또는 소속회사를 확인해 주세요.');
                 const teamType = text(team.data()?.type);
                 if (['지원팀', '용역팀'].includes(teamType) && payroll.payType !== teamType) fail('invalid-argument', `이 팀의 급여 구분은 ${teamType}이어야 합니다.`);

@@ -5,7 +5,7 @@ import { handleTeamAdvanceRequest } from './teamAdvanceRequests';
 import { handleTeamOffDutyRequest } from './teamOffDutyRequests';
 import { filterTeamRows } from './teamReadPolicy';
 
-test('대리 신청은 현재 소속 팀원만 허용하고 휴무 문서의 다른 팀 기록을 보존한다', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {
+test('팀장 가불 대리 신청은 유지하고 휴무 신청은 차단하며 일반 작업자의 본인 신청은 보존한다', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {
     assert.equal(process.env.GCLOUD_PROJECT, 'demo-worker-delegation');
     const app = admin.initializeApp({ projectId: process.env.GCLOUD_PROJECT });
     const db = app.firestore();
@@ -31,13 +31,16 @@ test('대리 신청은 현재 소속 팀원만 허용하고 휴무 문서의 다
         await assert.rejects(offDuty('other'), (e: any) => e.code === 'permission-denied');
         const result = await advance('member', 'allowed');
         assert.equal((await db.doc(`advance_requests/${result.id}`).get()).data()?.requesterUid, 'leader');
-        await offDuty('member');
+        await assert.rejects(offDuty('member'), (e: any) => e.code === 'permission-denied');
+        await db.doc('users/member-user').set({ status: 'active', role: 'user', linkedWorkerIds: ['member'] });
+        const selfOffDuty = (action: string) => handleTeamOffDutyRequest({ action, date, workerIds: ['member'], memo: 'fixture' }, { auth: { uid: 'member-user', token: {} } } as any);
+        await selfOffDuty('add');
         const saved = (await dateRef.get()).data()!;
         assert.deepEqual(saved.offDutyWorkerIds, ['other', 'member']);
-        assert.equal(saved.offDutyRequestActors.member.requesterUid, 'leader');
+        assert.equal(saved.offDutyRequestActors.member.requesterUid, 'member-user');
         const visible = filterTeamRows('field_schedule_requests', [{ ...saved, id: dateRef.id }], { teamIds: ['team-a'], workerIds: ['member'], siteIds: [] });
         assert.deepEqual(Object.keys(visible[0].offDutyRequestActors), ['member']);
-        await offDuty('member', 'remove');
+        await selfOffDuty('remove');
         assert.deepEqual((await dateRef.get()).data()?.offDutyWorkerIds, ['other']);
         await db.doc('workers/member').update({ teamId: 'team-b' });
         await assert.rejects(advance('member', 'transferred'), (e: any) => e.code === 'permission-denied');

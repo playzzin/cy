@@ -3974,7 +3974,7 @@ const ProgressClaimPage: React.FC<ProgressClaimPageProps> = ({ mode = 'full' }) 
             || progressDashboard.monthlyRows[0];
 
         return (
-            <div className="grid gap-4 xl:grid-cols-2">
+            <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 [&>div]:min-w-0">
                 <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                         <div>

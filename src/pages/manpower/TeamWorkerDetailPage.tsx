@@ -39,6 +39,8 @@ import { storage } from '../../config/firebase';
 import { PayslipTemplate } from '../payroll/components/PayslipTemplate';
 import type { PaymentData } from '../payroll/components/PayslipTemplate';
 import PayslipImageActions from './PayslipImageActions';
+import WorkerWorkHistory from '../../components/manpower/WorkerWorkHistory';
+import ImageFileActions from '../../components/common/ImageFileActions';
 import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyReportService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
@@ -52,7 +54,7 @@ import { resolveReportPayType } from '../../utils/payType';
 import { toast } from '../../utils/swal';
 import './TeamWorkerDetailPage.css';
 
-type StatusFilter = 'all' | 'active' | 'inactive';
+type StatusFilter = 'all' | 'active' | 'retired' | 'inactive';
 type DetailView = 'profile' | 'payslip' | 'dailyReport';
 
 const VIEW_TITLES: Record<DetailView, string> = {
@@ -171,71 +173,6 @@ const maskAccountNumber = (value?: string | null, visible = false) => {
     if (!raw) return EMPTY_TEXT;
     if (visible || raw.length <= 4) return raw;
     return `${'*'.repeat(Math.max(4, raw.length - 4))}${raw.slice(-4)}`;
-};
-
-const copyTextToClipboard = async (text: string) => {
-    if (!navigator.clipboard?.writeText) {
-        throw new Error('Clipboard text copy is not supported.');
-    }
-
-    await navigator.clipboard.writeText(text);
-};
-
-const convertImageBlobToPng = async (blob: Blob): Promise<Blob> => {
-    if (blob.type === 'image/png') return blob;
-
-    const bitmap = await createImageBitmap(blob);
-    const canvas = document.createElement('canvas');
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-
-    const context = canvas.getContext('2d');
-    if (!context) {
-        bitmap.close();
-        throw new Error('Canvas context is not available.');
-    }
-
-    context.drawImage(bitmap, 0, 0);
-    bitmap.close();
-
-    return await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((nextBlob) => {
-            if (nextBlob) {
-                resolve(nextBlob);
-                return;
-            }
-            reject(new Error('Failed to convert image to PNG.'));
-        }, 'image/png');
-    });
-};
-
-const copyImageUrlToClipboard = async (imageUrl: string) => {
-    const ClipboardItemCtor = (window as unknown as {
-        ClipboardItem?: new (items: Record<string, Blob>) => ClipboardItem;
-    }).ClipboardItem;
-    const clipboard = navigator.clipboard as Clipboard & {
-        write?: (data: ClipboardItem[]) => Promise<void>;
-    };
-
-    if (!ClipboardItemCtor || !clipboard?.write) {
-        await copyTextToClipboard(imageUrl);
-        return 'link' as const;
-    }
-
-    const response = await fetch(imageUrl);
-    if (!response.ok) {
-        throw new Error('Failed to fetch image.');
-    }
-
-    const blob = await response.blob();
-    const pngBlob = await convertImageBlobToPng(blob);
-    await clipboard.write([
-        new ClipboardItemCtor({
-            'image/png': pngBlob,
-        }),
-    ]);
-
-    return 'image' as const;
 };
 
 const isInactiveWorker = (worker: Worker) => {
@@ -397,22 +334,22 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
     const [isTeamPickerOpen, setIsTeamPickerOpen] = useState(false);
     const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
     const [searchQuery, setSearchQuery] = useState('');
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const [dailyReportDisplayMode, setDailyReportDisplayMode] = useState<DailyReportDisplayMode>('calendar');
+    const [profileSection, setProfileSection] = useState<'info' | 'work'>(() => new URLSearchParams(window.location.search).get('section') === 'work' ? 'work' : 'info');
     const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('list');
-    const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
     const [showSensitive, setShowSensitive] = useState(true);
     const [loadingMaster, setLoadingMaster] = useState(true);
     const [loadingOutput, setLoadingOutput] = useState(false);
     const [masterError, setMasterError] = useState('');
     const [outputError, setOutputError] = useState('');
-    const [idCardUrl, setIdCardUrl] = useState<string>('');
+    const [idCardImage, setIdCardImage] = useState({ workerId: '', url: '' });
+    const idCardUrl = idCardImage.workerId === selectedWorkerId ? idCardImage.url : '';
     const [idCardLoading, setIdCardLoading] = useState(false);
     const [idCardError, setIdCardError] = useState('');
-    const [idCardCopying, setIdCardCopying] = useState(false);
-    const [idCardSending, setIdCardSending] = useState(false);
     const [isSignatureOpen, setIsSignatureOpen] = useState(false);
+    const setIdCardUrl = (url: string) => setIdCardImage({ workerId: selectedWorkerId, url });
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
     const accessScope = useWorkerAccessScope(workers, teams);
@@ -547,7 +484,9 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
         return allTeamWorkers
             .filter(worker => {
                 if (statusFilter === 'active' && isInactiveWorker(worker)) return false;
-                if (statusFilter === 'inactive' && !isInactiveWorker(worker)) return false;
+                const retired = normalizeText(worker.status).includes('퇴사');
+                if (statusFilter === 'retired' && !retired) return false;
+                if (statusFilter === 'inactive' && (!isInactiveWorker(worker) || retired)) return false;
 
                 if (!query) return true;
                 return getWorkerSearchText(worker, getTeamLabel(worker, teamById)).includes(query);
@@ -867,63 +806,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
         return () => {
             mounted = false;
         };
-    }, [isDocumentView, selectedWorker?.fileNameSaved]);
-
-    const handleCopyIdCard = async () => {
-        if (!idCardUrl || idCardCopying) return;
-
-        setIdCardCopying(true);
-        try {
-            const result = await copyImageUrlToClipboard(idCardUrl);
-            toast.success(result === 'image'
-                ? '신분증 이미지가 클립보드에 복사되었습니다.'
-                : '신분증 링크가 클립보드에 복사되었습니다.');
-        } catch (error) {
-            console.error('ID card copy failed:', error);
-            try {
-                await copyTextToClipboard(idCardUrl);
-                toast.info('이미지 복사가 제한되어 신분증 링크를 복사했습니다.');
-            } catch {
-                toast.error('신분증 복사에 실패했습니다.');
-            }
-        } finally {
-            setIdCardCopying(false);
-        }
-    };
-
-    const handleSendIdCard = async () => {
-        if (!idCardUrl || idCardSending) return;
-
-        const workerName = String(selectedWorker?.name ?? '작업자').trim() || '작업자';
-        setIdCardSending(true);
-
-        try {
-            if (navigator.share) {
-                await navigator.share({
-                    title: `${workerName} 신분증`,
-                    text: `${workerName} 신분증`,
-                    url: idCardUrl,
-                });
-                toast.success('신분증 보내기를 완료했습니다.');
-                return;
-            }
-
-            await copyTextToClipboard(idCardUrl);
-            toast.info('보내기를 지원하지 않아 신분증 링크를 복사했습니다.');
-        } catch (error) {
-            if (error instanceof DOMException && error.name === 'AbortError') return;
-
-            console.error('ID card send failed:', error);
-            try {
-                await copyTextToClipboard(idCardUrl);
-                toast.info('보내기가 제한되어 신분증 링크를 복사했습니다.');
-            } catch {
-                toast.error('신분증 보내기에 실패했습니다.');
-            }
-        } finally {
-            setIdCardSending(false);
-        }
-    };
+    }, [isDocumentView, selectedWorker?.fileNameSaved, selectedWorkerId]);
 
     const handleRefresh = async () => {
         setLoadingMaster(true);
@@ -994,7 +877,6 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
     const handleTeamSelect = (teamId: string) => {
         setSelectedTeamId(teamId);
         setIsTeamPickerOpen(false);
-        setIsMobileFilterOpen(false);
         setMobileView('list');
     };
 
@@ -1097,20 +979,9 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                         </button>
                     )}
                 </label>
-                <button
-                    type="button"
-                    className={isMobileFilterOpen ? 'tw-mobile-filter-button tw-mobile-filter-button--active' : 'tw-mobile-filter-button'}
-                    onClick={() => setIsMobileFilterOpen(prev => !prev)}
-                    aria-expanded={isMobileFilterOpen}
-                    aria-controls="team-worker-filter-controls"
-                >
-                    <SlidersHorizontal size={18} />
-                    <span>필터</span>
-                    <small>{statusFilter === 'active' ? '재직' : statusFilter === 'inactive' ? '비활성' : '전체'}</small>
-                </button>
             </section>
 
-            <section id="team-worker-filter-controls" className={isMobileFilterOpen ? 'tw-toolbar tw-toolbar--mobile-expanded' : 'tw-toolbar'}>
+            <section id="team-worker-filter-controls" className="tw-toolbar tw-toolbar--always-visible">
                 <div className="tw-control tw-control--month">
                     <span>조회월</span>
                     <MonthNavigator
@@ -1132,14 +1003,15 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                     </div>
                 </label>
 
-                <label className="tw-control tw-control--status">
+                <div className="tw-control tw-control--status">
                     <span>상태</span>
-                    <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
-                        <option value="active">재직</option>
-                        <option value="inactive">퇴사/비활성</option>
-                        <option value="all">전체</option>
-                    </select>
-                </label>
+                    <div className="tw-status-options" role="group" aria-label="작업자 상태">
+                        {([{ value: 'all', label: '전체' }, { value: 'active', label: '재직' }, { value: 'retired', label: '퇴사' },
+                            ...(allTeamWorkers.some(worker => isInactiveWorker(worker) && !normalizeText(worker.status).includes('퇴사')) ? [{ value: 'inactive', label: '기타' }] : [])]
+                        ).map(option => <button type="button" key={option.value} aria-pressed={statusFilter === option.value}
+                            onClick={() => setStatusFilter(option.value as StatusFilter)}>{option.label}</button>)}
+                    </div>
+                </div>
             </section>
 
             {(masterError || outputError) && (
@@ -1375,6 +1247,10 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                                 </div>}
                             </div>
 
+                            {detailView === 'profile' && <div className="tw-profile-sections" role="tablist" aria-label="작업자 상세 영역">
+                                <button type="button" role="tab" aria-selected={profileSection === 'info'} onClick={() => setProfileSection('info')}>기본정보</button>
+                                <button type="button" role="tab" aria-selected={profileSection === 'work'} onClick={() => setProfileSection('work')}>근무내역</button>
+                            </div>}
                             <div className="tw-worker-stat-grid">
                                 <div>
                                     <span>월 공수</span>
@@ -1390,7 +1266,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                                 </div>
                             </div>
 
-                            {detailView === 'profile' && (
+                            {detailView === 'profile' && profileSection === 'info' && (
                             <div
                                 className="tw-section-grid tw-section-grid--team-accent"
                                 style={{ '--team-color': selectedWorkerTeamColor } as React.CSSProperties}
@@ -1449,33 +1325,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                                                     </div>
                                                 )}
                                             </div>
-                                            {idCardUrl && (
-                                                <div className="tw-doc-preview__actions">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => window.open(idCardUrl, '_blank', 'noopener,noreferrer')}
-                                                    >
-                                                        <Eye size={14} />
-                                                        원본 보기
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => void handleCopyIdCard()}
-                                                        disabled={idCardCopying}
-                                                    >
-                                                        <Copy size={14} />
-                                                        {idCardCopying ? '복사 중' : '복사'}
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => void handleSendIdCard()}
-                                                        disabled={idCardSending}
-                                                    >
-                                                        <Send size={14} />
-                                                        {idCardSending ? '보내는 중' : '보내기'}
-                                                    </button>
-                                                </div>
-                                            )}
+                                            {idCardUrl && <ImageFileActions key={`${selectedWorkerId}:${idCardUrl}`} imageUrl={idCardUrl} name={`${selectedWorker.name} 신분증`} />}
                                         </div>
 
                                         <div className="tw-doc-preview">
@@ -1526,272 +1376,9 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                             </section>
                             )}
 
-                            {detailView === 'dailyReport' && (
-                            <section className="tw-output-section">
-                                <div className="tw-output-section__header">
-                                    <h3>
-                                        {dailyReportDisplayMode === 'calendar' ? <CalendarDays size={18} /> : <List size={18} />}
-                                        출력일보 · {dailyReportDisplayMode === 'calendar' ? '달력보기' : '목록보기'}
-                                    </h3>
-                                    <div className="tw-output-section__summary" aria-label="출력일보 기간 및 합계">
-                                        <span className="tw-output-period">{startDate} ~ {endDate}</span>
-                                        <span className="tw-output-summary-item tw-output-summary-item--days">
-                                            <small>출력일수</small>
-                                            <strong>{workerOutputDayCount}일</strong>
-                                        </span>
-                                        <span className="tw-output-summary-item tw-output-summary-item--manday">
-                                            <small>공수</small>
-                                            <strong>{formatManDay(workerStats.totalManDay)}</strong>
-                                        </span>
-                                        <span className="tw-output-summary-item tw-output-summary-item--amount">
-                                            <small>금액</small>
-                                            <strong>{formatCurrency(workerStats.totalAmount)}</strong>
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <div className="tw-output-view-toolbar">
-                                    <div className="tw-output-view-toggle" role="tablist" aria-label="출력일보 보기 방식">
-                                        <button
-                                            id="team-worker-output-calendar-tab"
-                                            type="button"
-                                            role="tab"
-                                            aria-selected={dailyReportDisplayMode === 'calendar'}
-                                            aria-controls="team-worker-output-view-panel"
-                                            className={dailyReportDisplayMode === 'calendar'
-                                                ? 'tw-output-view-button tw-output-view-button--active'
-                                                : 'tw-output-view-button'}
-                                            onClick={() => setDailyReportDisplayMode('calendar')}
-                                        >
-                                            <CalendarDays size={16} />
-                                            달력보기
-                                        </button>
-                                        <button
-                                            id="team-worker-output-list-tab"
-                                            type="button"
-                                            role="tab"
-                                            aria-selected={dailyReportDisplayMode === 'list'}
-                                            aria-controls="team-worker-output-view-panel"
-                                            className={dailyReportDisplayMode === 'list'
-                                                ? 'tw-output-view-button tw-output-view-button--active'
-                                                : 'tw-output-view-button'}
-                                            onClick={() => setDailyReportDisplayMode('list')}
-                                        >
-                                            <List size={16} />
-                                            목록보기
-                                        </button>
-                                    </div>
-                                    <span className="tw-output-view-helper">
-                                        {dailyReportDisplayMode === 'calendar'
-                                            ? '날짜별 현장과 공수를 달력에서 확인합니다.'
-                                            : '출력일보의 상세 항목을 행 단위로 확인합니다.'}
-                                    </span>
-                                </div>
-
-                                <div
-                                    id="team-worker-output-view-panel"
-                                    className="tw-output-view-panel"
-                                    role="tabpanel"
-                                    aria-labelledby={dailyReportDisplayMode === 'calendar'
-                                        ? 'team-worker-output-calendar-tab'
-                                        : 'team-worker-output-list-tab'}
-                                >
-                                {dailyReportDisplayMode === 'calendar' && (
-                                    loadingOutput ? (
-                                        <div className="tw-empty-state">출력 상세를 불러오는 중입니다.</div>
-                                    ) : outputError ? (
-                                        <div className="tw-empty-state tw-empty-state--error">{outputError}</div>
-                                    ) : workerOutputRows.length === 0 ? (
-                                        <div className="tw-empty-state">선택한 기간의 출력 내역이 없습니다.</div>
-                                    ) : (
-                                    <div className="tw-worker-calendar-wrap" aria-label={`${selectedWorker.name}의 ${selectedMonth} 출력일보 달력`}>
-                                        <table className="tw-worker-calendar-table">
-                                            <thead>
-                                                <tr>
-                                                    {CALENDAR_WEEKDAY_LABELS.map((weekday, index) => (
-                                                        <th
-                                                            key={weekday}
-                                                            className={index === 5 ? 'tw-worker-calendar-saturday' : index === 6 ? 'tw-worker-calendar-sunday' : undefined}
-                                                        >
-                                                            {weekday}
-                                                        </th>
-                                                    ))}
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {workerCalendarWeeks.map((week, weekIndex) => (
-                                                    <tr key={`${selectedMonth}-week-${weekIndex}`}>
-                                                        {week.map((day) => {
-                                                            const dateKey = formatDateKey(day);
-                                                            const isCurrentMonth = day.getMonth() + 1 === Number(selectedMonth.slice(5, 7));
-                                                            const dayRows = isCurrentMonth ? (workerOutputRowsByDate.get(dateKey) ?? []) : [];
-                                                            const dayOfWeek = day.getDay();
-                                                            const dayClassName = [
-                                                                'tw-worker-calendar-day',
-                                                                isCurrentMonth ? '' : 'tw-worker-calendar-day--outside',
-                                                                dayOfWeek === 6 ? 'tw-worker-calendar-day--saturday' : '',
-                                                                dayOfWeek === 0 ? 'tw-worker-calendar-day--sunday' : '',
-                                                            ].filter(Boolean).join(' ');
-
-                                                            return (
-                                                                <td key={dateKey} className={dayClassName}>
-                                                                    <div className="tw-worker-calendar-day__number">{day.getDate()}일</div>
-                                                                    <div className="tw-worker-calendar-day__entries">
-                                                                        {dayRows.map((row, rowIndex) => {
-                                                                            const responsibleTeamLabel = getResponsibleTeamLabel(row);
-                                                                            const responsibleTeamColor = getResponsibleTeamColor(row, teamById);
-                                                                            const displayWorkerTeamName = row.workerTeamName
-                                                                                || (row.workerTeamId ? teamById.get(String(row.workerTeamId))?.name : '')
-                                                                                || getTeamLabel(selectedWorker, teamById);
-                                                                            return (
-                                                                                <article
-                                                                                    key={`${row.reportId}-${row.workerId}-${row.date}-${row.siteId}-${rowIndex}`}
-                                                                                    className="tw-worker-calendar-entry"
-                                                                                    style={{ borderLeftColor: responsibleTeamColor }}
-                                                                                    title={`${row.siteName || EMPTY_TEXT} · ${responsibleTeamLabel} · ${formatManDay(row.manDay)}공수 · 단가 ${formatCurrency(row.unitPrice)} · 금액 ${formatCurrency(getReportRowAmount(row))}`}
-                                                                                >
-                                                                                    <div>
-                                                                                        <strong>{row.siteName || EMPTY_TEXT}</strong>
-                                                                                        <span>{formatManDay(row.manDay)}공수</span>
-                                                                                    </div>
-                                                                                    <small style={{ color: responsibleTeamColor }}>{responsibleTeamLabel}</small>
-                                                                                    <div
-                                                                                        className="tw-worker-calendar-entry__worker"
-                                                                                        style={{ '--worker-team-color': selectedWorkerTeamColor } as React.CSSProperties}
-                                                                                    >
-                                                                                        <strong>{row.workerName || selectedWorker.name}</strong>
-                                                                                        <span>{displayWorkerTeamName || EMPTY_TEXT}</span>
-                                                                                    </div>
-                                                                                    <div className="tw-worker-calendar-entry__amounts">
-                                                                                        <span>단가 {formatCurrency(row.unitPrice)}</span>
-                                                                                        <span>금액 {formatCurrency(getReportRowAmount(row))}</span>
-                                                                                    </div>
-                                                                                </article>
-                                                                            );
-                                                                        })}
-                                                                    </div>
-                                                                </td>
-                                                            );
-                                                        })}
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                    )
-                                )}
-
-                                {dailyReportDisplayMode === 'list' && (
-                                <>
-                                <div className="tw-output-card-list">
-                                    {loadingOutput ? (
-                                        <div className="tw-empty-state">출력 상세를 불러오는 중입니다.</div>
-                                    ) : outputError ? (
-                                        <div className="tw-empty-state tw-empty-state--error">{outputError}</div>
-                                    ) : workerOutputRows.length === 0 ? (
-                                        <div className="tw-empty-state">선택한 기간의 출력 내역이 없습니다.</div>
-                                    ) : (
-                                        workerOutputRows.map(row => {
-                                            const displayWorkerTeamName = row.workerTeamName
-                                                || (row.workerTeamId ? teamById.get(String(row.workerTeamId))?.name : '')
-                                                || getTeamLabel(selectedWorker, teamById);
-                                            const payTypeLabel = resolveReportPayType(row) || EMPTY_TEXT;
-
-                                            return (
-                                                <article className="tw-output-card" key={`card-${row.reportId}-${row.workerId}-${row.date}-${row.siteId}`}>
-                                                    <div className="tw-output-card__header">
-                                                        <strong>{row.date || EMPTY_TEXT}</strong>
-                                                        <span>{formatCurrency(getReportRowAmount(row))}</span>
-                                                    </div>
-                                                    <dl>
-                                                        <div>
-                                                            <dt>현장</dt>
-                                                            <dd>{row.siteName || EMPTY_TEXT}</dd>
-                                                        </div>
-                                                        <div>
-                                                            <dt>현장소속팀</dt>
-                                                            <dd>{getResponsibleTeamLabel(row)}</dd>
-                                                        </div>
-                                                        <div>
-                                                            <dt>소속팀</dt>
-                                                            <dd>{displayWorkerTeamName || EMPTY_TEXT}</dd>
-                                                        </div>
-                                                        <div>
-                                                            <dt>급여방식</dt>
-                                                            <dd>{payTypeLabel}</dd>
-                                                        </div>
-                                                        <div>
-                                                            <dt>공수</dt>
-                                                            <dd>{formatManDay(row.manDay)}</dd>
-                                                        </div>
-                                                        <div>
-                                                            <dt>단가</dt>
-                                                            <dd>{formatCurrency(row.unitPrice)}</dd>
-                                                        </div>
-                                                    </dl>
-                                                </article>
-                                            );
-                                        })
-                                    )}
-                                </div>
-
-                                <div className="tw-output-table-wrap tw-output-table-wrap--v2">
-                                    <table className="tw-output-table tw-daily-v2-table">
-                                        <thead>
-                                            <tr>
-                                                <th className="tw-daily-v2-date">날짜</th>
-                                                <th>현장명</th>
-                                                <th>현장소속팀</th>
-                                                <th>성명</th>
-                                                <th>소속팀</th>
-                                                <th>급여방식</th>
-                                                <th className="tw-number">공수</th>
-                                                <th className="tw-number">단가</th>
-                                                <th className="tw-number">금액</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {loadingOutput ? (
-                                                <tr>
-                                                    <td colSpan={9} className="tw-table-empty">출력 상세를 불러오는 중입니다.</td>
-                                                </tr>
-                                            ) : outputError ? (
-                                                <tr>
-                                                    <td colSpan={9} className="tw-table-empty tw-table-empty--error">{outputError}</td>
-                                                </tr>
-                                            ) : workerOutputRows.length === 0 ? (
-                                                <tr>
-                                                    <td colSpan={9} className="tw-table-empty">선택한 기간의 출력 내역이 없습니다.</td>
-                                                </tr>
-                                            ) : (
-                                                workerOutputRows.map(row => {
-                                                    const displayWorkerTeamName = row.workerTeamName
-                                                        || (row.workerTeamId ? teamById.get(String(row.workerTeamId))?.name : '')
-                                                        || getTeamLabel(selectedWorker, teamById);
-                                                    const payTypeLabel = resolveReportPayType(row) || EMPTY_TEXT;
-
-                                                    return (
-                                                        <tr key={`${row.reportId}-${row.workerId}-${row.date}-${row.siteId}`}>
-                                                            <td className="tw-daily-v2-date">{row.date}</td>
-                                                            <td className="tw-truncate" title={row.siteName || ''}>{row.siteName || EMPTY_TEXT}</td>
-                                                            <td className="tw-truncate" title={getResponsibleTeamLabel(row)}>{getResponsibleTeamLabel(row)}</td>
-                                                            <td><strong>{row.workerName || selectedWorker.name}</strong></td>
-                                                            <td className="tw-truncate" title={displayWorkerTeamName}>{displayWorkerTeamName || EMPTY_TEXT}</td>
-                                                            <td>{payTypeLabel}</td>
-                                                            <td className="tw-number">{formatManDay(row.manDay)}</td>
-                                                            <td className="tw-number">{formatCurrency(row.unitPrice)}</td>
-                                                            <td className="tw-number">{formatCurrency(getReportRowAmount(row))}</td>
-                                                        </tr>
-                                                    );
-                                                })
-                                            )}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                </>
-                                )}
-                                </div>
-                            </section>
+                            {(detailView === 'dailyReport' || (detailView === 'profile' && profileSection === 'work')) && (
+                                <WorkerWorkHistory key={`${selectedWorkerId}:${selectedMonth}`} rows={workerOutputRows}
+                                    month={selectedMonth} workerName={selectedWorker.name} loading={loadingOutput} error={outputError} />
                             )}
                         </>
                     )}

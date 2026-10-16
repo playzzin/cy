@@ -433,7 +433,7 @@ const ExcelUploadWizard = <T extends Record<string, any>>({
 
     if (step === 'UPLOAD') {
         return (
-            <div className="p-10 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-center hover:bg-slate-100 transition-colors"
+            <div className="p-4 sm:p-10 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-center hover:bg-slate-100 transition-colors"
                 onDragOver={handleFileDrop} onDrop={handleFileDrop}
             >
                 <div className="mb-4 text-brand-500 text-5xl">
@@ -441,7 +441,7 @@ const ExcelUploadWizard = <T extends Record<string, any>>({
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 mb-2">{title} 마법사</h3>
                 <p className="text-slate-500 mb-6">{description || '엑셀 파일을 이곳으로 드래그하거나 클릭하여 업로드하세요.'}</p>
-                <div className="flex justify-center gap-3">
+                <div className="flex flex-col sm:flex-row justify-center gap-3">
                     <label className="bg-brand-600 hover:bg-brand-700 text-white px-6 py-3 rounded-lg font-bold cursor-pointer transition-all">
                         <FontAwesomeIcon icon={faCloudUploadAlt} /> 파일 선택 (.xlsx)
                         <input type="file" className="hidden" accept=".xlsx, .xls" onChange={e => e.target.files?.[0] && processFile(e.target.files[0])} />
@@ -458,18 +458,18 @@ const ExcelUploadWizard = <T extends Record<string, any>>({
                 </div>
 
                 {/* Guide for Fields */}
-                <div className="mt-8 text-left max-w-2xl mx-auto bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+                <div className="relative mt-8 text-left max-w-2xl mx-auto bg-white p-4 rounded-lg shadow-sm border border-slate-200">
                     <h4 className="font-bold text-sm text-slate-700 mb-2">💡 엑셀 파일 권장 헤더</h4>
                     <p className="text-xs text-slate-500 mb-3">
                         아래 필드를 포함하는 엑셀 파일을 업로드해주세요. <span className="text-red-500 font-bold">빨간색*</span>은 필수 항목입니다.
                     </p>
                     <div className="flex flex-wrap gap-2">
                         {fields.map(f => (
-                            <div key={f.key} className="group relative">
-                                <span className={`text-xs px-2 py-1 rounded border ${f.required ? 'bg-red-50 border-red-200 text-red-700 font-semibold' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                            <div key={f.key} className="group">
+                                <span tabIndex={0} className={`text-xs px-2 py-1 rounded border ${f.required ? 'bg-red-50 border-red-200 text-red-700 font-semibold' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
                                     {f.label}{f.required && '*'}
                                 </span>
-                                <div className="absolute bottom-full mb-2 w-48 bg-slate-800 text-white text-xs rounded p-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                                <div className="absolute bottom-full left-0 right-0 mb-2 bg-slate-800 text-white text-xs rounded p-2 hidden group-hover:block group-focus-within:block pointer-events-none z-10">
                                     <div className="font-bold">{f.label}</div>
                                     {f.aliases && f.aliases.length > 0 && <div className="text-slate-300">별칭: {f.aliases.join(', ')}</div>}
                                     {f.example && <div>예시: {f.example}</div>}

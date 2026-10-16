@@ -3,6 +3,7 @@ import * as functions from 'firebase-functions/v1';
 import { protectedRegion, requireCallableAuth } from './auth';
 import { list, text } from './teamReadPolicy';
 import { requireWorkerRequestAccess } from './workerRequestAccess';
+import { resolvedRoleNames } from './teamExpenseRequests';
 
 export async function handleTeamOffDutyRequest(input: any, context: functions.https.CallableContext) {
     const { uid } = requireCallableAuth(context);
@@ -20,6 +21,14 @@ export async function handleTeamOffDutyRequest(input: any, context: functions.ht
     const ref = db.collection('field_schedule_requests').doc(`${date}___date_off_duty__`);
     return db.runTransaction(async transaction => {
         const [profile, menu, saved] = await transaction.getAll(db.doc(`users/${uid}`), db.doc('settings/menus_v12'), ref);
+        const roles = resolvedRoleNames(profile.data(), menu.data()).map(value => text(value).toLowerCase().replace(/[\s_-]/g, ''));
+        const ownIds = list(profile.data()?.linkedWorkerIds).map(text).filter(value => value && !value.includes('/')).slice(0, 30);
+        const ownWorkers = ownIds.length ? await transaction.getAll(...ownIds.map(id => db.collection('workers').doc(id))) : [];
+        roles.push(...ownWorkers.map(doc => text(doc.data()?.role).toLowerCase().replace(/[\s_-]/g, '')));
+        if (roles.some(role => ['팀장', 'teamlead', 'teamleader'].includes(role))
+            && !roles.some(role => ['admin', 'administrator', 'superadmin', 'owner', 'dev', 'developer', 'systemadmin', '관리자', 'office', 'officestaff', '사무실', '사무실직원', '사무직원', '사무', '사장', '실장', 'manager', 'manager1', 'manager2', 'manager3', 'sitemanager', '현장관리자', '현장소장', '매니저', '매니저1', '매니저2', '매니저3', '메니저', '메니저1', '메니저2', '메니저3'].includes(role))) {
+            throw new functions.https.HttpsError('permission-denied', '팀장 휴무 신청은 사무실에서 처리합니다.');
+        }
         const workers = await transaction.getAll(...ids.map(id => db.collection('workers').doc(id)));
         for (const worker of workers) await requireWorkerRequestAccess(transaction, profile.data(), menu.data(), worker.id, worker.data());
         const existing = saved.data() || {};
@@ -52,4 +61,4 @@ export async function handleTeamOffDutyRequest(input: any, context: functions.ht
     });
 }
 
-export const teamOffDutyRequests = protectedRegion.https.onCall(handleTeamOffDutyRequest);
+export const teamOffDutyRequests = protectedRegion.runWith({ memory: '1GB' }).https.onCall(handleTeamOffDutyRequest);

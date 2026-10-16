@@ -807,7 +807,7 @@ export const AiImageGalleryPage = () => {
     const preset = IMAGE_PRESETS[category] || IMAGE_PRESETS['custom'];
 
     return (
-        <div className="min-h-[calc(100vh+60px)] -m-[30px] w-[calc(100%+60px)] bg-slate-950 text-slate-100 overflow-x-hidden">
+        <div className="min-h-[calc(100vh+60px)] -m-[15px] w-[calc(100%+30px)] md:-m-[30px] md:w-[calc(100%+60px)] bg-slate-950 text-slate-100 overflow-x-hidden">
             {/* Header */}
             <div className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-xl relative z-30">
                 <div className="max-w-[1920px] mx-auto px-6 py-5 flex flex-col md:flex-row md:items-center justify-between gap-4">

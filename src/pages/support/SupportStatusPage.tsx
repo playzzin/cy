@@ -166,7 +166,7 @@ const SupportStatusPage: React.FC = () => {
 
     return (
         <div className="p-6 bg-slate-50 min-h-screen">
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex flex-wrap gap-3 justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
                         <FontAwesomeIcon icon={faChartSimple} className="text-indigo-600" />
@@ -177,7 +177,7 @@ const SupportStatusPage: React.FC = () => {
                     </p>
                 </div>
 
-                <div className="flex gap-3">
+                <div className="flex flex-wrap gap-3">
                     <div className="bg-white border border-slate-200 rounded-lg flex items-center px-3 py-2 shadow-sm">
                         <FontAwesomeIcon icon={faCalendar} className="text-slate-400 mr-2" />
                         <ReactDatePicker

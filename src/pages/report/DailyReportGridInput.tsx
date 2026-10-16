@@ -2598,8 +2598,8 @@ const DailyReportGridInput: React.FC = () => {
             )}
 
             <div className="sticky-toolbar-wrapper">
-                <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center shadow-sm sticky-toolbar z-[20]">
-                    <div className="flex items-center gap-4">
+                <div className="p-4 bg-white border-b border-slate-200 flex flex-wrap gap-3 justify-between items-center shadow-sm sticky-toolbar z-[20]">
+                    <div className="flex flex-wrap items-center gap-4">
                         <div className="flex items-center gap-2 bg-slate-100 border border-slate-300 rounded-lg px-3 py-2">
                             <FontAwesomeIcon icon={faCalendarAlt} className="text-slate-500" />
                             <input
@@ -2633,7 +2633,7 @@ const DailyReportGridInput: React.FC = () => {
                             )}
                         </div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                         <button onClick={handleScheduleAnalyzeClick} disabled={loading || fetching} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm transition-colors font-bold"><FontAwesomeIcon icon={faCalendarAlt} /> 일정 분석</button>
                         <button onClick={handleKakaoAnalyzeClick} className="px-4 py-2 bg-yellow-400 text-slate-900 rounded-lg hover:bg-yellow-500 flex items-center gap-2 shadow-sm transition-colors font-bold"><FontAwesomeIcon icon={faComment} /> 카톡 분석</button>
                         <button onClick={addLedger} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 shadow-sm transition-colors"><FontAwesomeIcon icon={faPlus} /> 장부 추가</button>

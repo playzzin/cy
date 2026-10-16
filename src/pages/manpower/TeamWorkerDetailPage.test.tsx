@@ -103,3 +103,19 @@ test('작업자정보 메뉴는 기존 기본정보 조회를 유지한다', asy
     expect(screen.getByRole('heading', { name: '작업자 정보' })).toBeInTheDocument();
     expect(screen.queryByLabelText('월별 노임명세서')).not.toBeInTheDocument();
 });
+
+test('전체가 기본이며 퇴사와 기타 비활성을 구분하고 소속 범위를 유지한다', async () => {
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue([...workers,
+        { ...workers[0], id: 'retired', name: '퇴사검증', status: '퇴사', isActive: false },
+        { ...workers[0], id: 'inactive', name: '비활성검증', status: '출입금지', isActive: false },
+    ]);
+    render(<TeamWorkerDetailPage />);
+    await screen.findByRole('button', { name: /퇴사검증.*검증팀/ });
+    const status = screen.getByRole('group', { name: '작업자 상태' });
+    expect(within(status).getByRole('button', { name: '전체' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('group', { name: '조회월' })).toBeInTheDocument();
+    fireEvent.click(within(status).getByRole('button', { name: '퇴사' }));
+    expect(screen.queryByRole('button', { name: /비활성검증.*검증팀/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /다른팀사람/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /퇴사검증.*검증팀/ })).toBeInTheDocument();
+});

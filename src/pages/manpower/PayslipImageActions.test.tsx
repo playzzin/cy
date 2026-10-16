@@ -66,7 +66,7 @@ test('공유 이미지를 먼저 준비하고 두 번째 클릭에서 즉시 파
     await prepare();
     expect(share).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '공유창 열기' }));
-    expect(share).toHaveBeenCalledWith({ title: '가상하나 2026-10 급여명세서', files: [expect.any(File)] });
+    expect(share).toHaveBeenCalledWith({ files: [expect.any(File)] });
     expect(capturePayslipImage).toHaveBeenCalledTimes(1);
     await screen.findByText(/공유창 처리를 마쳤습니다/);
     expect(saveAs).not.toHaveBeenCalled();

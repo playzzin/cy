@@ -347,8 +347,8 @@ const DailyReportV2Page: React.FC = () => {
             )}
 
             {/* Header Toolbar */}
-            <div className="bg-white px-6 py-4 border-b border-slate-200 flex items-center justify-between shadow-sm">
-                <div className="flex items-center gap-4">
+            <div className="bg-white px-6 py-4 border-b border-slate-200 flex flex-wrap gap-3 items-center justify-between shadow-sm">
+                <div className="flex flex-wrap items-center gap-4">
                     <h1 className="text-lg font-bold text-slate-800">일보 등록 (Spreadsheet)</h1>
                     <div className="flex items-center gap-2 bg-slate-100 rounded-lg px-3 py-2">
                         <FontAwesomeIcon icon={faCalendarAlt} className="text-slate-500" />

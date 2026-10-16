@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { MessageManager } from '../../constants/messages';
 // ROLE_SITE_MAP removed - now fully dynamic
 import './DashboardLayout.css';
+import '../common/WorkflowTheme.css';
 
 import Header from './Header';
 import Sidebar from './Sidebar';
@@ -29,6 +30,8 @@ import {
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 import { getMenuModeStorageKey } from '../../utils/menuModeStorage';
 import { getPositionMenuView } from '../../utils/linkedPositionMenus';
+import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
+import { filterTeamWorkflowMenu } from '../../utils/teamWorkflowPolicy';
 
 // Removed hardcoded siteData in favor of dynamic loading
 
@@ -466,8 +469,10 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     const sourceSiteData = siteData
         ? (siteData[effectiveSite] || siteData[fallbackSite] || null)
         : null;
+    const restrictedTeam = useRestrictedTeamWorkflow();
     const currentSiteData = sourceSiteData && siteData
-        ? { ...sourceSiteData, menu: getPositionMenuView(siteData, effectiveSite) }
+        ? { ...sourceSiteData, menu: restrictedTeam ? filterTeamWorkflowMenu(getPositionMenuView(siteData, effectiveSite)) : getPositionMenuView(siteData, effectiveSite),
+            ...(restrictedTeam && sourceSiteData.headerActions ? { headerActions: filterTeamWorkflowMenu(sourceSiteData.headerActions) } : {}) }
         : null;
 
     const handleMenuItemClick = (item: MenuItem, position?: number) => {

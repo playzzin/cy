@@ -1900,7 +1900,7 @@ const IntegratedDailyReportUploader: React.FC = () => {
                         <FontAwesomeIcon icon={faInfoCircle} />
                         데이터 처리 순서
                     </h3>
-                    <div className="flex items-center gap-2 text-sm">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
                         {PROCESSING_ORDER.map((type, idx) => (
                             <React.Fragment key={type}>
                                 <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${SHEET_CONFIG[type].bgColor}`}>
@@ -1917,7 +1917,7 @@ const IntegratedDailyReportUploader: React.FC = () => {
 
                 {/* 업로드 영역 */}
                 <div
-                    className="bg-white p-12 rounded-2xl shadow-lg border-2 border-dashed border-slate-300 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-all cursor-pointer"
+                    className="bg-white p-4 sm:p-12 rounded-2xl shadow-lg border-2 border-dashed border-slate-300 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-all cursor-pointer"
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={handleFileDrop}
                 >

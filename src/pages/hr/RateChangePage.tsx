@@ -184,8 +184,8 @@ const RateChangePage: React.FC = () => {
 
             {/* 검색 및 필터 영역 */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 p-4">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
+                <div className="flex flex-wrap gap-3 items-center justify-between">
+                    <div className="flex flex-wrap items-center gap-4">
                         <div className="flex items-center gap-2">
                             <FontAwesomeIcon icon={faSearch} className="text-gray-400" />
                             <input
@@ -235,7 +235,7 @@ const RateChangePage: React.FC = () => {
             {/* 일괄 변경 영역 */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 p-4">
                 <h3 className="font-semibold text-gray-800 mb-3">🔄 일괄 단가 변경</h3>
-                <div className="flex items-center gap-4">
+                <div className="flex flex-wrap items-center gap-4">
                     <div className="flex items-center gap-2">
                         <FontAwesomeIcon icon={faWonSign} className="text-green-600" />
                         <input

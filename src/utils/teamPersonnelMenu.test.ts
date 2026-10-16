@@ -18,8 +18,7 @@ test('동적 팀장 직책의 기존 메뉴를 요청 순서대로 나누고 ID,
     expect(menu.sub?.map(item => typeof item === 'string' ? item : item.text)).toEqual(TEAM_PERSONNEL_MENU_ITEMS.map(item => item.text));
     expect(menu.sub?.[0]).toMatchObject({ id: 'workers', iconColor: '#123456', roles: ['팀장'] });
     expect(menu.sub?.[1]).toMatchObject({ path: '/manpower/team-worker-payslip', roles: ['팀장'] });
-    expect(menu.sub?.[2]).toMatchObject({ path: '/manpower/team-worker-daily-report', roles: ['팀장'] });
-    expect(menu.sub?.[3]).toMatchObject({ id: 'register', path: '/manpower/team-worker-requests' });
+    expect(menu.sub?.[2]).toMatchObject({ id: 'register', path: '/manpower/team-worker-requests' });
     expect(JSON.stringify(config.pos_office)).toBe(office);
     const first = JSON.stringify(config);
     ensureTeamPersonnelMenu(config);
@@ -32,7 +31,7 @@ test('팀장 이름 기반의 단일 인원관리 링크와 문자열 하위 메
     ] } };
     ensureTeamPersonnelMenu(config);
     expect(config.pos_custom.menu[0].path).toBeUndefined();
-    expect(config.pos_custom.menu[0].sub).toHaveLength(4);
+    expect(config.pos_custom.menu[0].sub).toHaveLength(3);
 });
 
 test('숨김 설정과 관련 없는 사용자 지정 메뉴를 보존한다', () => {
@@ -41,5 +40,5 @@ test('숨김 설정과 관련 없는 사용자 지정 메뉴를 보존한다', (
     (config.pos_dynamic.menu[0].sub![0] as { hide?: boolean }).hide = true;
     ensureTeamPersonnelMenu(config);
     expect(config.pos_dynamic.menu[0].sub?.[1]).toMatchObject({ hide: true });
-    expect(config.pos_dynamic.menu[0].sub?.[4]).toEqual({ text: '별도 업무', path: '/custom' });
+    expect(config.pos_dynamic.menu[0].sub?.[3]).toEqual({ text: '별도 업무', path: '/custom' });
 });

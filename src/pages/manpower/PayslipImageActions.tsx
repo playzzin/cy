@@ -3,6 +3,7 @@ import { Copy, Download, Share2, X } from 'lucide-react';
 import { saveAs } from 'file-saver';
 import type { PaymentData } from '../payroll/components/PayslipTemplate';
 import { capturePayslipImage, payslipImageFilename } from '../../utils/payslipImage';
+import { canShareImageFile as canShareFile, shareImageFile } from '../../utils/imageFileDelivery';
 import './PayslipImageActions.css';
 
 interface Props {
@@ -10,11 +11,6 @@ interface Props {
     data: PaymentData;
     month: string;
 }
-
-const canShareFile = (file: File) => {
-    try { return !!navigator.share && !!navigator.canShare?.({ files: [file] }); }
-    catch { return false; }
-};
 
 const PayslipImageActions: React.FC<Props> = ({ targetRef, data, month }) => {
     const [prepared, setPrepared] = useState<{ file: File; url: string } | null>(null);
@@ -79,7 +75,7 @@ const PayslipImageActions: React.FC<Props> = ({ targetRef, data, month }) => {
         setMessage('');
         try {
             // The file is already prepared, so share runs within this click's activation.
-            await navigator.share({ files: [prepared.file], title: `${data.workerName} ${month} 급여명세서` });
+            await shareImageFile(prepared.file);
             if (request === generation.current) setMessage('공유창 처리를 마쳤습니다. 전송 여부는 선택한 앱에서 확인해 주세요.');
         } catch (failure) {
             if (request === generation.current) {

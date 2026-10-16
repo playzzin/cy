@@ -112,7 +112,7 @@ const DroppableCanvasZone = ({ children }: { children: React.ReactNode }) => {
     });
 
     return (
-        <CanvasWrapper ref={setNodeRef} $isOver={isOver} onClick={() => { }}>
+        <CanvasWrapper ref={setNodeRef} $isOver={isOver} onClick={() => { }} role="region" aria-label="위임장 편집 영역" tabIndex={0}>
             {children}
         </CanvasWrapper>
     );
@@ -607,7 +607,7 @@ const DelegationBuilderPage: React.FC = () => {
 
                 {/* Toolbar */}
                 <Toolbar>
-                    <div className="flex items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-4">
                         <h1 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                             <FontAwesomeIcon icon={faFileAlt} className="text-blue-600" />
                             위임장 Builder <span className="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded">Commercial v1.0</span>
@@ -655,7 +655,7 @@ const DelegationBuilderPage: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                         {/* Export/Import/Print Group */}
                         <ToolButton onClick={triggerImport} title="파일에서 불러오기">
                             <FontAwesomeIcon icon={faFileImport} className="text-slate-600" />
@@ -972,10 +972,13 @@ const PageContainer = styled.div`
   flex-direction: column;
   height: 100vh;
   background: #f1f5f9;
+  @media (max-width: 768px) { height: auto; min-height: 100vh; }
 `;
 
 const Toolbar = styled.div`
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: space-between;
   align-items: center;
   padding: 8px 16px;
@@ -983,7 +986,8 @@ const Toolbar = styled.div`
   border-bottom: 1px solid #e2e8f0;
   box-shadow: 0 1px 2px rgba(0,0,0,0.05);
   z-index: 30;
-  height: 50px;
+  min-height: 50px;
+  flex-shrink: 0;
 `;
 
 const ToolButton = styled.button<{ disabled?: boolean }>`
@@ -1044,6 +1048,7 @@ const MainContent = styled.div`
   display: flex;
   flex: 1;
   overflow: hidden;
+  @media (max-width: 768px) { flex-direction: column; overflow: visible; }
 `;
 
 // Left sidebar for tools
@@ -1056,10 +1061,13 @@ const LeftPanel = styled.div`
     z-index: 20;
     overflow-y: auto;
     padding-bottom: 20px;
+    @media (max-width: 768px) { width: 100%; max-height: 260px; flex-shrink: 0; }
 `;
 
 const CanvasWrapper = styled.div<{ $isOver?: boolean }>`
   flex: 1;
+  min-width: 0;
+  @media (max-width: 768px) { flex: 0 0 560px; max-height: 560px; }
   background: ${props => props.$isOver ? '#e0e7ff' : '#e2e8f0'}; // Visual feedback on drag over
   transition: background-color 0.2s;
   overflow: auto;
@@ -1105,6 +1113,7 @@ const RightPanel = styled.div`
   display: flex;
   flex-direction: column;
   z-index: 20;
+  @media (max-width: 768px) { width: 100%; max-height: 420px; flex-shrink: 0; }
 `;
 
 const PanelContent = styled.div`

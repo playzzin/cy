@@ -957,8 +957,8 @@ const KakaoMessageCenterPage: React.FC = () => {
                 </div>
             </header>
 
-            <div className="flex-1 flex overflow-hidden">
-                <aside className="w-[450px] flex-none p-6 flex flex-col min-h-0">
+            <div className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
+                <aside className="w-full lg:w-[450px] flex-none p-4 lg:p-6 flex flex-col min-h-[320px] lg:min-h-0">
                     <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                         <FontAwesomeIcon icon={faEnvelope} className="text-blue-500" />
                         수신자 선택
@@ -968,7 +968,7 @@ const KakaoMessageCenterPage: React.FC = () => {
                     </div>
                 </aside>
 
-                <main className="flex-1 p-6 overflow-y-auto min-w-0">
+                <main className="flex-none lg:flex-1 p-4 lg:p-6 lg:overflow-y-auto min-w-0">
                     <div className="max-w-4xl mx-auto space-y-6">
                         <div className="flex bg-white p-1 rounded-xl shadow-sm border inline-flex w-full">
                             <button onClick={() => setMode('ALIMTALK')} className={`flex-1 py-3 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${mode === 'ALIMTALK' ? 'bg-yellow-400 text-black shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}>

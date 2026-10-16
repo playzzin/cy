@@ -488,8 +488,8 @@ export default function WorkerAdvanceRequestPage() {
 
             setAmountInput('');
             setMemo('');
-            setMessage('가불 신청을 등록했습니다.');
             await latestSummaryLoader.current();
+            setMessage('가불 신청을 등록했습니다.');
         } catch (error) {
             console.error('[WorkerAdvanceRequestPage] Failed to submit request', error);
             setMessage(error instanceof Error && error.message === 'requested-amount-exceeds-available'
@@ -511,8 +511,8 @@ export default function WorkerAdvanceRequestPage() {
         setMessage('');
         try {
             await advanceRequestService.cancelRequest(request.id, currentUser?.uid);
-            setMessage('신청을 취소했습니다.');
             await latestSummaryLoader.current();
+            setMessage('신청을 취소했습니다.');
         } catch (error) {
             console.error('[WorkerAdvanceRequestPage] Failed to cancel request', error);
             setMessage('신청 취소에 실패했습니다.');
@@ -661,6 +661,8 @@ export default function WorkerAdvanceRequestPage() {
                         </div>
 
                         <div className="p-4">
+                            <details className="advance-calculation-details">
+                            <summary>신청 가능액 계산 내역</summary>
                             <div className="advance-summary grid grid-cols-2 gap-3 xl:grid-cols-4">
                                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                                     <div className="flex items-center gap-2 text-xs font-black text-slate-500">
@@ -694,15 +696,10 @@ export default function WorkerAdvanceRequestPage() {
                                 </div>
                             </div>
 
-                            <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-                                <div className="rounded-lg border border-slate-200">
-                                    <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-                                        <div className="flex items-center gap-2 text-sm font-black text-slate-800">
-                                            <ClipboardList size={16} />
-                                            근무 내역
-                                        </div>
-                                        <span className="text-xs font-bold text-slate-500">{summary.workRows.length}건</span>
-                                    </div>
+                            </details>
+                            <div className="advance-request-body mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+                                <details className="advance-work-details rounded-lg border border-slate-200">
+                                    <summary>근무 내역 {summary.workRows.length}건</summary>
                                     <div className="advance-work-scroll max-h-[360px] overflow-auto">
                                         <table className="advance-work-table w-full min-w-[720px] text-sm">
                                             <thead className="sticky top-0 bg-slate-50 text-xs font-black text-slate-500">
@@ -741,9 +738,9 @@ export default function WorkerAdvanceRequestPage() {
                                             </tbody>
                                         </table>
                                     </div>
-                                </div>
+                                </details>
 
-                                <div className="rounded-lg border border-slate-200 p-4">
+                                <div className="advance-input rounded-lg border border-slate-200 p-4">
                                     <div className="flex items-center gap-2 text-sm font-black text-slate-800">
                                         <Send size={16} />
                                         신청 입력

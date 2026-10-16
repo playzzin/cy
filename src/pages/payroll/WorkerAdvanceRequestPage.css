@@ -115,3 +115,13 @@
         text-align: center;
     }
 }
+
+.advance-calculation-details > summary, .advance-work-details > summary { padding: 12px; min-height: 44px; cursor: pointer; color: #475569; font-size: 14px; font-weight: 700; }
+.advance-calculation-details { border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
+.advance-calculation-details .advance-summary { padding: 12px; }
+.advance-input { order: 0; }
+.advance-work-details { order: 1; align-self: start; min-width: 0; }
+@media (max-width: 767px) {
+    .advance-request-page .advance-request-workspace { padding: 10px; gap: 10px; }
+    .advance-request-page .advance-input { padding: 12px; }
+}

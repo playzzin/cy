@@ -46,12 +46,12 @@ export function useMasterData() {
     return context;
 }
 
-export function MasterDataProvider({ children }: { children: React.ReactNode }) {
+export function MasterDataProvider({ children, autoLoad = true }: { children: React.ReactNode; autoLoad?: boolean }) {
     const [companies, setCompanies] = useState<Company[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
     const [positions, setPositions] = useState<Position[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(autoLoad);
 
     // 회사 로드
     const refreshCompanies = useCallback(async () => {
@@ -131,8 +131,8 @@ export function MasterDataProvider({ children }: { children: React.ReactNode }) 
 
     // 앱 시작 시 데이터 로드
     useEffect(() => {
-        refreshAll();
-    }, [refreshAll]);
+        if (autoLoad) void refreshAll();
+    }, [autoLoad, refreshAll]);
 
     // 시공사/협력사만 필터링
     const validCompanies = companies.filter(

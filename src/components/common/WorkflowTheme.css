@@ -1,0 +1,23 @@
+/* Shared screen tokens. Document templates, print and export layouts retain their own sizing. */
+:root {
+    --workflow-canvas: #f5f7fb;
+    --workflow-surface: #fff;
+    --workflow-ink: #172033;
+    --workflow-muted: #64748b;
+    --workflow-border: #dfe5ef;
+    --workflow-accent: #2563eb;
+    --workflow-radius: 10px;
+    --workflow-space: 12px;
+}
+@media screen {
+    #main-content { --primary-color: var(--workflow-accent); color: var(--workflow-ink); background-color: var(--workflow-canvas); }
+    :where(#main-content, .preview-workspace, .cy-detail-dialog) { font-family: 'Pretendard', 'Noto Sans KR', 'Malgun Gothic', sans-serif; font-variant-numeric: tabular-nums; }
+    :where(#main-content, .preview-workspace, .cy-detail-dialog) :where(button, a, input, select, textarea, summary):focus-visible { outline: 2px solid var(--workflow-accent); outline-offset: 3px; }
+    :where(.tw-page, .worker-history, .team-account-page, .advance-request-page, .team-settlement-page) { --tw-surface: var(--workflow-surface); --tw-border: var(--workflow-border); --tw-accent-blue: var(--workflow-accent); }
+    :where(.worker-history, .team-account-page, .cy-detail-dialog) { color: var(--workflow-ink); }
+    :where(.worker-history, .team-account-page, .cy-detail-dialog) :where(button, input, select) { font: inherit; }
+    .team-account-page { border-radius: var(--workflow-radius); background: var(--workflow-surface); }
+}
+@media screen and (max-width: 640px) {
+    :where(.tw-page, .team-account-page, .advance-request-page) :where(.tw-primary-button, .tw-secondary-button, .tw-icon-button, summary) { min-height: 44px; }
+}

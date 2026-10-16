@@ -20,6 +20,7 @@ import MonthNavigator from '../../components/common/MonthNavigator';
 import WhiteboardTeamSelector, { type WhiteboardTeamOption } from './WhiteboardTeamSelector';
 import { loadSessionState, saveSessionState } from '../../utils/sessionStorage';
 import { getContrastingTextColor, getReadableAccentColor } from '../../utils/color';
+import './WhiteboardStatusBoard.css';
 
 interface BoardItem {
     id: string;
@@ -1573,7 +1574,7 @@ const WhiteboardStatusContent: React.FC<{
             <motion.div
                 layoutScroll
                 ref={containerRef}
-                className="flex-1 overflow-y-auto p-8 bg-slate-100/50 relative scroll-smooth motion-reduce:scroll-auto"
+                className="whiteboard-card-area flex-1 overflow-y-auto p-8 bg-slate-100/50 relative scroll-smooth motion-reduce:scroll-auto"
             >
                 {/* Background Grid Pattern */}
                 <div className="absolute inset-0 opacity-[0.03] pointer-events-none"
@@ -1586,7 +1587,7 @@ const WhiteboardStatusContent: React.FC<{
                         <p className="font-semibold">현황 데이터를 불러오는 중입니다.</p>
                     </div>
                 ) : dashboardItems.length > 0 ? (
-                    <div key={`${viewMode}:${year}-${month}:${selectedCompanyId}:${selectedTeamId}`} className="flex flex-wrap gap-2 w-full px-2 relative">
+                    <div key={`${viewMode}:${year}-${month}:${selectedCompanyId}:${selectedTeamId}`} className="whiteboard-site-grid">
                         <AnimatePresence mode="popLayout">
                         {sortedItems.map((item, itemIndex) => {
                             // Check expansion state for dynamic sizing
@@ -1595,11 +1596,11 @@ const WhiteboardStatusContent: React.FC<{
                             const hasExpandedDetail = Array.from(expandedDetails).some(key => key.startsWith(`${item.id}-`));
 
                             // Determine Flex Class (Flexible width with min-width)
-                            let colSpanClass = 'flex-1 min-w-[220px]';
+                            let colSpanClass = 'min-w-0';
 
                             // Only expand width if the main item is expanded
                             if (isItemExpanded) {
-                                colSpanClass = 'w-full flex-none'; // Take full width
+                                colSpanClass = 'col-span-full';
                             }
 
                             // Defensive check for totalManDay
@@ -1653,11 +1654,21 @@ const WhiteboardStatusContent: React.FC<{
                                     transition={{ layout: layoutTransition }}
                                     whileHover={!isItemExpanded && !reducedMotion ? { y: -3, transition: { duration: 0.2, ease: BOARD_EASE } } : undefined}
                                     key={`${item.type}:${item.id}`}
-                                    className={`bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden transition-shadow duration-300 ease-in-out group cursor-pointer 
+                                    className={`whiteboard-site-card bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden transition-shadow duration-300 ease-in-out group cursor-pointer
                                         ${colSpanClass} 
                                         ${isItemExpanded ? 'ring-1 shadow-xl z-20' : 'hover:shadow-lg'}
                                     `}
                                     style={{ ...ringStyle, borderRadius: 16 }}
+                                    data-expanded={isItemExpanded}
+                                    tabIndex={0}
+                                    role="button"
+                                    aria-label={`${item.name} 상세`}
+                                    aria-expanded={isItemExpanded}
+                                    onKeyDown={event => {
+                                        if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+                                            event.preventDefault(); event.currentTarget.click();
+                                        }
+                                    }}
                                     onClick={(e) => toggleAccordion(item.id, e)}
                                 >
                                     <motion.div
@@ -1669,7 +1680,7 @@ const WhiteboardStatusContent: React.FC<{
                                         {/* 컨텐츠 영역 */}
                                         <div className="min-w-0 flex-1">
                                             <h3
-                                                className="font-bold text-base text-slate-800 truncate whitespace-nowrap flex items-center gap-2"
+                                                className="whiteboard-site-card__title font-bold text-base text-slate-800 flex items-center gap-2"
                                                 title={item.name}
                                                 style={headerTextColor ? { color: headerTextColor } : undefined}
                                             >
@@ -1683,7 +1694,7 @@ const WhiteboardStatusContent: React.FC<{
                                                 )}
                                                 {item.name}
                                             </h3>
-                                            {isItemExpanded && (
+                                            {isItemExpanded && !teamAccess && (
                                                 <button
                                                     type="button"
                                                     onClick={(event) => openDailyReportList(item, event)}
@@ -1734,7 +1745,7 @@ const WhiteboardStatusContent: React.FC<{
 
                                     <BoardDisclosure open={!isItemExpanded} reducedMotion={reducedMotion} className="p-3 flex flex-col gap-2 min-h-[96px] relative">
                                         {() => (<>
-                                            <div className="flex items-baseline justify-between gap-4">
+                                            <div className="whiteboard-card-metrics flex items-baseline justify-between gap-4">
                                                 <div>
                                                     <div className="text-[10px] font-extrabold text-indigo-700 uppercase tracking-wider whitespace-nowrap drop-shadow-sm">
                                                         총 공수

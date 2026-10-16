@@ -28,6 +28,7 @@ export interface UserData {
     displayName: string | null;
     photoURL: string | null;
     lastLogin: Timestamp;
+    createdAt?: Timestamp;
     linkedWorkerIds?: string[]; // Array of linked worker IDs
     linkedCompanyIds?: string[]; // Array of linked company IDs
     linkedOfficeStaffIds?: string[]; // Array of linked office staff IDs
@@ -169,7 +170,7 @@ export const userService = {
             const userData: Partial<UserData> = {
                 uid: user.uid,
                 email: user.email,
-                displayName: user.displayName,
+                displayName: existing?.displayName ?? user.displayName,
                 photoURL: user.photoURL,
                 lastLogin: Timestamp.fromDate(now),
             };

@@ -1,0 +1,4 @@
+.image-file-actions > button, .image-file-actions__buttons button { min-height: 44px; padding: 8px 12px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; color: #1d4ed8; font-size: 14px; font-weight: 700; }
+.image-file-actions__preview { display: block; max-width: 100%; max-height: 50dvh; margin: auto; object-fit: contain; }
+.image-file-actions__buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.image-file-actions__buttons button:disabled { opacity: .5; }

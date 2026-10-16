@@ -1309,7 +1309,7 @@ const ExpenseClaimManagementPage: React.FC<ExpenseClaimManagementPageProps> = ({
             </button>
           </div>
 
-          <div className="grid gap-3 border-b border-slate-200 p-4 xl:grid-cols-[minmax(160px,1fr)_150px_150px_110px_150px_150px_minmax(180px,1fr)_auto]">
+          <div className="grid grid-cols-1 gap-3 border-b border-slate-200 p-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-[minmax(160px,1fr)_150px_150px_110px_150px_150px_minmax(180px,1fr)_auto] [&>*]:min-w-0">
             <label>
               <span className={labelClass}>항목명</span>
               <input

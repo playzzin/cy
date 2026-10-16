@@ -1,9 +1,10 @@
 import type { MenuItem, SiteDataType } from '../types/menu';
+import { hideTeamWorkflowLink } from './teamWorkflowPolicy';
+import { teamAccountApprovalEnabled } from './teamAccountApprovalFeature';
 
 export const TEAM_PERSONNEL_MENU_ITEMS: MenuItem[] = [
     { text: '작업자정보', path: '/manpower/team-worker-detail', icon: 'fa-address-card' },
     { text: '급여명세서', path: '/manpower/team-worker-payslip', icon: 'fa-file-invoice-dollar' },
-    { text: '출력일보', path: '/manpower/team-worker-daily-report', icon: 'fa-calendar-days' },
     { text: '신규작업자등록', path: '/manpower/team-worker-requests', icon: 'fa-user-plus' },
 ];
 
@@ -19,6 +20,23 @@ export const ensureTeamPersonnelMenu = (config: SiteDataType): void => {
     Object.entries(config).forEach(([key, site]) => {
         if (!teamLeadKeys.has(key) && !isTeamLead(site.name) && !isTeamLead(key.replace(/^pos_/, ''))) return;
 
+        const prune = (items: (MenuItem | string)[]): MenuItem[] => items.flatMap(value => {
+            const item = typeof value === 'string' ? { text: value } : value;
+            if (hideTeamWorkflowLink(item)) return [];
+            if (item.path === '/manpower/team-account-approvals' && !teamAccountApprovalEnabled()) return [];
+            if (item.sub) {
+                item.sub = prune(item.sub);
+                if (!item.sub.length && !item.path) return [];
+            }
+            return [item];
+        });
+        site.menu = prune(site.menu);
+        if (site.headerActions) site.headerActions = prune(site.headerActions);
+        const hasPersonnel = (items: (MenuItem | string)[]): boolean => items.some(item => typeof item !== 'string'
+            && (normalize(item.text) === '인원관리' || Boolean(item.sub && hasPersonnel(item.sub))));
+        if (!hasPersonnel(site.menu)) site.menu.push({ text: '인원관리', icon: 'fa-users', sub: [] });
+        const targets = [...TEAM_PERSONNEL_MENU_ITEMS, ...(teamAccountApprovalEnabled() ? [{ text: '팀원 계정 승인', path: '/manpower/team-account-approvals', icon: 'fa-user-check' }] : [])];
+
         const upgrade = (items: (MenuItem | string)[]) => {
             items.forEach(item => {
                 if (typeof item === 'string') return;
@@ -32,7 +50,7 @@ export const ensureTeamPersonnelMenu = (config: SiteDataType): void => {
                     || normalize(child.text) === normalize(target.text)
                     || (target === TEAM_PERSONNEL_MENU_ITEMS[0] && normalize(child.text) === '인원현황');
                 const profile = children.find(child => matches(child, TEAM_PERSONNEL_MENU_ITEMS[0]));
-                item.sub = TEAM_PERSONNEL_MENU_ITEMS.map((target, index) => {
+                item.sub = targets.map((target, index) => {
                     const existing = children.find(child => matches(child, target));
                     return {
                         ...(profile?.roles ? { roles: [...profile.roles] } : {}),
@@ -45,7 +63,7 @@ export const ensureTeamPersonnelMenu = (config: SiteDataType): void => {
                     };
                 });
                 // Preserve unrelated custom links when updating older configurations.
-                item.sub.push(...children.filter(child => !TEAM_PERSONNEL_MENU_ITEMS.some(target => matches(child, target))));
+                item.sub.push(...children.filter(child => !targets.some(target => matches(child, target))));
                 delete item.path;
             });
         };

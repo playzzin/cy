@@ -2534,3 +2534,18 @@
         overflow: visible;
     }
 }
+
+/* Essential month and status controls stay visible without opening a filter. */
+.tw-status-options { display: flex; gap: 3px; }
+.tw-status-options button { flex: 1; min-width: 38px; min-height: 44px; border: 1px solid #d8dee8; border-radius: 7px; background: #fff; color: #475569; font-size: 13px; font-weight: 700; }
+.tw-status-options button[aria-pressed=true] { color: #1d4ed8; border-color: #93c5fd; background: #eff6ff; }
+@media (max-width: 720px) {
+    .tw-toolbar.tw-toolbar--always-visible { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px; margin-bottom: 10px; }
+    .tw-toolbar--always-visible .tw-control--search { display: none; }
+    .tw-mobile-filter-bar { grid-template-columns: minmax(0, 1fr); }
+    .tw-page .tw-page__header { margin-bottom: 10px; }
+    .tw-page .tw-page__header h1 { font-size: 20px; }
+}
+.tw-profile-sections { display: flex; gap: 4px; margin: 10px 0; padding: 4px; background: #f1f5f9; border-radius: 9px; }
+.tw-profile-sections button { flex: 1; min-height: 44px; border: 0; border-radius: 7px; background: transparent; color: #475569; font-size: 14px; font-weight: 700; }
+.tw-profile-sections button[aria-selected=true] { background: #2563eb; color: #fff; }

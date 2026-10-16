@@ -1,0 +1,14 @@
+.whiteboard-site-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; width: 100%; position: relative; align-items: start; }
+.whiteboard-site-card__title { overflow-wrap: anywhere; min-width: 0; }
+.whiteboard-site-card:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
+@media (max-width: 767px) {
+    .whiteboard-card-area { padding: 10px !important; }
+    .whiteboard-site-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .whiteboard-site-card[data-expanded=true] { grid-column: 1 / -1; }
+    .whiteboard-site-card[data-expanded=false] > div { padding: 9px; }
+    .whiteboard-site-card[data-expanded=false] .whiteboard-site-card__title { font-size: 14px; line-height: 1.4; }
+    .whiteboard-site-card[data-expanded=false] .whiteboard-site-card__title + div { display: none; }
+    .whiteboard-site-card[data-expanded=false] .text-3xl { font-size: 22px; }
+    .whiteboard-site-card[data-expanded=false] .whiteboard-card-metrics { flex-direction: column; align-items: flex-start; gap: 4px; }
+    .whiteboard-site-card[data-expanded=false] .whiteboard-card-metrics > div:last-child { align-items: flex-start; }
+}

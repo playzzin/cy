@@ -64,7 +64,7 @@ const ComponentManagementPage: React.FC = () => {
                 </button>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                     <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
                         <tr>

@@ -639,7 +639,7 @@ const DrawingAiEstimatePage: React.FC = () => {
                     </div>
                 </header>
 
-                <div className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[360px_minmax(0,1fr)] [&>*]:min-w-0">
                     <aside className="space-y-4 print:hidden">
                         <section className="rounded-lg border border-slate-200 bg-white p-4">
                             <h2 className="mb-3 flex items-center gap-2 text-base font-bold text-slate-900">

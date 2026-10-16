@@ -185,3 +185,13 @@
     padding: 4px;
   }
 }
+
+.team-settlement-page__sticky-month { min-width: 190px; max-width: 240px; flex: 1; }
+@media (max-width: 767px) {
+    .team-settlement-page__workspace-bar { z-index: 35; gap: 8px; padding: 8px; }
+    .team-settlement-page .team-settlement-page__sticky-month { flex: 1 0 100%; min-width: 200px; max-width: none; }
+    .team-settlement-page .team-settlement-page__sticky-month button { min-height: 44px; }
+    .team-settlement-page__workspace-bar > div:last-child { display: flex; flex-wrap: wrap; gap: 6px; }
+    .team-settlement-page__workspace-bar > div:last-child button { min-height: 36px; padding: 6px 9px; font-size: 12px; }
+}
+@media print { .team-settlement-page__workspace-bar { position: static !important; } .team-settlement-page__sticky-month button { display: none; } }

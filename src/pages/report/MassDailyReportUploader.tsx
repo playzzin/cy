@@ -258,7 +258,7 @@ const MassDailyReportUploader: React.FC = () => {
 
     // --- UI Components ---
     return (
-        <div className="max-w-6xl mx-auto p-8 h-full flex flex-col">
+        <div className="max-w-6xl mx-auto p-4 sm:p-8 h-full flex flex-col">
             {/* Header */}
             <div className="mb-8">
                 <h1 className="text-3xl font-bold text-slate-800">대용량 엑셀 업로드 마법사</h1>
@@ -266,14 +266,14 @@ const MassDailyReportUploader: React.FC = () => {
             </div>
 
             {/* Stepper */}
-            <div className="flex items-center mb-8 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+            <div className="flex flex-wrap gap-y-3 items-center mb-8 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
                 {[
                     { id: 'upload', label: '1. 파일 선택', icon: faFileExcel },
                     { id: 'mapping', label: '2. 항목 연결', icon: faLink },
                     { id: 'preview', label: '3. 데이터 검사', icon: faTable },
                     { id: 'uploading', label: '4. 저장 실행', icon: faDatabase },
                 ].map((s, idx) => (
-                    <div key={s.id} className={`flex items-center ${step === s.id ? 'text-blue-600 font-bold' : 'text-slate-400'}`}>
+                    <div key={s.id} className={`flex shrink-0 items-center ${step === s.id ? 'text-blue-600 font-bold' : 'text-slate-400'}`}>
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center mr-2 border ${step === s.id ? 'bg-blue-100 border-blue-500' : 'bg-slate-50 border-slate-200'}`}>
                             <FontAwesomeIcon icon={s.icon} />
                         </div>
@@ -284,11 +284,11 @@ const MassDailyReportUploader: React.FC = () => {
             </div>
 
             {/* Content Area */}
-            <div className="flex-1 bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden flex flex-col p-8">
+            <div className="flex-1 bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden flex flex-col p-4 sm:p-8">
 
                 {/* Step 1: Upload */}
                 {step === 'upload' && (
-                    <div className="flex flex-col items-center justify-center h-full border-4 border-dashed border-slate-200 rounded-xl hover:bg-slate-50 transition-colors p-20 cursor-pointer relative">
+                    <div className="flex flex-col items-center justify-center h-full border-4 border-dashed border-slate-200 rounded-xl hover:bg-slate-50 transition-colors p-4 sm:p-12 lg:p-20 cursor-pointer relative">
                         <input type="file" onChange={handleFileUpload} accept=".xlsx, .xls" className="absolute inset-0 opacity-0 cursor-pointer" />
                         <FontAwesomeIcon icon={faCloudUploadAlt} className="text-6xl text-blue-400 mb-6" />
                         <h2 className="text-2xl font-bold text-slate-700 mb-2">엑셀 파일을 여기에 끌어다 놓으세요</h2>

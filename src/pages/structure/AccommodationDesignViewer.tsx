@@ -13,7 +13,7 @@ const AccommodationDesignViewer: React.FC = () => {
 
     return (
         <div className="p-8 max-w-[1600px] mx-auto bg-slate-50 min-h-screen">
-            <div className="mb-8 flex justify-between items-end">
+            <div className="mb-8 flex flex-wrap gap-3 justify-between items-end">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-800 flex items-center gap-3 mb-2">
                         <FontAwesomeIcon icon={faProjectDiagram} className="text-blue-600" />
@@ -38,8 +38,8 @@ const AccommodationDesignViewer: React.FC = () => {
                     <FontAwesomeIcon icon={faSitemap} className="text-indigo-500" />
                     1. 시스템 구조 (Architecture)
                 </h2>
-                <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center gap-8">
-                    <div className="flex gap-12 items-center">
+                <div className="bg-white p-4 sm:p-8 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center gap-8 overflow-x-auto">
+                    <div className="flex flex-col xl:flex-row gap-6 xl:gap-12 items-center">
                         <div className="flex flex-col items-center gap-2">
                             <div className="w-24 h-24 rounded-full bg-slate-100 border-2 border-slate-300 flex items-center justify-center text-3xl text-slate-500">
                                 👤
@@ -187,7 +187,7 @@ const AccommodationDesignViewer: React.FC = () => {
                 <div>
                     <h3 className="font-bold text-slate-700 mb-2 pl-2 border-l-4 border-green-500">B. 월별 공과금 대장 (Excel Grid)</h3>
                     <div className="bg-slate-100 p-6 rounded-xl border border-dashed border-slate-300">
-                        <div className="bg-white rounded shadow-sm border border-slate-200">
+                        <div className="bg-white rounded shadow-sm border border-slate-200 overflow-x-auto">
                             <div className="p-3 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                                 <button className="font-bold text-slate-600">◀ 2025년 1월 ▶</button>
                                 <button className="bg-green-600 text-white px-3 py-1 rounded text-sm">저장하기</button>

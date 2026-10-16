@@ -545,7 +545,7 @@ const AISettingsPage: React.FC = () => {
                                                     {page.paths.map((path) => (
                                                         <code
                                                             key={`${page.id}:${path}`}
-                                                            className="text-[11px] bg-slate-100 border border-slate-200 rounded px-2 py-0.5 text-slate-700"
+                                                            className="break-all whitespace-normal text-[11px] bg-slate-100 border border-slate-200 rounded px-2 py-0.5 text-slate-700"
                                                         >
                                                             {path}
                                                         </code>
@@ -554,7 +554,7 @@ const AISettingsPage: React.FC = () => {
                                             </td>
                                             <td className="px-4 py-3 text-slate-600">{scopeLabelMap[page.modelScope]}</td>
                                             <td className="px-4 py-3">
-                                                <code className="text-[11px] bg-slate-100 border border-slate-200 rounded px-2 py-1 text-slate-700">
+                                                <code className="break-all whitespace-normal text-[11px] bg-slate-100 border border-slate-200 rounded px-2 py-1 text-slate-700">
                                                     {model}
                                                 </code>
                                             </td>

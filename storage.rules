@@ -73,11 +73,7 @@ service firebase.storage {
     }
 
     function canAccessCardBillingStatements() {
-      return isAdmin()
-        || hasTokenRole(officeRoles())
-        || hasTokenRole(supportRoles())
-        || hasTokenRole(financeRoles())
-        || hasTokenRole(payrollRoles());
+      return activeProfile();
     }
 
     function constructionPlanCentralRoles() {
@@ -341,6 +337,7 @@ service firebase.storage {
         'backups',
         'system',
         'card-billing-statements',
+        'card-ledger-statements',
         'construction-plans',
         'construction-plan-staging',
         'construction-plan-record-staging',
@@ -402,6 +399,12 @@ service firebase.storage {
     // AI import session id. This explicit path keeps those PDFs/images private
     // while allowing the same card-billing roles to upload and view them.
     match /card-billing-statements/{yearMonth}/{documentId}/{fileName} {
+      allow read: if canAccessCardBillingStatements();
+      allow write: if canAccessCardBillingStatements()
+        && isValidCardBillingAttachment();
+    }
+
+    match /card-ledger-statements/{yearMonth}/{cardId}/{rowId}/{fileName} {
       allow read: if canAccessCardBillingStatements();
       allow write: if canAccessCardBillingStatements()
         && isValidCardBillingAttachment();

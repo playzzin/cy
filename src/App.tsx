@@ -99,6 +99,7 @@ const SupportRateManagementPage = React.lazy(() => import('./pages/support/Suppo
 const SupportManagerPage = React.lazy(() => import('./pages/support/SupportManagerPage'));
 const TeamExpenseRequestPage = React.lazy(() => import('./pages/support/TeamExpenseRequestPage'));
 const TeamWorkerRequestPage = React.lazy(() => import('./pages/manpower/TeamWorkerRequestPage'));
+const TeamAccountApprovalPage = React.lazy(() => import('./pages/manpower/TeamAccountApprovalPage'));
 const VehicleBillingLogPage = React.lazy(() => import('./pages/support/VehicleBillingLogPage'));
 const EngineOilCyclePage = React.lazy(() => import('./pages/support/EngineOilCyclePage'));
 const TeamEquipmentStatusPage = React.lazy(() => import('./pages/support/TeamEquipmentStatusPage'));
@@ -349,6 +350,7 @@ const App: React.FC = () => {
               <Route path="team-worker-payslip" element={<TeamWorkerDetailPage key="payslip" view="payslip" />} />
               <Route path="team-worker-daily-report" element={<TeamWorkerDetailPage key="dailyReport" view="dailyReport" />} />
               <Route path="team-worker-requests" element={<TeamWorkerRequestPage />} />
+              <Route path="team-account-approvals" element={<TeamAccountApprovalPage />} />
               <Route path="site-responsible-detail" element={<SiteResponsibleDetailPage />} />
               <Route path="site-manager-detail" element={<SiteResponsibleDetailPage />} />
               <Route path="freelancer" element={<FreelancerPage />} />
