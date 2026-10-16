@@ -33,7 +33,9 @@ export const loadWhiteboardTeamAccess = async (): Promise<WhiteboardTeamAccess |
     const teamById = indexById(teams);
     return {
         teams,
-        sites: sites.filter(site => teamById.has(idText(site.responsibleTeamId))),
+        // The endpoint also permits assigned/nested team links. Responsibility
+        // is display metadata, not an additional authorization requirement.
+        sites,
         workers: workers.filter(worker => teamById.has(idText(worker.teamId))),
     };
 };
@@ -45,23 +47,25 @@ export const scopeWhiteboardReports = (reports: DailyReport[], access: Whiteboar
 
     return reports.flatMap(report => {
         const site = siteById.get(idText(report.siteId));
-        const responsibleTeam = site && teamById.get(idText(site.responsibleTeamId));
-        if (!site || !responsibleTeam) return [];
+        const responsibleTeamId = site?.responsibleTeamId || report.responsibleTeamId;
+        const responsibleTeam = teamById.get(idText(responsibleTeamId));
         const workers = (report.workers ?? []).flatMap(row => {
             const worker = workerById.get(idText(row.workerId));
             const team = worker && teamById.get(idText(worker.teamId));
             if (!team) return [];
             return [{ ...row, teamId: team.id, workerTeamName: team.name }];
         });
-        // An unscoped legacy total cannot be attributed safely to this team.
+        // Participation at another team's site is permitted by the report
+        // endpoint. Require a verified own worker, never just a team label or
+        // an unscoped legacy total, even when the site is outside our catalog.
         if (!workers.length) return [];
         const writerTeam = teamById.get(idText(report.teamId));
         return [{
             ...report,
-            siteId: site.id || report.siteId,
-            siteName: site.name,
-            responsibleTeamId: responsibleTeam.id,
-            responsibleTeamName: responsibleTeam.name,
+            siteId: site?.id || report.siteId,
+            siteName: site?.name || report.siteName,
+            responsibleTeamId: responsibleTeam?.id || responsibleTeamId,
+            responsibleTeamName: responsibleTeam?.name || site?.responsibleTeamName || report.responsibleTeamName,
             teamId: writerTeam?.id || '',
             teamName: writerTeam?.name,
             workers,
