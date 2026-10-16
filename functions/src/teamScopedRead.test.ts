@@ -13,6 +13,7 @@ test('서버가 연결된 팀을 결정하고 타 팀·미승인·임의 컬렉�
     const db = app.firestore();
     const fixtures: Record<string, unknown> = {
         'users/leader': { status: 'active', role: 'user', position: '팀장', linkedWorkerIds: ['leader-worker'] },
+        'users/recipient': { status: 'active', displayName: '수신자', linkedWorkerIds: ['member-a', 'member-b'], email: 'private@example.invalid', secret: 'private' },
         'users/pending': { status: 'pending', position: '팀장', linkedWorkerIds: ['leader-worker'] },
         'users/unlinked': { status: 'active', position: '팀장' },
         'teams/team-a': { name: 'A', companyId: 'company-a' }, 'teams/team-b': { name: 'B', companyId: 'company-b' },
@@ -64,6 +65,11 @@ test('서버가 연결된 팀을 결정하고 타 팀·미승인·임의 컬렉�
         Object.entries(fixtures).forEach(([path, data]) => batch.set(db.doc(path), data as any));
         await batch.commit();
         const call = (collection: string, uid = 'leader', extra = {}) => getTeamScopedData.run({ collection, ...extra }, { auth: { uid, token: { role: 'admin' } } } as any);
+        const recipients = (await call('message_recipients')).rows;
+        const recipient = recipients.find((row: any) => row.uid === 'recipient');
+        assert.deepEqual(recipient, { uid: 'recipient', displayName: '수신자', role: '', position: '', department: '', status: 'active', linkedWorkerIds: ['member-a'] });
+        assert.equal(recipients.some((row: any) => row.uid === 'pending'), false);
+        for (const uid of ['pending', 'unlinked', 'missing']) await assert.rejects(call('message_recipients', uid), (error: any) => error.code === 'permission-denied');
         assert.deepEqual((await call('teams', 'leader', { teamId: 'team-b' })).rows.map((row: any) => row.id), ['team-a']);
         assert.deepEqual((await call('workers')).rows.map((row: any) => row.id).sort(), ['leader-worker', 'member-a']);
         assert.deepEqual((await call('workers')).rows.find((row: any) => row.id === 'member-a').createdAt, { __teamTimestamp: 1000 });

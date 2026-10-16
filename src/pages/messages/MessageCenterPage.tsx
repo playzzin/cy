@@ -21,6 +21,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveIcon } from '../../constants/iconMap';
 import { manpowerService, type Worker } from '../../services/manpowerService';
+import { getMessageRecipientUsers } from '../../services/messageRecipientDirectoryService';
 import { messageService } from '../../services/messageService';
 import { useMessageInbox } from '../../hooks/useMessageInbox';
 import { useMessageReadActions } from '../../hooks/useMessageReadActions';
@@ -223,7 +224,7 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
     const loadUsers = async () => {
       try {
         const [allUsers, profile, allWorkers, allTeams] = await Promise.all([
-          userService.getAllUsers(),
+          getMessageRecipientUsers(),
           userService.getUser(currentUser.uid),
           manpowerService.getWorkers(true),
           teamService.getTeams()
@@ -235,6 +236,10 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
         setCurrentProfile(profile);
       } catch (error) {
         console.error('[MessageCenter] failed to load recipients:', error);
+        if (!cancelled) {
+          setStatusTone('error');
+          setStatusText('수신자 목록을 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요.');
+        }
       }
     };
 

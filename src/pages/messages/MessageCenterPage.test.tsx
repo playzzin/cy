@@ -12,6 +12,7 @@ jest.mock('../../hooks/useMessageInbox', () => ({ useMessageInbox: () => mockInb
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'viewer' } }) }));
 jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: async () => [] } }));
 jest.mock('../../services/teamService', () => ({ teamService: { getTeams: async () => [] } }));
+jest.mock('../../services/messageRecipientDirectoryService', () => ({ getMessageRecipientUsers: async () => [] }));
 jest.mock('../../services/userService', () => ({ userService: { getAllUsers: async () => [], getUser: async () => ({ role: 'user' }) } }));
 jest.mock('../../services/messageService', () => ({ messageService: {
   isReadBy: (message: ErpMessage, uid: string) => message.readBy.includes(uid),

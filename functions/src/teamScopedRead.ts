@@ -1,3 +1,4 @@
+import { messageRecipientDirectoryRow } from './messageRecipientDirectory';
 import { resolvedRoleNames } from './teamExpenseRequests';
 import { readWorkerScopedData } from './workerScopedRead';
 import * as admin from 'firebase-admin';
@@ -12,6 +13,7 @@ import { readTeamSettlementIncoming } from './teamSettlementRead';
 import { readWhiteboardParticipation } from './whiteboardParticipation';
 
 const COLLECTIONS = new Set([
+    'message_recipients',
     'whiteboard_participation',
     'workers', 'teams', 'sites', 'companies', 'daily_reports', 'daily_dispatches', 'team_settlement_incoming', 'team_settlement_support_details',
     'schedule_confirmation_boards', 'field_schedule_requests',
@@ -162,6 +164,11 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
     const resolveRows = async (request: any) => {
         const collection = text(request.collection);
         const filters = request.filters || {};
+        if (collection === 'message_recipients') {
+            const recipients = await queryRows(db.collection('users').where('status', '==', 'active')
+                .select('displayName', 'name', 'role', 'position', 'department', 'status', 'isActive', 'linkedWorkerIds'), metrics);
+            return { rows: recipients.map(row => messageRecipientDirectoryRow(row, scope.workerIds)).filter(Boolean) };
+        }
         if (collection === 'whiteboard_participation') {
             return { rows: serialize([await readWhiteboardParticipation(db, teams, filters, metrics)]) };
         }
