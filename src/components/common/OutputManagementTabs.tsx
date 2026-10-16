@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useSiteMode } from '../../contexts/SiteModeContext';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faChartBar,
@@ -28,8 +29,16 @@ const OutputManagementTabs: React.FC<OutputManagementTabsProps> = ({
     title = '출력 관리'
 }) => {
     const navigate = useNavigate();
+    const { currentSite, currentPosition, currentPositionData, currentSiteData } = useSiteMode();
     const tabRailRef = useRef<HTMLDivElement | null>(null);
     const activeTabRef = useRef<HTMLButtonElement | null>(null);
+    const statusOnly = activeTab === 'status' && currentPosition !== 'full'
+        && !['test', 'nation'].includes(currentSite)
+        && [currentPosition, currentPositionData?.name, currentSiteData?.name].some(value =>
+            ['팀장', 'leader', 'teamlead', 'teamleader', '반장', 'foreman', '작업자', 'worker'].includes(
+                String(value || '').trim().toLowerCase().replace(/^pos[\s_-]*/i, '').replace(/[\s_-]/g, '')
+            )
+        );
 
     const handleSelect = (tab: OutputManagementTabKey) => {
         if (onTabSelect) {
@@ -81,7 +90,7 @@ const OutputManagementTabs: React.FC<OutputManagementTabsProps> = ({
 
         const targetLeft = activeButton.offsetLeft - (rail.clientWidth - activeButton.clientWidth) / 2;
         rail.scrollTo({ left: Math.max(0, targetLeft), behavior: 'smooth' });
-    }, [activeTab]);
+    }, [activeTab, statusOnly]);
 
     return (
         <div className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85">
@@ -98,7 +107,7 @@ const OutputManagementTabs: React.FC<OutputManagementTabsProps> = ({
                                 ref={tabRailRef}
                                 className="output-management-tab-rail flex gap-2 overflow-x-auto overscroll-x-contain scroll-smooth sm:gap-6"
                             >
-                                {tabs.map((tab) => (
+                                {tabs.filter(tab => !statusOnly || tab.key === 'status').map((tab) => (
                                     <button
                                         key={tab.key}
                                         ref={activeTab === tab.key ? activeTabRef : undefined}
