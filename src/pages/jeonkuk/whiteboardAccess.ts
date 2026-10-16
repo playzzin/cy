@@ -14,6 +14,7 @@ export type WhiteboardReport = DailyReport & {
     participationSummary?: boolean;
     teamCompanyId?: string;
     teamColor?: string;
+    participationDetails?: { workerId: string; workerName: string; date: string; manDay: number }[];
 };
 
 export type WhiteboardParticipationResult =
