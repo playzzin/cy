@@ -1,7 +1,6 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import type { Accommodation, UtilityRecord } from '../types/accommodation';
-import { getAccommodationContractAmounts, overlapsAccommodationMonth } from './accommodationMonthSummary';
 import { stripAccommodationOverchargeMemo } from './accommodationOvercharge';
 
 interface ExportContext {
@@ -100,8 +99,6 @@ function addContext(workbook: ExcelJS.Workbook, context: ExportContext, notes: s
 export function buildAccommodationStatusWorkbook(options: ExportContext & {
     statusLabel: string;
     rows: AccommodationStatusExportRow[];
-    monthAccommodations: Accommodation[];
-    monthRecords: UtilityRecord[];
 }): ExcelJS.Workbook {
     const workbook = createWorkbook();
     const sheet = createSheet(workbook, '배정·경비현황', [
@@ -123,21 +120,17 @@ export function buildAccommodationStatusWorkbook(options: ExportContext & {
     const monthSheet = createSheet(workbook, '월별계약집계', [
         '숙소명', '명의', '계약시작', '계약만료', '월세', '보증금',
     ], [28, 20, 18, 18, 20, 20]);
-    const recordsById = new Map(options.monthRecords
-        .filter(record => record.yearMonth === options.yearMonth)
-        .map(record => [record.accommodationId, record]));
-    options.monthAccommodations.forEach(room => {
-        if (!overlapsAccommodationMonth(room.contract || {}, options.yearMonth)
-            || (room.status === 'inactive' && !room.contract?.endDate)) return;
-        const values = getAccommodationContractAmounts(room, recordsById.get(room.id));
+    // Both sheets use the screen's selected month, filters and resolved amounts.
+    options.rows.forEach(({ accommodation: room, rent, deposit }) => {
         monthSheet.addRow([room.name, ownershipLabel(room.ownership), room.contract?.startDate || '',
-            room.contract?.endDate || '', values.rent, values.deposit]);
+            room.contract?.endDate || '', amount(rent), amount(deposit)]);
     });
     finishSheet(monthSheet, [5, 6]);
     addContext(workbook, options, [
         ['상태 필터', options.statusLabel], ['조회 숙소 수', String(options.rows.length)],
-        ['배정·경비현황 기준', '화면의 팀·상태·검색 조건과 정렬을 적용한 현재 목록입니다. 월세·보증금은 계약 금액 기준입니다.'],
-        ['월별계약집계 기준', '상단 월세·보증금 카드의 근거입니다. 선택 월·팀 기준이며 현재 목록의 상태·검색 필터는 적용하지 않습니다.'],
+        ['배정·경비현황 기준', '선택 월의 계약기간과 팀·상태·검색 조건을 적용한 목록입니다. 상단 카드와 하단 명의별 요약의 월세·보증금 합계는 이 목록의 계약 금액 기준입니다. 상태 필터는 현재 등록 상태를 사용합니다.'],
+        ['계약 시작일 미입력', `${options.rows.filter(row => !row.accommodation.contract?.startDate?.trim()).length}곳 (시작일이 없어 이전 월에도 포함됩니다. 정확한 월별 집계를 위해 계약 시작일을 확인해 주세요.)`],
+        ['월별계약집계 기준', '배정·경비현황과 동일한 조회월·팀·상태·검색 조건의 숙소와 계약 금액을 사용합니다. 두 시트의 월세·보증금 합계는 같습니다. 엑셀에서 시트별 필터를 변경하면 표시 합계는 달라질 수 있습니다.'],
     ]);
     return workbook;
 }
