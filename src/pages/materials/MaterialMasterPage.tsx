@@ -3,7 +3,15 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBoxesStacked, faPlus, faEdit, faTrash, faSave, faTimes } from '@fortawesome/free-solid-svg-icons';
 import materialService, { buildMaterialBusinessKey } from '../../services/materialService';
 import { Material } from '../../types/materials';
-import { getMaterialGroupKey, sortMaterialDisplayRows, MaterialGroupKey } from '../../utils/materialOrdering';
+import { sortMaterialDisplayRows } from '../../utils/materialOrdering';
+import { getMaterialMasterGroupKey, MaterialMasterGroupKey } from './materialMasterGrouping';
+
+const MATERIAL_GROUPS: Array<{ key: MaterialMasterGroupKey; title: string; accent: string }> = [
+    { key: 'dongbari', title: '동바리', accent: 'bg-indigo-500' },
+    { key: 'scaffolding', title: '비계', accent: 'bg-emerald-500' },
+    { key: 'system', title: '시스템', accent: 'bg-amber-500' },
+    { key: 'other', title: '기타', accent: 'bg-slate-400' },
+];
 
 const formatWon = (value?: number) => value ? `${value.toLocaleString('ko-KR')}원` : '-';
 
@@ -19,6 +27,7 @@ const MaterialMasterPage: React.FC = () => {
     const [materials, setMaterials] = useState<Material[]>([]);
     const [filteredMaterials, setFilteredMaterials] = useState<Material[]>([]);
     const [categoryFilter, setCategoryFilter] = useState('');
+    const [groupFilter, setGroupFilter] = useState<MaterialMasterGroupKey | ''>('');
     const [itemNameFilter, setItemNameFilter] = useState('');
     const [specFilter, setSpecFilter] = useState('');
     const [showForm, setShowForm] = useState(false);
@@ -54,7 +63,7 @@ const MaterialMasterPage: React.FC = () => {
 
     useEffect(() => {
         applyFilters();
-    }, [materials, categoryFilter, itemNameFilter, specFilter]);
+    }, [materials, groupFilter, categoryFilter, itemNameFilter, specFilter]);
 
     const loadData = async () => {
         setLoading(true);
@@ -72,6 +81,9 @@ const MaterialMasterPage: React.FC = () => {
     const applyFilters = () => {
         let result = [...materials];
 
+        if (groupFilter) {
+            result = result.filter(m => getMaterialMasterGroupKey(m) === groupFilter);
+        }
         if (categoryFilter) {
             result = result.filter(m => m.category.includes(categoryFilter));
         }
@@ -170,19 +182,21 @@ const MaterialMasterPage: React.FC = () => {
     };
 
     const groupedMaterials = useMemo(() => {
-        const groups: Record<MaterialGroupKey, Material[]> = {
+        const groups: Record<MaterialMasterGroupKey, Material[]> = {
             dongbari: [],
             scaffolding: [],
+            system: [],
             other: [],
         };
 
         filteredMaterials.forEach((material) => {
-            groups[getMaterialGroupKey(material)].push(material);
+            groups[getMaterialMasterGroupKey(material)].push(material);
         });
 
         return {
             dongbari: sortMaterialDisplayRows(groups.dongbari),
             scaffolding: sortMaterialDisplayRows(groups.scaffolding),
+            system: sortMaterialDisplayRows(groups.system),
             other: sortMaterialDisplayRows(groups.other),
         };
     }, [filteredMaterials]);
@@ -300,7 +314,7 @@ const MaterialMasterPage: React.FC = () => {
         accentClass: string,
         emptyText: string
     ) => (
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white">
+        <section aria-label={`${title} 자재`} className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white">
             <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
                 <h2 className="flex items-center gap-2 text-sm font-bold text-slate-800">
                     <span className={`h-5 w-1.5 rounded-full ${accentClass}`} />
@@ -322,7 +336,7 @@ const MaterialMasterPage: React.FC = () => {
                         <FontAwesomeIcon icon={faBoxesStacked} className="text-indigo-600" />
                         자재 마스터 관리
                     </h1>
-                    <p className="mt-1 hidden text-slate-500 sm:block">자재 정보를 등록하고 관리합니다</p>
+                    <p className="mt-1 hidden text-slate-500 sm:block">동바리·비계·시스템 자재를 분류별로 관리합니다</p>
                 </div>
                 <button
                     onClick={handleAdd}
@@ -341,14 +355,21 @@ const MaterialMasterPage: React.FC = () => {
                     </h2>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                         <div>
-                            <label className="block text-sm font-bold text-slate-700 mb-2">분류 *</label>
+                            <label htmlFor="material-category" className="block text-sm font-bold text-slate-700 mb-2">분류 *</label>
                             <input
+                                id="material-category"
+                                list="material-category-options"
                                 type="text"
                                 value={formData.category}
                                 onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                                placeholder="분류 입력 (예: 시스템 동바리)"
+                                placeholder="동바리, 비계, 시스템 등"
                                 className="w-full border border-slate-300 rounded-lg px-3 py-2"
                             />
+                            <datalist id="material-category-options">
+                                <option value="동바리" />
+                                <option value="비계" />
+                                <option value="시스템" />
+                            </datalist>
                         </div>
                         <div>
                             <label className="block text-sm font-bold text-slate-700 mb-2">품명 *</label>
@@ -433,6 +454,26 @@ const MaterialMasterPage: React.FC = () => {
 
             {/* 필터 및 목록 */}
             <div className="flex min-h-0 flex-1 flex-col overflow-visible rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-6 lg:overflow-hidden">
+                <div role="group" aria-label="자재 대분류" className="mb-4 flex flex-shrink-0 flex-wrap gap-2">
+                    {[{ key: '' as const, title: '전체' }, ...MATERIAL_GROUPS].map(group => {
+                        const count = group.key
+                            ? materials.filter(material => getMaterialMasterGroupKey(material) === group.key).length
+                            : materials.length;
+                        return (
+                            <button
+                                key={group.key}
+                                type="button"
+                                aria-pressed={groupFilter === group.key}
+                                onClick={() => setGroupFilter(group.key)}
+                                className={`rounded-lg border px-3 py-2 text-sm font-bold transition ${groupFilter === group.key
+                                    ? 'border-indigo-600 bg-indigo-600 text-white'
+                                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'}`}
+                            >
+                                {group.title} <span className="ml-1 text-xs">{count}</span>
+                            </button>
+                        );
+                    })}
+                </div>
                 <div className="mb-4 grid flex-shrink-0 grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
                     <input
                         type="text"
@@ -464,19 +505,19 @@ const MaterialMasterPage: React.FC = () => {
                 ) : filteredMaterials.length === 0 ? (
                     <div className="text-center py-20 text-slate-400">
                         <FontAwesomeIcon icon={faBoxesStacked} className="text-6xl mb-4 text-slate-200" />
-                        <p>등록된 자재가 없습니다.</p>
-                        <p className="text-sm mt-2">우측 상단의 '자재 등록' 버튼을 눌러 자재를 추가하세요.</p>
+                        <p>{groupFilter || categoryFilter || itemNameFilter || specFilter ? '검색 조건에 맞는 자재가 없습니다.' : '등록된 자재가 없습니다.'}</p>
+                        <p className="text-sm mt-2">검색 조건을 바꾸거나 '자재 등록' 버튼을 눌러 자재를 추가하세요.</p>
                     </div>
                 ) : (
                     <div className="min-h-0 flex-1 overflow-visible lg:overflow-auto">
-                        <div className="grid min-h-full grid-cols-1 gap-4 xl:grid-cols-2">
-                            {renderMaterialGroup('동바리', groupedMaterials.dongbari, 'bg-indigo-500', '동바리 자재가 없습니다.')}
-                            {renderMaterialGroup('비계', groupedMaterials.scaffolding, 'bg-emerald-500', '비계 자재가 없습니다.')}
-                            {groupedMaterials.other.length > 0 && (
-                                <div className="min-h-0 xl:col-span-2">
-                                    {renderMaterialGroup('기타', groupedMaterials.other, 'bg-slate-400', '기타 자재가 없습니다.')}
-                                </div>
-                            )}
+                        <div className={`grid min-h-full grid-cols-1 gap-4 ${groupFilter ? '' : 'xl:grid-cols-2'}`}>
+                            {MATERIAL_GROUPS
+                                .filter(group => (!groupFilter || group.key === groupFilter) && (group.key !== 'other' || groupedMaterials.other.length > 0))
+                                .map(group => (
+                                    <React.Fragment key={group.key}>
+                                        {renderMaterialGroup(group.title, groupedMaterials[group.key], group.accent, `${group.title} 자재가 없습니다.`)}
+                                    </React.Fragment>
+                                ))}
                         </div>
                     </div>
                 )}
