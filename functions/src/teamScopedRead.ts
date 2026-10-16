@@ -21,7 +21,7 @@ const COLLECTIONS = new Set([
     'vehicles', 'vehicleAssignments', 'vehicleBillingTargets', 'vehicle_billing_documents', 'vehicleExpenses',
     'cards', 'cardAssignments', 'cardBillingTargets', 'cardBillings', 'cardTransactions',
     'team_expense_claims', 'system_configs', 'office_transactions',
-    'materials', 'materialInbounds', 'materialOutbounds',
+    'materials', 'materialInbounds', 'materialOutbounds', 'materialPhotoBatches',
     'advance_payments', 'advance_requests',
 ]);
 
@@ -93,7 +93,7 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
                         isCatalogDefault: row.isCatalogDefault, hiddenCatalogDefault: row.hiddenCatalogDefault,
                     })));
             }
-            if (name === 'materialInbounds' || name === 'materialOutbounds') return byIds(name, ['siteId'], scope.siteIds);
+            if (['materialInbounds', 'materialOutbounds', 'materialPhotoBatches'].includes(name)) return byIds(name, ['siteId'], scope.siteIds);
             if (name === 'advance_payments' || name === 'advance_requests') {
                 // Payroll authorization is worker-only, so team/asset candidate
                 // queries cannot contribute any permitted rows.
@@ -149,7 +149,7 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
     resolvedTeamIds = teamIds;
     scope.teamIds = teamIds;
     const needsWorkers = requests.some(request => !['teams', 'materials', 'whiteboard_participation'].includes(text(request.collection)));
-    const requiresSites = (request: any) => ['sites', 'companies', 'materialInbounds', 'materialOutbounds'].includes(text(request.collection))
+    const requiresSites = (request: any) => ['sites', 'companies', 'materialInbounds', 'materialOutbounds', 'materialPhotoBatches'].includes(text(request.collection))
         || (request.collection === 'system_configs' && (!text(request.filters?.configId) || request.filters.configId === 'support_site_rates'));
     const needsSites = requests.some(requiresSites);
     const workers = needsWorkers ? (await read('workers')).filter(row => teamIds.includes(text(row.teamId))) : [];

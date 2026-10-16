@@ -16,7 +16,7 @@ const scopedCollections = new Set([
     'vehicles', 'vehicleAssignments', 'vehicleBillingTargets', 'vehicle_billing_documents', 'vehicleExpenses',
     'cards', 'cardAssignments', 'cardBillingTargets', 'cardBillings', 'cardTransactions',
     'team_expense_claims', 'system_configs', 'office_transactions',
-    'materials', 'materialInbounds', 'materialOutbounds',
+    'materials', 'materialInbounds', 'materialOutbounds', 'materialPhotoBatches',
     'advance_payments', 'advance_requests',
 ]);
 const decode = (value: any): any => {

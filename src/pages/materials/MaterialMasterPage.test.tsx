@@ -1,9 +1,11 @@
 import React from 'react';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useMaterialAdministration } from '../../hooks/useMaterialAdministration';
 import MaterialMasterPage from './MaterialMasterPage';
 import materialService from '../../services/materialService';
 
+jest.mock('../../hooks/useMaterialAdministration', () => ({ useMaterialAdministration: jest.fn() }));
 jest.mock('../../services/materialService', () => ({
     __esModule: true,
     default: { getUniqueMaterialsForSelection: jest.fn(), updateMaterial: jest.fn(), addMaterial: jest.fn(), deleteMaterial: jest.fn() },
@@ -17,6 +19,7 @@ const originalMatchMedia = window.matchMedia;
 
 beforeEach(() => {
     jest.clearAllMocks();
+    (useMaterialAdministration as jest.Mock).mockReturnValue(true);
     window.matchMedia = jest.fn().mockReturnValue({ matches: false });
     (materialService.getUniqueMaterialsForSelection as jest.Mock).mockResolvedValue(materials);
 });
@@ -51,4 +54,13 @@ it('시스템 분류를 수정 폼과 저장 요청에 그대로 유지한다', 
         await waitFor(() => expect(materialService.updateMaterial).toHaveBeenCalledWith('2', expect.objectContaining({ category: '시스템', description: '시스템 설명' })));
         await waitFor(() => expect(screen.queryByRole('heading', { name: '자재 수정' })).not.toBeInTheDocument());
     } finally { alert.mockRestore(); }
+});
+
+it('팀장은 공용 자재 목록을 조회하지만 등록·수정·삭제 기능은 보이지 않는다', async () => {
+    (useMaterialAdministration as jest.Mock).mockReturnValue(false);
+    render(<MaterialMasterPage />);
+    await screen.findByRole('region', { name: '시스템 자재' });
+    expect(screen.queryByRole('button', { name: '자재 등록' })).not.toBeInTheDocument();
+    expect(screen.queryByTitle('수정')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('삭제')).not.toBeInTheDocument();
 });

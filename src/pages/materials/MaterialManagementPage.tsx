@@ -1,3 +1,4 @@
+import { useMaterialAdministration } from '../../hooks/useMaterialAdministration';
 import React from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -65,6 +66,7 @@ const materialTabs = [
 
 const MaterialManagementPage: React.FC = () => {
     const location = useLocation();
+    const canManage = useMaterialAdministration();
     const normalizedPath = location.pathname.replace(/\/+$/, '');
     const isFieldGoodsPage = normalizedPath === '/materials/field-goods';
 
@@ -87,7 +89,7 @@ const MaterialManagementPage: React.FC = () => {
                         </div>
 
                         <nav className="grid grid-cols-4 gap-1 sm:-mx-1 sm:flex sm:gap-2 sm:overflow-x-auto sm:px-1 sm:pb-1 xl:mx-0 xl:pb-0" aria-label="자재관리 메뉴">
-                            {materialTabs.map((tab, index) => (
+                            {materialTabs.filter(tab => canManage || tab.to !== '/materials/logs').map((tab, index) => (
                                 <NavLink
                                     key={tab.to}
                                     to={tab.to}

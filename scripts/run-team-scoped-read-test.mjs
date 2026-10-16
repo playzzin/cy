@@ -19,7 +19,7 @@ const firebaseArgs = [
   'emulators:exec',
   '--only', 'firestore',
   '--project', 'demo-team-scoped-read',
-  'node --test functions/lib/teamReadPolicy.test.js functions/lib/teamScopedRead.test.js functions/lib/teamCatalogCache.test.js functions/lib/teamScopedQuery.test.js functions/lib/teamSettlementRead.test.js functions/lib/whiteboardParticipation.test.js functions/lib/workerScopedRead.test.js',
+  'node --test --test-concurrency=1 functions/lib/teamMaterialTransactions.test.js functions/lib/messageRecipientDirectory.test.js functions/lib/teamReadPolicy.test.js functions/lib/teamScopedRead.test.js functions/lib/teamCatalogCache.test.js functions/lib/teamScopedQuery.test.js functions/lib/teamSettlementRead.test.js functions/lib/whiteboardParticipation.test.js functions/lib/workerScopedRead.test.js',
 ];
 const globalCliCandidates = process.platform === 'win32'
   ? [path.join(env.APPDATA || '', 'npm', 'node_modules', 'firebase-tools', 'lib', 'bin', 'firebase.js')]

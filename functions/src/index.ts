@@ -169,3 +169,5 @@ export { geminiGateway } from './geminiGateway';
 export { parseManpowerDbQuestionWithGemini } from './manpowerDbAiSearch';
 export { sendKakaoAlimtalk, sendFriendTalk, getKakaoManagementUrl } from './kakao';
 export { issueTaxInvoiceApi, getTaxInvoiceListApi, getTaxInvoiceStatusApi } from './legacyTaxInvoice';
+
+export { teamMaterialTransactions } from './teamMaterialTransactions';

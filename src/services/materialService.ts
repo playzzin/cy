@@ -39,6 +39,7 @@ const logMaterialChange = async (
     source = 'materialService'
 ): Promise<void> => {
     try {
+        if (await usesTeamScopedReads()) return; // Scoped writes record their audit atomically on the server.
         const { materialLogService } = await import('./materialLogService');
         await materialLogService.safeCreateLog({
             action,

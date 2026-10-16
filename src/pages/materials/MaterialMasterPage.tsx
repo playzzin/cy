@@ -1,3 +1,4 @@
+import { useMaterialAdministration } from '../../hooks/useMaterialAdministration';
 import React, { useState, useEffect, useMemo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBoxesStacked, faPlus, faEdit, faTrash, faSave, faTimes } from '@fortawesome/free-solid-svg-icons';
@@ -23,6 +24,7 @@ const getMaterialErrorMessage = (error: unknown, fallback: string): string => {
 };
 
 const MaterialMasterPage: React.FC = () => {
+    const canManageCatalog = useMaterialAdministration();
     const [loading, setLoading] = useState(false);
     const [materials, setMaterials] = useState<Material[]>([]);
     const [filteredMaterials, setFilteredMaterials] = useState<Material[]>([]);
@@ -229,20 +231,20 @@ const MaterialMasterPage: React.FC = () => {
                                     </div>
                                 </div>
                                 <div className="flex shrink-0 gap-1">
-                                    <button
+                                    {canManageCatalog && (<button
                                         onClick={() => handleEdit(material)}
                                         className="flex h-9 w-9 items-center justify-center rounded-md border border-blue-100 bg-blue-50 text-blue-600 hover:bg-blue-100"
                                         title="수정"
                                     >
                                         <FontAwesomeIcon icon={faEdit} />
-                                    </button>
-                                    <button
+                                    </button>)}
+                                    {canManageCatalog && (<button
                                         onClick={() => handleDelete(material)}
                                         className="flex h-9 w-9 items-center justify-center rounded-md border border-red-100 bg-red-50 text-red-600 hover:bg-red-100"
                                         title="삭제"
                                     >
                                         <FontAwesomeIcon icon={faTrash} />
-                                    </button>
+                                    </button>)}
                                 </div>
                             </div>
                         </div>
@@ -284,20 +286,20 @@ const MaterialMasterPage: React.FC = () => {
                                     <td className="p-3 text-right">{material.safetyStock || '-'}</td>
                                     <td className="p-3">{material.description || '-'}</td>
                                     <td className="p-3 text-center">
-                                        <button
+                                        {canManageCatalog && (<button
                                             onClick={() => handleEdit(material)}
                                             className="mx-1 text-blue-600 hover:text-blue-800"
                                             title="수정"
                                         >
                                             <FontAwesomeIcon icon={faEdit} />
-                                        </button>
-                                        <button
+                                        </button>)}
+                                        {canManageCatalog && (<button
                                             onClick={() => handleDelete(material)}
                                             className="mx-1 text-red-600 hover:text-red-800"
                                             title="삭제"
                                         >
                                             <FontAwesomeIcon icon={faTrash} />
-                                        </button>
+                                        </button>)}
                                     </td>
                                 </tr>
                             ))}
@@ -338,13 +340,13 @@ const MaterialMasterPage: React.FC = () => {
                     </h1>
                     <p className="mt-1 hidden text-slate-500 sm:block">동바리·비계·시스템 자재를 분류별로 관리합니다</p>
                 </div>
-                <button
+                {canManageCatalog && (<button
                     onClick={handleAdd}
                     className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 font-bold text-white shadow-sm transition hover:bg-indigo-700 sm:w-auto sm:py-2"
                 >
                     <FontAwesomeIcon icon={faPlus} />
                     자재 등록
-                </button>
+                </button>)}
             </div>
 
             {/* 등록/수정 폼 */}

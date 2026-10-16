@@ -1,3 +1,4 @@
+import { saveScopedMaterialTransactions } from './teamMaterialTransactionService';
 import { getTeamScopedRows, invalidateTeamScopedCache } from './teamScopedReadService';
 import { db } from '../config/firebase';
 import {
@@ -80,17 +81,22 @@ export const materialFirestoreService = {
 
     // --- Inbound Transactions ---
     getInbound: async (id: string) => {
+        const scoped = await getTeamScopedRows<MaterialInboundZod>('materialInbounds');
+        if (scoped !== null) return scoped.find(row => row.id === id) || null;
         const ref = doc(db, INBOUND_COLLECTION, id).withConverter(createConverter(MaterialInboundSchema));
         const snap = await getDoc(ref);
         return snap.exists() ? snap.data() : null;
     },
 
     saveInbound: async (id: string, data: MaterialInboundZod) => {
+        if (await saveScopedMaterialTransactions('inbound', [{ ...data, id }])) return;
         const ref = doc(db, INBOUND_COLLECTION, id).withConverter(createConverter(MaterialInboundSchema));
         await setDoc(ref, data, { merge: true });
     },
 
     saveInboundsBatch: async (transactions: MaterialInboundZod[], photoBatch?: MaterialPhotoBatchZod) => {
+        if (transactions.length === 0) return;
+        if (await saveScopedMaterialTransactions('inbound', transactions, photoBatch)) return;
         let batch = writeBatch(db);
         let writeCount = 0;
         const commits: Array<Promise<void>> = [];
@@ -155,17 +161,22 @@ export const materialFirestoreService = {
 
     // --- Outbound Transactions ---
     getOutbound: async (id: string) => {
+        const scoped = await getTeamScopedRows<MaterialOutboundZod>('materialOutbounds');
+        if (scoped !== null) return scoped.find(row => row.id === id) || null;
         const ref = doc(db, OUTBOUND_COLLECTION, id).withConverter(createConverter(MaterialOutboundSchema));
         const snap = await getDoc(ref);
         return snap.exists() ? snap.data() : null;
     },
 
     saveOutbound: async (id: string, data: MaterialOutboundZod) => {
+        if (await saveScopedMaterialTransactions('outbound', [{ ...data, id }])) return;
         const ref = doc(db, OUTBOUND_COLLECTION, id).withConverter(createConverter(MaterialOutboundSchema));
         await setDoc(ref, data, { merge: true });
     },
 
     saveOutboundsBatch: async (transactions: MaterialOutboundZod[], photoBatch?: MaterialPhotoBatchZod) => {
+        if (transactions.length === 0) return;
+        if (await saveScopedMaterialTransactions('outbound', transactions, photoBatch)) return;
         let batch = writeBatch(db);
         let writeCount = 0;
         const commits: Array<Promise<void>> = [];
@@ -229,6 +240,8 @@ export const materialFirestoreService = {
     },
 
     getPhotoBatch: async (id: string) => {
+        const scoped = await getTeamScopedRows<MaterialPhotoBatchZod>('materialPhotoBatches');
+        if (scoped !== null) return scoped.find(row => row.id === id) || null;
         const ref = doc(db, PHOTO_BATCH_COLLECTION, id).withConverter(createConverter(MaterialPhotoBatchSchema));
         const snap = await getDoc(ref);
         return snap.exists() ? snap.data() : null;
