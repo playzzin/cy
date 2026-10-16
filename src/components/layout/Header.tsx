@@ -346,6 +346,9 @@ const Header: React.FC<HeaderProps> = ({
 
     // `test` and `nation` share the SITE-style top navigation shell.
     const isSiteLayerMode = currentSite === 'test' || currentSite === 'nation';
+    const isTeamLeaderMenu = !isSiteLayerMode && currentPosition !== 'full'
+        && [currentPosition, resolvePositionLabel(currentPosition, positions), safeCurrentSiteData.name]
+            .some(value => ['팀장', 'leader', 'teamlead', 'teamleader'].includes(normalizePositionValue(value)));
     const siteLandingPath = currentSite === 'nation' ? '/dashboard3' : '/dashboard2';
     const headerStyle = isSiteLayerMode
         ? isDarkMode
@@ -459,7 +462,7 @@ const Header: React.FC<HeaderProps> = ({
     }, [baseConfiguredHeaderActions, isPrivilegedHeaderUser]);
 
     const hasHeaderActionAccess = (item: MenuItem): boolean => {
-        if (item.hide) return false;
+        if (item.hide || (isTeamLeaderMenu && String(item.action || '').trim() === 'calculator')) return false;
         if (isPrivilegedHeaderUser) return true;
 
         const allowedRoles = Array.isArray(item.roles)
