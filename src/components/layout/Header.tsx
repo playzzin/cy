@@ -26,6 +26,7 @@ import { userMenuPositionService } from '../../services/userMenuPositionService'
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 import MessageIndicator from '../messages/MessageIndicator';
 import PositionPanel from './PositionPanel';
+import { isDevPreviewFrame, postPreviewMessage } from '../../utils/devPreviewRuntime';
 import { DevSessionNotice } from './DevSessionNotice';
 import { PositionItem, SiteDataType, MenuItem } from '../../types/menu';
 
@@ -51,6 +52,7 @@ interface HeaderProps {
     currentSiteData: any;
     isAdmin: boolean;
     isPositionPanelOpen: boolean;
+    canPreviewUsers?: boolean;
     currentPosition: string;
     changePosition: (positionId: string) => void;
     positions: PositionItem[];
@@ -160,6 +162,7 @@ const Header: React.FC<HeaderProps> = ({
     currentSiteData,
     isAdmin,
     isPositionPanelOpen,
+    canPreviewUsers = false,
     currentPosition,
     changePosition,
     positions,
@@ -443,7 +446,7 @@ const Header: React.FC<HeaderProps> = ({
 
     const configuredHeaderActions: MenuItem[] = React.useMemo(() => {
         const actions = [...baseConfiguredHeaderActions];
-        if (!isPrivilegedHeaderUser) return actions;
+        if (!isPrivilegedHeaderUser && !canPreviewUsers) return actions;
 
         const ensureDefaultAction = (actionName: string) => {
             const hasAction = actions.some((item) => String(item.action || '').trim() === actionName);
@@ -462,14 +465,14 @@ const Header: React.FC<HeaderProps> = ({
         };
 
         ensureDefaultAction('position');
-        ensureDefaultAction('admin');
+        if (isPrivilegedHeaderUser) ensureDefaultAction('admin');
 
         return actions;
-    }, [baseConfiguredHeaderActions, isPrivilegedHeaderUser]);
+    }, [baseConfiguredHeaderActions, isPrivilegedHeaderUser, canPreviewUsers]);
 
     const hasHeaderActionAccess = (item: MenuItem): boolean => {
         if (item.hide || (hidesCalculator && String(item.action || '').trim() === 'calculator')) return false;
-        if (isPrivilegedHeaderUser) return true;
+        if (isPrivilegedHeaderUser || (canPreviewUsers && item.action === 'position')) return true;
 
         const allowedRoles = Array.isArray(item.roles)
             ? item.roles.map(normalizeAccessRole).filter(Boolean)
@@ -539,12 +542,18 @@ const Header: React.FC<HeaderProps> = ({
         if (action === 'position') {
             return (
                 <div key={key} className="relative" ref={positionPanelRef}>
-                    <button className="header-btn header-tool-btn text-indigo-400 hover:bg-white/10" onClick={() => togglePanel('position')} title={label} aria-label={`${label} 열기`}>
+                    <button type="button" className="header-btn header-tool-btn text-indigo-400 hover:bg-white/10"
+                        onClick={() => isDevPreviewFrame ? postPreviewMessage('cy-preview:choose-position') : togglePanel('position')}
+                        title={canPreviewUsers ? '직책모드' : label} aria-label={canPreviewUsers ? '직책모드 열기' : label + ' 열기'}
+                        aria-expanded={isPositionPanelOpen} aria-controls="position-panel"
+                        style={canPreviewUsers ? { width: 'auto', gap: 6, padding: '0 10px' } : undefined}>
                         <FontAwesomeIcon icon={resolveIcon(item.icon, faIdBadge)} style={iconStyle} />
+                        {canPreviewUsers && <span style={{ fontSize: 13 }}>직책모드</span>}
                     </button>
                     {isPositionPanelOpen && (
                         <PositionPanel
                             isOpen={isPositionPanelOpen}
+                            userPreviewMode={canPreviewUsers}
                             togglePanel={togglePanel}
                             currentPosition={currentPosition}
                             changePosition={changePosition}

@@ -29,7 +29,7 @@ import {
 } from '../../utils/themeMode';
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 import { getMenuModeStorageKey } from '../../utils/menuModeStorage';
-import { getPositionMenuView, getLinkedMenuRef, isDevPositionSite } from '../../utils/linkedPositionMenus';
+import { getPositionMenuView, isDevPositionSite } from '../../utils/linkedPositionMenus';
 import { getDevPreviewSession, isDevPreviewFrame } from '../../utils/devPreviewRuntime';
 import { getSidebarSide } from '../../utils/sidebarSide';
 import DevUserPreview from '../developer/DevUserPreview';
@@ -506,9 +506,6 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
 
     const handleMenuItemClick = (item: MenuItem, position?: number) => {
         if (!currentSiteData) return;
-        const linked = getLinkedMenuRef(item.id);
-        if (canPreviewUsers && linked) { openUserPreview(linked.siteKey, item.path); return; }
-        setUserPreview(null);
 
         // 1. Direct Path (Priority)
         if (item.path) {
@@ -582,7 +579,6 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     };
 
     const changePosition = (positionId: string) => {
-        if (userPreview && canPreviewUsers && !isDevPositionSite(siteData, getPositionSiteKey(positionId))) { openUserPreview(positionId); return; }
         setUserPreview(null);
         setCurrentPosition(positionId);
         setActiveMenuItems({});
@@ -607,6 +603,15 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         }
 
         console.log('Position changed to:', positionId);
+    };
+
+    const selectPositionMode = (positionId: string) => {
+        if (canPreviewUsers && positionId !== 'full' && !isDevPositionSite(siteData, getPositionSiteKey(positionId))) {
+            openUserPreview(positionId);
+        } else {
+            changePosition(positionId);
+            closePanels();
+        }
     };
 
     const menuPaths = MENU_PATHS;
@@ -685,11 +690,16 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         );
     }
 
-    const routedContent = userPreview && canPreviewUsers && currentUser
-        ? <DevUserPreview key={currentUser.uid} actorUid={currentUser.uid} positionId={userPreview.positionId} path={userPreview.path}
-            positions={positions} siteData={siteData} onPosition={positionId => openUserPreview(positionId)}
-            onPath={path => setUserPreview(previous => previous ? { ...previous, path } : previous)} onExit={() => setUserPreview(null)} />
-        : isDevPreviewFrame ? <DevPreviewRouteGuard siteData={siteData} positionId={currentPosition}>{children}</DevPreviewRouteGuard> : children;
+    // The selected user owns the viewport without an enclosing DEV shell.
+    if (userPreview && canPreviewUsers && currentUser) {
+        return <SiteModeProvider {...siteModeValue}>
+            <DevUserPreview key={currentUser.uid} actorUid={currentUser.uid} positionId={userPreview.positionId} path={userPreview.path}
+                positions={positions} onPosition={positionId => openUserPreview(positionId)}
+                onPath={path => setUserPreview(previous => previous ? { ...previous, path } : previous)} onExit={() => setUserPreview(null)} />
+        </SiteModeProvider>;
+    }
+    const routedContent = isDevPreviewFrame
+        ? <DevPreviewRouteGuard siteData={siteData} positionId={currentPosition}>{children}</DevPreviewRouteGuard> : children;
 
     // Layout Variant for Cheongyeon SITE (test) - Same structure as Admin ERP with video background
     if (isSiteLayerMode && siteData?.[currentSite]?.menu && currentSiteData) {
@@ -710,7 +720,8 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
                         isAdmin={isAdmin}
                         isPositionPanelOpen={isPositionPanelOpen}
                         currentPosition={currentPosition}
-                        changePosition={changePosition}
+                        changePosition={selectPositionMode}
+                        canPreviewUsers={canPreviewUsers}
                         positions={positions}
                         siteData={siteData}
                         currentSite={currentSite}
@@ -726,8 +737,6 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
                         <Sidebar
                             side={sidebarSide}
                             currentSite={effectiveSite}
-                            onPreviewPosition={canPreviewUsers ? openUserPreview : undefined}
-                            onPreviewExit={() => setUserPreview(null)}
                             currentSiteData={currentSiteData}
                             closeAll={closeAll}
                             activeMenuItems={activeMenuItems}
@@ -798,7 +807,8 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
                     isAdmin={isAdmin}
                     isPositionPanelOpen={isPositionPanelOpen}
                     currentPosition={currentPosition}
-                    changePosition={changePosition}
+                    changePosition={selectPositionMode}
+                    canPreviewUsers={canPreviewUsers}
                     positions={positions}
                     siteData={siteData}
                     currentSite={currentSite}
@@ -811,8 +821,6 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
                     <Sidebar
                             side={sidebarSide}
                         currentSite={effectiveSite}
-                        onPreviewPosition={canPreviewUsers ? openUserPreview : undefined}
-                        onPreviewExit={() => setUserPreview(null)}
                         currentSiteData={currentSiteData}
                         closeAll={closeAll}
                         activeMenuItems={activeMenuItems}

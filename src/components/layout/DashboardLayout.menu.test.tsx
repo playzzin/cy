@@ -18,7 +18,8 @@ jest.mock('../../config/firebase', () => ({ db: {} }));
 jest.mock('firebase/firestore', () => ({ doc: jest.fn(), onSnapshot: jest.fn(() => jest.fn()) }));
 jest.mock('../../constants/messages', () => ({ MessageManager: { setContext: jest.fn() } }));
 jest.mock('../../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: () => false }));
-jest.mock('./Header', () => ({ toggleSidebar }: any) => <button onClick={toggleSidebar}>메뉴 토글</button>);
+jest.mock('./Header', () => ({ toggleSidebar, canPreviewUsers, changePosition }: any) => <header><button onClick={toggleSidebar}>메뉴 토글</button>{canPreviewUsers && <button onClick={() => changePosition('leader')}>상단 팀장 시점</button>}</header>);
+jest.mock('../developer/DevUserPreview', () => ({ positionId, onExit }: any) => <section aria-label="사용자 시점 확인"><span>{positionId}</span><button onClick={onExit}>DEV로 복귀</button></section>);
 jest.mock('./Sidebar', () => ({ side, closeAll }: any) => <nav data-testid="sidebar" data-side={side}><button onClick={closeAll}>메뉴 닫기</button></nav>);
 jest.mock('./LayoutBottomPanel', () => () => null);
 jest.mock('./AdminPanel', () => () => null);
@@ -131,4 +132,17 @@ it('팀장 직책 저장값이 있어도 청연 사이트 메뉴는 기존 배�
     render(app());
     await waitFor(() => expect(screen.getByTestId('menu-mode')).toHaveTextContent('test'));
     expect(screen.getByTestId('sidebar')).toHaveAttribute('data-side', 'left');
+});
+
+it('DEV 상단 직책모드에서 사용자 화면만 표시하고 복귀하면 기존 DEV 메뉴를 복원한다', async () => {
+    (userService.getUser as jest.Mock).mockResolvedValue({ role: 'admin', position: 'DEV', status: 'active' });
+    (manpowerService.getWorker as jest.Mock).mockResolvedValue(null);
+    render(app());
+    fireEvent.click(await screen.findByRole('button', { name: '상단 팀장 시점' }));
+    expect(screen.getByRole('region', { name: '사용자 시점 확인' })).toHaveTextContent('leader');
+    expect(screen.queryByTestId('sidebar')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '메뉴 토글' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'DEV로 복귀' }));
+    await waitFor(() => expect(screen.getByTestId('menu-mode')).toHaveTextContent('pos_dev'));
+    expect(screen.getByTestId('sidebar')).toBeInTheDocument();
 });

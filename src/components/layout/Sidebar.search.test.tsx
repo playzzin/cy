@@ -187,3 +187,12 @@ it('오른쪽 접힌 메뉴의 하위 패널은 화면 안쪽으로 열리고 �
     expect(screen.getByTestId('location')).toHaveTextContent('/payroll?tab=monthly');
     await waitFor(() => expect(screen.queryByRole('button', { name: '하위 메뉴 닫기' })).not.toBeInTheDocument());
 });
+
+it('DEV 구분선 아래 연결된 직책 메뉴도 일반 링크처럼 이동한다', () => {
+    const root='__linked_position__/pos_leader/root';
+    const linkedSite: SiteData={...site, sidebarSearchEnabled:false, menu:[{id:root,text:'팀장',sub:[{id:'__linked_position__/pos_leader/item/work',text:'근무내역',path:'/work'}]}]};
+    render(app({currentSite:'pos_dev',currentSiteData:linkedSite,activeMenuItems:{[root]:true}}));
+    expect(screen.queryByRole('button',{name:'이 직책으로 보기'})).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('link',{name:'근무내역'}));
+    expect(screen.getByTestId('location')).toHaveTextContent('/work');
+});
