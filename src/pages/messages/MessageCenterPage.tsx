@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Timestamp } from 'firebase/firestore';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faArrowUpRightFromSquare,
@@ -23,6 +23,7 @@ import { resolveIcon } from '../../constants/iconMap';
 import { manpowerService, type Worker } from '../../services/manpowerService';
 import { getMessageRecipientUsers } from '../../services/messageRecipientDirectoryService';
 import { messageService } from '../../services/messageService';
+import { useMessageAccess } from '../../hooks/useMessageAccess';
 import { useMessageInbox } from '../../hooks/useMessageInbox';
 import { useMessageReadActions } from '../../hooks/useMessageReadActions';
 import {
@@ -33,7 +34,7 @@ import {
   type MessageRecipientMode
 } from '../../services/messageRecipientResolver';
 import { teamService, type Team } from '../../services/teamService';
-import { userService, type UserData } from '../../services/userService';
+import { type UserData } from '../../services/userService';
 import type { CreateErpMessageInput, ErpMessage, ErpMessagePriority, ErpMessageType } from '../../types/erpMessage';
 import MessagePageTabs from '../../components/messages/MessagePageTabs';
 import '../../components/messages/MessageSystem.css';
@@ -189,7 +190,7 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
   const [users, setUsers] = useState<UserData[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
-  const [currentProfile, setCurrentProfile] = useState<UserData | null>(null);
+  const { profile: currentProfile, canSend: canWriteMessages, loading: accessLoading, error: accessError } = useMessageAccess();
   const { messages: inboxMessages, loading: inboxLoading, error: inboxError, retry: retryInbox } = useMessageInbox(currentUser?.uid);
   const { markRead, markAllRead, busy: reading, error: readError, retry: retryRead } = useMessageReadActions(currentUser?.uid);
   const autoReadAttempt = useRef('');
@@ -211,21 +212,22 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
   const admin = isAdminRole(currentProfile?.role as string | undefined);
 
   useEffect(() => {
-    if (!admin && (tab === 'all' || tab === 'system')) {
+    if ((!admin && (tab === 'all' || tab === 'system')) || (!canWriteMessages && tab === 'sent')) {
       setTab('inbox');
     }
-  }, [admin, tab]);
+  }, [admin, canWriteMessages, tab]);
 
   useEffect(() => {
     if (!currentUser?.uid) return;
 
     let cancelled = false;
 
+    if (!canWriteMessages) { setUsers([]); setWorkers([]); setTeams([]); return; }
+
     const loadUsers = async () => {
       try {
-        const [allUsers, profile, allWorkers, allTeams] = await Promise.all([
+        const [allUsers, allWorkers, allTeams] = await Promise.all([
           getMessageRecipientUsers(),
-          userService.getUser(currentUser.uid),
           manpowerService.getWorkers(true),
           teamService.getTeams()
         ]);
@@ -233,7 +235,6 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
         setUsers(allUsers);
         setWorkers(allWorkers);
         setTeams(allTeams);
-        setCurrentProfile(profile);
       } catch (error) {
         console.error('[MessageCenter] failed to load recipients:', error);
         if (!cancelled) {
@@ -248,17 +249,17 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
     return () => {
       cancelled = true;
     };
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, canWriteMessages]);
 
   useEffect(() => {
-    if (!currentUser?.uid) return;
+    if (!currentUser?.uid || !canWriteMessages) { setSentMessages([]); return; }
 
     const unsubscribeSent = messageService.subscribeSent(currentUser.uid, setSentMessages);
 
     return () => {
       unsubscribeSent();
     };
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, canWriteMessages]);
 
   useEffect(() => {
     if (!admin) {
@@ -472,8 +473,8 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
       );
     }
 
-    return options;
-  }, [admin, messageStats.inbox, messageStats.sent, messageStats.system, messageStats.total, messageStats.unread]);
+    return options.filter(option => canWriteMessages || option.key !== 'sent');
+  }, [admin, canWriteMessages, messageStats.inbox, messageStats.sent, messageStats.system, messageStats.total, messageStats.unread]);
 
   const selectedRecipientPreview = useMemo(() => {
     if (resolvedComposeRecipients.recipientScope === 'all') return '전체 사용자에게 발송됩니다.';
@@ -486,12 +487,12 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
   }, [resolvedComposeRecipients]);
 
   const canSend = useMemo(() => {
-    if (sending || !currentUser?.uid || !compose.body.trim()) return false;
+    if (!canWriteMessages || sending || !currentUser?.uid || !compose.body.trim()) return false;
     if (resolvedComposeRecipients.recipientScope === 'users' && resolvedComposeRecipients.recipientIds.length === 0) return false;
     if ((compose.recipientMode === 'teamMembers' || compose.recipientMode === 'teamLeaders') && compose.teamIds.length === 0) return false;
     if (!isValidActionUrl(compose.actionUrl.trim())) return false;
     return true;
-  }, [compose.actionUrl, compose.body, compose.recipientMode, compose.teamIds.length, currentUser?.uid, resolvedComposeRecipients, sending]);
+  }, [compose.actionUrl, compose.body, compose.recipientMode, compose.teamIds.length, currentUser?.uid, resolvedComposeRecipients, sending, canWriteMessages]);
 
   const resetCompose = () => {
     setCompose(initialCompose);
@@ -561,7 +562,7 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
   };
 
   const sendMessage = async () => {
-    if (!currentUser?.uid) return;
+    if (!currentUser?.uid || !canWriteMessages) return;
 
     setSending(true);
     setStatusText('');
@@ -645,18 +646,21 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
     selectedMessage && currentUser?.uid && !messageService.isReadBy(selectedMessage, currentUser.uid)
   );
 
+  if (isComposeMode && accessLoading) return <div role="status">메시지 권한을 확인하는 중입니다.</div>;
+  if (isComposeMode && !canWriteMessages) return <Navigate to="/messages" replace />;
+
   return (
     <div className="erp-message-shell">
       <header className="erp-message-page-header">
         <div>
           <h1 className="erp-message-page-title">{isComposeMode ? '메시지 보내기' : '메시지 보기'}</h1>
           <p className="erp-message-page-description">
-            {isComposeMode ? '받는 대상을 선택하고 업무 메시지를 발송합니다.' : '받은 메시지와 보낸 메시지를 확인합니다.'}
+            {isComposeMode ? '받는 대상을 선택하고 업무 메시지를 발송합니다.' : canWriteMessages ? '받은 메시지와 보낸 메시지를 확인합니다.' : '받은 업무메시지를 확인합니다.'}
           </p>
         </div>
 
         <div className="erp-message-page-header-actions">
-          <MessagePageTabs active={isComposeMode ? 'compose' : 'view'} />
+          <MessagePageTabs active={isComposeMode ? 'compose' : 'view'} readOnly={!canWriteMessages} />
           {!isComposeMode && (
             <button type="button" className="erp-message-secondary-button" onClick={markInboxRead} disabled={unreadCount === 0 || reading || inboxLoading || Boolean(inboxError)}>
               <FontAwesomeIcon icon={faCheck} />
@@ -666,6 +670,7 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
         </div>
       </header>
 
+      {accessError && <div role="alert" className="erp-message-read-error">메시지 권한을 확인하지 못했습니다. 새로고침 후 다시 시도해 주세요.</div>}
       {readError && <div role="alert" className="erp-message-read-error">{readError}
         <button type="button" disabled={reading} onClick={() => void retryRead?.()}>읽음 처리 다시 시도</button>
       </div>}
@@ -687,10 +692,10 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
           <span>중요/긴급</span>
           <strong>{messageStats.important.toLocaleString('ko-KR')}</strong>
         </div>
-        <div className="erp-message-insight-item">
+        {canWriteMessages && <div className="erp-message-insight-item">
           <span>보낸 메시지</span>
           <strong>{messageStats.sent.toLocaleString('ko-KR')}</strong>
-        </div>
+        </div>}
       </section>
       )}
 
@@ -870,7 +875,7 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
                 )}
               </div>
 
-              <section className="erp-message-receipts">
+              {canWriteMessages && <section className="erp-message-receipts">
                 <h3 className="erp-message-receipts-title">
                   확인 현황 {readRecipientCount}/{receiptUsers.length || selectedMessage.readBy.length}
                 </h3>
@@ -906,7 +911,7 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
                     );
                   })}
                 </div>
-              </section>
+              </section>}
             </>
           )}
         </div>

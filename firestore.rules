@@ -176,6 +176,16 @@ service cloud.firestore {
       return hasAnyRole(adminRoles());
     }
 
+    function isReadOnlyMessageUser() {
+      return hasAnyRole([
+        '팀장', '반장', 'team_leader', 'TEAM_LEADER', 'teamleader', 'TEAMLEADER',
+        'team_lead', 'TEAM_LEAD', 'teamlead', 'TEAMLEAD', 'foreman', 'FOREMAN',
+        'MhoUDnsuTNUnOpeNvfoL', 'mhoudnsutnunopenvfol',
+        'pos_MhoUDnsuTNUnOpeNvfoL', 'pos_mhoudnsutnunopenvfol',
+        'pos_team_leader', 'pos_teamleader', 'pos_team_lead', 'pos_teamlead'
+      ]) && !isAdmin();
+    }
+
     function canReadAudit() {
       return isAdmin() || hasAnyRole(auditRoles());
     }
@@ -1596,9 +1606,8 @@ service cloud.firestore {
       allow write: if !isPreviewIdentity() && (false);
     }
 
-    // General ERP messages retain their existing signed-in behavior, while
-    // server-authored bank alerts are visible only to configured recipients
-    // and may only receive the current recipient's read receipt.
+    // Team leaders can read messages and acknowledge their own receipts, but cannot author them.
+    // Server-authored bank alerts stay restricted to their configured recipients.
     match /smart_memo_reminders/{reminderId} {
       allow read: if (hasActiveUserProfile() && resource.data.userId == viewerUid()) && previewReadsAllowed();
       allow write: if !isPreviewIdentity() && (false);
@@ -1613,6 +1622,7 @@ service cloud.firestore {
           || (!isBankSystemMessage(resource.data) && canReadRegularErpMessage(resource.data))
         )) && previewReadsAllowed();
       allow create: if !isPreviewIdentity() && (hasActiveUserProfile()
+        && !isReadOnlyMessageUser()
         && !isBankSystemMessage(request.resource.data)
         && !isMemoReminderMessage(request.resource.data)
         && !isTaskNotificationMessage(request.resource.data)
@@ -1622,7 +1632,8 @@ service cloud.firestore {
         && (
           isValidErpMessageReadReceiptUpdate()
           || (
-            !isBankSystemMessage(resource.data)
+            !isReadOnlyMessageUser()
+            && !isBankSystemMessage(resource.data)
             && !isBankSystemMessage(request.resource.data)
             && !isMemoReminderMessage(resource.data)
             && !isMemoReminderMessage(request.resource.data)
@@ -1637,6 +1648,7 @@ service cloud.firestore {
           )
         ));
       allow delete: if !isPreviewIdentity() && (hasActiveUserProfile()
+        && !isReadOnlyMessageUser()
         && !isBankSystemMessage(resource.data)
         && !isMemoReminderMessage(resource.data)
         && !isTaskNotificationMessage(resource.data)

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth } from 'firebase/auth';
-import { connectFirestoreEmulator, getFirestore, doc, getDocFromServer, collection, query, where, getDocsFromServer, setDoc, updateDoc, serverTimestamp, arrayUnion, setLogLevel } from 'firebase/firestore';
+import { connectFirestoreEmulator, getFirestore, doc, getDocFromServer, collection, query, where, getDocsFromServer, setDoc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, setLogLevel } from 'firebase/firestore';
 
 const projectId = process.env.GCLOUD_PROJECT || '';
 assert.ok(projectId.startsWith('demo-'), 'A demo project is required');
@@ -77,6 +77,40 @@ try {
     await check('suspended accounts cannot acknowledge broadcasts', async () => {
         await db.doc(`users/${other.uid}`).update({ status: 'suspended' });
         await denied(updateDoc(doc(other.db, 'erp_messages/broadcast'), receipt(other.uid)));
+    });
+    const leader = await client('notice-team-leader');
+    await db.doc(`users/${leader.uid}`).update({ position: '팀장' });
+    const legacy = { ...base, senderId: leader.uid, recipientIds: [leader.uid], body: 'Legacy message' };
+    await db.doc('erp_messages/team-inbox').set({ ...base, recipientIds: [leader.uid] });
+    await db.doc('erp_messages/team-old-sent').set(legacy);
+    await check('team leaders can read received messages and acknowledge only themselves', async () => {
+        assert.equal((await getDocFromServer(doc(leader.db, 'erp_messages/team-inbox'))).exists(), true);
+        await updateDoc(doc(leader.db, 'erp_messages/team-inbox'), receipt(leader.uid));
+        await updateDoc(doc(leader.db, 'erp_messages/broadcast'), receipt(leader.uid));
+        await denied(updateDoc(doc(leader.db, 'erp_messages/team-inbox'), receipt(author.uid)));
+        await denied(getDocFromServer(doc(leader.db, 'erp_messages/notice')));
+    });
+    await check('team leaders cannot send, alter, archive, or delete even their own old messages', async () => {
+        await denied(setDoc(doc(leader.db, 'erp_messages/team-new'), legacy));
+        await denied(setDoc(doc(leader.db, 'erp_messages/team-broadcast'), { ...legacy, type: 'broadcast', recipientScope: 'all' }));
+        for (const patch of [{ body: 'changed' }, { status: 'archived' }, { recipientIds: [author.uid] }]) await denied(updateDoc(doc(leader.db, 'erp_messages/team-old-sent'), patch));
+        await denied(deleteDoc(doc(leader.db, 'erp_messages/team-old-sent')));
+    });
+    await check('all supported team role fields and position aliases enforce the same write restriction', async () => {
+        for (const alias of ['팀장', '반장', 'team_leader', 'TEAM_LEAD', 'foreman', 'MhoUDnsuTNUnOpeNvfoL', 'pos_MhoUDnsuTNUnOpeNvfoL']) {
+            for (const field of ['role', 'position', 'systemRole', 'accountType', 'roles', 'additionalPositions']) {
+                await db.doc(`users/${leader.uid}`).set({ role: 'user', status: 'active', [field]: ['roles', 'additionalPositions'].includes(field) ? [alias] : alias });
+                await denied(setDoc(doc(leader.db, 'erp_messages/team-new'), legacy));
+            }
+        }
+    });
+    await check('explicit administrator access remains available and removing it immediately restores read only', async () => {
+        await db.doc(`users/${leader.uid}`).set({ role: 'admin', position: '팀장', status: 'active' });
+        await setDoc(doc(leader.db, 'erp_messages/team-admin-check'), legacy);
+        await updateDoc(doc(leader.db, 'erp_messages/team-admin-check'), { body: 'Administrator edit' });
+        await deleteDoc(doc(leader.db, 'erp_messages/team-admin-check'));
+        await db.doc(`users/${leader.uid}`).update({ role: 'user' });
+        await denied(setDoc(doc(leader.db, 'erp_messages/team-new'), legacy));
     });
     console.log(`Notice notification rules: ${passed} scenarios passed.`);
 } finally {

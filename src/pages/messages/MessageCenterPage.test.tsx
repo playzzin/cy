@@ -7,12 +7,15 @@ import MessageCenterPage from './MessageCenterPage';
 import { messageService } from '../../services/messageService';
 import type { ErpMessage } from '../../types/erpMessage';
 
+const mockAccess = { profile: { role: 'user' }, canSend: true, loading: false, error: false };
+jest.mock('../../hooks/useMessageAccess', () => ({ useMessageAccess: () => mockAccess }));
+const mockRecipients = jest.fn();
 const mockInbox = { messages: [] as ErpMessage[], loading: false, error: null as Error | null, retry: jest.fn() };
 jest.mock('../../hooks/useMessageInbox', () => ({ useMessageInbox: () => mockInbox }));
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'viewer' } }) }));
 jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: async () => [] } }));
 jest.mock('../../services/teamService', () => ({ teamService: { getTeams: async () => [] } }));
-jest.mock('../../services/messageRecipientDirectoryService', () => ({ getMessageRecipientUsers: async () => [] }));
+jest.mock('../../services/messageRecipientDirectoryService', () => ({ getMessageRecipientUsers: () => mockRecipients() }));
 jest.mock('../../services/userService', () => ({ userService: { getAllUsers: async () => [], getUser: async () => ({ role: 'user' }) } }));
 jest.mock('../../services/messageService', () => ({ messageService: {
   isReadBy: (message: ErpMessage, uid: string) => message.readBy.includes(uid),
@@ -31,6 +34,8 @@ const page = (path = '/messages') => <MemoryRouter initialEntries={[path]} futur
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockAccess.canSend = true; mockAccess.loading = false; mockAccess.error = false;
+  mockRecipients.mockResolvedValue([]);
   mockInbox.messages = [message('first'), message('second')]; mockInbox.loading = false; mockInbox.error = null;
   (messageService.markAsRead as jest.Mock).mockResolvedValue(undefined);
   (messageService.markAllAsRead as jest.Mock).mockResolvedValue(undefined);
@@ -94,4 +99,21 @@ it('shows loading and retrieval errors instead of silently presenting an empty i
   expect(screen.getByRole('alert')).toHaveTextContent('불러오지 못했습니다');
   fireEvent.click(screen.getByRole('button', { name: '다시 불러오기' }));
   expect(mockInbox.retry).toHaveBeenCalledTimes(1);
+});
+
+it('team leaders only see their inbox and do not load recipient or sent directories', async () => {
+  mockAccess.canSend = false;
+  render(page());
+  expect(screen.getByText('받은 업무메시지를 확인합니다.')).toBeInTheDocument();
+  for (const name of ['메시지 보내기', '자동 메시지 설정', '자동 발송 로그']) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /보낸 메시지/ })).not.toBeInTheDocument();
+  expect(mockRecipients).not.toHaveBeenCalled();
+  expect(messageService.subscribeSent).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: /메시지 first/ }));
+  await waitFor(() => expect(messageService.markAsRead).toHaveBeenCalledWith('first', 'viewer'));
+  expect(screen.getByRole('heading', { name: '메시지 first' })).toBeInTheDocument();
+});
+it('preserves sending navigation for an unrestricted account', async () => {
+  render(page());
+  expect(await screen.findByRole('button', { name: '메시지 보내기' })).toBeInTheDocument();
 });

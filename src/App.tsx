@@ -128,6 +128,7 @@ const IdentityLogPage = React.lazy(() => import('./pages/database/IdentityLogPag
 const ManualPage = React.lazy(() => import('./pages/manual'));
 const ProfilePage = React.lazy(() => import('./pages/profile/ProfilePage'));
 const WorkerDelegationSignaturePage = React.lazy(() => import('./pages/worker/WorkerDelegationSignaturePage'));
+const MessageWriteAccessGate = React.lazy(() => import('./components/messages/MessageWriteAccessGate'));
 const MessageCenterPage = React.lazy(() => import('./pages/messages/MessageCenterPage'));
 const NoticeBoardPage = React.lazy(() => import('./pages/notices/NoticeBoardPage'));
 const MessageAutomationSettingsPage = React.lazy(() => import('./pages/messages/MessageAutomationSettingsPage'));
@@ -627,9 +628,9 @@ const App: React.FC = () => {
             <Route path="/notices" element={<NoticeBoardPage />} />
             <Route path="/notice-board" element={<NoticeBoardPage />} />
             <Route path="/messages" element={<MessageCenterPage />} />
-            <Route path="/messages/compose" element={<MessageCenterPage mode="compose" />} />
-            <Route path="/messages/settings" element={<MessageAutomationSettingsPage />} />
-            <Route path="/messages/automation-logs" element={<MessageAutomationLogPage />} />
+            <Route path="/messages/compose" element={<MessageWriteAccessGate><MessageCenterPage mode="compose" /></MessageWriteAccessGate>} />
+            <Route path="/messages/settings" element={<MessageWriteAccessGate><MessageAutomationSettingsPage /></MessageWriteAccessGate>} />
+            <Route path="/messages/automation-logs" element={<MessageWriteAccessGate><MessageAutomationLogPage /></MessageWriteAccessGate>} />
 
             {/* Storage Management */}
             <Route path="/storage" element={<StorageManagerPage />} />
