@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faIdBadge } from '@fortawesome/free-solid-svg-icons';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../config/firebase';
 import type { PositionItem } from '../../types/menu';
@@ -113,8 +115,8 @@ export default function DevUserPreview({ actorUid, positionId, path, positions, 
                 <span className="dev-user-preview__scope">{selected?.scopeLabel}</span>
             </div>
             <div className="dev-user-preview__actions">
-                <button type="button" ref={pickerButton} aria-label="직책모드 열기" aria-expanded={pickerOpen} aria-controls="dev-preview-picker"
-                    onClick={() => setPickerOpen(value => !value)}>직책모드 <span aria-hidden="true">⌄</span></button>
+                <button type="button" ref={pickerButton} className="dev-user-preview__mode-button" title="직책모드" aria-label="직책모드 열기" aria-expanded={pickerOpen} aria-controls="dev-preview-picker"
+                    onClick={() => setPickerOpen(value => !value)}><FontAwesomeIcon icon={faIdBadge} /></button>
                 <button type="button" onClick={onExit}>DEV로 복귀</button>
             </div>
         </header>
