@@ -1,16 +1,42 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // A reserved, short-lived identity reads as the selected user, never writes.
+    function isPreviewIdentity() {
+      return request.auth != null && (request.auth.uid.matches('^cy-preview-.*')
+        || request.auth.token.get('devPreview', false) == true || 'previewTargetUid' in request.auth.token);
+    }
+    function viewerUid() {
+      return request.auth.token.get('previewTargetUid', request.auth.uid);
+    }
+    function previewActorStillAllowed() {
+      let actorPath = /databases/$(database)/documents/users/$(request.auth.token.previewActorUid);
+      let actor = get(actorPath).data;
+      return actor.get('status', '') == 'active'
+        && [actor.get('role', ''), actor.get('position', ''), actor.get('systemRole', '')]
+          .concat(actor.get('roles', [])).concat(actor.get('additionalPositions', []))
+          .hasAny([request.auth.token.previewDevRole]);
+    }
+    function previewReadsAllowed() {
+      return !isPreviewIdentity() || (
+        request.auth.uid.matches('^cy-preview-.*')
+        && request.auth.token.get('devPreview', false) == true
+        && request.auth.token.get('previewTargetUid', '') != ''
+        && request.auth.token.previewExpiresAt > request.time.toMillis() / 1000
+        && previewActorStillAllowed()
+      );
+    }
+
     function isSignedIn() {
       return request.auth != null;
     }
 
     function isSelf(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return isSignedIn() && viewerUid() == userId;
     }
 
     function userDocPath() {
-      return /databases/$(database)/documents/users/$(request.auth.uid);
+      return /databases/$(database)/documents/users/$(viewerUid());
     }
 
     function hasUserProfile() {
@@ -177,7 +203,7 @@ service cloud.firestore {
       return hasActiveUserProfile()
         && (
           hasLinkedWorker(workerId)
-          || (('uid' in resource.data) && resource.data.uid == request.auth.uid)
+          || (('uid' in resource.data) && resource.data.uid == viewerUid())
         );
     }
 
@@ -394,21 +420,21 @@ service cloud.firestore {
       let participants = data.get('participants', {});
       return hasActiveUserProfile()
         && (
-          data.get('createdBy', '') == request.auth.uid
+          data.get('createdBy', '') == viewerUid()
           || (
             participants is map
             && (
               (
                 participants.get('authorIds', []) is list
-                && request.auth.uid in participants.get('authorIds', [])
+                && viewerUid() in participants.get('authorIds', [])
               )
               || (
                 participants.get('reviewerIds', []) is list
-                && request.auth.uid in participants.get('reviewerIds', [])
+                && viewerUid() in participants.get('reviewerIds', [])
               )
               || (
                 participants.get('approverIds', []) is list
-                && request.auth.uid in participants.get('approverIds', [])
+                && viewerUid() in participants.get('approverIds', [])
               )
             )
           )
@@ -427,11 +453,11 @@ service cloud.firestore {
       let participants = data.get('participants', {});
       return hasActiveUserProfile()
         && (
-          data.get('createdBy', '') == request.auth.uid
+          data.get('createdBy', '') == viewerUid()
           || (
             participants is map
             && participants.get('authorIds', []) is list
-            && request.auth.uid in participants.get('authorIds', [])
+            && viewerUid() in participants.get('authorIds', [])
           )
         );
     }
@@ -924,14 +950,14 @@ service cloud.firestore {
 
     function ownsConstructionPlanLock() {
       return ('editLock' in resource.data)
-        && resource.data.editLock.userId == request.auth.uid
+        && resource.data.editLock.userId == viewerUid()
         && resource.data.editLock.expiresAtEpochMs is number
         && resource.data.editLock.expiresAtEpochMs > request.time.toMillis();
     }
 
     function hasValidRequestedConstructionPlanLock() {
       return ('editLock' in request.resource.data)
-        && request.resource.data.editLock.userId == request.auth.uid
+        && request.resource.data.editLock.userId == viewerUid()
         && request.resource.data.editLock.userName is string
         && request.resource.data.editLock.acquiredAt is string
         && request.resource.data.editLock.heartbeatAt is string
@@ -947,7 +973,7 @@ service cloud.firestore {
       let priorLockExpired = hadLock
         && resource.data.editLock.expiresAtEpochMs is number
         && resource.data.editLock.expiresAtEpochMs <= request.time.toMillis();
-      let priorLockOwned = hadLock && resource.data.editLock.userId == request.auth.uid;
+      let priorLockOwned = hadLock && resource.data.editLock.userId == viewerUid();
       return request.resource.data.lockVersion == resource.data.lockVersion + 1
         && (
           (
@@ -978,7 +1004,7 @@ service cloud.firestore {
       let afterStatus = request.resource.data.status;
       let statusChanged = beforeStatus != afterStatus;
       let approvalTransition = afterStatus in ['approved_pending_issue', 'issued', 'superseded'];
-      return request.resource.data.updatedBy == request.auth.uid
+      return request.resource.data.updatedBy == viewerUid()
         // Approval snapshots and issued-for-use exports are produced by the
         // trusted server pipeline. Admin SDK writes bypass these client rules.
         && !approvalTransition
@@ -1115,7 +1141,7 @@ service cloud.firestore {
     function isVerifiedRequestDisplayName(value) {
       return value is string
         && (
-          value == request.auth.uid
+          value == viewerUid()
           || (request.auth.token.email is string && value == request.auth.token.email)
         );
     }
@@ -1136,7 +1162,7 @@ service cloud.firestore {
         && request.resource.data.reviewedBy is map
         && request.resource.data.reviewedBy.keys().hasAll(['uid', 'displayName'])
         && request.resource.data.reviewedBy.keys().hasOnly(['uid', 'displayName', 'email'])
-        && request.resource.data.reviewedBy.uid == request.auth.uid
+        && request.resource.data.reviewedBy.uid == viewerUid()
         && isVerifiedRequestDisplayName(request.resource.data.reviewedBy.displayName)
         && request.resource.data.reviewedBy.email == request.auth.token.email
         && request.resource.data.reviewedAt == request.time
@@ -1185,7 +1211,7 @@ service cloud.firestore {
         && data.quietHours.end is string
         && data.quietHours.end.matches('^([01]\\d|2[0-3]):[0-5]\\d$')
         && data.quietHours.timezone == 'Asia/Seoul'
-        && data.updatedById == request.auth.uid
+        && data.updatedById == viewerUid()
         && isVerifiedRequestDisplayName(data.updatedByName)
         && data.updatedAt == request.time;
     }
@@ -1206,7 +1232,7 @@ service cloud.firestore {
           'updatedAt',
           'lastSeenAt'
         ])
-        && data.uid == request.auth.uid
+        && data.uid == viewerUid()
         && data.token is string
         && data.token.size() >= 20
         && data.token.size() <= 4096
@@ -1240,20 +1266,20 @@ service cloud.firestore {
 
     function canReadBankSystemMessage(data) {
       return isAdmin()
-        || ('recipientIds' in data && data.recipientIds is list && request.auth.uid in data.recipientIds);
+        || ('recipientIds' in data && data.recipientIds is list && viewerUid() in data.recipientIds);
     }
 
     function canReadRegularErpMessage(data) {
       return isAdmin()
-        || ('senderId' in data && data.senderId == request.auth.uid)
+        || ('senderId' in data && data.senderId == viewerUid())
         || ('recipientScope' in data && data.recipientScope == 'all')
-        || ('recipientIds' in data && data.recipientIds is list && request.auth.uid in data.recipientIds);
+        || ('recipientIds' in data && data.recipientIds is list && viewerUid() in data.recipientIds);
     }
 
     function isValidErpMessageReadReceiptUpdate() {
       return resource.data.recipientIds is list
         && (
-          request.auth.uid in resource.data.recipientIds
+          viewerUid() in resource.data.recipientIds
           || (!isBankSystemMessage(resource.data)
             && !isMemoReminderMessage(resource.data)
             && !isTaskNotificationMessage(resource.data)
@@ -1267,14 +1293,14 @@ service cloud.firestore {
         && resource.data.readBy is list
         && request.resource.data.readBy is list
         && request.resource.data.readBy.hasAll(resource.data.readBy)
-        && request.resource.data.readBy.hasOnly(resource.data.readBy.concat([request.auth.uid]))
+        && request.resource.data.readBy.hasOnly(resource.data.readBy.concat([viewerUid()]))
         && request.resource.data.readBy.size() == resource.data.readBy.size()
-          + (request.auth.uid in resource.data.readBy ? 0 : 1)
-        && request.auth.uid in request.resource.data.readBy
+          + (viewerUid() in resource.data.readBy ? 0 : 1)
+        && viewerUid() in request.resource.data.readBy
         && resource.data.readAtBy is map
         && request.resource.data.readAtBy is map
-        && request.resource.data.readAtBy.diff(resource.data.readAtBy).affectedKeys().hasOnly([request.auth.uid])
-        && request.resource.data.readAtBy[request.auth.uid] == request.time
+        && request.resource.data.readAtBy.diff(resource.data.readAtBy).affectedKeys().hasOnly([viewerUid()])
+        && request.resource.data.readAtBy[viewerUid()] == request.time
         && request.resource.data.updatedAt == request.time;
     }
 
@@ -1294,7 +1320,7 @@ service cloud.firestore {
           'status',
           'updatedAt'
         ])
-        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.uid == viewerUid()
         && request.resource.data.role == 'user'
         && request.resource.data.status == 'pending'
         && isNullableString(request.resource.data.email)
@@ -1376,155 +1402,156 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow get: if isAdmin() || isSelf(userId);
-      allow list: if isAdmin();
-      allow create: if isAdmin() || isSafeSelfUserCreate(userId);
-      allow update: if isAdmin() || isSafeSelfUserUpdate(userId);
-      allow delete: if isAdmin();
+      allow get: if (isAdmin() || isSelf(userId)) && previewReadsAllowed();
+      allow list: if (isAdmin()) && previewReadsAllowed();
+      allow create: if !isPreviewIdentity() && (isAdmin() || isSafeSelfUserCreate(userId));
+      allow update: if !isPreviewIdentity() && (isAdmin() || isSafeSelfUserUpdate(userId));
+      allow delete: if !isPreviewIdentity() && (isAdmin());
     }
 
     match /login_logs/{logId} {
-      allow create: if isSignedIn() || isLoginFailureLogCreate();
-      allow get, list: if isAdmin();
-      allow update, delete: if false;
+      allow create: if !isPreviewIdentity() && (isSignedIn() || isLoginFailureLogCreate());
+      allow get, list: if (isAdmin()) && previewReadsAllowed();
+      allow update, delete: if !isPreviewIdentity() && (false);
     }
 
     match /settings/{settingsId} {
-      allow read: if hasActiveUserProfile();
-      allow create, update: if (isAdmin() && canWriteSettingsDocument(settingsId))
+      allow read: if (hasActiveUserProfile()) && previewReadsAllowed();
+      allow create, update: if !isPreviewIdentity() && ((isAdmin() && canWriteSettingsDocument(settingsId))
         || (
           settingsId == 'delegation_letter_v2_public'
           && (canWriteFinance() || hasAnyRole(siteRoles()))
-        );
-      allow delete: if isAdmin();
+        ));
+      allow delete: if !isPreviewIdentity() && (isAdmin());
     }
 
     match /server_settings/{settingsId} {
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     // Card-audit results contain executive financial review data. Reads are
     // restricted to CEO/DEV accounts; all mutations are owned by callables.
     match /{collectionId}/{docId} {
-      allow read: if isCardExpenseAuditCollection(collectionId)
-        && canAccessCardExpenseAudit();
-      allow create, update, delete: if false;
+      allow read: if (isCardExpenseAuditCollection(collectionId)
+        && canAccessCardExpenseAudit()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (false);
     }
 
     match /{collectionId}/{docId}/{subcollection}/{nestedDocId}/{nested=**} {
-      allow read: if isCardExpenseAuditCollection(collectionId)
-        && canAccessCardExpenseAudit();
-      allow write: if false;
+      allow read: if (isCardExpenseAuditCollection(collectionId)
+        && canAccessCardExpenseAudit()) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /system_configs/{configId} {
-      allow read: if hasActiveUserProfile();
-      allow create, update, delete: if isAdmin();
+      allow read: if (hasActiveUserProfile()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (isAdmin());
     }
 
     match /positions/{positionId} {
-      allow read: if hasActiveUserProfile();
-      allow create, update, delete: if isAdmin();
+      allow read: if (hasActiveUserProfile()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (isAdmin());
     }
 
     match /menus/{menuId} {
-      allow read: if hasActiveUserProfile();
-      allow create, update, delete: if isAdmin();
+      allow read: if (hasActiveUserProfile()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (isAdmin());
     }
 
     match /menu_configs/{menuConfigId} {
-      allow read: if hasActiveUserProfile();
-      allow create, update, delete: if isAdmin();
+      allow read: if (hasActiveUserProfile()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (isAdmin());
     }
 
     match /system_logs/{logId} {
-      allow create: if hasActiveUserProfile();
-      allow get, list: if canReadAudit();
-      allow update, delete: if false;
+      allow create: if !isPreviewIdentity() && (hasActiveUserProfile());
+      allow get, list: if (canReadAudit()) && previewReadsAllowed();
+      allow update, delete: if !isPreviewIdentity() && (false);
     }
 
     match /audit_logs/{logId} {
-      allow create: if hasActiveUserProfile();
-      allow get, list: if canReadAudit();
-      allow update, delete: if false;
+      allow create: if !isPreviewIdentity() && (hasActiveUserProfile());
+      allow get, list: if (canReadAudit()) && previewReadsAllowed();
+      allow update, delete: if !isPreviewIdentity() && (false);
     }
 
     match /database_logs/{logId} {
-      allow create: if hasActiveUserProfile();
-      allow get, list: if canReadAudit();
-      allow update, delete: if false;
+      allow create: if !isPreviewIdentity() && (hasActiveUserProfile());
+      allow get, list: if (canReadAudit()) && previewReadsAllowed();
+      allow update, delete: if !isPreviewIdentity() && (false);
     }
 
     match /daily_report_logs/{logId} {
-      allow create: if hasActiveUserProfile();
-      allow get, list: if canReadAudit() || canReadOperations();
-      allow update, delete: if false;
+      allow create: if !isPreviewIdentity() && (hasActiveUserProfile());
+      allow get, list: if (canReadAudit() || canReadOperations()) && previewReadsAllowed();
+      allow update, delete: if !isPreviewIdentity() && (false);
     }
 
     match /material_logs/{logId} {
-      allow create: if hasActiveUserProfile();
-      allow get, list: if canReadAudit() || canReadSupport();
-      allow update, delete: if false;
+      allow create: if !isPreviewIdentity() && (hasActiveUserProfile());
+      allow get, list: if (canReadAudit() || canReadSupport()) && previewReadsAllowed();
+      allow update, delete: if !isPreviewIdentity() && (false);
     }
 
     // Restricted incident records: only audit-capable accounts may read them;
     // mutations are limited to administrators so review ownership is explicit.
     match /incident_cases/{caseId} {
-      allow get, list: if canReadAudit();
-      allow create: if isAdmin()
+      allow get, list: if (canReadAudit()) && previewReadsAllowed();
+      allow create: if !isPreviewIdentity() && (isAdmin()
         && hasValidIncidentCaseShape(request.resource.data)
-        && request.resource.data.createdByUid == request.auth.uid
-        && request.resource.data.updatedByUid == request.auth.uid;
-      allow update: if isAdmin()
+        && request.resource.data.createdByUid == viewerUid()
+        && request.resource.data.updatedByUid == viewerUid());
+      allow update: if !isPreviewIdentity() && (isAdmin()
         && hasValidIncidentCaseShape(request.resource.data)
         && request.resource.data.caseNumber == resource.data.caseNumber
         && request.resource.data.createdByUid == resource.data.createdByUid
         && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.updatedByUid == request.auth.uid;
-      allow delete: if isAdmin();
+        && request.resource.data.updatedByUid == viewerUid());
+      allow delete: if !isPreviewIdentity() && (isAdmin());
     }
 
     match /incident_case_categories/{categoryId} {
-      allow get, list: if canReadAudit();
-      allow create: if isAdmin() && hasValidIncidentCategoryShape(request.resource.data);
-      allow update: if isAdmin()
+      allow get, list: if (canReadAudit()) && previewReadsAllowed();
+      allow create: if !isPreviewIdentity() && (isAdmin() && hasValidIncidentCategoryShape(request.resource.data));
+      allow update: if !isPreviewIdentity() && (isAdmin()
         && hasValidIncidentCategoryShape(request.resource.data)
-        && request.resource.data.createdAt == resource.data.createdAt;
-      allow delete: if isAdmin();
+        && request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if !isPreviewIdentity() && (isAdmin());
     }
 
     match /settlement_alert_states/{stateId} {
-      allow get, list: if canReadFinance() || canReadSupport() || canReadOperations() || canReadAudit();
-      allow create, update: if canWriteFinance() || canWriteSupport() || isAdmin();
-      allow delete: if isAdmin();
+      allow get, list: if (canReadFinance() || canReadSupport() || canReadOperations() || canReadAudit()) && previewReadsAllowed();
+      allow create, update: if !isPreviewIdentity() && (canWriteFinance() || canWriteSupport() || isAdmin());
+      allow delete: if !isPreviewIdentity() && (isAdmin());
     }
 
     // Bank SMS payloads and provider events are server-owned. Clients can only
     // review normalized candidates, manage global alert settings as an admin,
     // and register their own browser notification device.
     match /bank_sms_ingestions/{ingestionId} {
-      allow get, list: if canReadAudit();
-      allow create, update, delete: if false;
+      allow get, list: if (canReadAudit()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (false);
     }
 
     match /bank_transaction_candidates/{candidateId} {
-      allow get, list: if canReadFinance() || canReadAudit();
-      allow create, delete: if false;
-      allow update: if canWriteFinance() && isValidBankCandidateReviewUpdate();
+      allow get, list: if (canReadFinance() || canReadAudit()) && previewReadsAllowed();
+      allow create, delete: if !isPreviewIdentity() && (false);
+      allow update: if !isPreviewIdentity() && (canWriteFinance() && isValidBankCandidateReviewUpdate());
     }
 
     match /bank_notification_settings/{settingsId} {
-      allow get, list: if canReadFinance() || canReadAudit();
-      allow create, update: if isAdmin() && isValidBankNotificationSettings(request.resource.data);
-      allow delete: if false;
+      allow get, list: if (canReadFinance() || canReadAudit()) && previewReadsAllowed();
+      allow create, update: if !isPreviewIdentity() && (isAdmin() && isValidBankNotificationSettings(request.resource.data));
+      allow delete: if !isPreviewIdentity() && (false);
     }
 
     match /notification_devices/{deviceId} {
-      allow get: if isSignedIn() && (resource == null || resource.data.uid == request.auth.uid);
-      allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
-      allow create: if isSignedIn() && isValidOwnNotificationDevice(request.resource.data);
-      allow update: if isSignedIn()
-        && resource.data.uid == request.auth.uid
+      allow get: if (isSignedIn() && (resource == null || resource.data.uid == viewerUid())) && previewReadsAllowed();
+      allow list: if (isSignedIn() && resource.data.uid == viewerUid()) && previewReadsAllowed();
+      allow create: if !isPreviewIdentity() && (isSignedIn() && isValidOwnNotificationDevice(request.resource.data));
+      allow update: if !isPreviewIdentity() && (isSignedIn()
+        && resource.data.uid == viewerUid()
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.token == resource.data.token
         && request.resource.data.platform == resource.data.platform
@@ -1537,59 +1564,61 @@ service cloud.firestore {
           'updatedAt',
           'lastSeenAt'
         ])
-        && isValidOwnNotificationDevice(request.resource.data);
-      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+        && isValidOwnNotificationDevice(request.resource.data));
+      allow delete: if !isPreviewIdentity() && (isSignedIn() && resource.data.uid == viewerUid());
     }
 
     match /bank_notification_health/{healthId} {
-      allow get, list: if canReadFinance() || canReadAudit();
-      allow create, update, delete: if false;
+      allow get, list: if (canReadFinance() || canReadAudit()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (false);
     }
 
     match /bank_notification_outbox/{outboxId} {
-      allow get, list: if canReadAudit();
-      allow create, update, delete: if false;
+      allow get, list: if (canReadAudit()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (false);
     }
 
     match /bank_provider_events/{eventId} {
-      allow get, list: if canReadAudit();
-      allow create, update, delete: if false;
+      allow get, list: if (canReadAudit()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (false);
     }
 
     match /bank_ingestion_replay_nonces/{nonceId} {
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     // Exact-source idempotency claims are authored only by trusted Cloud
     // Functions. Client access would allow a signed-in user to reserve or
     // redirect a SHA-256 claim and bypass/import-block vehicle expenses.
     match /vehicleExpenseImportIdentities/{identityId} {
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     // General ERP messages retain their existing signed-in behavior, while
     // server-authored bank alerts are visible only to configured recipients
     // and may only receive the current recipient's read receipt.
     match /smart_memo_reminders/{reminderId} {
-      allow read: if hasActiveUserProfile() && resource.data.userId == request.auth.uid;
-      allow write: if false;
+      allow read: if (hasActiveUserProfile() && resource.data.userId == viewerUid()) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /erp_messages/{messageId} {
       // 수신자 쿼리는 다른 메시지 유형의 판정을 거치지 않고 같은 수신 권한을 확인합니다.
-      allow list: if hasActiveUserProfile() && request.auth.uid in resource.data.recipientIds;
-      allow read: if hasActiveUserProfile()
+      allow list: if (hasActiveUserProfile() && viewerUid() in resource.data.recipientIds) && previewReadsAllowed();
+      allow read: if (hasActiveUserProfile()
         && (
           (isBankSystemMessage(resource.data) && canReadBankSystemMessage(resource.data))
           || (!isBankSystemMessage(resource.data) && canReadRegularErpMessage(resource.data))
-        );
-      allow create: if hasActiveUserProfile()
+        )) && previewReadsAllowed();
+      allow create: if !isPreviewIdentity() && (hasActiveUserProfile()
         && !isBankSystemMessage(request.resource.data)
         && !isMemoReminderMessage(request.resource.data)
         && !isTaskNotificationMessage(request.resource.data)
-        && request.resource.data.senderId == request.auth.uid
-        && request.resource.data.type in ['direct', 'broadcast'];
-      allow update: if hasActiveUserProfile()
+        && request.resource.data.senderId == viewerUid()
+        && request.resource.data.type in ['direct', 'broadcast']);
+      allow update: if !isPreviewIdentity() && (hasActiveUserProfile()
         && (
           isValidErpMessageReadReceiptUpdate()
           || (
@@ -1602,226 +1631,226 @@ service cloud.firestore {
             && request.resource.data.type in ['direct', 'broadcast']
             && (
               isAdmin()
-              || ('senderId' in resource.data && resource.data.senderId == request.auth.uid)
+              || ('senderId' in resource.data && resource.data.senderId == viewerUid())
               || isValidErpMessageReadReceiptUpdate()
             )
           )
-        );
-      allow delete: if hasActiveUserProfile()
+        ));
+      allow delete: if !isPreviewIdentity() && (hasActiveUserProfile()
         && !isBankSystemMessage(resource.data)
         && !isMemoReminderMessage(resource.data)
         && !isTaskNotificationMessage(resource.data)
-        && (isAdmin() || ('senderId' in resource.data && resource.data.senderId == request.auth.uid));
+        && (isAdmin() || ('senderId' in resource.data && resource.data.senderId == viewerUid())));
     }
 
     match /support_shared_data/{dataId} {
-      allow read: if hasActiveUserProfile();
-      allow create, update, delete: if canWriteSupport();
+      allow read: if (hasActiveUserProfile()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (canWriteSupport());
     }
 
     match /materials/{materialId} {
-      allow read: if canReadOperations() || isClientPortalAccount() || isRentalPortalAccount();
-      allow create, update, delete: if canWriteOperations();
+      allow read: if (canReadOperations() || isClientPortalAccount() || isRentalPortalAccount()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (canWriteOperations());
     }
 
     match /materialInbounds/{transactionId} {
-      allow read: if canReadOperations()
+      allow read: if (canReadOperations()
         || canReadClientMaterialTransaction()
-        || canReadRentalMaterialTransaction();
-      allow create, update, delete: if canWriteOperations();
+        || canReadRentalMaterialTransaction()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (canWriteOperations());
     }
 
     match /materialOutbounds/{transactionId} {
-      allow read: if canReadOperations()
+      allow read: if (canReadOperations()
         || canReadClientMaterialTransaction()
-        || canReadRentalMaterialTransaction();
-      allow create, update, delete: if canWriteOperations();
+        || canReadRentalMaterialTransaction()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (canWriteOperations());
     }
 
     match /materialPhotoBatches/{photoBatchId} {
-      allow read: if canReadOperations()
+      allow read: if (canReadOperations()
         || canReadClientMaterialPhotoBatch()
-        || canReadRentalMaterialPhotoBatch();
-      allow create, update, delete: if canWriteOperations();
+        || canReadRentalMaterialPhotoBatch()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (canWriteOperations());
     }
 
     match /workers/{workerId} {
-      allow read: if canReadMasterData() || canReadOwnWorker(workerId);
-      allow update: if canWriteMasterData() || isValidOwnWorkerSignatureUpdate(workerId);
-      allow create, delete: if canWriteMasterData();
+      allow read: if (canReadMasterData() || canReadOwnWorker(workerId)) && previewReadsAllowed();
+      allow update: if !isPreviewIdentity() && (canWriteMasterData() || isValidOwnWorkerSignatureUpdate(workerId));
+      allow create, delete: if !isPreviewIdentity() && (canWriteMasterData());
     }
 
     match /{collectionId}/{docId} {
-      allow read: if isMasterDataCollection(collectionId)
+      allow read: if (isMasterDataCollection(collectionId)
         && (
           canReadMasterData()
           || (collectionId == 'companies' && canReadClientCompany(docId))
           || (collectionId == 'companies' && canReadRentalCompany(docId))
           || (collectionId == 'sites' && canReadClientSite(docId))
           || (collectionId == 'sites' && isRentalPortalAccount() && ('linkedSiteIds' in userProfile()) && hasLinkedSite(docId))
-        );
-      allow create, update, delete: if isMasterDataCollection(collectionId) && canWriteMasterData();
+        )) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (isMasterDataCollection(collectionId) && canWriteMasterData());
     }
 
     match /{collectionId}/{docId} {
-      allow read: if isOperationsCollection(collectionId)
-        && (canReadOperations() || (collectionId == 'daily_reports' && canReadClientDailyReport()));
-      allow create, update, delete: if isOperationsCollection(collectionId) && canWriteOperations();
+      allow read: if (isOperationsCollection(collectionId)
+        && (canReadOperations() || (collectionId == 'daily_reports' && canReadClientDailyReport()))) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (isOperationsCollection(collectionId) && canWriteOperations());
     }
 
     match /recruiting_referrers/{referrerId} {
-      allow read: if canRecruitingRead();
-      allow create, update: if canRecruitingRegister();
-      allow delete: if canRecruitingSettle();
+      allow read: if (canRecruitingRead()) && previewReadsAllowed();
+      allow create, update: if !isPreviewIdentity() && (canRecruitingRegister());
+      allow delete: if !isPreviewIdentity() && (canRecruitingSettle());
     }
 
     match /service_worker_referrals/{referralId} {
-      allow read: if canRecruitingRead();
-      allow create, update: if canRecruitingRegister();
-      allow delete: if canRecruitingSettle();
+      allow read: if (canRecruitingRead()) && previewReadsAllowed();
+      allow create, update: if !isPreviewIdentity() && (canRecruitingRegister());
+      allow delete: if !isPreviewIdentity() && (canRecruitingSettle());
     }
 
     match /service_referral_daily_lines/{lineId} {
-      allow read: if canRecruitingRead();
-      allow create, update, delete: if canRecruitingSettle();
+      allow read: if (canRecruitingRead()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (canRecruitingSettle());
     }
 
     match /service_referral_monthly_settlements/{settlementId} {
-      allow read: if canRecruitingRead();
-      allow create, update, delete: if canRecruitingSettle();
+      allow read: if (canRecruitingRead()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (canRecruitingSettle());
     }
 
     match /service_referral_settings/{settingsId} {
-      allow read: if canRecruitingRead();
-      allow create, update, delete: if canRecruitingSettle();
+      allow read: if (canRecruitingRead()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (canRecruitingSettle());
     }
 
     match /service_worker_history/{historyId} {
-      allow read: if canRecruitingRead();
-      allow create, update: if canRecruitingRegister();
-      allow delete: if canRecruitingSettle();
+      allow read: if (canRecruitingRead()) && previewReadsAllowed();
+      allow create, update: if !isPreviewIdentity() && (canRecruitingRegister());
+      allow delete: if !isPreviewIdentity() && (canRecruitingSettle());
     }
 
     match /service_referral_payments/{paymentId} {
-      allow read: if canRecruitingRead();
-      allow create, update, delete: if canRecruitingSettle();
+      allow read: if (canRecruitingRead()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (canRecruitingSettle());
     }
 
     match /service_referral_deposits/{depositId} {
-      allow read: if canRecruitingRead();
-      allow create, update, delete: if canRecruitingSettle();
+      allow read: if (canRecruitingRead()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (canRecruitingSettle());
     }
 
     match /service_referral_receivables/{receivableId} {
-      allow read: if canRecruitingRead();
-      allow create, update, delete: if canRecruitingSettle();
+      allow read: if (canRecruitingRead()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (canRecruitingSettle());
     }
 
     match /daily_advance_workbook_profiles/{profileId} {
-      allow read: if canReadFinance();
-      allow create, update, delete: if canWriteFinance();
+      allow read: if (canReadFinance()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (canWriteFinance());
     }
 
     match /daily_advance_statement_recruiter_fees/{feeId} {
-      allow read: if canReadFinance();
-      allow create, update, delete: if canWriteFinance();
+      allow read: if (canReadFinance()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (canWriteFinance());
     }
 
     match /monthly_payroll_settlements/{settlementId} {
-      allow read: if canReadFinance();
-      allow create: if isValidPayrollSettlementCreate();
-      allow update: if isValidPayrollSettlementUpdate();
-      allow delete: if false;
+      allow read: if (canReadFinance()) && previewReadsAllowed();
+      allow create: if !isPreviewIdentity() && (isValidPayrollSettlementCreate());
+      allow update: if !isPreviewIdentity() && (isValidPayrollSettlementUpdate());
+      allow delete: if !isPreviewIdentity() && (false);
     }
 
     match /{collectionId}/{docId} {
-      allow read: if isFinanceCollection(collectionId) && collectionId != 'monthly_payroll_settlements'
-        && (canReadFinance() || (collectionId == 'progress_claims' && canReadClientProgressClaim()));
-      allow create, update, delete: if isFinanceCollection(collectionId)
+      allow read: if (isFinanceCollection(collectionId) && collectionId != 'monthly_payroll_settlements'
+        && (canReadFinance() || (collectionId == 'progress_claims' && canReadClientProgressClaim()))) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (isFinanceCollection(collectionId)
         && collectionId != 'monthly_payroll_settlements'
-        && canWriteFinance();
+        && canWriteFinance());
     }
 
     match /{collectionId}/{docId} {
-      allow read: if isCardStatementImportCollection(collectionId) && canReadCardBillingStatements();
-      allow create, update, delete: if false;
+      allow read: if (isCardStatementImportCollection(collectionId) && canReadCardBillingStatements()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (false);
     }
 
     match /cardAssignments/{assignmentId} {
-      allow read: if canReadSupport();
-      allow create: if canWriteSupport()
+      allow read: if (canReadSupport()) && previewReadsAllowed();
+      allow create: if !isPreviewIdentity() && (canWriteSupport()
         && isCardLifecycleParentTouched(request.resource.data.cardId)
-        && isCardLifecycleParentActiveAfter(request.resource.data.cardId);
-      allow update: if canWriteSupport()
+        && isCardLifecycleParentActiveAfter(request.resource.data.cardId));
+      allow update: if !isPreviewIdentity() && (canWriteSupport()
         && request.resource.data.cardId == resource.data.cardId
         && isCardLifecycleParentTouched(request.resource.data.cardId)
         && (
           !isOpenCardLink(request.resource.data)
           || isCardLifecycleParentActiveAfter(request.resource.data.cardId)
-        );
-      allow delete: if canWriteSupport()
+        ));
+      allow delete: if !isPreviewIdentity() && (canWriteSupport()
         && (
           isCardLifecycleParentTouched(resource.data.cardId)
           || isCardLifecycleParentMissing(resource.data.cardId)
-        );
+        ));
     }
 
     match /cards/{cardId} {
-      allow read: if canReadSupport();
-      allow create: if canWriteSupport()
+      allow read: if (canReadSupport()) && previewReadsAllowed();
+      allow create: if !isPreviewIdentity() && (canWriteSupport()
         && request.resource.data.status == 'AVAILABLE'
         && request.resource.data.get('createdAt', null) == request.time
         && request.resource.data.get('updatedAt', null) == request.time
-        && hasEmptyCardOperationalSnapshot(request.resource.data);
-      allow update: if canWriteSupport() && isValidCardStatusUpdate(cardId);
-      allow delete: if false;
+        && hasEmptyCardOperationalSnapshot(request.resource.data));
+      allow update: if !isPreviewIdentity() && (canWriteSupport() && isValidCardStatusUpdate(cardId));
+      allow delete: if !isPreviewIdentity() && (false);
     }
 
     match /cardBillingTargets/{targetId} {
-      allow read: if canReadSupport();
-      allow create: if canWriteSupport()
+      allow read: if (canReadSupport()) && previewReadsAllowed();
+      allow create: if !isPreviewIdentity() && (canWriteSupport()
         && isCardLifecycleParentTouched(request.resource.data.cardId)
-        && isCardLifecycleParentActiveAfter(request.resource.data.cardId);
-      allow update: if canWriteSupport()
+        && isCardLifecycleParentActiveAfter(request.resource.data.cardId));
+      allow update: if !isPreviewIdentity() && (canWriteSupport()
         && request.resource.data.cardId == resource.data.cardId
         && isCardLifecycleParentTouched(request.resource.data.cardId)
         && (
           !isOpenCardLink(request.resource.data)
           || isCardLifecycleParentActiveAfter(request.resource.data.cardId)
-        );
-      allow delete: if canWriteSupport()
+        ));
+      allow delete: if !isPreviewIdentity() && (canWriteSupport()
         && (
           isCardLifecycleParentTouched(resource.data.cardId)
           || isCardLifecycleParentMissing(resource.data.cardId)
-        );
+        ));
     }
 
     match /{collectionId}/{docId} {
-      allow read: if isSupportCollection(collectionId) && canReadSupport();
-      allow create, update, delete: if isSupportCollection(collectionId) && canWriteSupport();
+      allow read: if (isSupportCollection(collectionId) && canReadSupport()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (isSupportCollection(collectionId) && canWriteSupport());
     }
 
     match /welfare_game_plays/{playId} {
-      allow create: if isSignedIn()
-        && request.resource.data.userId == request.auth.uid;
-      allow get, list: if isAdmin()
-        || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow update, delete: if false;
+      allow create: if !isPreviewIdentity() && (isSignedIn()
+        && request.resource.data.userId == viewerUid());
+      allow get, list: if (isAdmin()
+        || (isSignedIn() && resource.data.userId == viewerUid())) && previewReadsAllowed();
+      allow update, delete: if !isPreviewIdentity() && (false);
     }
 
     // Construction plans retain a revision trail. Issued/closed records are
     // immutable; corrections must be authored as a new draft revision.
     match /constructionPlans/{planId} {
-      allow get: if canReadConstructionPlanData(resource.data);
+      allow get: if (canReadConstructionPlanData(resource.data)) && previewReadsAllowed();
       // Participant portfolio queries run through the scoped callable. Only
       // central roles may issue an unbounded browser collection query.
-      allow list: if hasConstructionPlanCentralAccess();
+      allow list: if (hasConstructionPlanCentralAccess()) && previewReadsAllowed();
       // Draft identity, document number and revision are allocated by the
       // trusted series transaction. Browser clients may edit an existing
       // draft while holding its lock, but cannot create a parallel lineage.
-      allow create: if false;
-      allow update: if canWriteConstructionPlanData(resource.data) && isValidConstructionPlanUpdate();
-      allow delete: if false;
+      allow create: if !isPreviewIdentity() && (false);
+      allow update: if !isPreviewIdentity() && (canWriteConstructionPlanData(resource.data) && isValidConstructionPlanUpdate());
+      allow delete: if !isPreviewIdentity() && (false);
     }
 
     // Review bodies and replies can be narrower than the parent plan ACL
@@ -1829,106 +1858,118 @@ service cloud.firestore {
     // policies impossible to enforce consistently, so all collaboration data
     // is projected by the trusted callables.
     match /constructionPlans/{planId}/comments/{commentId}/{nested=**} {
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /constructionPlans/{planId}/{subcollection}/{nestedDocId}/{nested=**} {
       // Review comment visibility is stricter than plan participation and is
       // filtered by the trusted callable. Snapshot/workflow metadata remains
       // readable to plan participants through the parent ACL.
-      allow read: if subcollection != 'comments' && canReadConstructionPlanById(planId);
-      allow write: if false;
+      allow read: if (subcollection != 'comments' && canReadConstructionPlanById(planId)) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /constructionPlanSeries/{seriesId} {
-      allow get, list: if hasConstructionPlanCentralAccess();
-      allow create, update, delete: if false;
+      allow get, list: if (hasConstructionPlanCentralAccess()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (false);
     }
 
     match /constructionPlanSeries/{seriesId}/{subcollection}/{nestedDocId}/{nested=**} {
       // Idempotency claims and allocation internals are server-only. The
       // public lineage view is the top-level series plus plan documents.
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /constructionPlanMutationKeys/{claimId} {
       // Contains hashed idempotency claims and request fingerprints. Only the
       // trusted callable pipeline may inspect or mutate this collection.
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /constructionPlanMutationKeys/{claimId}/{subcollection}/{nestedDocId}/{nested=**} {
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /constructionPlanDrawingReuseJobs/{jobId} {
       // Contains immutable Storage paths/generations/SHA values, opaque
       // idempotency ownership and cleanup state. Visibility and mutations are
       // projected exclusively by trusted drawing-reuse callables.
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /constructionPlanDrawingReuseJobs/{jobId}/{subcollection}/{nestedDocId}/{nested=**} {
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     // Unlock requests, lifecycle idempotency claims and PDF download receipts
     // are created and projected only by trusted callables. They contain exact
     // concurrency bindings and must never be forged or enumerated by clients.
     match /constructionPlanLockRequests/{requestId} {
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /constructionPlanLifecycleMutationReceipts/{receiptId} {
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /constructionPlanPdfDownloadReceipts/{receiptId} {
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /constructionPlanPdfDownloadGrants/{grantId} {
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /welfare_game_daily_usage/{usageId} {
-      allow read: if hasActiveUserProfile();
-      allow create, update: if hasActiveUserProfile();
-      allow delete: if isAdmin();
+      allow read: if (hasActiveUserProfile()) && previewReadsAllowed();
+      allow create, update: if !isPreviewIdentity() && (hasActiveUserProfile());
+      allow delete: if !isPreviewIdentity() && (isAdmin());
     }
 
     match /{collectionId}/{docId} {
-      allow read: if isWelfareCollection(collectionId) && isAdmin();
-      allow create, update, delete: if isWelfareCollection(collectionId) && isAdmin();
+      allow read: if (isWelfareCollection(collectionId) && isAdmin()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (isWelfareCollection(collectionId) && isAdmin());
     }
 
     match /{collectionId}/{docId}/{subcollection}/{nestedDocId}/{nested=**} {
-      allow read: if isMasterDataCollection(collectionId) && canReadMasterData();
-      allow create, update, delete: if isMasterDataCollection(collectionId) && canWriteMasterData();
+      allow read: if (isMasterDataCollection(collectionId) && canReadMasterData()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (isMasterDataCollection(collectionId) && canWriteMasterData());
 
-      allow read: if isOperationsCollection(collectionId) && canReadOperations();
-      allow create, update, delete: if isOperationsCollection(collectionId) && canWriteOperations();
+      allow read: if (isOperationsCollection(collectionId) && canReadOperations()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (isOperationsCollection(collectionId) && canWriteOperations());
 
-      allow read: if isFinanceCollection(collectionId)
+      allow read: if (isFinanceCollection(collectionId)
         && collectionId != 'monthly_payroll_settlements'
-        && canReadFinance();
-      allow create, update, delete: if isFinanceCollection(collectionId)
+        && canReadFinance()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (isFinanceCollection(collectionId)
         && collectionId != 'monthly_payroll_settlements'
-        && canWriteFinance();
+        && canWriteFinance());
 
-      allow read: if isCardStatementImportCollection(collectionId) && canReadCardBillingStatements();
-      allow create, update, delete: if false;
+      allow read: if (isCardStatementImportCollection(collectionId) && canReadCardBillingStatements()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (false);
 
-      allow read: if isSupportCollection(collectionId) && canReadSupport();
-      allow create, update, delete: if isSupportCollection(collectionId) && canWriteSupport();
+      allow read: if (isSupportCollection(collectionId) && canReadSupport()) && previewReadsAllowed();
+      allow create, update, delete: if !isPreviewIdentity() && (isSupportCollection(collectionId) && canWriteSupport());
     }
 
     match /{collectionId}/{docId} {
-      allow read, write: if hasActiveUserProfile() && !isLockedCollection(collectionId);
+      allow read: if (hasActiveUserProfile() && !isLockedCollection(collectionId)) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (hasActiveUserProfile() && !isLockedCollection(collectionId));
     }
 
     match /{collectionId}/{docId}/{subcollection}/{nestedDocId}/{nested=**} {
-      allow read, write: if hasActiveUserProfile() && !isLockedCollection(collectionId);
+      allow read: if (hasActiveUserProfile() && !isLockedCollection(collectionId)) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (hasActiveUserProfile() && !isLockedCollection(collectionId));
     }
   }
 }

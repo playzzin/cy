@@ -212,3 +212,9 @@ it('동적 직책 ID를 실제 팀장 이름으로 해석한다', async () => {
         .mockResolvedValueOnce({ data: () => ({ admin: { positionConfig: [{ id: 'custom', name: '팀장' }] } }) });
     expect(await getTeamScopedRows('teams')).toEqual([{ id: 'own-worker' }]);
 });
+
+it('작업자 계정도 전체 목록 조회 대신 서버의 본인 범위 조회를 사용한다', async () => {
+    (getDoc as jest.Mock).mockResolvedValue({ data: () => ({ role: 'user', accountType: 'worker', position: '작업자', status: 'active' }) });
+    await getTeamScopedRows('workers');
+    expect(httpsCallable).toHaveBeenCalledWith({}, 'getTeamScopedData');
+});

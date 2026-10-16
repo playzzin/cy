@@ -29,8 +29,11 @@ import {
 } from '../../utils/themeMode';
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 import { getMenuModeStorageKey } from '../../utils/menuModeStorage';
-import { getPositionMenuView } from '../../utils/linkedPositionMenus';
+import { getPositionMenuView, getLinkedMenuRef, isDevPositionSite } from '../../utils/linkedPositionMenus';
+import { getDevPreviewSession, isDevPreviewFrame } from '../../utils/devPreviewRuntime';
 import { getSidebarSide } from '../../utils/sidebarSide';
+import DevUserPreview from '../developer/DevUserPreview';
+import DevPreviewRouteGuard from '../developer/DevPreviewRouteGuard';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { filterTeamWorkflowMenu } from '../../utils/teamWorkflowPolicy';
 
@@ -60,12 +63,14 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         return saved || 'admin';
     });
     const [currentPosition, setCurrentPosition] = useState(() => {
+        if (isDevPreviewFrame) return getDevPreviewSession()?.positionId || 'full';
         return localStorage.getItem(getMenuModeStorageKey('cy_current_position', currentUser?.uid)) || 'full';
     });
     const [userManuallyChangedSite, setUserManuallyChangedSite] = useState(() => {
         return localStorage.getItem(getMenuModeStorageKey('cy_site_manual', currentUser?.uid)) === 'true';
     });
     const [userManuallyChangedPosition, setUserManuallyChangedPosition] = useState(() => {
+        if (isDevPreviewFrame) return true;
         return localStorage.getItem(getMenuModeStorageKey('cy_position_manual', currentUser?.uid)) === 'true';
     });
     const [activeMenuItems, setActiveMenuItems] = useState<{ [key: string]: boolean }>({});
@@ -76,6 +81,8 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
 
     // Dynamic Menu State
     const [siteData, setSiteData] = useState<SiteDataType | null>(null);
+    const [canPreviewUsers, setCanPreviewUsers] = useState(false);
+    const [userPreview, setUserPreview] = useState<{ positionId: string; path: string } | null>(null);
 
     const autoAppliedPositionForUserRef = useRef('');
 
@@ -367,6 +374,26 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     );
 
     useEffect(() => {
+        let alive = true;
+        setCanPreviewUsers(false);
+        if (isDevPreviewFrame || !currentUser?.uid || !siteData) return;
+        void import('../../services/userService').then(({ userService }) => userService.getUser(currentUser.uid, true)).then(profile => {
+            const roles = [profile?.role, profile?.position, ...(profile?.additionalPositions || [])].map(role => String(role || '').trim().toLowerCase().replace(/^pos_/, ''));
+            const allowed = profile?.status === 'active' && (roles.some(role => ['dev', 'developer', '개발', '개발자'].includes(role))
+                || positions.some(position => isDevPositionSite(siteData, getPositionSiteKey(position.id)) && roles.includes(position.id.toLowerCase().replace(/^pos_/, ''))));
+            if (alive) { setCanPreviewUsers(Boolean(allowed)); if (!allowed) setUserPreview(null); }
+        }).catch(() => { if (alive) { setCanPreviewUsers(false); setUserPreview(null); } });
+        return () => { alive = false; };
+    }, [currentUser?.uid, siteData, positions]);
+    const openUserPreview = (positionId: string, path?: string) => {
+        if (!canPreviewUsers) return;
+        const configuredId = positions.find(position => getPositionSiteKey(position.id) === getPositionSiteKey(positionId))?.id || positionId.replace(/^pos_/, '');
+        setUserPreview(previous => ({ positionId: configuredId, path: path || previous?.path || location.pathname + location.search }));
+        closePanels();
+        setIsMobileOpen(false);
+    };
+
+    useEffect(() => {
         if (
             !currentUser?.uid
             || !siteData
@@ -454,7 +481,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
 
     const POSITION_SITE_MAP = getPositionSiteMap();
 
-    // Use the selected position menu and its layout side
+    // Use position-based site for left menu
     // 'full' position uses currentSite (full admin menu)
     const availableSiteKeys = siteData
         ? Object.keys(siteData).filter((siteKey) => Boolean(siteData[siteKey]?.menu))
@@ -479,6 +506,9 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
 
     const handleMenuItemClick = (item: MenuItem, position?: number) => {
         if (!currentSiteData) return;
+        const linked = getLinkedMenuRef(item.id);
+        if (canPreviewUsers && linked) { openUserPreview(linked.siteKey, item.path); return; }
+        setUserPreview(null);
 
         // 1. Direct Path (Priority)
         if (item.path) {
@@ -526,6 +556,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     };
 
     const changeSite = (siteKey: string) => {
+        setUserPreview(null);
         setCurrentSite(siteKey);
         setCurrentPosition('full');
         setActiveMenuItems({});
@@ -551,6 +582,8 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     };
 
     const changePosition = (positionId: string) => {
+        if (userPreview && canPreviewUsers && !isDevPositionSite(siteData, getPositionSiteKey(positionId))) { openUserPreview(positionId); return; }
+        setUserPreview(null);
         setCurrentPosition(positionId);
         setActiveMenuItems({});
         localStorage.setItem(getMenuModeStorageKey('cy_current_position', currentUser?.uid), positionId);
@@ -652,6 +685,12 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         );
     }
 
+    const routedContent = userPreview && canPreviewUsers && currentUser
+        ? <DevUserPreview key={currentUser.uid} actorUid={currentUser.uid} positionId={userPreview.positionId} path={userPreview.path}
+            positions={positions} siteData={siteData} onPosition={positionId => openUserPreview(positionId)}
+            onPath={path => setUserPreview(previous => previous ? { ...previous, path } : previous)} onExit={() => setUserPreview(null)} />
+        : isDevPreviewFrame ? <DevPreviewRouteGuard siteData={siteData} positionId={currentPosition}>{children}</DevPreviewRouteGuard> : children;
+
     // Layout Variant for Cheongyeon SITE (test) - Same structure as Admin ERP with video background
     if (isSiteLayerMode && siteData?.[currentSite]?.menu && currentSiteData) {
         const isNation = currentSite === 'nation';
@@ -687,6 +726,8 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
                         <Sidebar
                             side={sidebarSide}
                             currentSite={effectiveSite}
+                            onPreviewPosition={canPreviewUsers ? openUserPreview : undefined}
+                            onPreviewExit={() => setUserPreview(null)}
                             currentSiteData={currentSiteData}
                             closeAll={closeAll}
                             activeMenuItems={activeMenuItems}
@@ -734,7 +775,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
                         <RuntimeErrorBoundary
                             resetKeys={[location.pathname]}
                         >
-                            {children}
+                            {routedContent}
                         </RuntimeErrorBoundary>
                     </main>
                 </div>
@@ -768,8 +809,10 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
 
                 <RuntimeErrorBoundary>
                     <Sidebar
-                        side={sidebarSide}
+                            side={sidebarSide}
                         currentSite={effectiveSite}
+                        onPreviewPosition={canPreviewUsers ? openUserPreview : undefined}
+                        onPreviewExit={() => setUserPreview(null)}
                         currentSiteData={currentSiteData}
                         closeAll={closeAll}
                         activeMenuItems={activeMenuItems}
@@ -814,7 +857,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
                     <RuntimeErrorBoundary
                         resetKeys={[location.pathname]}
                     >
-                        {children}
+                        {routedContent}
                     </RuntimeErrorBoundary>
                 </main>
             </div>

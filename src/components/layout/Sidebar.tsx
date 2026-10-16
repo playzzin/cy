@@ -58,6 +58,7 @@ import MenuDivider from './MenuDivider';
 import { isMenuDivider } from '../../utils/menuDivider';
 import { getLinkedMenuRef } from '../../utils/linkedPositionMenus';
 import SidebarMenuBranch from './SidebarMenuBranch';
+
 import type { SidebarSide } from '../../utils/sidebarSide';
 
 interface SidebarProps {
@@ -78,6 +79,8 @@ interface SidebarProps {
     openMobileSidebar: () => void;
     toggleSidebar?: () => void;
     logoUrl?: string;
+    onPreviewPosition?: (positionId: string, path?: string) => void;
+    onPreviewExit?: () => void;
 }
 
 // Map menu text/path to permission IDs
@@ -224,6 +227,8 @@ const Sidebar: React.FC<SidebarProps> = ({
     toggleSubmenu,
     toggleNestedSubmenu,
     handleMenuItemClick,
+    onPreviewPosition,
+    onPreviewExit,
     handleSubMenuClick,
     handleLogoClick,
     menuPaths,
@@ -383,7 +388,10 @@ const Sidebar: React.FC<SidebarProps> = ({
         return params.get('newTab') === '1' || params.get('newTab') === 'true';
     };
 
-    const openMenuPath = (path: string) => {
+    const openMenuPath = (path: string, itemId?: string) => {
+        const linked = getLinkedMenuRef(itemId);
+        if (linked && onPreviewPosition) { onPreviewPosition(linked.siteKey, path); return; }
+        onPreviewExit?.();
         if (shouldOpenInNewTab(path)) {
             window.open(path, '_blank', 'noopener,noreferrer');
             if (isMobile) closeAll();
@@ -660,6 +668,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                                             )}
                                         </a>
                                     )}
+                                    {onPreviewPosition && getLinkedMenuRef(item.id)?.itemId === undefined && getLinkedMenuRef(item.id) && (!isSidebarCollapsed || isMobile) &&
+                                        <button type="button" className="dev-preview-entry" onClick={event => { event.stopPropagation(); onPreviewPosition(getLinkedMenuRef(item.id)!.siteKey); }} aria-label={`${item.text} 사용자 시점으로 보기`}>이 직책으로 보기</button>}
                                     {hasSub && isExpanded && (!isSidebarCollapsed || isMobile) && (
                                         <ul className="submenu-list" style={{ maxHeight: isExpanded ? 'none' : 0 }}>
                                             <SidebarMenuBranch items={item.sub || []} parentId={itemId}

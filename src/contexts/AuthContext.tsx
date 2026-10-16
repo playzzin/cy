@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { Auth, User } from 'firebase/auth';
 import { createDevAdminUser, disableDevAdminSession, isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { loginAccessTracker, writeAuthLog, writeLogoutLog } from '../services/loginAccessTracker';
+import { isDevPreviewFrame, postPreviewMessage, startDevPreviewAuth } from '../utils/devPreviewRuntime';
 
 type FirebaseAuthModule = typeof import('firebase/auth');
 
@@ -58,8 +59,10 @@ export function useAuth() {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(() => createDevAdminUser());
   const [loading, setLoading] = useState(() => !isDevAdminSessionEnabled());
+  const [previewError, setPreviewError] = useState('');
 
   useEffect(() => {
+    if (isDevPreviewFrame) return startDevPreviewAuth(user => { setCurrentUser(user); setLoading(false); }, message => { setPreviewError(message); setLoading(false); });
     const devAdminUser = createDevAdminUser();
     if (devAdminUser) {
       loginAccessTracker.observe(devAdminUser);
@@ -125,6 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function login(email: string, password: string) {
+    if (isDevPreviewFrame) throw new Error('미리보기에서는 로그인 정보를 변경할 수 없습니다.');
     const { auth, authModule } = await loadFirebaseAuth();
     const finishAccess = loginAccessTracker.beginInteractiveLogin();
 
@@ -157,6 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signup(email: string, password: string) {
+    if (isDevPreviewFrame) throw new Error('미리보기에서는 계정을 만들 수 없습니다.');
     const { auth, authModule } = await loadFirebaseAuth();
     const finishAccess = loginAccessTracker.beginInteractiveLogin();
     try {
@@ -171,6 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
+    if (isDevPreviewFrame) { postPreviewMessage('cy-preview:exit'); return; }
     if (isDevAdminSessionEnabled()) {
       const user = createDevAdminUser();
       await writeLogoutLog({ action: 'logout', provider: 'dev-admin', method: 'manual', user });
@@ -228,6 +234,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function loginWithGoogle() {
+    if (isDevPreviewFrame) throw new Error('미리보기에서는 로그인 정보를 변경할 수 없습니다.');
     const { auth, authModule } = await loadFirebaseAuth();
     const provider = new authModule.GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
@@ -268,6 +275,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loginWithGoogle,
     loading
   };
+
+  if (isDevPreviewFrame && previewError) return <p role="alert" className="p-6">{previewError}</p>;
 
   return (
     <AuthContext.Provider value={value}>

@@ -1,0 +1,115 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../config/firebase';
+import type { PositionItem, SiteDataType, MenuItem } from '../../types/menu';
+import { positionSiteKey } from '../../utils/linkedPositionMenus';
+import { safePreviewPath, previewFrameUrl, type PreviewBootstrap } from '../../utils/devPreviewRuntime';
+import './DevUserPreview.css';
+
+export interface PreviewAccount { uid: string; displayName: string; positionIds: string[]; scopeLabel: string; linked: boolean; additionalPositions: string[] }
+interface Props { actorUid: string; positionId: string; path: string; positions: PositionItem[]; siteData: SiteDataType;
+    onPosition: (id: string) => void; onPath: (path: string) => void; onExit: () => void }
+type Choice = { positionId: string; uid: string };
+export function choosePreviewAccount(accounts: PreviewAccount[], positionId: string, lastUid?: string): string {
+    const candidates = accounts.filter(account => account.positionIds.includes(positionId));
+    return candidates.find(account => account.uid === lastUid)?.uid || (candidates.length === 1 ? candidates[0].uid : '');
+}
+export default function DevUserPreview({ actorUid, positionId, path, positions, siteData, onPosition, onPath, onExit }: Props) {
+    const storageKey = `cy-preview-recent:${actorUid}`;
+    const [recent, setRecent] = useState<Choice[]>(() => {
+        try { const data = JSON.parse(sessionStorage.getItem(storageKey) || '[]'); return Array.isArray(data) ? data.filter(item => typeof item?.uid === 'string' && typeof item?.positionId === 'string').slice(0, 5) : []; } catch { return []; }
+    });
+    const [accounts, setAccounts] = useState<PreviewAccount[]>([]);
+    const [directoryLoading, setDirectoryLoading] = useState(true);
+    const [directoryRevision, setDirectoryRevision] = useState(0);
+    const [uid, setUid] = useState('');
+    const [session, setSession] = useState<(PreviewBootstrap & { frameId: string; initialPath: string }) | null>(null);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+    const [focus, setFocus] = useState(false);
+    const [renew, setRenew] = useState(0);
+    const iframe = useRef<HTMLIFrameElement>(null);
+    const currentPath = useRef(path); currentPath.current = path;
+    const recentRef = useRef(recent); recentRef.current = recent;
+    const callbacks = useRef({ onExit, onPath }); callbacks.current = { onExit, onPath };
+    const candidates = accounts.filter(account => account.positionIds.includes(positionId));
+    const selected = candidates.find(account => account.uid === uid);
+    const activeSession = selected && session?.target.uid === uid && session.positionId === positionId ? session : null;
+    const position = positions.find(item => item.id === positionId);
+
+    useEffect(() => {
+        let alive = true; setDirectoryLoading(true); setError('');
+        httpsCallable<unknown, { accounts: PreviewAccount[] }>(functions, 'getDevPreviewAccounts')({}).then(result => {
+            if (alive) setAccounts(result.data.accounts);
+        }).catch(() => { if (alive) setError('사용자 목록을 불러오지 못했습니다. DEV 권한과 미리보기 서버 배포 상태를 확인해 주세요.'); })
+            .finally(() => { if (alive) setDirectoryLoading(false); });
+        return () => { alive = false; };
+    }, [actorUid, directoryRevision]);
+    useEffect(() => {
+        setSession(null); setError('');
+        setUid(choosePreviewAccount(accounts, positionId, recentRef.current.find(item => item.positionId === positionId)?.uid));
+    }, [accounts, positionId]);
+    useEffect(() => {
+        let alive = true; setSession(null); setBusy(Boolean(selected));
+        if (!selected) return () => { alive = false; };
+        setError('');
+        httpsCallable<{ targetUid: string }, Omit<PreviewBootstrap, 'positionId'>>(functions, 'createDevPreviewSession')({ targetUid: selected.uid }).then(result => {
+            if (!alive) return;
+            setSession({ ...result.data, positionId, frameId: `cy-dev-preview:${crypto.randomUUID()}`, initialPath: safePreviewPath(currentPath.current) });
+            const choice = { positionId, uid: selected.uid };
+            const next = [choice, ...recentRef.current.filter(item => item.uid !== choice.uid || item.positionId !== choice.positionId)].slice(0, 5);
+            setRecent(next); sessionStorage.setItem(storageKey, JSON.stringify(next));
+        }).catch(() => { if (alive) { setBusy(false); setError('이 계정의 미리보기를 시작하지 못했습니다. 계정 활성 상태와 DEV 권한을 확인해 주세요.'); } });
+        return () => { alive = false; };
+    }, [selected, positionId, renew, storageKey]);
+    useEffect(() => {
+        if (!activeSession) return;
+        const loadingTimer = setTimeout(() => { setBusy(false); setSession(null); setError('사용자 화면을 불러오지 못했습니다. 연결을 확인하고 다시 시작해 주세요.'); }, 45000);
+        const send = (type: string, extra: Record<string, unknown> = {}) => iframe.current?.contentWindow?.postMessage({ type, frameId: activeSession.frameId, ...extra }, window.location.origin);
+        const listener = (event: MessageEvent) => {
+            if (event.origin !== window.location.origin || event.source !== iframe.current?.contentWindow || event.data?.frameId !== activeSession.frameId) return;
+            if (event.data.type === 'cy-preview:ready') send('cy-preview:bootstrap', { session: activeSession });
+            if (event.data.type === 'cy-preview:authenticated') { clearTimeout(loadingTimer); setBusy(false); send('cy-preview:navigate', { path: safePreviewPath(currentPath.current) }); }
+            if (event.data.type === 'cy-preview:path' && typeof event.data.path === 'string') callbacks.current.onPath(safePreviewPath(event.data.path));
+            if (event.data.type === 'cy-preview:exit') callbacks.current.onExit();
+            if (['cy-preview:expired', 'cy-preview:failed'].includes(event.data.type)) { setBusy(false); setSession(null); setError('미리보기가 종료되었습니다. 다시 시작해 주세요.'); }
+        };
+        window.addEventListener('message', listener);
+        const timer = setTimeout(() => { setBusy(false); setSession(null); setError('미리보기 시간이 만료되었습니다. 다시 시작해 주세요.'); }, Math.max(0, activeSession.expiresAt * 1000 - Date.now()));
+        return () => { window.removeEventListener('message', listener); clearTimeout(timer); clearTimeout(loadingTimer); };
+    }, [activeSession]);
+    useEffect(() => {
+        if (activeSession) iframe.current?.contentWindow?.postMessage({ type: 'cy-preview:navigate', frameId: activeSession.frameId, path: safePreviewPath(path) }, window.location.origin);
+    }, [path, activeSession]);
+    const basicItems = siteData[positionSiteKey(positionId)]?.menu || [];
+    const basicMenu = (items: (MenuItem | string)[]): React.ReactNode => items.map((entry, index) => {
+        const item = typeof entry === 'string' ? { text: entry } : entry;
+        if (item.hide || item.text === '-') return null;
+        return <li key={item.id || `${item.text}-${index}`}><span>{item.text}</span>{item.sub && <ul>{basicMenu(item.sub)}</ul>}</li>;
+    });
+    return <section className={`dev-user-preview ${focus ? 'dev-user-preview--focus' : ''}`} aria-label="사용자 시점 확인">
+        <div className="dev-user-preview__toolbar">
+            <div className="dev-user-preview__heading"><strong>사용자 시점 확인</strong><div><button onClick={() => setFocus(value => !value)}>{focus ? 'DEV 패널 표시' : '사용자 화면만'}</button><button onClick={onExit}>DEV로 복귀</button></div></div>
+            <div className="dev-user-preview__selectors">
+                <label>직책<select aria-label="직책" value={positionId} onChange={event => onPosition(event.target.value)}>{positions.filter(item => item.id !== 'full').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>보기 기준<select aria-label="보기 기준" value={selected?.uid || ''} onChange={event => { setSession(null); setUid(event.target.value); }} disabled={directoryLoading}><option value="">직책 기본 · 메뉴 구성</option>{candidates.map(account => <option key={account.uid} value={account.uid}>{account.displayName} · {account.scopeLabel}</option>)}</select></label>
+            </div>
+            <div className="dev-user-preview__recent"><span>최근 확인</span>{recent.map(choice => {
+                const account = accounts.find(item => item.uid === choice.uid && item.positionIds.includes(choice.positionId));
+                if (!account) return null;
+                return <button key={`${choice.positionId}:${choice.uid}`} onClick={() => {
+                    if (choice.positionId === positionId && choice.uid === uid) return;
+                    const next = [choice, ...recentRef.current.filter(item => item.uid !== choice.uid || item.positionId !== choice.positionId)].slice(0, 5);
+                    setRecent(next); recentRef.current = next; onPosition(choice.positionId); setSession(null); setUid(choice.uid);
+                }}>{account.displayName} · {positions.find(item => item.id === choice.positionId)?.name}</button>;
+            })}</div>
+        </div>
+        <div className="dev-user-preview__status" role="status">{selected ? `${selected.displayName} 시점 · ${selected.scopeLabel}` : `${position?.name || '직책'} 기본 메뉴`}<span>조회 미리보기 · 저장·승인·발송 차단</span></div>
+        {error && <div className="dev-user-preview__error" role="alert">{error}<button onClick={() => selected ? setRenew(value => value + 1) : setDirectoryRevision(value => value + 1)}>다시 시작</button></div>}
+        {(directoryLoading || busy) && <p role="status" className="p-4">{directoryLoading ? '연결된 사용자 계정을 확인하는 중입니다.' : '선택한 사용자의 화면을 준비하는 중입니다.'}</p>}
+        {activeSession && <iframe key={activeSession.frameId} ref={iframe} name={activeSession.frameId}
+            src={previewFrameUrl(activeSession.initialPath)}
+            title={`${selected?.displayName} 사용자 화면`} sandbox="allow-scripts allow-same-origin" referrerPolicy="same-origin" />}
+        {!selected && !directoryLoading && !error && <div className="dev-user-preview__basic"><div><strong>{position?.name} 메뉴 구성</strong><ul>{basicMenu(basicItems)}</ul></div><p>{candidates.length ? '사용자를 선택하면 해당 계정의 메뉴·버튼·실제 조회 범위로 화면을 확인할 수 있습니다.' : '이 직책에 연결된 활성 계정이 없습니다. 계정 연결 후 사용자 시점을 확인할 수 있습니다.'}</p></div>}
+    </section>;
+}

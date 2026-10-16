@@ -5,6 +5,7 @@ import { createHash } from 'crypto';
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import { getServerGeminiSettings } from './serverAiSettings';
+import { requireCallableAuth } from './auth';
 
 export type CardExpenseAuditSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type CardExpenseAuditReviewStatus = 'OPEN' | 'NORMAL' | 'NEEDS_EVIDENCE' | 'EXCEPTION' | 'ACKNOWLEDGED';
@@ -189,20 +190,17 @@ export const hasStrictCardExpenseAuditAccess = (source: Record<string, unknown>)
 const requireCardExpenseAuditAccess = async (
     context: functions.https.CallableContext,
 ): Promise<{ uid: string; name: string; email: string | null }> => {
-    if (!context.auth?.uid) {
-        throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다.');
-    }
-
-    const token = (context.auth.token || {}) as Record<string, unknown>;
-    const userSnap = await admin.firestore().collection('users').doc(context.auth.uid).get();
+    const auth = requireCallableAuth(context);
+    const token = (auth.token || {}) as Record<string, unknown>;
+    const userSnap = await admin.firestore().collection('users').doc(auth.uid).get();
     const user = userSnap.data() || {};
     if (!hasStrictCardExpenseAuditAccess(token) && !hasStrictCardExpenseAuditAccess(user)) {
         throw new functions.https.HttpsError('permission-denied', '카드 AI 감사는 CEO와 DEV 직책만 이용할 수 있습니다.');
     }
 
     return {
-        uid: context.auth.uid,
-        name: asString(user.displayName || token.name || token.email || context.auth.uid),
+        uid: auth.uid,
+        name: asString(user.displayName || token.name || token.email || auth.uid),
         email: asString(user.email || token.email) || null,
     };
 };

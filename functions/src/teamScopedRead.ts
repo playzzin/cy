@@ -1,4 +1,5 @@
 import { resolvedRoleNames } from './teamExpenseRequests';
+import { readWorkerScopedData } from './workerScopedRead';
 import * as admin from 'firebase-admin';
 import { FieldPath, Timestamp } from 'firebase-admin/firestore';
 import * as functions from 'firebase-functions/v1';
@@ -48,7 +49,11 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
     const linked = linkedIds.length ? await db.getAll(...linkedIds.map((id: string) => db.collection('workers').doc(id))) : [];
     const anchors = linked.filter(doc => doc.exists && doc.data()?.isActive !== false && !['퇴사', 'inactive', 'retired', 'archived'].includes(text(doc.data()?.status))).map(doc => ({ ...doc.data(), id: doc.id } as TeamRow));
     const menu = (await db.doc('settings/menus_v12').get()).data();
-    if (!anchors.length || !resolvedRoleNames(user, menu).some(isTeamLeader)) {
+    const roles = resolvedRoleNames(user, menu);
+    if (!roles.some(isTeamLeader) && (user.accountType === 'worker' || roles.some(role => ['worker', '작업자', '일반'].includes(text(role).toLowerCase())))) {
+        return serialize(await readWorkerScopedData(db, auth.uid, user, anchors, requests, batch));
+    }
+    if (!anchors.length || !roles.some(isTeamLeader)) {
         throw new functions.https.HttpsError('permission-denied', '팀장 계정의 작업자 연결을 확인해 주세요.');
     }
     const anchorTeamIds: string[] = Array.from(new Set(anchors.map(row => text(row.teamId)).filter(Boolean)));

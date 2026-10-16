@@ -4,6 +4,7 @@ import { auth, db, functions } from '../config/firebase';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 
 const leaderRoles = new Set(['팀장', '반장', 'teamlead', 'teamleader', 'foreman']);
+const workerRoles = new Set(['worker', '작업자', '일반']);
 const roleKey = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[\s_-]/g, '');
 const unrestricted = new Set(['admin', 'administrator', 'superadmin', 'owner', 'dev', 'developer', '관리자', '사장', '실장', 'manager', 'manager1', 'manager2', 'manager3', '매니저', '매니저1', '매니저2', '매니저3', '메니저1', '메니저2', '메니저3']);
 const scopedCollections = new Set([
@@ -48,7 +49,7 @@ export const usesTeamScopedReads = async (): Promise<boolean> => {
             roles = roles.flatMap(value => [value, positions.find(position => value === position.id || value === `pos_${position.id}`)?.name]);
         }
         if (roles.some(value => unrestricted.has(roleKey(value)))) return false;
-        const leader = roles.some(value => leaderRoles.has(roleKey(value)));
+        const leader = roles.some(value => leaderRoles.has(roleKey(value)) || workerRoles.has(roleKey(value)));
         if (leader && auth.currentUser === user) leaderRoute = { user, until: Date.now() + 10_000 };
         return leader;
     })();

@@ -4,6 +4,8 @@ import * as admin from 'firebase-admin';
 admin.initializeApp();
 admin.firestore().settings({ ignoreUndefinedProperties: true });
 
+export { getDevPreviewAccounts, createDevPreviewSession } from './devUserPreview';
+
 export { recordGeminiClientUsage, listGeminiUsageLogs } from './geminiUsageLogs';
 
 export { setSmartMemoReminder, dispatchSmartMemoReminders } from './smartMemoReminders';
@@ -161,3 +163,9 @@ export { workerSignatures } from './workerSignatures';
 export { aiWorkspace } from './aiWorkspace';
 export { dailyReportAnalyticsAi } from './dailyReportAnalyticsAi';
 export { aiWorkspaceReports, generateScheduledWorkspaceReports } from './aiWorkspace/scheduledReports';
+
+// Existing production APIs retained behind the preview boundary.
+export { geminiGateway } from './geminiGateway';
+export { parseManpowerDbQuestionWithGemini } from './manpowerDbAiSearch';
+export { sendKakaoAlimtalk, sendFriendTalk, getKakaoManagementUrl } from './kakao';
+export { issueTaxInvoiceApi, getTaxInvoiceListApi, getTaxInvoiceStatusApi } from './legacyTaxInvoice';

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MessagePayload, Messaging } from 'firebase/messaging';
 import { app } from '../../config/firebase';
+import { isDevPreviewFrame } from '../../utils/devPreviewRuntime';
 import {
   disableRememberedNotificationDevice,
   disableNotificationDeviceForToken,
@@ -115,6 +116,7 @@ export const useBankPushNotifications = (
   }, []);
 
   const registerCurrentBrowser = useCallback(async (requestPermission: boolean): Promise<boolean> => {
+    if (isDevPreviewFrame) return false;
     if (!uid || !enabled) return false;
     setBusy(true);
     setError('');
@@ -162,6 +164,7 @@ export const useBankPushNotifications = (
   const enablePush = useCallback(() => registerCurrentBrowser(true), [registerCurrentBrowser]);
 
   const disablePush = useCallback(async (): Promise<boolean> => {
+    if (isDevPreviewFrame) return false;
     if (!uid) return false;
     setBusy(true);
     setError('');

@@ -1,5 +1,6 @@
 import { getApps, initializeApp } from 'firebase/app';
 import { assertDeploymentEnvironment } from './deploymentEnvironment';
+import { isDevPreviewFrame } from '../utils/devPreviewRuntime';
 
 const REQUIRED_ENV_KEYS = [
   'REACT_APP_FIREBASE_API_KEY',
@@ -21,7 +22,7 @@ const requireEnv = (key: RequiredEnvKey): string => {
 };
 
 export const app = (() => {
-  const existing = getApps();
+  const existing = getApps().filter(candidate => candidate.name === (isDevPreviewFrame ? 'cy-dev-preview' : '[DEFAULT]'));
   if (existing.length > 0) {
     if (existing[0].options?.projectId) assertDeploymentEnvironment(existing[0].options.projectId, typeof window === 'undefined' ? '' : window.location.hostname);
     return existing[0];
@@ -39,7 +40,7 @@ export const app = (() => {
     ...(measurementId ? { measurementId } : {})
   };
 
-  return initializeApp(firebaseConfig);
+  return initializeApp(firebaseConfig, isDevPreviewFrame ? 'cy-dev-preview' : '[DEFAULT]');
 })();
 
 export default app;

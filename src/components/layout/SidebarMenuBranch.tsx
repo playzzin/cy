@@ -12,7 +12,7 @@ interface Props {
     expanded: Record<string, boolean>;
     onToggle: (id: string) => void;
     menuPaths: Record<string, string>;
-    onNavigate: (path: string) => void;
+    onNavigate: (path: string, itemId?: string) => void;
     isActive: (path: string | undefined) => boolean;
     displayText: (text: string) => string;
     iconName: (text: string, path?: string, icon?: string) => string;
@@ -60,7 +60,7 @@ const SidebarMenuBranch: React.FC<Props> = props => {
             </li>;
             return <li key={id} className="submenu-leaf-item has-open-btn">
                 <a href={path || '#'} className={`submenu-leaf-link ${active ? 'active' : ''}`} style={style}
-                    onClick={event => { event.preventDefault(); if (path) onNavigate(path); }}>
+                    onClick={event => { event.preventDefault(); if (path) onNavigate(path, item.id); }}>
                     {content}
                 </a>
                 {path && <button type="button" className="submenu-open-new-btn" title="새 창에서 열기" aria-label={`${label} 새 창에서 열기`}
