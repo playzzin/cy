@@ -545,10 +545,8 @@ const Header: React.FC<HeaderProps> = ({
                     <button type="button" className="header-btn header-tool-btn text-indigo-400 hover:bg-white/10"
                         onClick={() => isDevPreviewFrame ? postPreviewMessage('cy-preview:choose-position') : togglePanel('position')}
                         title={canPreviewUsers ? '직책모드' : label} aria-label={canPreviewUsers ? '직책모드 열기' : label + ' 열기'}
-                        aria-expanded={isPositionPanelOpen} aria-controls="position-panel"
-                        style={canPreviewUsers ? { width: 'auto', gap: 6, padding: '0 10px' } : undefined}>
+                        aria-expanded={isPositionPanelOpen} aria-controls="position-panel">
                         <FontAwesomeIcon icon={resolveIcon(item.icon, faIdBadge)} style={iconStyle} />
-                        {canPreviewUsers && <span style={{ fontSize: 13 }}>직책모드</span>}
                     </button>
                     {isPositionPanelOpen && (
                         <PositionPanel
