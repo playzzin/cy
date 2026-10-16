@@ -1,6 +1,6 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import TeamAccountApprovalPage from './TeamAccountApprovalPage';
 import { teamAccountApprovalService } from '../../services/teamAccountApprovalService';
 jest.mock('../../services/teamAccountApprovalService', () => ({ teamAccountApprovalService: { list: jest.fn(), approve: jest.fn() } }));
@@ -32,4 +32,67 @@ test('페이지를 추가하고 검색하며 권한 회수 오류 때 이전 목
     fireEvent.click(screen.getByText('새로고침'));
     await screen.findByRole('alert');
     await waitFor(() => expect(screen.queryByText('합성 가')).not.toBeInTheDocument());
+});
+
+afterEach(() => { jest.useRealTimers(); });
+test('창 복귀와 정기 갱신이 승인 확인창과 선택한 대상을 지우지 않는다', async () => {
+    jest.useFakeTimers();
+    render(<TeamAccountApprovalPage />);
+    await screen.findByText('합성 가');
+    fireEvent.click(screen.getByText('표시된 목록 선택 (최대 20건)'));
+    fireEvent.click(screen.getByText('선택 2건 승인·갱신'));
+    fireEvent.focus(window);
+    act(() => { jest.advanceTimersByTime(60000); });
+    expect(screen.getByRole('dialog')).toHaveTextContent('합성 가 · 소속 팀 · w1');
+    expect(teamAccountApprovalService.list).toHaveBeenCalledTimes(1);
+});
+test('조회 중 창 복귀와 정기 갱신이 중복 요청을 만들지 않는다', async () => {
+    jest.useFakeTimers();
+    let finish!: (page: unknown) => void;
+    (teamAccountApprovalService.list as jest.Mock).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    render(<TeamAccountApprovalPage />);
+    fireEvent.focus(window);
+    act(() => { jest.advanceTimersByTime(120000); });
+    expect(teamAccountApprovalService.list).toHaveBeenCalledTimes(1);
+    await act(async () => { finish({ rows, nextCursor: null }); });
+    expect(screen.getByText('합성 가')).toBeInTheDocument();
+});
+test('추가 조회한 페이지와 검색 상태가 창 복귀 뒤에도 유지된다', async () => {
+    (teamAccountApprovalService.list as jest.Mock).mockResolvedValueOnce({ rows: [rows[0]], nextCursor: 'w1' }).mockResolvedValueOnce({ rows: [rows[1]], nextCursor: null });
+    render(<TeamAccountApprovalPage />);
+    fireEvent.click(await screen.findByText('다음 팀원 50명 조회'));
+    await screen.findByText('합성 나');
+    fireEvent.focus(window);
+    expect(screen.getByText('합성 나')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('이름 또는 팀 이름'), { target: { value: '합성 나' } });
+    fireEvent.focus(window);
+    expect(screen.getByText('합성 나')).toBeInTheDocument();
+    expect(teamAccountApprovalService.list).toHaveBeenCalledTimes(2);
+});
+test('권한 거부를 구분해 안내하고 자동 재시도를 멈추되 수동 재시도는 허용한다', async () => {
+    jest.useFakeTimers();
+    (teamAccountApprovalService.list as jest.Mock).mockRejectedValueOnce({ code: 'functions/permission-denied' });
+    render(<TeamAccountApprovalPage />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('팀장 계정');
+    fireEvent.focus(window);
+    act(() => { jest.advanceTimersByTime(120000); });
+    expect(teamAccountApprovalService.list).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText('새로고침'));
+    await screen.findByText('합성 가');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+test('유휴 상태에서는 자동 갱신하고 부분 실패 결과는 창 복귀 뒤에도 유지한다', async () => {
+    (teamAccountApprovalService.approve as jest.Mock).mockResolvedValue({ results: [{ linkId: 'one', status: 'active' }, { linkId: 'two', status: 'failed', message: '현재 소속 확인 필요' }] });
+    render(<TeamAccountApprovalPage />);
+    await screen.findByText('합성 가');
+    fireEvent.focus(window);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(teamAccountApprovalService.list).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByText('표시된 목록 선택 (최대 20건)'));
+    fireEvent.click(screen.getByText('선택 2건 승인·갱신'));
+    fireEvent.click(screen.getByText('확인 후 승인·갱신'));
+    await screen.findByText('합성 나: 현재 소속 확인 필요');
+    fireEvent.focus(window);
+    expect(screen.getByText('합성 나: 현재 소속 확인 필요')).toBeInTheDocument();
+    expect(screen.getByText('선택 1건 승인·갱신')).toBeEnabled();
 });

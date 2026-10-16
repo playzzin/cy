@@ -15,36 +15,58 @@ export default function TeamAccountApprovalPage() {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [results, setResults] = useState<TeamApprovalResult[]>([]);
+    const [expanded, setExpanded] = useState(false);
     const generation = useRef(0);
+    const loading = useRef<number | null>(null);
+    const accessDenied = useRef(false);
     const running = useRef(false);
     const load = useCallback(async (next?: string) => {
+        if (loading.current !== null || running.current) return;
         const current = ++generation.current;
-        setBusy(true); setError(''); setSelected([]); setConfirming(false);
-        if (!next) setRows([]);
+        loading.current = current;
+        accessDenied.current = false;
+        setBusy(true); setError('');
+        if (!next) { setRows([]); setSelected([]); setConfirming(false); setExpanded(false); }
         try {
             const page = await teamAccountApprovalService.list(next);
             if (current !== generation.current) return;
             setRows(previous => next ? [...new Map([...previous, ...page.rows].map(row => [row.linkId, row])).values()] : page.rows);
             setCursor(page.nextCursor);
-        } catch {
+            if (next) setExpanded(true);
+        } catch (cause) {
             if (current !== generation.current) return;
-            setRows([]); setCursor(null); setError('목록을 불러오지 못했습니다. 현재 팀 소속과 승인 권한을 확인한 뒤 다시 시도해 주세요.');
-        } finally { if (current === generation.current) setBusy(false); }
+            const code = (cause as { code?: string } | null)?.code;
+            accessDenied.current = code === 'functions/permission-denied' || code === 'functions/unauthenticated';
+            setRows([]); setCursor(null); setSelected([]); setConfirming(false);
+            setError(code === 'functions/permission-denied'
+                ? '현재 계정에는 팀원 승인 권한이 없습니다. 팀장 계정과 현재 팀 연결을 확인한 뒤 새로고침해 주세요.'
+                : code === 'functions/unauthenticated'
+                    ? '로그인이 만료되었습니다. 다시 로그인한 뒤 이용해 주세요.'
+                    : '목록을 불러오지 못했습니다. 연결 상태를 확인한 뒤 새로고침해 주세요.');
+        } finally {
+            if (loading.current === current) loading.current = null;
+            if (current === generation.current) setBusy(false);
+        }
     }, []);
     useEffect(() => {
         if (enabled) void load();
-        return () => { generation.current += 1; };
+        return () => { generation.current += 1; loading.current = null; };
     }, [enabled, load]);
     useEffect(() => {
-        const refresh = () => { if (enabled && !running.current) { setResults([]); void load(); } };
+        // Preserve the user's review and loaded pages. Manual refresh explicitly
+        // starts a new list; idle first-page views still stay up to date.
+        const refresh = () => {
+            if (enabled && !accessDenied.current && !selected.length && !confirming
+                && !query.trim() && status === 'pending' && !expanded && !results.length) void load();
+        };
         window.addEventListener('focus', refresh);
         const timer = window.setInterval(refresh, 60000);
         return () => { window.removeEventListener('focus', refresh); window.clearInterval(timer); };
-    }, [enabled, load]);
+    }, [enabled, load, selected.length, confirming, query, status, expanded, results.length]);
     const visible = rows.filter(row => (status === 'all' || row.status === status) && `${row.name} ${row.teamName}`.includes(query.trim()));
     const chosen = rows.filter(row => selected.includes(row.linkId));
     const approve = async () => {
-        if (running.current || !chosen.length) return;
+        if (running.current || loading.current !== null || !chosen.length) return;
         running.current = true; setBusy(true); setError('');
         const current = ++generation.current;
         try {

@@ -2,6 +2,7 @@ import { strict as assert } from 'assert';
 import { test } from 'node:test';
 import * as admin from 'firebase-admin';
 import { getTeamScopedData } from './teamScopedRead';
+import * as scopedQuery from './teamScopedQuery';
 
 test('로그인하지 않은 호출은 데이터를 읽기 전에 차단한다', async () => {
     await assert.rejects(getTeamScopedData.run({ collection: 'workers' }, {} as any), (error: any) => error.code === 'unauthenticated');
@@ -134,3 +135,48 @@ test('서버가 연결된 팀을 결정하고 타 팀·미승인·임의 컬렉�
         await app.delete();
     }
 });
+
+const scopeChanges = [
+    { name: '접속 시각·표시 이름 변경', path: 'users/scope-race', update: { lastLogin: '2026-10-16', displayName: '합성 변경' }, allowed: true },
+    { name: '계정 정지', path: 'users/scope-race', update: { status: 'suspended' }, allowed: false },
+    { name: '팀장 역할 회수', path: 'users/scope-race', update: { position: '작업자' }, allowed: false },
+    { name: '연결 작업자 변경', path: 'users/scope-race', update: { linkedWorkerIds: [] }, allowed: false },
+    { name: '작업자 소속 변경', path: 'workers/scope-race-worker', update: { teamId: 'other-team' }, allowed: false },
+    { name: '메뉴 직책의 팀장 권한 회수', path: 'settings/menus_v12', update: { admin: { positionConfig: [{ id: 'scope-race-role', name: '작업자' }] } }, allowed: false },
+    { name: '권한과 무관한 메뉴 표시 변경', path: 'settings/menus_v12', update: { updatedAt: '2026-10-16' }, allowed: true },
+];
+for (const scenario of scopeChanges) {
+    test('조회 도중 ' + scenario.name + ': 권한·소속에 맞게 응답한다', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async t => {
+        const app = admin.initializeApp({ projectId: process.env.TEAM_READ_TEST_PROJECT_ID || 'demo-team-scoped-read' });
+        const db = app.firestore();
+        const fixtures: Record<string, any> = {
+            'users/scope-race': { status: 'active', position: 'pos_scope-race-role', linkedWorkerIds: ['scope-race-worker'] },
+            'workers/scope-race-worker': { teamId: 'scope-race-team', uid: 'scope-race', role: '팀장' },
+            'teams/scope-race-team': { name: '합성 팀' },
+            'settings/menus_v12': { admin: { positionConfig: [{ id: 'scope-race-role', name: '팀장' }] } },
+        };
+        let changed = false;
+        const original = scopedQuery.queryByIds;
+        const hook = t.mock.method(scopedQuery, 'queryByIds', async (...args: Parameters<typeof original>) => {
+            const result = await original(...args);
+            if (!changed && args[1] === 'teams') {
+                changed = true;
+                await db.doc(scenario.path).update(scenario.update);
+            }
+            return result;
+        });
+        try {
+            await Promise.all(Object.entries(fixtures).map(([path, data]) => db.doc(path).set(data)));
+            // Exercise both single and batch responses across the scenarios.
+            const request = scenario.allowed ? { collection: 'teams' } : { requests: [{ collection: 'teams' }] };
+            const call = getTeamScopedData.run(request, { auth: { uid: 'scope-race', token: {} } } as any);
+            if (scenario.allowed) assert.deepEqual((await call).rows.map((row: any) => row.id), ['scope-race-team']);
+            else await assert.rejects(call, (error: any) => error.code === 'permission-denied');
+            assert.equal(changed, true, '실제 조회와 최종 권한 확인 사이에 변경을 주입해야 한다');
+        } finally {
+            hook.mock.restore();
+            await Promise.all(Object.keys(fixtures).map(path => db.doc(path).delete()));
+            await app.delete();
+        }
+    });
+}
