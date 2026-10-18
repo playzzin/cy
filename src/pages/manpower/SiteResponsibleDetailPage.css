@@ -809,3 +809,29 @@
         display: block !important;
     }
 }
+
+.sr-workforce { margin: 20px 0; padding: 20px; border: 1px solid #dce5ef; border-radius: 16px; background: #f8fafc; }
+.sr-workforce__header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.sr-workforce__header h3 { margin: 0; font-size: 16px; font-weight: 800; color: #0f172a; }
+.sr-workforce__header p { margin: 5px 0 0; font-size: 12px; color: #64748b; }
+.sr-workforce__header > span { font-size: 13px; color: #334155; }
+.sr-workforce__header strong { color: #2563eb; }
+.sr-workforce__teams { display: grid; gap: 10px; }
+.sr-workforce__team { border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; overflow: hidden; }
+.sr-workforce__team summary { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 12px 14px; cursor: pointer; }
+.sr-workforce__team summary:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+.sr-workforce__team summary::after { content: '+'; color: #64748b; font-size: 18px; }
+.sr-workforce__team[open] summary::after { content: '−'; }
+.sr-workforce__team summary > strong { min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
+.sr-workforce__team summary > b { margin-left: auto; white-space: nowrap; color: #0f172a; font-size: 15px; }
+.sr-workforce__team small { color: #64748b; font-size: 12px; white-space: nowrap; }
+.sr-workforce__badge { flex-shrink: 0; border-radius: 6px; padding: 4px 6px; background: #f1f5f9; color: #475569; font-size: 11px; font-weight: 700; }
+.sr-workforce__badge--support { background: #eff6ff; color: #1d4ed8; }
+.sr-workforce__team ul { list-style: none; margin: 0; padding: 0 14px 8px; border-top: 1px solid #f1f5f9; }
+.sr-workforce__team li { display: flex; align-items: center; gap: 12px; padding: 10px 0; font-size: 13px; }
+.sr-workforce__team li > span { flex: 1; overflow-wrap: anywhere; }
+.sr-workforce__team li > strong { min-width: 64px; text-align: right; color: #1e40af; white-space: nowrap; }
+@media (max-width: 640px) {
+    .sr-workforce { padding: 14px 10px; margin: 16px 0; }
+    .sr-workforce__team summary { padding: 12px 10px; gap: 6px; }
+}

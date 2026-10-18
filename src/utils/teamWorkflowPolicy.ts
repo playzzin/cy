@@ -18,8 +18,12 @@ export const teamWorkflowDestination = (path: string): 'work' | 'blocked' | null
     return null;
 };
 const removedLabels = new Set(['일보작성', '보드입력', '일보보드입력', '일보목록', '일보목록v2', '출력일보', '개인달력', '노임체크', '인원전체관리', '인원전체내역조회', '휴무신청', '작업자휴무신청', '내휴무신청']);
-export const hideTeamWorkflowLink = (item: { text?: string; path?: string }) => removedLabels.has(String(item.text ?? '').replace(/\s/g, ''))
-    || Boolean(teamWorkflowDestination(item.path || MENU_PATHS[item.text || ''] || ''));
+export const hideTeamWorkflowLink = (item: { text?: string; path?: string }) => {
+    const path = (item.path || MENU_PATHS[item.text || ''] || '').split(/[?#]/)[0].replace(/\/+$/, '');
+    // The dedicated site calendar replaces the retired general report menu.
+    if (path === '/manpower/site-daily-report') return false;
+    return removedLabels.has(String(item.text ?? '').replace(/\s/g, '')) || Boolean(teamWorkflowDestination(path));
+};
 
 export function filterTeamWorkflowMenu(items: (MenuItem | string)[]): MenuItem[] {
     return items.flatMap(value => {

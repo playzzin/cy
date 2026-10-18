@@ -8,6 +8,7 @@ const workerRoles = new Set(['worker', '작업자', '일반']);
 const roleKey = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[\s_-]/g, '');
 const unrestricted = new Set(['admin', 'administrator', 'superadmin', 'owner', 'dev', 'developer', '관리자', '사장', '실장', 'manager', 'manager1', 'manager2', 'manager3', '매니저', '매니저1', '매니저2', '매니저3', '메니저1', '메니저2', '메니저3']);
 const scopedCollections = new Set([
+    'site_work_reports',
     'message_recipients',
     'whiteboard_participation',
     'workers', 'teams', 'sites', 'companies', 'daily_reports', 'daily_dispatches', 'team_settlement_incoming', 'team_settlement_support_details',
@@ -131,8 +132,11 @@ const flushReads = () => {
     const accounts = new Map<string | undefined, QueuedRead[]>();
     queue.forEach(item => accounts.set(item.uid, [...(accounts.get(item.uid) || []), item]));
     accounts.forEach(items => {
-        for (let offset = 0; offset < items.length; offset += 20) {
-            const group = items.slice(offset, offset + 20);
+        const batches = [
+            items.filter(item => !['daily_reports', 'site_work_reports'].includes(item.request.collection)),
+            items.filter(item => ['daily_reports', 'site_work_reports'].includes(item.request.collection)),
+        ].flatMap(reads => Array.from({ length: Math.ceil(reads.length / 20) }, (_, index) => reads.slice(index * 20, (index + 1) * 20)));
+        for (const group of batches) {
             if (legacyServerUntil > Date.now()) {
                 group.forEach(completeLegacyRead);
                 continue;

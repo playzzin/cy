@@ -34,6 +34,7 @@ type SiteSnapshotResolver = (report: DailyReportSiteSnapshotFallback & {
 }) => Promise<DailyReportSiteSnapshot>;
 
 export interface DailyReportWorkerRow {
+    isSiteSupport?: boolean;
     reportId: string;
     isEmptyReport?: boolean;
     workerIndex?: number;
@@ -624,6 +625,7 @@ export const dailyReportService = {
     },
 
     getWorkerRows: async (params: {
+        includeSiteSupport?: boolean;
         startDate?: string;
         endDate?: string;
         teamId?: string;
@@ -631,7 +633,10 @@ export const dailyReportService = {
         siteId?: string;
         companyIds?: string[];
     } = {}): Promise<DailyReportWorkerRow[]> => {
-        const reports = await dailyReportService.getReports(params);
+        const siteReports = params.includeSiteSupport
+            ? await getTeamScopedRows<DailyReport>('site_work_reports', { startDate: params.startDate, endDate: params.endDate })
+            : null;
+        const reports = siteReports ?? await dailyReportService.getReports(params);
         const rows: DailyReportWorkerRow[] = [];
 
         reports.forEach(report => {
@@ -680,6 +685,7 @@ export const dailyReportService = {
                 const unitPrice = worker.unitPrice || 0;
                 const resolvedPayType = resolveReportPayType(worker) || undefined;
                 rows.push({
+                    isSiteSupport: (worker as DailyReportWorker & { isSiteSupport?: boolean }).isSiteSupport,
                     reportId: report.id || '',
                     workerIndex,
                     date: report.date,

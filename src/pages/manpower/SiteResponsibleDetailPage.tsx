@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMobileDetailNavigation } from '../../hooks/useMobileScroll';
 import {
-    ArrowLeft,
     Banknote,
     BriefcaseBusiness,
     Building2,
@@ -22,6 +21,10 @@ import {
 
 import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyReportService';
 import MonthNavigator from '../../components/common/MonthNavigator';
+import MobileListReturnButton from '../../components/common/MobileListReturnButton';
+import WorkerWorkHistory from '../../components/manpower/WorkerWorkHistory';
+import SiteWorkforceSummary from '../../components/manpower/SiteWorkforceSummary';
+import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
@@ -162,7 +165,7 @@ const formatNumber = (value?: number | null) =>
 
 const formatManDay = (value?: number | null) => {
     const numeric = asNumber(value);
-    return Number.isInteger(numeric) ? numeric.toFixed(0) : numeric.toFixed(1);
+    return numeric.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
 };
 
 const getReportRowAmount = (row: Pick<DailyReportWorkerRow, 'amount' | 'manDay' | 'unitPrice'>) => {
@@ -222,7 +225,7 @@ const rowMatchesSite = (row: DailyReportWorkerRow, site: Site | null) => {
     if (!site) return false;
     const rowSiteId = String(row.siteId ?? '').trim();
     const siteIds = [site.id, site.legacyId].map(value => String(value ?? '').trim()).filter(Boolean);
-    if (rowSiteId && siteIds.includes(rowSiteId)) return true;
+    if (rowSiteId && siteIds.length) return siteIds.includes(rowSiteId);
     return normalizeText(row.siteName) === normalizeText(site.name);
 };
 
@@ -272,7 +275,7 @@ const downloadCsv = (filename: string, rows: Array<Record<string, string | numbe
     URL.revokeObjectURL(url);
 };
 
-const SiteResponsibleDetailPage: React.FC = () => {
+const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }> = ({ view }) => {
     const [sites, setSites] = useState<Site[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
@@ -282,12 +285,16 @@ const SiteResponsibleDetailPage: React.FC = () => {
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const [statusFilter, setStatusFilter] = useState<SiteStatusFilter>('active');
     const [searchQuery, setSearchQuery] = useState('');
-    const [detailView, setDetailView] = useState<DetailView>('siteInfo');
+    const [selectedDetailView, setDetailView] = useState<DetailView>('siteInfo');
     const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('sites');
     const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
     const [isResponsiblePickerOpen, setIsResponsiblePickerOpen] = useState(false);
     const [loadingMaster, setLoadingMaster] = useState(true);
     const [loadingOutput, setLoadingOutput] = useState(false);
+    const [outputError, setOutputError] = useState('');
+    const [refreshRevision, setRefreshRevision] = useState(0);
+    const restrictedTeam = useRestrictedTeamWorkflow();
+    const detailView = view ?? (restrictedTeam ? 'siteInfo' : selectedDetailView);
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
     const accessScope = useWorkerAccessScope(workers, teams);
@@ -301,7 +308,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                 const [nextSites, nextTeams, nextWorkers] = await Promise.all([
                     siteService.getSites(),
                     teamService.getTeams(),
-                    manpowerService.getWorkers(),
+                    manpowerService.getWorkers(refreshRevision > 0),
                 ]);
                 if (!mounted) return;
                 const cheongyeonTeams = nextTeams
@@ -324,20 +331,25 @@ const SiteResponsibleDetailPage: React.FC = () => {
         return () => {
             mounted = false;
         };
-    }, []);
+    }, [refreshRevision]);
 
     useEffect(() => {
         let mounted = true;
 
         const loadOutputRows = async () => {
             setLoadingOutput(true);
+            setOutputError('');
+            setOutputRows([]);
             try {
-                const rows = await dailyReportService.getWorkerRows({ startDate, endDate });
+                const rows = await dailyReportService.getWorkerRows({ startDate, endDate, includeSiteSupport: restrictedTeam });
                 if (mounted) setOutputRows(rows);
             } catch (error) {
                 console.error(error);
                 toast.error('출력일보 데이터를 불러오지 못했습니다.');
-                if (mounted) setOutputRows([]);
+                if (mounted) {
+                    setOutputRows([]);
+                    setOutputError('출력일보를 불러오지 못했습니다. 새로고침해 주세요.');
+                }
             } finally {
                 if (mounted) setLoadingOutput(false);
             }
@@ -347,7 +359,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
         return () => {
             mounted = false;
         };
-    }, [startDate, endDate]);
+    }, [startDate, endDate, restrictedTeam, refreshRevision]);
 
     const teamByKey = useMemo(() => {
         const map = new Map<string, Team>();
@@ -397,8 +409,10 @@ const SiteResponsibleDetailPage: React.FC = () => {
     }, [workers]);
 
     const scopedOutputRows = useMemo(
-        () => outputRows.filter(row => workerAccessMatchesReportRow(accessScope, row)),
-        [accessScope, outputRows]
+        () => outputRows.filter(row => workerAccessMatchesReportRow(accessScope, row)
+            || (restrictedTeam && accessScope.mode === 'team' && !accessScope.loading && sites.some(site =>
+                workerAccessMatchesTeamRef(accessScope, site.responsibleTeamId, site.responsibleTeamName) && rowMatchesSite(row, site)))),
+        [accessScope, outputRows, restrictedTeam, sites]
     );
 
     const scopedOutputSiteKeys = useMemo(
@@ -720,34 +734,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
         setMobileView('detail');
     };
 
-    const handleRefresh = async () => {
-        setLoadingMaster(true);
-        setLoadingOutput(true);
-        try {
-            const [nextSites, nextTeams, nextWorkers, rows] = await Promise.all([
-                siteService.getSites(),
-                teamService.getTeams(),
-                manpowerService.getWorkers(true),
-                dailyReportService.getWorkerRows({ startDate, endDate }),
-            ]);
-            const cheongyeonTeams = nextTeams
-                .filter(team => isCheongyeonTeam(team, nextWorkers))
-                .sort((left, right) =>
-                    String(left.name ?? '').localeCompare(String(right.name ?? ''), 'ko-KR')
-                );
-            setSites(nextSites);
-            setTeams(cheongyeonTeams);
-            setWorkers(nextWorkers);
-            setOutputRows(rows);
-            toast.success('최신 현장 데이터로 새로고침했습니다.');
-        } catch (error) {
-            console.error(error);
-            toast.error('새로고침 중 오류가 발생했습니다.');
-        } finally {
-            setLoadingMaster(false);
-            setLoadingOutput(false);
-        }
-    };
+    const handleRefresh = () => setRefreshRevision(current => current + 1);
 
     const handleCsvDownload = () => {
         const suffix = selectedSite?.name || selectedResponsible?.name || '현장';
@@ -757,10 +744,10 @@ const SiteResponsibleDetailPage: React.FC = () => {
             현장소속팀: getResponsibleName(row.responsibleTeamId ?? row.teamId, row.responsibleTeamName ?? row.teamName, teamByKey),
             성명: row.workerName || '',
             소속팀: row.workerTeamName || '',
-            급여방식: resolveReportPayType(row) || '',
+            급여방식: row.isSiteSupport ? '' : resolveReportPayType(row) || '',
             공수: row.manDay,
-            단가: row.unitPrice || 0,
-            금액: getReportRowAmount(row),
+            단가: row.isSiteSupport ? '' : row.unitPrice || 0,
+            금액: row.isSiteSupport ? '' : getReportRowAmount(row),
         })));
     };
 
@@ -778,7 +765,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
             </span>
             <span className="tw-team-item__meta">
                 <strong>{formatManDay(group.totalManDay)}</strong>
-                <small>{formatCurrency(group.totalAmount)}</small>
+                <small>{restrictedTeam ? '내 팀 ' : ''}{formatCurrency(group.totalAmount)}</small>
             </span>
         </button>
     );
@@ -791,11 +778,11 @@ const SiteResponsibleDetailPage: React.FC = () => {
                         <Building2 size={16} />
                         월별 현장담당 현장 조회
                     </div>
-                    <h1>현장별 노임명세서 · 출력일보</h1>
+                    <h1>{view === 'dailyReport' ? '현장 출력일보' : restrictedTeam || view === 'siteInfo' ? '현장정보' : '현장별 노임명세서 · 출력일보'}</h1>
                 </div>
 
                 <div className="tw-header-actions">
-                    <button type="button" className="tw-icon-button" onClick={handleCsvDownload} title="CSV 내보내기">
+                    <button type="button" className="tw-icon-button" onClick={handleCsvDownload} title="CSV 내보내기" disabled={loadingOutput || !!outputError}>
                         <Download size={18} />
                         <span>CSV</span>
                     </button>
@@ -891,7 +878,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                 </div>
                 <div className="tw-kpi">
                     <Banknote size={20} />
-                    <span>노무비</span>
+                    <span>{restrictedTeam ? '내 팀 노무비' : '노무비'}</span>
                     <strong>{formatCurrency(selectedResponsibleStats.totalAmount)}</strong>
                 </div>
                 <div className="tw-kpi">
@@ -993,7 +980,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                                 {statusLabel(site)}
                                             </span>
                                             <small>{formatManDay(stats.totalManDay)}</small>
-                                            <small>{formatCurrency(stats.totalAmount)}</small>
+                                            <small>{restrictedTeam ? '내 팀 ' : ''}{formatCurrency(stats.totalAmount)}</small>
                                         </span>
                                     </button>
                                 );
@@ -1003,9 +990,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                 </section>
 
                 <section className="tw-detail-panel">
-                    <button type="button" className="sr-mobile-back" onClick={() => setMobileView('sites')}>
-                        <ArrowLeft size={17} /> 현장 목록으로
-                    </button>
+                    <MobileListReturnButton kind="site" onClick={() => setMobileView('sites')} />
                     {!selectedSite ? (
                         <div className="tw-empty-detail">
                             <Building2 size={44} />
@@ -1036,7 +1021,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                     <strong>{formatManDay(selectedSiteStats.totalManDay)}</strong>
                                 </div>
                                 <div>
-                                    <span>월 노무비</span>
+                                    <span>{restrictedTeam ? '내 팀 월 노무비' : '월 노무비'}</span>
                                     <strong>{formatCurrency(selectedSiteStats.totalAmount)}</strong>
                                 </div>
                                 <div>
@@ -1045,7 +1030,10 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="tw-view-tabs" role="tablist" aria-label="월별 현장 문서">
+                            {restrictedTeam && detailView === 'siteInfo' && <SiteWorkforceSummary rows={selectedSiteRows} month={selectedMonth}
+                                loading={loadingOutput} error={outputError} />}
+
+                            {!restrictedTeam && !view && <div className="tw-view-tabs" role="tablist" aria-label="월별 현장 문서">
                                 <button
                                     type="button"
                                     className={detailView === 'siteInfo' ? 'tw-view-tab tw-view-tab--active' : 'tw-view-tab'}
@@ -1053,13 +1041,13 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                 >
                                     현장정보
                                 </button>
-                                <button
+                                {!restrictedTeam && <button
                                     type="button"
                                     className={detailView === 'payslip' ? 'tw-view-tab tw-view-tab--active' : 'tw-view-tab'}
                                     onClick={() => setDetailView('payslip')}
                                 >
                                     노임명세서
-                                </button>
+                                </button>}
                                 <button
                                     type="button"
                                     className={detailView === 'dailyReport' ? 'tw-view-tab tw-view-tab--active' : 'tw-view-tab'}
@@ -1067,7 +1055,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                 >
                                     출력일보
                                 </button>
-                            </div>
+                            </div>}
 
                             {detailView === 'siteInfo' && (
                                 <div
@@ -1109,7 +1097,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                         <h3><ShieldCheck size={18} />월간 요약</h3>
                                         <div className="tw-detail-grid">
                                             <DetailField label="총 공수" value={formatManDay(selectedSiteStats.totalManDay)} />
-                                            <DetailField label="노무비" value={formatCurrency(selectedSiteStats.totalAmount)} />
+                                            <DetailField label={restrictedTeam ? '내 팀 노무비' : '노무비'} value={formatCurrency(selectedSiteStats.totalAmount)} />
                                             <DetailField label="작업자" value={`${selectedSiteStats.workerCount.toLocaleString('ko-KR')}명`} />
                                             <DetailField label="출력일보" value={`${selectedSiteRows.length.toLocaleString('ko-KR')}건`} />
                                         </div>
@@ -1117,7 +1105,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                 </div>
                             )}
 
-                            {detailView === 'payslip' && (
+                            {!restrictedTeam && detailView === 'payslip' && (
                                 <section className="tw-document-panel sr-document-panel sr-labor-panel">
                                     <div className="sr-mobile-document-list" aria-label="노무내역서 모바일 요약">
                                         <div className="sr-mobile-document-list__summary">
@@ -1316,6 +1304,14 @@ const SiteResponsibleDetailPage: React.FC = () => {
                             )}
 
                             {detailView === 'dailyReport' && (
+                                restrictedTeam || view === 'dailyReport' ? <WorkerWorkHistory
+                                    key={selectedSiteKey}
+                                    rows={selectedSiteRows}
+                                    month={selectedMonth}
+                                    siteName={selectedSite.name}
+                                    loading={loadingOutput}
+                                    error={outputError}
+                                /> :
                                 <section className="tw-output-section">
                                     <div className="tw-output-section__header">
                                         <h3><ClipboardList size={18} />출력일보 목록</h3>

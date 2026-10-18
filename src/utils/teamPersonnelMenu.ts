@@ -8,6 +8,11 @@ export const TEAM_PERSONNEL_MENU_ITEMS: MenuItem[] = [
     { text: '신규작업자등록', path: '/manpower/team-worker-requests', icon: 'fa-user-plus' },
 ];
 
+export const TEAM_SITE_MENU_ITEMS: MenuItem[] = [
+    { text: '현장정보', path: '/manpower/site-responsible-detail', icon: 'fa-building' },
+    { text: '출력일보', path: '/manpower/site-daily-report', icon: 'fa-calendar-days' },
+];
+
 const normalize = (value?: string) => String(value ?? '').replace(/\s/g, '');
 const isTeamLead = (value?: string) => ['팀장', 'team_leader', 'teamleader'].includes(normalize(value).toLowerCase());
 
@@ -68,5 +73,40 @@ export const ensureTeamPersonnelMenu = (config: SiteDataType): void => {
             });
         };
         upgrade(site.menu);
+
+        let foundSiteMenu = false;
+        const upgradeSites = (items: (MenuItem | string)[]) => {
+            items.forEach(item => {
+                if (typeof item === 'string') return;
+                if (normalize(item.text) !== '현장관리' && (item.text === '현장정보'
+                    || item.path?.split(/[?#]/)[0] !== '/manpower/site-responsible-detail')) {
+                    if (item.sub) upgradeSites(item.sub);
+                    return;
+                }
+                foundSiteMenu = true;
+                const children = (item.sub ?? []).map(child => typeof child === 'string' ? { text: child } : child);
+                const matches = (child: MenuItem, target: MenuItem) => child.path?.split(/[?#]/)[0] === target.path
+                    || normalize(child.text) === normalize(target.text);
+                item.sub = TEAM_SITE_MENU_ITEMS.map(target => {
+                    const existing = children.find(child => matches(child, target));
+                    return {
+                        ...(item.roles ? { roles: [...item.roles] } : {}),
+                        ...(item.hide !== undefined ? { hide: item.hide } : {}),
+                        ...target, ...existing,
+                        id: existing?.id || `${item.id || key + '-sites'}-${target.path?.split('/').pop()}`,
+                        text: target.text, path: target.path,
+                    };
+                });
+                item.sub.push(...children.filter(child => !TEAM_SITE_MENU_ITEMS.some(target => matches(child, target))));
+                item.text = '현장관리';
+                delete item.path;
+            });
+        };
+        upgradeSites(site.menu);
+        if (!foundSiteMenu) {
+            const group: MenuItem = { id: `${key}-sites`, text: '현장관리', icon: 'fa-building', sub: [] };
+            site.menu.push(group);
+            upgradeSites([group]);
+        }
     });
 };
