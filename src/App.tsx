@@ -355,7 +355,7 @@ const App: React.FC = () => {
               <Route path="team-worker-daily-report" element={<TeamWorkerDetailPage key="dailyReport" view="dailyReport" />} />
               <Route path="team-worker-requests" element={<TeamWorkerRequestPage />} />
               <Route path="team-account-approvals" element={<TeamAccountApprovalPage />} />
-              <Route path="site-responsible-detail" element={<SiteResponsibleDetailPage view="siteInfo" />} />
+              <Route path="site-responsible-detail" element={<SiteResponsibleDetailPage />} />
               <Route path="site-daily-report" element={<SiteResponsibleDetailPage view="dailyReport" />} />
               <Route path="site-manager-detail" element={<SiteResponsibleDetailPage />} />
               <Route path="freelancer" element={<FreelancerPage />} />
