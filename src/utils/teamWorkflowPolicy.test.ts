@@ -13,6 +13,10 @@ test('쿼리로 입력 탭을 우회하지 못하고 기존 조회는 근무내�
     expect(teamWorkflowDestination('/reports/daily-worker-calendar')).toBe('work');
     for (const path of ['/payroll/advance-request', '/manpower/team-worker-payslip', '/manpower/team-worker-requests', '/manpower/team-account-approvals']) expect(teamWorkflowDestination(path)).toBeNull();
     expect(hideTeamWorkflowLink({ text: '보드입력' })).toBe(true);
+    expect(hideTeamWorkflowLink({ text: '출력일보', path: '/manpower/site-daily-report' })).toBe(false);
+    expect(hideTeamWorkflowLink({ text: '출력일보', path: '/manpower/team-worker-daily-report' })).toBe(true);
+    expect(teamWorkflowDestination('/manpower/team-worker-history')).toBeNull();
+    expect(teamWorkflowDestination('/manpower/site-daily-report')).toBeNull();
 });
 test('문자열·별칭·저장된 링크를 팀장 메뉴에서만 제거하고 재보정해도 복원하지 않는다', () => {
     const config: SiteDataType = {
@@ -21,6 +25,6 @@ test('문자열·별칭·저장된 링크를 팀장 메뉴에서만 제거하고
     };
     ensureTeamPersonnelMenu(config); const first = JSON.stringify(config); ensureTeamPersonnelMenu(config);
     expect(JSON.stringify(config)).toBe(first);
-    expect(JSON.stringify(config.pos_teamleader)).not.toMatch(/출력일보|개인달력|휴무신청|tab=input/);
+    expect(JSON.stringify(config.pos_teamleader.menu[0])).not.toMatch(/출력일보|개인달력|휴무신청|tab=input/);
     expect(config.pos_office.menu[0].text).toBe('일보작성');
 });
