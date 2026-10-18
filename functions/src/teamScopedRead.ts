@@ -10,9 +10,11 @@ import { mergeTeamQueryRows, queryByIds, queryRows, queryTeamCandidates } from '
 import { readTeamCatalog } from './teamCatalogCache';
 import { readTeamSettlementSupportDetails } from './teamSettlementSupportRead';
 import { readTeamSettlementIncoming } from './teamSettlementRead';
+import { projectSiteWorkReports, responsibleSites, validateSiteWorkRange } from './siteWorkReports';
 import { readWhiteboardParticipation } from './whiteboardParticipation';
 
 const COLLECTIONS = new Set([
+    'site_work_reports',
     'message_recipients',
     'whiteboard_participation',
     'workers', 'teams', 'sites', 'companies', 'daily_reports', 'daily_dispatches', 'team_settlement_incoming', 'team_settlement_support_details',
@@ -149,7 +151,7 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
     resolvedTeamIds = teamIds;
     scope.teamIds = teamIds;
     const needsWorkers = requests.some(request => !['teams', 'materials', 'whiteboard_participation'].includes(text(request.collection)));
-    const requiresSites = (request: any) => ['sites', 'companies', 'materialInbounds', 'materialOutbounds', 'materialPhotoBatches'].includes(text(request.collection))
+    const requiresSites = (request: any) => ['site_work_reports', 'sites', 'companies', 'materialInbounds', 'materialOutbounds', 'materialPhotoBatches'].includes(text(request.collection))
         || (request.collection === 'system_configs' && (!text(request.filters?.configId) || request.filters.configId === 'support_site_rates'));
     const needsSites = requests.some(requiresSites);
     const workers = needsWorkers ? (await read('workers')).filter(row => teamIds.includes(text(row.teamId))) : [];
@@ -164,6 +166,18 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
     const resolveRows = async (request: any) => {
         const collection = text(request.collection);
         const filters = request.filters || {};
+        if (collection === 'site_work_reports') {
+            validateSiteWorkRange(filters);
+            await sitesReady;
+            const reports = await read('daily_reports', { startDate: filters.startDate, endDate: filters.endDate });
+            const siteIds = new Set(responsibleSites(sites, scope).flatMap(row => [row.id, text(row.legacyId)]).filter(Boolean));
+            const attendees = reports.filter(row => siteIds.has(text(row.siteId))).flatMap(row => list(row.workers));
+            const missingTeams = attendees.filter(row => !text(row.teamId) && !scope.workerIds.includes(text(row.workerId || row.id)));
+            const supportWorkers = await byIds('workers', [FieldPath.documentId(), 'legacyId'], missingTeams.map(row => text(row.workerId || row.id)).filter(Boolean));
+            const attendanceTeams = await byIds('teams', [FieldPath.documentId(), 'legacyId'],
+                [...attendees, ...supportWorkers, ...workers].map(row => text(row.teamId)).filter(Boolean));
+            return { rows: serialize(projectSiteWorkReports(reports, sites, scope, [...workers, ...supportWorkers], attendanceTeams)) };
+        }
         if (collection === 'message_recipients') {
             const recipients = await queryRows(db.collection('users').where('status', '==', 'active')
                 .select('displayName', 'name', 'role', 'position', 'department', 'status', 'isActive', 'linkedWorkerIds'), metrics);
