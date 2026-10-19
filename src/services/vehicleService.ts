@@ -10,6 +10,8 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { vehicleFirestoreService } from './vehicleFirestoreService';
+import { vehicleRepairService } from '../features/vehicle-repairs/service';
+import { repairLedgerExpenses } from '../features/vehicle-repairs/expenses';
 import { Vehicle, VehicleAssigneeType, VehicleAssignmentRecord, VehicleBillingTargetRecord, VehicleExpenseRecord } from '../types/vehicle';
 
 const VEHICLE_ASSIGNMENT_COLLECTION = 'vehicleAssignments';
@@ -234,7 +236,12 @@ export const vehicleService = {
     },
 
     getExpensesByMonth: async (yearMonth: string): Promise<VehicleExpenseRecord[]> => {
-        return vehicleFirestoreService.listVehicleExpenses(undefined, yearMonth);
+        const [expenses, repairs, vehicles] = await Promise.all([
+            vehicleFirestoreService.listVehicleExpenses(undefined, yearMonth),
+            vehicleRepairService.list(),
+            vehicleFirestoreService.listVehicles()
+        ]);
+        return [...expenses, ...repairLedgerExpenses(repairs, vehicles, yearMonth)];
     },
 
     getExpensesByVehicle: async (vehicleId: string, yearMonth?: string): Promise<VehicleExpenseRecord[]> => {

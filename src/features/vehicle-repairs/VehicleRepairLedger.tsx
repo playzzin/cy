@@ -190,9 +190,9 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
     finally { lock.current = false; setBusy(false); }
   };
   const archive = async (row: RepairRecord) => {
-    if (lock.current || draftCount || !window.confirm(row.archived ? '이 정비내역을 복원할까요?' : '이 정비내역을 보관할까요? 보관함에서 다시 복원할 수 있습니다.')) return;
+    if (lock.current || draftCount || !window.confirm(row.archived ? '이 정비내역을 복원할까요?' : '이 정비내역을 삭제할까요? 월별 경비대장의 자동 수리비에서 제외되며 휴지통에서 복원할 수 있습니다.')) return;
     lock.current = true; setBusy(true); setError('');
-    try { await vehicleRepairService.archive(row); setNotice(row.archived ? '정비내역을 복원했습니다.' : '정비내역을 보관했습니다.'); await refresh(); }
+    try { await vehicleRepairService.archive(row); setNotice(row.archived ? '정비내역을 복원했습니다.' : '정비내역을 삭제했습니다. 휴지통에서 복원할 수 있습니다.'); await refresh(); }
     catch (error) { setError(errorText(error)); }
     finally { lock.current = false; setBusy(false); }
   };
@@ -220,7 +220,7 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
     <div className="repair-filters">
       <button type="button" className={allPeriods ? 'repair-period-active' : ''} aria-pressed={allPeriods} disabled={busy} onClick={() => { if (canLeave()) setAllPeriods(!allPeriods); }}>전체 기간</button>
       <label>비용 구분<select aria-label="정비 비용 구분" value={cost} onChange={event => setCost(event.target.value)}><option value="">전체 구분</option>{COST_KEYS.map(key => <option key={key} value={key}>{COST_LABELS[key]}</option>)}</select></label>
-      <label>상태<select aria-label="정비 상태" value={status} disabled={busy || draftCount > 0} onChange={event => setStatus(event.target.value)}><option value="active">전체 내역</option><option value="review">확인 필요</option><option value="archived">보관함</option></select></label>
+      <label>상태<select aria-label="정비 상태" value={status} disabled={busy || draftCount > 0} onChange={event => setStatus(event.target.value)}><option value="active">전체 내역</option><option value="review">확인 필요</option><option value="archived">휴지통</option></select></label>
       <label className="repair-search">검색<input value={search} onChange={event => setSearch(event.target.value)} placeholder="차량번호, 정비내용, 운전자, 업체" /></label>
       <button type="button" onClick={() => { setCost(''); setStatus('active'); setSearch(''); }}>초기화</button>
       <span className="repair-count">{allPeriods ? '전체 기간' : yearMonth} · {filtered.length}건</span>
@@ -230,7 +230,7 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
     <div className={`repair-table-wrap${sticky ? ' repair-table-fixed' : ''}`}>
       <table><caption className="sr-only">차량 정비내역 입력 대장</caption><colgroup><col style={{ width: 140 }} /><col style={{ width: 130 }} /><col style={{ width: 200 }} /><col style={{ width: 110 }} /><col style={{ width: 125 }} />{COST_KEYS.map(key => <col key={key} style={{ width: 110 }} />)}<col style={{ width: 120 }} /><col style={{ width: 160 }} /><col style={{ width: 90 }} /></colgroup>
         <thead><tr><th>정비일</th><th>차량번호</th><th>정비내용</th><th>운전자</th><th>정비업체</th>{COST_KEYS.map(key => <th className="repair-number" key={key}>{COST_LABELS[key]}{key === 'cheongyeon' && <small>VAT포함</small>}</th>)}<th className="repair-number">합계</th><th>비고</th><th>관리</th></tr></thead>
-        <tbody>{loading ? <tr><td colSpan={12} className="repair-empty">정비내역을 불러오는 중입니다.</td></tr> : !visible.length ? <tr><td colSpan={12} className="repair-empty">{status === 'archived' ? '보관한 정비내역이 없습니다.' : '조회 조건에 맞는 정비내역이 없습니다. 행 추가로 입력하거나 전체 기간을 확인해 주세요.'}</td></tr> : visible.map((row, index) => {
+        <tbody>{loading ? <tr><td colSpan={12} className="repair-empty">정비내역을 불러오는 중입니다.</td></tr> : !visible.length ? <tr><td colSpan={12} className="repair-empty">{status === 'archived' ? '삭제한 정비내역이 없습니다.' : '조회 조건에 맞는 정비내역이 없습니다. 행 추가로 입력하거나 전체 기간을 확인해 주세요.'}</td></tr> : visible.map((row, index) => {
           const label = `${(currentPage - 1) * 50 + index + 1}행`;
           const disabled = busy || row.archived || (draftCount >= 100 && !changedIds.has(row.id));
           return <tr key={row.id} className={`${changedIds.has(row.id) ? 'repair-row-dirty' : ''} ${rowErrors[row.id] || invalidAmounts.has(row.id) ? 'repair-row-error' : ''}`}>
@@ -242,14 +242,14 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
             {COST_KEYS.map(key => <td className="repair-number repair-cost-cell" key={key}><AmountInput value={row.costs[key]} raw={drafts[row.id]?.amountInputs[key]} label={`${label} ${COST_LABELS[key]} 금액`} disabled={disabled} onChange={text => updateAmount(row, key, text)} /></td>)}
             <td className="repair-number repair-row-total">{invalidAmounts.has(row.id) ? '확인 필요' : formatRepairAmount(repairTotal(row))}</td>
             <td><input aria-label={`${label} 비고`} value={row.memo} title={row.memo} disabled={disabled} placeholder="—" onChange={event => updateRow(row, { memo: event.target.value })} />{repairReviewNotes(drafts[row.id]?.original ?? row).length > 0 && <label className="repair-review-check"><input type="checkbox" aria-label={`${label} 비용 메모 확인 완료`} disabled={disabled} checked={repairReviewNotes(row).length === 0} onChange={event => updateRow(row, { issues: event.target.checked ? row.issues.filter(issue => !repairReviewNotes(row).includes(issue)) : Array.from(new Set([...row.issues, ...repairReviewNotes(drafts[row.id]?.original ?? row)])) })} />비용 메모 확인 완료</label>}</td>
-            <td>{changedIds.has(row.id) ? <button type="button" disabled={busy} onClick={() => undoRow(row.id)}>{row.revision === 0 ? '행 취소' : '되돌리기'}</button> : <button type="button" disabled={busy || draftCount > 0} onClick={() => void archive(row)}>{row.archived ? '복원' : '보관'}</button>}</td>
+            <td>{changedIds.has(row.id) ? <button type="button" disabled={busy} onClick={() => undoRow(row.id)}>{row.revision === 0 ? '행 취소' : '되돌리기'}</button> : <button type="button" disabled={busy || draftCount > 0} onClick={() => void archive(row)}>{row.archived ? '복원' : '삭제'}</button>}</td>
           </tr>;
         })}</tbody>
         <tfoot><tr><th colSpan={5}>조회 내역 합계 ({filtered.length}건)</th>{COST_KEYS.map(key => <td className="repair-number" key={key}>{filtered.some(row => drafts[row.id] && invalidDraftAmounts(drafts[row.id]).includes(key)) ? '확인 필요' : formatRepairAmount(totals[key])}</td>)}<td className="repair-number repair-total-cell">{hasInvalidAmounts ? '확인 필요' : formatRepairAmount(total)}</td><td colSpan={2}>{draftCount > 0 ? '저장 전 입력 포함' : '저장된 내역'}</td></tr></tfoot>
       </table>
     </div>
     <div className="repair-footer"><span>표에서 바로 입력 · Tab 키로 다음 칸 이동</span><div><button type="button" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>이전</button><span>{currentPage} / {pages}</span><button type="button" disabled={currentPage >= pages} onClick={() => setPage(currentPage + 1)}>다음</button></div></div>
-    <div className="repair-guide"><strong>입력 가이드</strong><p><b>행 추가</b>로 정비일·차량번호·정비내용·비용을 입력한 뒤 상단 <b>저장</b>을 누르세요. 기존 내역도 표에서 바로 수정할 수 있습니다. 빈 비용은 미입력, 0은 0원으로 저장됩니다.</p><p>청연(VAT포함) 금액은 원본 그대로 보존합니다. 정비내역 저장은 월별 청구 금액에 자동 합산되지 않습니다.</p></div>
+    <div className="repair-guide"><strong>입력 가이드</strong><p><b>행 추가</b>로 정비일·차량번호·정비내용·비용을 입력한 뒤 상단 <b>저장</b>을 누르세요. 기존 내역도 표에서 바로 수정할 수 있습니다. 빈 비용은 미입력, 0은 0원으로 저장됩니다.</p><p>청연(VAT포함) 금액은 원본 그대로 보존합니다. 저장한 정비비 합계는 차량번호가 연결된 해당 월 경비대장의 수리비에 자동 반영됩니다. 청구·정산 반영은 월별 경비대장에서 확인 후 저장해 주세요. 삭제한 내역은 휴지통에서 복원할 수 있습니다.</p></div>
 
     <Dialog.Root open={Boolean(preview)} onOpenChange={open => { if (!open && !busy) setPreview(null); }}><Dialog.Portal><Dialog.Overlay className="repair-overlay" /><Dialog.Content className="repair-dialog repair-import-dialog" onInteractOutside={event => { if (busy) event.preventDefault(); }}>
       <Dialog.Title>엑셀 정비내역 가져오기</Dialog.Title><Dialog.Description>월별 합계 행을 제외하고 개별 정비 이력만 가져옵니다. 기존 기록은 덮어쓰지 않습니다.</Dialog.Description>

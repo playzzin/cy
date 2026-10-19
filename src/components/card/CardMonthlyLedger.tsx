@@ -2,6 +2,7 @@ import { saveCardMonthlyLedger } from '../../services/cardMonthlyLedgerSaveCoord
 import { SupportExcelDownloadButton } from '../support/SupportExcelDownloadButton';
 import type { SupportExportContext } from '../../utils/supportResourceExcelExport';
 import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
+import { SupportLedgerMemo } from '../support/SupportLedgerMemo';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faBuilding,
@@ -1789,6 +1790,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                 <col style={{ width: '17%' }} />
                                 <col style={{ width: '13%' }} />
                                 <col style={{ width: '12%' }} />
+                                <col style={{ width: '15%' }} />
                             </colgroup>
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
@@ -1798,6 +1800,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                     <th className="px-4 py-4 text-left w-48 tracking-wider bg-indigo-700">카드</th>
                                     <th className="px-2 py-4 text-center w-40 border-l border-indigo-400 bg-indigo-500">총금액</th>
                                     <th className="px-2 py-4 text-center w-40 border-l border-indigo-500">사용내역서</th>
+                                    <th className="px-2 py-4 text-left border-l border-indigo-500">비고</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-indigo-50">
@@ -2001,13 +2004,16 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                     <div className="mt-1 text-[10px] font-bold text-slate-400">{statementPaths.length}개</div>
                                                 )}
                                             </td>
-
+                                            <td className="p-2 align-top bg-white border-l border-indigo-50">
+                                                <SupportLedgerMemo key={`${yearMonth}:${row.id}`} memoKey={`card:${yearMonth}:${row.id}`}
+                                                    label={`${row.card.name} ${row.card.last4}`} initialMemo={row.memo} />
+                                            </td>
                                         </tr>
                                     );
                                 })}
                                 {rows.length === 0 && (
                                     <tr>
-                                        <td colSpan={6} className="p-20 text-center text-slate-400 bg-slate-50/50">
+                                        <td colSpan={7} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">
                                                 <FontAwesomeIcon icon={faReceipt} className="text-4xl text-slate-300" />
                                                 <p>카드 대장 행이 없습니다.</p>
@@ -2022,6 +2028,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                     <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-amber-300 text-lg">
                                         {formatNumberForDisplay(totals.total)}
                                     </td>
+                                    <td className="bg-slate-900 border-l border-slate-700"></td>
                                     <td className="bg-slate-900 border-l border-slate-700"></td>
                                 </tr>
                             </tfoot>

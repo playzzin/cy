@@ -1,4 +1,5 @@
 import { vehicleService } from './vehicleService';
+import { isRepairLedgerExpense } from '../features/vehicle-repairs/expenses';
 import { supportWriteOperationLogService } from './supportWriteOperationLogService';
 import { getErrorMessage, reportSupportWriteError, SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../utils/supportWriteErrorReporting';
 import type {
@@ -192,7 +193,14 @@ export const saveVehicleMonthlyLedgerMutation = async <TRow extends VehicleMonth
   const expenseUpsertIds = new Set<string>();
   rowsToProcess.forEach(({ row }) => {
     expenseTypes.forEach((type) => {
-      const amount = row.amounts[type] ?? 0;
+      const repairAmount = type === 'REPAIR' ? originalExpenses.filter(expense =>
+        isRepairLedgerExpense(expense) && expense.vehicleId === row.vehicle.id && expense.status !== 'CANCELLED'
+        && expense.date >= row.segment.startDate && expense.date <= row.segment.endDate
+      ).reduce((sum, expense) => sum + expense.amount, 0) : 0;
+      const amount = type === 'REPAIR'
+        ? Math.round(((row.amounts[type] ?? 0) - repairAmount) * 100) / 100
+        : row.amounts[type] ?? 0;
+      if (amount < 0) throw new Error('수리비가 연결된 정비내역보다 작습니다. 정비내역 대장에서 금액을 수정한 뒤 다시 조회해 주세요.');
       if (amount <= 0) return;
       const id = buildExpenseId(yearMonth, row, type);
       expenseUpsertIds.add(id);
@@ -218,6 +226,7 @@ export const saveVehicleMonthlyLedgerMutation = async <TRow extends VehicleMonth
 
   const expenseCancelIds = Array.from(new Set(
     originalExpenses
+      .filter((expense) => !isRepairLedgerExpense(expense))
       .filter((expense) => expense.status !== 'CANCELLED')
       .filter(isVisibleExpense)
       .map((expense) => expense.id)

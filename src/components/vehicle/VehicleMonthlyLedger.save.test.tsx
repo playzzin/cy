@@ -25,6 +25,7 @@ import type { Vehicle, VehicleExpenseRecord } from '../../types/vehicle';
 import type { VehicleBillingDocument } from '../../types/vehicleBilling';
 import { SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../../utils/supportWriteErrorReporting';
 
+jest.mock('../../services/supportLedgerMemoService', () => ({ supportLedgerMemoService: { read: async () => null, save: async () => undefined } }));
 jest.mock('../../utils/supportResourceExcelExport', () => ({ buildVehicleLedgerWorkbook: jest.fn(() => ({})), downloadSupportResourceWorkbook: jest.fn() }));
 
 jest.mock('../../services/vehicleService', () => ({ vehicleService: {

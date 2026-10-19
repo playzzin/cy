@@ -125,12 +125,31 @@ test('새로고침과 엑셀 가져오기는 미저장 편집이 있으면 잠�
   expect(screen.getByRole('button', { name: '엑셀 가져오기' })).toBeEnabled();
 });
 
-test('보관 확인을 취소하면 서버 상태를 바꾸지 않는다', async () => {
+test('삭제 확인을 취소하면 서버 상태를 바꾸지 않는다', async () => {
   jest.spyOn(window, 'confirm').mockReturnValue(false);
   renderLedger();
   await screen.findByDisplayValue('테스트 수리 two');
-  fireEvent.click(screen.getByRole('button', { name: '보관' }));
+  fireEvent.click(screen.getByRole('button', { name: '삭제' }));
   expect(vehicleRepairService.archive).not.toHaveBeenCalled();
+});
+
+test('삭제 후 휴지통에서 복원할 수 있다', async () => {
+  jest.spyOn(window, 'confirm').mockReturnValue(true);
+  const active = row('two', '2026-04-01', 220000);
+  const archived = { ...active, archived: true, revision: 2 };
+  (vehicleRepairService.archive as jest.Mock).mockResolvedValue(undefined);
+  renderLedger();
+  await screen.findByDisplayValue('테스트 수리 two');
+  (vehicleRepairService.list as jest.Mock).mockResolvedValue([archived]);
+  fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+  await screen.findByText('정비내역을 삭제했습니다. 휴지통에서 복원할 수 있습니다.');
+  await waitFor(() => expect(screen.queryByDisplayValue('테스트 수리 two')).not.toBeInTheDocument());
+  fireEvent.change(screen.getByLabelText('정비 상태'), { target: { value: 'archived' } });
+  expect(screen.getByDisplayValue('테스트 수리 two')).toBeInTheDocument();
+  (vehicleRepairService.list as jest.Mock).mockResolvedValue([{ ...active, revision: 3 }]);
+  fireEvent.click(screen.getByRole('button', { name: '복원' }));
+  await screen.findByText('정비내역을 복원했습니다.');
+  expect(vehicleRepairService.archive).toHaveBeenLastCalledWith(archived);
 });
 
 test('조회 실패를 표시하고 다시 조회할 수 있다', async () => {

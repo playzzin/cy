@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, memo, useMemo } from 'react';
+import { editableSupportMemo } from '../../utils/supportLedgerMemo';
 import { SupportLedgerReview } from '../support/SupportLedgerReview';
 import { accommodationReviewBill } from '../../utils/supportLedgerReviewAdapters';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -388,7 +389,7 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
     }, [accommodationByAnyId, accommodationByName]);
 
     const removeAutomaticOverchargeMemoFromRecord = useCallback((record: UtilityRecord): UtilityRecord => {
-        const memo = stripAccommodationOverchargeMemo(record.memo);
+        const memo = editableSupportMemo(stripAccommodationOverchargeMemo(record.memo));
         return memo === (record.memo ?? '') ? record : { ...record, memo };
     }, []);
 
@@ -2773,7 +2774,7 @@ const UtilityLedger: React.FC<UtilityLedgerProps> = ({ selectedTeamId = '', sear
                                     <th className="px-2 py-4 text-center w-28 border-l border-indigo-500">기타</th>
                                     <th className="px-2 py-4 text-center w-32 border-l border-indigo-400 bg-indigo-500">합계</th>
                                     <th className="px-2 py-4 text-center border-l border-indigo-500">초과액</th>
-                                    <th className="px-4 py-4 text-left border-l border-indigo-500">메모</th>
+                                    <th className="px-4 py-4 text-left border-l border-indigo-500">비고</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-indigo-50">
