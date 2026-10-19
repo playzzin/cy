@@ -190,7 +190,9 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
     finally { lock.current = false; setBusy(false); }
   };
   const archive = async (row: RepairRecord) => {
-    if (lock.current || draftCount || !window.confirm(row.archived ? '이 정비내역을 복원할까요?' : '이 정비내역을 삭제할까요? 월별 경비대장의 자동 수리비에서 제외되며 휴지통에서 복원할 수 있습니다.')) return;
+    if (lock.current || draftCount || !window.confirm(row.archived ? '이 정비내역을 복원할까요?' : row.source
+      ? '이 정비이력을 삭제할까요? 기존 월별 경비에 별도로 입력한 금액은 유지되며, 휴지통에서 이력을 복원할 수 있습니다.'
+      : '이 정비내역을 삭제할까요? 월별 경비대장의 자동 수리비에서 제외되며 휴지통에서 복원할 수 있습니다.')) return;
     lock.current = true; setBusy(true); setError('');
     try { await vehicleRepairService.archive(row); setNotice(row.archived ? '정비내역을 복원했습니다.' : '정비내역을 삭제했습니다. 휴지통에서 복원할 수 있습니다.'); await refresh(); }
     catch (error) { setError(errorText(error)); }
@@ -249,7 +251,7 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
       </table>
     </div>
     <div className="repair-footer"><span>표에서 바로 입력 · Tab 키로 다음 칸 이동</span><div><button type="button" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>이전</button><span>{currentPage} / {pages}</span><button type="button" disabled={currentPage >= pages} onClick={() => setPage(currentPage + 1)}>다음</button></div></div>
-    <div className="repair-guide"><strong>입력 가이드</strong><p><b>행 추가</b>로 정비일·차량번호·정비내용·비용을 입력한 뒤 상단 <b>저장</b>을 누르세요. 기존 내역도 표에서 바로 수정할 수 있습니다. 빈 비용은 미입력, 0은 0원으로 저장됩니다.</p><p>청연(VAT포함) 금액은 원본 그대로 보존합니다. 저장한 정비비 합계는 차량번호가 연결된 해당 월 경비대장의 수리비에 자동 반영됩니다. 청구·정산 반영은 월별 경비대장에서 확인 후 저장해 주세요. 삭제한 내역은 휴지통에서 복원할 수 있습니다.</p></div>
+    <div className="repair-guide"><strong>입력 가이드</strong><p><b>행 추가</b>로 정비일·차량번호·정비내용·비용을 입력한 뒤 상단 <b>저장</b>을 누르세요. 기존 내역도 표에서 바로 수정할 수 있습니다. 빈 비용은 미입력, 0은 0원으로 저장됩니다.</p><p>직접 등록한 정비비는 차량번호가 연결된 해당 월 경비대장의 수리비에 자동 반영됩니다. 엑셀로 가져온 과거 이력은 기존 월별 수리비와 중복 합산하지 않습니다. 청구·정산 반영은 월별 경비대장에서 확인 후 저장해 주세요. 삭제한 내역은 휴지통에서 복원할 수 있습니다.</p></div>
 
     <Dialog.Root open={Boolean(preview)} onOpenChange={open => { if (!open && !busy) setPreview(null); }}><Dialog.Portal><Dialog.Overlay className="repair-overlay" /><Dialog.Content className="repair-dialog repair-import-dialog" onInteractOutside={event => { if (busy) event.preventDefault(); }}>
       <Dialog.Title>엑셀 정비내역 가져오기</Dialog.Title><Dialog.Description>월별 합계 행을 제외하고 개별 정비 이력만 가져옵니다. 기존 기록은 덮어쓰지 않습니다.</Dialog.Description>

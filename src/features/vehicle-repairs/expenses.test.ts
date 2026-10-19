@@ -20,3 +20,7 @@ test('삭제·미연결·중복 차량·잘못된 날짜와 금액은 합산하�
 test('수정·복원은 원본의 최신 금액을 반영한다', () => {
   expect(repairLedgerExpenses([{ ...row, costs: { ...emptyCosts(), personal: 10.7 } }], vehicles, '2026-10')[0].amount).toBe(10.7);
 });
+test('기존 월별 수리비와 겹치는 엑셀 이관이력은 다시 합산하지 않는다', () => {
+  const imported = { ...row, source: { fileName: 'history.xlsx', sheet: '2026', cell: 'A2', signature: 'history', costHeaders: ['청연'] } };
+  expect(repairLedgerExpenses([imported, { ...row, id: 'new' }], vehicles, '2026-10')).toEqual([expect.objectContaining({ id: 'repair-ledger-source:new', amount: 32000 })]);
+});
