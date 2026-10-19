@@ -155,6 +155,8 @@ export const MENU_PATHS: { [key: string]: string } = {
     "발행리스트": "/payroll/taxinvoice/issue-list",
     "세금계산서발행리스트": "/payroll/taxinvoice/issue-list",
     "매입매출 관리": "/payroll/workbook-ledger",
+    "법인세 관리": "/payroll/corporate-tax",
+    "법인세": "/payroll/corporate-tax",
     "매입매출 로그": "/payroll/workbook-ledger/logs",
     "매입매출 변경 로그": "/payroll/workbook-ledger/logs",
     "매입매출장부 로그": "/payroll/workbook-ledger/logs",

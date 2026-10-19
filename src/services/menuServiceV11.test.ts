@@ -139,7 +139,8 @@ describe('menuServiceV11 canonical Firestore document', () => {
 
     expect(loaded!.pos_ceo.menu[0].sub).toEqual([
       expect.objectContaining(currentLedger), expect.objectContaining(ledgerLogs),
-      expect.objectContaining(dawonLedger), expect.objectContaining(customLink)
+      expect.objectContaining(dawonLedger), expect.objectContaining(customLink),
+      expect.objectContaining({ text: '법인세 관리', path: '/payroll/corporate-tax' })
     ]);
     expect(loaded!.pos_ceo.menu[1]).toMatchObject({ path: '/custom-child' });
     expect(loaded!.pos_ceo.headerActions).toEqual([]);

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { selectedTarget, deploySelected } = require('./deploy-selected.cjs');
-const { main: deployHosting } = require('./deploy-verified.cjs');
+const { main: deployHosting, assertReleaseAncestry } = require('./deploy-verified.cjs');
 
 const state = { commit: 'synthetic-commit', dirty: false, fingerprints: {
   hosting: 'web', functions: 'server', firestore: 'rules', storage: 'storage', deployment: 'config',
@@ -117,4 +117,34 @@ test('hosting refuses deployment if source changes during checks and propagates 
   await assert.rejects(deployHosting([], { getState: () => state, readRemote: async () => remote,
     execute: quiet, verifyRelease: async () => { throw new Error('release mismatch'); }, log: quiet,
   }), /release mismatch/);
+});
+
+test('hosting blocks stale or unrelated releases even when backend fingerprints match', async () => {
+  const localCommit = 'a'.repeat(40), remoteCommit = 'b'.repeat(40);
+  const gitCalls = [];
+  assertReleaseAncestry(localCommit, remoteCommit, args => { gitCalls.push(args); return { status: 0 }; });
+  assert.deepEqual(gitCalls, [['merge-base', '--is-ancestor', remoteCommit, localCommit]]);
+  assert.throws(() => assertReleaseAncestry(localCommit, remoteCommit, () => ({ status: 1 })), /운영 변경을 먼저 합쳐/);
+  assert.throws(() => assertReleaseAncestry(localCommit, remoteCommit, () => ({ status: 128 })), /Git 이력/);
+  assert.throws(() => assertReleaseAncestry(localCommit, '--unsafe', fail), /형식/);
+  assert.throws(() => assertReleaseAncestry(localCommit, undefined, fail), /배포 커밋/);
+  for (const args of [[], ['--initialize-record']]) {
+    await assert.rejects(deployHosting(args, {
+      getState: () => ({ ...state, commit: localCommit }),
+      readRemote: async () => ({ ...remote, commit: remoteCommit }),
+      checkAncestry: (local, deployed) => assertReleaseAncestry(local, deployed, () => ({ status: 1 })),
+      execute: fail, verifyRelease: fail, log: quiet,
+    }), /운영 변경을 먼저 합쳐/);
+  }
+});
+
+test('hosting stops if production changes while verification is running', async () => {
+  let reads = 0;
+  const calls = [];
+  await assert.rejects(deployHosting([], {
+    getState: () => state,
+    readRemote: async () => ({ ...remote, commit: reads++ ? 'new-release' : state.commit }),
+    checkAncestry: quiet, execute: (...args) => calls.push(args), verifyRelease: fail, log: quiet,
+  }), /검사 중 운영 배포 버전/);
+  assert.equal(calls.length, 1, 'must stop before invoking Firebase');
 });

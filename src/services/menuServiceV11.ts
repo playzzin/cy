@@ -18,6 +18,7 @@ import { permissionAuditService } from './permissionAuditService';
 import { mergeMenuConfigChanges } from '../utils/menuConfigChanges';
 import { ensureTeamPersonnelMenu } from '../utils/teamPersonnelMenu';
 import { ensureBankTransferMenu } from '../utils/bankTransferMenu';
+import { ensureCorporateTaxMenu } from '../utils/corporateTaxMenu';
 
 export type { MenuItem, SiteDataType };
 
@@ -1195,6 +1196,7 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
     removeWorkbookLedgerUpgradeMenus(final);
     ensureTeamPersonnelMenu(final);
     ensureBankTransferMenu(final);
+    ensureCorporateTaxMenu(final);
 
     return final;
 };

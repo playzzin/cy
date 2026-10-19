@@ -654,6 +654,7 @@ service cloud.firestore {
         'daily_advance_statement_recruiter_fees',
         'workbook_ledger_logs',
         'tax_ledger_entries',
+        'corporate_tax_settlements',
         'quarter_vat_payments',
         'quarter_vat_payments_dawon',
         'freelancers',
@@ -827,6 +828,7 @@ service cloud.firestore {
       // large ERP collection classifiers to stay under the rules expression
       // budget.
       return collectionId in [
+        'office_staff_payroll',
         'gemini_usage_logs',
         'team_expense_requests',
         'team_worker_requests',
@@ -1766,6 +1768,22 @@ service cloud.firestore {
     match /daily_advance_statement_recruiter_fees/{feeId} {
       allow read: if (canReadFinance()) && previewReadsAllowed();
       allow create, update, delete: if !isPreviewIdentity() && (canWriteFinance());
+    }
+
+    match /office_staff_payroll/{monthId} {
+      function validPayroll() {
+        let data = request.resource.data;
+        return monthId.matches('^(20[0-9]{2}|2100)-(0[1-9]|1[0-2])$')
+          && data.keys().hasOnly(['month', 'year', 'payroll', 'revision', 'updatedBy', 'updatedAt'])
+          && data.month == monthId && data.year is int && data.year >= 2000 && data.year <= 2100
+          && monthId.matches('^' + string(data.year) + '-.*$')
+          && data.payroll is map && data.payroll.grossPaySnapshot is list
+          && data.revision is int && data.updatedBy == request.auth.uid && data.updatedAt == request.time;
+      }
+      allow read: if canReadFinance() && previewReadsAllowed();
+      allow create: if !isPreviewIdentity() && canWriteFinance() && validPayroll() && request.resource.data.revision == 1;
+      allow update: if !isPreviewIdentity() && canWriteFinance() && validPayroll() && request.resource.data.revision == resource.data.revision + 1;
+      allow delete: if !isPreviewIdentity() && (false);
     }
 
     match /monthly_payroll_settlements/{settlementId} {

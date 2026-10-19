@@ -242,6 +242,7 @@ const MemoPage = lazyNamed(() => import('./features/smart-memo/pages/MemoPage'),
 const KakaoSenderPage = React.lazy(() => import('./pages/helper/KakaoSenderPage'));
 const TodoPage = React.lazy(() => import('./pages/helper/TodoPage'));
 const TaxAffairsPage = React.lazy(() => import('./pages/tax/TaxAffairsPage'));
+const CorporateTaxPage = React.lazy(() => import('./pages/tax/CorporateTaxPage'));
 const SettlementAlertCenterPage = React.lazy(() => import('./pages/settlement/SettlementAlertCenterPage'));
 const BankNotificationsPage = React.lazy(() => import('./features/bank-notifications/BankNotificationsPage'));
 const KakaoMessageCenterPage = React.lazy(() => import('./pages/kakao/KakaoMessageCenterPage'));
@@ -464,6 +465,7 @@ const App: React.FC = () => {
               <Route path="kakao-sender" element={<KakaoSenderPage />} />
               <Route path="kakao-message-center" element={<KakaoMessageCenterPage />} />
               <Route path="tax-affairs" element={<TaxAffairsPage />} />
+              <Route path="corporate-tax" element={<CorporateTaxPage />} />
               <Route path="delegation-letter" element={<DelegationLetterPage />} />
               <Route path="delegation-letter-v2" element={<DelegationLetterV2Page />} />
               <Route path="cash-receipt-confirmation" element={<CashReceiptConfirmationPage />} />
