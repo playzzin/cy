@@ -165,7 +165,7 @@ const BusinessMotionStory: React.FC<Props> = ({ module, paused, reducedMotion, o
                         {i === step && <span className="cy-story-step-progress" aria-hidden="true"><span key={`${step}-${replay}`} className={playing || elapsed.current > 0 ? 'has-started' : ''} style={{ animationPlayState: playing && !stopped ? 'running' : 'paused', animationDuration: `${actionDuration}ms` }} /></span>}
                     </li>)}
                 </ol>
-                <BusinessActionScene module={module} step={step} replay={replay} documentIndex={documentIndex} />
+                <BusinessActionScene module={module} step={step} replay={replay} documentIndex={documentIndex} paused={stopped} reducedMotion={reducedMotion} />
                 <ol key={`beats-${step}-${replay}`} className="cy-story-action-beats" aria-label="선택한 액션의 동작 순서">{ACTION_BEATS[module.id][step].map(beat => <li key={beat}><i aria-hidden="true" />{beat}</li>)}</ol>
                 <div className="cy-story-player">
                     <div className="cy-story-player-status" role="status">{reducedMotion ? '모션 감소 · 직접 단계 탐색' : paused ? '전체 모션 일시정지 중' : actionPaused ? '액션 모션 일시정지 중' : playing ? (visible ? '순서대로 재생 중' : '화면 밖에서 재생 대기 중') : finished ? '사업 흐름을 모두 살펴봤습니다' : '나의 속도로 살펴보세요'}<span>액션 {stepNumber} / {totalSteps}</span></div>
