@@ -1,7 +1,10 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import TeamWorkerDetailPage from './TeamWorkerDetailPage';
+import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
+import { teamResourceStatusService } from '../../services/teamResourceStatusService';
+import { showConfirmAlert } from '../../utils/swal';
 import { manpowerService } from '../../services/manpowerService';
 import { teamService } from '../../services/teamService';
 import { dailyReportService } from '../../services/dailyReportService';
@@ -18,7 +21,9 @@ jest.mock('../../hooks/useWorkerAccessScope', () => ({
 }));
 jest.mock('../../components/SecureSignature', () => () => null);
 jest.mock('../../components/signatures/SignatureGeneratorModal', () => () => null);
-jest.mock('../../utils/swal', () => ({ toast: { error: jest.fn(), success: jest.fn(), warning: jest.fn() } }));
+jest.mock('../../routes/TeamWorkflowGate', () => ({ useRestrictedTeamWorkflow: jest.fn() }));
+jest.mock('../../services/teamResourceStatusService', () => ({ teamResourceStatusService: { update: jest.fn() } }));
+jest.mock('../../utils/swal', () => ({ showConfirmAlert: jest.fn(), toast: { error: jest.fn(), success: jest.fn(), warning: jest.fn() } }));
 
 const workers = [
     { id: 'one', name: '가상하나', teamId: 'a', teamName: '검증팀', companyName: '청연이엔지', status: '재직', unitPrice: 100000 },
@@ -29,6 +34,9 @@ const workers = [
 
 beforeEach(() => {
     jest.clearAllMocks();
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(false);
+    (showConfirmAlert as jest.Mock).mockResolvedValue({ isConfirmed: true });
+    (teamResourceStatusService.update as jest.Mock).mockImplementation(async input => ({ id: input.id, status: input.status, isActive: input.status === '재직' }));
     window.matchMedia = jest.fn().mockReturnValue({ matches: false });
     (teamService.getTeams as jest.Mock).mockResolvedValue([
         { id: 'a', name: '검증팀', companyName: '청연이엔지' }, { id: 'b', name: '다른팀', companyName: '청연이엔지' },
@@ -104,18 +112,75 @@ test('작업자정보 메뉴는 기존 기본정보 조회를 유지한다', asy
     expect(screen.queryByLabelText('월별 노임명세서')).not.toBeInTheDocument();
 });
 
-test('전체가 기본이며 퇴사와 기타 비활성을 구분하고 소속 범위를 유지한다', async () => {
+test('재직중이 기본이며 퇴사와 기타 비활성을 구분하고 소속 범위를 유지한다', async () => {
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue([...workers,
         { ...workers[0], id: 'retired', name: '퇴사검증', status: '퇴사', isActive: false },
         { ...workers[0], id: 'inactive', name: '비활성검증', status: '출입금지', isActive: false },
     ]);
     render(<TeamWorkerDetailPage />);
-    await screen.findByRole('button', { name: /퇴사검증.*검증팀/ });
+    await screen.findByRole('button', { name: /가상하나.*검증팀/ });
+    expect(screen.queryByRole('button', { name: /퇴사검증.*검증팀/ })).not.toBeInTheDocument();
     const status = screen.getByRole('group', { name: '작업자 상태' });
-    expect(within(status).getByRole('button', { name: '전체' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(status).getByRole('button', { name: '재직중 (3)' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('group', { name: '조회월' })).toBeInTheDocument();
-    fireEvent.click(within(status).getByRole('button', { name: '퇴사' }));
+    fireEvent.click(within(status).getByRole('button', { name: '퇴사자 (1)' }));
     expect(screen.queryByRole('button', { name: /비활성검증.*검증팀/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /다른팀사람/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /퇴사검증.*검증팀/ })).toBeInTheDocument();
+});
+
+test('팀장은 작업자정보에서 퇴사 처리 후 재직중으로 복귀하며 선택과 인원수가 갱신된다', async () => {
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(true);
+    render(<TeamWorkerDetailPage view="profile" />);
+    fireEvent.click(await screen.findByRole('button', { name: /가상하나.*검증팀/ }));
+    fireEvent.click(screen.getByRole('button', { name: '퇴사 처리' }));
+    await waitFor(() => expect(teamResourceStatusService.update).toHaveBeenCalledWith({ kind: 'worker', id: 'one', status: '퇴사', expectedStatus: '재직', expectedIsActive: null }));
+    expect(await screen.findByRole('button', { name: '재직중으로 변경' })).toBeEnabled();
+    expect(screen.getByRole('heading', { name: '가상하나' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '퇴사자 (1)' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: /가상둘.*검증팀/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '재직중으로 변경' }));
+    await waitFor(() => expect(teamResourceStatusService.update).toHaveBeenLastCalledWith({ kind: 'worker', id: 'one', status: '재직', expectedStatus: '퇴사', expectedIsActive: false }));
+    expect(await screen.findByRole('button', { name: '퇴사 처리' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '재직중 (3)' })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('퇴사 취소와 저장 실패 시 기존 상태를 유지하고 중복 저장을 막는다', async () => {
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(true);
+    (showConfirmAlert as jest.Mock).mockResolvedValueOnce({ isConfirmed: false });
+    render(<TeamWorkerDetailPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '퇴사 처리' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '퇴사 처리' })).toBeEnabled());
+    expect(teamResourceStatusService.update).not.toHaveBeenCalled();
+    let reject!: (reason: Error) => void;
+    (teamResourceStatusService.update as jest.Mock).mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; }));
+    fireEvent.click(screen.getByRole('button', { name: '퇴사 처리' }));
+    await waitFor(() => expect(teamResourceStatusService.update).toHaveBeenCalledTimes(1));
+    const pendingButton = screen.getByRole('button', { name: '처리 중…' });
+    expect(pendingButton).toBeDisabled();
+    fireEvent.click(pendingButton);
+    await act(async () => reject(new Error('현재 소속 팀원만 변경할 수 있습니다.')));
+    expect(screen.getByRole('alert')).toHaveTextContent('현재 소속 팀원만');
+    expect(screen.getByRole('button', { name: '재직중 (3)' })).toHaveAttribute('aria-pressed', 'true');
+    expect(teamResourceStatusService.update).toHaveBeenCalledTimes(1);
+});
+
+test('출력일보에서도 영문 퇴사 상태를 분리 조회하며 상태 설정은 작업자정보에만 표시한다', async () => {
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(true);
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue([...workers, { ...workers[0], id: 'retired', name: '퇴사검증', status: 'retired' }]);
+    render(<TeamWorkerDetailPage view="dailyReport" />);
+    fireEvent.click(await screen.findByRole('button', { name: '퇴사자 (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: /퇴사검증.*검증팀/ }));
+    expect(screen.getByRole('heading', { name: '퇴사검증' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '재직 상태 설정' })).not.toBeInTheDocument();
+});
+
+test('출입금지 작업자는 기타 목록에서 조회하며 퇴사 복귀 버튼으로 제한을 해제하지 않는다', async () => {
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(true);
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue([{ ...workers[0], status: '출입금지', isActive: false }]);
+    render(<TeamWorkerDetailPage view="profile" />);
+    fireEvent.click(await screen.findByRole('button', { name: '기타 (1)' }));
+    expect(await screen.findByRole('heading', { name: '가상하나' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '재직 상태 설정' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '재직중으로 변경' })).not.toBeInTheDocument();
 });

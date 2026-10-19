@@ -49,7 +49,7 @@
     font-weight: 900;
 }
 
-.sr-site-status--완료 {
+.sr-site-status--종료 {
     border-color: #cbd5e1;
     background: #f8fafc;
     color: #475569;
@@ -575,7 +575,7 @@
 
     .sr-mobile-filter-bar {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 78px;
+        grid-template-columns: minmax(0, 1fr);
         align-items: stretch;
         gap: 8px;
         margin-bottom: 10px;

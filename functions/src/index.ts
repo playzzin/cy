@@ -171,3 +171,5 @@ export { sendKakaoAlimtalk, sendFriendTalk, getKakaoManagementUrl } from './kaka
 export { issueTaxInvoiceApi, getTaxInvoiceListApi, getTaxInvoiceStatusApi } from './legacyTaxInvoice';
 
 export { teamMaterialTransactions } from './teamMaterialTransactions';
+
+export { updateTeamResourceStatus } from './teamResourceStatus';

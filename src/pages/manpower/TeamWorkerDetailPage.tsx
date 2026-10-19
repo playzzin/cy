@@ -40,6 +40,9 @@ import { PayslipTemplate } from '../payroll/components/PayslipTemplate';
 import type { PaymentData } from '../payroll/components/PayslipTemplate';
 import PayslipImageActions from './PayslipImageActions';
 import WorkerWorkHistory from '../../components/manpower/WorkerWorkHistory';
+import TeamResourceStatusControl from '../../components/manpower/TeamResourceStatusControl';
+import { getWorkerStatusGroup, getWorkerStatusLabel, workerStatusMatches } from '../../utils/workerStatus';
+import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import ImageFileActions from '../../components/common/ImageFileActions';
 import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyReportService';
 import { manpowerService, Worker } from '../../services/manpowerService';
@@ -175,10 +178,7 @@ const maskAccountNumber = (value?: string | null, visible = false) => {
     return `${'*'.repeat(Math.max(4, raw.length - 4))}${raw.slice(-4)}`;
 };
 
-const isInactiveWorker = (worker: Worker) => {
-    const status = normalizeText(worker.status);
-    return worker.isActive === false || status.includes('퇴사') || status.includes('inactive') || status.includes('출입금지');
-};
+const isInactiveWorker = (worker: Worker) => getWorkerStatusGroup(worker) !== 'active';
 
 const buildTeamTokens = (team?: Team | null) => {
     const values = [team?.id, team?.legacyId, team?.name].map(value => String(value ?? '').trim()).filter(Boolean);
@@ -328,13 +328,14 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
     const isDocumentView = detailView !== 'profile';
     const payslipRef = useRef<HTMLDivElement>(null);
     const [teams, setTeams] = useState<Team[]>([]);
+    const restrictedTeam = useRestrictedTeamWorkflow();
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [outputRows, setOutputRows] = useState<DailyReportWorkerRow[]>([]);
     const [selectedTeamId, setSelectedTeamId] = useState<string>('');
     const [isTeamPickerOpen, setIsTeamPickerOpen] = useState(false);
     const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
     const [searchQuery, setSearchQuery] = useState('');
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const [dailyReportDisplayMode, setDailyReportDisplayMode] = useState<DailyReportDisplayMode>('calendar');
     const [profileSection, setProfileSection] = useState<'info' | 'work'>(() => new URLSearchParams(window.location.search).get('section') === 'work' ? 'work' : 'info');
@@ -483,10 +484,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
 
         return allTeamWorkers
             .filter(worker => {
-                if (statusFilter === 'active' && isInactiveWorker(worker)) return false;
-                const retired = normalizeText(worker.status).includes('퇴사');
-                if (statusFilter === 'retired' && !retired) return false;
-                if (statusFilter === 'inactive' && (!isInactiveWorker(worker) || retired)) return false;
+                if (!workerStatusMatches(worker, statusFilter)) return false;
 
                 if (!query) return true;
                 return getWorkerSearchText(worker, getTeamLabel(worker, teamById)).includes(query);
@@ -590,11 +588,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
     }, [allTeamWorkers, teamOutputRows]);
 
     const teamFocusWorker = useMemo(() => {
-        const candidates = allTeamWorkers.filter(worker => {
-            if (statusFilter === 'active') return !isInactiveWorker(worker);
-            if (statusFilter === 'inactive') return isInactiveWorker(worker);
-            return true;
-        });
+        const candidates = allTeamWorkers.filter(worker => workerStatusMatches(worker, statusFilter));
 
         return candidates.reduce<{ worker: Worker; manDay: number } | null>((topWorker, worker) => {
             const workerId = String(worker.id ?? '').trim();
@@ -1006,10 +1000,10 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                 <div className="tw-control tw-control--status">
                     <span>상태</span>
                     <div className="tw-status-options" role="group" aria-label="작업자 상태">
-                        {([{ value: 'all', label: '전체' }, { value: 'active', label: '재직' }, { value: 'retired', label: '퇴사' },
-                            ...(allTeamWorkers.some(worker => isInactiveWorker(worker) && !normalizeText(worker.status).includes('퇴사')) ? [{ value: 'inactive', label: '기타' }] : [])]
+                        {([{ value: 'active', label: '재직중' }, { value: 'retired', label: '퇴사자' }, { value: 'all', label: '전체' },
+                            ...(allTeamWorkers.some(worker => getWorkerStatusGroup(worker) === 'inactive') ? [{ value: 'inactive', label: '기타' }] : [])]
                         ).map(option => <button type="button" key={option.value} aria-pressed={statusFilter === option.value}
-                            onClick={() => setStatusFilter(option.value as StatusFilter)}>{option.label}</button>)}
+                            onClick={() => { setStatusFilter(option.value as StatusFilter); setMobileView('list'); }}>{option.label} ({allTeamWorkers.filter(worker => workerStatusMatches(worker, option.value as StatusFilter)).length})</button>)}
                     </div>
                 </div>
             </section>
@@ -1214,7 +1208,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                                     <div className="tw-worker-hero__title">
                                         <h2>{selectedWorker.name}</h2>
                                         <span className={isInactiveWorker(selectedWorker) ? 'tw-status tw-status--inactive' : 'tw-status'}>
-                                            {isInactiveWorker(selectedWorker) ? '비활성' : '재직'}
+                                            {getWorkerStatusLabel(selectedWorker)}
                                         </span>
                                     </div>
                                     <div className="tw-worker-hero__meta">
@@ -1271,6 +1265,12 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                                 className="tw-section-grid tw-section-grid--team-accent"
                                 style={{ '--team-color': selectedWorkerTeamColor } as React.CSSProperties}
                             >
+                                {restrictedTeam && accessScope.mode === 'team' && !accessScope.loading && <TeamResourceStatusControl
+                                    key={selectedWorker.id} kind="worker" resource={selectedWorker}
+                                    onSaved={result => {
+                                        setWorkers(current => current.map(worker => worker.id === result.id ? { ...worker, status: result.status, isActive: result.isActive === true } : worker));
+                                        setStatusFilter(result.status === '퇴사' ? 'retired' : 'active');
+                                    }} />}
                                 <section className="tw-detail-section">
                                     <h3><UserRound size={18} />작업자 정보</h3>
                                     <div className="tw-detail-grid">

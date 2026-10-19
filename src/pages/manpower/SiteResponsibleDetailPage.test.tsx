@@ -4,11 +4,11 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import SiteResponsibleDetailPage from './SiteResponsibleDetailPage';
 import { dailyReportService } from '../../services/dailyReportService';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
+import { siteService } from '../../services/siteService';
+import { teamResourceStatusService } from '../../services/teamResourceStatusService';
+import { showConfirmAlert } from '../../utils/swal';
 
-jest.mock('../../services/siteService', () => ({ siteService: { getSites: async () => [
-    { id: 'site-a', name: '가상 가현장', responsibleTeamId: 'a', responsibleTeamName: '검증팀', status: 'active' },
-    { id: 'site-b', name: '가상 나현장', responsibleTeamId: 'a', responsibleTeamName: '검증팀', status: 'active' },
-] } }));
+jest.mock('../../services/siteService', () => ({ siteService: { getSites: jest.fn() } }));
 jest.mock('../../services/teamService', () => ({ teamService: { getTeams: async () => [
     { id: 'a', name: '검증팀', companyName: '청연이엔지' },
 ] } }));
@@ -20,10 +20,17 @@ jest.mock('../../hooks/useWorkerAccessScope', () => ({
     workerAccessMatchesReportRow: (_scope: unknown, row: { teamId: string }) => row.teamId === 'a',
     workerAccessMatchesTeamRef: (_scope: unknown, teamId: string) => teamId === 'a',
 }));
-jest.mock('../../utils/swal', () => ({ toast: { error: jest.fn(), success: jest.fn(), warning: jest.fn() } }));
+jest.mock('../../services/teamResourceStatusService', () => ({ teamResourceStatusService: { update: jest.fn() } }));
+jest.mock('../../utils/swal', () => ({ showConfirmAlert: jest.fn(), toast: { error: jest.fn(), success: jest.fn(), warning: jest.fn() } }));
 
 beforeEach(() => {
     jest.clearAllMocks();
+    (siteService.getSites as jest.Mock).mockResolvedValue([
+        { id: 'site-a', name: '가상 가현장', responsibleTeamId: 'a', responsibleTeamName: '검증팀', status: 'active' },
+        { id: 'site-b', name: '가상 나현장', responsibleTeamId: 'a', responsibleTeamName: '검증팀', status: 'active' },
+    ]);
+    (showConfirmAlert as jest.Mock).mockResolvedValue({ isConfirmed: true });
+    (teamResourceStatusService.update as jest.Mock).mockImplementation(async input => ({ id: input.id, status: input.status }));
     window.matchMedia = jest.fn().mockReturnValue({ matches: false });
     (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(true);
     (dailyReportService.getWorkerRows as jest.Mock).mockImplementation(async ({ startDate }) => [
@@ -31,6 +38,42 @@ beforeEach(() => {
         { reportId: 'r2', date: startDate, siteId: 'site-a', siteName: '가상 가현장', workerId: 'two', workerName: '동명작업자', teamId: 'a', workerTeamName: '지원팀', manDay: 0.5, unitPrice: 200000 },
         { reportId: 'r3', date: startDate, siteId: 'site-b', siteName: '가상 나현장', workerId: 'three', workerName: '다른현장작업자', teamId: 'a', manDay: 1, unitPrice: 300000 },
     ]);
+});
+
+test('현장정보에서 종료 처리와 진행중 복귀를 하고 목록·건수·선택을 즉시 갱신한다', async () => {
+    render(<SiteResponsibleDetailPage view="siteInfo" />);
+    await screen.findByRole('heading', { name: '가상 가현장' });
+    fireEvent.click(screen.getByRole('button', { name: '현장 종료' }));
+    await waitFor(() => expect(teamResourceStatusService.update).toHaveBeenCalledWith({ kind: 'site', id: 'site-a', status: 'completed', expectedStatus: 'active', expectedIsActive: null }));
+    expect(await screen.findByRole('button', { name: '진행중으로 변경' })).toBeEnabled();
+    expect(screen.getByLabelText('현장 상태')).toHaveValue('completed');
+    expect(screen.getByRole('heading', { name: '가상 가현장' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /가상 나현장.*진행중/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '종료 현장 (1)' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '진행중으로 변경' }));
+    await waitFor(() => expect(teamResourceStatusService.update).toHaveBeenLastCalledWith({ kind: 'site', id: 'site-a', status: 'active', expectedStatus: 'completed', expectedIsActive: null }));
+    expect(await screen.findByRole('button', { name: '현장 종료' })).toBeEnabled();
+    expect(screen.getByLabelText('현장 상태')).toHaveValue('active');
+    expect(screen.getByRole('option', { name: '진행중 현장 (2)' })).toBeInTheDocument();
+});
+
+test('현장 출력일보에서 기존 종료 상태 표기를 모두 모아 보며 설정 버튼은 표시하지 않는다', async () => {
+    (siteService.getSites as jest.Mock).mockResolvedValueOnce(['completed', 'closed', '종료', '완료', '마감'].map((status, index) => ({ id: `closed-${index}`, name: `종료검증${index}`, responsibleTeamId: 'a', responsibleTeamName: '검증팀', status } as any)));
+    render(<SiteResponsibleDetailPage view="dailyReport" />);
+    await screen.findByRole('option', { name: '종료 현장 (5)' });
+    expect(screen.queryByRole('button', { name: /종료검증0/ })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('현장 상태'), { target: { value: 'completed' } });
+    expect(await screen.findByRole('heading', { name: '종료검증0' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '현장 상태 설정' })).not.toBeInTheDocument();
+});
+
+test('현장 상태 저장 실패 시 진행중 목록과 상태를 유지한다', async () => {
+    (teamResourceStatusService.update as jest.Mock).mockRejectedValueOnce(new Error('담당 현장만 변경할 수 있습니다.'));
+    render(<SiteResponsibleDetailPage view="siteInfo" />);
+    fireEvent.click(await screen.findByRole('button', { name: '현장 종료' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('담당 현장만');
+    expect(screen.getByLabelText('현장 상태')).toHaveValue('active');
+    expect(screen.getByRole('button', { name: '현장 종료' })).toBeEnabled();
 });
 
 test('별도 현장 출력일보 화면에서 달력 합계와 작업자별 상세를 연결한다', async () => {

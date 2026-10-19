@@ -14,7 +14,6 @@ import {
     RefreshCw,
     Search,
     ShieldCheck,
-    SlidersHorizontal,
     Users,
     X,
 } from 'lucide-react';
@@ -24,6 +23,8 @@ import MonthNavigator from '../../components/common/MonthNavigator';
 import MobileListReturnButton from '../../components/common/MobileListReturnButton';
 import WorkerWorkHistory from '../../components/manpower/WorkerWorkHistory';
 import SiteMonthlyManDays from '../../components/manpower/SiteMonthlyManDays';
+import TeamResourceStatusControl from '../../components/manpower/TeamResourceStatusControl';
+import { isClosedSite, normalizeSiteStatus } from '../../utils/siteStatus';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
@@ -230,18 +231,18 @@ const rowMatchesSite = (row: DailyReportWorkerRow, site: Site | null) => {
 };
 
 const statusLabel = (site: Site) => {
-    const normalized = normalizeText(site.status);
-    if (normalized === 'completed' || normalized === 'closed' || normalized === '마감') return '완료';
+    const normalized = normalizeSiteStatus(site.status);
+    if (isClosedSite(site)) return '종료';
     if (normalized === 'planned' || normalized === '예정') return '예정';
     return '진행중';
 };
 
 const siteStatusMatches = (site: Site, filter: SiteStatusFilter) => {
     if (filter === 'all') return true;
-    const normalized = normalizeText(site.status);
-    if (filter === 'active') return normalized === 'active' || normalized === '진행중' || !normalized;
-    if (filter === 'completed') return normalized === 'completed' || normalized === 'closed' || normalized === '마감';
-    return normalized === 'planned' || normalized === '예정';
+    const label = statusLabel(site);
+    if (filter === 'active') return label === '진행중';
+    if (filter === 'completed') return label === '종료';
+    return label === '예정';
 };
 
 const DetailField: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({ label, value, wide }) => (
@@ -288,7 +289,6 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedDetailView, setDetailView] = useState<DetailView>('siteInfo');
     const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('sites');
-    const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
     const [isResponsiblePickerOpen, setIsResponsiblePickerOpen] = useState(false);
     const [loadingMaster, setLoadingMaster] = useState(true);
     const [loadingOutput, setLoadingOutput] = useState(false);
@@ -838,20 +838,9 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                         </button>
                     )}
                 </label>
-                <button
-                    type="button"
-                    className={isMobileFilterOpen ? 'sr-mobile-filter-button sr-mobile-filter-button--active' : 'sr-mobile-filter-button'}
-                    onClick={() => setIsMobileFilterOpen(prev => !prev)}
-                    aria-expanded={isMobileFilterOpen}
-                    aria-controls="site-responsible-filter-controls"
-                >
-                    <SlidersHorizontal size={18} />
-                    <span>필터</span>
-                    <small>{statusFilter === 'active' ? '진행' : statusFilter === 'planned' ? '예정' : statusFilter === 'completed' ? '완료' : '전체'}</small>
-                </button>
             </section>
 
-            <section id="site-responsible-filter-controls" className={isMobileFilterOpen ? 'tw-toolbar sr-toolbar--mobile-expanded' : 'tw-toolbar'}>
+            <section id="site-responsible-filter-controls" className="tw-toolbar tw-toolbar--always-visible">
                 <div className="tw-control tw-control--month">
                     <span>조회월</span>
                     <MonthNavigator
@@ -874,10 +863,10 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
 
                 <label className="tw-control">
                     <span>현장 상태</span>
-                    <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as SiteStatusFilter)}>
-                        <option value="active">진행중 ({selectedResponsibleStatusCounts.active})</option>
+                    <select aria-label="현장 상태" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as SiteStatusFilter); setMobileView('sites'); }}>
+                        <option value="active">진행중 현장 ({selectedResponsibleStatusCounts.active})</option>
                         <option value="planned">예정 ({selectedResponsibleStatusCounts.planned})</option>
-                        <option value="completed">완료 ({selectedResponsibleStatusCounts.completed})</option>
+                        <option value="completed">종료 현장 ({selectedResponsibleStatusCounts.completed})</option>
                         <option value="all">전체 ({selectedResponsibleStatusCounts.all})</option>
                     </select>
                 </label>
@@ -887,7 +876,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                 <span>전체 {selectedResponsibleStatusCounts.all.toLocaleString('ko-KR')}개</span>
                 <span>진행 {selectedResponsibleStatusCounts.active.toLocaleString('ko-KR')}개</span>
                 <span>예정 {selectedResponsibleStatusCounts.planned.toLocaleString('ko-KR')}개</span>
-                <span>완료 {selectedResponsibleStatusCounts.completed.toLocaleString('ko-KR')}개</span>
+                <span>종료 {selectedResponsibleStatusCounts.completed.toLocaleString('ko-KR')}개</span>
                 <strong>현재 표시 {selectedResponsibleSites.length.toLocaleString('ko-KR')}개</strong>
             </div>
 
@@ -1085,6 +1074,13 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                                     className="tw-section-grid tw-section-grid--team-accent"
                                     style={{ '--team-color': siteDisplayColor } as React.CSSProperties}
                                 >
+                                    {restrictedTeam && accessScope.mode === 'team' && !accessScope.loading
+                                        && workerAccessMatchesTeamRef(accessScope, selectedSite.responsibleTeamId) && <TeamResourceStatusControl
+                                            key={selectedSite.id} kind="site" resource={selectedSite}
+                                            onSaved={result => {
+                                                setSites(current => current.map(site => site.id === result.id ? { ...site, status: result.status as Site['status'] } : site));
+                                                setStatusFilter(result.status === 'completed' ? 'completed' : 'active');
+                                            }} />}
                                     <section className="tw-detail-section">
                                         <h3><Building2 size={18} />현장정보</h3>
                                         <div className="tw-detail-grid">
