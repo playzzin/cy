@@ -66,21 +66,25 @@ test('월을 바꾸면 새 달을 조회하고 실패 시 이전 날짜 내역�
     const month = (dailyReportService.getWorkerRows as jest.Mock).mock.calls[0][0].startDate;
     (dailyReportService.getWorkerRows as jest.Mock).mockRejectedValueOnce(new Error('test failure'));
     fireEvent.click(screen.getByRole('button', { name: '이전 달' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('새로고침해 주세요');
+    const history = within(screen.getByRole('region', { name: '현장 출력일보' }));
+    const summary = within(screen.getByRole('region', { name: '현장 팀·작업자별 공수' }));
+    expect(await history.findByRole('alert')).toHaveTextContent('새로고침해 주세요');
+    expect(summary.getByRole('alert')).toHaveTextContent('새로고침해 주세요');
     expect((dailyReportService.getWorkerRows as jest.Mock).mock.calls[1][0].startDate).not.toBe(month);
     expect(screen.queryByRole('button', { name: /근무내역 0.75공수/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
-    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryAllByRole('alert')).toHaveLength(0));
     expect(await screen.findByRole('button', { name: /근무내역 0.75공수/ })).toBeInTheDocument();
     log.mockRestore();
 });
 
-test('팀장 현장정보는 출력일보 탭과 달력을 포함하지 않는다', async () => {
+test('팀장 현장정보는 출력일보와 팀·지원팀별 공수 영역을 포함하지 않는다', async () => {
     render(<SiteResponsibleDetailPage />);
     await screen.findByRole('heading', { name: '가상 가현장' });
     expect(screen.getByRole('heading', { name: '현장정보', level: 1 })).toBeInTheDocument();
     expect(screen.queryByRole('tablist', { name: '월별 현장 문서' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('현장 출력일보')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '현장 팀·작업자별 공수' })).not.toBeInTheDocument();
 });
 
 test('사무실의 기존 현장 노임명세서와 출력일보 목록은 유지한다', async () => {
@@ -94,14 +98,14 @@ test('사무실의 기존 현장 노임명세서와 출력일보 목록은 유�
     expect(screen.queryByLabelText('현장 출력일보')).not.toBeInTheDocument();
 });
 
-test('담당 현장에 지원 온 타 팀과 작업자 공수를 포함하고 다른 현장은 제외한다', async () => {
+test('현장 출력일보에 지원 온 타 팀과 작업자 공수를 표시하고 다른 현장은 제외한다', async () => {
     (dailyReportService.getWorkerRows as jest.Mock).mockImplementation(async ({ startDate }) => [
         { reportId: 'own', date: startDate, siteId: 'site-a', siteName: '가상 가현장', teamId: 'a', responsibleTeamId: 'a', workerId: 'one', workerName: '동명', workerTeamId: 'a', workerTeamName: '검증팀', manDay: 1, unitPrice: 100 },
         { reportId: 'support', date: startDate, siteId: 'site-a', siteName: '가상 가현장', teamId: 'b', responsibleTeamId: 'a', workerId: 'two', workerName: '동명', workerTeamId: 'b', workerTeamName: '외부지원팀', isSiteSupport: true, manDay: 0.5, unitPrice: 0 },
         { reportId: 'support-2', date: startDate.replace(/01$/, '02'), siteId: 'site-a', siteName: '가상 가현장', teamId: 'b', responsibleTeamId: 'a', workerId: 'two', workerName: '동명', workerTeamId: 'b', workerTeamName: '외부지원팀', isSiteSupport: true, manDay: 0.25, unitPrice: 0 },
         { reportId: 'unrelated', date: startDate, siteId: 'other-site', siteName: '가상 가현장', teamId: 'b', workerId: 'other', workerName: '차단대상', manDay: 99 },
     ]);
-    render(<SiteResponsibleDetailPage />);
+    render(<SiteResponsibleDetailPage view="dailyReport" />);
     const summary = await screen.findByRole('region', { name: '현장 팀·작업자별 공수' });
     await waitFor(() => expect(within(summary).getByText('외부지원팀')).toBeInTheDocument());
     expect((dailyReportService.getWorkerRows as jest.Mock).mock.calls[0][0].includeSiteSupport).toBe(true);
@@ -109,6 +113,7 @@ test('담당 현장에 지원 온 타 팀과 작업자 공수를 포함하고 �
     expect(within(support).getByText('0.75공수')).toBeInTheDocument();
     expect(within(support).getByText('2일')).toBeInTheDocument();
     expect(within(summary).getAllByText('동명')).toHaveLength(2);
+    expect(screen.getByRole('region', { name: '현장 출력일보' })).toBeInTheDocument();
     expect(screen.queryByText('차단대상')).not.toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: '현장담당 요약' })).getByText('1.75')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /가상 나현장.*진행중/ }));

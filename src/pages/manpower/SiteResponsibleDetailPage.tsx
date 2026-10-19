@@ -1030,7 +1030,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                                 </div>
                             </div>
 
-                            {restrictedTeam && detailView === 'siteInfo' && <SiteWorkforceSummary rows={selectedSiteRows} month={selectedMonth}
+                            {restrictedTeam && detailView === 'dailyReport' && <SiteWorkforceSummary rows={selectedSiteRows} month={selectedMonth}
                                 loading={loadingOutput} error={outputError} />}
 
                             {!restrictedTeam && !view && <div className="tw-view-tabs" role="tablist" aria-label="월별 현장 문서">
