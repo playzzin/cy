@@ -29,11 +29,31 @@
 .worker-history__day-total small { color: #64748b; font-size: 10px; }
 .worker-history__day-count { color: #64748b; font-size: 10px; overflow-wrap: anywhere; }
 .worker-history__no-work { align-self: center; margin: auto; color: #cbd5e1; font-size: 14px; }
-.worker-history__row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: 10px 4px; background: white; color: #334155; border: 0; border-bottom: 1px solid #e2e8f0; text-align: left; }
-.worker-history__row > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 13px; }
-.worker-history__row > span:last-child { flex-shrink: 0; text-align: right; }
-.worker-history__row strong { font-size: 14px; }
-.worker-history__row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.worker-history__list-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 0; }
+.worker-history__list-heading h4 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+.worker-history__list-heading .worker-history__hint { margin-bottom: 0; }
+.worker-history__list-order { font-size: 12px; color: #64748b; white-space: nowrap; }
+.worker-history__list { display: grid; gap: 16px; }
+.worker-history__date { min-width: 0; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; box-shadow: 0 2px 4px rgba(15, 23, 42, 0.025); }
+.worker-history__date--today { border-color: #93c5fd; }
+.worker-history__row { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; width: 100%; align-items: center; gap: 14px; padding: 16px; border: 0; border-radius: 12px; background: #f8fafc; color: #334155; text-align: left; cursor: pointer; }
+.worker-history__row:hover { background: #eff6ff; }
+.worker-history__date-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; align-self: start; min-height: 62px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; font-variant-numeric: tabular-nums; }
+.worker-history__date-tile small { font-size: 10px; font-weight: 600; }
+.worker-history__date-tile strong { font-size: 26px; font-weight: 800; line-height: 1.2; }
+.worker-history__date-summary { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.worker-history__date-title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: #0f172a; font-size: 15px; font-weight: 800; }
+.worker-history__list-today { padding: 2px 6px; border-radius: 4px; background: #dbeafe; color: #1d4ed8; font-size: 10px; }
+.worker-history__date-meta { color: #64748b; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.worker-history__detail-link { width: fit-content; color: #2563eb; font-size: 11px; font-weight: 600; }
+.worker-history__row:hover .worker-history__detail-link { text-decoration: underline; text-underline-offset: 3px; }
+.worker-history__date-amount { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; min-width: 0; font-variant-numeric: tabular-nums; }
+.worker-history__daily-total { display: flex; align-items: baseline; gap: 9px; font-size: 12px; color: #475569; }
+.worker-history__daily-total > small { font-size: 11px; color: #64748b; }
+.worker-history__daily-total strong { margin-right: 3px; font-size: 26px; color: #0f172a; font-weight: 800; line-height: 1.15; }
+.worker-history__daily-wage { display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 5px; row-gap: 2px; font-size: 12px; }
+.worker-history__daily-wage small { font-size: 11px; color: #64748b; }
+.worker-history__daily-wage strong { white-space: nowrap; font-weight: 600; }
 .worker-history__detail { border-bottom: 1px solid #e2e8f0; padding: 0 0 16px; margin-bottom: 16px; }
 .worker-history__detail h4 { font-size: 16px; font-weight: 800; overflow-wrap: anywhere; margin: 0 0 12px; }
 .worker-history__detail dl { display: grid; gap: 8px; margin: 0; }
@@ -46,16 +66,22 @@
 .worker-history__day-team { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; padding: 5px 6px; border: 1px solid var(--work-team-border); border-left: 3px solid var(--work-team-color); border-radius: 5px; background: var(--work-team-tint); color: var(--work-team-text); font-size: 11px; line-height: 1.35; }
 .worker-history__day-team > span { min-width: 0; overflow-wrap: anywhere; }
 .worker-history__day-team > b { flex-shrink: 0; font-variant-numeric: tabular-nums; }
-.worker-history__date { margin-bottom: 12px; }
 .worker-history__teams, .worker-history__teams ul { list-style: none; padding: 0; margin: 0; }
-.worker-history__teams { display: grid; gap: 8px; padding: 10px; background: #f8fafc; border-radius: 0 0 8px 8px; }
-.worker-history__team-heading { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-.worker-history__team-heading > strong { min-width: 0; overflow-wrap: anywhere; }
-.worker-history__team-heading > b { margin-left: auto; white-space: nowrap; }
+.worker-history__teams { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; padding: 12px; border-top: 1px solid #e2e8f0; }
+.worker-history__team-card { min-width: 0; border: 1px solid var(--work-team-border); border-top: 3px solid var(--work-team-color); border-radius: 8px; background: #fff; overflow: hidden; }
+.worker-history__team-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; background: var(--work-team-tint); }
+.worker-history__team-heading > div { min-width: 0; }
+.worker-history__team-heading strong { display: block; font-size: 13px; font-weight: 800; color: var(--work-team-text); overflow-wrap: anywhere; }
+.worker-history__team-heading i { display: inline-block; width: 7px; height: 7px; margin: 0 6px 1px 0; border-radius: 50%; background: var(--work-team-color); }
+.worker-history__team-heading > b { white-space: nowrap; font-size: 19px; color: var(--work-team-text); font-variant-numeric: tabular-nums; }
+.worker-history__team-heading > b > small { margin-left: 3px; font-size: 10px; font-weight: 500; }
+.worker-history__team-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 5px; font-size: 11px; color: #64748b; }
 .worker-history__badge { display: inline-block; flex-shrink: 0; padding: 3px 5px; border-radius: 4px; background: var(--work-team-tint, #f1f5f9); color: var(--work-team-text, #475569); font-size: 10px; font-weight: 700; }
-.worker-history__teams ul li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0 0 6px; color: #475569; font-size: 12px; }
-.worker-history__teams ul li span { overflow-wrap: anywhere; }
-.worker-history__teams ul li strong { white-space: nowrap; }
+.worker-history__teams .worker-history__members { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); column-gap: 20px; padding: 4px 12px; }
+.worker-history__members li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; padding: 8px 0; color: #475569; font-size: 12px; line-height: 1.5; border-bottom: 1px solid #f1f5f9; }
+.worker-history__members li:last-child { border-bottom-color: transparent; }
+.worker-history__members li > span { min-width: 0; overflow-wrap: anywhere; }
+.worker-history__members li > strong { flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 600; color: #334155; }
 .worker-history__detail > .worker-history__badge { margin-bottom: 6px; }
 @media (max-width: 640px) {
     .worker-history { padding: 10px; }
@@ -70,4 +96,19 @@
     .worker-history__day-total small { font-size: 9px; }
     .worker-history__day-team { flex-direction: column; align-items: flex-start; gap: 2px; padding: 4px 2px; border-left-width: 2px; font-size: 10px; }
     .worker-history__day-team > b { align-self: flex-end; }
+    .worker-history__list-heading { padding: 12px 0; }
+    .worker-history__list-heading h4 { font-size: 18px; }
+    .worker-history__list { gap: 12px; }
+    .worker-history__row { grid-template-columns: 46px minmax(0, 1fr); gap: 10px; padding: 12px; }
+    .worker-history__date-tile { min-height: 54px; }
+    .worker-history__date-tile strong { font-size: 23px; }
+    .worker-history__date-summary { position: relative; padding-right: 55px; gap: 4px; }
+    .worker-history__date-title { font-size: 14px; }
+    .worker-history__detail-link { position: absolute; top: 2px; right: 0; font-size: 10px; }
+    .worker-history__date-amount { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid #e2e8f0; }
+    .worker-history__daily-total { flex-shrink: 0; gap: 6px; }
+    .worker-history__daily-total strong { font-size: 23px; }
+    .worker-history__daily-wage { flex-direction: column; align-items: flex-end; margin-left: auto; text-align: right; font-size: 11px; }
+    .worker-history__daily-wage small { font-size: 10px; }
+    .worker-history__teams { grid-template-columns: minmax(0, 1fr); padding: 10px; gap: 8px; }
 }

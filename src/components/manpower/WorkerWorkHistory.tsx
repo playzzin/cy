@@ -90,20 +90,36 @@ export default function WorkerWorkHistory({ rows, month, workerName, siteName, l
                         </button>;
                     })}
                 </div>
-            </> : grouped.size === 0 ? <p>선택한 기간의 근무내역이 없습니다.</p> : <div className="worker-history__list">
-                {Array.from(grouped.entries()).sort(([a], [b]) => b.localeCompare(a)).map(([date, entries]) => <article key={date} className="worker-history__date" aria-label={`${date} 출력 내역`}>
-                    <button type="button" className="worker-history__row" onClick={() => setSelectedDate(date)} aria-label={`${date} 근무 상세`}>
-                        <span><strong>{date.slice(5)}</strong><small>{isSite ? `작업자 ${workerCount(entries)}명 · ${entries.length}건` : Array.from(new Set(entries.map(row => row.siteName || '현장 미지정'))).join(' · ')}</small></span>
-                        <span>{days(entries.reduce((sum, row) => sum + number(row.manDay), 0))}공수
-                            {entries.some(row => !row.isSiteSupport) && <strong>{hasRedactedWages ? '조회 가능 노무비 ' : ''}{money(entries.reduce((sum, row) => sum + workHistoryAmount(row), 0))}</strong>}</span>
-                    </button>
-                    {isSite && <ul className="worker-history__teams" aria-label={`${date} 팀별 공수`}>{groupWorkTeams(entries, teams).map(team => <li key={team.key} style={workTeamStyle(team.color) as React.CSSProperties}>
-                        <div className="worker-history__team-heading"><span className={team.support ? 'worker-history__badge worker-history__badge--support' : 'worker-history__badge'}>{team.support ? '지원팀' : '내 팀'}</span>
-                            <strong>{team.name}</strong><b>{days(team.manDay)}공수</b></div>
-                        <ul aria-label={`${team.name} 작업자 공수`}>{[...team.workers.values()].map(worker => <li key={worker.key}><span>{worker.name}</span><strong>{days(worker.manDay)}공수</strong></li>)}</ul>
-                    </li>)}</ul>}
-                </article>)}
-            </div>}
+            </> : grouped.size === 0 ? <p>선택한 기간의 근무내역이 없습니다.</p> : <>
+                <div className="worker-history__list-heading"><div><h4>{year}년 {monthNumber}월</h4>
+                    <p className="worker-history__hint">{isSite ? '날짜별 합계와 팀·작업자별 공수를 확인하세요.' : '날짜별 현장과 공수를 확인하세요.'}</p></div>
+                    <span className="worker-history__list-order">최신 날짜순 · {grouped.size}일</span></div>
+                <div className="worker-history__list">
+                    {Array.from(grouped.entries()).sort(([a], [b]) => b.localeCompare(a)).map(([date, entries]) => {
+                        const dayTeams = isSite ? groupWorkTeams(entries, teams) : [];
+                        const weekday = new Date(year, monthNumber - 1, Number(date.slice(8))).getDay();
+                        const isToday = date === todayDate;
+                        return <article key={date} className={`worker-history__date${isToday ? ' worker-history__date--today' : ''}`} aria-label={`${date} 출력 내역`}>
+                            <button type="button" className="worker-history__row" onClick={() => setSelectedDate(date)} aria-label={`${date} 근무 상세`}>
+                                <time dateTime={date} className={`worker-history__date-tile${weekday === 6 ? ' worker-history__saturday' : weekday === 0 ? ' worker-history__sunday' : ''}`}>
+                                    <small>{monthNumber}월</small><strong>{Number(date.slice(8))}</strong></time>
+                                <span className="worker-history__date-summary"><span className="worker-history__date-title">{['일', '월', '화', '수', '목', '금', '토'][weekday]}요일
+                                    {isToday && <span className="worker-history__list-today">오늘</span>}</span>
+                                    <span className="worker-history__date-meta">{isSite ? `${dayTeams.length}개 팀 · 작업자 ${workerCount(entries)}명` : Array.from(new Set(entries.map(row => row.siteName || '현장 미지정'))).join(' · ')}</span>
+                                    <span className="worker-history__detail-link">상세보기 <span aria-hidden="true">↗</span></span></span>
+                                <span className="worker-history__date-amount"><span className="worker-history__daily-total"><small>일 합계</small><span><strong>{days(entries.reduce((sum, row) => sum + number(row.manDay), 0))}</strong>공수</span></span>
+                                    {entries.some(row => !row.isSiteSupport) && <span className="worker-history__daily-wage"><small>{hasRedactedWages ? '조회 가능 노무비' : '노무비'}</small>{' '}<strong>{money(entries.reduce((sum, row) => sum + workHistoryAmount(row), 0))}</strong></span>}</span>
+                            </button>
+                            {isSite && <ul className="worker-history__teams" aria-label={`${date} 팀별 공수`}>{dayTeams.map(team => <li className="worker-history__team-card" key={team.key} style={workTeamStyle(team.color) as React.CSSProperties}>
+                                <div className="worker-history__team-heading"><div><strong><i aria-hidden="true" />{team.name}</strong>
+                                    <span className="worker-history__team-meta"><span className={team.support ? 'worker-history__badge worker-history__badge--support' : 'worker-history__badge'}>{team.support ? '지원팀' : '내 팀'}</span><span>{team.workers.size}명</span></span></div>
+                                    <b>{days(team.manDay)}<small>공수</small></b></div>
+                                <ul className="worker-history__members" aria-label={`${team.name} 작업자 공수`}>{[...team.workers.values()].map(worker => <li key={worker.key}><span>{worker.name}</span><strong>{days(worker.manDay)}공수</strong></li>)}</ul>
+                            </li>)}</ul>}
+                        </article>;
+                    })}
+                </div>
+            </>}
         </div>
         <ResponsiveDetailDialog open={!!selectedDate && !loading && !error} onOpenChange={open => { if (!open) setSelectedDate(''); }}
             title={`${selectedDate} ${title}`} description={`${subjectName} · ${selectedRows.length}건`}>
