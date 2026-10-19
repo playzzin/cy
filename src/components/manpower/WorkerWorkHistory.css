@@ -24,8 +24,8 @@
 .worker-history__detail dd { margin: 0; overflow-wrap: anywhere; }
 .worker-history button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 .worker-history__support-total { color: #7c3aed; }
-.worker-history__day-teams { display: grid; gap: 3px; width: 100%; }
-.worker-history__day-team { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 5px; padding: 3px; border-radius: 4px; background: #dbeafe; color: #1e40af; font-size: 10px; }
+.worker-history__day-teams { display: grid; gap: 3px; width: 100%; min-width: 0; }
+.worker-history__day-team { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; min-width: 0; padding: 3px; border-radius: 4px; background: #dbeafe; color: #1e40af; font-size: 10px; text-align: center; }
 .worker-history__day-team > span { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .worker-history__day-team--support { background: #ede9fe; color: #6d28d9; }
 .worker-history__date { margin-bottom: 12px; }
