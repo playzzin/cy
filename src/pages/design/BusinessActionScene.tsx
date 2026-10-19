@@ -4,10 +4,11 @@ import { MotionSprite } from './BusinessMotionArtwork';
 import WorkforceMotionScene from './WorkforceMotionScene';
 import PartnerNetworkScene from './PartnerNetworkScene';
 import ErpManagementScene from './ErpManagementScene';
+import BusinessConstructionFilm from './BusinessConstructionFilm';
 import './BusinessCinematic.css';
 
 type SceneProps = { step: number; id: string; documentIndex?: number };
-type Props = { module: BusinessModule; step: number; replay: number; documentIndex?: number };
+type Props = { module: BusinessModule; step: number; replay: number; documentIndex?: number; paused?: boolean; reducedMotion?: boolean };
 type GroupProps = { children: React.ReactNode; motion?: string; active?: boolean; order?: number };
 const Motion = ({ children, motion = 'arrive', active = true, order = 0 }: GroupProps) => <g className={active ? `cy-film-motion cy-film-${motion}` : undefined} style={{ '--piece-order': order } as React.CSSProperties}>{children}</g>;
 const Stamp = ({ x, y, order = 0 }: { x: number; y: number; order?: number }) => <g transform={`translate(${x} ${y})`}><Motion motion="confirm" order={order}><circle r="20" fill="#0a3539" stroke="#8ee9d4" strokeWidth="1.5" /><path d="m-9 0 6 6 12-13" stroke="#b2ffe9" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></Motion></g>;
@@ -47,14 +48,17 @@ const RentalScene = ({ step }: SceneProps) => {
 };
 
 const SCENES: Record<BusinessModule['id'], React.FC<SceneProps>> = { 'system-dongbari-scaffolding': ConstructionScene, 'material-rental': RentalScene, 'manpower-supply': WorkforceMotionScene, 'erp-site-management': ErpManagementScene, 'partner-network': PartnerNetworkScene };
-const BusinessActionScene: React.FC<Props> = ({ module, step, replay, documentIndex }) => {
+const BusinessActionScene: React.FC<Props> = ({ module, step, replay, documentIndex, paused = false, reducedMotion = false }) => {
     const id = useId().replace(/:/g, '');
     const Scene = SCENES[module.id];
-    return <svg key={`${module.id}-${step}-${replay}`} className="cy-action-scene cy-cinematic-scene" viewBox="0 0 960 540" role="img" aria-label={`${module.title} · ${module.workflow[step].title} 모션 그래픽`} data-scene={module.id} data-step={step} fill="none">
+    const scene = <svg key={`${module.id}-${step}-${replay}`} className="cy-action-scene cy-cinematic-scene" viewBox="0 0 960 540" role="img" aria-label={`${module.title} · ${module.workflow[step].title} 모션 그래픽`} data-scene={module.id} data-step={step} fill="none">
         <defs><radialGradient id={`${id}-aura`}><stop stopColor="#176283" stopOpacity=".4" /><stop offset="1" stopColor="#061322" stopOpacity="0" /></radialGradient><linearGradient id={`${id}-floor`} x2="0" y2="1"><stop stopColor="#1f5779" stopOpacity=".15" /><stop offset="1" stopColor="#05101f" stopOpacity=".8" /></linearGradient></defs>
         <rect width="960" height="540" fill="#061221" /><ellipse cx="490" cy="285" rx="465" ry="280" fill={`url(#${id}-aura)`} /><path d="M0 345 480 160 960 345V540H0Z" fill={`url(#${id}-floor)`} />
         <g stroke="#69b8d8" strokeOpacity=".075">{[0, 1, 2, 3, 4, 5, 6].map(i => <React.Fragment key={i}><path d={`M${-190 + i * 150} 540 960 ${190 + i * 49}`} /><path d={`M${1150 - i * 150} 540 0 ${190 + i * 49}`} /></React.Fragment>)}</g><ellipse cx="488" cy="461" rx="345" ry="45" fill="#000" opacity=".18" />
         <g className="cy-film-camera"><Scene step={step} id={id} documentIndex={documentIndex} /></g><g stroke="#8ccce2" strokeOpacity=".4"><path d="M23 53V23h30M907 23h30v30M23 487v30h30M907 517h30v-30" /></g><text x="39" y="510" fill="#638ba8" fontSize="9" letterSpacing="2">CHEONG YEON / {module.level.toUpperCase()}</text><text x="922" y="510" textAnchor="end" fill="#719ab4" fontSize="9" letterSpacing="1">ACTION {String(step + 1).padStart(2, '0')}</text>
     </svg>;
+    return module.id === 'system-dongbari-scaffolding' && step === 2
+        ? <BusinessConstructionFilm key={`${module.id}-${step}-${replay}`} paused={paused} reducedMotion={reducedMotion} fallback={scene} />
+        : scene;
 };
 export default BusinessActionScene;
