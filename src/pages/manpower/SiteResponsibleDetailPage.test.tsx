@@ -109,12 +109,13 @@ test('현장 출력일보에 지원 온 타 팀과 작업자 공수를 표시하
     render(<SiteResponsibleDetailPage view="dailyReport" />);
     const history = await screen.findByRole('region', { name: '현장 출력일보' });
     const firstDay = await within(history).findByRole('button', { name: /근무내역 1.5공수/ });
-    expect(within(firstDay).getByText('지원 외부지원팀')).toBeInTheDocument();
+    expect(within(firstDay).getByText('외부지원팀')).toBeInTheDocument();
     expect(within(firstDay).getByText('0.5')).toBeInTheDocument();
     expect((dailyReportService.getWorkerRows as jest.Mock).mock.calls[0][0].includeSiteSupport).toBe(true);
-    expect(within(history).getByText('· 지원 0.75공수 포함')).toBeInTheDocument();
+    expect(within(history).queryByText('· 지원 0.75공수 포함')).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: '현장 팀·작업자별 공수' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '목록보기' }));
+    expect(within(history).getByText('· 지원 0.75공수 포함')).toBeInTheDocument();
     const supportLists = within(history).getAllByRole('list', { name: '외부지원팀 작업자 공수' });
     expect(supportLists).toHaveLength(2);
     expect(within(supportLists[0]).getByText('0.25공수')).toBeInTheDocument();
@@ -128,14 +129,15 @@ test('현장 출력일보에 지원 온 타 팀과 작업자 공수를 표시하
 });
 
 test('현장정보는 급여 없이 연도별 월 공수와 누적공수를 표시하고 현장·연도 변경을 반영한다', async () => {
-    (dailyReportService.getWorkerRows as jest.Mock).mockImplementation(async ({ startDate }) => {
+    (dailyReportService.getWorkerRows as jest.Mock).mockImplementation(async ({ startDate, endDate }) => {
+        if (Date.parse(endDate) - Date.parse(startDate) > 31 * 86400000) throw new Error('monthly range required');
         const year = startDate.slice(0, 4);
         return [
             { reportId: 'jan', date: `${year}-01-01`, siteId: 'site-a', teamId: 'a', manDay: 1.25, unitPrice: 100000 },
             { reportId: 'feb', date: `${year}-02-01`, siteId: 'site-a', teamId: 'b', responsibleTeamId: 'a', isSiteSupport: true, manDay: 0.5 },
             { reportId: 'other', date: `${year}-01-01`, siteId: 'site-b', teamId: 'a', manDay: 9 },
             { reportId: 'private', date: `${year}-01-01`, siteId: 'private-site', teamId: 'b', manDay: 99 },
-        ];
+        ].filter(row => row.date >= startDate && row.date <= endDate);
     });
     render(<SiteResponsibleDetailPage view="siteInfo" />);
     const summary = await screen.findByRole('region', { name: '월별 누적공수' });
@@ -146,15 +148,16 @@ test('현장정보는 급여 없이 연도별 월 공수와 누적공수를 표�
     expect(screen.queryByText(/노무비|125,000원/)).not.toBeInTheDocument();
     const firstQuery = (dailyReportService.getWorkerRows as jest.Mock).mock.calls[0][0];
     expect(firstQuery.startDate).toMatch(/-01-01$/);
-    expect(firstQuery.endDate).toMatch(/-12-31$/);
+    expect(firstQuery.endDate).toMatch(/-01-31$/);
     expect(firstQuery.includeSiteSupport).toBe(true);
+    expect((dailyReportService.getWorkerRows as jest.Mock).mock.calls).toHaveLength(12);
     fireEvent.click(screen.getByRole('button', { name: /가상 나현장.*진행중/ }));
     expect(within(summary).getByRole('row', { name: /^2월/ })).toHaveTextContent('9');
     expect(within(summary).queryByText('1.75')).not.toBeInTheDocument();
     for (let index = 0; index < 12; index++) fireEvent.click(screen.getByRole('button', { name: '이전 달' }));
-    await waitFor(() => expect((dailyReportService.getWorkerRows as jest.Mock).mock.calls).toHaveLength(2));
+    await waitFor(() => expect((dailyReportService.getWorkerRows as jest.Mock).mock.calls).toHaveLength(24));
     await within(summary).findByRole('table');
-    expect((dailyReportService.getWorkerRows as jest.Mock).mock.calls[1][0].startDate).toBe(`${Number(firstQuery.startDate.slice(0, 4)) - 1}-01-01`);
+    expect((dailyReportService.getWorkerRows as jest.Mock).mock.calls[12][0].startDate).toBe(`${Number(firstQuery.startDate.slice(0, 4)) - 1}-01-01`);
 });
 
 test('현장정보 연간 조회 실패 시 이전 누적공수를 숨긴다', async () => {

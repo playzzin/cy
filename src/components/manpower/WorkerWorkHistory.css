@@ -5,12 +5,30 @@
 .worker-history__tabs { display: flex; gap: 4px; padding: 4px; margin: 8px 0; border-radius: 9px; background: #f1f5f9; }
 .worker-history__tabs button { flex: 1; min-height: 44px; border: 0; border-radius: 7px; background: transparent; color: #475569; font-size: 14px; font-weight: 700; }
 .worker-history__tabs button[aria-selected=true] { background: #2563eb; color: white; }
-.worker-history__calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
-.worker-history__weekday { padding: 8px 0; text-align: center; font-size: 12px; color: #64748b; }
-.worker-history__day { min-width: 0; min-height: 82px; padding: 6px 2px; display: flex; flex-direction: column; align-items: center; gap: 4px; border: 1px solid #e2e8f0; border-radius: 6px; color: #475569; background: #fff; font-size: 12px; }
-.worker-history__day--worked { background: #eff6ff; border-color: #bfdbfe; }
-.worker-history__day strong { font-size: 16px; color: #1d4ed8; }
-.worker-history__day small { display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+.worker-history__calendar-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 12px 0 8px; }
+.worker-history__calendar-heading h4 { margin: 0; color: #0f172a; font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+.worker-history__month-total { display: flex; align-items: baseline; gap: 5px; padding: 10px 14px; background: #f1f5f9; border-radius: 10px; font-size: 12px; color: #475569; }
+.worker-history__month-total strong { font-size: 23px; color: #0f172a; font-variant-numeric: tabular-nums; }
+.worker-history__legend { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 4px 0 16px; padding: 0; }
+.worker-history__legend li { display: flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid var(--work-team-border); border-radius: 8px; background: var(--work-team-tint); color: #334155; font-size: 12px; }
+.worker-history__legend i { width: 8px; height: 8px; border-radius: 3px; background: var(--work-team-color); box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.12); flex-shrink: 0; }
+.worker-history__legend strong { color: var(--work-team-text); font-size: 12px; }
+.worker-history__calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; background: #e2e8f0; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+.worker-history__weekday { padding: 11px 0; background: #f8fafc; text-align: center; font-size: 12px; font-weight: 700; color: #64748b; }
+.worker-history__blank { background: #f8fafc; }
+.worker-history__day { min-width: 0; min-height: 132px; padding: 9px 7px; display: flex; flex-direction: column; align-items: stretch; gap: 5px; border: 0; border-radius: 0; color: #475569; background: #fff; font-size: 12px; text-align: left; cursor: pointer; }
+.worker-history__day:hover { background: #f8fafc; box-shadow: inset 0 0 0 1px #94a3b8; }
+.worker-history__day--worked { background: #fff; }
+.worker-history__day-number { display: flex; align-items: center; gap: 5px; min-height: 24px; font-size: 12px; font-weight: 700; }
+.worker-history__saturday, .worker-history__saturday .worker-history__day-number { color: #2563eb; }
+.worker-history__sunday, .worker-history__sunday .worker-history__day-number { color: #e11d48; }
+.worker-history__day--today { box-shadow: inset 0 0 0 2px #2563eb; background: #f8fbff; }
+.worker-history__today-label { font-size: 9px; padding: 2px 5px; border-radius: 4px; background: #2563eb; color: white; }
+.worker-history__day-total { display: flex; align-items: baseline; gap: 3px; }
+.worker-history__day-total strong { font-size: 23px; color: #0f172a; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.worker-history__day-total small { color: #64748b; font-size: 10px; }
+.worker-history__day-count { color: #64748b; font-size: 10px; overflow-wrap: anywhere; }
+.worker-history__no-work { align-self: center; margin: auto; color: #cbd5e1; font-size: 14px; }
 .worker-history__row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: 10px 4px; background: white; color: #334155; border: 0; border-bottom: 1px solid #e2e8f0; text-align: left; }
 .worker-history__row > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 13px; }
 .worker-history__row > span:last-child { flex-shrink: 0; text-align: right; }
@@ -24,20 +42,32 @@
 .worker-history__detail dd { margin: 0; overflow-wrap: anywhere; }
 .worker-history button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 .worker-history__support-total { color: #7c3aed; }
-.worker-history__day-teams { display: grid; gap: 3px; width: 100%; min-width: 0; }
-.worker-history__day-team { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; min-width: 0; padding: 3px; border-radius: 4px; background: #dbeafe; color: #1e40af; font-size: 10px; text-align: center; }
-.worker-history__day-team > span { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.worker-history__day-team--support { background: #ede9fe; color: #6d28d9; }
+.worker-history__day-teams { display: grid; gap: 4px; width: 100%; min-width: 0; margin-top: 3px; }
+.worker-history__day-team { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; padding: 5px 6px; border: 1px solid var(--work-team-border); border-left: 3px solid var(--work-team-color); border-radius: 5px; background: var(--work-team-tint); color: var(--work-team-text); font-size: 11px; line-height: 1.35; }
+.worker-history__day-team > span { min-width: 0; overflow-wrap: anywhere; }
+.worker-history__day-team > b { flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .worker-history__date { margin-bottom: 12px; }
 .worker-history__teams, .worker-history__teams ul { list-style: none; padding: 0; margin: 0; }
 .worker-history__teams { display: grid; gap: 8px; padding: 10px; background: #f8fafc; border-radius: 0 0 8px 8px; }
 .worker-history__team-heading { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .worker-history__team-heading > strong { min-width: 0; overflow-wrap: anywhere; }
 .worker-history__team-heading > b { margin-left: auto; white-space: nowrap; }
-.worker-history__badge { display: inline-block; flex-shrink: 0; padding: 3px 5px; border-radius: 4px; background: #dbeafe; color: #1e40af; font-size: 10px; font-weight: 700; }
-.worker-history__badge--support { background: #ede9fe; color: #6d28d9; }
+.worker-history__badge { display: inline-block; flex-shrink: 0; padding: 3px 5px; border-radius: 4px; background: var(--work-team-tint, #f1f5f9); color: var(--work-team-text, #475569); font-size: 10px; font-weight: 700; }
 .worker-history__teams ul li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0 0 6px; color: #475569; font-size: 12px; }
 .worker-history__teams ul li span { overflow-wrap: anywhere; }
 .worker-history__teams ul li strong { white-space: nowrap; }
 .worker-history__detail > .worker-history__badge { margin-bottom: 6px; }
-@media (max-width: 640px) { .worker-history { padding: 10px; } }
+@media (max-width: 640px) {
+    .worker-history { padding: 10px; }
+    .worker-history__calendar-heading h4 { font-size: 18px; }
+    .worker-history__legend { gap: 5px; margin-bottom: 12px; }
+    .worker-history__legend li { padding: 6px 8px; font-size: 11px; }
+    .worker-history__day { padding: 5px 3px; min-height: 112px; gap: 4px; }
+    .worker-history__day-number { min-height: 20px; font-size: 11px; }
+    .worker-history__today-label { display: none; }
+    .worker-history__day-total { flex-wrap: wrap; gap: 1px; }
+    .worker-history__day-total strong { font-size: 17px; }
+    .worker-history__day-total small { font-size: 9px; }
+    .worker-history__day-team { flex-direction: column; align-items: flex-start; gap: 2px; padding: 4px 2px; border-left-width: 2px; font-size: 10px; }
+    .worker-history__day-team > b { align-self: flex-end; }
+}

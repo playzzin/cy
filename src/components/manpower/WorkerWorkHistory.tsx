@@ -2,9 +2,10 @@ import React, { useEffect, useId, useMemo, useState } from 'react';
 import type { DailyReportWorkerRow } from '../../services/dailyReportService';
 import ResponsiveDetailDialog from '../common/ResponsiveDetailDialog';
 import { resolveReportPayType } from '../../utils/payType';
+import { groupWorkTeams, recordedWorkTeam, workTeamStyle, WorkHistoryTeam } from './workHistoryTeams';
 import './WorkerWorkHistory.css';
 
-type Props = { rows: DailyReportWorkerRow[]; month: string; loading: boolean; error: string }
+type Props = { rows: DailyReportWorkerRow[]; month: string; loading: boolean; error: string; teams?: WorkHistoryTeam[] }
     & ({ workerName: string; siteName?: never } | { siteName: string; workerName?: never });
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 export const workHistoryAmount = (row: DailyReportWorkerRow) => {
@@ -15,25 +16,9 @@ export const workHistoryAmount = (row: DailyReportWorkerRow) => {
 const money = (value: number) => `${Math.round(value).toLocaleString('ko-KR')}원`;
 const days = (value: number) => value.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
 const workerCount = (rows: DailyReportWorkerRow[]) => new Set(rows.map(row => row.workerId || row.workerName || row.name)).size;
-const groupTeams = (rows: DailyReportWorkerRow[]) => {
-    const teams = new Map<string, { key: string; name: string; support: boolean; manDay: number;
-        workers: Map<string, { key: string; name: string; manDay: number }> }>();
-    rows.forEach(row => {
-        const support = row.isSiteSupport === true;
-        const name = row.workerTeamName || row.teamName || '소속 미확인';
-        const key = `${support}:${row.workerTeamId || name}`;
-        const team = teams.get(key) ?? { key, name, support, manDay: 0, workers: new Map() };
-        const workerKey = row.workerId || row.workerName || row.name || 'unknown';
-        const worker = team.workers.get(workerKey) ?? { key: workerKey, name: row.workerName || row.name || '작업자 미지정', manDay: 0 };
-        worker.manDay += number(row.manDay);
-        team.manDay += number(row.manDay);
-        team.workers.set(workerKey, worker);
-        teams.set(key, team);
-    });
-    return [...teams.values()].sort((a, b) => Number(a.support) - Number(b.support) || a.name.localeCompare(b.name, 'ko-KR'));
-};
+const EMPTY_TEAMS: WorkHistoryTeam[] = [];
 
-export default function WorkerWorkHistory({ rows, month, workerName, siteName, loading, error }: Props) {
+export default function WorkerWorkHistory({ rows, month, workerName, siteName, loading, error, teams = EMPTY_TEAMS }: Props) {
     const isSite = siteName !== undefined;
     const subjectName = siteName ?? workerName;
     const title = isSite ? '출력일보' : '근무내역';
@@ -49,19 +34,22 @@ export default function WorkerWorkHistory({ rows, month, workerName, siteName, l
     const visibleRows = Array.from(grouped.values()).flat();
     const totalDays = visibleRows.reduce((sum, row) => sum + number(row.manDay), 0);
     const totalAmount = visibleRows.reduce((sum, row) => sum + workHistoryAmount(row), 0);
-    const hasSupport = visibleRows.some(row => row.isSiteSupport);
-    const supportDays = visibleRows.filter(row => row.isSiteSupport).reduce((sum, row) => sum + number(row.manDay), 0);
+    const hasRedactedWages = visibleRows.some(row => row.isSiteSupport);
+    const supportDays = visibleRows.filter(row => recordedWorkTeam(row, teams).support).reduce((sum, row) => sum + number(row.manDay), 0);
     const hasOwnRows = visibleRows.some(row => !row.isSiteSupport);
+    const monthTeams = groupWorkTeams(visibleRows, teams);
     const [year, monthNumber] = month.split('-').map(Number);
     const offset = (new Date(year, monthNumber - 1, 1).getDay() + 6) % 7;
     const dayCount = new Date(year, monthNumber, 0).getDate();
     const cellCount = Math.ceil((offset + dayCount) / 7) * 7;
     const selectedRows = grouped.get(selectedDate) || [];
+    const today = new Date();
+    const todayDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     return <section className="worker-history" aria-label={isSite ? '현장 출력일보' : '작업자 근무내역'}>
         <header className="worker-history__header"><h3>{title}</h3>
             {!loading && !error && <p>{grouped.size}일 · <strong>{days(totalDays)}공수</strong>
-                {hasSupport && <span className="worker-history__support-total"> · 지원 {days(supportDays)}공수 포함</span>}
-                {hasOwnRows && <> · {hasSupport ? '내 팀 ' : ''}{money(totalAmount)}</>}</p>}
+                {mode === 'list' && supportDays > 0 && <span className="worker-history__support-total"> · 지원 {days(supportDays)}공수 포함</span>}
+                {hasOwnRows && <> · {hasRedactedWages ? '조회 가능 노무비 ' : ''}{money(totalAmount)}</>}</p>}
         </header>
         <div role="tablist" aria-label={`${title} 보기 방식`} className="worker-history__tabs">
             {(['calendar', 'list'] as const).map(value => <button key={value} type="button" role="tab" id={`${id}-${value}`}
@@ -69,9 +57,16 @@ export default function WorkerWorkHistory({ rows, month, workerName, siteName, l
         </div>
         <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${mode}`}>
             {loading ? <p role="status">{title}{isSite ? '를' : '을'} 불러오는 중입니다.</p> : error ? <p role="alert">{error}</p> : mode === 'calendar' ? <>
-                <p className="worker-history__hint">{isSite ? '날짜별 합계에 지원팀 공수를 포함합니다. 날짜를 누르면 작업자별 내역을 볼 수 있습니다.' : '날짜를 누르면 현장과 금액을 자세히 볼 수 있습니다.'}</p>
+                <div className="worker-history__calendar-heading"><div><h4>{year}년 {monthNumber}월</h4>
+                    <p className="worker-history__hint">{isSite ? '팀별 공수를 한눈에 확인하고 날짜를 눌러 작업자 내역을 보세요.' : '날짜를 누르면 현장과 금액을 자세히 볼 수 있습니다.'}</p></div>
+                    <span className="worker-history__month-total">월 합계 <strong>{days(totalDays)}</strong> 공수</span></div>
+                {isSite && monthTeams.length > 0 && <ul className="worker-history__legend" aria-label="팀별 색상과 월 공수">
+                    {monthTeams.map(team => <li key={team.key} style={workTeamStyle(team.color) as React.CSSProperties}>
+                        <i aria-hidden="true" /><span>{team.name}</span><strong>{days(team.manDay)}공수</strong>
+                    </li>)}
+                </ul>}
                 <div className="worker-history__calendar" aria-label={`${subjectName}의 ${month} 출력일보 달력`}>
-                    {['월', '화', '수', '목', '금', '토', '일'].map(day => <span className="worker-history__weekday" key={day}>{day}</span>)}
+                    {['월', '화', '수', '목', '금', '토', '일'].map((day, index) => <span className={`worker-history__weekday${index === 5 ? ' worker-history__saturday' : index === 6 ? ' worker-history__sunday' : ''}`} key={day}>{day}</span>)}
                     {Array.from({ length: cellCount }, (_, index) => {
                         const day = index - offset + 1;
                         if (day < 1 || day > dayCount) return <span key={index} className="worker-history__blank" />;
@@ -79,14 +74,19 @@ export default function WorkerWorkHistory({ rows, month, workerName, siteName, l
                         const entries = grouped.get(date) || [];
                         const sum = entries.reduce((value, row) => value + number(row.manDay), 0);
                         const sites = Array.from(new Set(entries.map(row => row.siteName || '현장 미지정')));
-                        return <button type="button" key={index} className={entries.length ? 'worker-history__day worker-history__day--worked' : 'worker-history__day'}
+                        const dayClass = ['worker-history__day', entries.length ? 'worker-history__day--worked' : '',
+                            date === todayDate ? 'worker-history__day--today' : '', index % 7 === 5 ? 'worker-history__saturday' : index % 7 === 6 ? 'worker-history__sunday' : ''].filter(Boolean).join(' ');
+                        return <button type="button" key={index} className={dayClass} aria-current={date === todayDate ? 'date' : undefined}
                             aria-label={`${date} 근무내역${entries.length ? ` ${days(sum)}공수` : ' 없음'}`} onClick={() => setSelectedDate(date)}>
-                            <span>{day}</span>{entries.length > 0 && <><strong>{days(sum)}</strong><small>{isSite ? `${workerCount(entries)}명` : sites.length > 1 ? `${sites.length}개 현장` : sites[0]}</small>
-                                {isSite && <span className="worker-history__day-teams">{groupTeams(entries).map(team => <span key={team.key}
-                                    className={team.support ? 'worker-history__day-team worker-history__day-team--support' : 'worker-history__day-team'}
-                                    title={`${team.support ? '지원팀' : '내 팀'} ${team.name} ${days(team.manDay)}공수`}>
-                                    <span>{team.support ? '지원 ' : ''}{team.name}</span><b>{days(team.manDay)}</b>
+                            <span className="worker-history__day-number">{day}{date === todayDate && <span className="worker-history__today-label">오늘</span>}</span>
+                            {entries.length > 0 && <><span className="worker-history__day-total"><strong>{days(sum)}</strong><small>공수</small></span>
+                                <small className="worker-history__day-count">{isSite ? `${workerCount(entries)}명` : sites.length > 1 ? `${sites.length}개 현장` : sites[0]}</small>
+                                {isSite && <span className="worker-history__day-teams">{groupWorkTeams(entries, teams).map(team => <span key={team.key}
+                                    className="worker-history__day-team" style={workTeamStyle(team.color) as React.CSSProperties}
+                                    title={`${team.name} ${days(team.manDay)}공수`}>
+                                    <span>{team.name}</span><b>{days(team.manDay)}</b>
                                 </span>)}</span>}</>}
+                            {entries.length === 0 && <span className="worker-history__no-work" aria-hidden="true">—</span>}
                         </button>;
                     })}
                 </div>
@@ -95,9 +95,9 @@ export default function WorkerWorkHistory({ rows, month, workerName, siteName, l
                     <button type="button" className="worker-history__row" onClick={() => setSelectedDate(date)} aria-label={`${date} 근무 상세`}>
                         <span><strong>{date.slice(5)}</strong><small>{isSite ? `작업자 ${workerCount(entries)}명 · ${entries.length}건` : Array.from(new Set(entries.map(row => row.siteName || '현장 미지정'))).join(' · ')}</small></span>
                         <span>{days(entries.reduce((sum, row) => sum + number(row.manDay), 0))}공수
-                            {entries.some(row => !row.isSiteSupport) && <strong>{hasSupport ? '내 팀 ' : ''}{money(entries.reduce((sum, row) => sum + workHistoryAmount(row), 0))}</strong>}</span>
+                            {entries.some(row => !row.isSiteSupport) && <strong>{hasRedactedWages ? '조회 가능 노무비 ' : ''}{money(entries.reduce((sum, row) => sum + workHistoryAmount(row), 0))}</strong>}</span>
                     </button>
-                    {isSite && <ul className="worker-history__teams" aria-label={`${date} 팀별 공수`}>{groupTeams(entries).map(team => <li key={team.key}>
+                    {isSite && <ul className="worker-history__teams" aria-label={`${date} 팀별 공수`}>{groupWorkTeams(entries, teams).map(team => <li key={team.key} style={workTeamStyle(team.color) as React.CSSProperties}>
                         <div className="worker-history__team-heading"><span className={team.support ? 'worker-history__badge worker-history__badge--support' : 'worker-history__badge'}>{team.support ? '지원팀' : '내 팀'}</span>
                             <strong>{team.name}</strong><b>{days(team.manDay)}공수</b></div>
                         <ul aria-label={`${team.name} 작업자 공수`}>{[...team.workers.values()].map(worker => <li key={worker.key}><span>{worker.name}</span><strong>{days(worker.manDay)}공수</strong></li>)}</ul>
@@ -108,7 +108,7 @@ export default function WorkerWorkHistory({ rows, month, workerName, siteName, l
         <ResponsiveDetailDialog open={!!selectedDate && !loading && !error} onOpenChange={open => { if (!open) setSelectedDate(''); }}
             title={`${selectedDate} ${title}`} description={`${subjectName} · ${selectedRows.length}건`}>
             {selectedRows.length === 0 ? <p>해당 날짜의 근무내역이 없습니다.</p> : selectedRows.map((row, index) => <article className="worker-history__detail" key={`${row.reportId}-${index}`}>
-                {isSite && row.isSiteSupport && <span className="worker-history__badge worker-history__badge--support">지원팀</span>}
+                {isSite && mode === 'list' && recordedWorkTeam(row, teams).support && <span className="worker-history__badge worker-history__badge--support">지원팀</span>}
                 <h4>{isSite ? row.workerName || row.name || '작업자 미지정' : row.siteName || '현장 미지정'}</h4><dl>
                     <div><dt>공수</dt><dd>{days(number(row.manDay))}공수</dd></div>
                     {!row.isSiteSupport && <><div><dt>단가</dt><dd>{money(number(row.unitPrice))}</dd></div>

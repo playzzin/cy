@@ -278,6 +278,7 @@ const downloadCsv = (filename: string, rows: Array<Record<string, string | numbe
 const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }> = ({ view }) => {
     const [sites, setSites] = useState<Site[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
+    const [calendarTeams, setCalendarTeams] = useState<Team[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [outputRows, setOutputRows] = useState<DailyReportWorkerRow[]>([]);
     const [selectedResponsibleKey, setSelectedResponsibleKey] = useState('');
@@ -298,8 +299,10 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
     const selectedYear = selectedMonth.slice(0, 4);
-    const queryStartDate = detailView === 'siteInfo' ? `${selectedYear}-01-01` : startDate;
-    const queryEndDate = detailView === 'siteInfo' ? `${selectedYear}-12-31` : endDate;
+    const queryPeriod = detailView === 'siteInfo' ? selectedYear : selectedMonth;
+    const outputRanges = useMemo(() => queryPeriod.length === 4
+        ? Array.from({ length: 12 }, (_, index) => getMonthRange(`${queryPeriod}-${String(index + 1).padStart(2, '0')}`))
+        : [getMonthRange(queryPeriod)], [queryPeriod]);
     const accessScope = useWorkerAccessScope(workers, teams);
 
     useEffect(() => {
@@ -321,6 +324,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                     );
                 setSites(nextSites);
                 setTeams(cheongyeonTeams);
+                setCalendarTeams(nextTeams);
                 setWorkers(nextWorkers);
             } catch (error) {
                 console.error(error);
@@ -344,7 +348,10 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
             setOutputError('');
             setOutputRows([]);
             try {
-                const rows = await dailyReportService.getWorkerRows({ startDate: queryStartDate, endDate: queryEndDate, includeSiteSupport: restrictedTeam });
+                // The scoped attendance endpoint accepts at most one month per
+                // request. Its service batches these bounded monthly reads.
+                const months = await Promise.all(outputRanges.map(range => dailyReportService.getWorkerRows({ ...range, includeSiteSupport: restrictedTeam })));
+                const rows = months.flat();
                 if (mounted) setOutputRows(rows);
             } catch (error) {
                 console.error(error);
@@ -362,7 +369,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
         return () => {
             mounted = false;
         };
-    }, [queryStartDate, queryEndDate, restrictedTeam, refreshRevision]);
+    }, [outputRanges, restrictedTeam, refreshRevision]);
 
     const teamByKey = useMemo(() => {
         const map = new Map<string, Team>();
@@ -1325,6 +1332,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                                 restrictedTeam || view === 'dailyReport' ? <WorkerWorkHistory
                                     key={selectedSiteKey}
                                     rows={selectedSiteRows}
+                                    teams={calendarTeams}
                                     month={selectedMonth}
                                     siteName={selectedSite.name}
                                     loading={loadingOutput}
