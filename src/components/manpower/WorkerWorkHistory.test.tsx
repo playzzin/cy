@@ -47,3 +47,28 @@ test('조회 실패 시 이전 내역과 합계를 노출하지 않는다', () =
     expect(screen.queryByText('1.5공수')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /2026-10-01/ })).not.toBeInTheDocument();
 });
+
+test('현장 달력과 목록은 같은 날의 지원팀·작업자 공수를 합산하며 지원 급여는 합산하지 않는다', () => {
+    const supportRows = [
+        { reportId: 'own', date: '2026-10-01', workerId: 'own', workerName: '동명', workerTeamId: 'a', workerTeamName: '검증팀', manDay: 1, unitPrice: 100000 },
+        { reportId: 'support-1', date: '2026-10-01', workerId: 'support', workerName: '동명', workerTeamId: 'b', workerTeamName: '지원검증팀', isSiteSupport: true, manDay: 0.25, unitPrice: 900000 },
+        { reportId: 'support-2', date: '2026-10-01', workerId: 'support', workerName: '동명', workerTeamId: 'b', workerTeamName: '지원검증팀', isSiteSupport: true, manDay: 0.5, unitPrice: 900000 },
+        { reportId: 'outside', date: '2026-09-01', workerId: 'outside', workerTeamName: '이전월팀', manDay: 50 },
+        { reportId: 'empty', date: '2026-10-01', isEmptyReport: true, workerId: '__empty__', manDay: 0 },
+    ] as DailyReportWorkerRow[];
+    render(<WorkerWorkHistory rows={supportRows} month="2026-10" siteName="검증현장" loading={false} error="" />);
+    const day = screen.getByRole('button', { name: '2026-10-01 근무내역 1.75공수' });
+    expect(within(day).getByText('2명')).toBeInTheDocument();
+    expect(within(day).getByTitle('지원팀 지원검증팀 0.75공수')).toBeInTheDocument();
+    expect(screen.getByText('· 지원 0.75공수 포함')).toBeInTheDocument();
+    expect(screen.queryByText('이전월팀')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '목록보기' }));
+    const date = screen.getByRole('article', { name: '2026-10-01 출력 내역' });
+    expect(within(date).getByRole('button')).toHaveTextContent('1.75공수내 팀 100,000원');
+    const support = within(date).getByRole('list', { name: '지원검증팀 작업자 공수' });
+    expect(within(support).getAllByRole('listitem')).toHaveLength(1);
+    expect(within(support).getByText('동명')).toBeInTheDocument();
+    expect(within(support).getByText('0.75공수')).toBeInTheDocument();
+    expect(within(date).getAllByText('동명')).toHaveLength(2);
+    expect(screen.queryByText(/900,000|775,000/)).not.toBeInTheDocument();
+});

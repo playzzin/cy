@@ -23,7 +23,7 @@ import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyRe
 import MonthNavigator from '../../components/common/MonthNavigator';
 import MobileListReturnButton from '../../components/common/MobileListReturnButton';
 import WorkerWorkHistory from '../../components/manpower/WorkerWorkHistory';
-import SiteWorkforceSummary from '../../components/manpower/SiteWorkforceSummary';
+import SiteMonthlyManDays from '../../components/manpower/SiteMonthlyManDays';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
@@ -297,6 +297,9 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
     const detailView = view ?? (restrictedTeam ? 'siteInfo' : selectedDetailView);
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
+    const selectedYear = selectedMonth.slice(0, 4);
+    const queryStartDate = detailView === 'siteInfo' ? `${selectedYear}-01-01` : startDate;
+    const queryEndDate = detailView === 'siteInfo' ? `${selectedYear}-12-31` : endDate;
     const accessScope = useWorkerAccessScope(workers, teams);
 
     useEffect(() => {
@@ -341,7 +344,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
             setOutputError('');
             setOutputRows([]);
             try {
-                const rows = await dailyReportService.getWorkerRows({ startDate, endDate, includeSiteSupport: restrictedTeam });
+                const rows = await dailyReportService.getWorkerRows({ startDate: queryStartDate, endDate: queryEndDate, includeSiteSupport: restrictedTeam });
                 if (mounted) setOutputRows(rows);
             } catch (error) {
                 console.error(error);
@@ -359,7 +362,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
         return () => {
             mounted = false;
         };
-    }, [startDate, endDate, restrictedTeam, refreshRevision]);
+    }, [queryStartDate, queryEndDate, restrictedTeam, refreshRevision]);
 
     const teamByKey = useMemo(() => {
         const map = new Map<string, Team>();
@@ -408,11 +411,16 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
         return map;
     }, [workers]);
 
-    const scopedOutputRows = useMemo(
+    const scopedPeriodRows = useMemo(
         () => outputRows.filter(row => workerAccessMatchesReportRow(accessScope, row)
             || (restrictedTeam && accessScope.mode === 'team' && !accessScope.loading && sites.some(site =>
                 workerAccessMatchesTeamRef(accessScope, site.responsibleTeamId, site.responsibleTeamName) && rowMatchesSite(row, site)))),
         [accessScope, outputRows, restrictedTeam, sites]
+    );
+
+    const scopedOutputRows = useMemo(
+        () => scopedPeriodRows.filter(row => row.date?.startsWith(`${selectedMonth}-`)),
+        [scopedPeriodRows, selectedMonth]
     );
 
     const scopedOutputSiteKeys = useMemo(
@@ -592,6 +600,17 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
             : []
     ), [scopedOutputRows, selectedSite]);
 
+    const selectedSiteYearRows = useMemo(
+        () => scopedPeriodRows.filter(row => rowMatchesSite(row, selectedSite)),
+        [scopedPeriodRows, selectedSite]
+    );
+    const cumulativeManDay = (rows: DailyReportWorkerRow[]) => rows
+        .filter(row => !row.isEmptyReport && row.date >= `${selectedYear}-01-01` && row.date <= endDate)
+        .reduce((sum, row) => sum + asNumber(row.manDay), 0);
+    const responsibleCumulativeManDay = cumulativeManDay(scopedPeriodRows.filter(row => rowResponsibleKey(row) === selectedResponsibleKey));
+    const siteCumulativeManDay = cumulativeManDay(selectedSiteYearRows);
+    const cumulativeValue = (value: number) => loadingOutput || outputError ? '-' : formatManDay(value);
+
     const selectedSiteStatsByKey = useMemo(() => {
         const map = new Map<string, SiteListStats>();
         const ensureStats = (key: string) => {
@@ -765,7 +784,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
             </span>
             <span className="tw-team-item__meta">
                 <strong>{formatManDay(group.totalManDay)}</strong>
-                <small>{restrictedTeam ? '내 팀 ' : ''}{formatCurrency(group.totalAmount)}</small>
+                <small>{detailView === 'siteInfo' ? '월 공수' : `${restrictedTeam ? '내 팀 ' : ''}${formatCurrency(group.totalAmount)}`}</small>
             </span>
         </button>
     );
@@ -877,9 +896,9 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                     <strong>{formatManDay(selectedResponsibleStats.totalManDay)}</strong>
                 </div>
                 <div className="tw-kpi">
-                    <Banknote size={20} />
-                    <span>{restrictedTeam ? '내 팀 노무비' : '노무비'}</span>
-                    <strong>{formatCurrency(selectedResponsibleStats.totalAmount)}</strong>
+                    {detailView === 'siteInfo' ? <CalendarDays size={20} /> : <Banknote size={20} />}
+                    <span>{detailView === 'siteInfo' ? `${selectedYear}년 누적공수` : restrictedTeam ? '내 팀 노무비' : '노무비'}</span>
+                    <strong>{detailView === 'siteInfo' ? cumulativeValue(responsibleCumulativeManDay) : formatCurrency(selectedResponsibleStats.totalAmount)}</strong>
                 </div>
                 <div className="tw-kpi">
                     <Users size={20} />
@@ -980,7 +999,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                                                 {statusLabel(site)}
                                             </span>
                                             <small>{formatManDay(stats.totalManDay)}</small>
-                                            <small>{restrictedTeam ? '내 팀 ' : ''}{formatCurrency(stats.totalAmount)}</small>
+                                            <small>{detailView === 'siteInfo' ? '월 공수' : `${restrictedTeam ? '내 팀 ' : ''}${formatCurrency(stats.totalAmount)}`}</small>
                                         </span>
                                     </button>
                                 );
@@ -1021,17 +1040,14 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                                     <strong>{formatManDay(selectedSiteStats.totalManDay)}</strong>
                                 </div>
                                 <div>
-                                    <span>{restrictedTeam ? '내 팀 월 노무비' : '월 노무비'}</span>
-                                    <strong>{formatCurrency(selectedSiteStats.totalAmount)}</strong>
+                                    <span>{detailView === 'siteInfo' ? `${selectedYear}년 누적공수` : restrictedTeam ? '내 팀 월 노무비' : '월 노무비'}</span>
+                                    <strong>{detailView === 'siteInfo' ? cumulativeValue(siteCumulativeManDay) : formatCurrency(selectedSiteStats.totalAmount)}</strong>
                                 </div>
                                 <div>
                                     <span>작업자</span>
                                     <strong>{selectedSiteStats.workerCount.toLocaleString('ko-KR')}</strong>
                                 </div>
                             </div>
-
-                            {restrictedTeam && detailView === 'dailyReport' && <SiteWorkforceSummary rows={selectedSiteRows} month={selectedMonth}
-                                loading={loadingOutput} error={outputError} />}
 
                             {!restrictedTeam && !view && <div className="tw-view-tabs" role="tablist" aria-label="월별 현장 문서">
                                 <button
@@ -1097,11 +1113,13 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                                         <h3><ShieldCheck size={18} />월간 요약</h3>
                                         <div className="tw-detail-grid">
                                             <DetailField label="총 공수" value={formatManDay(selectedSiteStats.totalManDay)} />
-                                            <DetailField label={restrictedTeam ? '내 팀 노무비' : '노무비'} value={formatCurrency(selectedSiteStats.totalAmount)} />
+                                            <DetailField label="선택 월까지 누적공수" value={cumulativeValue(siteCumulativeManDay)} />
                                             <DetailField label="작업자" value={`${selectedSiteStats.workerCount.toLocaleString('ko-KR')}명`} />
                                             <DetailField label="출력일보" value={`${selectedSiteRows.length.toLocaleString('ko-KR')}건`} />
                                         </div>
                                     </section>
+                                    <SiteMonthlyManDays rows={selectedSiteYearRows} month={selectedMonth}
+                                        loading={loadingOutput} error={outputError} />
                                 </div>
                             )}
 

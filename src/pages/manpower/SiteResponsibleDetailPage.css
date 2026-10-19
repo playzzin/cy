@@ -810,6 +810,14 @@
     }
 }
 
+.sr-monthly-mandays { grid-column: 1 / -1; }
+.sr-monthly-mandays > p { margin: 0 0 12px; color: #64748b; font-size: 12px; }
+.sr-monthly-mandays table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.sr-monthly-mandays th, .sr-monthly-mandays td { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; text-align: right; }
+.sr-monthly-mandays th:first-child { text-align: left; }
+.sr-monthly-mandays thead { background: #f8fafc; color: #475569; }
+.sr-monthly-mandays__selected { background: #eff6ff; color: #1d4ed8; font-weight: 700; }
+.sr-monthly-mandays small { margin-left: 8px; font-size: 10px; }
 .sr-workforce { margin: 20px 0; padding: 20px; border: 1px solid #dce5ef; border-radius: 16px; background: #f8fafc; }
 .sr-workforce__header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
 .sr-workforce__header h3 { margin: 0; font-size: 16px; font-weight: 800; color: #0f172a; }

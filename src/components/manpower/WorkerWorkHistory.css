@@ -23,4 +23,21 @@
 .worker-history__detail dt { color: #64748b; }
 .worker-history__detail dd { margin: 0; overflow-wrap: anywhere; }
 .worker-history button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.worker-history__support-total { color: #7c3aed; }
+.worker-history__day-teams { display: grid; gap: 3px; width: 100%; }
+.worker-history__day-team { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 5px; padding: 3px; border-radius: 4px; background: #dbeafe; color: #1e40af; font-size: 10px; }
+.worker-history__day-team > span { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.worker-history__day-team--support { background: #ede9fe; color: #6d28d9; }
+.worker-history__date { margin-bottom: 12px; }
+.worker-history__teams, .worker-history__teams ul { list-style: none; padding: 0; margin: 0; }
+.worker-history__teams { display: grid; gap: 8px; padding: 10px; background: #f8fafc; border-radius: 0 0 8px 8px; }
+.worker-history__team-heading { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.worker-history__team-heading > strong { min-width: 0; overflow-wrap: anywhere; }
+.worker-history__team-heading > b { margin-left: auto; white-space: nowrap; }
+.worker-history__badge { display: inline-block; flex-shrink: 0; padding: 3px 5px; border-radius: 4px; background: #dbeafe; color: #1e40af; font-size: 10px; font-weight: 700; }
+.worker-history__badge--support { background: #ede9fe; color: #6d28d9; }
+.worker-history__teams ul li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0 0 6px; color: #475569; font-size: 12px; }
+.worker-history__teams ul li span { overflow-wrap: anywhere; }
+.worker-history__teams ul li strong { white-space: nowrap; }
+.worker-history__detail > .worker-history__badge { margin-bottom: 6px; }
 @media (max-width: 640px) { .worker-history { padding: 10px; } }
