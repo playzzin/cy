@@ -21,6 +21,8 @@ export interface ErpMessage {
   recipientNames: string[];
   readBy: string[];
   readAtBy: Record<string, Timestamp>;
+  /** Local Firestore writes must not be treated as confirmed read receipts. */
+  readReceiptPending?: boolean;
   pinned: boolean;
   actionLabel?: string | null;
   actionUrl?: string | null;

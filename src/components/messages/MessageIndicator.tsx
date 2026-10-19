@@ -33,8 +33,8 @@ export const MessageIndicator: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const { markRead, markAllRead, busy, error: actionError, retry: retryRead } = useMessageReadActions(currentUser?.uid);
   const { messages, summary, loading, error, retry } = useMessageNotifications(currentUser?.uid);
+  const { markRead, markAllRead, busy, readOnly, error: actionError, retry: retryRead } = useMessageReadActions(currentUser?.uid, messages);
 
   useEffect(() => { setOpen(false); }, [currentUser?.uid]);
 
@@ -74,19 +74,18 @@ export const MessageIndicator: React.FC = () => {
       <button
         ref={triggerRef}
         type="button"
-        className={`header-btn erp-message-button ${summary.unread > 0 ? 'has-unread' : ''}`}
+        className={`header-btn erp-message-button ${summary.unread > 0 ? 'has-unread' : ''} ${actionError ? 'has-read-error' : ''}`}
         onClick={() => setOpen((value) => !value)}
-        title="메시지함"
-        aria-label={`메시지함${summary.unread > 0 ? `, 안 읽은 메시지 ${summary.unread}건` : ''}`}
+        title={actionError ? '읽음 저장 확인 필요 · 알림함에서 다시 시도할 수 있습니다' : '메시지함'}
+        aria-label={`메시지함${summary.unread > 0 ? `, 안 읽은 메시지 ${summary.unread}건` : ''}${actionError ? ', 읽음 저장 확인 필요' : ''}`}
         aria-expanded={open}
       >
         <FontAwesomeIcon icon={faEnvelope} />
         {summary.unread > 0 && <span className="erp-message-badge">{unreadLabel}</span>}
+        {actionError && <span className="erp-message-save-warning" aria-hidden="true">!</span>}
       </button>
 
-      {actionError && <div role="alert" className="erp-message-read-error">{actionError}
-        <button type="button" disabled={busy} onClick={() => void retryRead?.()}>읽음 처리 다시 시도</button>
-      </div>}
+      <span role="status" className="erp-message-sr-only">{!open && actionError ? '읽음 저장 확인이 필요합니다. 알림함을 열어 다시 시도해 주세요.' : ''}</span>
 
       {open && (
         <div className="erp-message-popover" role="dialog" aria-label="최근 메시지">
@@ -102,7 +101,7 @@ export const MessageIndicator: React.FC = () => {
                 type="button"
                 className="erp-message-text-button"
                 onClick={markAllAsRead}
-                disabled={summary.unread === 0 || busy || loading || Boolean(error)}
+                disabled={readOnly || summary.unread === 0 || busy || loading || Boolean(error)}
                 title="모두 읽음 처리"
                 aria-label="모든 알림 읽음 처리"
               >
@@ -110,6 +109,15 @@ export const MessageIndicator: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {readOnly && <div className="erp-message-read-notice">미리보기에서는 읽음 상태를 저장하지 않습니다.</div>}
+          {actionError && <div role="alert" className="erp-message-read-error erp-message-popover-error">
+            <strong>읽음 저장 확인 필요</strong>
+            <p>{actionError}</p>
+            <button type="button" className="erp-message-text-button" disabled={busy} onClick={() => void retryRead?.()}>
+              {busy ? '저장 중…' : '읽음 처리 다시 시도'}
+            </button>
+          </div>}
 
           <div className="erp-message-popover-list">
             {error && <div role="alert" className="erp-message-empty">알림을 불러오지 못했습니다.<button type="button" onClick={retry} className="erp-message-text-button">다시 불러오기</button></div>}

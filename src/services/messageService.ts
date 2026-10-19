@@ -1,6 +1,7 @@
 import { auth, db } from '../config/firebase';
 import {
   Timestamp,
+  FieldPath,
   arrayUnion,
   collection,
   doc,
@@ -106,6 +107,7 @@ const publishMergedSnapshots = (
   snapshots.forEach((snapshot) => {
     snapshot?.docs.forEach((docSnap) => {
       const message = normalizeMessage(docSnap.id, docSnap.data());
+      message.readReceiptPending = docSnap.metadata?.hasPendingWrites === true;
       if (isActiveMessage(message)) merged.set(message.id, message);
     });
   });
@@ -161,12 +163,12 @@ const buildSummary = (uid: string, messages: ErpMessage[]): ErpMessageSummary =>
 export const messageService = {
   collectionName: COLLECTION_NAME,
 
-  getReadAtKey: safeReadAtKey,
+  getReadAtKey: (uid: string): string => uid,
 
   isReadBy,
 
   getReadAt: (message: ErpMessage, uid: string): Timestamp | undefined => {
-    return message.readAtBy?.[safeReadAtKey(uid)];
+    return message.readAtBy?.[uid] ?? message.readAtBy?.[safeReadAtKey(uid)];
   },
 
   buildSummary,
@@ -190,7 +192,7 @@ export const messageService = {
     const now = Timestamp.now();
     const messageRef = doc(collection(db, COLLECTION_NAME));
     const initialReadBy = input.senderId ? [input.senderId] : [];
-    const readAtBy = input.senderId ? { [safeReadAtKey(input.senderId)]: now } : {};
+    const readAtBy = input.senderId ? { [input.senderId]: now } : {};
 
     await setDoc(messageRef, {
       type: input.type,
@@ -314,11 +316,13 @@ export const messageService = {
 
     if (!messageId || !uid) return;
 
-    await updateDoc(doc(db, COLLECTION_NAME, messageId), {
-      readBy: arrayUnion(uid),
-      [`readAtBy.${safeReadAtKey(uid)}`]: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
+    // Preserve the authenticated UID exactly, including dots in custom UIDs.
+    // The receipt rules only allow the current user's map entry to change.
+    await updateDoc(doc(db, COLLECTION_NAME, messageId),
+      'readBy', arrayUnion(uid),
+      new FieldPath('readAtBy', uid), serverTimestamp(),
+      'updatedAt', serverTimestamp()
+    );
   },
 
   markAllAsRead: async (messages: ErpMessage[], uid: string): Promise<void> => {
@@ -332,11 +336,11 @@ export const messageService = {
     for (let index = 0; index < unreadMessages.length; index += 450) {
       const batch = writeBatch(db);
       unreadMessages.slice(index, index + 450).forEach((message) => {
-        batch.update(doc(db, COLLECTION_NAME, message.id), {
-          readBy: arrayUnion(uid),
-          [`readAtBy.${safeReadAtKey(uid)}`]: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
+        batch.update(doc(db, COLLECTION_NAME, message.id),
+          'readBy', arrayUnion(uid),
+          new FieldPath('readAtBy', uid), serverTimestamp(),
+          'updatedAt', serverTimestamp()
+        );
       });
       await batch.commit();
     }

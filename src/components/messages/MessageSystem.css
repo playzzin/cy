@@ -1637,10 +1637,60 @@
   text-decoration: underline;
 }
 
-.erp-message-indicator > .erp-message-read-error {
+.erp-message-button.has-read-error {
+  box-shadow: 0 0 0 2px #f59e0b;
+}
+
+.erp-message-save-warning {
   position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: calc(var(--z-modal, 1000) + 1);
-  width: min(340px, calc(100vw - 24px));
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f59e0b;
+  color: #451a03;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.erp-message-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.erp-message-popover-error {
+  margin: 12px 12px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  flex-shrink: 0;
+}
+
+.erp-message-popover-error p {
+  margin: 4px 0 10px;
+  overflow-wrap: anywhere;
+}
+
+.erp-message-popover-error button {
+  margin-left: 0;
+  text-decoration: none;
+}
+
+.erp-message-popover-error button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.erp-message-read-notice {
+  padding: 10px 16px;
+  color: #64748b;
+  font-size: 12px;
+  background: #f8fafc;
 }

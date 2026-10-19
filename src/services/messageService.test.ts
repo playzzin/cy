@@ -1,13 +1,36 @@
-import { onSnapshot, writeBatch, Timestamp } from 'firebase/firestore';
+import { FieldPath, onSnapshot, updateDoc, writeBatch, Timestamp } from 'firebase/firestore';
 import { messageService } from './messageService';
 import type { ErpMessage } from '../types/erpMessage';
 
 jest.mock('../config/firebase', () => ({ db: {}, auth: {} }));
 jest.mock('../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: () => false }));
 jest.mock('firebase/firestore', () => ({ ...jest.requireActual('firebase/firestore'),
-    doc: jest.fn((_db, _collection, id) => id), collection: jest.fn(), query: jest.fn(), where: jest.fn(), onSnapshot: jest.fn(), writeBatch: jest.fn()
+    doc: jest.fn((_db, _collection, id) => id), collection: jest.fn(), query: jest.fn(), where: jest.fn(), onSnapshot: jest.fn(), writeBatch: jest.fn(), updateDoc: jest.fn()
 }));
 beforeEach(() => jest.clearAllMocks());
+
+it('preserves custom user IDs in both single and bulk read receipts', async () => {
+    const uid = 'viewer.name:team';
+    const batch = { update: jest.fn(), commit: jest.fn(async () => undefined) };
+    (writeBatch as jest.Mock).mockReturnValue(batch);
+    await messageService.markAsRead('single', uid);
+    await messageService.markAllAsRead([{ id: 'bulk', readBy: [] } as unknown as ErpMessage], uid);
+    for (const call of [(updateDoc as jest.Mock).mock.calls[0], batch.update.mock.calls[0]]) {
+        expect(call[1]).toBe('readBy');
+        expect((call[3] as FieldPath).isEqual(new FieldPath('readAtBy', uid))).toBe(true);
+        expect(call[5]).toBe('updatedAt');
+    }
+    expect(messageService.getReadAtKey(uid)).toBe(uid);
+});
+
+it('reads old receipt timestamps while preferring the exact user ID', () => {
+    const legacy = Timestamp.fromMillis(1000);
+    const current = Timestamp.fromMillis(2000);
+    const message = { readAtBy: { viewer_name: legacy } } as unknown as ErpMessage;
+    expect(messageService.getReadAt(message, 'viewer.name')).toBe(legacy);
+    message.readAtBy['viewer.name'] = current;
+    expect(messageService.getReadAt(message, 'viewer.name')).toBe(current);
+});
 
 it('processes every unread message across batch limits and deduplicates ids', async () => {
     const batches: Array<{ update: jest.Mock; commit: jest.Mock }> = [];
