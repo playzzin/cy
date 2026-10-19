@@ -22,14 +22,25 @@ test('같은 날짜의 모든 현장과 금액을 상세에서 확인하고 닫�
     await waitFor(() => expect(day).toHaveFocus());
 });
 
-test('목록은 날짜별 합계와 현장을 요약하고 세부 단가는 상세에서만 보여준다', () => {
+test('목록을 펼쳐 현장별 공수를 보고 별도 상세에서 단가를 확인한 뒤 포커스가 돌아온다', async () => {
     render(<WorkerWorkHistory {...props} />);
     fireEvent.click(screen.getByRole('tab', { name: '목록보기' }));
-    const row = screen.getByRole('button', { name: '2026-10-01 근무 상세' });
+    const row = screen.getByRole('button', { name: '2026-10-01 근무내역', expanded: false });
     expect(within(row).getByText('150,000원')).toBeInTheDocument();
     expect(screen.queryByText('단가')).not.toBeInTheDocument();
     fireEvent.click(row);
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    const sites = screen.getByRole('list', { name: '2026-10-01 현장별 근무내역' });
+    expect(within(sites).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(sites).getByText('0.5공수')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByText('단가')).not.toBeInTheDocument();
+    const detail = screen.getByRole('button', { name: '2026-10-01 근무 상세' });
+    detail.focus(); fireEvent.click(detail);
     expect(within(screen.getByRole('dialog')).getAllByText('단가')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: '상세 닫기' }));
+    await waitFor(() => expect(detail).toHaveFocus());
+    expect(row).toHaveAttribute('aria-expanded', 'true');
 });
 
 test('빈 날짜와 월 변경은 이전 상세를 보여주지 않는다', () => {
@@ -66,6 +77,7 @@ test('현장 달력과 목록은 같은 날의 지원팀·작업자 공수를 �
     expect(screen.getByText('· 지원 0.75공수 포함')).toBeInTheDocument();
     const date = screen.getByRole('article', { name: '2026-10-01 출력 내역' });
     expect(within(date).getByRole('button')).toHaveTextContent('1.75공수조회 가능 노무비 100,000원');
+    fireEvent.click(within(date).getByRole('button', { expanded: false }));
     const support = within(date).getByRole('list', { name: '지원검증팀 작업자 공수' });
     expect(within(support).getAllByRole('listitem')).toHaveLength(1);
     expect(within(support).getByText('동명')).toBeInTheDocument();
@@ -87,6 +99,7 @@ test('현재 명단에서 제외된 작업자도 일보 소속이 같은 팀이�
     expect(team.style.getPropertyValue('--work-team-color')).toBe('#686868');
     expect(screen.queryByText(/지원/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '목록보기' }));
+    fireEvent.click(screen.getByRole('button', { name: '2026-10-01 근무내역', expanded: false }));
     const members = screen.getByRole('list', { name: '가람팀 작업자 공수' });
     expect(within(members).getAllByRole('listitem')).toHaveLength(2);
     expect(screen.queryByText('지원팀')).not.toBeInTheDocument();
@@ -95,6 +108,45 @@ test('현재 명단에서 제외된 작업자도 일보 소속이 같은 팀이�
     expect(within(dialog).queryByText('지원팀')).not.toBeInTheDocument();
     expect(within(dialog).queryByText('0원')).not.toBeInTheDocument();
     expect(within(dialog).getAllByText('단가')).toHaveLength(1);
+});
+
+test('날짜 목록은 기본 접힘이며 한 날짜만 펼치고 같은 날짜를 다시 누르면 접힌다', () => {
+    const attendance = [...rows, { ...rows[0], reportId: 'next', date: '2026-10-02', workerName: '다음날작업자' }];
+    render(<WorkerWorkHistory rows={attendance} month="2026-10" siteName="검증현장" loading={false} error="" />);
+    fireEvent.click(screen.getByRole('tab', { name: '목록보기' }));
+    const first = screen.getByRole('button', { name: '2026-10-01 근무내역', expanded: false });
+    const second = screen.getByRole('button', { name: '2026-10-02 근무내역', expanded: false });
+    expect(screen.queryByRole('list', { name: /팀별 공수/ })).not.toBeInTheDocument();
+    expect(within(first).getByText('1.5')).toBeInTheDocument();
+    fireEvent.click(first);
+    const panel = screen.getByRole('region', { name: '2026-10-01 근무내역' });
+    expect(first).toHaveAttribute('aria-controls', panel.id);
+    expect(panel).toHaveAttribute('aria-labelledby', first.id);
+    expect(within(panel).getByText('가상작업자')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(second);
+    expect(first).toHaveAttribute('aria-expanded', 'false');
+    expect(panel).not.toBeVisible();
+    expect(screen.queryByText('가상작업자')).not.toBeInTheDocument();
+    expect(screen.getByText('다음날작업자')).toBeInTheDocument();
+    fireEvent.click(second);
+    expect(second).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('다음날작업자')).not.toBeInTheDocument();
+    expect(within(first).getByText('1.5')).toBeInTheDocument();
+});
+
+test('조회 대상·월 변경과 로딩·오류 이후에는 펼쳤던 날짜가 초기화된다', () => {
+    const initial = { rows, month: '2026-10', siteName: '검증현장', loading: false, error: '' };
+    const { rerender } = render(<WorkerWorkHistory {...initial} />);
+    fireEvent.click(screen.getByRole('tab', { name: '목록보기' }));
+    for (const changed of [{ siteName: '다른현장' }, { month: '2026-11' }, { loading: true }, { error: '조회 실패' }]) {
+        fireEvent.click(screen.getByRole('button', { name: '2026-10-01 근무내역', expanded: false }));
+        expect(screen.getByRole('list', { name: '2026-10-01 팀별 공수' })).toBeInTheDocument();
+        rerender(<WorkerWorkHistory {...initial} {...changed} />);
+        rerender(<WorkerWorkHistory {...initial} />);
+        expect(screen.getByRole('button', { name: '2026-10-01 근무내역', expanded: false })).toBeInTheDocument();
+        expect(screen.queryByRole('list', { name: '2026-10-01 팀별 공수' })).not.toBeInTheDocument();
+    }
 });
 
 test('달력의 오늘과 주말을 구분하고 빈 월에서도 보기 전환을 유지한다', () => {

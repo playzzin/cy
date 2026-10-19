@@ -36,8 +36,19 @@
 .worker-history__list { display: grid; gap: 16px; }
 .worker-history__date { min-width: 0; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; box-shadow: 0 2px 4px rgba(15, 23, 42, 0.025); }
 .worker-history__date--today { border-color: #93c5fd; }
-.worker-history__row { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; width: 100%; align-items: center; gap: 14px; padding: 16px; border: 0; border-radius: 12px; background: #f8fafc; color: #334155; text-align: left; cursor: pointer; }
+.worker-history__row { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto 18px; width: 100%; align-items: center; gap: 14px; padding: 16px; border: 0; border-radius: 12px; background: #f8fafc; color: #334155; text-align: left; cursor: pointer; }
 .worker-history__row:hover { background: #eff6ff; }
+.worker-history__row[aria-expanded=true] { background: #eff6ff; border-radius: 12px 12px 0 0; }
+.worker-history__chevron { grid-column: 4; grid-row: 1; color: #64748b; transition: transform 160ms ease; }
+.worker-history__row[aria-expanded=true] .worker-history__chevron { transform: rotate(180deg); color: #2563eb; }
+.worker-history__accordion-panel[hidden] { display: none; }
+.worker-history__accordion-actions { display: flex; justify-content: flex-end; padding: 0 12px 12px; }
+.worker-history__accordion-actions button { min-height: 40px; padding: 8px 12px; border: 1px solid #dbeafe; border-radius: 8px; background: #eff6ff; color: #1d4ed8; font-size: 12px; font-weight: 700; cursor: pointer; }
+.worker-history__accordion-actions button:hover { background: #dbeafe; }
+.worker-history__sites { list-style: none; margin: 0; padding: 0 14px 12px; border-top: 1px solid #e2e8f0; }
+.worker-history__sites li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 0; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
+.worker-history__sites li > span { min-width: 0; overflow-wrap: anywhere; }
+.worker-history__sites li > strong { flex-shrink: 0; color: #334155; font-variant-numeric: tabular-nums; }
 .worker-history__date-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; align-self: start; min-height: 62px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; font-variant-numeric: tabular-nums; }
 .worker-history__date-tile small { font-size: 10px; font-weight: 600; }
 .worker-history__date-tile strong { font-size: 26px; font-weight: 800; line-height: 1.2; }
@@ -45,8 +56,8 @@
 .worker-history__date-title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: #0f172a; font-size: 15px; font-weight: 800; }
 .worker-history__list-today { padding: 2px 6px; border-radius: 4px; background: #dbeafe; color: #1d4ed8; font-size: 10px; }
 .worker-history__date-meta { color: #64748b; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
-.worker-history__detail-link { width: fit-content; color: #2563eb; font-size: 11px; font-weight: 600; }
-.worker-history__row:hover .worker-history__detail-link { text-decoration: underline; text-underline-offset: 3px; }
+.worker-history__accordion-hint { width: fit-content; color: #2563eb; font-size: 11px; font-weight: 600; }
+.worker-history__row:hover .worker-history__accordion-hint { text-decoration: underline; text-underline-offset: 3px; }
 .worker-history__date-amount { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; min-width: 0; font-variant-numeric: tabular-nums; }
 .worker-history__daily-total { display: flex; align-items: baseline; gap: 9px; font-size: 12px; color: #475569; }
 .worker-history__daily-total > small { font-size: 11px; color: #64748b; }
@@ -99,16 +110,20 @@
     .worker-history__list-heading { padding: 12px 0; }
     .worker-history__list-heading h4 { font-size: 18px; }
     .worker-history__list { gap: 12px; }
-    .worker-history__row { grid-template-columns: 46px minmax(0, 1fr); gap: 10px; padding: 12px; }
+    .worker-history__row { grid-template-columns: 46px minmax(0, 1fr) 18px; gap: 10px; padding: 12px; }
+    .worker-history__chevron { grid-column: 3; }
     .worker-history__date-tile { min-height: 54px; }
     .worker-history__date-tile strong { font-size: 23px; }
-    .worker-history__date-summary { position: relative; padding-right: 55px; gap: 4px; }
+    .worker-history__date-summary { gap: 4px; }
     .worker-history__date-title { font-size: 14px; }
-    .worker-history__detail-link { position: absolute; top: 2px; right: 0; font-size: 10px; }
+    .worker-history__accordion-hint { font-size: 10px; }
     .worker-history__date-amount { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid #e2e8f0; }
     .worker-history__daily-total { flex-shrink: 0; gap: 6px; }
     .worker-history__daily-total strong { font-size: 23px; }
     .worker-history__daily-wage { flex-direction: column; align-items: flex-end; margin-left: auto; text-align: right; font-size: 11px; }
     .worker-history__daily-wage small { font-size: 10px; }
     .worker-history__teams { grid-template-columns: minmax(0, 1fr); padding: 10px; gap: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .worker-history__chevron { transition: none; }
 }

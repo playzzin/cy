@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import type { DailyReportWorkerRow } from '../../services/dailyReportService';
 import ResponsiveDetailDialog from '../common/ResponsiveDetailDialog';
 import { resolveReportPayType } from '../../utils/payType';
@@ -24,8 +25,9 @@ export default function WorkerWorkHistory({ rows, month, workerName, siteName, l
     const title = isSite ? '출력일보' : '근무내역';
     const [mode, setMode] = useState<'calendar' | 'list'>('calendar');
     const [selectedDate, setSelectedDate] = useState('');
+    const [expandedDate, setExpandedDate] = useState('');
     const id = useId();
-    useEffect(() => { setSelectedDate(''); }, [month, subjectName, loading, error]);
+    useEffect(() => { setSelectedDate(''); setExpandedDate(''); }, [month, subjectName, loading, error]);
     const grouped = useMemo(() => {
         const result = new Map<string, DailyReportWorkerRow[]>();
         rows.filter(row => !row.isEmptyReport && row.date?.startsWith(`${month}-`)).forEach(row => result.set(row.date, [...(result.get(row.date) || []), row]));
@@ -92,30 +94,41 @@ export default function WorkerWorkHistory({ rows, month, workerName, siteName, l
                 </div>
             </> : grouped.size === 0 ? <p>선택한 기간의 근무내역이 없습니다.</p> : <>
                 <div className="worker-history__list-heading"><div><h4>{year}년 {monthNumber}월</h4>
-                    <p className="worker-history__hint">{isSite ? '날짜별 합계와 팀·작업자별 공수를 확인하세요.' : '날짜별 현장과 공수를 확인하세요.'}</p></div>
+                    <p className="worker-history__hint">{isSite ? '날짜를 펼치면 팀·작업자별 공수를 확인할 수 있습니다.' : '날짜를 펼치면 현장별 근무내역을 확인할 수 있습니다.'}</p></div>
                     <span className="worker-history__list-order">최신 날짜순 · {grouped.size}일</span></div>
                 <div className="worker-history__list">
                     {Array.from(grouped.entries()).sort(([a], [b]) => b.localeCompare(a)).map(([date, entries]) => {
                         const dayTeams = isSite ? groupWorkTeams(entries, teams) : [];
                         const weekday = new Date(year, monthNumber - 1, Number(date.slice(8))).getDay();
                         const isToday = date === todayDate;
+                        const isExpanded = expandedDate === date;
+                        const triggerId = `${id}-trigger-${date}`;
+                        const panelId = `${id}-date-${date}`;
                         return <article key={date} className={`worker-history__date${isToday ? ' worker-history__date--today' : ''}`} aria-label={`${date} 출력 내역`}>
-                            <button type="button" className="worker-history__row" onClick={() => setSelectedDate(date)} aria-label={`${date} 근무 상세`}>
+                            <button type="button" className="worker-history__row" id={triggerId} aria-expanded={isExpanded} aria-controls={panelId}
+                                onClick={() => setExpandedDate(current => current === date ? '' : date)} aria-label={`${date} 근무내역`}>
                                 <time dateTime={date} className={`worker-history__date-tile${weekday === 6 ? ' worker-history__saturday' : weekday === 0 ? ' worker-history__sunday' : ''}`}>
                                     <small>{monthNumber}월</small><strong>{Number(date.slice(8))}</strong></time>
                                 <span className="worker-history__date-summary"><span className="worker-history__date-title">{['일', '월', '화', '수', '목', '금', '토'][weekday]}요일
                                     {isToday && <span className="worker-history__list-today">오늘</span>}</span>
                                     <span className="worker-history__date-meta">{isSite ? `${dayTeams.length}개 팀 · 작업자 ${workerCount(entries)}명` : Array.from(new Set(entries.map(row => row.siteName || '현장 미지정'))).join(' · ')}</span>
-                                    <span className="worker-history__detail-link">상세보기 <span aria-hidden="true">↗</span></span></span>
+                                    <span className="worker-history__accordion-hint">{isExpanded ? '내역 접기' : '내역 펼치기'}</span></span>
                                 <span className="worker-history__date-amount"><span className="worker-history__daily-total"><small>일 합계</small><span><strong>{days(entries.reduce((sum, row) => sum + number(row.manDay), 0))}</strong>공수</span></span>
                                     {entries.some(row => !row.isSiteSupport) && <span className="worker-history__daily-wage"><small>{hasRedactedWages ? '조회 가능 노무비' : '노무비'}</small>{' '}<strong>{money(entries.reduce((sum, row) => sum + workHistoryAmount(row), 0))}</strong></span>}</span>
+                                <ChevronDown className="worker-history__chevron" size={18} aria-hidden="true" />
                             </button>
-                            {isSite && <ul className="worker-history__teams" aria-label={`${date} 팀별 공수`}>{dayTeams.map(team => <li className="worker-history__team-card" key={team.key} style={workTeamStyle(team.color) as React.CSSProperties}>
+                            <div id={panelId} role="region" aria-labelledby={triggerId} hidden={!isExpanded} className="worker-history__accordion-panel">
+                            {isExpanded && <>{isSite ? <ul className="worker-history__teams" aria-label={`${date} 팀별 공수`}>{dayTeams.map(team => <li className="worker-history__team-card" key={team.key} style={workTeamStyle(team.color) as React.CSSProperties}>
                                 <div className="worker-history__team-heading"><div><strong><i aria-hidden="true" />{team.name}</strong>
                                     <span className="worker-history__team-meta"><span className={team.support ? 'worker-history__badge worker-history__badge--support' : 'worker-history__badge'}>{team.support ? '지원팀' : '내 팀'}</span><span>{team.workers.size}명</span></span></div>
                                     <b>{days(team.manDay)}<small>공수</small></b></div>
                                 <ul className="worker-history__members" aria-label={`${team.name} 작업자 공수`}>{[...team.workers.values()].map(worker => <li key={worker.key}><span>{worker.name}</span><strong>{days(worker.manDay)}공수</strong></li>)}</ul>
+                            </li>)}</ul> : <ul className="worker-history__sites" aria-label={`${date} 현장별 근무내역`}>{entries.map((row, index) => <li key={`${row.reportId}-${index}`}>
+                                <span>{row.siteName || '현장 미지정'}</span><strong>{days(number(row.manDay))}공수</strong>
                             </li>)}</ul>}
+                                <div className="worker-history__accordion-actions"><button type="button" onClick={() => setSelectedDate(date)} aria-label={`${date} 근무 상세`}>상세 내역 보기 <span aria-hidden="true">↗</span></button></div>
+                            </>}
+                            </div>
                         </article>;
                     })}
                 </div>
