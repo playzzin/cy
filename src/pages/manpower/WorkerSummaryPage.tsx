@@ -596,18 +596,19 @@ const WorkerSummaryPage: React.FC = () => {
             throw new Error('요약 테이블을 찾을 수 없습니다.');
         }
 
-        const canvas = await html2canvas(summaryRef.current, {
+        const captureOptions = {
             useCORS: true,
             backgroundColor: '#ffffff',
             scale: 2,
             windowWidth: 1280,
-            onclone: (_document, table) => {
+            onclone: (_document: Document, table: HTMLElement) => {
                 // Keep the exported image tabular even when the screen uses mobile cards.
                 table.setAttribute('data-export', 'true');
                 table.style.width = '1080px';
                 table.style.minWidth = '1080px';
             }
-        });
+        };
+        const canvas = await html2canvas(summaryRef.current, captureOptions);
 
         return await new Promise<Blob>((resolve, reject) => {
             canvas.toBlob((blob) => {
