@@ -12,6 +12,8 @@ import html2canvas from 'html2canvas';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
+import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
+import { getTeamScopedRows } from '../../services/teamScopedReadService';
 import './WorkerSummaryPage.css';
 
 
@@ -366,10 +368,12 @@ const isActiveWorker = (worker: Worker) => {
 };
 
 const WorkerSummaryPage: React.FC = () => {
+    const restricted = useRestrictedTeamWorkflow();
     const summaryRef = React.useRef<HTMLTableElement>(null);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(false);
 
     const [selectedTeam, setSelectedTeam] = useState<string>('');
     const [searchQuery, setSearchQuery] = useState('');
@@ -386,17 +390,27 @@ const WorkerSummaryPage: React.FC = () => {
     const [idCardUrls, setIdCardUrls] = useState<Record<string, string>>({});
 
     useEffect(() => {
+        let cancelled = false;
         const loadData = async () => {
             try {
                 setLoading(true);
+                setLoadError(false);
+                setWorkers([]);
+                setTeams([]);
+                setSelectedWorkerIds(new Set());
+                setIdCardUrls({});
                 const [allWorkers, allTeams, allCompanies] = await Promise.all([
-                    manpowerService.getWorkers(),
-                    teamService.getTeams(),
-                    companyService.getCompanies()
+                    restricted ? getTeamScopedRows<Worker>('workers') : manpowerService.getWorkers(),
+                    restricted ? getTeamScopedRows<Team>('teams') : teamService.getTeams(),
+                    restricted ? Promise.resolve([]) : companyService.getCompanies()
                 ]);
+                if (cancelled) return;
+                if (!allWorkers || !allTeams) throw new Error('소속 팀 조회 권한을 확인하지 못했습니다.');
 
                 // Active workers only
-                const activeWorkers = allWorkers.filter(isActiveWorker);
+                const teamIds = new Set(allTeams.flatMap(team => [team.id, team.legacyId]).filter(Boolean));
+                const activeWorkers = allWorkers.filter(worker => isActiveWorker(worker)
+                    && (!restricted || teamIds.has(worker.teamId)));
 
                 const cheongyeonCompanies = allCompanies.filter((company) => isCheongyeonCompanyName(company.name));
                 const cheongyeonCompanyIds = new Set(
@@ -411,6 +425,7 @@ const WorkerSummaryPage: React.FC = () => {
                 );
                 const allowedTeams = allTeams
                     .filter((team) => {
+                        if (restricted) return true;
                         const teamCompanyId = String(team.companyId ?? '').trim();
                         const teamCompanyName = normalizeText(team.companyName);
 
@@ -427,20 +442,19 @@ const WorkerSummaryPage: React.FC = () => {
                     return allowedTeams.some((team) => getTeamKey(team) === prev) ? prev : '';
                 });
 
-                // Default select first team if available
-                if (allowedTeams.length > 0) {
-                    // setSelectedTeam(allTeams[0].id || '');
-                }
             } catch (error) {
+                if (cancelled) return;
+                setLoadError(true);
                 console.error("Failed to load data:", error);
                 toast.error("데이터를 불러오는데 실패했습니다.");
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         };
 
         loadData();
-    }, []);
+        return () => { cancelled = true; };
+    }, [restricted]);
 
     const teamMemberCounts = useMemo(() => {
         const counts = new Map<string, number>();
@@ -798,6 +812,7 @@ const WorkerSummaryPage: React.FC = () => {
     };
 
     if (loading) return <LoadingOverlay>데이터 로딩 중...</LoadingOverlay>;
+    if (loadError) return <p role="alert" className="p-6">작업자 정보를 불러오지 못했습니다. 소속 팀 연결과 조회 권한을 확인한 뒤 새로고침해 주세요.</p>;
 
     return (
         <PageContainer className="worker-summary-page" data-mobile-view={mobileView}>
@@ -826,7 +841,7 @@ const WorkerSummaryPage: React.FC = () => {
                             value={selectedTeam}
                             onChange={(e) => setSelectedTeam(e.target.value)}
                         >
-                            <option value="">전체 팀 보기 ({workers.length}명)</option>
+                            <option value="">{restricted ? '내 팀 작업자' : '전체 팀 보기'} ({workers.length}명)</option>
                             {teams.map(team => {
                                 const teamKey = getTeamKey(team);
                                 const teamColor = normalizeHexColor(team.color);

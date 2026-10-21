@@ -23,7 +23,9 @@ test('저장된 메뉴를 조회할 때 허용된 세 메뉴로 표시하며 서
         expect.objectContaining({ text: '작업자정보', path: '/manpower/team-worker-detail' }),
         expect.objectContaining({ text: '급여명세서', path: '/manpower/team-worker-payslip' }),
         expect.objectContaining({ text: '신규작업자등록', path: '/manpower/team-worker-requests' }),
+        expect.objectContaining({ text: '작업자 요약', path: '/manpower/summary' }),
     ]);
+    expect(config?.pos_leader.menu).toContainEqual(expect.objectContaining({ path: '/support/vehicles/oil-cycle' }));
     expect(stored.pos_leader.menu[0].sub).toHaveLength(2);
     expect(setDoc).not.toHaveBeenCalled();
     expect(runTransaction).not.toHaveBeenCalled();

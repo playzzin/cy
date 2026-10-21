@@ -16,6 +16,17 @@ test('서버가 연결된 팀을 결정하고 타 팀·미승인·임의 컬렉�
         'users/recipient': { status: 'active', displayName: '수신자', linkedWorkerIds: ['member-a', 'member-b'], email: 'private@example.invalid', secret: 'private' },
         'users/pending': { status: 'pending', position: '팀장', linkedWorkerIds: ['leader-worker'] },
         'users/unlinked': { status: 'active', position: '팀장' },
+        'users/ordinary-worker': { status: 'active', accountType: 'worker', linkedWorkerIds: ['leader-worker'] },
+        'vehicles/own-oil': { currentAssigneeType: 'TEAM', currentAssigneeId: 'team-a', licensePlate: '가상1111' },
+        'vehicles/member-oil': { currentAssigneeType: 'WORKER', currentAssigneeId: 'member-a' },
+        'vehicles/other-oil': { currentAssigneeType: 'TEAM', currentAssigneeId: 'team-b' },
+        'vehicles/moved-oil': { currentAssigneeType: 'TEAM', currentAssigneeId: 'team-b', billingTargetType: 'TEAM', billingTargetId: 'team-a' },
+        'vehicleAssignments/past-oil': { vehicleId: 'moved-oil', assigneeType: 'TEAM', assigneeId: 'team-a', endDate: '2026-01-01' },
+        'support_shared_data/engine_oil_cycle': { data: {
+            'own-oil': { currentKm: 18000, lastOilKm: 10000, cycleKm: 10000, otherTeamNote: 'private' },
+            'other-oil': { currentKm: 999999 },
+            'moved-oil': { currentKm: 888888 },
+        } },
         'teams/team-a': { name: 'A', companyId: 'company-a' }, 'teams/team-b': { name: 'B', companyId: 'company-b' },
         'companies/company-a': { name: 'A company', secret: 'private' }, 'companies/company-b': { name: 'B company' },
         'workers/leader-worker': { uid: 'leader', teamId: 'team-a', role: '팀장' },
@@ -72,6 +83,13 @@ test('서버가 연결된 팀을 결정하고 타 팀·미승인·임의 컬렉�
         for (const uid of ['pending', 'unlinked', 'missing']) await assert.rejects(call('message_recipients', uid), (error: any) => error.code === 'permission-denied');
         assert.deepEqual((await call('teams', 'leader', { teamId: 'team-b' })).rows.map((row: any) => row.id), ['team-a']);
         assert.deepEqual((await call('workers')).rows.map((row: any) => row.id).sort(), ['leader-worker', 'member-a']);
+        const oil = (await call('vehicle_oil_summary', 'leader', { filters: { teamId: 'team-b', vehicleId: 'other-oil' } })).rows;
+        assert.deepEqual(oil.map((row: any) => row.id).sort(), ['member-oil', 'own-oil']);
+        assert.equal(oil.find((row: any) => row.id === 'own-oil').currentKm, 18000);
+        assert.equal(JSON.stringify(oil).includes('private'), false);
+        for (const uid of ['pending', 'unlinked', 'missing', 'ordinary-worker']) {
+            await assert.rejects(call('vehicle_oil_summary', uid), (error: any) => error.code === 'permission-denied');
+        }
         assert.deepEqual((await call('workers')).rows.find((row: any) => row.id === 'member-a').createdAt, { __teamTimestamp: 1000 });
         assert.deepEqual((await call('advance_payments')).rows.map((row: any) => row.id), ['own']);
         assert.deepEqual((await call('advance_requests')).rows.map((row: any) => row.id), ['nested-own', 'own']);
@@ -121,6 +139,7 @@ test('서버가 연결된 팀을 결정하고 타 팀·미승인·임의 컬렉�
         assert.equal((await call('companies', 'leader', { filters: { bypassCache: true } })).rows[0].name, 'A updated');
         // Even a warm catalog cache cannot retain access after a team/account change.
         await db.doc('workers/leader-worker').update({ teamId: 'team-b' });
+        assert.deepEqual((await call('vehicle_oil_summary')).rows.map((row: any) => row.id).sort(), ['moved-oil', 'other-oil']);
         assert.deepEqual((await call('companies')).rows.map((row: any) => row.id), ['company-b']);
         await db.doc('workers/leader-worker').update({ isActive: false });
         await assert.rejects(call('companies'), (error: any) => error.code === 'permission-denied');

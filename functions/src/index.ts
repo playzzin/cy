@@ -151,6 +151,7 @@ export { planExcelConversion, getExcelConversionStatus } from './excelConversion
 export { analyzeExcelStructure } from './excelStructurePlanning';
 
 export { getTeamScopedData } from './teamScopedRead';
+export { saveTeamVehicleOil } from './teamVehicleOilWrite';
 export { teamExpenseRequests } from './teamExpenseRequests';
 export { teamWorkerRequests } from './teamWorkerRequests';
 

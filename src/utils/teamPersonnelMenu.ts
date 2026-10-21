@@ -6,6 +6,7 @@ export const TEAM_PERSONNEL_MENU_ITEMS: MenuItem[] = [
     { text: '작업자정보', path: '/manpower/team-worker-detail', icon: 'fa-address-card' },
     { text: '급여명세서', path: '/manpower/team-worker-payslip', icon: 'fa-file-invoice-dollar' },
     { text: '신규작업자등록', path: '/manpower/team-worker-requests', icon: 'fa-user-plus' },
+    { text: '작업자 요약', path: '/manpower/summary', icon: 'fa-users' },
 ];
 
 export const TEAM_SITE_MENU_ITEMS: MenuItem[] = [
@@ -73,6 +74,16 @@ export const ensureTeamPersonnelMenu = (config: SiteDataType): void => {
             });
         };
         upgrade(site.menu);
+
+        const oilPath = '/support/vehicles/oil-cycle';
+        const hasOilMenu = (items: (MenuItem | string)[]): boolean => items.some(item => typeof item !== 'string'
+            && (item.path?.split(/[?#]/)[0] === oilPath || Boolean(item.sub && hasOilMenu(item.sub))));
+        if (!hasOilMenu(site.menu)) {
+            const oilMenu: MenuItem = { id: `${key}-engine-oil-cycle`, text: '엔진오일 주기', path: oilPath, icon: 'fa-oil-can' };
+            const supportGroup = site.menu.find(item => ['지원관리', '차량관리'].includes(normalize(item.text)) && item.sub);
+            if (supportGroup?.sub) supportGroup.sub.push(oilMenu);
+            else site.menu.push(oilMenu);
+        }
 
         let foundSiteMenu = false;
         const upgradeSites = (items: (MenuItem | string)[]) => {

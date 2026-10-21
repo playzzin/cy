@@ -1,3 +1,4 @@
+import { projectTeamVehicleOil } from './teamVehicleOilSummary';
 import { messageRecipientDirectoryRow } from './messageRecipientDirectory';
 import { resolvedRoleNames } from './teamExpenseRequests';
 import { readWorkerScopedData } from './workerScopedRead';
@@ -14,6 +15,7 @@ import { projectSiteWorkReports, responsibleSites, validateSiteWorkRange } from 
 import { readWhiteboardParticipation } from './whiteboardParticipation';
 
 const COLLECTIONS = new Set([
+    'vehicle_oil_summary',
     'site_work_reports',
     'message_recipients',
     'whiteboard_participation',
@@ -166,6 +168,12 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
     const resolveRows = async (request: any) => {
         const collection = text(request.collection);
         const filters = request.filters || {};
+        if (collection === 'vehicle_oil_summary') {
+            // Ignore client-supplied team/vehicle IDs and never return the shared map.
+            const vehicles = await byIds('vehicles', ['currentAssigneeId', 'billingTargetId'], [...scope.teamIds, ...scope.workerIds]);
+            const shared = (await db.doc('support_shared_data/engine_oil_cycle').get()).data();
+            return { rows: projectTeamVehicleOil(vehicles, workers, teams, shared?.data) };
+        }
         if (collection === 'site_work_reports') {
             validateSiteWorkRange(filters);
             await sitesReady;

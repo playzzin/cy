@@ -19,6 +19,9 @@ import { vehicleService } from '../../services/vehicleService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { supportSharedDataService } from '../../services/supportSharedDataService';
+import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
+import { getTeamScopedRows } from '../../services/teamScopedReadService';
+import { saveTeamVehicleOil } from '../../services/teamVehicleOilService';
 
 type OilStatusType = 'danger' | 'warning' | 'normal';
 type OilFilterType = OilStatusType | 'all';
@@ -318,6 +321,7 @@ const inputClassName = (changed = false) => (
 );
 
 const EngineOilCyclePage: React.FC = () => {
+    const restricted = useRestrictedTeamWorkflow();
     const navigate = useNavigate();
     const [oilState, setOilState] = useState<{ records: EngineOilRecord[]; drafts: Record<string, EngineOilDraft> }>({
         records: [],
@@ -346,10 +350,19 @@ const EngineOilCyclePage: React.FC = () => {
         }, 1800);
     };
 
-    const loadVehicleRecords = async () => {
+    const loadVehicleRecords = async (isCancelled: () => boolean) => {
         setLoading(true);
         setLoadError(null);
+        setOilState({ records: [], drafts: {} });
+        setChangedIds(new Set());
         try {
+            if (restricted) {
+                const records = await getTeamScopedRows<EngineOilRecord>('vehicle_oil_summary');
+                if (isCancelled()) return;
+                if (!records) throw new Error('소속 팀 차량 조회 권한을 확인하지 못했습니다.');
+                setOilState({ records, drafts: toDraftMap(records) });
+                return;
+            }
             const [vehicles, workers, teams] = await Promise.all([
                 vehicleService.getVehicles(),
                 manpowerService.getWorkers().catch(() => [] as Worker[]),
@@ -401,6 +414,7 @@ const EngineOilCyclePage: React.FC = () => {
                 })
                 .filter((record) => Boolean(record.id));
 
+            if (isCancelled()) return;
             setOilState({
                 records,
                 drafts: toDraftMap(records)
@@ -414,22 +428,29 @@ const EngineOilCyclePage: React.FC = () => {
                 showToast('기존 오일 기록을 공용 DB로 이전했습니다.');
             }
         } catch (error) {
+            if (isCancelled()) return;
             console.error('[EngineOilCyclePage] Failed to load vehicles:', error);
             setLoadError(error instanceof Error ? error.message : '차량 정보를 불러오지 못했습니다.');
         } finally {
-            setLoading(false);
+            if (!isCancelled()) setLoading(false);
         }
     };
 
     useEffect(() => {
-        loadVehicleRecords();
-    }, [refreshKey]);
+        let cancelled = false;
+        void loadVehicleRecords(() => cancelled);
+        return () => { cancelled = true; };
+    }, [refreshKey, restricted]);
 
-    const commitRecords = async (records: EngineOilRecord[], drafts?: Record<string, EngineOilDraft>): Promise<boolean> => {
+    const commitRecords = async (records: EngineOilRecord[], drafts?: Record<string, EngineOilDraft>, ids = records.map(record => record.id)): Promise<boolean> => {
         setSaving(true);
         try {
-            await supportSharedDataService.save('engine_oil_cycle', buildMetricPayload(records));
-            persistLocalMetrics(records);
+            if (restricted) {
+                await saveTeamVehicleOil(Object.values(buildMetricPayload(records.filter(record => ids.includes(record.id)))));
+            } else {
+                await supportSharedDataService.save('engine_oil_cycle', buildMetricPayload(records));
+                persistLocalMetrics(records);
+            }
             setOilState((prev) => ({
                 records,
                 drafts: drafts ?? prev.drafts
@@ -438,7 +459,7 @@ const EngineOilCyclePage: React.FC = () => {
             return true;
         } catch (error) {
             console.error('[EngineOilCyclePage] Failed to save shared oil metrics:', error);
-            showToast('공용 DB 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+            showToast(restricted ? '저장하지 못했습니다. 현재 소속·차량 배정을 확인하고 새로고침해 주세요.' : '공용 DB 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
             return false;
         } finally {
             setSaving(false);
@@ -504,7 +525,7 @@ const EngineOilCyclePage: React.FC = () => {
         const saved = await commitRecords(nextRecords, {
             ...oilState.drafts,
             [id]: toDraft(nextRecords.find((record) => record.id === id) as EngineOilRecord)
-        });
+        }, [id]);
         if (!saved) return;
         setChangedIds((prev) => {
             const next = new Set(prev);
@@ -550,7 +571,7 @@ const EngineOilCyclePage: React.FC = () => {
             if (savedRecord) nextDrafts[id] = toDraft(savedRecord);
         });
 
-        const saved = await commitRecords(nextRecords, nextDrafts);
+        const saved = await commitRecords(nextRecords, nextDrafts, ids);
         if (!saved) return;
         setChangedIds((prev) => {
             const next = new Set(prev);
@@ -635,14 +656,14 @@ const EngineOilCyclePage: React.FC = () => {
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
-                            <button
+                            {!restricted && <button
                                 type="button"
                                 onClick={() => navigate('/support/vehicles')}
                                 className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-slate-700 transition-colors hover:bg-slate-50"
                             >
                                 <FontAwesomeIcon icon={faArrowLeft} className="text-xs" />
                                 차량 관리
-                            </button>
+                            </button>}
                             <button
                                 type="button"
                                 onClick={() => setRefreshKey((prev) => prev + 1)}
@@ -652,7 +673,7 @@ const EngineOilCyclePage: React.FC = () => {
                                 차량정보 새로고침
                             </button>
                             <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700">
-                                차량 관리 연동 · 차량번호/팀 자동반영 · 공용 DB 저장
+                                {restricted ? '내 팀 차량만 조회·수정' : '차량 관리 연동 · 차량번호/팀 자동반영 · 공용 DB 저장'}
                             </div>
                         </div>
                     </div>
@@ -698,7 +719,7 @@ const EngineOilCyclePage: React.FC = () => {
                             <button type="button" onClick={() => setActiveFilter('normal')} className={filterButtonClassName('normal')}>정상</button>
                         </div>
 
-                        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        {!restricted && <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                             <span className="whitespace-nowrap text-xs font-black text-slate-500">전체교체주기</span>
                             <select
                                 value={globalCycleKm}
@@ -718,7 +739,7 @@ const EngineOilCyclePage: React.FC = () => {
                             >
                                 전체 적용
                             </button>
-                        </div>
+                        </div>}
 
                         <button
                             type="button"
@@ -734,7 +755,7 @@ const EngineOilCyclePage: React.FC = () => {
                             {changedIds.size > 0 ? `변경 ${changedIds.size.toLocaleString('ko-KR')}건 저장` : '일괄 저장'}
                         </button>
 
-                        <button
+                        {!restricted && <button
                             type="button"
                             onClick={resetOilData}
                             disabled={saving}
@@ -742,7 +763,7 @@ const EngineOilCyclePage: React.FC = () => {
                         >
                             <FontAwesomeIcon icon={faRotateLeft} />
                             오일기록 초기화
-                        </button>
+                        </button>}
                     </div>
 
                     <div className="mt-3 text-xs font-semibold leading-5 text-slate-500">
@@ -750,7 +771,7 @@ const EngineOilCyclePage: React.FC = () => {
                     </div>
 
                     {loadError && (
-                        <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">
+                        <div role="alert" className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">
                             {loadError}
                         </div>
                     )}
@@ -841,6 +862,7 @@ const EngineOilCyclePage: React.FC = () => {
                                             </td>
                                             <td className="px-3 py-2 text-right">
                                                 <input
+                                                    aria-label={`${record.plate} 현재거리`}
                                                     value={draft.currentKm}
                                                     type="number"
                                                     onChange={(event) => setDraftValue(record.id, 'currentKm', event.target.value)}
@@ -850,6 +872,7 @@ const EngineOilCyclePage: React.FC = () => {
                                             </td>
                                             <td className="px-3 py-2 text-right">
                                                 <input
+                                                    aria-label={`${record.plate} 최근교체거리`}
                                                     value={draft.lastOilKm}
                                                     type="number"
                                                     onChange={(event) => setDraftValue(record.id, 'lastOilKm', event.target.value)}

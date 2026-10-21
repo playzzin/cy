@@ -4,6 +4,11 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import WorkerSummaryPage from './WorkerSummaryPage';
 import { manpowerService } from '../../services/manpowerService';
 import html2canvas from 'html2canvas';
+import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
+import { getTeamScopedRows } from '../../services/teamScopedReadService';
+
+jest.mock('../../routes/TeamWorkflowGate', () => ({ useRestrictedTeamWorkflow: jest.fn() }));
+jest.mock('../../services/teamScopedReadService', () => ({ getTeamScopedRows: jest.fn() }));
 
 jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: jest.fn() } }));
 jest.mock('../../services/teamService', () => ({
@@ -22,12 +27,44 @@ jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
 beforeEach(() => {
     jest.clearAllMocks();
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(false);
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue([
         { id: 'one', name: '가상가', teamId: 'a', teamName: '가상 A팀', status: '재직' },
         { id: 'two', name: '가상나', teamId: 'a', teamName: '가상 A팀', status: '재직' },
         { id: 'three', name: '가상다', teamId: 'b', teamName: '가상 B팀', status: '재직' },
         { id: 'inactive', name: '가상퇴사', teamId: 'a', status: '퇴사' }
     ]);
+});
+
+test('팀장은 서버에서 허용한 팀만 선택·요약하며 다른 팀과 미배정 작업자는 제외한다', async () => {
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(true);
+    (getTeamScopedRows as jest.Mock).mockImplementation(async collection => collection === 'teams'
+        ? [{ id: 'a', legacyId: 'legacy-a', name: '가상 A팀', companyName: '다른 회사' }]
+        : [
+            { id: 'one', name: '가상가', teamId: 'a', status: '재직' },
+            { id: 'two', name: '가상나', teamId: 'legacy-a', status: '재직' },
+            { id: 'other', name: '다른 팀 인원', teamId: 'b', teamName: '가상 A팀' },
+            { id: 'unassigned', name: '미배정 인원' },
+        ]);
+    await openPage();
+    expect(manpowerService.getWorkers).not.toHaveBeenCalled();
+    expect(screen.getByRole('option', { name: '내 팀 작업자 (2명)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /가상 A팀/ })).toBeInTheDocument();
+    expect(screen.queryByText('다른 팀 인원')).not.toBeInTheDocument();
+    expect(screen.queryByText('미배정 인원')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: /목록 전체 선택/ }));
+    expect(screen.getByRole('status')).toHaveTextContent('2명 선택');
+});
+
+test('팀 조회 권한을 확인하지 못하면 전체 작업자 조회로 대체하지 않는다', async () => {
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(true);
+    (getTeamScopedRows as jest.Mock).mockResolvedValue(null);
+    const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    render(<WorkerSummaryPage />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('소속 팀 연결');
+    expect(manpowerService.getWorkers).not.toHaveBeenCalled();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    log.mockRestore();
 });
 
 async function openPage() {

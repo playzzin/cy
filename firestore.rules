@@ -1658,7 +1658,8 @@ service cloud.firestore {
     }
 
     match /support_shared_data/{dataId} {
-      allow read: if (hasActiveUserProfile()) && previewReadsAllowed();
+      allow read: if (hasActiveUserProfile()) && previewReadsAllowed()
+        && (dataId != 'engine_oil_cycle' || canReadSupport());
       allow create, update, delete: if !isPreviewIdentity() && (canWriteSupport());
     }
 
