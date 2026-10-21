@@ -12,7 +12,7 @@ import { accountDirectoryService, AccountDirectory } from '../../services/accoun
 import { aiSettingsService } from '../../services/aiSettingsService';
 import { createWorkbookLedgerService, WorkbookLedgerEntry, WorkbookLedgerTenant, WorkbookTransactionType } from '../../services/workbookLedgerService';
 import { createQuarterVatPaymentService, QuarterVatPaymentRecord } from '../../services/quarterVatPaymentService';
-import { buildQuarterVatBalances, sumQuarterVatBalances, VatQuarter } from '../../utils/quarterVatSettlement';
+import { buildQuarterVatBalances, buildQuarterVatPaymentHistory, sumQuarterVatBalances, VatQuarter } from '../../utils/quarterVatSettlement';
 import { createTaxInvoiceDuplicateFingerprint, TaxInvoiceExtractedCandidate, validateTaxInvoiceFiles } from '../../services/taxInvoiceBulkImportService';
 import { calculateWorkbookTotalAmount, calculateWorkbookVatAmount } from '../../utils/workbookLedgerAmounts';
 import { applyWorkbookLedgerExcelStyle } from '../../utils/workbookLedgerExcelStyle';
@@ -2898,6 +2898,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         [quarterVatBalances, quarterVatFilter.quarter]
     );
     const quarterVatPaidAmount = quarterVatBalanceTotals.paidAmount;
+    const quarterVatAnnualBalance = useMemo(() => sumQuarterVatBalances(quarterVatBalances, 'all'), [quarterVatBalances]);
+    const quarterVatPaymentHistory = useMemo(
+        () => buildQuarterVatPaymentHistory(quarterVatFilter.year, quarterVatBalances, quarterVatPayments),
+        [quarterVatFilter.year, quarterVatBalances, quarterVatPayments]
+    );
 
     const ledgerTotals = useMemo(() => {
         return ledgerRows.reduce((accumulator, row) => ({
@@ -3319,60 +3324,68 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             });
             summarySheet['!autofilter'] = { ref: `A10:I${10 + quarterVatReport.quarterRows.length}` };
 
-            const annualBalance = sumQuarterVatBalances(quarterVatBalances, 'all');
-            const paymentRows = quarterVatPayments.map((payment, index) => [
+            const annualBalance = quarterVatAnnualBalance;
+            const paymentHistory = quarterVatPaymentHistory;
+            const paymentRows = paymentHistory.map((row, index) => [
                 index + 1,
-                `${payment.year}년 ${getQuarterVatLabel(payment.quarter)}`,
-                payment.date,
-                payment.amount,
-                payment.note || '-',
+                `${row.year}년 ${getQuarterVatLabel(row.quarter)}`,
+                row.date || '-',
+                row.expectedAmount ?? '',
+                row.paymentAmount ?? '',
+                row.remainingAmount,
+                row.note || '-',
             ]);
             const paymentDataStartRow = 9;
             const paymentTotalRow = paymentDataStartRow + Math.max(paymentRows.length, 1);
             const paymentSheet = XLSX.utils.aoa_to_sheet([
-                [`${companyLabel} 부가세 납부 내역`, '', '', '', ''],
-                [`${quarterVatFilter.year}년 귀속 전체 · 납부일 기준 내림차순 · 생성 ${generatedAt}`, '', '', '', ''],
+                [`${companyLabel} 부가세 납부 내역`, '', '', '', '', '', ''],
+                [`${quarterVatFilter.year}년 귀속 전체 · 귀속분기별 / 납부일 오름차순 · 생성 ${generatedAt}`, '', '', '', '', '', ''],
                 [],
-                ['예상 납부세액', '', '누적 납부금액', '', '남은 납부금액'],
-                [annualBalance.expectedAmount, '', annualBalance.paidAmount, '', annualBalance.remainingAmount],
+                ['예상 납부세액', '', '누적 납부금액', '', '', '남은 납부금액', ''],
+                [annualBalance.expectedAmount, '', annualBalance.paidAmount, '', '', annualBalance.remainingAmount, ''],
                 [],
-                ['납부 내역', '', '', '', ''],
-                ['No', '귀속연도·분기', '실제 납부일', '납부금액', '메모'],
-                ...(paymentRows.length > 0 ? paymentRows : [['', '', '등록된 납부 내역이 없습니다.', '', '']]),
-                ['', '', '누적 납부금액', annualBalance.paidAmount, ''],
+                ['납부 내역', '', '', '', '', '', ''],
+                ['No', '귀속연도·분기', '실제 납부일', '발생금액', '납부금액', '잔액', '메모'],
+                ...(paymentRows.length > 0 ? paymentRows : [['등록된 납부 내역이 없습니다.', '', '', '', '', '', '']]),
+                ['', '', '합계', annualBalance.expectedAmount, annualBalance.paidAmount, annualBalance.remainingAmount, ''],
+                ['※ 발생금액은 조회 기준의 분기별 예상 납부세액입니다. 잔액은 귀속분기별로 계산하며, 초과 납부·환급은 「분기별 납부현황」을 확인하세요.', '', '', '', '', '', ''],
             ]) as unknown as StyledExcelWorksheet;
-            paymentSheet['!cols'] = [{ wch: 8 }, { wch: 13 }, { wch: 15 }, { wch: 18 }, { wch: 42 }];
-            mergeExcelCells(XLSX, paymentSheet, 'A1:E1');
-            mergeExcelCells(XLSX, paymentSheet, 'A2:E2');
+            paymentSheet['!cols'] = [{ wch: 8 }, { wch: 16 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 32 }];
+            mergeExcelCells(XLSX, paymentSheet, 'A1:G1');
+            mergeExcelCells(XLSX, paymentSheet, 'A2:G2');
             mergeExcelCells(XLSX, paymentSheet, 'A4:B4');
             mergeExcelCells(XLSX, paymentSheet, 'A5:B5');
-            mergeExcelCells(XLSX, paymentSheet, 'C4:D4');
-            mergeExcelCells(XLSX, paymentSheet, 'C5:D5');
-            mergeExcelCells(XLSX, paymentSheet, 'A7:E7');
-            if (paymentRows.length === 0) mergeExcelCells(XLSX, paymentSheet, 'A9:E9');
+            mergeExcelCells(XLSX, paymentSheet, 'C4:E4');
+            mergeExcelCells(XLSX, paymentSheet, 'C5:E5');
+            mergeExcelCells(XLSX, paymentSheet, 'F4:G4');
+            mergeExcelCells(XLSX, paymentSheet, 'F5:G5');
+            mergeExcelCells(XLSX, paymentSheet, 'A7:G7');
+            mergeExcelCells(XLSX, paymentSheet, `A${paymentTotalRow + 1}:G${paymentTotalRow + 1}`);
+            if (paymentRows.length === 0) mergeExcelCells(XLSX, paymentSheet, 'A9:G9');
             setExcelRowHeight(paymentSheet, 1, 30);
             setExcelRowHeight(paymentSheet, 2, 21);
             setExcelRowHeight(paymentSheet, 4, 21);
             setExcelRowHeight(paymentSheet, 5, 29);
             setExcelRowHeight(paymentSheet, 7, 22);
-            applyExcelRangeStyle(XLSX, paymentSheet, 'A1:E1', titleStyle);
-            applyExcelRangeStyle(XLSX, paymentSheet, 'A2:E2', subtitleStyle);
-            applyExcelRangeStyle(XLSX, paymentSheet, 'A4:E4', kpiLabelStyle);
+            setExcelRowHeight(paymentSheet, 8, 24);
+            applyExcelRangeStyle(XLSX, paymentSheet, 'A1:G1', titleStyle);
+            applyExcelRangeStyle(XLSX, paymentSheet, 'A2:G2', subtitleStyle);
+            applyExcelRangeStyle(XLSX, paymentSheet, 'A4:G4', kpiLabelStyle);
             applyExcelRangeStyle(XLSX, paymentSheet, 'A5:B5', kpiValueStyle);
-            applyExcelRangeStyle(XLSX, paymentSheet, 'C5:D5', paymentKpiStyle);
-            applyExcelRangeStyle(XLSX, paymentSheet, 'E5:E5', remainingKpiStyle);
-            applyExcelRangeStyle(XLSX, paymentSheet, 'A7:E7', sectionStyle);
-            applyExcelRangeStyle(XLSX, paymentSheet, 'A8:E8', tableHeaderStyle);
+            applyExcelRangeStyle(XLSX, paymentSheet, 'C5:E5', paymentKpiStyle);
+            applyExcelRangeStyle(XLSX, paymentSheet, 'F5:G5', remainingKpiStyle);
+            applyExcelRangeStyle(XLSX, paymentSheet, 'A7:G7', sectionStyle);
+            applyExcelRangeStyle(XLSX, paymentSheet, 'A8:G8', tableHeaderStyle);
             if (paymentRows.length === 0) {
-                applyExcelRangeStyle(XLSX, paymentSheet, 'A9:E9', { ...bodyStyle, fill: getExcelFill('F8FAFC'), alignment: { horizontal: 'center', vertical: 'center' } });
+                applyExcelRangeStyle(XLSX, paymentSheet, 'A9:G9', { ...bodyStyle, fill: getExcelFill('F8FAFC'), alignment: { horizontal: 'center', vertical: 'center' } });
             } else {
-                paymentRows.forEach((_, index) => {
+                paymentHistory.forEach((row, index) => {
                     const rowNumber = paymentDataStartRow + index;
-                    const fill = index % 2 === 0 ? 'FFFFFF' : 'F8FAFC';
-                    applyExcelRangeStyle(XLSX, paymentSheet, `A${rowNumber}:E${rowNumber}`, { ...bodyStyle, fill: getExcelFill(fill) });
+                    const fill = row.expectedAmount !== null ? 'EFF6FF' : index % 2 === 0 ? 'FFFFFF' : 'F8FAFC';
+                    applyExcelRangeStyle(XLSX, paymentSheet, `A${rowNumber}:G${rowNumber}`, { ...bodyStyle, fill: getExcelFill(fill) });
                     applyExcelRangeStyle(XLSX, paymentSheet, `A${rowNumber}:C${rowNumber}`, { ...centerBodyStyle, fill: getExcelFill(fill) });
-                    applyExcelRangeStyle(XLSX, paymentSheet, `D${rowNumber}:D${rowNumber}`, { ...amountBodyStyle, fill: getExcelFill(fill) });
-                    applyExcelRangeStyle(XLSX, paymentSheet, `E${rowNumber}:E${rowNumber}`, {
+                    applyExcelRangeStyle(XLSX, paymentSheet, `D${rowNumber}:F${rowNumber}`, { ...amountBodyStyle, fill: getExcelFill(fill) });
+                    applyExcelRangeStyle(XLSX, paymentSheet, `G${rowNumber}:G${rowNumber}`, {
                         ...bodyStyle,
                         fill: getExcelFill(fill),
                         alignment: { horizontal: 'left', vertical: 'center', wrapText: true },
@@ -3380,9 +3393,14 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     setExcelRowHeight(paymentSheet, rowNumber, 28);
                 });
             }
-            applyExcelRangeStyle(XLSX, paymentSheet, `A${paymentTotalRow}:E${paymentTotalRow}`, totalStyle);
+            applyExcelRangeStyle(XLSX, paymentSheet, `A${paymentTotalRow}:G${paymentTotalRow}`, totalStyle);
             applyExcelRangeStyle(XLSX, paymentSheet, `A${paymentTotalRow}:C${paymentTotalRow}`, { ...totalStyle, alignment: { horizontal: 'center', vertical: 'center' } });
-            paymentSheet['!autofilter'] = { ref: `A8:E${paymentDataStartRow + Math.max(paymentRows.length, 1)}` };
+            setExcelRowHeight(paymentSheet, paymentTotalRow, 28);
+            applyExcelRangeStyle(XLSX, paymentSheet, `A${paymentTotalRow + 1}:G${paymentTotalRow + 1}`, {
+                ...subtitleStyle, alignment: { horizontal: 'left', vertical: 'center', wrapText: true },
+            });
+            setExcelRowHeight(paymentSheet, paymentTotalRow + 1, 36);
+            paymentSheet['!autofilter'] = { ref: `A8:G${paymentTotalRow - 1}` };
 
             const detailRows = quarterVatReport.detailRows.map((row, index) => [
                 index + 1,
@@ -3494,7 +3512,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             setDownloadingVat(false);
         }
     }, [companyLabel, quarterVatFilter, quarterVatPaidAmount, quarterVatPayments, quarterVatReport,
-        quarterVatCompanyReport, quarterVatBalances, quarterVatBalanceTotals, quarterVatPaymentReady, loading, savingQuarterVatPayment]);
+        quarterVatCompanyReport, quarterVatBalances, quarterVatBalanceTotals, quarterVatAnnualBalance, quarterVatPaymentHistory,
+        quarterVatPaymentReady, loading, savingQuarterVatPayment]);
 
     const canRegisterReceipt = summaryFilter.mode === '미수금' || summaryFilter.mode === '미지급금';
     const canOpenReceiptHistory = canRegisterReceipt;
@@ -3643,16 +3662,18 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 <td class="right">${formatNumber(row.totalAmount)}</td>
             </tr>
         `).join('');
-        const paymentRowsHtml = quarterVatPayments.length > 0
-            ? quarterVatPayments.map((payment) => `
-                <tr>
-                    <td>${payment.year}년 ${escapeHtml(getQuarterVatLabel(payment.quarter))}</td>
-                    <td>${escapeHtml(payment.date)}</td>
-                    <td class="right">${formatNumber(payment.amount)}</td>
-                    <td>${escapeHtml(payment.note || '-')}</td>
+        const paymentRowsHtml = quarterVatPaymentHistory.length > 0
+            ? quarterVatPaymentHistory.map((row) => `
+                <tr${row.payment === null ? ' class="opening"' : ''}>
+                    <td>${row.year}년 ${escapeHtml(getQuarterVatLabel(row.quarter))}</td>
+                    <td>${escapeHtml(row.date || '-')}</td>
+                    <td class="right">${row.expectedAmount === null ? '-' : formatNumber(row.expectedAmount)}</td>
+                    <td class="right">${row.paymentAmount === null ? '-' : formatNumber(row.paymentAmount)}</td>
+                    <td class="right">${formatNumber(row.remainingAmount)}</td>
+                    <td>${escapeHtml(row.note || '-')}</td>
                 </tr>
             `).join('')
-            : '<tr><td colspan="4">등록된 납부 내역이 없습니다.</td></tr>';
+            : '<tr><td colspan="6">등록된 납부 내역이 없습니다.</td></tr>';
         const metricRowsHtml = metricRows.map(([label, value]) => `
             <div class="metric"><span>${escapeHtml(String(label))}</span><strong>${formatNumber(Number(value))}</strong></div>
         `).join('');
@@ -3677,6 +3698,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     th, td { border: 1px solid #cbd5e1; padding: 6px 7px; font-size: 11px; word-break: keep-all; }
                     th { background: #1e3a8a; color: white; }
                     .right { text-align: right; }
+                    .opening td { background: #eff6ff; }
+                    tfoot td { background: #e0e7ff; font-weight: 700; }
                     @media print { body { margin: 12mm; } .no-print { display: none; } }
                 </style>
             </head>
@@ -3686,9 +3709,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 <div class="meta">납부 현황은 회사 전체 기준입니다. 검색조건은 월별·세부 내역에 적용됩니다. 분기별 미납액은 다른 분기의 환급·초과납부와 상계하지 않습니다.</div>
                 <div class="metrics">${metricRowsHtml}</div>
                 <h2>납부 내역 · ${quarterVatFilter.year}년 귀속 전체</h2>
+                <div class="meta">귀속분기별 · 납부일 오름차순. 발생금액은 조회 기준의 분기별 예상 납부세액이며, 잔액은 귀속분기별로 계산합니다.</div>
                 <table>
-                    <thead><tr><th>귀속연도·분기</th><th>실제 납부일</th><th>납부금액</th><th>메모</th></tr></thead>
+                    <thead><tr><th>귀속연도·분기</th><th>실제 납부일</th><th>발생금액</th><th>납부금액</th><th>잔액</th><th>메모</th></tr></thead>
                     <tbody>${paymentRowsHtml}</tbody>
+                    <tfoot><tr><td colspan="2">합계</td><td class="right">${formatNumber(quarterVatAnnualBalance.expectedAmount)}</td><td class="right">${formatNumber(quarterVatAnnualBalance.paidAmount)}</td><td class="right">${formatNumber(quarterVatAnnualBalance.remainingAmount)}</td><td></td></tr></tfoot>
                 </table>
                 <h2>분기별 납부 현황 · ${quarterVatFilter.year}년 회사 전체</h2>
                 <table>
@@ -3716,7 +3741,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         printWindow.document.close();
         setTimeout(() => setPrintingVat(false), 800);
     }, [companyLabel, quarterVatFilter, quarterVatPaidAmount, quarterVatPayments, quarterVatReport,
-        quarterVatCompanyReport, quarterVatBalances, quarterVatBalanceTotals, quarterVatPaymentReady, loading, savingQuarterVatPayment]);
+        quarterVatCompanyReport, quarterVatBalances, quarterVatBalanceTotals, quarterVatAnnualBalance, quarterVatPaymentHistory,
+        quarterVatPaymentReady, loading, savingQuarterVatPayment]);
 
     const handleDownloadView = useCallback(async (view: 'ledger' | 'summary') => {
         if (downloadingView || loading || (view === 'summary' && summaryActionsBlockedRef.current)) return;
@@ -6495,6 +6521,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             귀속분기는 세금이 발생한 분기, 실제 납부일은 돈을 낸 날짜입니다. 예: 1분기 세금을 8월에 납부하면 귀속분기는 1분기입니다.
                             여러 번 나누어 납부한 금액도 합산됩니다. 부가세 납부는 매입금액에 포함되지 않습니다.
                         </div>
+                        <div className="workbook-vat-notice">
+                            귀속분기별로 발생금액과 납부일순 잔액을 표시합니다. 발생금액은 조회 기준의 분기별 예상 납부세액입니다.
+                            초과 납부 시 잔액은 0원으로 표시하며, 초과 납부·환급액은 분기별 납부 현황에서 확인할 수 있습니다.
+                        </div>
                         {quarterVatPaymentError && (
                             <div className="workbook-vat-notice workbook-vat-notice-warning" role="alert">
                                 {quarterVatPaymentError}
@@ -6567,42 +6597,58 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                         <th>No</th>
                                         <th>귀속연도·분기</th>
                                         <th>실제 납부일</th>
+                                        <th>발생금액</th>
                                         <th>납부금액</th>
+                                        <th>잔액</th>
                                         <th>메모</th>
                                         <th>관리</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {loadingQuarterVatPayment && (
+                                    {(loadingQuarterVatPayment || loading) && (
                                         <tr>
-                                            <td colSpan={6} className="sheet-empty-state">납부 내역을 불러오는 중입니다.</td>
+                                            <td colSpan={8} className="sheet-empty-state">납부 내역을 불러오는 중입니다.</td>
                                         </tr>
                                     )}
-                                    {quarterVatPaymentReady && quarterVatPayments.length === 0 && (
+                                    {quarterVatPaymentReady && !loading && quarterVatPaymentHistory.length === 0 && (
                                         <tr>
-                                            <td colSpan={6} className="sheet-empty-state">등록된 납부 내역이 없습니다.</td>
+                                            <td colSpan={8} className="sheet-empty-state">등록된 납부 내역이 없습니다.</td>
                                         </tr>
                                     )}
-                                    {quarterVatPaymentReady && quarterVatPayments.map((payment, index) => (
-                                        <tr key={`${payment.year}:${payment.quarter}:${payment.id}`}>
+                                    {quarterVatPaymentReady && !loading && quarterVatPaymentHistory.map((row, index) => (
+                                        <tr key={`${row.year}:${row.quarter}:${row.payment ? `payment:${row.payment.id}` : 'opening'}`}
+                                            className={row.payment === null ? 'workbook-vat-opening-row' : undefined}>
                                             <td className="align-right">{index + 1}</td>
-                                            <td>{payment.year}년 {getQuarterVatLabel(payment.quarter)}</td>
-                                            <td>{payment.date}</td>
-                                            <td className="align-right">{formatNumber(payment.amount)}</td>
-                                            <td>{payment.note || '-'}</td>
+                                            <td>{row.year}년 {getQuarterVatLabel(row.quarter)}</td>
+                                            <td>{row.date || '-'}</td>
+                                            <td className="align-right">{row.expectedAmount === null ? '-' : formatNumber(row.expectedAmount)}</td>
+                                            <td className="align-right">{row.paymentAmount === null ? '-' : formatNumber(row.paymentAmount)}</td>
+                                            <td className="align-right">{formatNumber(row.remainingAmount)}</td>
+                                            <td>{row.note || '-'}</td>
                                             <td>
-                                                <button
+                                                {row.payment && <button
                                                     type="button"
                                                     className="workbook-toolbar-button workbook-inline-button"
-                                                    onClick={() => handleDeleteQuarterVatPayment(payment)}
+                                                    onClick={() => row.payment && handleDeleteQuarterVatPayment(row.payment)}
                                                     disabled={savingQuarterVatPayment}
                                                 >
                                                     삭제
-                                                </button>
+                                                </button>}
                                             </td>
                                         </tr>
                                     ))}
                                 </tbody>
+                                {quarterVatPaymentReady && !loading && (
+                                    <tfoot>
+                                        <tr>
+                                            <td colSpan={3}>합계</td>
+                                            <td className="align-right">{formatNumber(quarterVatAnnualBalance.expectedAmount)}</td>
+                                            <td className="align-right">{formatNumber(quarterVatAnnualBalance.paidAmount)}</td>
+                                            <td className="align-right">{formatNumber(quarterVatAnnualBalance.remainingAmount)}</td>
+                                            <td colSpan={2}></td>
+                                        </tr>
+                                    </tfoot>
+                                )}
                             </table>
                         </div>
                     </div>

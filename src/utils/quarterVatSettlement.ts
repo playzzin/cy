@@ -51,3 +51,45 @@ export const sumQuarterVatBalances = (rows: ReadonlyArray<VatQuarterBalance>, qu
         overpaidAmount: total.overpaidAmount + row.overpaidAmount,
         refundAmount: total.refundAmount + row.refundAmount,
     }), { expectedAmount: 0, paidAmount: 0, remainingAmount: 0, overpaidAmount: 0, refundAmount: 0 });
+
+export interface VatPaymentHistoryRow {
+    year: number;
+    quarter: VatQuarter;
+    date: string;
+    expectedAmount: number | null;
+    paymentAmount: number | null;
+    remainingAmount: number;
+    note: string;
+    payment: QuarterVatPaymentRecord | null;
+}
+
+/** Each quarter starts with its assessed amount, followed by its dated installments. */
+export const buildQuarterVatPaymentHistory = (
+    year: number,
+    balances: ReadonlyArray<VatQuarterBalance>,
+    payments: ReadonlyArray<QuarterVatPaymentRecord>,
+): VatPaymentHistoryRow[] => [...balances]
+    .sort((left, right) => left.quarter.localeCompare(right.quarter, 'en'))
+    .flatMap((balance) => {
+        const matching = payments
+            .filter((payment) => payment.year === year && payment.quarter === balance.quarter)
+            .sort((left, right) => left.date.localeCompare(right.date, 'en')
+                || left.createdAt.localeCompare(right.createdAt, 'en')
+                || left.id.localeCompare(right.id, 'en'));
+        if (balance.expectedAmount === 0 && matching.length === 0) return [];
+
+        let paidAmount = 0;
+        return [{
+            year, quarter: balance.quarter, date: '',
+            expectedAmount: balance.expectedAmount, paymentAmount: null,
+            remainingAmount: balance.expectedAmount, note: '납부 전 잔액', payment: null,
+        }, ...matching.map((payment) => {
+            paidAmount += payment.amount;
+            return {
+                year, quarter: balance.quarter, date: payment.date,
+                expectedAmount: null, paymentAmount: payment.amount,
+                remainingAmount: Math.max(balance.expectedAmount - paidAmount, 0),
+                note: payment.note, payment,
+            };
+        })];
+    });

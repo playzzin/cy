@@ -2562,11 +2562,35 @@
 }
 
 .workbook-vat-payment-history-wrapper {
-    max-height: 260px;
+    max-height: 420px;
 }
 
 .workbook-vat-payment-history-table {
-    min-width: 660px;
+    min-width: 940px;
+}
+
+.workbook-vat-payment-history-table th:nth-child(1) { width: 52px; }
+.workbook-vat-payment-history-table th:nth-child(2) { width: 150px; }
+.workbook-vat-payment-history-table th:nth-child(3),
+.workbook-vat-payment-history-table th:nth-child(4),
+.workbook-vat-payment-history-table th:nth-child(5),
+.workbook-vat-payment-history-table th:nth-child(6) { width: 130px; }
+.workbook-vat-payment-history-table th:last-child { width: 80px; }
+
+.workbook-vat-payment-history-table tbody td:nth-child(7) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.workbook-vat-payment-history-table .workbook-vat-opening-row td {
+    background: #eff6ff;
+    font-weight: 700;
+}
+
+.workbook-vat-payment-history-table tfoot td {
+    background: #e0e7ff;
+    color: #312e81;
+    font-weight: 800;
 }
 
 .workbook-vat-payment-history-table td:nth-child(1),

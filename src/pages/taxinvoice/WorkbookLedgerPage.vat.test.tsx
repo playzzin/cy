@@ -2,6 +2,7 @@ import React from 'react';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import Swal from 'sweetalert2';
 import type { QuarterVatPaymentRecord } from '../../services/quarterVatPaymentService';
 
 const mockPayments: QuarterVatPaymentRecord[] = [];
@@ -53,6 +54,7 @@ const balanceRow = (quarter: string) => within(screen.getByRole('table', { name:
 
 beforeEach(() => {
     jest.clearAllMocks();
+    (Swal.fire as jest.Mock).mockResolvedValue({ isConfirmed: true });
     window.sessionStorage.clear();
     window.sessionStorage.setItem('workbook-ledger:cheongyeon:active-tab', 'vat');
     mockPayments.splice(0);
@@ -87,7 +89,15 @@ it('registers Q1 installments paid in Q3, preserves Q3 debt, and reloads history
     await queryQuarter('Q3');
     expect(balanceRow('1분기')).toHaveTextContent('납부 완료');
     expect(balanceRow('3분기')).toHaveTextContent('200,000');
-    expect(within(screen.getByRole('table', { name: '부가세 납부 내역' })).getAllByRole('row')).toHaveLength(3);
+    const history = within(screen.getByRole('table', { name: '부가세 납부 내역' }));
+    expect(history.getAllByRole('row')).toHaveLength(6);
+    expect(history.getByRole('columnheader', { name: '발생금액' })).toBeInTheDocument();
+    expect(history.getByRole('columnheader', { name: '잔액' })).toBeInTheDocument();
+    expect(within(history.getByRole('row', { name: /2026-08-15/ })).getAllByRole('cell').map((cell) => cell.textContent))
+        .toEqual(['2', '2026년 1분기', '2026-08-15', '-', '40,000', '60,000', '-', '삭제']);
+    expect(within(history.getByRole('row', { name: /2026-09-20/ })).getAllByRole('cell').map((cell) => cell.textContent))
+        .toEqual(['3', '2026년 1분기', '2026-09-20', '-', '60,000', '0', '-', '삭제']);
+    expect(history.getAllByRole('button', { name: '삭제' })).toHaveLength(2);
     const metrics = screen.getByLabelText('선택 분기 납부 현황');
     expect(within(metrics).getByRole('group', { name: '누적 납부금액' })).toHaveTextContent('0');
     expect(within(metrics).getByRole('group', { name: '남은 납부금액' })).toHaveTextContent('200,000');
@@ -136,19 +146,45 @@ it('exports and prints the same quarterly outstanding amounts without offsetting
     const summaryRows = XLSX.utils.sheet_to_json(book.Sheets['부가세 요약'], { header: 1 });
     expect(summaryRows[4][8]).toBe(200000);
     const historyRows = XLSX.utils.sheet_to_json(book.Sheets['납부내역'], { header: 1 });
-    expect(historyRows[8].slice(1, 4)).toEqual(['2026년 1분기', '2026-08-15', 120000]);
+    expect(historyRows[7]).toEqual(['No', '귀속연도·분기', '실제 납부일', '발생금액', '납부금액', '잔액', '메모']);
+    expect(historyRows[8]).toEqual([1, '2026년 1분기', '-', 100000, '', 100000, '납부 전 잔액']);
+    expect(historyRows[9]).toEqual([2, '2026년 1분기', '2026-08-15', '', 120000, 0, '합성 검증']);
+    expect(historyRows[10]).toEqual([3, '2026년 3분기', '-', 200000, '', 200000, '납부 전 잔액']);
+    expect(historyRows[11]).toEqual(['', '', '합계', 300000, 120000, 200000, '']);
+    const roundTrip = XLSX.read(XLSX.write(book, { bookType: 'xlsx', type: 'buffer' }), { type: 'buffer' });
+    expect(roundTrip.Sheets['납부내역']['!autofilter'].ref).toBe('A8:G11');
+    expect(roundTrip.Sheets['납부내역'].F10.v).toBe(0);
+    expect(roundTrip.Sheets['납부내역'].F12.v).toBe(200000);
     await queryQuarter('Q3');
     fireEvent.click(screen.getByRole('button', { name: '엑셀' }));
     await waitFor(() => expect(mockSaveAs).toHaveBeenCalledTimes(2));
     const q3Book = (mockXlsxWrite as jest.Mock).mock.calls[1][0];
     const q3History = XLSX.utils.sheet_to_json(q3Book.Sheets['납부내역'], { header: 1 });
-    expect(q3History[8].slice(1, 4)).toEqual(['2026년 1분기', '2026-08-15', 120000]);
-    expect(q3History[4]).toEqual([300000, '', 120000, '', 200000]);
+    expect(q3History[9].slice(1, 6)).toEqual(['2026년 1분기', '2026-08-15', '', 120000, 0]);
+    expect(q3History[4]).toEqual([300000, '', 120000, '', '', 200000, '']);
     const write = jest.fn();
     const open = jest.spyOn(window, 'open').mockReturnValue({ document: { write, close: jest.fn() } } as unknown as Window);
     fireEvent.click(screen.getByRole('button', { name: '인쇄' }));
     expect(write).toHaveBeenCalledWith(expect.stringContaining('분기별 납부 현황'));
     expect(write).toHaveBeenCalledWith(expect.stringContaining('2026년 1분기'));
     expect(write).toHaveBeenCalledWith(expect.stringContaining('<strong>200,000</strong>'));
+    expect(write).toHaveBeenCalledWith(expect.stringContaining('<th>발생금액</th><th>납부금액</th><th>잔액</th>'));
+    expect(write).toHaveBeenCalledWith(expect.stringContaining('<td class="right">120,000</td>\n                    <td class="right">0</td>'));
     open.mockRestore();
+});
+
+it('recalculates the running balance after deleting a payment, leaving opening amounts intact', async () => {
+    mockPayments.push(
+        { id: 'late', year: 2026, quarter: 'Q1', date: '2026-09-20', amount: 30000, note: '후속 납부', createdAt: '', createdBy: '' },
+        { id: 'early', year: 2026, quarter: 'Q1', date: '2026-08-15', amount: 40000, note: '첫 납부', createdAt: '', createdBy: '' },
+    );
+    mount();
+    await queryQuarter('all');
+    const history = within(screen.getByRole('table', { name: '부가세 납부 내역' }));
+    expect(history.getAllByRole('row')[2]).toHaveTextContent('첫 납부');
+    fireEvent.click(within(history.getByRole('row', { name: /첫 납부/ })).getByRole('button', { name: '삭제' }));
+    await waitFor(() => expect(history.queryByRole('row', { name: /첫 납부/ })).not.toBeInTheDocument());
+    expect(mockDeletePayment).toHaveBeenCalledWith(2026, 'Q1', 'early');
+    expect(within(history.getByRole('row', { name: /후속 납부/ })).getAllByRole('cell')[5]).toHaveTextContent('70,000');
+    expect(history.getAllByText('납부 전 잔액')).toHaveLength(2);
 });
