@@ -21,6 +21,7 @@ const compiler = webpack({
 compiler.run((error, stats) => {
     if (error || stats.hasErrors()) { console.error(error || stats.toString('errors-only')); process.exitCode = 1; compiler.close(() => {}); return; }
     compiler.close(() => {});
+    if (process.argv.includes('--build-only')) { console.log('Certificate fixture built.'); return; }
     http.createServer((req, res) => {
         const pathname = new URL(req.url, 'http://127.0.0.1:4193').pathname;
         const local = path.resolve(output, `.${pathname}`);

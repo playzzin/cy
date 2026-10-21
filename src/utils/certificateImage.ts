@@ -50,7 +50,23 @@ export const captureCertificateImage = async (element: HTMLDivElement): Promise<
             }));
         },
     };
-    const canvas = await html2canvas(element, options);
+    // html2canvas 1.4 measures font baselines in the live document with a hidden
+    // 1px image. Tailwind's `img { display: block }` moves that probe to the next
+    // line and shifts every exported glyph down. Reset only the measurement
+    // image (not the visible stamps); an onclone-only fix cannot reach it.
+    const fontMetricsStyle = document.createElement('style');
+    fontMetricsStyle.textContent = `
+        body > div[style*="visibility: hidden"] > img[width="1"][height="1"] {
+            display: inline-block !important;
+        }
+    `;
+    document.head.appendChild(fontMetricsStyle);
+    let canvas: HTMLCanvasElement;
+    try {
+        canvas = await html2canvas(element, options);
+    } finally {
+        fontMetricsStyle.remove();
+    }
     return new Promise<Blob>((resolve, reject) => {
         canvas.toBlob(blob => blob?.size ? resolve(blob) : reject(new Error('증명서 이미지를 만들지 못했습니다.')), 'image/png');
     });
