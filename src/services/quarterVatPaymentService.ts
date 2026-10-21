@@ -49,8 +49,8 @@ const resolveCollectionName = (tenantKey: WorkbookLedgerTenant | string): string
 };
 
 const normalizeYear = (value: unknown): number => {
-    const year = Math.trunc(normalizeWorkbookNumber(value, 0));
-    if (year < 2000 || year > 2100) throw new Error('납부금액의 연도가 올바르지 않습니다.');
+    const year = normalizeWorkbookNumber(value, 0);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new Error('납부금액의 연도가 올바르지 않습니다.');
     return year;
 };
 
@@ -65,7 +65,9 @@ const normalizeText = (value: unknown): string => typeof value === 'string' ? va
 const buildPaymentId = (year: number, quarter: QuarterVatPaymentQuarter) => `${year}_${quarter}`;
 const normalizeDate = (value: unknown): string => {
     const date = normalizeText(value);
-    return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
+    const parsed = new Date(`${date}T00:00:00Z`);
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date ? date : '';
 };
 
 const normalizePayment = (id: string, data: Record<string, unknown>): QuarterVatPaymentRecord => ({

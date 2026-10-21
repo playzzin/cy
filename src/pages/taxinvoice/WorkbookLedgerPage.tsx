@@ -11,7 +11,8 @@ import { teamService } from '../../services/teamService';
 import { accountDirectoryService, AccountDirectory } from '../../services/accountDirectoryService';
 import { aiSettingsService } from '../../services/aiSettingsService';
 import { createWorkbookLedgerService, WorkbookLedgerEntry, WorkbookLedgerTenant, WorkbookTransactionType } from '../../services/workbookLedgerService';
-import { createQuarterVatPaymentService, QuarterVatPaymentQuarter, QuarterVatPaymentRecord } from '../../services/quarterVatPaymentService';
+import { createQuarterVatPaymentService, QuarterVatPaymentRecord } from '../../services/quarterVatPaymentService';
+import { buildQuarterVatBalances, sumQuarterVatBalances, VatQuarter } from '../../utils/quarterVatSettlement';
 import { createTaxInvoiceDuplicateFingerprint, TaxInvoiceExtractedCandidate, validateTaxInvoiceFiles } from '../../services/taxInvoiceBulkImportService';
 import { calculateWorkbookTotalAmount, calculateWorkbookVatAmount } from '../../utils/workbookLedgerAmounts';
 import { applyWorkbookLedgerExcelStyle } from '../../utils/workbookLedgerExcelStyle';
@@ -179,6 +180,16 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         siteName: '',
     });
     const [quarterVatPayments, setQuarterVatPayments] = useState<QuarterVatPaymentRecord[]>([]);
+    const [quarterVatPaymentYearDraft, setQuarterVatPaymentYearDraft] = useState(String(currentYear));
+    const [quarterVatPaymentQuarterDraft, setQuarterVatPaymentQuarterDraft] = useState<VatQuarter>(currentQuarter as VatQuarter);
+    const [quarterVatPaymentError, setQuarterVatPaymentError] = useState('');
+    const [quarterVatPaymentLoadedKey, setQuarterVatPaymentLoadedKey] = useState('');
+    const [quarterVatPaymentReload, setQuarterVatPaymentReload] = useState(0);
+    const quarterVatPaymentContext = `${tenantKey}:${quarterVatFilter.year}`;
+    const quarterVatPaymentContextRef = useRef(quarterVatPaymentContext);
+    quarterVatPaymentContextRef.current = quarterVatPaymentContext;
+    const quarterVatPaymentSavingRef = useRef(false);
+    const quarterVatPaymentReady = quarterVatPaymentLoadedKey === quarterVatPaymentContext && !quarterVatPaymentError;
     const [quarterVatPaymentDateDraft, setQuarterVatPaymentDateDraft] = useState(todayString);
     const [quarterVatPaymentAmountDraft, setQuarterVatPaymentAmountDraft] = useState('');
     const [quarterVatPaymentNoteDraft, setQuarterVatPaymentNoteDraft] = useState('');
@@ -479,17 +490,20 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
         let isCurrent = true;
         setLoadingQuarterVatPayment(true);
+        setQuarterVatPaymentLoadedKey('');
+        setQuarterVatPaymentError('');
         setQuarterVatPayments([]);
 
         void quarterVatPaymentService
-            .getPayments(quarterVatFilter.year, quarterVatFilter.quarter as QuarterVatPaymentQuarter)
+            .getPayments(quarterVatFilter.year, 'all')
             .then((payments) => {
                 if (!isCurrent) return;
                 setQuarterVatPayments(payments);
+                setQuarterVatPaymentLoadedKey(quarterVatPaymentContext);
             })
             .catch((error) => {
                 console.error(error);
-                if (isCurrent) setQuarterVatPayments([]);
+                if (isCurrent) setQuarterVatPaymentError('납부 내역을 불러오지 못했습니다. 납부액과 잔액을 확인하려면 다시 시도해주세요.');
             })
             .finally(() => {
                 if (isCurrent) setLoadingQuarterVatPayment(false);
@@ -498,7 +512,14 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         return () => {
             isCurrent = false;
         };
-    }, [activeTab, quarterVatFilter.quarter, quarterVatFilter.year, quarterVatPaymentService]);
+    }, [activeTab, quarterVatFilter.year, quarterVatPaymentService, quarterVatPaymentContext, quarterVatPaymentReload]);
+
+    useEffect(() => {
+        setQuarterVatPaymentYearDraft(String(quarterVatFilter.year));
+        if (quarterVatFilter.quarter !== 'all') setQuarterVatPaymentQuarterDraft(quarterVatFilter.quarter);
+        setQuarterVatPaymentAmountDraft('');
+        setQuarterVatPaymentNoteDraft('');
+    }, [tenantKey, quarterVatFilter.year, quarterVatFilter.quarter]);
 
     useEffect(() => {
         if (activeTab !== 'summary' || purchaseAccountsByName.size > 0) return;
@@ -2741,8 +2762,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [quarterVatDraft]);
 
     const handleSaveQuarterVatPayment = useCallback(async () => {
-        if (quarterVatFilter.quarter === 'all') {
-            Swal.fire('입력 확인', '납부 내역은 분기를 선택한 뒤 등록해주세요.', 'warning');
+        if (quarterVatPaymentSavingRef.current || !quarterVatPaymentReady) return;
+        const paymentYear = Number(quarterVatPaymentYearDraft);
+        if (!Number.isInteger(paymentYear) || paymentYear < 2000 || paymentYear > 2100) {
+            Swal.fire('입력 확인', '귀속연도는 2000년부터 2100년 사이로 입력해주세요.', 'warning');
             return;
         }
 
@@ -2758,17 +2781,25 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             return;
         }
 
+        quarterVatPaymentSavingRef.current = true;
+        const savedContext = quarterVatPaymentContext;
         setSavingQuarterVatPayment(true);
         try {
             const payment = await quarterVatPaymentService.addPayment({
-                year: quarterVatFilter.year,
-                quarter: quarterVatFilter.quarter as QuarterVatPaymentQuarter,
+                year: paymentYear,
+                quarter: quarterVatPaymentQuarterDraft,
                 date: paymentDate,
                 amount,
                 note: quarterVatPaymentNoteDraft,
                 createdBy: currentUser?.uid ?? ''
             });
-            setQuarterVatPayments((previous) => [...previous, payment].sort((left, right) => {
+            if (quarterVatPaymentContextRef.current !== savedContext) return;
+            if (paymentYear !== quarterVatFilter.year) {
+                setQuarterVatFilter((previous) => ({ ...previous, year: paymentYear, quarter: payment.quarter }));
+                setQuarterVatDraft((previous) => ({ ...previous, year: paymentYear, quarter: payment.quarter }));
+            }
+            setQuarterVatPayments((previous) => [...previous.filter((item) =>
+                !(item.id === payment.id && item.year === payment.year && item.quarter === payment.quarter)), payment].sort((left, right) => {
                 const dateCompare = right.date.localeCompare(left.date, 'en');
                 if (dateCompare !== 0) return dateCompare;
                 return right.createdAt.localeCompare(left.createdAt, 'en');
@@ -2777,7 +2808,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             setQuarterVatPaymentNoteDraft('');
             Swal.fire({
                 icon: 'success',
-                title: '납부 내역을 등록했습니다.',
+                title: `${payment.year}년 ${getQuarterVatLabel(payment.quarter)} 납부 내역을 등록했습니다.`,
                 toast: true,
                 position: 'top-end',
                 showConfirmButton: false,
@@ -2787,12 +2818,16 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             console.error(error);
             Swal.fire('오류', '납부 내역을 저장하지 못했습니다.', 'error');
         } finally {
+            quarterVatPaymentSavingRef.current = false;
             setSavingQuarterVatPayment(false);
         }
     }, [
         currentUser?.uid,
-        quarterVatFilter.quarter,
         quarterVatFilter.year,
+        quarterVatPaymentYearDraft,
+        quarterVatPaymentQuarterDraft,
+        quarterVatPaymentReady,
+        quarterVatPaymentContext,
         quarterVatPaymentAmountDraft,
         quarterVatPaymentDateDraft,
         quarterVatPaymentNoteDraft,
@@ -2800,27 +2835,34 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     ]);
 
     const handleDeleteQuarterVatPayment = useCallback(async (payment: QuarterVatPaymentRecord) => {
+        if (quarterVatPaymentSavingRef.current || !quarterVatPaymentReady) return;
+        const savedContext = quarterVatPaymentContext;
         const result = await Swal.fire({
             title: '납부 내역 삭제',
-            text: `${payment.date} · ${formatNumber(payment.amount)}원 납부 내역을 삭제할까요?`,
+            text: `${payment.year}년 ${getQuarterVatLabel(payment.quarter)} · ${payment.date} · ${formatNumber(payment.amount)}원 납부 내역을 삭제할까요?`,
             icon: 'warning',
             showCancelButton: true,
             confirmButtonText: '삭제',
             cancelButtonText: '취소'
         });
-        if (!result.isConfirmed) return;
+        if (!result.isConfirmed || quarterVatPaymentSavingRef.current || quarterVatPaymentContextRef.current !== savedContext) return;
 
+        quarterVatPaymentSavingRef.current = true;
         setSavingQuarterVatPayment(true);
         try {
             await quarterVatPaymentService.deletePayment(payment.year, payment.quarter, payment.id);
-            setQuarterVatPayments((previous) => previous.filter((item) => item.id !== payment.id));
+            if (quarterVatPaymentContextRef.current === savedContext) {
+                setQuarterVatPayments((previous) => previous.filter((item) =>
+                    !(item.id === payment.id && item.year === payment.year && item.quarter === payment.quarter)));
+            }
         } catch (error) {
             console.error(error);
             Swal.fire('오류', '납부 내역을 삭제하지 못했습니다.', 'error');
         } finally {
+            quarterVatPaymentSavingRef.current = false;
             setSavingQuarterVatPayment(false);
         }
-    }, [quarterVatPaymentService]);
+    }, [quarterVatPaymentService, quarterVatPaymentReady, quarterVatPaymentContext]);
 
     const ledgerRows = useMemo(
         () => (activeTab === 'ledger' ? buildLedgerRows(entries, ledgerFilter) : []),
@@ -2843,10 +2885,19 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         () => (activeTab === 'vat' ? buildQuarterVatReport(entries, quarterVatFilter) : buildQuarterVatReport([], quarterVatFilter)),
         [activeTab, entries, quarterVatFilter]
     );
-    const quarterVatPaidAmount = useMemo(
-        () => quarterVatPayments.reduce((sum, payment) => sum + payment.amount, 0),
-        [quarterVatPayments]
+    const quarterVatCompanyReport = useMemo(
+        () => buildQuarterVatReport(activeTab === 'vat' ? entries : [], { ...quarterVatFilter, partnerName: '', siteName: '' }),
+        [activeTab, entries, quarterVatFilter]
     );
+    const quarterVatBalances = useMemo(
+        () => buildQuarterVatBalances(quarterVatFilter.year, quarterVatCompanyReport.quarterRows, quarterVatPayments),
+        [quarterVatFilter.year, quarterVatCompanyReport, quarterVatPayments]
+    );
+    const quarterVatBalanceTotals = useMemo(
+        () => sumQuarterVatBalances(quarterVatBalances, quarterVatFilter.quarter),
+        [quarterVatBalances, quarterVatFilter.quarter]
+    );
+    const quarterVatPaidAmount = quarterVatBalanceTotals.paidAmount;
 
     const ledgerTotals = useMemo(() => {
         return ledgerRows.reduce((accumulator, row) => ({
@@ -3075,7 +3126,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [kbPreviewRows, summaryFilter.mode]);
 
     const handleDownloadQuarterVat = useCallback(async () => {
-        if (quarterVatReport.detailRows.length === 0) {
+        if (loading || !quarterVatPaymentReady || savingQuarterVatPayment) return;
+        if (quarterVatReport.detailRows.length === 0 && quarterVatPayments.length === 0) {
             Swal.fire('안내', '다운로드할 분기 부가세 데이터가 없습니다.', 'info');
             return;
         }
@@ -3092,8 +3144,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             const detailTypeLabel = quarterVatFilter.detailTransactionType === 'all'
                 ? '매출·매입 전체'
                 : quarterVatFilter.detailTransactionType;
-            const expectedPaymentAmount = quarterVatReport.totals.payableVat;
-            const remainingPaymentAmount = Math.max(expectedPaymentAmount - quarterVatPaidAmount, 0);
+            const expectedPaymentAmount = quarterVatBalanceTotals.expectedAmount;
+            const remainingPaymentAmount = quarterVatBalanceTotals.remainingAmount;
             const generatedAt = new Date().toLocaleString('ko-KR');
 
             const titleStyle = {
@@ -3178,11 +3230,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 [`${selectedLabel} · ${basisLabel} · 생성 ${generatedAt}`, '', '', '', '', '', '', '', '', ''],
                 [],
                 ['매출세액', '', '매입세액', '', '예상 납부세액', '', '누적 납부금액', '', '남은 납부금액', ''],
-                [quarterVatReport.totals.salesVat, '', quarterVatReport.totals.purchaseVat, '', expectedPaymentAmount, '', quarterVatPaidAmount, '', remainingPaymentAmount, ''],
+                [quarterVatCompanyReport.totals.salesVat, '', quarterVatCompanyReport.totals.purchaseVat, '', expectedPaymentAmount, '', quarterVatPaidAmount, '', remainingPaymentAmount, ''],
                 [],
                 ['조회 기준', selectedLabel, '세부 구분', detailTypeLabel, '거래처', quarterVatFilter.partnerName || '전체', '현장', quarterVatFilter.siteName || '전체', '생성일', generatedAt],
-                ['※ 납부일별 내역은 「납부내역」 시트에서 확인할 수 있습니다.', '', '', '', '', '', '', '', '', ''],
-                ['분기 요약', '', '', '', '', '', '', '', '', ''],
+                ['※ 상단 납부 현황은 회사 전체 기준입니다. 분기별 잔액은 「분기별 납부현황」 시트를 확인하세요.', '', '', '', '', '', '', '', '', ''],
+                ['분기별 거래 요약 · 검색조건 적용', '', '', '', '', '', '', '', '', ''],
                 ['분기', '기간', '매출 공급가액', '매출세액', '매출 합계', '매입 공급가액', '매입세액', '매입 합계', '예상 납부세액'],
                 ...quarterVatReport.quarterRows.map((row) => [
                     row.label,
@@ -3267,9 +3319,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             });
             summarySheet['!autofilter'] = { ref: `A10:I${10 + quarterVatReport.quarterRows.length}` };
 
+            const annualBalance = sumQuarterVatBalances(quarterVatBalances, 'all');
             const paymentRows = quarterVatPayments.map((payment, index) => [
                 index + 1,
-                getQuarterVatLabel(payment.quarter),
+                `${payment.year}년 ${getQuarterVatLabel(payment.quarter)}`,
                 payment.date,
                 payment.amount,
                 payment.note || '-',
@@ -3278,15 +3331,15 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             const paymentTotalRow = paymentDataStartRow + Math.max(paymentRows.length, 1);
             const paymentSheet = XLSX.utils.aoa_to_sheet([
                 [`${companyLabel} 부가세 납부 내역`, '', '', '', ''],
-                [`${selectedLabel} · 납부일 기준 내림차순 · 생성 ${generatedAt}`, '', '', '', ''],
+                [`${quarterVatFilter.year}년 귀속 전체 · 납부일 기준 내림차순 · 생성 ${generatedAt}`, '', '', '', ''],
                 [],
                 ['예상 납부세액', '', '누적 납부금액', '', '남은 납부금액'],
-                [expectedPaymentAmount, '', quarterVatPaidAmount, '', remainingPaymentAmount],
+                [annualBalance.expectedAmount, '', annualBalance.paidAmount, '', annualBalance.remainingAmount],
                 [],
                 ['납부 내역', '', '', '', ''],
-                ['No', '분기', '납부일', '납부금액', '메모'],
+                ['No', '귀속연도·분기', '실제 납부일', '납부금액', '메모'],
                 ...(paymentRows.length > 0 ? paymentRows : [['', '', '등록된 납부 내역이 없습니다.', '', '']]),
-                ['', '', '누적 납부금액', quarterVatPaidAmount, ''],
+                ['', '', '누적 납부금액', annualBalance.paidAmount, ''],
             ]) as unknown as StyledExcelWorksheet;
             paymentSheet['!cols'] = [{ wch: 8 }, { wch: 13 }, { wch: 15 }, { wch: 18 }, { wch: 42 }];
             mergeExcelCells(XLSX, paymentSheet, 'A1:E1');
@@ -3400,6 +3453,26 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             });
             detailSheet['!autofilter'] = { ref: `A5:O${5 + detailRows.length}` };
 
+            const balanceSheet = XLSX.utils.aoa_to_sheet([
+                [`${companyLabel} ${quarterVatFilter.year}년 분기별 납부 현황 · 회사 전체 · ${basisLabel}`],
+                ['분기별 미납액은 다른 분기의 환급·초과납부와 상계하지 않습니다. 음수 예상세액은 환급 예상액입니다.'],
+                ['귀속분기', '예상세액', '누적 납부금액', '남은 납부금액', '초과 납부금액', '환급 예상세액', '최근 납부일', '상태'],
+                ...quarterVatBalances.map((row) => [
+                    getQuarterVatLabel(row.quarter), row.payableVat, row.paidAmount, row.remainingAmount,
+                    row.overpaidAmount, row.refundAmount, row.lastPaymentDate || '-', row.status,
+                ]),
+            ]) as unknown as StyledExcelWorksheet;
+            balanceSheet['!cols'] = Array.from({ length: 8 }, () => ({ wch: 20 }));
+            mergeExcelCells(XLSX, balanceSheet, 'A1:H1');
+            mergeExcelCells(XLSX, balanceSheet, 'A2:H2');
+            setExcelRowHeight(balanceSheet, 1, 30);
+            setExcelRowHeight(balanceSheet, 2, 25);
+            applyExcelRangeStyle(XLSX, balanceSheet, 'A1:H1', titleStyle);
+            applyExcelRangeStyle(XLSX, balanceSheet, 'A2:H2', subtitleStyle);
+            applyExcelRangeStyle(XLSX, balanceSheet, 'A3:H3', tableHeaderStyle);
+            applyExcelRangeStyle(XLSX, balanceSheet, 'A4:H7', bodyStyle);
+            applyExcelRangeStyle(XLSX, balanceSheet, 'B4:F7', amountBodyStyle);
+            XLSX.utils.book_append_sheet(workbook, balanceSheet as unknown as import('xlsx').WorkSheet, '분기별 납부현황');
             XLSX.utils.book_append_sheet(workbook, summarySheet as unknown as import('xlsx').WorkSheet, '부가세 요약');
             XLSX.utils.book_append_sheet(workbook, paymentSheet as unknown as import('xlsx').WorkSheet, '납부내역');
             XLSX.utils.book_append_sheet(workbook, detailSheet as unknown as import('xlsx').WorkSheet, '세부내역');
@@ -3420,7 +3493,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         } finally {
             setDownloadingVat(false);
         }
-    }, [companyLabel, quarterVatFilter.quarter, quarterVatFilter.year, quarterVatPaidAmount, quarterVatPayments, quarterVatReport]);
+    }, [companyLabel, quarterVatFilter, quarterVatPaidAmount, quarterVatPayments, quarterVatReport,
+        quarterVatCompanyReport, quarterVatBalances, quarterVatBalanceTotals, quarterVatPaymentReady, loading, savingQuarterVatPayment]);
 
     const canRegisterReceipt = summaryFilter.mode === '미수금' || summaryFilter.mode === '미지급금';
     const canOpenReceiptHistory = canRegisterReceipt;
@@ -3504,7 +3578,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     );
 
     const handlePrintQuarterVat = useCallback(() => {
-        if (quarterVatReport.detailRows.length === 0) {
+        if (loading || !quarterVatPaymentReady || savingQuarterVatPayment) return;
+        if (quarterVatReport.detailRows.length === 0 && quarterVatPayments.length === 0) {
             Swal.fire('안내', '인쇄할 분기 부가세 데이터가 없습니다.', 'info');
             return;
         }
@@ -3523,22 +3598,25 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             ? '매출·매입'
             : quarterVatFilter.detailTransactionType;
         const paidAmount = quarterVatPaidAmount;
-        const remainingPaymentAmount = Math.max(quarterVatReport.totals.payableVat - paidAmount, 0);
+        const remainingPaymentAmount = quarterVatBalanceTotals.remainingAmount;
         const metricRows = [
-            ['매출세액', quarterVatReport.totals.salesVat],
-            ['매입세액', quarterVatReport.totals.purchaseVat],
-            ['예상 납부세액', quarterVatReport.totals.payableVat],
+            ['매출세액', quarterVatCompanyReport.totals.salesVat],
+            ['매입세액', quarterVatCompanyReport.totals.purchaseVat],
+            ['예상 납부세액', quarterVatBalanceTotals.expectedAmount],
             ['누적 납부금액', paidAmount],
             ['남은 납부금액', remainingPaymentAmount],
+            ['초과 납부금액', quarterVatBalanceTotals.overpaidAmount],
+            ['환급 예상세액', quarterVatBalanceTotals.refundAmount],
         ];
-        const quarterRowsHtml = quarterVatReport.quarterRows.map((row) => `
+        const quarterRowsHtml = quarterVatBalances.map((row) => `
             <tr>
-                <td>${escapeHtml(row.label)}</td>
-                <td>${escapeHtml(row.periodLabel)}</td>
-                <td class="right">${formatNumber(row.salesVat)}</td>
-                <td class="right">${formatNumber(row.purchaseVat)}</td>
+                <td>${escapeHtml(getQuarterVatLabel(row.quarter))}</td>
                 <td class="right">${formatNumber(row.payableVat)}</td>
-                <td class="right">${formatNumber(row.entryCount)}</td>
+                <td class="right">${formatNumber(row.paidAmount)}</td>
+                <td class="right">${formatNumber(row.remainingAmount)}</td>
+                <td class="right">${formatNumber(row.overpaidAmount)}</td>
+                <td>${escapeHtml(row.lastPaymentDate || '-')}</td>
+                <td>${escapeHtml(row.status)}</td>
             </tr>
         `).join('');
         const monthlyRowsHtml = quarterVatReport.monthlyRows.map((row) => `
@@ -3568,7 +3646,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const paymentRowsHtml = quarterVatPayments.length > 0
             ? quarterVatPayments.map((payment) => `
                 <tr>
-                    <td>${escapeHtml(getQuarterVatLabel(payment.quarter))}</td>
+                    <td>${payment.year}년 ${escapeHtml(getQuarterVatLabel(payment.quarter))}</td>
                     <td>${escapeHtml(payment.date)}</td>
                     <td class="right">${formatNumber(payment.amount)}</td>
                     <td>${escapeHtml(payment.note || '-')}</td>
@@ -3605,15 +3683,16 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             <body>
                 <h1>${escapeHtml(companyLabel)} ${escapeHtml(selectedLabel)} 부가세</h1>
                 <div class="meta">${escapeHtml(basisLabel)} · 거래처 ${escapeHtml(quarterVatFilter.partnerName || '전체')} · 현장 ${escapeHtml(quarterVatFilter.siteName || '전체')} · 세부 ${escapeHtml(detailTransactionLabel)}</div>
+                <div class="meta">납부 현황은 회사 전체 기준입니다. 검색조건은 월별·세부 내역에 적용됩니다. 분기별 미납액은 다른 분기의 환급·초과납부와 상계하지 않습니다.</div>
                 <div class="metrics">${metricRowsHtml}</div>
-                <h2>납부 내역</h2>
+                <h2>납부 내역 · ${quarterVatFilter.year}년 귀속 전체</h2>
                 <table>
-                    <thead><tr><th>분기</th><th>납부일</th><th>납부금액</th><th>메모</th></tr></thead>
+                    <thead><tr><th>귀속연도·분기</th><th>실제 납부일</th><th>납부금액</th><th>메모</th></tr></thead>
                     <tbody>${paymentRowsHtml}</tbody>
                 </table>
-                <h2>분기 요약</h2>
+                <h2>분기별 납부 현황 · ${quarterVatFilter.year}년 회사 전체</h2>
                 <table>
-                    <thead><tr><th>분기</th><th>기간</th><th>매출세액</th><th>매입세액</th><th>예상 납부</th><th>건수</th></tr></thead>
+                    <thead><tr><th>귀속분기</th><th>예상세액</th><th>누적 납부</th><th>남은 납부</th><th>초과 납부</th><th>최근 납부일</th><th>상태</th></tr></thead>
                     <tbody>${quarterRowsHtml}</tbody>
                 </table>
                 <h2>월별 요약</h2>
@@ -3636,7 +3715,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         `);
         printWindow.document.close();
         setTimeout(() => setPrintingVat(false), 800);
-    }, [companyLabel, quarterVatFilter, quarterVatPaidAmount, quarterVatPayments, quarterVatReport]);
+    }, [companyLabel, quarterVatFilter, quarterVatPaidAmount, quarterVatPayments, quarterVatReport,
+        quarterVatCompanyReport, quarterVatBalances, quarterVatBalanceTotals, quarterVatPaymentReady, loading, savingQuarterVatPayment]);
 
     const handleDownloadView = useCallback(async (view: 'ledger' | 'summary') => {
         if (downloadingView || loading || (view === 'summary' && summaryActionsBlockedRef.current)) return;
@@ -6203,8 +6283,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     );
 
     const renderQuarterVatTab = () => {
-        const totals = quarterVatReport.totals;
-        const payableVat = totals.payableVat;
+        const totals = quarterVatCompanyReport.totals;
         const selectedLabel = quarterVatFilter.quarter === 'all'
             ? `${quarterVatFilter.year}년 전체`
             : `${quarterVatFilter.year}년 ${getQuarterVatLabel(quarterVatFilter.quarter)}`;
@@ -6212,16 +6291,15 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const detailTransactionLabel = quarterVatFilter.detailTransactionType === 'all'
             ? '매출·매입'
             : quarterVatFilter.detailTransactionType;
-        const expectedPaymentAmount = Math.max(payableVat, 0);
-        const remainingPaymentAmount = Math.max(expectedPaymentAmount - quarterVatPaidAmount, 0);
-        const overpaidAmount = Math.max(quarterVatPaidAmount - expectedPaymentAmount, 0);
+        const { expectedAmount: expectedPaymentAmount, remainingAmount: remainingPaymentAmount, overpaidAmount, refundAmount } = quarterVatBalanceTotals;
         const metricItems = [
             { label: '매출세액', value: totals.salesVat, tone: 'sales' },
             { label: '매입세액', value: totals.purchaseVat, tone: 'purchase' },
-            { label: '예상 납부세액', value: payableVat, tone: payableVat > 0 ? 'payable' : payableVat < 0 ? 'refund' : 'muted' },
-            { label: '누적 납부금액', value: quarterVatPaidAmount, tone: 'payment' },
-            { label: '남은 납부금액', value: remainingPaymentAmount, tone: remainingPaymentAmount > 0 ? 'remaining' : 'muted' },
-            ...(overpaidAmount > 0 ? [{ label: '초과 납부금액', value: overpaidAmount, tone: 'warning' }] : []),
+            { label: '예상 납부세액', value: expectedPaymentAmount, tone: expectedPaymentAmount > 0 ? 'payable' : 'muted' },
+            { label: '누적 납부금액', value: quarterVatPaidAmount, tone: 'payment', needsPayments: true },
+            { label: '남은 납부금액', value: remainingPaymentAmount, tone: remainingPaymentAmount > 0 ? 'remaining' : 'muted', needsPayments: true },
+            ...(refundAmount > 0 ? [{ label: '환급 예상세액', value: refundAmount, tone: 'refund' }] : []),
+            ...(overpaidAmount > 0 ? [{ label: '초과 납부금액', value: overpaidAmount, tone: 'warning', needsPayments: true }] : []),
         ];
 
         return (
@@ -6237,6 +6315,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 <td className="sheet-value-light" colSpan={2}>
                                     <input
                                         type="number"
+                                        aria-label="부가세 조회연도"
                                         className="sheet-filter-input"
                                         value={quarterVatDraft.year}
                                         onChange={(event) => setQuarterVatDraft((prev) => ({ ...prev, year: Number(event.target.value) }))}
@@ -6245,6 +6324,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 <th className="sheet-label-blue">분기</th>
                                 <td className="sheet-value-light" colSpan={2}>
                                     <select
+                                        aria-label="부가세 조회분기"
                                         className="sheet-filter-input"
                                         value={quarterVatDraft.quarter}
                                         onChange={(event) => setQuarterVatDraft((prev) => ({ ...prev, quarter: event.target.value as QuarterVatOption }))}
@@ -6258,6 +6338,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 <th className="sheet-label-blue">기준</th>
                                 <td className="sheet-value-light" colSpan={2}>
                                     <select
+                                        aria-label="부가세 집계기준"
                                         className="sheet-filter-input"
                                         value={quarterVatDraft.basis}
                                         onChange={(event) => setQuarterVatDraft((prev) => ({ ...prev, basis: event.target.value as QuarterVatBasis }))}
@@ -6282,7 +6363,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                         type="button"
                                         className="excel-button excel-button-gray"
                                         onClick={handlePrintQuarterVat}
-                                        disabled={printingVat}
+                                        disabled={printingVat || loading || !quarterVatPaymentReady || savingQuarterVatPayment}
                                     >
                                         <FontAwesomeIcon icon={printingVat ? faSpinner : faPrint} spin={printingVat} />
                                         인쇄
@@ -6293,7 +6374,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                         type="button"
                                         className="excel-button excel-button-green"
                                         onClick={handleDownloadQuarterVat}
-                                        disabled={downloadingVat}
+                                        disabled={downloadingVat || loading || !quarterVatPaymentReady || savingQuarterVatPayment}
                                     >
                                         <FontAwesomeIcon icon={downloadingVat ? faSpinner : faDownload} spin={downloadingVat} />
                                         엑셀
@@ -6357,30 +6438,91 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         </div>
                     )}
 
-                    <div className="workbook-vat-metric-grid">
+                    <div className="workbook-vat-notice">
+                        납부 현황은 {companyLabel} 회사 전체 · {basisLabel}입니다. 거래처·현장·세부 구분 검색은 월별·세부 내역에 적용됩니다.
+                        전체 잔액은 분기별 미납액의 합계이며 다른 분기의 환급·초과납부와 상계하지 않습니다.
+                    </div>
+                    <div className="workbook-vat-metric-grid" aria-label="선택 분기 납부 현황">
                         {metricItems.map((item) => (
-                            <div key={item.label} className={`workbook-vat-metric-card workbook-vat-metric-${item.tone}`}>
+                            <div key={item.label} role="group" aria-label={item.label} className={`workbook-vat-metric-card workbook-vat-metric-${item.tone}`}>
                                 <div>{item.label}</div>
-                                <strong>{formatNumber(item.value)}</strong>
+                                <strong>{loading ? '집계 중' : item.needsPayments && !quarterVatPaymentReady ? (quarterVatPaymentError ? '확인 필요' : '조회 중') : formatNumber(item.value)}</strong>
                             </div>
                         ))}
                     </div>
 
+                    <div className="workbook-vat-panel">
+                        <div className="workbook-vat-panel-title">분기별 납부 현황 · {quarterVatFilter.year}년 회사 전체</div>
+                        <div className="sheet-table-wrapper">
+                            <table aria-label="분기별 납부 현황" className="sheet-table workbook-vat-table workbook-vat-balance-table">
+                                <thead>
+                                    <tr>
+                                        <th>분기</th>
+                                        <th>기간</th>
+                                        <th>매출세액</th>
+                                        <th>매입세액</th>
+                                        <th>예상 납부</th>
+                                        <th>누적 납부금액</th>
+                                        <th>남은 납부금액</th>
+                                        <th>초과 납부금액</th>
+                                        <th>최근 납부일</th>
+                                        <th>상태</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {quarterVatCompanyReport.quarterRows.map((row, index) => (
+                                        <tr key={row.quarter} className={quarterVatFilter.quarter === row.quarter ? 'workbook-vat-selected-row' : ''}>
+                                            <td>{row.label}</td>
+                                            <td>{row.periodLabel}</td>
+                                            <td className="align-right">{formatNumber(row.salesVat)}</td>
+                                            <td className="align-right">{formatNumber(row.purchaseVat)}</td>
+                                            <td className="align-right">{formatNumber(row.payableVat)}</td>
+                                            <td className="align-right">{quarterVatPaymentReady && !loading ? formatNumber(quarterVatBalances[index].paidAmount) : '—'}</td>
+                                            <td className="align-right">{quarterVatPaymentReady && !loading ? formatNumber(quarterVatBalances[index].remainingAmount) : '—'}</td>
+                                            <td className="align-right">{quarterVatPaymentReady && !loading ? formatNumber(quarterVatBalances[index].overpaidAmount) : '—'}</td>
+                                            <td>{quarterVatPaymentReady ? quarterVatBalances[index].lastPaymentDate || '-' : '—'}</td>
+                                            <td>{quarterVatPaymentReady && !loading ? quarterVatBalances[index].status : quarterVatPaymentError ? '확인 필요' : '조회 중'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
                     <div className="workbook-vat-panel workbook-vat-payment-panel">
-                        <div className="workbook-vat-panel-title">부가세 납부 내역 · {selectedLabel}</div>
-                        {quarterVatFilter.quarter === 'all' && (
-                            <div className="workbook-vat-notice workbook-vat-notice-warning">
-                                전체 조회에서는 납부 내역과 잔액을 합산해 확인할 수 있습니다. 새 납부 내역은 분기를 선택한 뒤 등록해주세요.
+                        <div className="workbook-vat-panel-title">부가세 납부 내역 · {quarterVatFilter.year}년 귀속 전체</div>
+                        <div className="workbook-vat-notice">
+                            귀속분기는 세금이 발생한 분기, 실제 납부일은 돈을 낸 날짜입니다. 예: 1분기 세금을 8월에 납부하면 귀속분기는 1분기입니다.
+                            여러 번 나누어 납부한 금액도 합산됩니다. 부가세 납부는 매입금액에 포함되지 않습니다.
+                        </div>
+                        {quarterVatPaymentError && (
+                            <div className="workbook-vat-notice workbook-vat-notice-warning" role="alert">
+                                {quarterVatPaymentError}
+                                <button type="button" className="workbook-toolbar-button" onClick={() => setQuarterVatPaymentReload((value) => value + 1)}>납부 내역 다시 조회</button>
                             </div>
                         )}
                         <div className="workbook-vat-payment-form">
                             <label>
-                                <span>납부일</span>
+                                <span>귀속연도</span>
+                                <input type="number" min={2000} max={2100} value={quarterVatPaymentYearDraft}
+                                    onChange={(event) => setQuarterVatPaymentYearDraft(event.target.value)}
+                                    disabled={!quarterVatPaymentReady || savingQuarterVatPayment} />
+                            </label>
+                            <label>
+                                <span>귀속분기</span>
+                                <select value={quarterVatPaymentQuarterDraft}
+                                    onChange={(event) => setQuarterVatPaymentQuarterDraft(event.target.value as VatQuarter)}
+                                    disabled={!quarterVatPaymentReady || savingQuarterVatPayment}>
+                                    {QUARTER_VAT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                </select>
+                            </label>
+                            <label>
+                                <span>실제 납부일</span>
                                 <input
                                     type="date"
                                     value={quarterVatPaymentDateDraft}
                                     onChange={(event) => setQuarterVatPaymentDateDraft(event.target.value)}
-                                    disabled={loadingQuarterVatPayment || savingQuarterVatPayment || quarterVatFilter.quarter === 'all'}
+                                    disabled={!quarterVatPaymentReady || savingQuarterVatPayment}
                                 />
                             </label>
                             <label>
@@ -6397,7 +6539,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                         }
                                     }}
                                     placeholder="예: 10,000,000"
-                                    disabled={loadingQuarterVatPayment || savingQuarterVatPayment || quarterVatFilter.quarter === 'all'}
+                                    disabled={!quarterVatPaymentReady || savingQuarterVatPayment}
                                 />
                             </label>
                             <label className="workbook-vat-payment-note-field">
@@ -6406,25 +6548,25 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     value={quarterVatPaymentNoteDraft}
                                     onChange={(event) => setQuarterVatPaymentNoteDraft(event.target.value)}
                                     placeholder="선택 입력"
-                                    disabled={loadingQuarterVatPayment || savingQuarterVatPayment || quarterVatFilter.quarter === 'all'}
+                                    disabled={!quarterVatPaymentReady || savingQuarterVatPayment}
                                 />
                             </label>
                             <button
                                 type="button"
                                 className="excel-button excel-button-green"
                                 onClick={handleSaveQuarterVatPayment}
-                                disabled={loadingQuarterVatPayment || savingQuarterVatPayment || quarterVatFilter.quarter === 'all'}
+                                disabled={!quarterVatPaymentReady || savingQuarterVatPayment}
                             >
                                 {savingQuarterVatPayment ? '등록 중' : '납부 내역 등록'}
                             </button>
                         </div>
                         <div className="sheet-table-wrapper workbook-vat-payment-history-wrapper">
-                            <table className="sheet-table workbook-vat-table workbook-vat-payment-history-table">
+                            <table aria-label="부가세 납부 내역" className="sheet-table workbook-vat-table workbook-vat-payment-history-table">
                                 <thead>
                                     <tr>
                                         <th>No</th>
-                                        {quarterVatFilter.quarter === 'all' && <th>분기</th>}
-                                        <th>납부일</th>
+                                        <th>귀속연도·분기</th>
+                                        <th>실제 납부일</th>
                                         <th>납부금액</th>
                                         <th>메모</th>
                                         <th>관리</th>
@@ -6433,18 +6575,18 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 <tbody>
                                     {loadingQuarterVatPayment && (
                                         <tr>
-                                            <td colSpan={quarterVatFilter.quarter === 'all' ? 6 : 5} className="sheet-empty-state">납부 내역을 불러오는 중입니다.</td>
+                                            <td colSpan={6} className="sheet-empty-state">납부 내역을 불러오는 중입니다.</td>
                                         </tr>
                                     )}
-                                    {!loadingQuarterVatPayment && quarterVatPayments.length === 0 && (
+                                    {quarterVatPaymentReady && quarterVatPayments.length === 0 && (
                                         <tr>
-                                            <td colSpan={quarterVatFilter.quarter === 'all' ? 6 : 5} className="sheet-empty-state">등록된 납부 내역이 없습니다.</td>
+                                            <td colSpan={6} className="sheet-empty-state">등록된 납부 내역이 없습니다.</td>
                                         </tr>
                                     )}
-                                    {!loadingQuarterVatPayment && quarterVatPayments.map((payment, index) => (
-                                        <tr key={payment.id}>
+                                    {quarterVatPaymentReady && quarterVatPayments.map((payment, index) => (
+                                        <tr key={`${payment.year}:${payment.quarter}:${payment.id}`}>
                                             <td className="align-right">{index + 1}</td>
-                                            {quarterVatFilter.quarter === 'all' && <td>{getQuarterVatLabel(payment.quarter)}</td>}
+                                            <td>{payment.year}년 {getQuarterVatLabel(payment.quarter)}</td>
                                             <td>{payment.date}</td>
                                             <td className="align-right">{formatNumber(payment.amount)}</td>
                                             <td>{payment.note || '-'}</td>
@@ -6466,38 +6608,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     </div>
 
                     <div className="workbook-vat-grid">
-                        <div className="workbook-vat-panel">
-                            <div className="workbook-vat-panel-title">분기 요약</div>
-                            <div className="sheet-table-wrapper">
-                                <table className="sheet-table workbook-vat-table">
-                                    <thead>
-                                        <tr>
-                                            <th>분기</th>
-                                            <th>기간</th>
-                                            <th>매출 공급가액</th>
-                                            <th>매출세액</th>
-                                            <th>매입 공급가액</th>
-                                            <th>매입세액</th>
-                                            <th>예상 납부</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {quarterVatReport.quarterRows.map((row) => (
-                                            <tr key={row.quarter} className={quarterVatFilter.quarter === row.quarter ? 'workbook-vat-selected-row' : ''}>
-                                                <td>{row.label}</td>
-                                                <td>{row.periodLabel}</td>
-                                                <td className="align-right">{formatNumber(row.salesSupply)}</td>
-                                                <td className="align-right">{formatNumber(row.salesVat)}</td>
-                                                <td className="align-right">{formatNumber(row.purchaseSupply)}</td>
-                                                <td className="align-right">{formatNumber(row.purchaseVat)}</td>
-                                                <td className="align-right">{formatNumber(row.payableVat)}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
                         <div className="workbook-vat-panel">
                             <div className="workbook-vat-panel-title">월별 요약</div>
                             <div className="sheet-table-wrapper">

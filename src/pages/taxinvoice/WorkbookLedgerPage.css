@@ -2523,7 +2523,8 @@
     font-weight: 800;
 }
 
-.workbook-vat-payment-form input {
+.workbook-vat-payment-form input,
+.workbook-vat-payment-form select {
     min-width: 0;
     width: 100%;
     border: 1px solid #cbd5e1;
@@ -2534,12 +2535,13 @@
     font-size: 13px;
 }
 
-.workbook-vat-payment-form label:nth-child(2) input {
+.workbook-vat-payment-form input[aria-label="납부금액"] {
     font-weight: 800;
     text-align: right;
 }
 
-.workbook-vat-payment-form input:disabled {
+.workbook-vat-payment-form input:disabled,
+.workbook-vat-payment-form select:disabled {
     background: #f8fafc;
     color: #64748b;
 }
@@ -2574,8 +2576,12 @@
 
 .workbook-vat-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
+}
+
+.workbook-vat-balance-table {
+    min-width: 1050px;
 }
 
 .workbook-vat-panel {
