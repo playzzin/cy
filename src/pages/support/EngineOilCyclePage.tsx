@@ -68,8 +68,9 @@ type EngineOilMetricInput = {
 const STORAGE_KEY = 'engine_oil_vehicle_metrics_v2';
 const MIGRATION_KEY = 'engine_oil_vehicle_metrics_firestore_migrated_v1';
 const DEFAULT_TEAM_COLOR = '#94a3b8';
+const DEFAULT_CYCLE_KM = 8000;
 
-const defaultMetric = (id: string, cycleKm = 10000): EngineOilMetric => ({
+const defaultMetric = (id: string, cycleKm = DEFAULT_CYCLE_KM): EngineOilMetric => ({
     id,
     currentKm: 0,
     lastOilKm: 0,
@@ -81,7 +82,7 @@ const toNumber = (value: unknown): number => {
     return Number.isFinite(next) ? next : 0;
 };
 
-const normalizeMetric = (id: string, value?: EngineOilMetricInput, fallbackCycle = 10000): EngineOilMetric => {
+const normalizeMetric = (id: string, value?: EngineOilMetricInput, fallbackCycle = DEFAULT_CYCLE_KM): EngineOilMetric => {
     const currentKm = Math.max(0, toNumber(value?.currentKm));
     const lastOilKm = Math.max(0, toNumber(value?.lastOilKm));
     const cycleKm = Math.max(1, toNumber(value?.cycleKm || fallbackCycle));
@@ -113,12 +114,12 @@ const normalizeMetricMap = (value: unknown): Record<string, EngineOilMetric> => 
 };
 
 const mergeMetricMaps = (
-    sharedMetrics: Record<string, EngineOilMetric>,
+    sharedMetrics: Record<string, EngineOilMetricInput>,
     localMetrics: Record<string, EngineOilMetric>
 ): Record<string, EngineOilMetric> => {
-    const merged = { ...sharedMetrics };
+    const merged = normalizeMetricMap(sharedMetrics);
     Object.entries(localMetrics).forEach(([id, localMetric]) => {
-        const sharedMetric = sharedMetrics[id];
+        const sharedMetric = merged[id];
         if (!sharedMetric) {
             merged[id] = localMetric;
             return;
@@ -128,7 +129,8 @@ const mergeMetricMaps = (
             id,
             currentKm: sharedMetric.currentKm > 0 ? sharedMetric.currentKm : localMetric.currentKm,
             lastOilKm: sharedMetric.lastOilKm > 0 ? sharedMetric.lastOilKm : localMetric.lastOilKm,
-            cycleKm: sharedMetric.cycleKm !== 10000 ? sharedMetric.cycleKm : localMetric.cycleKm
+            // Preserve an explicitly saved cycle, including a previous default.
+            cycleKm: toNumber(sharedMetrics[id]?.cycleKm) > 0 ? sharedMetric.cycleKm : localMetric.cycleKm
         };
     });
     return merged;
@@ -193,7 +195,7 @@ const toDraftMap = (records: EngineOilRecord[]): Record<string, EngineOilDraft> 
 const formatKm = (value: number): string => `${Number(value || 0).toLocaleString('ko-KR')}km`;
 
 const getOilStatus = (record: EngineOilRecord): OilStatus => {
-    const nextKm = Number(record.lastOilKm || 0) + Number(record.cycleKm || 10000);
+    const nextKm = Number(record.lastOilKm || 0) + Number(record.cycleKm || DEFAULT_CYCLE_KM);
     const remainKm = nextKm - Number(record.currentKm || 0);
 
     if (remainKm <= 1000) {
@@ -332,7 +334,7 @@ const EngineOilCyclePage: React.FC = () => {
     const [refreshKey, setRefreshKey] = useState(0);
     const [activeFilter, setActiveFilter] = useState<OilFilterType>('all');
     const [searchTerm, setSearchTerm] = useState('');
-    const [globalCycleKm, setGlobalCycleKm] = useState('10000');
+    const [globalCycleKm, setGlobalCycleKm] = useState(String(DEFAULT_CYCLE_KM));
     const [changedIds, setChangedIds] = useState<Set<string>>(() => new Set());
     const [saving, setSaving] = useState(false);
     const [toastMessage, setToastMessage] = useState('');
@@ -379,7 +381,7 @@ const EngineOilCyclePage: React.FC = () => {
                 if (sharedMetrics) {
                     const normalizedSharedMetrics = normalizeMetricMap(sharedMetrics);
                     if (needsLocalMigration()) {
-                        savedMetrics = mergeMetricMaps(normalizedSharedMetrics, localMetrics);
+                        savedMetrics = mergeMetricMaps(sharedMetrics, localMetrics);
                         await supportSharedDataService.save('engine_oil_cycle', savedMetrics);
                         migratedLocalData = true;
                     } else {
@@ -402,7 +404,7 @@ const EngineOilCyclePage: React.FC = () => {
                 .map((vehicle) => {
                     const id = normalizeKey(vehicle.id);
                     const saved = savedMetrics[id];
-                    const metric = saved ? normalizeMetric(id, saved, toNumber(globalCycleKm) || 10000) : defaultMetric(id, toNumber(globalCycleKm) || 10000);
+                    const metric = saved ? normalizeMetric(id, saved) : defaultMetric(id);
                     const team = resolveTeamInfo(vehicle, workerLookup.byId, workerLookup.byName, teamLookup.byId, teamLookup.byName);
 
                     return {
@@ -422,8 +424,6 @@ const EngineOilCyclePage: React.FC = () => {
             persistLocalMetrics(records);
             setLoadError(loadWarning);
             setChangedIds(new Set());
-            const firstCycle = records.find((record) => record.cycleKm > 0)?.cycleKm;
-            if (firstCycle) setGlobalCycleKm(String(firstCycle));
             if (migratedLocalData) {
                 showToast('기존 오일 기록을 공용 DB로 이전했습니다.');
             }
@@ -603,7 +603,7 @@ const EngineOilCyclePage: React.FC = () => {
 
     const resetOilData = async () => {
         if (!window.confirm('엔진오일 거리 기록만 초기화할까요? 차량번호와 팀은 차량 관리에서 다시 불러옵니다.')) return;
-        const cycleKm = Math.max(1, toNumber(globalCycleKm) || 10000);
+        const cycleKm = Math.max(1, toNumber(globalCycleKm) || DEFAULT_CYCLE_KM);
         const records = oilState.records.map((record) => ({
             ...record,
             ...defaultMetric(record.id, cycleKm)
@@ -722,12 +722,14 @@ const EngineOilCyclePage: React.FC = () => {
                         {!restricted && <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                             <span className="whitespace-nowrap text-xs font-black text-slate-500">전체교체주기</span>
                             <select
+                                aria-label="전체교체주기"
                                 value={globalCycleKm}
                                 onChange={(event) => setGlobalCycleKm(event.target.value)}
                                 className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm font-black text-slate-800 outline-none focus:border-blue-500"
                             >
                                 <option value="5000">5,000km</option>
                                 <option value="7000">7,000km</option>
+                                <option value="8000">8,000km</option>
                                 <option value="10000">10,000km</option>
                                 <option value="15000">15,000km</option>
                             </select>

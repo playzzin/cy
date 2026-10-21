@@ -19,6 +19,15 @@ test('현재 팀·팀원 배정과 legacy ID만 허용하고 타 팀 이동·미
     assert.deepEqual(rows.map(row => row.id), ['team', 'worker', 'billing']);
     assert.deepEqual(rows[0], { id: 'team', plate: '가상1', team: '가상 A팀', teamColor: '#94a3b8', currentKm: 100, lastOilKm: 10, cycleKm: 5000 });
     assert.equal(rows[1].currentKm, 0);
-    assert.equal(rows[1].cycleKm, 10000);
+    assert.equal(rows[1].cycleKm, 8000);
+    assert.equal(rows[2].cycleKm, 8000);
     assert.deepEqual(projectTeamVehicleOil([{ id: 'none' }], [], [], {}), []);
+});
+
+test('기록이 없거나 주기가 잘못된 차량은 8000km를 적용하고 저장된 주기는 유지한다', () => {
+    const cycles = [undefined, null, 0, -1, 'invalid', 5000, 8000, 10000, 15000];
+    const vehicles = cycles.map((_, index) => ({ id: String(index), currentAssigneeType: 'TEAM', currentAssigneeId: 'a' }));
+    const metrics = Object.fromEntries(cycles.map((cycleKm, index) => [String(index), { cycleKm }]));
+    const rows = projectTeamVehicleOil(vehicles, [], [{ id: 'a', name: '가상 A팀' }], metrics);
+    assert.deepEqual(rows.map(row => row.cycleKm), [8000, 8000, 8000, 8000, 8000, 5000, 8000, 10000, 15000]);
 });

@@ -93,3 +93,33 @@ test('사무실 계정의 공용 DB 조회와 기존 저장 동작을 유지한�
     }));
     expect(getTeamScopedRows).not.toHaveBeenCalled();
 });
+
+test('전체교체주기 기본값과 신규 차량은 8000km이며 기존 저장 주기는 유지한다', async () => {
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(false);
+    (vehicleService.getVehicles as jest.Mock).mockResolvedValue([{ id: 'own', licensePlate: record.plate }]);
+    (supportSharedDataService.load as jest.Mock).mockResolvedValue({ own: record });
+    openPage();
+    await screen.findByText('조회 1 / 1대');
+    expect(screen.getByRole('combobox', { name: '전체교체주기' })).toHaveValue('8000');
+    // Choosing a bulk action without applying it must not change a new vehicle's default.
+    fireEvent.change(screen.getByRole('combobox', { name: '전체교체주기' }), { target: { value: '15000' } });
+    (vehicleService.getVehicles as jest.Mock).mockResolvedValue([{ id: 'own', licensePlate: record.plate }, { id: 'new', licensePlate: '가상 신규차량' }]);
+    fireEvent.click(screen.getByRole('button', { name: '차량정보 새로고침' }));
+    await screen.findByText('조회 2 / 2대');
+    const metrics = JSON.parse(localStorage.getItem('engine_oil_vehicle_metrics_v2')!);
+    expect(metrics.new.cycleKm).toBe(8000);
+    expect(metrics.own.cycleKm).toBe(10000);
+    fireEvent.change(screen.getByRole('combobox', { name: '전체교체주기' }), { target: { value: '8000' } });
+    fireEvent.click(screen.getByRole('button', { name: '전체 적용' }));
+    await waitFor(() => expect(supportSharedDataService.save).toHaveBeenCalledWith('engine_oil_cycle', expect.objectContaining({ own: expect.objectContaining({ cycleKm: 8000 }), new: expect.objectContaining({ cycleKm: 8000 }) })));
+});
+
+test.each([8000, 10000, undefined])('브라우저 기록 이전 시 저장된 주기 %s를 기본값으로 오인해 덮어쓰지 않는다', async cycleKm => {
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(false);
+    (vehicleService.getVehicles as jest.Mock).mockResolvedValue([{ id: 'own', licensePlate: record.plate }]);
+    (supportSharedDataService.load as jest.Mock).mockResolvedValue({ own: { ...record, cycleKm } });
+    localStorage.setItem('engine_oil_vehicle_metrics_v2', JSON.stringify({ own: { ...record, cycleKm: 7000 } }));
+    openPage();
+    await screen.findByText('조회 1 / 1대');
+    expect(supportSharedDataService.save).toHaveBeenCalledWith('engine_oil_cycle', { own: expect.objectContaining({ cycleKm: cycleKm ?? 7000 }) });
+});

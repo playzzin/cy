@@ -1,5 +1,7 @@
 import { TeamRow, text } from './teamReadPolicy';
 
+const DEFAULT_CYCLE_KM = 8000;
+
 /** Current assignment wins over billing and historical assignment records. */
 export function projectTeamVehicleOil(vehicles: TeamRow[], workers: TeamRow[], teams: TeamRow[], metrics: any) {
     const byId = (rows: TeamRow[], id: unknown) => rows.find(row => [row.id, text(row.legacyId)].filter(Boolean).includes(text(id)));
@@ -22,7 +24,7 @@ export function projectTeamVehicleOil(vehicles: TeamRow[], workers: TeamRow[], t
             teamColor: /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(text(team.color)) ? text(team.color) : '#94a3b8',
             currentKm: distance(metric?.currentKm),
             lastOilKm: distance(metric?.lastOilKm),
-            cycleKm: distance(metric?.cycleKm, 10000) || 10000,
+            cycleKm: distance(metric?.cycleKm, DEFAULT_CYCLE_KM) || DEFAULT_CYCLE_KM,
         }];
     });
 }
